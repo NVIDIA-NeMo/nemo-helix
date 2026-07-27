@@ -503,6 +503,8 @@ jobs:
       working_directory: /tmp/nmp-subprocess-jobs
       # How long to wait after SIGTERM before force killing the process group. | default: 10
       graceful_shutdown_timeout_seconds: 10
+      # How long a step may go without updates before a restarted controller treats its subprocess as orphaned (platform stopped mid-run) and cancels the step. | default: 60
+      orphan_recovery_grace_seconds: 60
   # Interval in seconds for the job reconciler to run | default: 2
   reconcile_interval_seconds: 2
   # Interval in seconds for the job scheduler to run | default: 5
