@@ -185,18 +185,38 @@ class EnvironmentSpecInline(BaseModel):
     )
 
 
+class SandboxSpecInline(BaseModel):
+    """Inline sandbox spec - the isolation posture around an agent run.
+
+    Provider-specific in its extension fields. ``provider`` names a registered
+    sandbox provider (open set, discovered via entry points); ``provider_config``
+    carries provider-specific fields the platform does not interpret.
+    """
+
+    description: str = Field(default="", description="Human-readable description.")
+    provider: str = Field(description="Sandbox provider name (e.g. 'openshell', 'opensandbox').")
+    provider_config: JsonMap = Field(
+        default_factory=dict,
+        description="Provider-specific sandbox configuration; the platform does not interpret these fields.",
+    )
+
+
 class AgentEnvironmentInline(BaseModel):
-    """Inline AgentEnvironment - a composition of environment + compute specs.
+    """Inline AgentEnvironment - a composition of environment, sandbox, and compute specs.
 
     Each part is a ``ref | inline | None`` union: a ``"workspace/name"`` string
     references a stored spec entity, an object provides the spec inline, and
-    ``None`` omits it. (A ``sandbox_spec`` is out of scope for now and omitted.)
+    ``None`` omits it.
     """
 
     description: str = Field(default="", description="Human-readable description.")
     environment_spec: str | EnvironmentSpecInline | None = Field(
         default=None,
         description='"workspace/name" ref to an AgentEnvironmentSpec, an inline spec, or None.',
+    )
+    sandbox_spec: str | SandboxSpecInline | None = Field(
+        default=None,
+        description='"workspace/name" ref to an AgentSandboxSpec, an inline spec, or None.',
     )
     compute_spec: str | ComputeSpecInline | None = Field(
         default=None,
@@ -230,8 +250,12 @@ class AgentEnvironmentSpec(EntityMetadata, EnvironmentSpecInline):
     """A reusable environment spec entity."""
 
 
+class AgentSandboxSpec(EntityMetadata, SandboxSpecInline):
+    """A reusable sandbox spec entity."""
+
+
 class AgentEnvironment(EntityMetadata, AgentEnvironmentInline):
-    """A reusable composition of environment and compute specs."""
+    """A reusable composition of environment, sandbox, and compute specs."""
 
 
 class AgentDeployment(EntityMetadata):
@@ -355,6 +379,12 @@ class CreateComputeSpecRequest(ComputeSpecInline):
     name: str = Field(description="Unique compute-spec name within the workspace.")
 
 
+class CreateSandboxSpecRequest(SandboxSpecInline):
+    """Request body for ``POST /v2/workspaces/{workspace}/sandbox-specs``."""
+
+    name: str = Field(description="Unique sandbox-spec name within the workspace.")
+
+
 class InvokeAgentRequest(BaseModel):
     """OpenAI chat-completions request body for agent invocation."""
 
@@ -427,6 +457,7 @@ DeploymentPage = Page[AgentDeployment]
 SessionPage = Page[AgentSession]
 EnvironmentPage = Page[AgentEnvironment]
 EnvironmentSpecPage = Page[AgentEnvironmentSpec]
+SandboxSpecPage = Page[AgentSandboxSpec]
 ComputeSpecPage = Page[AgentComputeSpec]
 AgentJobPage = Page[AgentJob]
 AgentJobResultListResponse = PlatformJobListResultResponse

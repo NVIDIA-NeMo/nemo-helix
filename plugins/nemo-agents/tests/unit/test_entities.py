@@ -25,11 +25,13 @@ from nemo_agents_plugin.entities import (
     AgentEnvironment,
     AgentEnvironmentInline,
     AgentEnvironmentSpec,
+    AgentSandboxSpec,
     AgentSession,
     ComputeResources,
     ComputeSpecInline,
     EnvironmentSpecInline,
     McpFulfillment,
+    SandboxSpecInline,
     SessionStatus,
     agent_config_file_ref,
     ethos_file_ref,
@@ -403,6 +405,7 @@ class TestEnvironmentEntities:
         assert AgentEnvironment.__entity_type__ == "agent_environment"
         assert AgentEnvironmentSpec.__entity_type__ == "agent_environment_spec"
         assert AgentComputeSpec.__entity_type__ == "agent_compute_spec"
+        assert AgentSandboxSpec.__entity_type__ == "agent_sandbox_spec"
 
     def test_compute_spec_resources(self) -> None:
         cs = AgentComputeSpec(
@@ -433,6 +436,7 @@ class TestEnvironmentEntities:
         by_ref = AgentEnvironment(name="env1", workspace="default", environment_spec="default/e1")
         assert by_ref.environment_spec == "default/e1"
         assert by_ref.compute_spec is None
+        assert by_ref.sandbox_spec is None
 
         inline = AgentEnvironment(
             name="env2",
@@ -442,6 +446,42 @@ class TestEnvironmentEntities:
         )
         assert isinstance(inline.environment_spec, EnvironmentSpecInline)
         assert isinstance(inline.compute_spec, ComputeSpecInline)
+
+    def test_sandbox_spec_fields(self) -> None:
+        ss = AgentSandboxSpec(
+            name="s1",
+            workspace="default",
+            provider="openshell",
+            provider_config={"policy_ref": "default/my-policy"},
+        )
+        assert ss.provider == "openshell"
+        assert ss.provider_config == {"policy_ref": "default/my-policy"}
+
+    def test_environment_with_sandbox_spec(self) -> None:
+        by_ref = AgentEnvironment(
+            name="env3",
+            workspace="default",
+            sandbox_spec="default/s1",
+        )
+        assert by_ref.sandbox_spec == "default/s1"
+
+        inline = AgentEnvironment(
+            name="env4",
+            workspace="default",
+            sandbox_spec=SandboxSpecInline(provider="opensandbox", provider_config={"runtime_class": "kata"}),
+        )
+        assert isinstance(inline.sandbox_spec, SandboxSpecInline)
+        assert inline.sandbox_spec.provider == "opensandbox"
+
+        from_wire = AgentEnvironment.model_validate(
+            {
+                "name": "env5",
+                "workspace": "default",
+                "sandbox_spec": {"provider": "opensandbox", "provider_config": {"runtime_class": "kata"}},
+            }
+        )
+        assert isinstance(from_wire.sandbox_spec, SandboxSpecInline)
+        assert from_wire.sandbox_spec.provider_config == {"runtime_class": "kata"}
 
     def test_data_fields_include_domain_fields(self) -> None:
         es = AgentEnvironmentSpec(name="e1", workspace="default", env={"FOO": "bar"})

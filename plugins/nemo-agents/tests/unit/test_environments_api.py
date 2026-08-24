@@ -17,7 +17,9 @@ from nemo_agents_plugin.entities import (
     AgentComputeSpec,
     AgentEnvironment,
     AgentEnvironmentSpec,
+    AgentSandboxSpec,
     EnvironmentSpecInline,
+    SandboxSpecInline,
 )
 from nemo_platform_plugin.entity import NemoEntity
 from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
@@ -105,6 +107,51 @@ class TestEnvironmentSpecRoutes:
         assert resp.status_code == 204
 
 
+class TestSandboxSpecRoutes:
+    def test_create(self) -> None:
+        client_mock = AsyncMock()
+        client_mock.create = AsyncMock(side_effect=lambda e: _stamp(e))
+        client = _test_client(client_mock)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/sandbox-specs",
+            json={"name": "s1", "provider": "openshell", "provider_config": {"policy_ref": "default/p1"}},
+        )
+
+        assert resp.status_code == 201
+        created: AgentSandboxSpec = client_mock.create.call_args[0][0]
+        assert created.name == "s1"
+        assert created.provider == "openshell"
+        assert created.provider_config == {"policy_ref": "default/p1"}
+
+    def test_create_conflict(self) -> None:
+        client_mock = AsyncMock()
+        client_mock.create = AsyncMock(side_effect=NemoEntityConflictError("exists"))
+        client = _test_client(client_mock)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/sandbox-specs",
+            json={"name": "s1", "provider": "openshell"},
+        )
+        assert resp.status_code == 409
+
+    def test_get_not_found(self) -> None:
+        client_mock = AsyncMock()
+        client_mock.get = AsyncMock(side_effect=NemoEntityNotFoundError("gone"))
+        client = _test_client(client_mock)
+
+        resp = client.get("/apis/agents/v2/workspaces/default/sandbox-specs/s1")
+        assert resp.status_code == 404
+
+    def test_delete(self) -> None:
+        client_mock = AsyncMock()
+        client_mock.delete = AsyncMock(return_value=None)
+        client = _test_client(client_mock)
+
+        resp = client.delete("/apis/agents/v2/workspaces/default/sandbox-specs/s1")
+        assert resp.status_code == 204
+
+
 class TestEnvironmentRoutes:
     def test_create_with_refs(self) -> None:
         client_mock = AsyncMock()
@@ -113,13 +160,19 @@ class TestEnvironmentRoutes:
 
         resp = client.post(
             "/apis/agents/v2/workspaces/default/environments",
-            json={"name": "env1", "environment_spec": "default/e1", "compute_spec": "default/c1"},
+            json={
+                "name": "env1",
+                "environment_spec": "default/e1",
+                "sandbox_spec": "default/s1",
+                "compute_spec": "default/c1",
+            },
         )
 
         assert resp.status_code == 201
         created: AgentEnvironment = client_mock.create.call_args[0][0]
         assert created.name == "env1"
         assert created.environment_spec == "default/e1"
+        assert created.sandbox_spec == "default/s1"
         assert created.compute_spec == "default/c1"
 
     def test_create_with_inline(self) -> None:
@@ -129,13 +182,19 @@ class TestEnvironmentRoutes:
 
         resp = client.post(
             "/apis/agents/v2/workspaces/default/environments",
-            json={"name": "env2", "environment_spec": {"env": {"A": "1"}}},
+            json={
+                "name": "env2",
+                "environment_spec": {"env": {"A": "1"}},
+                "sandbox_spec": {"provider": "openshell", "provider_config": {"policy_ref": "default/p1"}},
+            },
         )
 
         assert resp.status_code == 201
         created: AgentEnvironment = client_mock.create.call_args[0][0]
         assert isinstance(created.environment_spec, EnvironmentSpecInline)
         assert created.environment_spec.env == {"A": "1"}
+        assert isinstance(created.sandbox_spec, SandboxSpecInline)
+        assert created.sandbox_spec.provider == "openshell"
 
     def test_get(self) -> None:
         env = _stamp(AgentEnvironment(name="env1", workspace="default", environment_spec="default/e1"))

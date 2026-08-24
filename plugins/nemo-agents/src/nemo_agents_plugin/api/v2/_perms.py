@@ -60,3 +60,10 @@ class ComputeSpecPerms(PermissionSet, namespace="agents.compute-specs"):
     LIST = perm("List agent compute specs")
     READ = perm("Read an agent compute spec")
     DELETE = perm("Delete an agent compute spec")
+
+
+class SandboxSpecPerms(PermissionSet, namespace="agents.sandbox-specs"):
+    CREATE = perm("Create agent sandbox specs")
+    LIST = perm("List agent sandbox specs")
+    READ = perm("Read an agent sandbox spec")
+    DELETE = perm("Delete an agent sandbox spec")

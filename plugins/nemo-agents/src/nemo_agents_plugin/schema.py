@@ -26,6 +26,7 @@ from nemo_agents_plugin.entities import (
     AgentDeployment,
     AgentEnvironment,
     AgentEnvironmentSpec,
+    AgentSandboxSpec,
     AgentSession,
     DeploymentStatus,
 )
@@ -43,6 +44,9 @@ from nemo_platform_plugin.agents.types import (
 )
 from nemo_platform_plugin.agents.types import (
     CreateEnvironmentSpecRequest as CreateEnvironmentSpecRequest,
+)
+from nemo_platform_plugin.agents.types import (
+    CreateSandboxSpecRequest as CreateSandboxSpecRequest,
 )
 from nemo_platform_plugin.agents.types import (
     CreateSessionRequest as CreateSessionRequest,
@@ -98,6 +102,10 @@ class ComputeSpecFilter(NemoFilter):
     """Query filter for ``GET /v2/workspaces/{workspace}/compute-specs``."""
 
 
+class SandboxSpecFilter(NemoFilter):
+    """Query filter for ``GET /v2/workspaces/{workspace}/sandbox-specs``."""
+
+
 # ---------------------------------------------------------------------------
 # List response type aliases
 # ---------------------------------------------------------------------------
@@ -108,3 +116,4 @@ SessionPage = NemoListResponse[AgentSession]
 EnvironmentPage = NemoListResponse[AgentEnvironment]
 EnvironmentSpecPage = NemoListResponse[AgentEnvironmentSpec]
 ComputeSpecPage = NemoListResponse[AgentComputeSpec]
+SandboxSpecPage = NemoListResponse[AgentSandboxSpec]

@@ -3517,6 +3517,150 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/sandbox-specs:
+    post:
+      tags:
+      - Agent Sandbox Specs
+      summary: Create Sandbox Spec
+      description: Create a new AgentSandboxSpec.
+      operationId: create_sandbox_spec_apis_agents_v2_workspaces__workspace__sandbox_specs_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSandboxSpecRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSandboxSpec'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Agent Sandbox Specs
+      summary: List Sandbox Specs
+      description: List AgentSandboxSpecs in the workspace.
+      operationId: list_sandbox_specs_apis_agents_v2_workspaces__workspace__sandbox_specs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 20
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+          default: -created_at
+          title: Sort
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NemoListResponse_AgentSandboxSpec_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/sandbox-specs/{name}:
+    get:
+      tags:
+      - Agent Sandbox Specs
+      summary: Get Sandbox Spec
+      description: Get an AgentSandboxSpec by name.
+      operationId: get_sandbox_spec_apis_agents_v2_workspaces__workspace__sandbox_specs__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSandboxSpec'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Agent Sandbox Specs
+      summary: Delete Sandbox Spec
+      description: Delete an AgentSandboxSpec by name.
+      operationId: delete_sandbox_spec_apis_agents_v2_workspaces__workspace__sandbox_specs__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agents/v2/workspaces/{workspace}/sessions:
     post:
       tags:
@@ -4090,6 +4234,15 @@ components:
           title: Environment Spec
           description: '"workspace/name" ref to an AgentEnvironmentSpec, an inline
             spec, or None.'
+        sandbox_spec:
+          anyOf:
+          - type: string
+            title: Reference
+            description: A reference to SandboxSpecInline.
+          - $ref: '#/components/schemas/SandboxSpecInline'
+          title: Sandbox Spec
+          description: '"workspace/name" ref to an AgentSandboxSpec, an inline spec,
+            or None.'
         compute_spec:
           anyOf:
           - type: string
@@ -4164,7 +4317,8 @@ components:
       - parent
       - db_version
       title: AgentEnvironment
-      description: 'A composition of an environment spec and a compute spec.
+      description: 'A composition of an environment spec, a sandbox spec, and a compute
+        spec.
 
 
         Entity type: ``agent_environment``
@@ -4188,6 +4342,15 @@ components:
           title: Environment Spec
           description: '"workspace/name" ref to an AgentEnvironmentSpec, an inline
             spec, or None.'
+        sandbox_spec:
+          anyOf:
+          - type: string
+            title: Reference
+            description: A reference to SandboxSpecInline.
+          - $ref: '#/components/schemas/SandboxSpecInline'
+          title: Sandbox Spec
+          description: '"workspace/name" ref to an AgentSandboxSpec, an inline spec,
+            or None.'
         compute_spec:
           anyOf:
           - type: string
@@ -4199,15 +4362,15 @@ components:
             or None.'
       type: object
       title: AgentEnvironmentInline
-      description: 'Inline AgentEnvironment - a composition of environment + compute
-        specs.
+      description: 'Inline AgentEnvironment - a composition of environment, sandbox,
+        and compute specs.
 
 
         Each part is a ``ref | inline | None`` union: a ``"workspace/name"`` string
 
         references a stored spec entity, an object provides the spec inline, and
 
-        ``None`` omits it. (A ``sandbox_spec`` is out of scope for now and omitted.)'
+        ``None`` omits it.'
     AgentEnvironmentSpec:
       properties:
         description:
@@ -4376,6 +4539,96 @@ components:
         \ than this model narrowing them for everyone. The\n``agents.execute`` job,\
         \ for example, accepts only ``nemo-agents-spec-v1``\nand rejects a config\
         \ that is not a valid agent spec."
+    AgentSandboxSpec:
+      properties:
+        description:
+          type: string
+          title: Description
+          description: Human-readable description.
+          default: ''
+        provider:
+          type: string
+          title: Provider
+          description: Sandbox provider name (e.g. 'openshell', 'opensandbox').
+        provider_config:
+          additionalProperties: true
+          type: object
+          title: Provider Config
+          description: Provider-specific sandbox configuration; the platform does
+            not interpret these fields.
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        id:
+          type: string
+          title: Id
+          readOnly: true
+        created_at:
+          title: Created At
+          readOnly: true
+          type: string
+          format: date-time
+        created_by:
+          title: Created By
+          readOnly: true
+          nullable: true
+          type: string
+        updated_at:
+          title: Updated At
+          readOnly: true
+          type: string
+          format: date-time
+        updated_by:
+          title: Updated By
+          readOnly: true
+          nullable: true
+          type: string
+        entity_id:
+          type: string
+          title: Entity Id
+          description: Alias for id for backwards compatibility.
+          readOnly: true
+        parent:
+          title: Parent
+          description: Parent entity ID for nested entities.
+          readOnly: true
+          type: string
+        db_version:
+          type: integer
+          title: Db Version
+          description: Database version of the entity for optimistic locking.
+          readOnly: true
+      type: object
+      required:
+      - provider
+      - workspace
+      - id
+      - created_at
+      - created_by
+      - updated_at
+      - updated_by
+      - entity_id
+      - parent
+      - db_version
+      title: AgentSandboxSpec
+      description: 'A reusable sandbox spec (the isolation posture around an agent
+        run).
+
+
+        Entity type: ``agent_sandbox_spec``
+
+        Referenced by an AgentEnvironment''s ``sandbox_spec`` (by name or inline).'
     AgentSession:
       properties:
         name:
@@ -4879,6 +5132,15 @@ components:
           title: Environment Spec
           description: '"workspace/name" ref to an AgentEnvironmentSpec, an inline
             spec, or None.'
+        sandbox_spec:
+          anyOf:
+          - type: string
+            title: Reference
+            description: A reference to SandboxSpecInline.
+          - $ref: '#/components/schemas/SandboxSpecInline'
+          title: Sandbox Spec
+          description: '"workspace/name" ref to an AgentSandboxSpec, an inline spec,
+            or None.'
         compute_spec:
           anyOf:
           - type: string
@@ -4972,6 +5234,33 @@ components:
       - name
       title: CreateEnvironmentSpecRequest
       description: Request body for ``POST /v2/workspaces/{workspace}/environment-specs``.
+    CreateSandboxSpecRequest:
+      properties:
+        description:
+          type: string
+          title: Description
+          description: Human-readable description.
+          default: ''
+        provider:
+          type: string
+          title: Provider
+          description: Sandbox provider name (e.g. 'openshell', 'opensandbox').
+        provider_config:
+          additionalProperties: true
+          type: object
+          title: Provider Config
+          description: Provider-specific sandbox configuration; the platform does
+            not interpret these fields.
+        name:
+          type: string
+          title: Name
+          description: Unique sandbox-spec name within the workspace.
+      type: object
+      required:
+      - provider
+      - name
+      title: CreateSandboxSpecRequest
+      description: Request body for ``POST /v2/workspaces/{workspace}/sandbox-specs``.
     CreateSessionRequest:
       properties:
         deployment_id:
@@ -6127,6 +6416,29 @@ components:
       required:
       - data
       title: NemoListResponse_AgentEnvironment_
+    NemoListResponse_AgentSandboxSpec_:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/AgentSandboxSpec'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: "Pagination metadata \u2014 page, page_size, total_results,\
+            \ etc."
+        sort:
+          title: Sort
+          description: Sort field applied to this result set (e.g. '-created_at').
+          type: string
+        filter:
+          title: Filter
+          description: Filter criteria echoed back from the request.
+      type: object
+      required:
+      - data
+      title: NemoListResponse_AgentSandboxSpec_
     NemoListResponse_AgentSession_:
       properties:
         data:
@@ -7273,6 +7585,35 @@ components:
       - config
       - config_format
       title: ResolvedAgentConfig
+    SandboxSpecInline:
+      properties:
+        description:
+          type: string
+          title: Description
+          description: Human-readable description.
+          default: ''
+        provider:
+          type: string
+          title: Provider
+          description: Sandbox provider name (e.g. 'openshell', 'opensandbox').
+        provider_config:
+          additionalProperties: true
+          type: object
+          title: Provider Config
+          description: Provider-specific sandbox configuration; the platform does
+            not interpret these fields.
+      type: object
+      required:
+      - provider
+      title: SandboxSpecInline
+      description: 'Inline sandbox spec - the isolation posture around an agent run.
+
+
+        Provider-specific in its extension fields. ``provider`` names a registered
+
+        sandbox provider (open set, discovered via entry points); ``provider_config``
+
+        carries provider-specific fields the platform does not interpret.'
     SessionFilter:
       additionalProperties: false
       description: Query filter for ``GET /v2/workspaces/{workspace}/sessions``.

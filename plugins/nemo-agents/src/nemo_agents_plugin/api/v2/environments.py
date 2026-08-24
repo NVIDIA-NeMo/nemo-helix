@@ -19,20 +19,23 @@ import logging
 from typing import TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from nemo_agents_plugin.api.v2._perms import ComputeSpecPerms, EnvironmentPerms, EnvironmentSpecPerms
+from nemo_agents_plugin.api.v2._perms import ComputeSpecPerms, EnvironmentPerms, EnvironmentSpecPerms, SandboxSpecPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client
 from nemo_agents_plugin.authz import scope
-from nemo_agents_plugin.entities import AgentComputeSpec, AgentEnvironment, AgentEnvironmentSpec
+from nemo_agents_plugin.entities import AgentComputeSpec, AgentEnvironment, AgentEnvironmentSpec, AgentSandboxSpec
 from nemo_agents_plugin.schema import (
     ComputeSpecFilter,
     ComputeSpecPage,
     CreateComputeSpecRequest,
     CreateEnvironmentRequest,
     CreateEnvironmentSpecRequest,
+    CreateSandboxSpecRequest,
     EnvironmentFilter,
     EnvironmentPage,
     EnvironmentSpecFilter,
     EnvironmentSpecPage,
+    SandboxSpecFilter,
+    SandboxSpecPage,
 )
 from nemo_platform_plugin.api.filters import make_filter_obj_dep
 from nemo_platform_plugin.authz import CallerKind, path_rule
@@ -53,6 +56,7 @@ router = APIRouter()
 _environment_filter_dep = make_filter_obj_dep(EnvironmentFilter)
 _environment_spec_filter_dep = make_filter_obj_dep(EnvironmentSpecFilter)
 _compute_spec_filter_dep = make_filter_obj_dep(ComputeSpecFilter)
+_sandbox_spec_filter_dep = make_filter_obj_dep(SandboxSpecFilter)
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +78,7 @@ async def create_environment(
         workspace=workspace,
         description=body.description,
         environment_spec=body.environment_spec,
+        sandbox_spec=body.sandbox_spec,
         compute_spec=body.compute_spec,
     )
     return await _create_entity(entity_client, environment, kind="environment", name=body.name, workspace=workspace)
@@ -264,6 +269,73 @@ async def delete_compute_spec(
 ) -> None:
     """Delete an AgentComputeSpec by name."""
     await _delete_entity(entity_client, AgentComputeSpec, name=name, workspace=workspace, kind="compute spec")
+
+
+# ---------------------------------------------------------------------------
+# AgentSandboxSpec
+# ---------------------------------------------------------------------------
+
+
+@router.post("/sandbox-specs", response_model=AgentSandboxSpec, status_code=201, tags=["Agent Sandbox Specs"])
+@scope.write
+@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[SandboxSpecPerms.CREATE])
+async def create_sandbox_spec(
+    workspace: str,
+    body: CreateSandboxSpecRequest,
+    entity_client: NemoEntitiesClient = Depends(get_entity_client),
+) -> AgentSandboxSpec:
+    """Create a new AgentSandboxSpec."""
+    spec = AgentSandboxSpec(**body.model_dump(), workspace=workspace)
+    return await _create_entity(entity_client, spec, kind="sandbox spec", name=body.name, workspace=workspace)
+
+
+@router.get("/sandbox-specs", response_model=SandboxSpecPage, tags=["Agent Sandbox Specs"])
+@scope.read
+@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[SandboxSpecPerms.LIST])
+async def list_sandbox_specs(
+    workspace: str,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    sort: str = Query(default="-created_at"),
+    filter: SandboxSpecFilter = Depends(_sandbox_spec_filter_dep),
+    entity_client: NemoEntitiesClient = Depends(get_entity_client),
+) -> SandboxSpecPage:
+    """List AgentSandboxSpecs in the workspace."""
+    return await _list_entities(
+        entity_client,
+        AgentSandboxSpec,
+        SandboxSpecPage,
+        workspace=workspace,
+        page=page,
+        page_size=page_size,
+        sort=sort,
+        filter=filter,
+        kind="sandbox specs",
+    )
+
+
+@router.get("/sandbox-specs/{name}", response_model=AgentSandboxSpec, tags=["Agent Sandbox Specs"])
+@scope.read
+@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[SandboxSpecPerms.READ])
+async def get_sandbox_spec(
+    workspace: str,
+    name: str,
+    entity_client: NemoEntitiesClient = Depends(get_entity_client),
+) -> AgentSandboxSpec:
+    """Get an AgentSandboxSpec by name."""
+    return await _get_entity(entity_client, AgentSandboxSpec, name=name, workspace=workspace, kind="sandbox spec")
+
+
+@router.delete("/sandbox-specs/{name}", status_code=204, tags=["Agent Sandbox Specs"])
+@scope.write
+@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[SandboxSpecPerms.DELETE])
+async def delete_sandbox_spec(
+    workspace: str,
+    name: str,
+    entity_client: NemoEntitiesClient = Depends(get_entity_client),
+) -> None:
+    """Delete an AgentSandboxSpec by name."""
+    await _delete_entity(entity_client, AgentSandboxSpec, name=name, workspace=workspace, kind="sandbox spec")
 
 
 # ---------------------------------------------------------------------------

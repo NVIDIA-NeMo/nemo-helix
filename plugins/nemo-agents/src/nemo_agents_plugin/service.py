@@ -123,7 +123,7 @@ class AgentsService(NemoService):
             RouterSpec(
                 environments.router,
                 tag="Agent Environments",
-                description="AgentEnvironment, EnvironmentSpec, and ComputeSpec CRUD",
+                description="AgentEnvironment, EnvironmentSpec, SandboxSpec, and ComputeSpec CRUD",
                 prefix=_prefix,
             ),
             RouterSpec(

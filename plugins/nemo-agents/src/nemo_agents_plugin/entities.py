@@ -48,6 +48,9 @@ from nemo_platform_plugin.agents.types import (
 from nemo_platform_plugin.agents.types import (
     ModelProviderOverride as ModelProviderOverride,
 )
+from nemo_platform_plugin.agents.types import (
+    SandboxSpecInline as SandboxSpecInline,
+)
 from nemo_platform_plugin.auth import AuthContext
 from nemo_platform_plugin.entity import NemoEntity
 from nemo_platform_plugin.refs import FilesetRef
@@ -99,13 +102,15 @@ def is_container_deployment_mode(mode: str) -> bool:
 #
 # An AgentDeployment (and, later, an AgentInvocationJob) runs against an
 # AgentEnvironment: a composition of an EnvironmentSpec (the dependencies an
-# agent reaches - model endpoints, secrets, env vars, MCP servers) and a
-# ComputeSpec (k8s-style resource requests/limits). Each part varies
-# independently and is referenced by ``ref | inline | None`` so a spec can be
-# authored once and reused across many Environments.
+# agent reaches - model endpoints, secrets, env vars, MCP servers), a
+# SandboxSpec (the isolation posture around the run), and a ComputeSpec
+# (k8s-style resource requests/limits). Each part varies independently and is
+# referenced by ``ref | inline | None`` so a spec can be authored once and
+# reused across many Environments.
 #
 # The specs are also first-class entities (``agent_environment_spec``,
-# ``agent_compute_spec``, ``agent_environment``) with their own CRUD APIs. Most
+# ``agent_sandbox_spec``, ``agent_compute_spec``, ``agent_environment``) with
+# their own CRUD APIs. Most
 # inline BaseModels come from ``nemo_platform_plugin.agents.types`` so the
 # entity and typed-client contracts share one shape. ``AgentInline`` stays local
 # because persisted agent configs are mutable framework payloads where
@@ -214,8 +219,16 @@ class AgentEnvironmentSpec(NemoEntity, EnvironmentSpecInline, entity_type="agent
     """
 
 
+class AgentSandboxSpec(NemoEntity, SandboxSpecInline, entity_type="agent_sandbox_spec"):
+    """A reusable sandbox spec (the isolation posture around an agent run).
+
+    Entity type: ``agent_sandbox_spec``
+    Referenced by an AgentEnvironment's ``sandbox_spec`` (by name or inline).
+    """
+
+
 class AgentEnvironment(NemoEntity, AgentEnvironmentInline, entity_type="agent_environment"):
-    """A composition of an environment spec and a compute spec.
+    """A composition of an environment spec, a sandbox spec, and a compute spec.
 
     Entity type: ``agent_environment``
     The single thing an AgentDeployment references. Each part is a

@@ -21,6 +21,7 @@ from nemo_platform_plugin.agents.types import (
     AgentJobResult,
     AgentJobResultListResponse,
     AgentJobStatusResponse,
+    AgentSandboxSpec,
     AgentSession,
     CreateAgentDeploymentRequest,
     CreateAgentRequest,
@@ -28,6 +29,7 @@ from nemo_platform_plugin.agents.types import (
     CreateEnvironmentRequest,
     CreateEnvironmentSpecRequest,
     CreateExecuteJobRequest,
+    CreateSandboxSpecRequest,
     CreateSessionRequest,
     DeploymentLogsQueryParams,
     DeploymentLogsResponse,
@@ -52,6 +54,7 @@ _SESSIONS = f"{_PREFIX}/sessions"
 _ENVIRONMENT_SPECS = f"{_PREFIX}/environment-specs"
 _ENVIRONMENTS = f"{_PREFIX}/environments"
 _COMPUTE_SPECS = f"{_PREFIX}/compute-specs"
+_SANDBOX_SPECS = f"{_PREFIX}/sandbox-specs"
 _EXECUTE_JOBS = f"{_PREFIX}/jobs/execute"
 _JOBS = f"{_PREFIX}/jobs/{{collection}}"
 
@@ -230,6 +233,28 @@ def get_compute_spec(*, workspace: str | None = None, name: str) -> AgentCompute
 @delete(f"{_COMPUTE_SPECS}/{{name}}")
 @abstractmethod
 def delete_compute_spec(*, workspace: str | None = None, name: str) -> None: ...
+
+
+@post(_SANDBOX_SPECS)
+@abstractmethod
+def create_sandbox_spec(*, workspace: str | None = None, body: CreateSandboxSpecRequest) -> AgentSandboxSpec: ...
+
+
+@get(_SANDBOX_SPECS)
+@abstractmethod
+def list_sandbox_specs(
+    *, workspace: str | None = None, query_params: ListEnvironmentResourcesQueryParams | None = None
+) -> Paginated[AgentSandboxSpec]: ...
+
+
+@get(f"{_SANDBOX_SPECS}/{{name}}")
+@abstractmethod
+def get_sandbox_spec(*, workspace: str | None = None, name: str) -> AgentSandboxSpec: ...
+
+
+@delete(f"{_SANDBOX_SPECS}/{{name}}")
+@abstractmethod
+def delete_sandbox_spec(*, workspace: str | None = None, name: str) -> None: ...
 
 
 # ---------------------------------------------------------------------------

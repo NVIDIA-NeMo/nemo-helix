@@ -22,6 +22,7 @@ from nemo_platform_plugin.agents.types import (
     AgentJobRequest,
     AgentJobResultListResponse,
     AgentJobStatusResponse,
+    AgentSandboxSpec,
     AgentSession,
     CreateAgentRequest,
     CreateComputeSpecRequest,
@@ -29,6 +30,7 @@ from nemo_platform_plugin.agents.types import (
     CreateEnvironmentRequest,
     CreateEnvironmentSpecRequest,
     CreateExecuteJobRequest,
+    CreateSandboxSpecRequest,
     CreateSessionRequest,
     DeploymentLogsResponse,
     InvokeAgentRequest,
@@ -135,6 +137,10 @@ def test_environment_resources() -> None:
         workspace="default",
         body=CreateComputeSpecRequest(name="small"),
     )
+    sandbox_create = endpoints.create_sandbox_spec(
+        workspace="default",
+        body=CreateSandboxSpecRequest(name="isolated", provider="openshell", provider_config={"policy": "strict"}),
+    )
 
     assert env_spec_create.path_template == f"{_PREFIX}/environment-specs"
     assert env_spec_create.response_type is AgentEnvironmentSpec
@@ -149,6 +155,16 @@ def test_environment_resources() -> None:
     assert get_origin(endpoints.list_compute_specs(workspace="default").response_type) is Paginated
     assert endpoints.get_compute_spec(workspace="default", name="small").response_type is AgentComputeSpec
     assert endpoints.delete_compute_spec(workspace="default", name="small").response_type is None
+    assert sandbox_create.path_template == f"{_PREFIX}/sandbox-specs"
+    assert sandbox_create.response_type is AgentSandboxSpec
+    assert _json_body(sandbox_create) == {
+        "name": "isolated",
+        "provider": "openshell",
+        "provider_config": {"policy": "strict"},
+    }
+    assert get_origin(endpoints.list_sandbox_specs(workspace="default").response_type) is Paginated
+    assert endpoints.get_sandbox_spec(workspace="default", name="isolated").response_type is AgentSandboxSpec
+    assert endpoints.delete_sandbox_spec(workspace="default", name="isolated").response_type is None
 
 
 def test_gateway_invocation() -> None:
