@@ -1050,6 +1050,57 @@ def test_deploy_forwards_environment_ref() -> None:
     assert body["environment"] == "default/env1"
 
 
+def test_deploy_forwards_inline_environment_json() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["body"] = req.read()
+        return httpx.Response(201, json={"name": "d1", "status": "pending"})
+
+    inline = {
+        "environment_spec": "default/env-spec",
+        "sandbox_spec": {"provider": "openshell", "provider_config": {"policy": "strict"}},
+    }
+    app = AgentsCLI().get_cli()
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(
+            app,
+            ["deploy", "--agent", "a1", "--environment", json.dumps(inline), "--no-wait", "--base-url", "http://test"],
+        )
+
+    assert result.exit_code == 0, result.stderr
+    body = json.loads(captured["body"])
+    assert body["environment"]["environment_spec"] == "default/env-spec"
+    assert body["environment"]["sandbox_spec"]["provider"] == "openshell"
+    assert body["environment"]["sandbox_spec"]["provider_config"] == {"policy": "strict"}
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("default/env1", "default/env1"),
+        ("  default/env1  ", "default/env1"),
+        ("env1", "env1"),
+        ('{"compute_spec": "default/small"}', {"compute_spec": "default/small"}),
+        (' {"sandbox_spec": {"provider": "openshell"}} ', {"sandbox_spec": {"provider": "openshell"}}),
+    ],
+)
+def test_parse_environment_arg(raw: str, expected: str | dict[str, Any]) -> None:
+    from nemo_agents_plugin.cli import _parse_environment_arg
+
+    assert _parse_environment_arg(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ['{"compute_spec": ', "{not json}"])
+def test_parse_environment_arg_rejects_malformed_json(raw: str) -> None:
+    import typer
+    from nemo_agents_plugin.cli import _parse_environment_arg
+
+    with pytest.raises(typer.Exit) as excinfo:
+        _parse_environment_arg(raw)
+    assert excinfo.value.exit_code == 2
+
+
 def test_deploy_forwards_image_entrypoint_mode() -> None:
     captured: dict[str, Any] = {}
 

@@ -6076,7 +6076,7 @@ nemo agents deploy [OPTIONS]
 * `--mode`: Runtime backend: subprocess (default), docker, or k8s. [default: subprocess]
 * `--image, -i`: Container image for docker/k8s modes (falls back to deployments.default_image).
 * `--use-image-entrypoint`: For docker/k8s modes, preserve the image ENTRYPOINT/CMD instead of injecting the platform-owned agent server command.
-* `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref (e.g. 'default/repo-research-ben'). Its EnvironmentSpec is merged into the agent config and its ComputeSpec/secret refs are snapshotted onto the deployment at create time.
+* `--environment, -e`: AgentEnvironment for this deployment: a "workspace/name" ref, or an inline JSON object whose environment_spec / sandbox_spec / compute_spec are each a ref or inline spec (e.g. '`{"environment_spec": "default/prod-env", "sandbox_spec": {"provider": "openshell"}}`'). Resolved and snapshotted at create time.
 * `--wait, --no-wait`: Wait for the deployment to reach a terminal status (running or failed) before returning.  Exits 0 only on running; exits 1 with the failure reason if runtime startup fails or readiness times out. Pass --no-wait for fire-and-forget behaviour (the original default — returns the pending deployment immediately as JSON).
 * `--timeout, -t <INTEGER>`: Maximum seconds to wait for a terminal status (only with --wait). [default: 300]
 * `--workspace, -w`: [default: default]

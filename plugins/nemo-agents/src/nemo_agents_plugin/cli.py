@@ -1310,10 +1310,10 @@ def _register_platform_commands(app: typer.Typer) -> None:
             "--environment",
             "-e",
             help=(
-                "AgentEnvironment to deploy under, as a 'workspace/name' ref "
-                "(e.g. 'default/repo-research-ben'). Its EnvironmentSpec is merged "
-                "into the agent config and its ComputeSpec/secret refs are "
-                "snapshotted onto the deployment at create time."
+                'AgentEnvironment for this deployment: a "workspace/name" ref, or an inline JSON object whose '
+                "environment_spec / sandbox_spec / compute_spec are each a ref or inline spec "
+                '(e.g. \'{"environment_spec": "default/prod-env", "sandbox_spec": {"provider": "openshell"}}\'). '
+                "Resolved and snapshotted at create time."
             ),
         ),
         wait: bool = typer.Option(
@@ -1374,8 +1374,8 @@ def _register_platform_commands(app: typer.Typer) -> None:
             payload["image"] = image
         if use_image_entrypoint:
             payload["use_image_entrypoint"] = True
-        if environment is not None:
-            payload["environment"] = environment
+        if environment:
+            payload["environment"] = _parse_environment_arg(environment)
         client = _agents_client(base_url, workspace)
         resp = _run_sdk(
             "POST agent API",
@@ -2723,6 +2723,27 @@ def _resolve_timestamp_format(ctx: typer.Context) -> str | None:
         except Exception:
             logger.debug("Failed to resolve global timestamp format for agents list", exc_info=True)
     return None
+
+
+def _parse_environment_arg(raw: str) -> str | dict[str, Any]:
+    """Parse ``--environment`` into a ref string or inline dict.
+
+    A JSON object is an inline AgentEnvironment. Anything else is passed
+    through as a ref: ``"workspace/name"`` or a bare name resolved in the
+    target workspace.
+    """
+    stripped = raw.strip()
+    if stripped.startswith("{"):
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            typer.echo(f"--environment is not valid JSON: {exc}", err=True)
+            raise typer.Exit(code=2)
+        if not isinstance(parsed, dict):
+            typer.echo("--environment JSON must be an object.", err=True)
+            raise typer.Exit(code=2)
+        return parsed
+    return stripped
 
 
 def _platform_sdk(base_url: str) -> Any:
