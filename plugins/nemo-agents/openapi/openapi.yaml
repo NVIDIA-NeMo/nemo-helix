@@ -4076,6 +4076,12 @@ components:
             as ENV_VAR_NAME -> 'workspace/secret-name'. Compiled into secret-backed
             container env vars (never plaintext) for docker/k8s modes; ignored for
             subprocess.
+        sandbox:
+          allOf:
+          - $ref: '#/components/schemas/SandboxSpecInline'
+          description: Resolved sandbox spec snapshot from the referenced environment.
+            Records the isolation posture (provider + provider_config) for the deployment;
+            the runner uses it when the sandbox provider is wired.
         spec_revision:
           type: string
           title: Spec Revision
