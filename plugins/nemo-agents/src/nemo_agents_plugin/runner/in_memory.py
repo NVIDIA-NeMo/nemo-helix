@@ -42,6 +42,7 @@ from nemo_agents_plugin.entities import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
     ComputeResources,
     DeploymentMode,
+    SandboxSpecInline,
 )
 from nemo_agents_plugin.fabric.gateway_credentials import platform_gateway_credential_env
 from nemo_agents_plugin.runner.backend import DeploymentInfo, LocalLog, LogLocation, NotYetAvailable, RunnerBackend
@@ -238,15 +239,16 @@ class InMemoryRunnerBackend(RunnerBackend):
         resources: ComputeResources | None = None,
         secrets: dict[str, str] | None = None,
         use_image_entrypoint: bool = False,
+        sandbox: SandboxSpecInline | None = None,
     ) -> DeploymentInfo:
         """Start a local deployment for NAT workflows or Platform-owned agents."""
         # created_by drives on-behalf-of delegation only for container modes (via
         # the auth-proxy sidecar). Subprocess deployments run in-process on the
         # platform host and do not use the sidecar, so it does not apply here.
-        # resources (compute spec) and secrets (secret-env refs) only apply to
-        # container modes; subprocess runs in-process on the platform host with no
-        # resource isolation and injects no managed secrets.
-        del image, deployment_mode, created_by, auth_context, resources, secrets, use_image_entrypoint
+        # resources (compute spec), secrets (secret-env refs), and sandbox only
+        # apply to container modes; subprocess runs in-process on the platform
+        # host with no resource isolation and injects no managed secrets.
+        del image, deployment_mode, created_by, auth_context, resources, secrets, use_image_entrypoint, sandbox
         if config.get("config_format") == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
             return await self._create_fabric_deployment(workspace, name, config, port, agent=agent)
 

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from nemo_agents_plugin.entities import ComputeResources, DeploymentMode, DeploymentStatus, Endpoint
+from nemo_agents_plugin.entities import ComputeResources, DeploymentMode, DeploymentStatus, Endpoint, SandboxSpecInline
 from nemo_agents_plugin.spec_revision import SpecRevision
 from nemo_platform_plugin.auth import AuthContext
 
@@ -105,6 +105,7 @@ class RunnerBackend(ABC):
         resources: ComputeResources | None = None,
         secrets: dict[str, str] | None = None,
         use_image_entrypoint: bool = False,
+        sandbox: SandboxSpecInline | None = None,
     ) -> DeploymentInfo:
         """Start the agent process; returns status="starting".
 
@@ -129,6 +130,11 @@ class RunnerBackend(ABC):
         ``use_image_entrypoint`` is only meaningful for container backends. When
         true, those backends preserve the image ENTRYPOINT/CMD instead of
         injecting the platform-owned server command.
+
+        ``sandbox`` is the resolved sandbox spec (provider + provider_config)
+        from the deployment's snapshotted environment. Container backends compile
+        it into the DeploymentConfig's backend_config for sandbox providers
+        (e.g. openshell). Subprocess mode ignores it.
         """
         ...
 

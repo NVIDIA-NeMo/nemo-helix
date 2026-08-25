@@ -17,11 +17,13 @@ from nemo_agents_plugin.entities import (
     AgentEnvironment,
     AgentEnvironmentInline,
     AgentEnvironmentSpec,
+    AgentSandboxSpec,
     ComputeResources,
     ComputeSpecInline,
     EnvironmentSpecInline,
     McpFulfillment,
     ModelProviderOverride,
+    SandboxSpecInline,
 )
 from nemo_agents_plugin.environment_resolution import (
     EnvironmentResolutionError,
@@ -53,6 +55,7 @@ def _agent_config(**overrides: Any) -> dict[str, Any]:
 async def test_resolve_none_returns_empty() -> None:
     resolved = await resolve_environment(None, workspace="default", entity_client=AsyncMock())
     assert resolved.environment_spec is None
+    assert resolved.sandbox_spec is None
     assert resolved.compute_spec is None
 
 
@@ -60,11 +63,15 @@ async def test_resolve_none_returns_empty() -> None:
 async def test_resolve_inline_environment_with_inline_specs() -> None:
     environment = AgentEnvironmentInline(
         environment_spec=EnvironmentSpecInline(env={"FOO": "bar"}),
+        sandbox_spec=SandboxSpecInline(provider="openshell", provider_config={"timeout": 30}),
         compute_spec=ComputeSpecInline(resources=ComputeResources(limits={"cpu": "2"})),
     )
     resolved = await resolve_environment(environment, workspace="default", entity_client=AsyncMock())
     assert resolved.environment_spec is not None
     assert resolved.environment_spec.env == {"FOO": "bar"}
+    assert resolved.sandbox_spec is not None
+    assert resolved.sandbox_spec.provider == "openshell"
+    assert resolved.sandbox_spec.provider_config == {"timeout": 30}
     assert resolved.compute_spec is not None
     assert resolved.compute_spec.resources.limits == {"cpu": "2"}
 
@@ -75,22 +82,26 @@ async def test_resolve_environment_ref_dereferences_all_entities() -> None:
         name="env1",
         workspace="default",
         environment_spec="default/espec",
+        sandbox_spec="default/sspec",
         compute_spec="default/cspec",
     )
     espec = AgentEnvironmentSpec(name="espec", workspace="default", env={"A": "1"})
+    sspec = AgentSandboxSpec(name="sspec", workspace="default", provider="openshell")
     cspec = AgentComputeSpec(name="cspec", workspace="default", resources=ComputeResources(requests={"cpu": "1"}))
 
     entity_client = AsyncMock()
-    entity_client.get = AsyncMock(side_effect=[env_entity, espec, cspec])
+    entity_client.get = AsyncMock(side_effect=[env_entity, espec, sspec, cspec])
 
     resolved = await resolve_environment("default/env1", workspace="default", entity_client=entity_client)
 
     assert resolved.environment_spec is not None
     assert resolved.environment_spec.env == {"A": "1"}
+    assert resolved.sandbox_spec is not None
+    assert resolved.sandbox_spec.provider == "openshell"
     assert resolved.compute_spec is not None
     assert resolved.compute_spec.resources.requests == {"cpu": "1"}
-    # AgentEnvironment, then its two specs.
-    assert entity_client.get.await_count == 3
+    # AgentEnvironment, then its three specs.
+    assert entity_client.get.await_count == 4
 
 
 @pytest.mark.asyncio
@@ -102,11 +113,19 @@ async def test_resolve_missing_environment_ref_raises() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolve_missing_spec_ref_raises() -> None:
+async def test_resolve_missing_environment_spec_ref_raises() -> None:
     env_entity = AgentEnvironment(name="env1", workspace="default", environment_spec="default/missing")
     entity_client = AsyncMock()
     entity_client.get = AsyncMock(side_effect=[env_entity, NemoEntityNotFoundError("gone")])
     with pytest.raises(EnvironmentResolutionError, match="AgentEnvironmentSpec 'missing' not found"):
+        await resolve_environment("default/env1", workspace="default", entity_client=entity_client)
+
+
+async def test_resolve_missing_sandbox_spec_ref_raises() -> None:
+    env_entity = AgentEnvironment(name="env1", workspace="default", sandbox_spec="default/missing")
+    entity_client = AsyncMock()
+    entity_client.get = AsyncMock(side_effect=[env_entity, NemoEntityNotFoundError("gone")])
+    with pytest.raises(EnvironmentResolutionError, match="AgentSandboxSpec 'missing' not found"):
         await resolve_environment("default/env1", workspace="default", entity_client=entity_client)
 
 

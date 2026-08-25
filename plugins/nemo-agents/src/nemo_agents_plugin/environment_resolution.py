@@ -46,8 +46,10 @@ from nemo_agents_plugin.entities import (
     AgentEnvironment,
     AgentEnvironmentInline,
     AgentEnvironmentSpec,
+    AgentSandboxSpec,
     ComputeSpecInline,
     EnvironmentSpecInline,
+    SandboxSpecInline,
 )
 from nemo_platform_plugin.entities.base import parse_qualified_name
 from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
@@ -59,9 +61,10 @@ class EnvironmentResolutionError(ValueError):
 
 @dataclass(frozen=True)
 class ResolvedEnvironment:
-    """Concrete environment/compute specs resolved from an AgentEnvironment."""
+    """Concrete environment/sandbox/compute specs resolved from an AgentEnvironment."""
 
     environment_spec: EnvironmentSpecInline | None = None
+    sandbox_spec: SandboxSpecInline | None = None
     compute_spec: ComputeSpecInline | None = None
 
 
@@ -101,10 +104,17 @@ async def resolve_environment(
     environment_spec = await _resolve_environment_spec(
         resolved_env.environment_spec, workspace=workspace, entity_client=entity_client
     )
+    sandbox_spec = await _resolve_sandbox_spec(
+        resolved_env.sandbox_spec, workspace=workspace, entity_client=entity_client
+    )
     compute_spec = await _resolve_compute_spec(
         resolved_env.compute_spec, workspace=workspace, entity_client=entity_client
     )
-    return ResolvedEnvironment(environment_spec=environment_spec, compute_spec=compute_spec)
+    return ResolvedEnvironment(
+        environment_spec=environment_spec,
+        sandbox_spec=sandbox_spec,
+        compute_spec=compute_spec,
+    )
 
 
 async def _resolve_agent_environment(
@@ -158,6 +168,25 @@ async def _resolve_compute_spec(
         except NemoEntityNotFoundError as exc:
             raise EnvironmentResolutionError(
                 f"AgentComputeSpec '{name}' not found in workspace '{ref_workspace}'."
+            ) from exc
+    return spec
+
+
+async def _resolve_sandbox_spec(
+    spec: str | SandboxSpecInline | None,
+    *,
+    workspace: str,
+    entity_client: NemoEntitiesClient,
+) -> SandboxSpecInline | None:
+    if spec is None:
+        return None
+    if isinstance(spec, str):
+        ref_workspace, name = parse_qualified_name(spec, default_workspace=workspace)
+        try:
+            return await entity_client.get(AgentSandboxSpec, name=name, workspace=ref_workspace)
+        except NemoEntityNotFoundError as exc:
+            raise EnvironmentResolutionError(
+                f"AgentSandboxSpec '{name}' not found in workspace '{ref_workspace}'."
             ) from exc
     return spec
 

@@ -274,6 +274,10 @@ class AgentDeployment(EntityMetadata):
         default=None,
         description="Resolved compute snapshot from the referenced environment.",
     )
+    sandbox: SandboxSpecInline | None = Field(
+        default=None,
+        description="Resolved sandbox spec snapshot (provider + provider_config) from the referenced environment.",
+    )
     secrets: StringMap = Field(default_factory=dict, description="Resolved secret env references.")
     status: DeploymentStatus = Field(default="pending", description="Deployment lifecycle status.")
     deployment_mode: DeploymentMode = Field(default="subprocess", description="Runtime backend.")

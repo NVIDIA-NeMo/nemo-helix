@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import yaml
 from nemo_agents_plugin.config import AgentsConfig, DeploymentsRunnerConfig
-from nemo_agents_plugin.entities import ComputeResources, DeploymentMode, Endpoint
+from nemo_agents_plugin.entities import ComputeResources, DeploymentMode, Endpoint, SandboxSpecInline
 from nemo_agents_plugin.fabric.gateway_credentials import PLATFORM_IGW_API_KEY_ENV, PLATFORM_IGW_API_KEY_PLACEHOLDER
 from nemo_agents_plugin.runner.deployments_backend import (
     DeploymentsRunnerBackend,
@@ -27,7 +27,7 @@ from nemo_agents_plugin.runner.deployments_backend import (
     rewrite_fabric_config_base_urls,
 )
 from nemo_agents_plugin.runner.fabric_artifact_staging import FabricArtifactStagingError
-from nemo_deployments_plugin.entities import ConfigFile, Deployment, DeploymentConfig
+from nemo_deployments_plugin.entities import ConfigFile, Deployment, DeploymentBackendConfig, DeploymentConfig
 from nemo_deployments_plugin.types import Endpoint as PluginEndpoint
 from nemo_platform_plugin.auth import AuthContext
 from nemo_platform_plugin.entities.client import AsyncEntitiesClient
@@ -452,6 +452,48 @@ def test_build_deployment_config_no_secrets_adds_no_secret_env() -> None:
         mode="k8s",
     )
     assert all(e.secret_ref is None for e in cfg.containers[0].env)
+
+
+def _build_k8s_config(**overrides: Any) -> DeploymentConfig:
+    return build_deployment_config(
+        name="hello-dep",
+        workspace="default",
+        image="nat-runtime:latest",
+        port=8000,
+        agent_config={},
+        platform_base_url="http://nmp-api:8080",
+        config_mount_path="/workspace/config.yaml",
+        mode="k8s",
+        **overrides,
+    )
+
+
+def test_build_deployment_config_compiles_openshell_sandbox_into_backend_config() -> None:
+    cfg = _build_k8s_config(
+        sandbox=SandboxSpecInline(provider="openshell", provider_config={"policy_path": "/etc/openshell/strict.yaml"}),
+    )
+    assert cfg.backend_config.openshell is not None
+    assert cfg.backend_config.openshell.policy_path == "/etc/openshell/strict.yaml"
+    assert cfg.backend_config.docker is None
+    assert cfg.backend_config.k8s is None
+
+
+def test_build_deployment_config_no_sandbox_leaves_backend_config_empty() -> None:
+    cfg = _build_k8s_config()
+    assert cfg.backend_config.openshell is None
+    assert cfg.backend_config.docker is None
+    assert cfg.backend_config.k8s is None
+
+
+def test_build_deployment_config_unknown_sandbox_provider_is_skipped() -> None:
+    cfg = _build_k8s_config(sandbox=SandboxSpecInline(provider="not-a-provider", provider_config={"x": 1}))
+    assert cfg.backend_config == DeploymentBackendConfig()
+
+
+def test_build_deployment_config_invalid_sandbox_provider_config_is_skipped() -> None:
+    # policy_path must be a string; a mapping fails OpenShellDeploymentConfig validation.
+    cfg = _build_k8s_config(sandbox=SandboxSpecInline(provider="openshell", provider_config={"policy_path": {"a": 1}}))
+    assert cfg.backend_config.openshell is None
 
 
 def test_build_deployment_config_adds_workload_identity_when_requested() -> None:

@@ -153,6 +153,7 @@ async def create_deployment(
         config=merged.config,
         environment=body.environment,
         compute=resolved_environment.compute_spec,
+        sandbox=resolved_environment.sandbox_spec,
         secrets=merged.secrets,
         spec_revision=spec.revision,
         spec_tracked_revision=spec.tracked_revision,

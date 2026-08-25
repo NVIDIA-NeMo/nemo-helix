@@ -31,6 +31,7 @@ from nemo_agents_plugin.entities import (
     DeploymentMode,
     DeploymentStatus,
     Endpoint,
+    SandboxSpecInline,
 )
 from nemo_agents_plugin.fabric.gateway_credentials import platform_gateway_credential_env
 from nemo_agents_plugin.runner.backend import DeploymentInfo, ExternalLog, LogLocation, RunnerBackend
@@ -50,9 +51,11 @@ from nemo_deployments_plugin.entities import (
     Container,
     ContainerPort,
     Deployment,
+    DeploymentBackendConfig,
     DeploymentConfig,
     EnvVar,
     HTTPGetAction,
+    OpenShellDeploymentConfig,
     Probe,
     ResourceRequirements,
     SecretRef,
@@ -71,6 +74,7 @@ from nemo_platform_plugin.entities.client import AsyncEntitiesClient
 from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_platform_plugin.files.client import AsyncFilesClient
 from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -414,6 +418,40 @@ def _info_from_deployment(deployment: Deployment) -> DeploymentInfo:
     return info
 
 
+_SANDBOX_PROVIDER_BACKEND_CONFIG_MODELS: dict[str, type[BaseModel]] = {
+    "openshell": OpenShellDeploymentConfig,
+}
+
+
+def _build_sandbox_backend_config(sandbox: SandboxSpecInline | None) -> DeploymentBackendConfig:
+    """Compile a sandbox spec into the DeploymentConfig's backend_config.
+
+    Maps the sandbox ``provider`` name to the corresponding key in
+    ``DeploymentBackendConfig`` and validates ``provider_config`` against
+    the provider-specific model. Unknown providers are silently ignored
+    (the sandbox config is advisory; a missing backend does not block the
+    deployment).
+    """
+    if sandbox is None:
+        return DeploymentBackendConfig()
+    provider = sandbox.provider
+    model_cls = _SANDBOX_PROVIDER_BACKEND_CONFIG_MODELS.get(provider)
+    if model_cls is None:
+        logger.debug("Sandbox provider %r has no matching backend config model; skipping.", provider)
+        return DeploymentBackendConfig()
+    try:
+        validated = model_cls.model_validate(sandbox.provider_config)
+    except Exception:
+        logger.warning(
+            "Sandbox provider_config for %r failed validation against %s; skipping.",
+            provider,
+            model_cls.__name__,
+            exc_info=True,
+        )
+        return DeploymentBackendConfig()
+    return DeploymentBackendConfig.model_validate({provider: validated})
+
+
 def build_deployment_config(
     *,
     name: str,
@@ -433,6 +471,7 @@ def build_deployment_config(
     secrets: dict[str, str] | None = None,
     use_image_entrypoint: bool = False,
     workload_identity_enabled: bool = False,
+    sandbox: SandboxSpecInline | None = None,
 ) -> DeploymentConfig:
     """Compile an agent into a long-running ``DeploymentConfig`` (Always).
 
@@ -574,6 +613,7 @@ def build_deployment_config(
             "auth_proxy_sidecar_identity": auth_proxy_identity,
             "auth_proxy_sidecar_on_behalf_of": auth_proxy_on_behalf_of,
             "workload_identity": workload_identity,
+            "backend_config": _build_sandbox_backend_config(sandbox),
         }
     )
 
@@ -606,6 +646,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
         resources: ComputeResources | None = None,
         secrets: dict[str, str] | None = None,
         use_image_entrypoint: bool = False,
+        sandbox: SandboxSpecInline | None = None,
     ) -> DeploymentInfo:
         """Create DeploymentConfig + Deployment entities for the agent container."""
         del port  # Host port is allocated by the deployments executor, not agents.
@@ -736,6 +777,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
                 secrets=secrets,
                 use_image_entrypoint=use_image_entrypoint,
                 workload_identity_enabled=auth_context is not None and is_workload_identity_token_exchange_enabled(),
+                sandbox=sandbox,
             )
         except ReservedSecretEnvVarError as exc:
             logger.error("Refusing to deploy agent %r: %s", name, exc)

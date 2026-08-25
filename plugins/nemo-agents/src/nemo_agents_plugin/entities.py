@@ -329,6 +329,14 @@ class AgentDeployment(NemoEntity, entity_type="agent_deployment"):
             "vars (never plaintext) for docker/k8s modes; ignored for subprocess."
         ),
     )
+    sandbox: SandboxSpecInline | None = Field(
+        default=None,
+        description=(
+            "Resolved sandbox spec snapshot from the referenced environment. "
+            "Records the isolation posture (provider + provider_config) for the deployment; "
+            "the runner uses it when the sandbox provider is wired."
+        ),
+    )
     spec_revision: str = Field(
         default="",
         description=(

@@ -557,6 +557,7 @@ class AgentDeploymentController(NemoController):
                 resources=dep.compute.resources if dep.compute is not None else None,
                 secrets=dep.secrets or None,
                 use_image_entrypoint=dep.use_image_entrypoint,
+                sandbox=dep.sandbox,
             )
         except Exception as exc:
             logger.exception("Failed to start agent for deployment '%s'", dep.name)
