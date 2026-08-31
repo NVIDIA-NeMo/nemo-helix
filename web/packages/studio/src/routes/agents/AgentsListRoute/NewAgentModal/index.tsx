@@ -19,10 +19,9 @@ import {
   UploadRoot,
   UploadTrigger,
 } from '@nvidia/foundations-react-core';
-import {
-  AgentSpecFilesetOrphanError,
-  useCreateAgentFromUpload,
-} from '@studio/api/agents/useCreateAgentFromUpload';
+import { AgentSpecFilesetOrphanError } from '@studio/api/agents/agentSpecFileset';
+import { useCreateAgentFromGitHub } from '@studio/api/agents/useCreateAgentFromGitHub';
+import { useCreateAgentFromUpload } from '@studio/api/agents/useCreateAgentFromUpload';
 import { CodingAgentPromptEditor } from '@studio/components/CodingAgentPromptEditor';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { agentIntegrationPrompt } from '@studio/routes/agents/AgentDetailRoute/overview/codingAgentPrompts';
@@ -30,6 +29,11 @@ import {
   AGENT_CONFIG_FILENAME,
   uploadAgentFormSchema,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
+import {
+  type GitHubAgentSource,
+  agentNameFromSource,
+  parseGitHubSource,
+} from '@studio/routes/agents/AgentsListRoute/NewAgentModal/github';
 import type {
   NewAgentModalProps,
   NewAgentTab,
@@ -48,6 +52,8 @@ import {
   totalEntryBytes,
   validateAgentEntries,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
+import { CreateSecretModal } from '@studio/routes/SecretsListRoute/CreateSecretModal';
+import { SecretSearchableSelect } from '@studio/routes/SecretsListRoute/SecretSearchableSelect';
 import { getAgentDetailRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -74,10 +80,11 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     node?.setAttribute('webkitdirectory', '');
   }, []);
   const [entries, setEntries] = useState<UploadAgentEntry[]>([]);
-  const [directoryName, setDirectoryName] = useState('');
+  const [sourceLabel, setSourceLabel] = useState('');
   const [selectionError, setSelectionError] = useState<string | undefined>(undefined);
   const [replaceArmedFor, setReplaceArmedFor] = useState<string | null>(null);
   const [tab, setTab] = useState<NewAgentTab>('coding-agent-prompt');
+  const [isSecretModalOpen, setSecretModalOpen] = useState(false);
 
   const {
     mutateAsync: createAgent,
@@ -93,6 +100,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     },
   });
 
+  const { mutateAsync: createAgentFromRepo, error: repoError } = useCreateAgentFromGitHub();
+
   const {
     control,
     setValue,
@@ -101,7 +110,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     formState: { errors },
   } = useForm({
     resolver: zodResolver(uploadAgentFormSchema),
-    defaultValues: { name: '' },
+    defaultValues: { name: '', repoUrl: '', secretKey: '' },
     disabled: isPending,
     mode: 'onChange',
   });
@@ -111,20 +120,32 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     () =>
       entries.length === 0
         ? undefined
-        : `${directoryName} — ${entries.length} files, ${Math.max(1, Math.round(totalEntryBytes(entries) / 1000))} KB`,
-    [directoryName, entries]
+        : `${sourceLabel} — ${entries.length} files, ${Math.max(1, Math.round(totalEntryBytes(entries) / 1000))} KB`,
+    [sourceLabel, entries]
   );
 
   const watchedName = useWatch({ control, name: 'name' });
+  const watchedRepoUrl = useWatch({ control, name: 'repoUrl' });
+  const watchedSecretKey = useWatch({ control, name: 'secretKey' });
+
+  // A repository is only a source once it parses; a half-typed URL must not enable submit.
+  const repoSource = useMemo((): GitHubAgentSource | undefined => {
+    if (!watchedRepoUrl?.trim()) return undefined;
+    try {
+      return parseGitHubSource(watchedRepoUrl);
+    } catch {
+      return undefined;
+    }
+  }, [watchedRepoUrl]);
   // Derived, not stored: an armed replace targets one fileset, so editing the name
   // disarms it in the same render rather than one render later.
   const replaceOrphan = replaceArmedFor !== null && replaceArmedFor === watchedName?.trim();
 
   const resetAndClose = () => {
     resetMutation();
-    resetForm({ name: '' });
+    resetForm({ name: '', repoUrl: '', secretKey: '' });
     setEntries([]);
-    setDirectoryName('');
+    setSourceLabel('');
     setSelectionError(undefined);
     setReplaceArmedFor(null);
     setTab('coding-agent-prompt');
@@ -143,10 +164,13 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     return () => selection !== selectionSeq.current;
   };
 
-  // Both entry points land here so a drop is validated exactly like a pick.
-  const acceptPicked = async (picked: PickedFile[], superseded: () => boolean) => {
-    setDirectoryName(picked[0]?.relativePath.split('/')[0] ?? '');
-    const collected = collectAgentEntries(picked);
+  // Picks, drops and repositories all land here so every source is validated the same way.
+  const acceptEntries = async (
+    collected: UploadAgentEntry[],
+    label: string,
+    superseded: () => boolean
+  ) => {
+    setSourceLabel(label);
 
     const problem = validateAgentEntries(collected);
     if (problem) {
@@ -182,11 +206,23 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     setEntries(collected);
   };
 
+  const acceptPicked = (picked: PickedFile[], superseded: () => boolean) =>
+    acceptEntries(
+      collectAgentEntries(picked),
+      picked[0]?.relativePath.split('/')[0] ?? '',
+      superseded
+    );
+
+  const onRepoUrlBlur = () => {
+    if (!repoSource || watchedName?.trim()) return;
+    setValue('name', agentNameFromSource(repoSource), { shouldValidate: true });
+  };
+
   const rejectOversized = (count: number): boolean => {
     const oversized = tooManyPickedFiles(count);
     if (!oversized) return false;
     setEntries([]);
-    setDirectoryName('');
+    setSourceLabel('');
     setSelectionError(oversized);
     return true;
   };
@@ -228,9 +264,21 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     await acceptPicked(picked, superseded);
   };
 
+  // A repository wins over a picked directory: the fileset can only have one source, and the
+  // repository is the one the user typed last.
   const onSubmit: SubmitHandler<UploadAgentFormData> = async (formData) => {
     const name = formData.name.trim();
     try {
+      if (repoSource) {
+        await createAgentFromRepo({
+          workspace,
+          name,
+          source: repoSource,
+          secretName: formData.secretKey?.trim() || undefined,
+          replaceOrphanedFileset: replaceOrphan,
+        });
+        return;
+      }
       await createAgent({ workspace, name, entries, replaceOrphanedFileset: replaceOrphan });
     } catch (error) {
       // An orphaned fileset is recoverable, so the next submit replaces it.
@@ -241,71 +289,114 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   // No fallback argument: getErrorMessage prefers one over a plain Error's own message.
   const errorMessage =
     selectionError ??
-    (createError ? getErrorMessage(createError as Error) || 'Failed to create agent' : undefined);
+    ((createError ?? repoError)
+      ? getErrorMessage((createError ?? repoError) as Error) || 'Failed to create agent'
+      : undefined);
 
   const onUploadTab = tab === 'upload';
 
   return (
-    <FormModal
-      open={open}
-      onClose={resetAndClose}
-      className="w-[720px] max-w-[90vw]"
-      title="Instrument an agent with NeMo Platform"
-      instruction="Integrated agents allow users to evaluate, optimize, and deploy agents."
-      submitButtonText={replaceOrphan ? 'Replace and create' : 'Create'}
-      onSubmit={handleSubmit(onSubmit)}
-      disabled={isPending}
-      loading={isPending}
-      submitDisabled={entries.length === 0}
-      errorText={onUploadTab ? errorMessage : undefined}
-      slotFooterRight={
-        onUploadTab ? undefined : (
-          <Button color="brand" type="button" onClick={resetAndClose}>
-            Close
-          </Button>
-        )
-      }
-    >
-      <TabsRoot value={tab} onValueChange={(value) => setTab(value as NewAgentTab)}>
-        <TabsList aria-label="Ways to instrument an agent">
-          <TabsTrigger value="coding-agent-prompt">Coding agent prompt</TabsTrigger>
-          <TabsTrigger value="upload">Upload agent</TabsTrigger>
-        </TabsList>
+    <>
+      <FormModal
+        open={open}
+        onClose={resetAndClose}
+        className="w-[720px] max-w-[90vw]"
+        title="Instrument an agent with NeMo Platform"
+        instruction="Integrated agents allow users to evaluate, optimize, and deploy agents."
+        submitButtonText={replaceOrphan ? 'Replace and create' : 'Create'}
+        onSubmit={handleSubmit(onSubmit)}
+        disabled={isPending}
+        loading={isPending}
+        submitDisabled={entries.length === 0 && !repoSource}
+        errorText={onUploadTab ? errorMessage : undefined}
+        slotFooterRight={
+          onUploadTab ? undefined : (
+            <Button color="brand" type="button" onClick={resetAndClose}>
+              Close
+            </Button>
+          )
+        }
+      >
+        <TabsRoot value={tab} onValueChange={(value) => setTab(value as NewAgentTab)}>
+          <TabsList aria-label="Ways to instrument an agent">
+            <TabsTrigger value="coding-agent-prompt">Coding agent prompt</TabsTrigger>
+            <TabsTrigger value="upload">Upload agent</TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="coding-agent-prompt" className="items-stretch p-0 pt-density-lg">
-          <CodingAgentPromptEditor
-            prompt={agentIntegrationPrompt({ workspace, baseUrl: PLATFORM_BASE_URL })}
-          />
-        </TabsContent>
-
-        <TabsContent value="upload" className="items-stretch p-0 pt-density-lg">
-          <Stack gap="density-md">
-            <Text kind="label/semibold/md">Select agent config files</Text>
-            <UploadRoot multiple disabled={isPending}>
-              <UploadTrigger
-                className="w-full"
-                data-testid="agent-directory-dropzone"
-                onDrop={onDirectoryDropped}
-                slotAnchor={directoryName ? 'Choose a different directory' : 'Choose a directory'}
-                slotHeaderText=" containing agent.yaml."
-              >
-                <UploadInputElement
-                  ref={setDirectoryInput}
-                  data-testid="agent-directory-input"
-                  multiple
-                  onChange={onDirectoryPicked}
-                />
-              </UploadTrigger>
-            </UploadRoot>
-            {entriesSummary ? <Text kind="body/regular/sm">{entriesSummary}</Text> : null}
-            <ControlledTextInput
-              useControllerProps={{ control, name: 'name' }}
-              label="Name"
-              formFieldProps={{ slotError: errors.name?.message }}
+          <TabsContent value="coding-agent-prompt" className="items-stretch p-0 pt-density-lg">
+            <CodingAgentPromptEditor
+              prompt={agentIntegrationPrompt({ workspace, baseUrl: PLATFORM_BASE_URL })}
             />
-          </Stack>
-        </TabsContent>
-      </TabsRoot>
-    </FormModal>
+          </TabsContent>
+
+          <TabsContent value="upload" className="items-stretch p-0 pt-density-lg">
+            <Stack gap="density-md">
+              <Text kind="label/semibold/md">Select agent config files</Text>
+              <UploadRoot multiple disabled={isPending}>
+                <UploadTrigger
+                  className="w-full"
+                  data-testid="agent-directory-dropzone"
+                  onDrop={onDirectoryDropped}
+                  slotAnchor={sourceLabel ? 'Choose a different directory' : 'Choose a directory'}
+                  slotHeaderText=" containing agent.yaml."
+                >
+                  <UploadInputElement
+                    ref={setDirectoryInput}
+                    data-testid="agent-directory-input"
+                    multiple
+                    onChange={onDirectoryPicked}
+                  />
+                </UploadTrigger>
+              </UploadRoot>
+              {entriesSummary ? <Text kind="body/regular/sm">{entriesSummary}</Text> : null}
+              <Stack gap="density-sm">
+                <Text kind="label/semibold/md">Or import from a GitHub repository</Text>
+                <ControlledTextInput
+                  label="Repository"
+                  disabled={isPending}
+                  useControllerProps={{ control, name: 'repoUrl' }}
+                  formFieldProps={{
+                    slotInfo:
+                      'github.com/owner/repo, optionally with @branch and #sub/directory. The files are read from GitHub on demand, not copied.',
+                    slotError: errors.repoUrl?.message,
+                  }}
+                  attributes={{ Input: { onBlur: onRepoUrlBlur } }}
+                />
+                <SecretSearchableSelect
+                  workspace={workspace}
+                  queryEnabled={open && Boolean(workspace)}
+                  ensureOptionValue={watchedSecretKey || undefined}
+                  useControllerProps={{ control, name: 'secretKey' }}
+                  onRequestNewSecret={() => setSecretModalOpen(true)}
+                  triggerPlaceholder=""
+                  formFieldProps={{
+                    slotLabel: 'Access token secret',
+                    slotInfo:
+                      'Required for a private repository. The token stays in the platform and is never sent to your browser.',
+                    slotError: errors.secretKey?.message,
+                  }}
+                />
+              </Stack>
+              <ControlledTextInput
+                useControllerProps={{ control, name: 'name' }}
+                label="Name"
+                formFieldProps={{ slotError: errors.name?.message }}
+              />
+            </Stack>
+          </TabsContent>
+        </TabsRoot>
+      </FormModal>
+      {isSecretModalOpen ? (
+        <CreateSecretModal
+          workspace={workspace}
+          open
+          onClose={() => setSecretModalOpen(false)}
+          onSecretCreated={(secretName) => {
+            setValue('secretKey', secretName, { shouldValidate: true });
+            setSecretModalOpen(false);
+          }}
+        />
+      ) : null}
+    </>
   );
 };

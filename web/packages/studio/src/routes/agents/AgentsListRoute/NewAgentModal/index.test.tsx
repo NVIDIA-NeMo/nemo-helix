@@ -73,6 +73,8 @@ interface Scenario {
 const mockPlatform = ({ filesetExists = false, agentExists = false }: Scenario = {}) => {
   const uploaded: string[] = [];
   const created: { name?: string }[] = [];
+  const filesets: { storage?: unknown }[] = [];
+  const deleted: string[] = [];
 
   server.use(
     http.get(FILESET_URL, ({ params }) =>
@@ -85,8 +87,15 @@ const mockPlatform = ({ filesetExists = false, agentExists = false }: Scenario =
         ? HttpResponse.json({ name: params['name'], workspace })
         : HttpResponse.json({ detail: 'not found' }, { status: 404 })
     ),
-    http.delete(FILESET_URL, () => HttpResponse.json({ name: 'deleted' })),
-    http.post(FILESETS_URL, async ({ request }) => HttpResponse.json(await request.json())),
+    http.delete(FILESET_URL, ({ params }) => {
+      deleted.push(String(params['name']));
+      return HttpResponse.json({ name: 'deleted' });
+    }),
+    http.post(FILESETS_URL, async ({ request }) => {
+      const body = (await request.json()) as { storage?: unknown };
+      filesets.push(body);
+      return HttpResponse.json(body);
+    }),
     http.put(UPLOAD_URL, ({ request }) => {
       uploaded.push(decodeURIComponent(new URL(request.url).pathname.split('/-/')[1] ?? ''));
       return HttpResponse.json({ path: 'ok' });
@@ -98,7 +107,7 @@ const mockPlatform = ({ filesetExists = false, agentExists = false }: Scenario =
     })
   );
 
-  return { uploaded, created };
+  return { uploaded, created, filesets, deleted };
 };
 
 const renderModal = () =>
@@ -350,6 +359,73 @@ describe('NewAgentModal oversized pick', () => {
 
     expect(await within(dialog).findByText(/880,000 files/)).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+  });
+});
+
+describe('NewAgentModal GitHub import', () => {
+  const typeRepo = async (
+    dialog: HTMLElement,
+    user: ReturnType<typeof userEvent.setup>,
+    spec = 'github.com/owner/repo'
+  ) => {
+    await user.type(within(dialog).getByRole('textbox', { name: 'Repository' }), spec);
+    await user.tab();
+  };
+
+  it('backs the spec fileset with the repository instead of uploading files', async () => {
+    const user = userEvent.setup();
+    const { uploaded, created, filesets } = mockPlatform();
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(FABRIC_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openUploadTab(dialog);
+    await typeRepo(dialog, user, 'github.com/owner/repo@v2#agents/calc');
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+    await submit(dialog, user);
+
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(uploaded).toHaveLength(0);
+    expect(filesets[0]?.storage).toEqual({
+      type: 'github',
+      owner: 'owner',
+      repo: 'repo',
+      revision: 'v2',
+      path: 'agents/calc',
+    });
+  });
+
+  it('names the agent after the repository so the fileset name is settled up front', async () => {
+    const user = userEvent.setup();
+    mockPlatform();
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(FABRIC_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openUploadTab(dialog);
+    await typeRepo(dialog, user, 'github.com/owner/my-repo');
+
+    await waitFor(() => expect(within(dialog).getByDisplayValue('my-repo')).toBeInTheDocument());
+  });
+
+  it('rolls the fileset back when the repository has no agent.yaml', async () => {
+    const user = userEvent.setup();
+    const { created, deleted } = mockPlatform();
+    server.use(
+      http.get(UPLOAD_URL, () => HttpResponse.json({ detail: 'not found' }, { status: 404 }))
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openUploadTab(dialog);
+    await typeRepo(dialog, user);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('repo')).toBeInTheDocument());
+
+    await submit(dialog, user);
+
+    expect(await within(dialog).findByText(/Could not read agent\.yaml/)).toBeInTheDocument();
+    expect(created).toHaveLength(0);
+    await waitFor(() => expect(deleted).toContain('repo-spec'));
   });
 });
 
