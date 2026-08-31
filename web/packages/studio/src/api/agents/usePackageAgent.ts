@@ -99,7 +99,9 @@ export const usePackageAgent = ({ workspace, agentName }: UsePackageAgentParams)
         PACKAGE_RESULT_NAME
       );
       const parsed: unknown = JSON.parse(await blob.text());
-      return parsePackageResult(parsed);
+      // react-query rejects an undefined queryFn result, and a job can finish
+      // without a usable tag.
+      return parsePackageResult(parsed) ?? null;
     },
     enabled: Boolean(jobName) && isComplete,
   });
