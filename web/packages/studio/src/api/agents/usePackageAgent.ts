@@ -18,6 +18,28 @@ export const FABRIC_CONFIG_FORMAT = 'nemo-agents-spec-v1';
 /** Name the packaging job saves its result under; see `PACKAGE_RESULT_NAME` in the plugin. */
 export const PACKAGE_RESULT_NAME = 'package_result';
 
+/**
+ * How long a job may sit unscheduled before the UI stops implying progress.
+ *
+ * The jobs scheduler dispatches within seconds, so staying `created` past this
+ * means nothing is picking the job up — most often a platform started without
+ * the jobs controller, where it would otherwise spin forever.
+ */
+export const QUEUED_STALL_MS = 60_000;
+
+/**
+ * Whether a job has sat unscheduled long enough to stop implying progress.
+ *
+ * Only `created` counts: a running build legitimately takes minutes, while
+ * `created` means accepted but never dispatched.
+ */
+export const isQueuedTooLong = (
+  status: string | undefined,
+  submittedAt: number | undefined,
+  now: number
+): boolean =>
+  status === 'created' && submittedAt !== undefined && now - submittedAt > QUEUED_STALL_MS;
+
 /** Statuses that will not change again, so polling can stop. */
 const TERMINAL_JOB_STATUSES = new Set(['completed', 'error', 'cancelled']);
 
@@ -62,11 +84,15 @@ interface UsePackageAgentParams {
  */
 export const usePackageAgent = ({ workspace, agentName }: UsePackageAgentParams) => {
   const [jobName, setJobName] = useState<string | undefined>();
+  const [submittedAt, setSubmittedAt] = useState<number | undefined>();
 
   const submit = useMutation({
     mutationFn: (input: Omit<PackageAgentInput, 'agent'> = {}) =>
       agentsCreatePackageJob(workspace, { spec: { agent: agentName, ...input } }),
-    onSuccess: (job) => setJobName(job.name),
+    onSuccess: (job) => {
+      setJobName(job.name);
+      setSubmittedAt(Date.now());
+    },
   });
 
   const status = useQuery({
@@ -79,6 +105,10 @@ export const usePackageAgent = ({ workspace, agentName }: UsePackageAgentParams)
 
   const jobStatus = status.data?.status;
   const isComplete = jobStatus === 'completed';
+
+  // The status poll doubles as the clock, so no extra timer is needed.
+  const isQueued = jobStatus === 'created';
+  const isStalled = isQueuedTooLong(jobStatus, submittedAt, status.dataUpdatedAt);
 
   // `jobStatus` is in the key so the flip to terminal fetches once more: the
   // lines explaining a failure land after the status changes, and polling has
@@ -115,12 +145,18 @@ export const usePackageAgent = ({ workspace, agentName }: UsePackageAgentParams)
     jobName,
     jobStatus,
     isRunning: Boolean(jobName) && !isTerminalPackageStatus(jobStatus),
+    isQueued,
+    /** Accepted but never dispatched — nothing is running the job. */
+    isStalled,
     isComplete,
     isFailed: jobStatus === 'error' || jobStatus === 'cancelled',
     logs: logs.data?.data ?? [],
     isLogsLoading: logs.isLoading,
     image: result.data?.image,
     published: result.data?.published,
-    reset: () => setJobName(undefined),
+    reset: () => {
+      setJobName(undefined);
+      setSubmittedAt(undefined);
+    },
   };
 };

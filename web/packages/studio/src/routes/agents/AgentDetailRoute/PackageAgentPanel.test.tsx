@@ -108,6 +108,15 @@ describe('PackageAgentPanel', () => {
     expect(screen.queryByRole('button', { name: 'Use for deployment' })).not.toBeInTheDocument();
   });
 
+  it('says queued while the job waits to be dispatched', async () => {
+    mockJob('created');
+    renderPanel();
+
+    await clickBuild();
+
+    expect(await screen.findByRole('button', { name: 'Queued…' })).toBeInTheDocument();
+  });
+
   it('refuses to package a NAT workflow agent', async () => {
     renderPanel({ canPackage: false });
 

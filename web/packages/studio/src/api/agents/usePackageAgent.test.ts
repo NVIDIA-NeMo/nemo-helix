@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { isTerminalPackageStatus, parsePackageResult } from '@studio/api/agents/usePackageAgent';
+import {
+  isQueuedTooLong,
+  isTerminalPackageStatus,
+  parsePackageResult,
+  QUEUED_STALL_MS,
+} from '@studio/api/agents/usePackageAgent';
 
 describe('parsePackageResult', () => {
   it('reads the tag a deployment needs', () => {
@@ -59,5 +64,25 @@ describe('isTerminalPackageStatus', () => {
 
   it('keeps polling before the first status arrives', () => {
     expect(isTerminalPackageStatus(undefined)).toBe(false);
+  });
+});
+
+describe('isQueuedTooLong', () => {
+  const submittedAt = 1_000_000;
+
+  it('warns once a created job has waited past the threshold', () => {
+    expect(isQueuedTooLong('created', submittedAt, submittedAt + QUEUED_STALL_MS + 1)).toBe(true);
+  });
+
+  it('stays quiet while the job is still plausibly queued', () => {
+    expect(isQueuedTooLong('created', submittedAt, submittedAt + QUEUED_STALL_MS)).toBe(false);
+  });
+
+  it.each(['active', 'completed', 'error'])('never warns for %s, which is not stuck', (status) => {
+    expect(isQueuedTooLong(status, submittedAt, submittedAt + QUEUED_STALL_MS * 10)).toBe(false);
+  });
+
+  it('needs a submit time before it can judge', () => {
+    expect(isQueuedTooLong('created', undefined, submittedAt + QUEUED_STALL_MS * 10)).toBe(false);
   });
 });

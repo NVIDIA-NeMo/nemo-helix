@@ -35,6 +35,8 @@ export const PackageAgentPanel: FC<PackageAgentPanelProps> = ({
     isSubmitting,
     jobName,
     isRunning,
+    isQueued,
+    isStalled,
     isComplete,
     isFailed,
     logs,
@@ -53,7 +55,7 @@ export const PackageAgentPanel: FC<PackageAgentPanelProps> = ({
           disabled={!canPackage || isSubmitting || isRunning}
           onClick={() => packageAgent({})}
         >
-          {isRunning ? 'Building…' : 'Build image'}
+          {isQueued ? 'Queued…' : isRunning ? 'Building…' : 'Build image'}
         </Button>
       }
     >
@@ -98,6 +100,13 @@ export const PackageAgentPanel: FC<PackageAgentPanelProps> = ({
         {isComplete && !image ? (
           <Text kind="body/regular/sm" className="text-secondary">
             The job finished without reporting an image tag. Check the logs below.
+          </Text>
+        ) : null}
+
+        {isStalled ? (
+          <Text kind="body/regular/sm" className="text-warning">
+            The job was accepted but has not started. Check that the platform is running a jobs
+            controller.
           </Text>
         ) : null}
 
