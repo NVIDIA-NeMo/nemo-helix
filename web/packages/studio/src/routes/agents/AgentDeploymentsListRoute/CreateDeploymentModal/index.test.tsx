@@ -22,8 +22,16 @@ interface CapturedDeployment {
   image?: string;
 }
 
-const renderModal = () =>
-  renderRoute(<CreateDeploymentModal open onClose={vi.fn()} workspace={workspace} agent={agent} />);
+const renderModal = (initialImage?: string) =>
+  renderRoute(
+    <CreateDeploymentModal
+      open
+      onClose={vi.fn()}
+      workspace={workspace}
+      agent={agent}
+      initialImage={initialImage}
+    />
+  );
 
 const captureCreate = (): { body?: CapturedDeployment } => {
   const captured: { body?: CapturedDeployment } = {};
@@ -104,6 +112,23 @@ describe('CreateDeploymentModal', () => {
         agent,
         deployment_mode: 'docker',
         image: 'nvcr.io/example/nemo-studio-assistant:poc',
+      })
+    );
+  });
+
+  it('deploys a freshly packaged image without retyping it', async () => {
+    const user = userEvent.setup();
+    const captured = captureCreate();
+    renderModal('nemo-agents/default/nemo-studio-assistant:1.0');
+
+    const dialog = await getDeploymentDialog();
+    await user.click(within(dialog).getByRole('button', { name: 'Deploy' }));
+
+    await waitFor(() =>
+      expect(captured.body).toEqual({
+        agent,
+        deployment_mode: 'docker',
+        image: 'nemo-agents/default/nemo-studio-assistant:1.0',
       })
     );
   });

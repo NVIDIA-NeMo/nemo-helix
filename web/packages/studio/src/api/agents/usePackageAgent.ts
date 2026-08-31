@@ -5,11 +5,15 @@ import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import {
   agentsCreatePackageJob,
   agentsDownloadPackageJobResult,
+  agentsGetPackageJobLogs,
   agentsGetPackageJobStatus,
 } from '@nemo/sdk/generated/agents/api';
 import type { PackageAgentInput } from '@nemo/sdk/generated/agents/schema';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+
+/** Only Platform-managed agents can be packaged; NAT workflows build from a checkout. */
+export const FABRIC_CONFIG_FORMAT = 'nemo-agents-spec-v1';
 
 /** Name the packaging job saves its result under; see `PACKAGE_RESULT_NAME` in the plugin. */
 export const PACKAGE_RESULT_NAME = 'package_result';
@@ -76,6 +80,16 @@ export const usePackageAgent = ({ workspace, agentName }: UsePackageAgentParams)
   const jobStatus = status.data?.status;
   const isComplete = jobStatus === 'completed';
 
+  // `jobStatus` is in the key so the flip to terminal fetches once more: the
+  // lines explaining a failure land after the status changes, and polling has
+  // stopped by then.
+  const logs = useQuery({
+    queryKey: ['agents', 'package-job', workspace, jobName, 'logs', jobStatus],
+    queryFn: () => agentsGetPackageJobLogs(workspace, jobName as string),
+    enabled: Boolean(jobName),
+    refetchInterval: isTerminalPackageStatus(jobStatus) ? false : JOB_POLLING_INTERVAL_MS,
+  });
+
   const result = useQuery({
     queryKey: ['agents', 'package-job', workspace, jobName, 'result'],
     queryFn: async () => {
@@ -101,6 +115,8 @@ export const usePackageAgent = ({ workspace, agentName }: UsePackageAgentParams)
     isRunning: Boolean(jobName) && !isTerminalPackageStatus(jobStatus),
     isComplete,
     isFailed: jobStatus === 'error' || jobStatus === 'cancelled',
+    logs: logs.data?.data ?? [],
+    isLogsLoading: logs.isLoading,
     image: result.data?.image,
     published: result.data?.published,
     reset: () => setJobName(undefined),

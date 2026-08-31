@@ -37,11 +37,11 @@ const deploymentFormSchema = z
 
 type DeploymentFormData = z.infer<typeof deploymentFormSchema>;
 
-const makeDefaultValues = (agent?: string): DeploymentFormData => ({
+const makeDefaultValues = (agent?: string, image?: string): DeploymentFormData => ({
   name: '',
   agent: agent ?? '',
-  deploymentMode: 'subprocess',
-  image: '',
+  deploymentMode: image ? 'docker' : 'subprocess',
+  image: image ?? '',
 });
 
 interface CreateDeploymentModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
@@ -49,6 +49,8 @@ interface CreateDeploymentModalProps extends Pick<FormModalProps, 'open' | 'onCl
   agent?: string;
   /** Override the workspace inferred from the current path. */
   workspace: string;
+  /** A freshly built tag to deploy, so the image does not have to be retyped. */
+  initialImage?: string;
 }
 
 export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
@@ -56,6 +58,7 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
   onClose,
   agent: agentProp,
   workspace,
+  initialImage,
 }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -103,15 +106,15 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
     formState: { errors },
   } = useForm({
     resolver: zodResolver(deploymentFormSchema),
-    defaultValues: makeDefaultValues(agentProp),
+    defaultValues: makeDefaultValues(agentProp, initialImage),
     disabled: isPending,
     mode: 'onChange',
   });
   const deploymentMode = watch('deploymentMode');
 
   useEffect(() => {
-    resetForm(makeDefaultValues(agentProp));
-  }, [agentProp, resetForm]);
+    resetForm(makeDefaultValues(agentProp, initialImage));
+  }, [agentProp, initialImage, resetForm]);
 
   const reset = () => {
     resetMutation();

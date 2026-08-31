@@ -12,6 +12,7 @@ import {
 } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { NoHealthyDeploymentsBanner } from '@studio/routes/agents/AgentDetailRoute/NoHealthyDeploymentsBanner';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
+import { PackageAgentPanel } from '@studio/routes/agents/AgentDetailRoute/PackageAgentPanel';
 import type { FC } from 'react';
 
 interface DeploymentsTabProps {
@@ -27,6 +28,10 @@ interface DeploymentsTabProps {
   canDeploy: boolean;
   /** Where the agent's files come from, to link each staged commit and mark stale ones. */
   specSource?: AgentSpecSource;
+  workspace: string;
+  /** Packaging is Fabric-only, a narrower gate than `canDeploy`. */
+  canPackage: boolean;
+  onImageBuilt?: (image: string) => void;
 }
 
 /** A commit, linked to GitHub when the source it came from is still known. */
@@ -54,8 +59,19 @@ export const DeploymentsTab: FC<DeploymentsTabProps> = ({
   onViewLogs,
   canDeploy,
   specSource,
+  workspace,
+  canPackage,
+  onImageBuilt,
 }) => (
   <Stack gap="5" className="w-full">
+    {agentName ? (
+      <PackageAgentPanel
+        workspace={workspace}
+        agentName={agentName}
+        canPackage={canPackage}
+        onImageBuilt={onImageBuilt}
+      />
+    ) : null}
     <DetailPanel title="Deployments" flush>
       {!isDeploymentsLoading && deployments.length === 0 ? (
         <div className="p-4">

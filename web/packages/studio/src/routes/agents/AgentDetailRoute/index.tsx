@@ -17,6 +17,7 @@ import {
   Text,
 } from '@nvidia/foundations-react-core';
 import { agentSpecSource, useAgentSpecFileset } from '@studio/api/agents/useAgentSpecFileset';
+import { FABRIC_CONFIG_FORMAT } from '@studio/api/agents/usePackageAgent';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import { ImportTracesModal } from '@studio/components/ImportTracesModal';
@@ -130,6 +131,9 @@ export const AgentDetailRoute: FC = () => {
 
   const modelNames = getAgentModelNames(agent?.config);
   const canDeploy = !!agent?.config;
+  // Narrower than canDeploy: NAT workflows package from a source checkout.
+  const canPackage = agent?.config_format === FABRIC_CONFIG_FORMAT;
+  const [packagedImage, setPackagedImage] = useState<string | undefined>();
 
   const canRunEvaluation = !!agentName && canDeploy;
 
@@ -261,6 +265,12 @@ export const AgentDetailRoute: FC = () => {
               onViewLogs={viewLogs}
               canDeploy={canDeploy}
               specSource={specSource}
+              workspace={workspace}
+              canPackage={canPackage}
+              onImageBuilt={(image) => {
+                setPackagedImage(image);
+                setCreateDeploymentOpen(true);
+              }}
             />
           </TabsContent>
 
@@ -314,7 +324,11 @@ export const AgentDetailRoute: FC = () => {
           open
           agent={agentName}
           workspace={workspace}
-          onClose={() => setCreateDeploymentOpen(false)}
+          initialImage={packagedImage}
+          onClose={() => {
+            setCreateDeploymentOpen(false);
+            setPackagedImage(undefined);
+          }}
         />
       )}
       <WalkthroughCoachmarks
