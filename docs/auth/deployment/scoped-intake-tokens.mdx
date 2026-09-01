@@ -1,0 +1,376 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Scoped Intake Tokens"
+description: "Create service-account Scoped Access Keys for reading Intake data and sending OTLP telemetry."
+---
+Use this runbook when you already have a NeMo Helix deployment with
+authentication enabled and need bearer tokens for non-interactive Intake clients.
+Typical clients include OTLP exporters, collectors, jobs, and automation scripts.
+
+The CLI calls these credentials Scoped Access Keys. They are NeMo-minted JWTs
+you can expire, suspend, rotate, and revoke. Kubernetes service account tokens
+and workload identity token exchange are separate features.
+
+A human HelixAdmin signs in and creates the keys. Other callers, including
+service accounts, are rejected. The service account is a NeMo identity, not an
+IdP user, and it does not sign in.
+
+<Note>
+
+`nemo auth access-keys create` supports user-bound keys, service-account-bound
+keys, service-area scopes, workspace grants, and finite or unlimited lifetimes.
+For service-account keys, combine `--scope intake` with the minimum workspace
+role, short lifetimes, suspension, rotation, and revocation. API-scope checks
+also apply to bearer tokens that contain `scope` or `scp` claims, such as OIDC
+access tokens requested with `nemo auth login --scope ...`.
+
+</Note>
+
+## Access Model
+
+Scoped Access Keys are constrained by:
+
+- the principal ID stamped into the token
+- any service-area scopes stamped into the token
+- the principal's workspace role bindings
+- the key expiration time
+- the key suspension or revocation state
+
+For service-account keys, the admin passes a service account ID to
+`--service-account`. NeMo stamps the token subject as
+`service-account:<service-account-id>`.
+
+Use separate service accounts for read and write access:
+
+| Token | `--service-account` value | Recommended `--scope` | Principal to grant | Minimum role | Intended use |
+|---|---|---|---|---|---|
+| Intake reader token | `intake-reader` | `intake` | `service-account:intake-reader` | Viewer | Fetch spans, traces, sessions, evaluator results, or annotations |
+| Intake OTLP writer token | `intake-otel-writer` | `intake` | `service-account:intake-otel-writer` | Editor | Send OTLP, ATIF, chat-completions, or direct span data |
+
+The built-in Viewer and Editor roles are workspace-wide. The `--scope intake`
+token scope restricts the key to Intake API endpoints, while the workspace role
+decides read/write access inside that API. A reader service account with Viewer
+cannot write even though `--scope intake` stamps both `intake:read` and
+`intake:write`; the role check still denies writes.
+
+<Warning>
+
+Do not use the `service:` prefix for customer automation identities. NeMo Helix
+reserves `service:<name>` for internal platform service principals with
+different authorization behavior. Customer service-account access keys use the
+`service-account:<id>` principal form.
+
+</Warning>
+
+## Before You Start
+
+Set these variables for the existing deployment and target workspace:
+
+```bash
+export NHX_BASE_URL=https://nhx.company.com
+export WORKSPACE=team-workspace
+
+export INTAKE_READER_SERVICE_ACCOUNT_ID=intake-reader
+export INTAKE_WRITER_SERVICE_ACCOUNT_ID=intake-otel-writer
+export INTAKE_READER_PRINCIPAL="service-account:${INTAKE_READER_SERVICE_ACCOUNT_ID}"
+export INTAKE_WRITER_PRINCIPAL="service-account:${INTAKE_WRITER_SERVICE_ACCOUNT_ID}"
+
+export READ_KEY_TTL_SECONDS=604800
+export WRITE_KEY_TTL_SECONDS=604800
+```
+
+Service account IDs must start with a letter or number and may contain letters,
+numbers, `.`, `_`, `+`, `/`, or `-`. Pass the unprefixed ID to
+`--service-account`. Use the prefixed `service-account:<id>` value when granting
+workspace access.
+
+You need:
+
+- NeMo Helix auth is already enabled.
+- Your IdP, login flow, and gateway auth path already work.
+- A human platform admin can sign in with the CLI.
+- The admin has the `HelixAdmin` role in the `system` workspace.
+- A platform or workspace admin can manage workspace members for the target
+  workspace.
+- Scoped Access Keys are enabled, or a platform operator can enable them through
+  the documented deployment configuration.
+
+Set `NHX_BASE_URL` to the final HTTPS origin. Do not send authenticated requests
+through HTTP redirects.
+
+## Confirm Existing Auth
+
+Verify the public URL and sign in as the human admin who will create the service
+tokens:
+
+```bash
+curl -fsS "$NHX_BASE_URL/apis/auth/discovery" | jq '.auth_enabled'
+nemo auth login --base-url "$NHX_BASE_URL"
+nemo auth status
+nemo workspaces members list --workspace "$WORKSPACE"
+```
+
+The discovery command should print `true`. The admin signs in with the normal
+user flow. The service accounts created later do not run `nemo auth login`.
+
+Confirm the CLI supports service-account Scoped Access Keys:
+
+```bash
+nemo auth access-keys create --help
+```
+
+The help output should include `--service-account`, `--expires-in`, `--scope`,
+and `--workspace`. If those options are missing, upgrade to a NeMo Helix release
+that supports service-bound Scoped Access Keys.
+
+On Entra, create these keys from the admin's existing CLI session. NeMo stamps
+`service-account:<id>` into the token.
+
+## Enable Scoped Access Keys
+
+If `nemo auth access-keys list` already succeeds, skip this section.
+
+For chart-based deployments, set these under `platformConfig.auth`. Field
+details are in
+[Scoped Access Keys configuration](/documentation/access-control/deployment#scoped-access-keys).
+
+- `token_signing.issuer`
+- `token_signing.key_id`
+- `token_signing.private_key_file`
+- `access_keys.enabled`
+- `access_keys.issue_format`
+- `access_keys.accepted_formats`
+- `access_keys.audience`
+- `access_keys.default_expires_in_seconds`
+- `access_keys.max_expires_in_seconds`
+
+Also place a stable RSA signing key at `token_signing.private_key_file`. Keep a
+backup. Replacing the key invalidates keys already signed with that key id.
+
+The lifetime controls are:
+
+- `auth.access_keys.default_expires_in_seconds`: default lifetime when a create
+  request omits `--expires-in`.
+- `auth.access_keys.max_expires_in_seconds`: maximum finite lifetime that admins
+  may request.
+- `nemo auth access-keys create --expires-in <seconds>`: lifetime for one key,
+  capped by `max_expires_in_seconds`.
+- `nemo auth access-keys create --expires-in none`: request a key with no
+  expiration. This only works when `auth.access_keys.max_expires_in_seconds` is
+  `null`.
+
+After the operator applies the configuration, verify access-key support:
+
+```bash
+curl -fsS "$NHX_BASE_URL/apis/auth/discovery" | jq '.auth_enabled'
+curl -fsS "$NHX_BASE_URL/apis/auth/jwks" | jq '.keys[].kid'
+nemo auth access-keys list
+```
+
+The discovery command should print `true`. The JWKS output should include the
+configured access-key signing `kid`.
+
+If `nemo auth access-keys list` returns `Scoped Access Keys are not enabled`,
+`access_keys.enabled` or the signing key is still missing. Finish the settings
+above and roll the API again.
+
+Gateway requirements are covered in
+[Gateway Integration](/documentation/access-control/deployment/gateway-integration).
+
+## Grant Intake Access
+
+Grant read access to the reader service account:
+
+```bash
+nemo workspaces members create \
+  --workspace "$WORKSPACE" \
+  --principal "$INTAKE_READER_PRINCIPAL" \
+  --roles Viewer
+```
+
+Grant write access to the OTLP writer service account:
+
+```bash
+nemo workspaces members create \
+  --workspace "$WORKSPACE" \
+  --principal "$INTAKE_WRITER_PRINCIPAL" \
+  --roles Editor
+```
+
+Verify the grants:
+
+```bash
+nemo workspaces members list --workspace "$WORKSPACE"
+```
+
+## Create And Verify A Reader Token
+
+Create the token from a human HelixAdmin CLI session:
+
+```bash
+export NHX_INTAKE_READ_TOKEN="$(
+  nemo auth access-keys create \
+    --service-account "$INTAKE_READER_SERVICE_ACCOUNT_ID" \
+    --name intake-read \
+    --description "Read Intake data from $WORKSPACE" \
+    --scope intake \
+    --expires-in "$READ_KEY_TTL_SECONDS"
+)"
+```
+
+The CLI prints the token only once. Store the token in your secret manager.
+
+Verify the token resolves as a Scoped Access Key:
+
+```bash
+curl -fsS "$NHX_BASE_URL/apis/auth/authenticate" \
+  -H "Authorization: Bearer $NHX_INTAKE_READ_TOKEN" \
+  | jq '{principal, token_kind, jti, scopes}'
+```
+
+Expected fields:
+
+```json
+{
+  "principal": "service-account:intake-reader",
+  "token_kind": "access_key",
+  "jti": "ak_...",
+  "scopes": [
+    "intake:read",
+    "intake:write"
+  ]
+}
+```
+
+The `intake:*` scopes limit the token to Intake endpoints. Authorization is
+also enforced by the service-account principal's workspace role.
+
+Use the reader token to fetch Intake data:
+
+```bash
+curl -g --fail-with-body \
+  -H "Authorization: Bearer $NHX_INTAKE_READ_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans?page=1&page_size=1"
+```
+
+Confirm the reader token cannot write:
+
+```bash
+curl -sS -o /tmp/read-token-write-check.json -w "%{http_code}\n" \
+  -X POST \
+  -H "Authorization: Bearer $NHX_INTAKE_READ_TOKEN" \
+  -H "Content-Type: application/x-protobuf" \
+  --data-binary @/dev/null \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/ingest/otlp/v1/traces"
+```
+
+The expected status is `403`. If it succeeds, check whether the reader service
+account was granted Editor, Admin, wildcard, or HelixAdmin access.
+
+## Create And Verify An OTLP Writer Token
+
+Create the writer token from the admin CLI session:
+
+```bash
+export NHX_INTAKE_WRITE_TOKEN="$(
+  nemo auth access-keys create \
+    --service-account "$INTAKE_WRITER_SERVICE_ACCOUNT_ID" \
+    --name intake-otel-write \
+    --description "Write OTLP telemetry to $WORKSPACE" \
+    --scope intake \
+    --expires-in "$WRITE_KEY_TTL_SECONDS"
+)"
+```
+
+Verify the token resolves as a Scoped Access Key:
+
+```bash
+curl -fsS "$NHX_BASE_URL/apis/auth/authenticate" \
+  -H "Authorization: Bearer $NHX_INTAKE_WRITE_TOKEN" \
+  | jq '{principal, token_kind, jti, scopes}'
+```
+
+Expected `principal` is `service-account:intake-otel-writer`, `token_kind` is
+`access_key`, `jti` starts with `ak_`, and `scopes` contains `intake:read` and
+`intake:write`.
+
+Verify the OTLP write path accepts the token:
+
+```bash
+curl -sS -o /tmp/write-token-otlp-check.json -w "%{http_code}\n" \
+  -X POST \
+  -H "Authorization: Bearer $NHX_INTAKE_WRITE_TOKEN" \
+  -H "Content-Type: application/x-protobuf" \
+  --data-binary @/dev/null \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/ingest/otlp/v1/traces"
+cat /tmp/write-token-otlp-check.json
+```
+
+The expected status is `200`, with `{"errors":[]}`. This empty OTLP request
+verifies authorization and endpoint wiring. Send a real trace from your agent or
+collector, then query it back with the reader token.
+
+Configure an OTLP/HTTP exporter with the writer token:
+
+```bash
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/ingest/otlp/v1/traces"
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer%20$NHX_INTAKE_WRITE_TOKEN"
+```
+
+## Operate And Rotate Keys
+
+`nemo auth access-keys list` lists keys owned by the signed-in user. A current
+HelixAdmin also sees all service-account-bound keys, including keys created
+by other admins.
+
+List keys:
+
+```bash
+nemo auth access-keys list
+nemo auth access-keys list --page 2 --page-size 100
+```
+
+Suspend, restore, rotate, or revoke a key by its `jti`:
+
+```bash
+nemo auth access-keys suspend ak_0123456789abcdef0123456789abcdef
+nemo auth access-keys unsuspend ak_0123456789abcdef0123456789abcdef
+nemo auth access-keys rotate ak_0123456789abcdef0123456789abcdef
+nemo auth access-keys revoke ak_0123456789abcdef0123456789abcdef
+```
+
+Service-account keys are platform-owned. Any current human HelixAdmin can
+list, suspend, unsuspend, rotate, or revoke them by `jti`. A service-account key
+cannot create or manage other service-account keys, even if someone grants that
+service account HelixAdmin.
+
+`rotate` prints the replacement token once and keeps the old key usable for the
+configured rotation grace period. Update the external secret or collector
+configuration, verify the replacement, then revoke the old key or let the grace
+period expire.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Check |
+|---|---|---|
+| `Scoped Access Keys are not enabled` | `auth.access_keys.enabled` is false in the running config, or the signing key is not configured | Ask the operator to check the access-key configuration and `curl "$NHX_BASE_URL/apis/auth/jwks"` |
+| `nemo auth access-keys create --help` has no `--service-account` | The CLI or platform release does not support service-bound Scoped Access Keys | Upgrade the CLI and platform together |
+| `403` while creating a service-account key | The signed-in caller is not a current human HelixAdmin, or auth is disabled | Confirm the caller has `HelixAdmin` in the `system` workspace |
+| `/apis/auth/authenticate` returns `"scopes": []` | The key was created without `--scope` | Create a replacement with `--scope intake` |
+| Need a service token with an `intake:write` claim | The key was created without the Intake service scope | Create a replacement with `--scope intake` |
+| `401` from `/apis/auth/authenticate` | Bad, expired, suspended, revoked, or wrong-audience key | Run `nemo auth access-keys list` as a HelixAdmin |
+| Reader token can write | Reader service account has Editor, Admin, wildcard, or HelixAdmin access | Check `nemo workspaces members list --workspace "$WORKSPACE"` and system role bindings |
+| `403` from a read request | Reader service account is not Viewer or higher in the workspace | Check the workspace member list |
+| `403` from OTLP ingest | Writer service account is not Editor or higher in the workspace | Check the workspace member list |
+| OTLP exporter works, but no spans appear | Empty test batch or missing semantic telemetry | Send a real OpenInference or OTel GenAI trace and query by `session_id` |
+
+## Related
+
+- [Auth Configuration](/documentation/access-control/deployment)
+- [Managing Access](/documentation/access-control/authorization/managing-access)
+- [Gateway Integration](/documentation/access-control/deployment/gateway-integration)
+- [Using Authentication](/documentation/access-control/authentication/using-authentication)
+- [Troubleshooting](/documentation/access-control/troubleshooting)

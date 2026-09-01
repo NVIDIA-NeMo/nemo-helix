@@ -58,6 +58,8 @@
     path: ../../auth/concepts.mdx
   - page: Configuration
     path: ../../auth/deployment/configuration.mdx
+  - page: Deployment Secrets
+    path: ../../auth/deployment/deployment-secrets.mdx
   - page: Credential Propagation
     path: ../../auth/deployment/credential-propagation.mdx
   - page: Gateway Integration

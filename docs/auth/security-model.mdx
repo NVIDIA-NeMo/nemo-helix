@@ -26,7 +26,7 @@ sequenceDiagram
     IdP-->>Client: JWT
     Client->>Gateway: Authorization: Bearer token
     Gateway->>Auth: /apis/auth/ext-authz
-    Auth-->>Gateway: Trusted X-NHX-Principal-* and X-NHX-Scopes headers
+    Auth-->>Gateway: Trusted X-NHX-Principal-* headers and optional X-NHX-Scopes
     Gateway->>Service: Forward request with trusted headers
     Service->>PDP: Check authorization
     PDP-->>Service: Allow / deny
@@ -36,7 +36,8 @@ The request flow:
 
 1. **Client** sends a request with a bearer token in the `Authorization` header.
 2. In gateway deployments, **Gateway** calls the auth service's `/apis/auth/ext-authz` endpoint; otherwise, the first service validates the token directly.
-3. The validating component derives trusted `X-NHX-Principal-*` and `X-NHX-Scopes` headers.
+3. The validating component derives trusted `X-NHX-Principal-*` headers and
+   `X-NHX-Scopes` when the token carries scope claims.
 4. **PDP** (Policy Decision Point) evaluates authorization — checks the principal's role bindings and token scopes against the operation's requirements.
 5. If allowed, the service handles the request.
 
@@ -70,7 +71,7 @@ No gateway is required. This is the simplest mode and the default.
 The gateway (e.g., Envoy with `ext_authz`) authenticates the bearer token before forwarding the request:
 
 1. Gateway calls `/apis/auth/ext-authz` with the original `Authorization` header
-2. Auth service validates the bearer token and returns trusted `X-NHX-Principal-*` and `X-NHX-Scopes` headers
+2. Auth service validates the bearer token and returns trusted `X-NHX-Principal-*` headers, plus `X-NHX-Scopes` when the token carries scope claims
 3. Gateway forwards the request with those trusted headers
 4. Services skip bearer-token re-validation and run their normal PDP authorization checks
 
@@ -78,9 +79,16 @@ This rejects unauthenticated requests before they reach Helix services while kee
 
 ## Principal Model
 
-A **principal** is an authenticated identity — typically a human user identified by email address. Each request has exactly one principal.
+A **principal** is an authenticated identity. It can be a human user, a group
+identifier used in role bindings, a NeMo service account, or an internal
+platform service principal. Each request has exactly one principal.
 
 When OIDC is enabled, the principal is resolved from JWT claims: the `sub` claim becomes the principal ID (or `oid` for Azure AD), the `email` claim provides the email (or `upn` for Azure AD), and group memberships come from the `groups` claim. These claim names are configurable. In gateway deployments, the auth service performs this extraction and the gateway forwards the returned `X-NHX-Principal-*` headers.
+
+Scoped Access Keys can also authenticate as the signed-in user's principal, or
+as a NeMo service account when a HelixAdmin creates the key with
+`--service-account <id>`. Service-account keys use the principal ID
+`service-account:<id>` and do not require an IdP user or email address.
 
 <Note>
 
@@ -93,14 +101,37 @@ The following headers carry the authenticated identity through the system:
 
 | Header | Description |
 |---|---|
-| `X-NHX-Principal-Id` | Unique identifier for the principal (required). Resolved from the JWT `sub` claim (or `oid` for Azure AD). |
-| `X-NHX-Principal-Email` | The principal's email address. |
-| `X-NHX-Principal-Groups` | Comma-separated list of groups the principal belongs to (from JWT group claims). |
-| `X-NHX-Scopes` | Space-separated list of token scopes (extracted from the JWT `scp` or `scope` claim). Used by the PDP for scope-based authorization checks. |
+| `X-NHX-Principal-Id` | Unique identifier for the principal (required). For OIDC, this is resolved from the JWT `sub` claim or the configured subject claim. For service-account access keys, this is `service-account:<id>`. |
+| `X-NHX-Principal-Email` | The principal's email address, when the authenticated token has one. |
+| `X-NHX-Principal-Groups` | Comma-separated list of groups the principal belongs to, when the authenticated token has group claims. |
+| `X-NHX-Scopes` | Space-separated list of token scopes, when the authenticated token has a `scp` or `scope` claim. Used by the PDP for scope-based authorization checks. |
 
 These headers are set after bearer-token validation and forwarded on every internal service-to-service call. As described in [Authentication Modes](#authentication-modes), services inside the trust boundary accept them unconditionally — they are never re-validated. Services still call the PDP for authorization when `auth.enabled=true`.
 
-### Service Principals
+### Service Accounts
+
+Service accounts are customer-facing non-human identities for automation. A
+HelixAdmin can create a service-account Scoped Access Key with:
+
+```bash
+nemo auth access-keys create --service-account intake-otel-writer
+```
+
+The issued token authenticates as `service-account:intake-otel-writer`.
+Service-account principals are not privileged by default. Grant them workspace
+roles the same way you grant roles to users:
+
+```bash
+nemo workspaces members create \
+  --principal service-account:intake-otel-writer \
+  --roles Editor \
+  --workspace ml-team
+```
+
+Service accounts do not run `nemo auth login`, do not require email addresses,
+and are not Kubernetes service account tokens.
+
+### Internal Service Principals
 
 Not all requests originate from human users. Platform services that need cross-workspace access — for example, the jobs controller monitoring jobs across all users, or the evaluator coordinating evaluations — authenticate as **service principals**.
 
@@ -120,20 +151,19 @@ Some operations require a service to act with its own credentials while preservi
 - **Secret access**: A user cannot fetch a secret value directly — only the platform can — but the platform still needs to verify that the user has permission to access the secret's workspace.
 - **Entity store access**: Feature-specific APIs (Models, Evaluation, etc.) check user permissions at the service level, then access the entity store using service credentials with the user's identity attached for `created_by`/`updated_by` attribution.
 
-In these cases, the calling service sets the `X-NHX-Principal-On-Behalf-Of` header to a JSON object containing the original user's identity:
+In these cases, the calling service sets its own principal plus separate
+on-behalf-of headers for the original user's identity:
 
-```json
-{
-  "id": "user-principal-id",
-  "email": "alice@example.com",
-  "groups": [
-    "team-ml",
-    "data-eng"
-  ]
-}
+```http
+X-NHX-Principal-Id: service:evaluator
+X-NHX-Principal-On-Behalf-Of: user-principal-id
+X-NHX-Principal-On-Behalf-Of-Email: alice@example.com
+X-NHX-Principal-On-Behalf-Of-Groups: team-ml,data-eng
 ```
 
-The downstream service constructs a principal from this object and evaluates the *user's* permissions — including group-based access — while accepting the request from the service identity.
+The downstream service constructs a delegated principal from those headers and
+evaluates the *user's* permissions, including group-based access, while
+accepting the request from the service identity.
 
 #### Job Credential Propagation
 
@@ -157,7 +187,10 @@ On top of RBAC, NeMo Helix supports **API scopes** as a second authorization lay
 1. **Scope check** (token level): When the JWT carries NeMo Helix API scopes, at least one scope must match the endpoint (for example, `platform:read` or `platform:write`). Tokens with no NeMo Helix API scopes skip this optional check for backward compatibility. Scopes limit what the *token* can do.
 2. **Permission check** (role level): The principal must have the necessary permissions via role bindings in the workspace. Roles limit what the *user* can do.
 
-Both must pass. This enables least-privilege token usage — for example, an Editor can create a read-only token (`platform:read` only) for monitoring scripts.
+Both must pass when platform API scopes are present. Tokens with no scope claim,
+or only standard OIDC scopes such as `openid`, `profile`, and `email`, skip the
+scope check and rely on the permission check. An Editor can sign in with
+`platform:read` only and use that token for monitoring scripts.
 
 For details, see [Authorization Concepts](/documentation/access-control/concepts), [Roles & Permissions](/documentation/access-control/authorization/roles-and-permissions), and [API Scopes](/documentation/access-control/authorization/api-scopes).
 
