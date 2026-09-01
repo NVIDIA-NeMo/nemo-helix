@@ -5,20 +5,24 @@
 title: "Authorization"
 description: ""
 ---
-NeMo Helix authorization controls what authenticated users can do. Every API request is evaluated against the user's token scopes and role bindings before it is allowed.
+NeMo Helix authorization controls what authenticated principals can do. Every
+API request is evaluated against the principal's role bindings, and against
+token scopes when the token carries NeMo Helix API scopes.
 
 The authorization model has four building blocks:
 
 1. **Workspaces** — the authorization boundary. All resources belong to a workspace.
 2. **Roles** — permission bundles (Viewer, Editor, Admin) granted per workspace.
-3. **Role bindings** — the link between a user, a role, and a workspace.
-4. **Scopes** — token-level restrictions that limit what the token can do, independent of the user's role.
+3. **Role bindings** — the link between a principal, a role, and a workspace.
+4. **Scopes** — token-level restrictions that limit what the token can do, independent of the principal's role.
 
 ```text
 Request → PDP → Scope check → Role binding check → Allow / Deny
 ```
 
-For a request to succeed, both the scope check (does the token allow it?) and the role check (does the user have permission?) must pass.
+For a request to succeed, the role check must pass. If the token contains
+platform API scopes such as `intake:write` or `platform:read`, the scope check
+must pass too.
 
 For the full conceptual background, see [Authorization Concepts](/documentation/access-control/concepts). For the security architecture, see [Security Model](/documentation/access-control/security-model).
 
