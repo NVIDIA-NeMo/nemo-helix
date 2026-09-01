@@ -61,11 +61,11 @@ export interface PackageResult {
  */
 export const parsePackageResult = (parsed: unknown): PackageResult | undefined => {
   const image = (parsed as { image?: unknown })?.image;
-  if (typeof image !== 'string' || !image) return undefined;
+  if (typeof image !== 'string' || !image.trim()) return undefined;
   const agent = (parsed as { agent?: unknown })?.agent;
   const published = (parsed as { published?: unknown })?.published;
   return {
-    image,
+    image: image.trim(),
     agent: typeof agent === 'string' ? agent : '',
     published: typeof published === 'string' ? published : '',
   };

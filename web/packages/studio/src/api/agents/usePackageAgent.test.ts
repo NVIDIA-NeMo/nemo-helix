@@ -36,12 +36,19 @@ describe('parsePackageResult', () => {
   it.each([
     ['a missing image', { agent: 'my-agent' }],
     ['an empty image', { image: '', agent: 'my-agent' }],
+    ['a whitespace-only image', { image: '   ', agent: 'my-agent' }],
     ['a non-string image', { image: 42 }],
     ['null', null],
     ['a bare number', 7],
     ['a string', 'nope'],
   ])('treats %s as no result rather than a blank tag', (_label, payload) => {
     expect(parsePackageResult(payload)).toBeUndefined();
+  });
+
+  it('trims a padded image so it matches what deployment validation accepts', () => {
+    expect(parsePackageResult({ image: '  my-agent:1.0  ', agent: 'my-agent' })?.image).toBe(
+      'my-agent:1.0'
+    );
   });
 
   it('ignores non-string companions instead of leaking them into the tag', () => {
