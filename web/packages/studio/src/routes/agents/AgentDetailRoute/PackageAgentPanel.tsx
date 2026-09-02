@@ -6,7 +6,7 @@ import { LogViewer } from '@nemo/common/src/components/LogViewer';
 import { Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { usePackageAgent } from '@studio/api/agents/usePackageAgent';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
-import type { FC } from 'react';
+import { useEffect, type FC } from 'react';
 
 interface PackageAgentPanelProps {
   workspace: string;
@@ -15,6 +15,11 @@ interface PackageAgentPanelProps {
   canPackage: boolean;
   /** Offers the finished tag to the deployment flow. */
   onImageBuilt?: (image: string) => void;
+  /**
+   * Reports the finished tag as soon as the build produces one, so deploying
+   * from anywhere on the page starts from the image this agent just built.
+   */
+  onImageAvailable?: (image: string) => void;
 }
 
 /**
@@ -28,6 +33,7 @@ export const PackageAgentPanel: FC<PackageAgentPanelProps> = ({
   agentName,
   canPackage,
   onImageBuilt,
+  onImageAvailable,
 }) => {
   const {
     packageAgent,
@@ -44,6 +50,12 @@ export const PackageAgentPanel: FC<PackageAgentPanelProps> = ({
     image,
     published,
   } = usePackageAgent({ workspace, agentName });
+
+  useEffect(() => {
+    if (isComplete && image) {
+      onImageAvailable?.(image);
+    }
+  }, [isComplete, image, onImageAvailable]);
 
   return (
     <DetailPanel

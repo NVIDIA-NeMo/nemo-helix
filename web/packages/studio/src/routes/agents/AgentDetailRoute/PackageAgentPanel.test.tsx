@@ -14,13 +14,18 @@ const agent = 'my-agent';
 const jobsUrl = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/package`;
 const jobUrl = `${jobsUrl}/:name`;
 
-const renderPanel = (props?: { canPackage?: boolean; onImageBuilt?: (image: string) => void }) =>
+const renderPanel = (props?: {
+  canPackage?: boolean;
+  onImageBuilt?: (image: string) => void;
+  onImageAvailable?: (image: string) => void;
+}) =>
   renderRoute(
     <PackageAgentPanel
       workspace={workspace}
       agentName={agent}
       canPackage={props?.canPackage ?? true}
       onImageBuilt={props?.onImageBuilt}
+      onImageAvailable={props?.onImageAvailable}
     />
   );
 
@@ -60,6 +65,28 @@ describe('PackageAgentPanel', () => {
     await user.click(await screen.findByRole('button', { name: 'Use for deployment' }));
 
     expect(onImageBuilt).toHaveBeenCalledWith('nemo-agents/default/my-agent:1.0');
+  });
+
+  it('reports the tag without waiting to be asked, so deploying elsewhere has a default', async () => {
+    const onImageAvailable = vi.fn();
+    mockJob('completed');
+    renderPanel({ onImageAvailable });
+
+    await clickBuild();
+    await screen.findByText('nemo-agents/default/my-agent:1.0');
+
+    expect(onImageAvailable).toHaveBeenCalledWith('nemo-agents/default/my-agent:1.0');
+  });
+
+  it('reports no tag when the job finishes without one', async () => {
+    const onImageAvailable = vi.fn();
+    mockJob('completed', '');
+    renderPanel({ onImageAvailable });
+
+    await clickBuild();
+    await screen.findByText(/finished without reporting an image tag/);
+
+    expect(onImageAvailable).not.toHaveBeenCalled();
   });
 
   it('shows the rejection reason rather than a generic failure', async () => {

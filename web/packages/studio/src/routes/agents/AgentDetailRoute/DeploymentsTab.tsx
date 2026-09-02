@@ -32,6 +32,7 @@ interface DeploymentsTabProps {
   /** Packaging is Fabric-only, a narrower gate than `canDeploy`. */
   canPackage: boolean;
   onImageBuilt?: (image: string) => void;
+  onImageAvailable?: (image: string) => void;
 }
 
 /** A commit, linked to GitHub when the source it came from is still known. */
@@ -62,6 +63,7 @@ export const DeploymentsTab: FC<DeploymentsTabProps> = ({
   workspace,
   canPackage,
   onImageBuilt,
+  onImageAvailable,
 }) => (
   <Stack gap="5" className="w-full">
     {agentName ? (
@@ -70,6 +72,7 @@ export const DeploymentsTab: FC<DeploymentsTabProps> = ({
         agentName={agentName}
         canPackage={canPackage}
         onImageBuilt={onImageBuilt}
+        onImageAvailable={onImageAvailable}
       />
     ) : null}
     <DetailPanel title="Deployments" flush>
