@@ -133,7 +133,18 @@ describe('CreateDeploymentModal', () => {
     );
   });
 
-  it('requires an image for container deployments', async () => {
+  it("surfaces the server's refusal when no image resolves", async () => {
+    server.use(
+      http.post(deploymentsUrl, () =>
+        HttpResponse.json(
+          {
+            detail:
+              "deployment_mode 'docker' requires a container image. Set 'image' on the request, or configure 'deployments.default_image'.",
+          },
+          { status: 400 }
+        )
+      )
+    );
     const user = userEvent.setup();
     renderModal();
 
@@ -142,10 +153,20 @@ describe('CreateDeploymentModal', () => {
     await user.click(await screen.findByRole('option', { name: 'Docker' }));
     await user.click(within(dialog).getByRole('button', { name: 'Deploy' }));
 
-    expect(
-      await within(dialog).findByText(
-        'Container image is required for Docker and Kubernetes deployments'
-      )
-    ).toBeInTheDocument();
+    expect(await within(dialog).findByText(/requires a container image/)).toBeInTheDocument();
+  });
+
+  it('submits without an image so a configured default can apply', async () => {
+    const captured = captureCreate();
+    const user = userEvent.setup();
+    renderModal();
+
+    const dialog = await getDeploymentDialog();
+    await user.click(within(dialog).getByRole('combobox', { name: 'Runtime' }));
+    await user.click(await screen.findByRole('option', { name: 'Docker' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Deploy' }));
+
+    await waitFor(() => expect(captured.body.deployment_mode).toBe('docker'));
+    expect(captured.body.image).toBeUndefined();
   });
 });

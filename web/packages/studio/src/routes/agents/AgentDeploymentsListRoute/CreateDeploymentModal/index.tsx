@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
@@ -18,22 +19,14 @@ import { type FC, useEffect } from 'react';
 import { type SubmitHandler, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
-const deploymentFormSchema = z
-  .object({
-    name: z.literal('').or(entityNameSchema('Deployment name')).optional(),
-    agent: z.string().min(1, 'Agent is required'),
-    deploymentMode: z.enum(['subprocess', 'docker', 'k8s']),
-    image: z.string().optional(),
-  })
-  .superRefine(({ deploymentMode, image }, context) => {
-    if (deploymentMode !== 'subprocess' && !image?.trim()) {
-      context.addIssue({
-        code: 'custom',
-        path: ['image'],
-        message: 'Container image is required for Docker and Kubernetes deployments',
-      });
-    }
-  });
+// Whether a container deployment needs an image depends on the server's configured
+// default, which only the server knows. It rejects the request; we surface that.
+const deploymentFormSchema = z.object({
+  name: z.literal('').or(entityNameSchema('Deployment name')).optional(),
+  agent: z.string().min(1, 'Agent is required'),
+  deploymentMode: z.enum(['subprocess', 'docker', 'k8s']),
+  image: z.string().optional(),
+});
 
 type DeploymentFormData = z.infer<typeof deploymentFormSchema>;
 
@@ -134,12 +127,10 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
     }
   };
 
-  const errorMessage =
-    createError instanceof Error
-      ? createError.message
-      : createError
-        ? 'An error occurred'
-        : undefined;
+  // The server owns whether an image is required, so its message has to reach the user.
+  const errorMessage = createError
+    ? getErrorMessage(createError as Error, 'An error occurred')
+    : undefined;
 
   return (
     <FormModal
@@ -183,7 +174,8 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
             placeholder="nvcr.io/org/team/agent:tag"
             formFieldProps={{
               slotError: errors.image?.message,
-              slotInfo: 'The backend pulls this image using its configured registry credentials.',
+              slotInfo:
+                'The backend pulls this image using its configured registry credentials. Leave empty to use the deployment default, if one is configured.',
             }}
           />
         )}
