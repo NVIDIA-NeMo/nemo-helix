@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
-import { LogViewer } from '@nemo/common/src/components/LogViewer';
-import { Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import { usePackageAgent } from '@studio/api/agents/usePackageAgent';
+import { JOBS_ENABLED } from '@studio/constants/environment';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
+import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';
 import { useEffect, type FC } from 'react';
+import { useNavigate } from 'react-router';
 
 interface PackageAgentPanelProps {
   workspace: string;
@@ -26,7 +28,8 @@ interface PackageAgentPanelProps {
  * Build a container image for this agent so a docker or k8s deployment has one.
  *
  * The build runs for minutes, so this stays on the page rather than inside the
- * deployment modal, and streams the job's logs while it runs.
+ * deployment modal. Build output belongs on the job page, which already renders
+ * it in full, rather than filling this panel with a wall of install lines.
  */
 export const PackageAgentPanel: FC<PackageAgentPanelProps> = ({
   workspace,
@@ -35,6 +38,7 @@ export const PackageAgentPanel: FC<PackageAgentPanelProps> = ({
   onImageBuilt,
   onImageAvailable,
 }) => {
+  const navigate = useNavigate();
   const {
     packageAgent,
     submitError,
@@ -46,8 +50,6 @@ export const PackageAgentPanel: FC<PackageAgentPanelProps> = ({
     isComplete,
     isFailed,
     isRestored,
-    logs,
-    isLogsLoading,
     image,
     published,
   } = usePackageAgent({ workspace, agentName });
@@ -115,7 +117,7 @@ export const PackageAgentPanel: FC<PackageAgentPanelProps> = ({
 
         {isComplete && !image ? (
           <Text kind="body/regular/sm" className="text-secondary">
-            The job finished without reporting an image tag. Check the logs below.
+            The job finished without reporting an image tag. Open the job to see why.
           </Text>
         ) : null}
 
@@ -128,17 +130,29 @@ export const PackageAgentPanel: FC<PackageAgentPanelProps> = ({
 
         {isFailed ? (
           <Text kind="body/regular/sm" className="text-danger">
-            Packaging failed. The build output is below.
+            Packaging failed. Open the job for the build output.
           </Text>
         ) : null}
 
-        {jobName ? (
-          <LogViewer
-            logs={logs}
-            isLoading={isLogsLoading}
-            downloadFilename={`${agentName}-package.log`}
-            emptyMessage="Waiting for build output…"
-          />
+        {(isQueued || isRunning) && !isStalled ? (
+          <Flex gap="2" className="items-center">
+            <Spinner size="small" aria-label="Building image" />
+            <Text kind="body/regular/sm" className="text-secondary">
+              {isQueued ? 'Waiting for a build to start…' : 'Building — this takes a few minutes.'}
+            </Text>
+          </Flex>
+        ) : null}
+
+        {jobName && JOBS_ENABLED ? (
+          <Flex>
+            <Button
+              kind="tertiary"
+              size="small"
+              onClick={() => navigate(getWorkspaceJobDetailRoute(workspace, jobName))}
+            >
+              View job
+            </Button>
+          </Flex>
         ) : null}
       </Stack>
     </DetailPanel>

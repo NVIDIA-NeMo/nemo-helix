@@ -5,14 +5,12 @@ import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import {
   agentsCreatePackageJob,
   agentsDownloadPackageJobResult,
-  agentsGetPackageJobLogs,
   agentsGetPackageJobStatus,
   agentsListPackageJobs,
 } from '@nemo/sdk/generated/agents/api';
 import type {
   PackageAgentInput,
   PackageAgentJobsSortField,
-  PlatformJobLog,
 } from '@nemo/sdk/generated/agents/schema';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -48,12 +46,6 @@ export const isQueuedTooLong = (
 /** Statuses that will not change again, so polling can stop. */
 const TERMINAL_JOB_STATUSES = new Set(['completed', 'error', 'cancelled']);
 
-/** Lines per request. The API pages logs, and a build easily outruns one page. */
-const LOG_PAGE_LIMIT = 500;
-
-/** Stops a runaway build's output from being fetched without end. */
-const MAX_LOG_PAGES = 20;
-
 /**
  * How far back to look for this agent's last packaging job.
  *
@@ -62,27 +54,6 @@ const MAX_LOG_PAGES = 20;
  * previous build rather than the wrong one.
  */
 const RECENT_JOBS_PAGE_SIZE = 100;
-
-/**
- * Read every page of a job's logs.
- *
- * The first page alone stops mid-install, which reads as a stalled build rather
- * than a paged response.
- */
-const fetchAllLogs = async (workspace: string, jobName: string): Promise<PlatformJobLog[]> => {
-  const lines: PlatformJobLog[] = [];
-  let cursor: string | undefined;
-  for (let page = 0; page < MAX_LOG_PAGES; page += 1) {
-    const response = await agentsGetPackageJobLogs(workspace, jobName, {
-      limit: LOG_PAGE_LIMIT,
-      ...(cursor ? { page_cursor: cursor } : {}),
-    });
-    lines.push(...response.data);
-    if (!response.next_page) return lines;
-    cursor = response.next_page;
-  }
-  return lines;
-};
 
 export const isTerminalPackageStatus = (status: string | undefined): boolean =>
   status !== undefined && TERMINAL_JOB_STATUSES.has(status);
@@ -167,16 +138,6 @@ export const usePackageAgent = ({ workspace, agentName }: UsePackageAgentParams)
   const isQueued = jobStatus === 'created';
   const isStalled = isQueuedTooLong(jobStatus, submittedAt, status.dataUpdatedAt);
 
-  // `jobStatus` is in the key so the flip to terminal fetches once more: the
-  // lines explaining a failure land after the status changes, and polling has
-  // stopped by then.
-  const logs = useQuery({
-    queryKey: ['agents', 'package-job', workspace, activeJobName, 'logs', jobStatus],
-    queryFn: () => fetchAllLogs(workspace, activeJobName as string),
-    enabled: Boolean(activeJobName),
-    refetchInterval: isTerminalPackageStatus(jobStatus) ? false : JOB_POLLING_INTERVAL_MS,
-  });
-
   const result = useQuery({
     queryKey: ['agents', 'package-job', workspace, activeJobName, 'result'],
     queryFn: async () => {
@@ -211,8 +172,6 @@ export const usePackageAgent = ({ workspace, agentName }: UsePackageAgentParams)
     isStalled,
     isComplete,
     isFailed: jobStatus === 'error' || jobStatus === 'cancelled',
-    logs: logs.data ?? [],
-    isLogsLoading: logs.isLoading,
     image: result.data?.image,
     published: result.data?.published,
     reset: () => {
