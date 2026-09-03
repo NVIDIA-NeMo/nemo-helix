@@ -133,9 +133,11 @@ export const AgentDetailRoute: FC = () => {
   const canDeploy = !!agent?.config;
   // Narrower than canDeploy: NAT workflows package from a source checkout.
   const canPackage = agent?.config_format === FABRIC_CONFIG_FORMAT;
-  // Survives closing the deploy modal: an image this agent built stays the
-  // default for every later deployment, not just the one opened from the panel.
-  const [builtImage, setBuiltImage] = useState<string | undefined>();
+  // Survives closing the deploy modal, but not a change of agent: the route is
+  // reused across agentName, so an unscoped tag would deploy one agent's image
+  // under another's name.
+  const [builtImage, setBuiltImage] = useState<{ agent: string; image: string } | undefined>();
+  const builtImageForAgent = builtImage?.agent === agentName ? builtImage?.image : undefined;
 
   const canRunEvaluation = !!agentName && canDeploy;
 
@@ -270,10 +272,10 @@ export const AgentDetailRoute: FC = () => {
               workspace={workspace}
               canPackage={canPackage}
               onImageBuilt={(image) => {
-                setBuiltImage(image);
+                setBuiltImage({ agent: agentName ?? '', image });
                 setCreateDeploymentOpen(true);
               }}
-              onImageAvailable={setBuiltImage}
+              onImageAvailable={(image) => setBuiltImage({ agent: agentName ?? '', image })}
             />
           </TabsContent>
 
@@ -327,7 +329,7 @@ export const AgentDetailRoute: FC = () => {
           open
           agent={agentName}
           workspace={workspace}
-          initialImage={builtImage}
+          initialImage={builtImageForAgent}
           onClose={() => setCreateDeploymentOpen(false)}
         />
       )}

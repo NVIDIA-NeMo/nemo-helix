@@ -87,7 +87,11 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
         agent: data.agent,
         ...(data.name ? { name: data.name } : {}),
         deployment_mode: data.deploymentMode,
-        ...(data.deploymentMode !== 'subprocess' && data.image ? { image: data.image.trim() } : {}),
+        // Trim before testing, so a whitespace-only entry omits the field rather
+        // than sending an empty one.
+        ...(data.deploymentMode !== 'subprocess' && data.image?.trim()
+          ? { image: data.image.trim() }
+          : {}),
       },
     });
 

@@ -68,6 +68,9 @@ export const DeploymentsTab: FC<DeploymentsTabProps> = ({
   <Stack gap="5" className="w-full">
     {agentName ? (
       <PackageAgentPanel
+        // The route is reused across agents; without this the panel would show
+        // the previous agent's job and logs.
+        key={agentName}
         workspace={workspace}
         agentName={agentName}
         canPackage={canPackage}
