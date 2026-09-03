@@ -50,9 +50,9 @@ def test_sdk_run_uses_run_job_collection_path() -> None:
         default_headers={},
         _client=Client(),
     )
-    resource = AnonymizerResource(platform)  # type: ignore[arg-type]
+    resource = AnonymizerResource(platform)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
     request = AnonymizerRequest(
-        config=AnonymizerConfig(replace=Redact()),
+        config=AnonymizerConfig(replace=Redact()),  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         data=AnonymizerInputSpec(source="inputs#records.csv"),
     )
 
