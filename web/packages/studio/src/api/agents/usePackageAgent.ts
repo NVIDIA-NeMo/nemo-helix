@@ -7,7 +7,7 @@ import {
   agentsDownloadPackageJobResult,
   agentsGetPackageJobStatus,
   agentsListPackageJobs,
-} from '@nemo/sdk/generated/agents/api';
+} from '@nemo/sdk/generated/agents/agents';
 import type {
   PackageAgentInput,
   PackageAgentJobsSortField,
