@@ -39,6 +39,7 @@ export interface AgentDetailCTAsProps {
   onRunEvaluation: () => void;
   /** Omitted until the tab can render the optimization form; the button stays visible but inert. */
   onOptimize?: () => void;
+  onImportTraces: () => void;
 }
 
 /**
@@ -60,6 +61,7 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
   onDeploy,
   onRunEvaluation,
   onOptimize,
+  onImportTraces,
 }) => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
@@ -103,9 +105,14 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
   return (
     <Flex gap="2" wrap="wrap" justify="end">
       {INTAKE_ENABLED && showSecondaryActions && (
-        <Button kind="secondary" onClick={() => navigate(getIntakeTracesRoute(workspace))}>
-          Open traces
-        </Button>
+        <>
+          <Button kind="secondary" onClick={onImportTraces} disabled={!agentName}>
+            Import traces
+          </Button>
+          <Button kind="secondary" onClick={() => navigate(getIntakeTracesRoute(workspace))}>
+            Open traces
+          </Button>
+        </>
       )}
       {ordered.map((action) => {
         const isPrimary = action.id === primaryId;

@@ -2,14 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
-import { PageHeader, Stack, Tabs } from '@nvidia/foundations-react-core';
+import { Button, PageHeader, Stack, Tabs } from '@nvidia/foundations-react-core';
 import { FeatureFlagBadge } from '@studio/components/FeatureFlagBadge';
+import { ImportTracesModal } from '@studio/components/ImportTracesModal';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getIntakeSpansRoute, getIntakeTracesRoute } from '@studio/routes/utils';
-import { FC, Suspense } from 'react';
+import { Upload } from 'lucide-react';
+import { FC, Suspense, useState } from 'react';
 import { Link, Outlet, matchPath, useLocation } from 'react-router';
 
 export const INTAKE_FILTER_ACTION_TARGET_ID = 'intake-filter-action-target';
@@ -21,6 +23,7 @@ export const INTAKE_FILTER_ACTION_TARGET_ID = 'intake-filter-action-target';
  */
 export const IntakeLayout: FC = () => {
   const workspace = useWorkspaceFromPath();
+  const [importOpen, setImportOpen] = useState(false);
 
   const location = useLocation();
   const match = matchPath(
@@ -53,6 +56,12 @@ export const IntakeLayout: FC = () => {
               <FeatureFlagBadge flag="intakeEnabled" />
             </>
           }
+          slotActions={
+            <Button kind="secondary" onClick={() => setImportOpen(true)}>
+              <Upload />
+              Import traces
+            </Button>
+          }
         />
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-density-lg">
           <Tabs
@@ -74,6 +83,11 @@ export const IntakeLayout: FC = () => {
         <Suspense fallback={<Loading description="Loading..." />}>
           <Outlet />
         </Suspense>
+        <ImportTracesModal
+          open={importOpen}
+          onClose={() => setImportOpen(false)}
+          workspace={workspace}
+        />
       </Stack>
     </AccessibleTitle>
   );
