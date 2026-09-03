@@ -47,6 +47,56 @@ const clickBuild = async () => {
 };
 
 describe('PackageAgentPanel', () => {
+  it('shows the whole build log, not just the first page', async () => {
+    server.use(
+      http.post(jobsUrl, () => HttpResponse.json({ name: 'pkg-1', status: 'created' })),
+      http.get(`${jobUrl}/status`, () => HttpResponse.json({ status: 'completed' })),
+      http.get(`${jobUrl}/results/package_result/download`, () =>
+        HttpResponse.json({ image: 'nemo-agents/default/my-agent:1.0', agent, published: '' })
+      ),
+      http.get(`${jobUrl}/logs`, ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get('page_cursor');
+        return cursor
+          ? HttpResponse.json({ data: [{ message: 'last line' }], total: 2, next_page: null })
+          : HttpResponse.json({
+              data: [{ message: 'first line' }],
+              total: 2,
+              next_page: 'cursor-2',
+            });
+      })
+    );
+    renderPanel();
+
+    await clickBuild();
+
+    await screen.findByText(/first line/);
+    expect(document.body.textContent).toContain('last line');
+  });
+
+  it('recovers the last build for this agent after a reload', async () => {
+    server.use(
+      http.get(jobsUrl, () =>
+        HttpResponse.json({
+          data: [
+            { name: 'someone-elses', spec: { agent: 'other-agent' } },
+            { name: 'pkg-1', spec: { agent } },
+          ],
+          total: 2,
+        })
+      ),
+      http.get(`${jobUrl}/status`, () => HttpResponse.json({ status: 'completed' })),
+      http.get(`${jobUrl}/logs`, () => HttpResponse.json({ data: [], next_page: null })),
+      http.get(`${jobUrl}/results/package_result/download`, () =>
+        HttpResponse.json({ image: 'nemo-agents/default/my-agent:1.0', agent, published: '' })
+      )
+    );
+    renderPanel();
+
+    // No build was started in this session; the tag comes from the earlier job.
+    expect(await screen.findByText('nemo-agents/default/my-agent:1.0')).toBeInTheDocument();
+    expect(screen.getByText('Image ready')).toBeInTheDocument();
+  });
+
   it('surfaces the built tag once the job completes', async () => {
     mockJob('completed');
     renderPanel();

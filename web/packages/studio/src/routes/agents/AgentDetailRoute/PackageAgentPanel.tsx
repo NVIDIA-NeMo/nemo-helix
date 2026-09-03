@@ -45,6 +45,7 @@ export const PackageAgentPanel: FC<PackageAgentPanelProps> = ({
     isStalled,
     isComplete,
     isFailed,
+    isRestored,
     logs,
     isLogsLoading,
     image,
@@ -93,6 +94,9 @@ export const PackageAgentPanel: FC<PackageAgentPanelProps> = ({
 
         {isComplete && image ? (
           <Stack gap="1">
+            <Text kind="body/bold/sm" className="text-success">
+              {isRestored ? 'Image ready' : 'Build finished — image ready'}
+            </Text>
             <Text kind="body/bold/sm">{image}</Text>
             {published ? (
               <Text kind="body/regular/sm" className="text-secondary">
