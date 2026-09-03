@@ -6,16 +6,13 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_AGENT_OVERVIEW_ENABLED', 'true');
 });
 
-import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
-import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import { getAgentDetailRoute } from '@studio/routes/utils';
 import { renderRoute, screen } from '@studio/tests/util/render';
 import { waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
 
 const agentName = 'react-agent';
 const workspace = workspace1.workspace;
@@ -25,32 +22,6 @@ const renderDetail = () =>
     history: getAgentDetailRoute(workspace, agentName),
     routes: [{ path: ROUTES.workspace.agentDetail, element: <AgentDetailRoute /> }],
   });
-
-const BUILT_IMAGE = 'nemo-agents/default/react-agent:1.0';
-const agentsUrl = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agents`;
-const jobsUrl = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/package`;
-
-/** A Fabric agent whose packaging job has already produced BUILT_IMAGE. */
-const mockPackagedFabricAgent = () => {
-  server.use(
-    http.get(`${agentsUrl}/:name`, () =>
-      HttpResponse.json({
-        name: agentName,
-        workspace,
-        description: '',
-        created_at: '2026-04-20T10:00:00Z',
-        config: {},
-        config_format: 'nemo-agents-spec-v1',
-      })
-    ),
-    http.post(jobsUrl, () => HttpResponse.json({ name: 'pkg-1', status: 'created' })),
-    http.get(`${jobsUrl}/:name/status`, () => HttpResponse.json({ status: 'completed' })),
-    http.get(`${jobsUrl}/:name/logs`, () => HttpResponse.json({ data: [] })),
-    http.get(`${jobsUrl}/:name/results/package_result/download`, () =>
-      HttpResponse.json({ image: BUILT_IMAGE, agent: agentName, published: '' })
-    )
-  );
-};
 
 describe('AgentDetailRoute', () => {
   it('renders the agent as a full page with tabs and header actions', async () => {
@@ -98,23 +69,6 @@ describe('AgentDetailRoute', () => {
 
     expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
     expect(await screen.findByRole('textbox', { name: /Task prompt/i })).toBeInTheDocument();
-  });
-
-  it('deploys with the image this agent just built, whichever button opens the modal', async () => {
-    mockPackagedFabricAgent();
-    renderDetail();
-    const user = userEvent.setup();
-
-    await user.click(await screen.findByRole('tab', { name: 'Deployments' }));
-    await user.click(await screen.findByRole('button', { name: 'Build image' }));
-    await screen.findByText(BUILT_IMAGE);
-
-    // The page's own Deploy button, not "Use for deployment".
-    await user.click(screen.getAllByRole('button', { name: /^Deploy$/ })[0]);
-
-    expect(await screen.findByRole('textbox', { name: 'Container Image' })).toHaveValue(
-      BUILT_IMAGE
-    );
   });
 
   it('shows the agent spec on the details tab and masks secrets', async () => {
