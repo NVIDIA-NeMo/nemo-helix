@@ -2,12 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
-import { Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
+import {
+  Button,
+  Flex,
+  FormField,
+  Spinner,
+  Stack,
+  Text,
+  TextInput,
+} from '@nvidia/foundations-react-core';
 import { usePackageAgent } from '@studio/api/agents/usePackageAgent';
 import { JOBS_ENABLED } from '@studio/constants/environment';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';
-import { useEffect, type FC } from 'react';
+import { useEffect, useState, type FC } from 'react';
 import { useNavigate } from 'react-router';
 
 interface PackageAgentPanelProps {
@@ -39,6 +47,7 @@ export const PackageAgentPanel: FC<PackageAgentPanelProps> = ({
   onImageAvailable,
 }) => {
   const navigate = useNavigate();
+  const [registry, setRegistry] = useState('');
   const {
     packageAgent,
     submitError,
@@ -68,7 +77,7 @@ export const PackageAgentPanel: FC<PackageAgentPanelProps> = ({
           kind="secondary"
           size="small"
           disabled={!canPackage || isSubmitting || isRunning}
-          onClick={() => packageAgent({})}
+          onClick={() => packageAgent(registry.trim() ? { registry: registry.trim() } : {})}
         >
           {isQueued ? 'Queued…' : isRunning ? 'Building…' : 'Build image'}
         </Button>
@@ -92,6 +101,15 @@ export const PackageAgentPanel: FC<PackageAgentPanelProps> = ({
           <Text kind="body/regular/sm" className="text-secondary">
             Build an image for this agent to deploy it with Docker or Kubernetes.
           </Text>
+        ) : null}
+
+        {canPackage && !isQueued && !isRunning ? (
+          <FormField
+            slotLabel="Registry (optional)"
+            slotHelp="Push the built image here so a cluster can pull it. The platform host must already be logged in to it — credentials are never sent through this form."
+          >
+            <TextInput value={registry} placeholder="nvcr.io/my-org" onValueChange={setRegistry} />
+          </FormField>
         ) : null}
 
         {isComplete && image ? (

@@ -5,7 +5,7 @@ import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { PackageAgentPanel } from '@studio/routes/agents/AgentDetailRoute/PackageAgentPanel';
-import { renderRoute, screen } from '@studio/tests/util/render';
+import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -47,6 +47,44 @@ const clickBuild = async () => {
 };
 
 describe('PackageAgentPanel', () => {
+  it('pushes to a registry when one is given', async () => {
+    const submitted: { registry?: string }[] = [];
+    server.use(
+      http.post(jobsUrl, async ({ request }) => {
+        const body = (await request.json()) as { spec?: { registry?: string } };
+        submitted.push({ registry: body.spec?.registry });
+        return HttpResponse.json({ name: 'pkg-1', status: 'created' });
+      }),
+      http.get(`${jobUrl}/status`, () => HttpResponse.json({ status: 'active' }))
+    );
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.type(screen.getByRole('textbox', { name: /Registry/ }), '  nvcr.io/my-org  ');
+    await clickBuild();
+
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0].registry).toBe('nvcr.io/my-org');
+  });
+
+  it('omits the registry when the field is left empty', async () => {
+    const submitted: Record<string, unknown>[] = [];
+    server.use(
+      http.post(jobsUrl, async ({ request }) => {
+        const body = (await request.json()) as { spec?: Record<string, unknown> };
+        submitted.push(body.spec ?? {});
+        return HttpResponse.json({ name: 'pkg-1', status: 'created' });
+      }),
+      http.get(`${jobUrl}/status`, () => HttpResponse.json({ status: 'active' }))
+    );
+    renderPanel();
+
+    await clickBuild();
+
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]).not.toHaveProperty('registry');
+  });
+
   it('offers the job rather than a wall of build output', async () => {
     mockJob('active');
     renderPanel();
