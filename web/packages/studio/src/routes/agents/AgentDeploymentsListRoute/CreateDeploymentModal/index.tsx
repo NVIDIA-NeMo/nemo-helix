@@ -13,10 +13,10 @@ import {
   useAgentsCreateDeployment,
 } from '@nemo/sdk/generated/agents/agent-deployments';
 import { useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
-import { Stack } from '@nvidia/foundations-react-core';
+import { Accordion, Stack } from '@nvidia/foundations-react-core';
 import { AGENT_CONTAINER_DEPLOYMENTS_ENABLED } from '@studio/constants/environment';
 import { useQueryClient } from '@tanstack/react-query';
-import { type FC, useEffect } from 'react';
+import { type FC, useEffect, useState } from 'react';
 import { type SubmitHandler, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
@@ -110,6 +110,16 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
   });
   const deploymentMode = watch('deploymentMode');
 
+  // Opened when a packaged tag arrives, so the prefilled image is not hidden behind
+  // a disclosure the user never opened.
+  const [advancedOpen, setAdvancedOpen] = useState<string | undefined>(
+    initialImage ? 'advanced' : undefined
+  );
+
+  useEffect(() => {
+    if (initialImage) setAdvancedOpen('advanced');
+  }, [initialImage]);
+
   useEffect(() => {
     resetForm(makeDefaultValues(agentProp, initialImage));
   }, [agentProp, initialImage, resetForm]);
@@ -158,36 +168,52 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
             slotInfo: ENTITY_NAME_HELP,
           }}
         />
-        <ControlledSelect
-          useControllerProps={{ control, name: 'deploymentMode' }}
-          items={[
-            { value: 'subprocess', children: 'Subprocess' },
-            // The platform refuses container deployments when this is off, so do not
-            // offer a mode whose request the API will reject.
-            ...(AGENT_CONTAINER_DEPLOYMENTS_ENABLED
-              ? [
-                  { value: 'docker', children: 'Docker' },
-                  { value: 'k8s', children: 'Kubernetes' },
-                ]
-              : []),
-          ]}
-          formFieldProps={{
-            slotLabel: 'Runtime',
-            slotInfo:
-              'Use Docker for a local container image or Kubernetes for a cluster deployment.',
-          }}
-        />
-        {AGENT_CONTAINER_DEPLOYMENTS_ENABLED && deploymentMode !== 'subprocess' && (
-          <ControlledTextInput
-            useControllerProps={{ control, name: 'image' }}
-            name="image"
-            label="Container Image"
-            placeholder="nvcr.io/org/team/agent:tag"
-            formFieldProps={{
-              slotError: errors.image?.message,
-              slotInfo:
-                'The backend pulls this image using its configured registry credentials. Leave empty to use the deployment default, if one is configured.',
-            }}
+        {/* Subprocess covers the common case and needs nothing else. Runtime and image
+            are the container path, so they sit behind a disclosure rather than in front
+            of everyone — and the whole section is absent when the platform refuses
+            container deployments, since there would be nothing advanced to choose. */}
+        {AGENT_CONTAINER_DEPLOYMENTS_ENABLED && (
+          <Accordion
+            className="[&>div]:border-b-0"
+            value={advancedOpen}
+            onValueChange={setAdvancedOpen}
+            items={[
+              {
+                value: 'advanced',
+                chevronPosition: 'start',
+                slotTrigger: `${advancedOpen === 'advanced' ? 'Hide' : 'Show'} Advanced`,
+                slotContent: (
+                  <Stack gap="density-lg" className="pt-density-md">
+                    <ControlledSelect
+                      useControllerProps={{ control, name: 'deploymentMode' }}
+                      items={[
+                        { value: 'subprocess', children: 'Subprocess' },
+                        { value: 'docker', children: 'Docker' },
+                        { value: 'k8s', children: 'Kubernetes' },
+                      ]}
+                      formFieldProps={{
+                        slotLabel: 'Runtime',
+                        slotInfo:
+                          'Use Docker for a local container image or Kubernetes for a cluster deployment.',
+                      }}
+                    />
+                    {deploymentMode !== 'subprocess' && (
+                      <ControlledTextInput
+                        useControllerProps={{ control, name: 'image' }}
+                        name="image"
+                        label="Container Image"
+                        placeholder="nvcr.io/org/team/agent:tag"
+                        formFieldProps={{
+                          slotError: errors.image?.message,
+                          slotInfo:
+                            'The backend pulls this image using its configured registry credentials. Leave empty to use the deployment default, if one is configured.',
+                        }}
+                      />
+                    )}
+                  </Stack>
+                ),
+              },
+            ]}
           />
         )}
         {!agentProp && (

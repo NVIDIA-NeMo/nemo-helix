@@ -137,6 +137,31 @@ describe('CreateDeploymentModal', () => {
     );
   });
 
+  it('keeps container options out of the way until asked for', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    const dialog = await getDeploymentDialog();
+
+    // The accordion hides its content rather than unmounting it, so this is about
+    // what the user can see, not what React rendered.
+    expect(within(dialog).getByRole('combobox', { name: 'Runtime' })).not.toBeVisible();
+
+    await user.click(within(dialog).getByText(/Show Advanced/));
+
+    expect(within(dialog).getByRole('combobox', { name: 'Runtime' })).toBeVisible();
+  });
+
+  it('opens the disclosure when a packaged image arrives, so the tag is visible', async () => {
+    renderModal('nemo-agents/default/my-agent:1.0');
+
+    const dialog = await getDeploymentDialog();
+
+    expect(await within(dialog).findByRole('textbox', { name: 'Container Image' })).toHaveValue(
+      'nemo-agents/default/my-agent:1.0'
+    );
+  });
+
   it("surfaces the server's refusal when no image resolves", async () => {
     server.use(
       http.post(deploymentsUrl, () =>
