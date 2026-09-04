@@ -54,6 +54,16 @@ class ControllerConfig(BaseModel):
 class DeploymentsRunnerConfig(BaseModel):
     """Settings for container-mode agent deployments via the nemo-deployments plugin."""
 
+    container_deployments_enabled: bool = Field(
+        default=False,
+        description=(
+            "Allow docker/k8s agent deployments and platform-side image packaging. Off by "
+            "default: both need a build host and a registry the cluster can pull from, so a "
+            "platform without them should refuse at submit time rather than fail later. "
+            "Packaging is gated with deployments because an image nothing can deploy is "
+            "not worth building."
+        ),
+    )
     default_executor: str | None = Field(
         default=None,
         description="Named deployments-plugin executor used when mode-specific executors are unset.",

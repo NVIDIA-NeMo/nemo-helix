@@ -110,6 +110,19 @@ async def create_deployment(
             detail="use_image_entrypoint requires deployment_mode 'docker' or 'k8s'.",
         )
 
+    if (
+        is_container_deployment_mode(body.deployment_mode)
+        and not AgentsConfig.get().deployments.container_deployments_enabled
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"deployment_mode '{body.deployment_mode}' is not enabled on this platform. "
+                "Set 'agents.deployments.container_deployments_enabled' to allow container "
+                "deployments, or deploy with deployment_mode 'subprocess'."
+            ),
+        )
+
     # The controller refuses this too, but only on its next reconcile — by which
     # point a pending deployment exists and the caller has had its 201.
     if is_container_deployment_mode(body.deployment_mode):

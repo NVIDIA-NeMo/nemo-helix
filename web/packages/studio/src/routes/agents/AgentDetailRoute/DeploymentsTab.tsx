@@ -6,6 +6,7 @@ import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Button, Flex, Stack, StatusIndicator, Text } from '@nvidia/foundations-react-core';
 import { type AgentSpecSource, githubCommitUrl } from '@studio/api/agents/useAgentSpecFileset';
+import { AGENT_CONTAINER_DEPLOYMENTS_ENABLED } from '@studio/constants/environment';
 import {
   deploymentStatusColor,
   shortRevision,
@@ -66,7 +67,7 @@ export const DeploymentsTab: FC<DeploymentsTabProps> = ({
   onImageAvailable,
 }) => (
   <Stack gap="5" className="w-full">
-    {agentName ? (
+    {agentName && AGENT_CONTAINER_DEPLOYMENTS_ENABLED ? (
       <PackageAgentPanel
         // The route is reused across agents; without this the panel would show
         // the previous agent's job and logs.

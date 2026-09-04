@@ -14,6 +14,7 @@ import {
 } from '@nemo/sdk/generated/agents/agent-deployments';
 import { useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
 import { Stack } from '@nvidia/foundations-react-core';
+import { AGENT_CONTAINER_DEPLOYMENTS_ENABLED } from '@studio/constants/environment';
 import { useQueryClient } from '@tanstack/react-query';
 import { type FC, useEffect } from 'react';
 import { type SubmitHandler, useForm } from 'react-hook-form';
@@ -33,7 +34,7 @@ type DeploymentFormData = z.infer<typeof deploymentFormSchema>;
 const makeDefaultValues = (agent?: string, image?: string): DeploymentFormData => ({
   name: '',
   agent: agent ?? '',
-  deploymentMode: image ? 'docker' : 'subprocess',
+  deploymentMode: image && AGENT_CONTAINER_DEPLOYMENTS_ENABLED ? 'docker' : 'subprocess',
   image: image ?? '',
 });
 
@@ -161,8 +162,14 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
           useControllerProps={{ control, name: 'deploymentMode' }}
           items={[
             { value: 'subprocess', children: 'Subprocess' },
-            { value: 'docker', children: 'Docker' },
-            { value: 'k8s', children: 'Kubernetes' },
+            // The platform refuses container deployments when this is off, so do not
+            // offer a mode whose request the API will reject.
+            ...(AGENT_CONTAINER_DEPLOYMENTS_ENABLED
+              ? [
+                  { value: 'docker', children: 'Docker' },
+                  { value: 'k8s', children: 'Kubernetes' },
+                ]
+              : []),
           ]}
           formFieldProps={{
             slotLabel: 'Runtime',
@@ -170,7 +177,7 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
               'Use Docker for a local container image or Kubernetes for a cluster deployment.',
           }}
         />
-        {deploymentMode !== 'subprocess' && (
+        {AGENT_CONTAINER_DEPLOYMENTS_ENABLED && deploymentMode !== 'subprocess' && (
           <ControlledTextInput
             useControllerProps={{ control, name: 'image' }}
             name="image"

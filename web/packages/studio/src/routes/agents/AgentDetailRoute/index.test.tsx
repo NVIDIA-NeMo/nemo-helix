@@ -4,6 +4,7 @@
 vi.hoisted(() => {
   vi.stubEnv('VITE_FF_INTAKE_ENABLED', 'true');
   vi.stubEnv('VITE_FF_AGENT_OVERVIEW_ENABLED', 'true');
+  vi.stubEnv('VITE_FF_AGENT_CONTAINER_DEPLOYMENTS_ENABLED', 'true');
 });
 
 import { ROUTES } from '@studio/constants/routes';

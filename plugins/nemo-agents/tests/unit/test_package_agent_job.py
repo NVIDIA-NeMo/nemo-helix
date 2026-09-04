@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
@@ -78,7 +78,18 @@ def _patch_profiles(profiles: list[Any] | Exception):
 
 
 class TestToSpec:
-    async def test_resolves_agent_config_inline(self) -> None:
+    async def test_packaging_is_refused_when_the_platform_disables_containers(self) -> None:
+        # No container_deployments_enabled fixture: this is the default.
+        with pytest.raises(PlatformJobCompilationError, match="container_deployments_enabled"):
+            await PackageAgentJob.to_spec(
+                PackageAgentInput(agent="any-agent"),
+                workspace="default",
+                entity_client=AsyncMock(),
+                async_sdk=None,
+                is_local=False,
+            )
+
+    async def test_resolves_agent_config_inline(self, container_deployments_enabled: None) -> None:
         spec = await PackageAgentJob.to_spec(
             PackageAgentInput(agent="my-agent"),
             workspace="default",
@@ -91,7 +102,7 @@ class TestToSpec:
         assert spec.workspace == "default"
         assert spec.agent_config == FABRIC_CONFIG
 
-    async def test_missing_agent_fails_at_submit(self) -> None:
+    async def test_missing_agent_fails_at_submit(self, container_deployments_enabled: None) -> None:
         with pytest.raises(PlatformJobCompilationError, match="not found in workspace"):
             await PackageAgentJob.to_spec(
                 PackageAgentInput(agent="ghost"),
@@ -101,7 +112,7 @@ class TestToSpec:
                 is_local=False,
             )
 
-    async def test_nat_workflow_agent_is_rejected(self) -> None:
+    async def test_nat_workflow_agent_is_rejected(self, container_deployments_enabled: None) -> None:
         with pytest.raises(PlatformJobCompilationError, match="packaging supports"):
             await PackageAgentJob.to_spec(
                 PackageAgentInput(agent="my-agent"),
@@ -111,7 +122,7 @@ class TestToSpec:
                 is_local=False,
             )
 
-    async def test_knobs_survive_resolution(self) -> None:
+    async def test_knobs_survive_resolution(self, container_deployments_enabled: None) -> None:
         spec = await PackageAgentJob.to_spec(
             PackageAgentInput(agent="my-agent", tag="custom:1.0", allow_root=True, python_version="3.12"),
             workspace="default",
