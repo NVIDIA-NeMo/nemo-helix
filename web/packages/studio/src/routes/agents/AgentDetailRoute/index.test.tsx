@@ -108,7 +108,8 @@ describe('AgentDetailRoute', () => {
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('tab', { name: 'Deployments' }));
-    await screen.findByText(BUILT_IMAGE);
+    // The tag lives in the packaging modal now; the trigger is what reports it is ready.
+    await screen.findByText('Image ready');
 
     await user.click(screen.getAllByRole('button', { name: /^Deploy$/ })[0]);
 
