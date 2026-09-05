@@ -28,7 +28,6 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
 
 import yaml
-from nemo_agents_plugin.config import AgentsConfig
 from nemo_agents_plugin.entities import (
     AGENT_CONFIG_FILENAME,
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
@@ -222,13 +221,6 @@ class PackageAgentJob(NemoJob):
         the POST rather than the build.
         """
         del is_local
-        if not AgentsConfig.get().deployments.container_deployments_enabled:
-            raise PlatformJobCompilationError(
-                "Image packaging is not enabled on this platform. Set "
-                "'agents.deployments.container_deployments_enabled' to allow it. Packaging is "
-                "gated with container deployments because an image nothing can deploy is not "
-                "worth building."
-            )
         assert isinstance(input_spec, PackageAgentInput), (
             f"PackageAgentJob.to_spec received unexpected input type: {type(input_spec).__name__}"
         )

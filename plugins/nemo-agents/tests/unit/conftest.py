@@ -61,18 +61,3 @@ def _released_contract_version(monkeypatch: pytest.MonkeyPatch) -> None:
     import nemo_agents_plugin.container.template as template
 
     monkeypatch.setattr(template, "get_contract_version", lambda: "1.0.0")
-
-
-@pytest.fixture
-def container_deployments_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Turn on container deployments and packaging.
-
-    Both are off by default, so anything exercising docker/k8s or image builds
-    has to ask for them — which keeps the default-off path honest rather than
-    quietly enabling it for the whole suite.
-    """
-    from nemo_agents_plugin.config import AgentsConfig
-
-    config = AgentsConfig.get()
-    monkeypatch.setattr(config.deployments, "container_deployments_enabled", True)
-    monkeypatch.setattr(AgentsConfig, "get", classmethod(lambda cls: config))
