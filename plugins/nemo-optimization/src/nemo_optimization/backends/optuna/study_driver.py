@@ -13,7 +13,7 @@ import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 import optuna
 import yaml
@@ -21,10 +21,6 @@ from optuna.samplers import GridSampler
 from optuna.study import StudyDirection
 
 from nemo_optimization.backends.optuna.artifacts import maybe_write_pareto_plots, write_trials_dataframe
-from nemo_optimization.backends.optuna.config_overlay import (
-    apply_suggestions,
-    suggestions_to_profile_overlay,
-)
 from nemo_optimization.backends.optuna.early_stop import maybe_stop_if_target_met
 from nemo_optimization.backends.optuna.search_space import (
     SearchSpaceError,
@@ -34,6 +30,17 @@ from nemo_optimization.backends.optuna.search_space import (
     suggestions_by_path,
 )
 from nemo_optimization.backends.optuna.selection import pick_trial
+from nemo_optimization.candidate import CandidateEvaluationError, CandidateEvaluationResult, CandidateEvaluator
+from nemo_optimization.config_overlay import (
+    apply_suggestions,
+    suggestions_to_profile_overlay,
+)
+from nemo_optimization.optimizer_config import (
+    MetricDirection,
+    MetricSpec,
+    OptimizerConfigError,
+    parse_optimizer_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,30 +48,9 @@ logger = logging.getLogger(__name__)
 class StudyDriverError(RuntimeError):
     """Raised when study configuration or execution fails."""
 
-
-class TrialEvaluator(Protocol):
-    """Evaluate one repetition of a trial (wired to AgentEvaluator in Phase B2)."""
-
-    def evaluate(
-        self,
-        *,
-        trial_number: int,
-        suggestions: dict[str, Any],
-        trial_overlay: dict[str, Any],
-        rep: int,
-    ) -> dict[str, float]:
-        """Return metric name to score for one repetition.
-
-        ``suggestions`` must be keyed by Fabric dotted paths (the output of
-        ``suggestions_by_path``), matching ``apply_suggestions`` / trial YAML.
-        """
-
-
-@dataclass(frozen=True)
-class MetricSpec:
-    name: str
-    direction: StudyDirection
-    weight: float
+    def __init__(self, message: str, *, trial_count: int = 0) -> None:
+        super().__init__(message)
+        self.trial_count = trial_count
 
 
 @dataclass(frozen=True)
@@ -82,61 +68,39 @@ class NumericStudyConfig:
 class NumericStudyResult:
     study: optuna.Study
     best_trial: optuna.trial.FrozenTrial
+    optimized_payload: dict[str, Any]
     metric_names: tuple[str, ...]
-    n_trials: int
+    planned_trials: int
+    executed_trials: int
     output_dir: Path
+
+    @property
+    def n_trials(self) -> int:
+        """Configured/resolved planned trial count, retained for compatibility."""
+
+        return self.planned_trials
 
 
 def parse_numeric_study_config(optimizer: Mapping[str, Any]) -> NumericStudyConfig:
-    numeric = optimizer.get("numeric")
-    if not isinstance(numeric, Mapping):
-        raise StudyDriverError("optimizer.numeric must be a mapping.")
-    if not numeric.get("enabled"):
+    numeric_only = dict(optimizer)
+    numeric_only.pop("prompt", None)
+    try:
+        shared = parse_optimizer_config({"optimizer": numeric_only})
+        search_space = parse_search_space(optimizer)
+    except (OptimizerConfigError, SearchSpaceError) as exc:
+        raise StudyDriverError(str(exc)) from exc
+    numeric = shared.numeric
+    if numeric is None or not numeric.enabled:
         raise StudyDriverError("optimizer.numeric.enabled must be true.")
 
-    eval_metrics = optimizer.get("eval_metrics")
-    if not isinstance(eval_metrics, Mapping) or not eval_metrics:
-        raise StudyDriverError("optimizer.eval_metrics must declare at least one metric.")
-
-    metrics: list[MetricSpec] = []
-    for name, raw in eval_metrics.items():
-        if not isinstance(raw, Mapping):
-            raise StudyDriverError(f"optimizer.eval_metrics[{name!r}] must be a mapping.")
-        direction_raw = str(raw.get("direction", "maximize")).lower()
-        if direction_raw not in {"maximize", "minimize"}:
-            raise StudyDriverError(f"Metric {name!r} direction must be 'maximize' or 'minimize'.")
-        metric_name = str(raw.get("evaluator_name") or name)
-        metrics.append(
-            MetricSpec(
-                name=metric_name,
-                direction=StudyDirection.MAXIMIZE if direction_raw == "maximize" else StudyDirection.MINIMIZE,
-                weight=float(raw.get("weight", 1.0)),
-            )
-        )
-
-    sampler = numeric.get("sampler")
-    # "bayesian" / "tpe" / omitted → Optuna TPE (Bayesian optimization). Keep the
-    # canonical name so configs and study metadata are not silently rewritten to None.
-    if sampler is None:
-        sampler_name = "bayesian"
-    else:
-        sampler_name = str(sampler).lower()
-        if sampler_name in {"bayesian", "tpe"}:
-            sampler_name = "bayesian"
-        elif sampler_name != "grid":
-            raise StudyDriverError(
-                f"Unsupported optimizer.numeric.sampler: {sampler!r}. "
-                "Supported values: 'bayesian' (TPE), 'tpe', 'grid'."
-            )
-
     return NumericStudyConfig(
-        n_trials=int(numeric.get("n_trials", 20)),
-        sampler=sampler_name,
-        reps_per_param_set=max(1, int(optimizer.get("reps_per_param_set", 1))),
-        target=float(optimizer["target"]) if optimizer.get("target") is not None else None,
-        multi_objective_mode=str(optimizer.get("multi_objective_combination_mode", "harmonic")),
-        metrics=tuple(metrics),
-        search_space=parse_search_space(optimizer),
+        n_trials=numeric.n_trials,
+        sampler="bayesian" if numeric.sampler in {None, "bayesian", "tpe"} else "grid",
+        reps_per_param_set=shared.reps_per_param_set,
+        target=shared.target,
+        multi_objective_mode=shared.multi_objective_mode,
+        metrics=shared.metrics,
+        search_space=search_space,
     )
 
 
@@ -169,7 +133,7 @@ def scores_to_objective_values(scores: Mapping[str, float], metric_names: Sequen
 def run_numeric_study(
     payload: Mapping[str, Any],
     output_dir: Path,
-    evaluator: TrialEvaluator,
+    evaluator: CandidateEvaluator,
     *,
     seed: int | None = None,
 ) -> NumericStudyResult:
@@ -180,7 +144,10 @@ def run_numeric_study(
 
     config = parse_numeric_study_config(optimizer)
     metric_names = tuple(metric.name for metric in config.metrics)
-    directions = [metric.direction for metric in config.metrics]
+    directions = [
+        StudyDirection.MAXIMIZE if metric.direction is MetricDirection.MAXIMIZE else StudyDirection.MINIMIZE
+        for metric in config.metrics
+    ]
     weights = [metric.weight for metric in config.metrics]
 
     sampler = create_sampler(config, seed=seed)
@@ -206,7 +173,7 @@ def run_numeric_study(
             width=trial_id_width,
         )
 
-        rep_scores = [
+        rep_evaluations = [
             evaluator.evaluate(
                 trial_number=trial.number,
                 suggestions=dict(path_suggestions),
@@ -215,6 +182,7 @@ def run_numeric_study(
             )
             for rep in range(config.reps_per_param_set)
         ]
+        rep_scores = [evaluation.aggregate_metrics for evaluation in rep_evaluations]
         for rep_index, rep_score in enumerate(rep_scores):
             missing = [name for name in metric_names if name not in rep_score]
             if missing:
@@ -235,9 +203,9 @@ def run_numeric_study(
         return objective_values[0] if len(objective_values) == 1 else objective_values
 
     logger.info("Starting numeric Optuna study (%d trials, %d metrics)", n_trials, len(metric_names))
-    # Agent-eval / audit failures raise StudyDriverError; fail that Optuna trial and continue.
-    # Do not catch broader Exception — programming errors should still abort the study.
-    study.optimize(objective, n_trials=n_trials, catch=(StudyDriverError,))
+    # Candidate/eval failures fail the Optuna trial and continue. Do not catch
+    # broader Exception: programming errors should still abort the study.
+    study.optimize(objective, n_trials=n_trials, catch=(StudyDriverError, CandidateEvaluationError))
     logger.info("Numeric Optuna study finished")
 
     completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
@@ -246,7 +214,8 @@ def run_numeric_study(
         n_pruned = sum(1 for t in study.trials if t.state == optuna.trial.TrialState.PRUNED)
         raise StudyDriverError(
             f"Numeric study finished with no completed trials "
-            f"({n_failed} failed, {n_pruned} pruned, {len(study.trials)} total)."
+            f"({n_failed} failed, {n_pruned} pruned, {len(study.trials)} total).",
+            trial_count=len(study.trials),
         )
 
     if len(metric_names) == 1:
@@ -260,9 +229,15 @@ def run_numeric_study(
 
     # best_trial.params is keyed by logical search-space names; map to Fabric paths
     # the same way trial configs do before writing optimized_config.yml.
+    best_path_suggestions = suggestions_by_path(config.search_space, best_trial.params)
+    optimized_payload = apply_suggestions(
+        base_config,
+        best_path_suggestions,
+        strip_optimizer=False,
+    )
     optimized_config = apply_suggestions(
         base_config,
-        suggestions_by_path(config.search_space, best_trial.params),
+        best_path_suggestions,
     )
     write_optimized_config(output_dir, optimized_config)
     write_trials_dataframe(study=study, metric_names=metric_names, output_dir=output_dir)
@@ -271,8 +246,10 @@ def run_numeric_study(
     return NumericStudyResult(
         study=study,
         best_trial=best_trial,
+        optimized_payload=optimized_payload,
         metric_names=metric_names,
-        n_trials=n_trials,
+        planned_trials=n_trials,
+        executed_trials=len(study.trials),
         output_dir=output_dir,
     )
 
@@ -357,10 +334,10 @@ class SyntheticTrialEvaluator:
         suggestions: dict[str, Any],
         trial_overlay: dict[str, Any],
         rep: int,
-    ) -> dict[str, float]:
+    ) -> CandidateEvaluationResult:
         del trial_number, trial_overlay, rep
         score = _numeric_suggestion_score(suggestions)
-        return {name: score for name in self._metric_names}
+        return CandidateEvaluationResult(aggregate_metrics={name: score for name in self._metric_names})
 
 
 def _numeric_suggestion_score(suggestions: Mapping[str, Any]) -> float:
@@ -380,7 +357,6 @@ __all__ = [
     "SearchSpaceError",
     "StudyDriverError",
     "SyntheticTrialEvaluator",
-    "TrialEvaluator",
     "average_metric_vectors",
     "create_sampler",
     "parse_numeric_study_config",

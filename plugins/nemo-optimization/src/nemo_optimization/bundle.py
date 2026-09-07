@@ -27,6 +27,7 @@ from nemo_platform_plugin.refs import FILESET_REF_PATTERN
 
 from nemo_optimization.fabric import FABRIC_AGENT_SCHEMA_VERSION, is_fabric_agent_config, looks_like_nat_config
 from nemo_optimization.schemas.optimize import is_fileset_relative
+from nemo_optimization.search_space import SearchSpaceError, parse_numeric_search_space, parse_prompt_search_space
 
 
 class BundlePreflightError(ValueError):
@@ -70,7 +71,7 @@ def preflight_bundle(
     config = _load_config(source, optimize_config)
     problems = [
         *_agent_problems(config, agent=agent),
-        *_optimizer_problems(config),
+        *_optimizer_problems(config, agent=agent),
         *_path_problems(source, config),
         *_symlink_problems(source),
     ]
@@ -118,7 +119,7 @@ def _agent_problems(config: Mapping[str, Any], *, agent: str | None) -> Iterator
     )
 
 
-def _optimizer_problems(config: Mapping[str, Any]) -> Iterator[str]:
+def _optimizer_problems(config: Mapping[str, Any], *, agent: str | None) -> Iterator[str]:
     """``OptimizeRouter`` picks its backend off these flags; an unset optimizer has nothing to run."""
     optimizer = config.get("optimizer")
     if not isinstance(optimizer, Mapping):
@@ -133,6 +134,30 @@ def _optimizer_problems(config: Mapping[str, Any]) -> Iterator[str]:
         yield "no optimizer is enabled; set optimizer.numeric.enabled or optimizer.prompt.enabled"
     if "numeric" in enabled and not optimizer.get("search_space"):
         yield "optimizer.numeric is enabled but optimizer.search_space is empty"
+    elif "numeric" in enabled:
+        try:
+            parse_numeric_search_space(optimizer)
+        except SearchSpaceError as exc:
+            yield str(exc)
+    if "prompt" in enabled:
+        if not optimizer.get("search_space"):
+            yield "optimizer.prompt is enabled but optimizer.search_space is empty"
+            return
+        prompt = optimizer.get("prompt")
+        model = prompt.get("model") if isinstance(prompt, Mapping) else None
+        if not isinstance(model, str) or not model.strip():
+            yield "optimizer.prompt.model must explicitly reference a model declared under models.*"
+        elif is_fabric_agent_config(config):
+            models = config.get("models")
+            if not isinstance(models, Mapping) or not isinstance(models.get(model.strip()), Mapping):
+                yield f"optimizer.prompt.model references unknown model {model.strip()!r}"
+        try:
+            parse_prompt_search_space(
+                optimizer,
+                payload=config if is_fabric_agent_config(config) and agent is None else None,
+            )
+        except SearchSpaceError as exc:
+            yield str(exc)
 
 
 def _path_problems(source: Path, config: Mapping[str, Any]) -> Iterator[str]:

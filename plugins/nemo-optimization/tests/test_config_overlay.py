@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import pytest
-from nemo_optimization.backends.optuna.config_overlay import (
+from nemo_optimization.config_overlay import (
     apply_suggestions,
     nest_dotted_paths,
     suggestions_to_profile_overlay,

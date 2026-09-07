@@ -138,6 +138,47 @@ def test_rejects_numeric_optimization_with_an_empty_search_space(tmp_path: Path)
         preflight_bundle(tmp_path, "optimize.yml")
 
 
+def test_rejects_prompt_optimization_without_model_reference(tmp_path: Path) -> None:
+    config = full_config()
+    config["instructions"] = {"system": {"content": "Base prompt."}}
+    config["optimizer"] = {
+        "prompt": {"enabled": True},
+        "search_space": {
+            "system_prompt": {
+                "type": "fabric",
+                "path": "instructions.system.content",
+                "is_prompt": True,
+                "purpose": "Answer accurately.",
+            }
+        },
+    }
+    make_bundle(tmp_path, config, files={"dataset.json": DATASET})
+
+    with pytest.raises(BundlePreflightError, match="optimizer.prompt.model"):
+        preflight_bundle(tmp_path, "optimize.yml")
+
+
+def test_rejects_prompt_optimization_when_inline_prompt_path_is_not_string(tmp_path: Path) -> None:
+    config = full_config()
+    config["models"]["prompt_optimizer"] = {"provider": "openai", "model": "gpt-5-mini"}
+    config["instructions"] = {"system": {"content": {"text": "Base prompt."}}}
+    config["optimizer"] = {
+        "prompt": {"enabled": True, "model": "prompt_optimizer"},
+        "search_space": {
+            "system_prompt": {
+                "type": "fabric",
+                "path": "instructions.system.content",
+                "is_prompt": True,
+                "purpose": "Answer accurately.",
+            }
+        },
+    }
+    make_bundle(tmp_path, config, files={"dataset.json": DATASET})
+
+    with pytest.raises(BundlePreflightError, match="must resolve to a string"):
+        preflight_bundle(tmp_path, "optimize.yml")
+
+
 def test_checks_stdio_mcp_server_scripts_ship_in_the_bundle(tmp_path: Path) -> None:
     config = full_config()
     config["mcp"] = {
