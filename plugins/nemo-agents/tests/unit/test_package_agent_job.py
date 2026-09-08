@@ -452,6 +452,23 @@ class TestPublishedPackagingContract:
         extras = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["optional-dependencies"]
         assert any(spec.startswith(dependency) for spec in extras["nemo-agents-plugin"])
 
+    def test_default_fabric_install_includes_adapters_without_harnesses(self) -> None:
+        import tomllib
+
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+        declared = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["dependencies"]
+        fabric = {spec.split("==", 1)[0] for spec in declared if spec.startswith("nemo-fabric")}
+        assert fabric == {
+            "nemo-fabric[relay]",
+            "nemo-fabric-adapters-claude",
+            "nemo-fabric-adapters-codex",
+            "nemo-fabric-adapters-deepagents",
+            "nemo-fabric-adapters-hermes",
+        }
+        assert not any(
+            spec.startswith(("claude-agent-sdk", "deepagents", "hermes-agent", "openai-codex")) for spec in declared
+        )
+
 
 class TestTagNamespace:
     """Docker tags are daemon-global; the auth boundary is the workspace."""
