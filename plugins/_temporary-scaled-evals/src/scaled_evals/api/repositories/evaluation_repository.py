@@ -812,6 +812,24 @@ class EvaluationRepository:
             )
             return cur.fetchone()
 
+    def list_cancelled_platform_jobs(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """List cancelled evaluations whose outer Platform Job may still run."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, current_execution, dispatch_job_name, backend_handle
+                FROM evaluations
+                WHERE deleted_at IS NULL
+                  AND status = 'cancelled'
+                  AND dispatch_job_name LIKE 'scaled-evals-evaluation-%%'
+                  AND cancel_teardown_status = 'pending'
+                ORDER BY cancel_teardown_updated_at, id
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            return list(cur.fetchall())
+
     def load_archive_row(self, evaluation_id: str) -> dict | None:
         with self.conn.cursor() as cur:
             cur.execute(

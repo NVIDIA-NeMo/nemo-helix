@@ -46,7 +46,7 @@ x-scaled-evals-env: &scaled-evals-env
   S3_BUCKET: ${S3_BUCKET:-scaled-evals}
 
   BUILDKIT_ADDR: unix:///run/buildkit/buildkitd.sock
-  BUILD_WORKER_REQUIRED: "true"
+  BUILD_WORKER_REQUIRED: "false"
 
   IMAGE_REGISTRY: ${IMAGE_REGISTRY:-registry:5000}
   REGISTRY_INSECURE: ${REGISTRY_INSECURE:-true}
@@ -58,6 +58,10 @@ x-scaled-evals-env: &scaled-evals-env
   # for cluster parity, which on an arm64 laptop makes every sample build go
   # through QEMU. Set it explicitly when the image must run on amd64 nodes.
   IMAGE_BUILD_PLATFORM: ${IMAGE_BUILD_PLATFORM-}
+  SCALED_EVALS_PLATFORM_BUILD_JOBS_ENABLED: "true"
+  SCALED_EVALS_PLATFORM_EVALUATION_JOBS_ENABLED: "true"
+  SCALED_EVALS_PLATFORM_JOBS_PROVIDER: subprocess
+  SCALED_EVALS_PLATFORM_JOBS_WORKSPACE: default
 
 x-app-build: &app-build
   context: ../../../..
@@ -184,12 +188,20 @@ services:
       - services
       - run
       - --services
-      - scaled-evals
+      - scaled-evals,jobs,entities,auth,secrets,files
+      - --controllers
+      - jobs,scaled-evals-jobs
       - --host
       - 0.0.0.0
       - --port
       - "8080"
-    environment: *scaled-evals-env
+    environment:
+      <<: *scaled-evals-env
+      # Subprocess Jobs deliberately inherit only PATH and VIRTUAL_ENV. Supply
+      # scaled-evals runtime configuration through the local execution profile
+      # so it is not persisted in each Platform Job spec.
+      NMP_JOBS_EXECUTORS: >-
+        [{"provider":"subprocess","profile":"default","backend":"subprocess","config":{"working_directory":"/tmp/nmp-subprocess-jobs","cleanup_completed_jobs_immediately":false,"env":{"SCALED_EVALS_DATABASE_URL":"postgresql://${POSTGRES_USER:-scaled_evals}:${POSTGRES_PASSWORD:-scaled_evals}@postgres:5432/${POSTGRES_DB:-scaled_evals}","DATABASE_SSL_MODE":"${DATABASE_SSL_MODE:-disable}","CREDENTIALS_ENCRYPTION_KEY":"${CREDENTIALS_ENCRYPTION_KEY:?generate a Fernet key and set it in .env}","S3_ENDPOINT":"http://rustfs:9000","S3_PUBLIC_ENDPOINT":"${S3_PUBLIC_ENDPOINT:-http://localhost:9000}","S3_ACCESS_KEY":"${S3_ACCESS_KEY:-scaledevals}","S3_SECRET_KEY":"${S3_SECRET_KEY:-scaledevals-dev-secret}","S3_BUCKET":"${S3_BUCKET:-scaled-evals}","BUILDKIT_ADDR":"unix:///run/buildkit/buildkitd.sock","IMAGE_REGISTRY":"${IMAGE_REGISTRY:-registry:5000}","REGISTRY_INSECURE":"${REGISTRY_INSECURE:-true}","TASK_IMAGE_VALIDATION_MODE":"${TASK_IMAGE_VALIDATION_MODE:-resolve}","TASK_IMAGE_ALLOWED_REGISTRIES":"${TASK_IMAGE_ALLOWED_REGISTRIES:-registry:5000}","TASK_IMAGE_REGISTRY_INSECURE":"${TASK_IMAGE_REGISTRY_INSECURE:-true}","HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES":"${HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES:-docker.io,ghcr.io}","IMAGE_BUILD_PLATFORM":"${IMAGE_BUILD_PLATFORM-}"}}}]
     ports:
       - "${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8080}:8080"
     depends_on:
@@ -214,23 +226,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
-
-  build-worker:
-    image: ${APP_IMAGE:-nemo-scaled-evals:dev}
-    build: *app-build
-    command: ["scaled-evals-build-worker"]
-    environment: *scaled-evals-env
-    depends_on:
-      # Not postgres-healthy but api-healthy: the API owns schema creation, and
-      # a worker that starts first would query tables that do not exist yet.
-      api:
-        condition: service_healthy
-      buildkit:
-        condition: service_healthy
-      registry:
-        condition: service_started
-    volumes:
-      - buildkit-socket:/run/buildkit
 
   dispatch-worker:
     image: ${APP_IMAGE:-nemo-scaled-evals:dev}

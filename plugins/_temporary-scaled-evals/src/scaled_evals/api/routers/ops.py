@@ -116,6 +116,14 @@ def _build_worker_probe() -> None:
             raise RuntimeError("no fresh build worker heartbeat")
 
 
+def _platform_jobs_controller_probe() -> None:
+    with pooled_connection(timeout=3) as conn:
+        if not OperationsRepository(conn).has_fresh_service_heartbeat(
+            "platform_jobs_controller", stale_seconds=settings.build_worker_stale_seconds
+        ):
+            raise RuntimeError("no fresh Platform Jobs controller heartbeat")
+
+
 def _dispatch_worker_probe() -> None:
     response = httpx.get(settings.dispatch_worker_health_url, timeout=3)
     response.raise_for_status()
@@ -377,6 +385,12 @@ def _run_dependency_checks() -> tuple[dict[str, str], bool]:
         bool(settings.dispatch_worker_health_url),
         _dispatch_worker_probe,
     )
+    required_ok &= _enabled_required_check(
+        checks,
+        "platform_jobs_controller",
+        settings.platform_build_jobs_enabled or settings.platform_evaluation_jobs_enabled,
+        _platform_jobs_controller_probe,
+    )
     required_ok &= _enabled_required_check(checks, "build_worker", settings.build_worker_required, _build_worker_probe)
     required_ok &= _enabled_required_check(checks, "buildkit", settings.buildkit_enabled, buildkit.check_buildkit)
     required_ok &= _enabled_required_check(checks, "registry", settings.registry_enabled, registry.check_registry)
@@ -388,6 +402,8 @@ def _run_dependency_checks() -> tuple[dict[str, str], bool]:
 def _dependency_is_required(name: str) -> bool:
     if name == "dispatch_worker":
         return bool(settings.dispatch_worker_health_url)
+    if name == "platform_jobs_controller":
+        return settings.platform_build_jobs_enabled or settings.platform_evaluation_jobs_enabled
     if name == "build_worker":
         return settings.build_worker_required
     if name == "buildkit":

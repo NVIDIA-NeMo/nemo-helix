@@ -26,12 +26,11 @@ with urllib.request.urlopen(token_request, timeout=30) as response:
 host = os.environ["REGISTRY_HOST"].removeprefix("https://").removeprefix("http://").rstrip("/")
 username = os.environ["REGISTRY_USERNAME"]
 auth = base64.b64encode(f"{username}:{registry_token}".encode()).decode()
-docker_config_data = base64.b64encode(
-    json.dumps(
-        {"auths": {host: {"username": username, "password": registry_token, "auth": auth}}},
-        separators=(",", ":"),
-    ).encode()
-).decode()
+docker_config = json.dumps(
+    {"auths": {host: {"username": username, "password": registry_token, "auth": auth}}},
+    separators=(",", ":"),
+)
+docker_config_data = base64.b64encode(docker_config.encode()).decode()
 
 namespace = os.environ["POD_NAMESPACE"]
 secret_name = os.environ["REGISTRY_AUTH_SECRET_NAME"]
@@ -75,6 +74,32 @@ except urllib.error.HTTPError as exc:
 else:
     secret["metadata"]["resourceVersion"] = existing["metadata"]["resourceVersion"]
     request("PUT", secret_path, secret)
+
+platform_secrets_url = os.environ.get("PLATFORM_SECRETS_URL")
+if platform_secrets_url:
+    platform_secret_name = "scaled-evals-registry-auth"
+    platform_body = json.dumps({"name": platform_secret_name, "value": docker_config}).encode()
+    platform_request = urllib.request.Request(
+        platform_secrets_url,
+        data=platform_body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        urllib.request.urlopen(platform_request, timeout=30).read()
+    except urllib.error.HTTPError as exc:
+        if exc.code != 409:
+            raise
+        patch_request = urllib.request.Request(
+            f"{platform_secrets_url}/{platform_secret_name}",
+            data=json.dumps({"value": docker_config}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="PATCH",
+        )
+        urllib.request.urlopen(patch_request, timeout=30).read()
+    except urllib.error.URLError:
+        # The deployment script performs the initial sync after API readiness.
+        pass
 
 # Deliberately omits the Secret name: it reaches this script through an env var whose
 # name matches a credential heuristic, and it is static deployment config anyway.
