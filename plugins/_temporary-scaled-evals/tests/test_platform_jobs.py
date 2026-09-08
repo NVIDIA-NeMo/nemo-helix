@@ -7,10 +7,13 @@ import json
 import re
 from unittest.mock import MagicMock
 
+import pytest
+
+pytest.importorskip("nemo_scaled_evals_plugin")
+
 import nemo_scaled_evals_plugin.jobs.evaluation_execution as evaluation_job_module
 import nemo_scaled_evals_plugin.jobs.task_image_build as build_job_module
 import nemo_scaled_evals_plugin.tasks.evaluation_execution as evaluation_task_module
-import pytest
 from nemo_platform_plugin.jobs.providers import CPUExecutionProvider, SubprocessExecutionProvider
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
 from nemo_scaled_evals_plugin.jobs.naming import (

@@ -7,7 +7,7 @@ from __future__ import annotations
 # annotations in the same class body, so those spell the type ``builtins.list``.
 import builtins
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import psycopg
 from psycopg.types.json import Json
@@ -812,7 +812,7 @@ class EvaluationRepository:
             )
             return cur.fetchone()
 
-    def list_cancelled_platform_jobs(self, *, limit: int = 100) -> list[dict[str, Any]]:
+    def list_cancelled_platform_jobs(self, *, limit: int = 100) -> builtins.list[dict[str, Any]]:
         """List cancelled evaluations whose outer Platform Job may still run."""
         with self.conn.cursor() as cur:
             cur.execute(
@@ -828,7 +828,7 @@ class EvaluationRepository:
                 """,
                 (limit,),
             )
-            return list(cur.fetchall())
+            return cast(builtins.list[dict[str, Any]], cur.fetchall())
 
     def load_archive_row(self, evaluation_id: str) -> dict | None:
         with self.conn.cursor() as cur:

@@ -98,8 +98,9 @@ if platform_secrets_url:
         )
         urllib.request.urlopen(patch_request, timeout=30).read()
     except urllib.error.URLError:
+        if os.environ.get("PLATFORM_SECRETS_SYNC_OPTIONAL") != "true":
+            raise
         # The deployment script performs the initial sync after API readiness.
-        pass
 
 # Deliberately omits the Secret name: it reaches this script through an env var whose
 # name matches a credential heuristic, and it is static deployment config anyway.

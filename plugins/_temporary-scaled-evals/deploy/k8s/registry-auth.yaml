@@ -39,6 +39,8 @@ spec:
                   value: .dockerconfigjson
                 - name: PLATFORM_SECRETS_URL
                   value: http://scaled-evals-api:8080/apis/secrets/v2/workspaces/default/secrets
+                - name: PLATFORM_SECRETS_SYNC_OPTIONAL
+                  value: "false"
                 - name: POD_NAMESPACE
                   valueFrom:
                     fieldRef:

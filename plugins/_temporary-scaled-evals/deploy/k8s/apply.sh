@@ -97,7 +97,19 @@ kubectl delete deployment -n "$NS" scaled-evals-build-worker --ignore-not-found
 # updates it in place without putting an empty credential into the manifests.
 echo "==> priming GAR credentials"
 JOB="gar-auth-$(date +%s)"
-kubectl create job -n "$NS" "$JOB" --from=cronjob/scaled-evals-gar-registry-auth-refresh
+kubectl create job -n "$NS" "$JOB" \
+  --from=cronjob/scaled-evals-gar-registry-auth-refresh \
+  --dry-run=client -o json |
+  python3 -c '
+import json
+import sys
+
+document = json.load(sys.stdin)
+environment = document["spec"]["template"]["spec"]["containers"][0]["env"]
+next(item for item in environment if item["name"] == "PLATFORM_SECRETS_SYNC_OPTIONAL")["value"] = "true"
+json.dump(document, sys.stdout)
+' |
+  kubectl create -f -
 kubectl wait -n "$NS" --for=condition=complete --timeout=180s "job/$JOB"
 
 echo "==> waiting for the API"
