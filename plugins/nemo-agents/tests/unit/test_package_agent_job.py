@@ -469,11 +469,12 @@ class TestPublishedPackagingContract:
             spec.startswith(("claude-agent-sdk", "deepagents", "hermes-agent", "openai-codex")) for spec in declared
         )
 
-    def test_individual_harness_extras(self) -> None:
+    def test_harness_extras(self) -> None:
         import tomllib
 
         pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
         extras = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["optional-dependencies"]
+        assert extras["all"] == ["nemo-agents-plugin[claude,codex,deepagents]"]
         assert extras["claude"] == ["nemo-fabric-adapters-claude[harness]>=0.3.0,<0.4.0"]
         assert extras["codex"] == ["nemo-fabric-adapters-codex[harness]>=0.3.0,<0.4.0"]
         assert extras["deepagents"] == ["nemo-fabric-adapters-deepagents[harness]>=0.3.0,<0.4.0"]

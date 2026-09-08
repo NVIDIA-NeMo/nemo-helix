@@ -79,6 +79,7 @@ agents = "nemo_agents_plugin.skills:skills_dir"
 nemo_agents_files_telemetry = "nemo_agents_plugin.telemetry.files_service_exporter"
 
 [project.optional-dependencies]
+all = ["nemo-agents-plugin[claude,codex,deepagents]"]
 claude = ["nemo-fabric-adapters-claude[harness]>=0.3.0,<0.4.0"]
 codex = ["nemo-fabric-adapters-codex[harness]>=0.3.0,<0.4.0"]
 deepagents = ["nemo-fabric-adapters-deepagents[harness]>=0.3.0,<0.4.0"]
