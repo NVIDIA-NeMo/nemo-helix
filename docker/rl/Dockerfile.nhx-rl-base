@@ -406,7 +406,7 @@ for actor in \
     nemo_rl.models.policy.workers.megatron_policy_worker.MegatronPolicyWorker \
     nemo_rl.environments.nemo_gym.NemoGym \
     nemo_rl.environments.sandbox.nemo_gym_actor.SandboxedGymActor \
-    nemo_rl.environments.sandbox.broker_actor.SandboxEpisodeBrokerActor \
+    sandboxed_gym.ray.broker_actor.SandboxEpisodeBrokerActor \
     nemo_rl.models.generation.vllm.vllm_worker.VllmGenerationWorker \
     nemo_rl.models.generation.vllm.vllm_worker_async.VllmAsyncGenerationWorker \
     nemo_rl.experience.sync_rollout_actor.SyncRolloutActor
