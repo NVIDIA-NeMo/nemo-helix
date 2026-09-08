@@ -39,11 +39,10 @@ dependencies = [
     # improvement/ subpackage — agent-improvement workflow (POC).
     "anthropic>=0.88.0",
     "rich>=13.7.1",
-    "nemo-fabric[claude,codex,relay,streaming]>=0.3.0,<0.4.0",
+    "nemo-fabric[relay,streaming]>=0.3.0,<0.4.0",
+    "nemo-fabric-adapters-claude>=0.3.0,<0.4.0",
+    "nemo-fabric-adapters-codex>=0.3.0,<0.4.0",
     "nemo-fabric-adapters-deepagents>=0.3.0,<0.4.0",
-    # Platform owns the security-required DeepAgents harness version instead of
-    # inheriting Fabric's optional harness extra, which is capped below 0.7.
-    "deepagents>=0.7.8,<0.8",
     # Fabric 0.3's Hermes adapter intentionally excludes the harness. Platform manages
     # the compatible Hermes Agent installation separately.
     "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0; python_version < '3.14'",
