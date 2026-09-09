@@ -42,7 +42,7 @@ executes it through the selected harness.
 | Model credentials | Set the credentials required by the selected provider; the examples use `NVIDIA_API_KEY` |
 | Harness CLI and authentication | Install and authenticate the selected harness when required; for example, run `codex login` for Codex or complete the Claude CLI login flow |
 | NeMo Relay CLI | Required for Claude and Codex; install it with `script/dev-install-fabric.sh` after installing the plugin |
-| Hermes runtime | Required only for Hermes; use a separate Python 3.12 environment and set `ADAPTER_PYTHON` as described in the [Hermes example](examples/nemo-agent-config/README.md#hermes) |
+| Hermes runtime | Required only for Hermes; install it with `script/dev-install-hermes.sh` and set `ADAPTER_PYTHON` as described in the [Hermes example](examples/nemo-agent-config/README.md#hermes) |
 
 Install the plugin from the repository root, after `uv sync`. This installs
 Fabric, the Relay Python bindings, and the supported harness adapters. The NeMo

@@ -27,6 +27,7 @@ from nemo_platform_plugin.jobs.execution_profiles import (
     DockerJobExecutionProfileConfig,
     SubprocessJobExecutionProfile,
 )
+from packaging.requirements import Requirement
 from pydantic import ValidationError
 
 FABRIC_CONFIG: dict[str, Any] = {"config_format": NEMO_AGENTS_SPEC_CONFIG_FORMAT, "harness": {"type": "deepagents"}}
@@ -457,9 +458,13 @@ class TestPublishedPackagingContract:
 
         pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
         declared = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["dependencies"]
-        fabric = {spec.split("==", 1)[0] for spec in declared if spec.startswith("nemo-fabric")}
+        requirements = (Requirement(spec) for spec in declared if spec.startswith("nemo-fabric"))
+        fabric = {
+            f"{requirement.name}[{','.join(sorted(requirement.extras))}]" if requirement.extras else requirement.name
+            for requirement in requirements
+        }
         assert fabric == {
-            "nemo-fabric[relay]",
+            "nemo-fabric[relay,streaming]",
             "nemo-fabric-adapters-claude",
             "nemo-fabric-adapters-codex",
             "nemo-fabric-adapters-deepagents",

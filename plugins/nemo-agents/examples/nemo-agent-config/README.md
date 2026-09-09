@@ -127,16 +127,11 @@ In this example, Claude uses its harness-local Anthropic model config.
 ### Hermes
 
 Hermes Agent has dependencies that conflict with the Platform environment, so
-install it with the Fabric adapter in a separate Python 3.12 environment:
+use the repository helper to install Fabric's pinned Hermes source and matching
+adapter in a separate Python 3.12 environment:
 
 ```bash
-uvx uv@0.9.14 venv --python 3.12 .venv-hermes
-uvx uv@0.9.14 --no-config pip install \
-  --python .venv-hermes/bin/python \
-  "nemo-fabric[relay]>=0.3.0,<0.4.0" \
-  "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0" \
-  "hermes-agent==0.19.0"
-
+script/dev-install-hermes.sh
 export ADAPTER_PYTHON="$PWD/.venv-hermes/bin/python"
 ```
 
