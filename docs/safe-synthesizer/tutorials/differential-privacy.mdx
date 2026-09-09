@@ -372,6 +372,10 @@ def check_data_requirements(dataset_size):
     """Check if dataset size is suitable for DP."""
     print(f"📏 Dataset Size Analysis: {dataset_size} records")
 
+    if dataset_size <= 0:
+        print("❌ Empty dataset - collect records before applying DP")
+        return
+
     if dataset_size >= 10000:
         print("✅ Excellent - Dataset size is ideal for DP")
         print(" Expected: Good quality with ε ∈ [8, 12]")
