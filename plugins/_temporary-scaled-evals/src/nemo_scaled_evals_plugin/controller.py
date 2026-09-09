@@ -9,6 +9,8 @@ import asyncio
 import logging
 import socket
 import time
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from typing import Any
 
 from nemo_platform_plugin.client.adapter import client_from_platform
@@ -42,6 +44,11 @@ _ACTIVE_JOB_STATUSES = {
     PlatformJobStatus.PAUSING,
     PlatformJobStatus.RESUMING,
     PlatformJobStatus.CANCELLING,
+}
+# Statuses in which no task has executed yet, so no sandbox can exist.
+_PRELAUNCH_JOB_STATUSES = {
+    PlatformJobStatus.CREATED,
+    PlatformJobStatus.PENDING,
 }
 
 
@@ -86,20 +93,37 @@ class ScaledEvalsJobsController(NemoController):
 
     async def reconcile(self) -> None:
         """Perform one bounded pass over build, evaluation, and cancellation work."""
+        for name, phase in self._phases():
+            try:
+                await phase()
+            except Exception:
+                # One unprocessable row must not abort the pass, skip the
+                # heartbeat, or mark this controller unhealthy. Readiness gates
+                # the API, so a poison-pill row would otherwise take it offline.
+                LOG.exception("scaled-evals Platform Jobs phase %s failed", name)
         try:
-            if settings.platform_build_jobs_enabled:
-                await self._submit_one_build()
-                await self._reconcile_builds()
-            if settings.platform_evaluation_jobs_enabled:
-                await self._submit_one_evaluation()
-                await self._reconcile_one_evaluation()
-                await self._cancel_evaluation_jobs()
             await asyncio.to_thread(self._heartbeat)
         except Exception:
             self._healthy = False
-            LOG.exception("scaled-evals Platform Jobs reconciliation failed")
+            LOG.exception("scaled-evals Platform Jobs heartbeat failed")
         else:
             self._healthy = True
+
+    def _phases(self) -> list[tuple[str, Callable[[], Awaitable[None]]]]:
+        """Return the enabled reconciliation phases, in execution order."""
+        phases: list[tuple[str, Callable[[], Awaitable[None]]]] = []
+        if settings.platform_build_jobs_enabled:
+            phases += [
+                ("submit_build", self._submit_one_build),
+                ("reconcile_builds", self._reconcile_builds),
+            ]
+        if settings.platform_evaluation_jobs_enabled:
+            phases += [
+                ("submit_evaluation", self._submit_one_evaluation),
+                ("reconcile_evaluation", self._reconcile_one_evaluation),
+                ("cancel_evaluations", self._cancel_evaluation_jobs),
+            ]
+        return phases
 
     async def _submit_one_build(self) -> None:
         job = await asyncio.to_thread(self._claim_build)
@@ -233,21 +257,25 @@ class ScaledEvalsJobsController(NemoController):
 
     async def _cancel_evaluation_jobs(self) -> None:
         for row in await asyncio.to_thread(self._list_cancelled_evaluations):
-            # Once a sandbox exists, let the execution task observe cancellation
-            # and run the existing teardown path before its outer Job exits.
-            if row.get("backend_handle"):
-                continue
             name = str(row["dispatch_job_name"])
             try:
                 status = (await self.jobs.get_job_status(workspace=settings.platform_jobs_workspace, name=name)).data()
             except NotFoundError:
-                await asyncio.to_thread(self._complete_cancel_teardown, row)
+                await asyncio.to_thread(self._settle_cancel_teardown, row, name)
+                continue
+            if status.status in _PRELAUNCH_JOB_STATUSES:
+                # No task has run, so no sandbox can exist. Stop the Job before
+                # it pulls an image and executes an already-cancelled run.
+                # Cancelling an ACTIVE Job instead would race a task that has
+                # launched a sandbox but not yet persisted its handle.
+                with suppress(ConflictError):
+                    await self.jobs.cancel_job(workspace=settings.platform_jobs_workspace, name=name)
                 continue
             if status.status in _ACTIVE_JOB_STATUSES:
                 # The task observes durable cancellation and performs runtime
                 # teardown. Deleting its outer Job here would bypass that path.
                 continue
-            await asyncio.to_thread(self._complete_cancel_teardown, row)
+            await asyncio.to_thread(self._settle_cancel_teardown, row, name)
 
     def _claim_build(self) -> TaskBuildJob | None:
         with pooled_connection() as conn:
@@ -375,9 +403,21 @@ class ScaledEvalsJobsController(NemoController):
         with pooled_connection() as conn:
             return EvaluationRepository(conn).list_cancelled_platform_jobs()
 
-    def _complete_cancel_teardown(self, row: dict[str, Any]) -> None:
+    def _settle_cancel_teardown(self, row: dict[str, Any], job_name: str) -> None:
+        """Terminalize teardown for a cancelled evaluation whose Job has ended."""
         with pooled_connection() as conn:
-            EvaluationRepository(conn).record_cancel_teardown_succeeded(str(row["id"]))
+            repo = EvaluationRepository(conn)
+            if row.get("backend_handle"):
+                # The Job is gone, so no task will release the sandbox. Record
+                # the failure rather than leaving the row pending forever at the
+                # head of the teardown window, where it would also crowd out
+                # later cancellations.
+                repo.record_cancel_teardown_failure(
+                    str(row["id"]),
+                    f"Platform evaluation job {job_name} ended before releasing its runtime",
+                )
+                return
+            repo.record_cancel_teardown_succeeded(str(row["id"]))
 
     def _heartbeat(self) -> None:
         with pooled_connection() as conn:

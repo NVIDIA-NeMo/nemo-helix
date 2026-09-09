@@ -127,6 +127,8 @@ async def test_compile_outputs_use_current_platform_job_models(monkeypatch) -> N
     assert evaluation_step.executor.resources.requests.cpu == "50m"
     assert evaluation_step.executor.resources.limits.memory == "1Gi"
     assert evaluation_step.config["deadline_seconds"] == 7200
+    # The platform reaps a hung dispatcher only when this is non-zero.
+    assert evaluation_step.lifecycle.staleness_timeout_seconds == 7200
 
     local_build = await TaskImageBuildJob.compile(
         workspace="default",

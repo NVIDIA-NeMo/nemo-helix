@@ -14,6 +14,7 @@ from nemo_platform_plugin.jobs.api_factory import (
     ResourcesLimitsSpec,
     ResourcesRequestsSpec,
     ResourcesSpec,
+    StepLifecycle,
 )
 from nemo_scaled_evals_plugin.jobs.specs import EvaluationExecutionSpec
 from nemo_scaled_evals_plugin.jobs.task_image_build import resolve_executor, resolve_secret_environment
@@ -58,6 +59,10 @@ class EvaluationExecutionJob(NemoJob):
                     ),
                     environment=resolve_secret_environment(),
                     config=canonical.model_dump(mode="json"),
+                    # Without this the platform cannot reap a hung dispatcher:
+                    # the step stays active forever and the reconciler keeps
+                    # releasing its claim.
+                    lifecycle=StepLifecycle(staleness_timeout_seconds=canonical.deadline_seconds),
                 )
             ]
         )
