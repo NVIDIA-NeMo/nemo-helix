@@ -157,7 +157,7 @@ One difference from the old MkDocs hook: that hook ran at build time and kept th
 
 | Workflow | Trigger | Purpose |
 | --- | --- | --- |
-| `fern-docs-ci.yaml` | `pull_request` touching `docs/**` | `npm run check` (fern check + MDX + NotebookViewer artifacts + gated links) and `npm run broken-links` |
+| `fern-docs-ci.yaml` | `pull_request` touching `docs/**` | `npm run check` (fern check + MDX + NotebookViewer artifacts + gated links), plus a docs lint job for Python snippets and `npm run broken-links` |
 | `fern-docs-preview-build.yaml` | `pull_request` touching `docs/**` | Upload PR `docs/` sources as an artifact (no secrets — fork-safe) |
 | `fern-docs-preview-comment.yaml` | successful preview build (`workflow_run`) | Build a Fern preview with `DOCS_FERN_TOKEN` and post/update the PR comment |
 | `publish-fern-docs.yaml` | push to `main` touching `docs/**`, stable SemVer tag, `docs/v*` republish tag, or manual dispatch | Materialize release versions and publish the Fern docs site |
