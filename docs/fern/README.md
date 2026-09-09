@@ -23,6 +23,7 @@ From the repo root (these wrap `cd docs/fern && npm run …`):
 make docs-deps     # one-time: install docs/fern tooling (needed for MDX validation)
 make docs-login    # one-time per machine: Fern CLI auth for the nvidia org
 make docs-check    # validate: fern check + MDX + NotebookViewer artifacts + gated links
+make docs-lint-snippets  # syntax-check Python fenced snippets across all docs
 make docs          # start local preview (prints a localhost URL)
 make docs-watch    # start local preview plus a repo-level watcher for docs/** changes
 ```

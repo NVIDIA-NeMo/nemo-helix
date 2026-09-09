@@ -117,7 +117,7 @@ from nemo_platform_plugin.authz import CallerKind, path_rule
 @router.put("/deployments/{name}/status", response_model=Deployment)
 @scope.write
 @path_rule(callers=[CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentPerms.STATUS_UPDATE])
-async def update_deployment_status(workspace: str, name: str, ...) -> Deployment: ...
+async def update_deployment_status(workspace: str, name: str) -> Deployment: ...
 ```
 
 An authenticated-but-permissionless route passes `permissions=[]`:

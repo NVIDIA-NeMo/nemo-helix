@@ -10,10 +10,16 @@ on:
   pull_request:
     paths:
       - 'docs/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/fern-docs-ci.yaml'
 
 permissions:
   contents: read
+
+env:
+  UV_VERSION: "0.9.14"
+  TOOLCHAIN: system
 
 jobs:
   check:
@@ -47,3 +53,23 @@ jobs:
         env:
           FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}
         run: npm run broken-links
+
+  python-snippets:
+    name: Python docs snippets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          python-version: "3.12"
+          cache-dependency-glob: uv.lock
+
+      - name: Lint Python snippets
+        run: make docs-lint-snippets
