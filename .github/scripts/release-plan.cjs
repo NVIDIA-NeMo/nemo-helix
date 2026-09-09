@@ -3,6 +3,10 @@
 
 // Release plan parsing is independent of the GitHub Actions runtime.
 const SEMVER_CORE_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+// SemVer spelling because this string becomes the git tag; stamp_sdk_version.py
+// converts it to the PEP 440 wheel version.
+const PRERELEASE_VERSION_PATTERN =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-(a|b|rc)(0|[1-9]\d*)$/;
 // ECMA-compatible SemVer 2.0.0 pattern from https://semver.org/.
 const SEMVER_PATTERN = new RegExp(
   "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)" +
@@ -45,6 +49,7 @@ async function resolveReleasePlan({
   now = () => new Date(),
 }) {
   const allWheels = JSON.parse(env.RELEASE_WHEELS_JSON);
+  const bulkWheels = allWheels.filter((wheel) => !wheel.independent);
   const allContainers = JSON.parse(env.RELEASE_CONTAINERS_JSON);
   const inputs = context.payload.inputs ?? {};
   const isManual = context.eventName === "workflow_dispatch";
@@ -67,8 +72,14 @@ async function resolveReleasePlan({
         "Stable releases require an exact 40-character source SHA.",
       );
     }
-    if (!SEMVER_CORE_PATTERN.test(version)) {
-      throw new Error("Stable releases require a MAJOR.MINOR.PATCH version.");
+    if (
+      !SEMVER_CORE_PATTERN.test(version) &&
+      !PRERELEASE_VERSION_PATTERN.test(version)
+    ) {
+      throw new Error(
+        "Stable releases require a MAJOR.MINOR.PATCH version, " +
+          "optionally suffixed -aN, -bN or -rcN.",
+      );
     }
   } else {
     if (sourceSha && !/^[0-9a-f]{40}$/i.test(sourceSha)) {
@@ -100,8 +111,8 @@ async function resolveReleasePlan({
 
   sourceSha = sourceSha.toLowerCase();
   const presets = {
-    all: { wheels: allWheels, containers: allContainers, includeHelm: true },
-    wheels: { wheels: allWheels, containers: [], includeHelm: false },
+    all: { wheels: bulkWheels, containers: allContainers, includeHelm: true },
+    wheels: { wheels: bulkWheels, containers: [], includeHelm: false },
     containers: { wheels: [], containers: allContainers, includeHelm: false },
     helm: { wheels: [], containers: [], includeHelm: true },
   };
@@ -136,6 +147,23 @@ async function resolveReleasePlan({
     throw new Error(`Unknown release scope: ${releaseScope}.`);
   }
 
+  // One resolved version is stamped onto every artifact in a release, so a wheel with its
+  // own version line cannot share one.
+  const independentWheels = selection.wheels.filter(
+    (wheel) => wheel.independent,
+  );
+  const artifactCount =
+    selection.wheels.length +
+    selection.containers.length +
+    (selection.includeHelm ? 1 : 0);
+  if (independentWheels.length > 0 && artifactCount > 1) {
+    throw new Error(
+      `An independent wheel must be released on its own: ${independentWheels
+        .map((wheel) => wheel.id)
+        .join(", ")}.`,
+    );
+  }
+
   const { wheels, containers, includeHelm } = selection;
   const wheelIds = wheels.map((wheel) => wheel.id);
   const containerIds = containers.map((container) => container.id);
@@ -155,6 +183,8 @@ async function resolveReleasePlan({
     }
   }
 
+  const isPrerelease = PRERELEASE_VERSION_PATTERN.test(version);
+
   const nightlyTimestamp =
     releaseType === "nightly"
       ? now().toISOString().replace(/\D/g, "").slice(0, 14)
@@ -168,6 +198,7 @@ async function resolveReleasePlan({
     sourceSha,
     sourceBranch,
     version,
+    isPrerelease,
     releaseLabel,
     nightlyTimestamp,
     wheels,

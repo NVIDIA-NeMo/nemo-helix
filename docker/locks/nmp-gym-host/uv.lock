@@ -1233,19 +1233,50 @@ wheels = [
 ]
 
 [[package]]
+name = "nemo-sandboxed-gym"
+source = { directory = "../../../packages/sandboxed_gym" }
+dependencies = [
+    { name = "pydantic", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+
+[package.optional-dependencies]
+runtime = [
+    { name = "pyyaml", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", marker = "extra == 'dev'", specifier = ">=0.115.0" },
+    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115.0" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
+    { name = "opensandbox", marker = "extra == 'dev'", specifier = ">=0.1.15" },
+    { name = "opensandbox", marker = "extra == 'opensandbox'", specifier = ">=0.1.15" },
+    { name = "pydantic", specifier = ">=2.10.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
+    { name = "pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.2" },
+    { name = "pyyaml", marker = "extra == 'runtime'", specifier = ">=6.0.2" },
+    { name = "pyyaml", marker = "extra == 'server'", specifier = ">=6.0.2" },
+    { name = "ray", marker = "extra == 'ray'", specifier = ">=2.40.0" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'dev'", specifier = ">=0.30.0" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.30.0" },
+]
+provides-extras = ["dev", "opensandbox", "ray", "runtime", "server"]
+
+[[package]]
 name = "nmp-gym-host"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
     { name = "nemo-gym", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "sandboxed-gym", extra = ["runtime"], marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-sandboxed-gym", extra = ["runtime"], marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "tiktoken", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "nemo-gym", specifier = "==0.5.0" },
-    { name = "sandboxed-gym", extras = ["runtime"], directory = "../../../packages/sandboxed_gym" },
+    { name = "nemo-sandboxed-gym", extras = ["runtime"], directory = "../../../packages/sandboxed_gym" },
     { name = "tiktoken", specifier = "==0.13.0" },
 ]
 
@@ -1860,35 +1891,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/1f/f1/13968e49655d40b6b19d8b9140296bbc6f1d86b3f0f6c346cf9f1adddf4b/rpds_py-2026.6.3-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:4f4bca01b63096f606e095734dd56e74e175f94cfbf24ff3d63281cec61f7bb7", size = 543832, upload-time = "2026-06-30T07:15:49.33Z" },
     { url = "https://files.pythonhosted.org/packages/1e/16/5043105e679436ccfbc8e5e0dd2d663ed18a8b8113515fd06a5e5d77c83e/rpds_py-2026.6.3-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:1cf01971c4f2c5553b772a542e4aaf191789cd331bc2cd4ff0e6e65ba49e1e97", size = 572431, upload-time = "2026-06-30T07:15:52.394Z" },
 ]
-
-[[package]]
-name = "sandboxed-gym"
-version = "0.1.0"
-source = { directory = "../../../packages/sandboxed_gym" }
-dependencies = [
-    { name = "pydantic", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-]
-
-[package.optional-dependencies]
-runtime = [
-    { name = "pyyaml", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115.0" },
-    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
-    { name = "opensandbox", marker = "extra == 'opensandbox'", specifier = ">=0.1.15" },
-    { name = "pydantic", specifier = ">=2.10.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
-    { name = "pyyaml", marker = "extra == 'runtime'", specifier = ">=6.0.2" },
-    { name = "ray", marker = "extra == 'ray'", specifier = ">=2.40.0" },
-    { name = "sandboxed-gym", extras = ["runtime"], marker = "extra == 'server'" },
-    { name = "sandboxed-gym", extras = ["server", "opensandbox"], marker = "extra == 'dev'" },
-    { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.30.0" },
-]
-provides-extras = ["server", "runtime", "opensandbox", "ray", "dev"]
 
 [[package]]
 name = "scikit-learn"

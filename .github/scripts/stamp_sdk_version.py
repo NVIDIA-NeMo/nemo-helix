@@ -10,9 +10,12 @@ import sys
 from pathlib import Path
 from typing import Literal
 
-Cadence = Literal["nightly", "rc", "release"]
+Cadence = Literal["nightly", "prerelease", "release"]
 SEMVER_CORE_PATTERN = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
-RELEASE_CORE_TAG_PATTERN = re.compile(rf"^({SEMVER_CORE_PATTERN})(?:-rc\d+)?$")
+# Tags stay SemVer (`1.0.0-rc0`); wheels are PEP 440 (`1.0.0rc0`). The two spellings meet here.
+PRERELEASE_SUFFIX_PATTERN = r"(?:a|b|rc)(?:0|[1-9][0-9]*)"
+RELEASE_CORE_TAG_PATTERN = re.compile(rf"^({SEMVER_CORE_PATTERN})(?:-{PRERELEASE_SUFFIX_PATTERN})?$")
+PRERELEASE_LABEL_PATTERN = re.compile(rf"^({SEMVER_CORE_PATTERN})-({PRERELEASE_SUFFIX_PATTERN})$")
 
 
 class StampError(Exception):
@@ -63,11 +66,11 @@ def resolve_sdk_version(
             raise StampError("nightly timestamp must be YYYYMMDDHHMMSS")
         return f"{base_version}.dev{nightly_timestamp}"
 
-    if cadence == "rc":
-        match = re.fullmatch(rf"({SEMVER_CORE_PATTERN})-rc(\d+)", release_label)
+    if cadence == "prerelease":
+        match = PRERELEASE_LABEL_PATTERN.fullmatch(release_label)
         if not match:
-            raise StampError(f"RC release label must look like 1.0.0-rc0: {release_label}")
-        return f"{match.group(1)}rc{match.group(2)}"
+            raise StampError(f"pre-release label must look like 1.0.0-a1, 1.0.0-b1 or 1.0.0-rc0: {release_label}")
+        return f"{match.group(1)}{match.group(2)}"
 
     if cadence == "release":
         if not re.fullmatch(SEMVER_CORE_PATTERN, release_label):
@@ -97,9 +100,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--sdk-id", required=True)
-    parser.add_argument("--cadence", required=True, choices=["nightly", "rc", "release"])
+    parser.add_argument("--cadence", required=True, choices=["nightly", "prerelease", "release"])
     # --release-label is unused for cadence=nightly; cadence-specific validation
-    # in resolve_sdk_version() rejects empty/missing labels for rc and release.
+    # in resolve_sdk_version() rejects empty/missing labels for prerelease and release.
     parser.add_argument("--release-label", default="")
     parser.add_argument("--nightly-timestamp", default="")
     parser.add_argument(

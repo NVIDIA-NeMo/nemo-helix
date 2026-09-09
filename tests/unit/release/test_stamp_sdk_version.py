@@ -130,10 +130,14 @@ def test_nightly_falls_back_outside_git_checkout(tmp_path: Path):
     assert version == "0.0.0.dev20260512010101"
 
 
-def test_rc_resolves_python_rc_version(tmp_path: Path):
-    version = stamp(tmp_path, cadence="rc", release_label="1.2.3-rc12")
+@pytest.mark.parametrize(
+    ("release_label", "expected"),
+    [("1.2.3-rc12", "1.2.3rc12"), ("1.2.3-a1", "1.2.3a1"), ("1.2.3-b0", "1.2.3b0")],
+)
+def test_prerelease_resolves_pep440_version(tmp_path: Path, release_label: str, expected: str):
+    version = stamp(tmp_path, cadence="prerelease", release_label=release_label)
 
-    assert version == "1.2.3rc12"
+    assert version == expected
 
 
 def test_stable_resolves_release_label(tmp_path: Path):
@@ -170,11 +174,15 @@ def test_invalid_nightly_timestamp_fails(tmp_path: Path):
         "1.2.3-alpha.1-rc0",
         "1.2.3+build.1-rc0",
         "1.0.0rc0",
+        "1.2.3-alpha1",
+        "1.2.3-rc",
+        "1.2.3-rc01",
+        "1.2.3",
     ],
 )
-def test_invalid_rc_label_fails(tmp_path: Path, release_label: str):
-    with pytest.raises(StampError, match="RC release label must look like 1.0.0-rc0"):
-        stamp(tmp_path, cadence="rc", release_label=release_label)
+def test_invalid_prerelease_label_fails(tmp_path: Path, release_label: str):
+    with pytest.raises(StampError, match="pre-release label must look like"):
+        stamp(tmp_path, cadence="prerelease", release_label=release_label)
 
 
 @pytest.mark.parametrize(
