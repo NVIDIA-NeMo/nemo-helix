@@ -1,13 +1,37 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Annotated, Any, cast
+"""``nemo inference`` command group, backed by the typed Models, VirtualModels and Inference Gateway clients."""
+
+from __future__ import annotations
+
+from typing import Annotated
 
 import typer
+from nemo_platform_plugin.models.client import ModelsClient
+
+from nemo_platform_ext.cli.commands.inference import (
+    deployment_configs,
+    deployments,
+    gateway,
+    models,
+    prompts,
+    providers,
+    virtual_models,
+)
 from nemo_platform_ext.cli.core.context import CLIContext
 from nemo_platform_ext.cli.core.errors import handle_errors
+from nemo_platform_ext.cli.core.help_formatter import create_typer_app
 
-app = cast(Any, None)  # override-skip: provided by generated file
+app = create_typer_app(name="inference", help="Inference operations.")
+
+app.add_typer(deployment_configs.app, name="deployment-configs")
+app.add_typer(deployments.app, name="deployments")
+app.add_typer(gateway.app, name="gateway")
+app.add_typer(models.app, name="models")
+app.add_typer(prompts.app, name="prompts")
+app.add_typer(providers.app, name="providers")
+app.add_typer(virtual_models.app, name="virtual-models")
 
 
 @app.command("get-url")
@@ -41,16 +65,16 @@ def get_url(
         raise typer.BadParameter("--provider and --virtual-model are mutually exclusive")
 
     state: CLIContext = ctx.obj
-    client = state.get_client()
-    ws = workspace if workspace is not None else client._get_workspace_path_param()
+    models_client = state.typed_client(ModelsClient)
+    ws = models_client.require_workspace(workspace)
 
     if provider is not None:
-        provider_obj = client.inference.providers.retrieve(provider, workspace=ws)
-        url = client.models.get_provider_route_openai_url(provider_obj).removesuffix("/v1")
+        provider_obj = models_client.get_provider(name=provider, workspace=ws).data()
+        url = models_client.get_provider_route_openai_url(provider_obj).removesuffix("/v1")
     elif virtual_model is not None:
-        entity = client.models.retrieve(virtual_model, workspace=ws)
-        url = client.models.get_model_entity_route_openai_url(entity).removesuffix("/v1")
+        entity = models_client.get_model(name=virtual_model, workspace=ws).data()
+        url = models_client.get_model_entity_route_openai_url(entity).removesuffix("/v1")
     else:
-        url = client.models.get_openai_route_base_url(workspace=ws)
+        url = models_client.get_openai_route_base_url(workspace=ws)
 
     typer.echo(url)
