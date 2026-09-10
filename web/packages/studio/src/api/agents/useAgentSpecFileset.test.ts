@@ -50,6 +50,20 @@ describe('agentSpecSource', () => {
     expect(source?.trackedRevision).toBeUndefined();
   });
 
+  it('does not treat a commit recorded as its own original as a tracked ref', () => {
+    const source = agentSpecSource(
+      fileset({
+        type: 'github',
+        owner: 'acme',
+        repo: 'agents',
+        revision: 'abc123',
+        original_revision: 'abc123',
+      })
+    );
+
+    expect(source?.trackedRevision).toBeUndefined();
+  });
+
   it('ignores a fileset that is not repository-backed', () => {
     expect(agentSpecSource(fileset({ type: 'local', path: '/data/calc' }))).toBeUndefined();
     expect(agentSpecSource(undefined)).toBeUndefined();

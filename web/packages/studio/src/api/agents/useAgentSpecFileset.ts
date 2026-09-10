@@ -25,13 +25,17 @@ const isGithubStorage = (
   storage: FilesetOutput['storage'] | undefined
 ): storage is GithubStorageConfig => storage?.type === 'github';
 
-export const agentSpecSource = (fileset: FilesetOutput | undefined): AgentSpecSource | undefined => {
+export const agentSpecSource = (
+  fileset: FilesetOutput | undefined
+): AgentSpecSource | undefined => {
   if (!fileset || !isGithubStorage(fileset.storage)) return undefined;
 
   const { owner, repo, path, revision, original_revision: tracked } = fileset.storage;
   return {
     repository: path ? `${owner}/${repo}/${path}` : `${owner}/${repo}`,
-    trackedRevision: tracked ?? undefined,
+    // The service records the requested ref even when it was already a commit, and a ref
+    // equal to what it resolved to cannot name anything else — so it is not tracking.
+    trackedRevision: tracked && tracked !== revision ? tracked : undefined,
     revision: revision ?? '',
     webUrl: `https://github.com/${owner}/${repo}/tree/${revision}${path ? `/${path}` : ''}`,
   };
