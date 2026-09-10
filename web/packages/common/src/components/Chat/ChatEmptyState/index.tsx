@@ -2,19 +2,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Stack, Text, type StackProps } from '@nvidia/foundations-react-core';
-import type { FC } from 'react';
+import type { FC, ReactNode } from 'react';
 
 import { Nebula } from '../../Nebula';
 
 export interface ChatEmptyStateProps extends StackProps {
   slotHeading?: string;
   slotSubheading?: string;
+  /**
+   * Optional call to action rendered below the subheading — e.g. a button that
+   * resolves whatever the empty state is describing.
+   */
+  slotAction?: ReactNode;
 }
 
 export const ChatEmptyState: FC<ChatEmptyStateProps> = ({
   className,
   slotHeading = 'Ready',
   slotSubheading = 'Prompt your model to get started.',
+  slotAction,
   ...stackProps
 }) => {
   const passedClasses = className?.split(' ') || [];
@@ -32,7 +38,9 @@ export const ChatEmptyState: FC<ChatEmptyStateProps> = ({
       <Text kind="label/regular/lg" className="text-center">
         {slotSubheading}
       </Text>
-      <div className="absolute top-0 left-0 w-full h-full">
+      {slotAction ? <div className="relative z-10">{slotAction}</div> : null}
+      {/* Decorative only: must not intercept clicks on slotAction. */}
+      <div className="pointer-events-none absolute top-0 left-0 w-full h-full">
         <Nebula variant="sphere" />
       </div>
     </Stack>
