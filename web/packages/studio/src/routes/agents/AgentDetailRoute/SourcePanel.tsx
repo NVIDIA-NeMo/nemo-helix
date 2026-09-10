@@ -99,7 +99,9 @@ export const SourcePanel: FC<SourcePanelProps> = ({ workspace, agentName }) => {
               </Anchor>
             }
           />
-          {source.trackedRevision && <KVPair label="Tracking" value={source.trackedRevision} />}
+          {source.trackedRevision ? (
+            <KVPair label="Tracking" value={source.trackedRevision} />
+          ) : null}
           <KVPair label="Revision" value={shortRevision(source.revision)} truncate />
           <Text kind="body/regular/sm">
             Files are read from GitHub on demand at this commit. Deployments stage the commit they

@@ -37,9 +37,12 @@ const NON_CONTENT_ROUTES = new Set([
   'wiki',
 ]);
 
-const trimSlashes = (value: string): string => value.replace(/^\/+|\/+$/g, '');
+const SURROUNDING_SLASHES = /^\/+|\/+$/g;
+const GIT_SUFFIX = /\.git$/;
 
-const dropGitSuffix = (value: string): string => value.replace(/\.git$/, '');
+const trimSlashes = (value: string): string => value.replace(SURROUNDING_SLASHES, '');
+
+const dropGitSuffix = (value: string): string => value.replace(GIT_SUFFIX, '');
 
 /**
  * Where the host ends. An `@` before this is `user@host` userinfo; one after it opens a ref,

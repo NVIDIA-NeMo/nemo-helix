@@ -156,7 +156,7 @@ export const AgentDetailRoute: FC = () => {
               <Flex align="baseline" gap="3">
                 <Text kind="title/md">{agent?.name ?? agentName ?? 'Agent details'}</Text>
                 <StatusBadge status={status} label={statusPillLabel} />
-                {specSource && (
+                {specSource ? (
                   <Link
                     to={{ search: `?${TAB_SEARCH_PARAM}=details`, hash: `#${SOURCE_PANEL_ID}` }}
                     className="contents"
@@ -167,7 +167,7 @@ export const AgentDetailRoute: FC = () => {
                       {shortRevision(specSource.revision)}
                     </Badge>
                   </Link>
-                )}
+                ) : null}
               </Flex>
               <Flex align="center" gap="1">
                 <Text kind="body/regular/sm" className="text-secondary">
