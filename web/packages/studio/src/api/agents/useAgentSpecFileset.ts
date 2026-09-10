@@ -35,7 +35,9 @@ export const agentSpecSource = (
 ): AgentSpecSource | undefined => {
   if (!fileset || !isGithubStorage(fileset.storage)) return undefined;
 
-  const { owner, repo, path, revision, original_revision: tracked } = fileset.storage;
+  // The service pins revision to a resolved commit before it stores the fileset, so it is
+  // only optional in the generated type because the model carries a default.
+  const { owner, repo, path, revision = 'HEAD', original_revision: tracked } = fileset.storage;
   return {
     owner,
     repo,
@@ -43,7 +45,7 @@ export const agentSpecSource = (
     // The service records the requested ref even when it was already a commit, and a ref
     // equal to what it resolved to cannot name anything else — so it is not tracking.
     trackedRevision: tracked && tracked !== revision ? tracked : undefined,
-    revision: revision ?? '',
+    revision,
     webUrl: `https://github.com/${owner}/${repo}/tree/${revision}${path ? `/${path}` : ''}`,
   };
 };

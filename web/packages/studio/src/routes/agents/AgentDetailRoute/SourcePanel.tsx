@@ -13,7 +13,7 @@ import {
 import { shortRevision } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { RefreshCw } from 'lucide-react';
-import { type FC, useEffect, useRef } from 'react';
+import { type FC, useEffect, useMemo, useRef } from 'react';
 import { useLocation } from 'react-router';
 
 /** Anchor for the header's commit badge, which deep-links here. */
@@ -32,19 +32,21 @@ interface SourcePanelProps {
  */
 export const SourcePanel: FC<SourcePanelProps> = ({ workspace, agentName }) => {
   const toast = useToast();
-  const { hash } = useLocation();
+  const { hash, key } = useLocation();
   const panelRef = useRef<HTMLDivElement>(null);
+  const scrolledForKey = useRef<string | null>(null);
   const { data: fileset, isLoading } = useAgentSpecFileset(workspace, agentName);
   const { mutate: refresh, isPending } = useRefreshAgentSpecFileset(workspace, agentName);
 
-  const source = agentSpecSource(fileset);
+  const source = useMemo(() => agentSpecSource(fileset), [fileset]);
 
-  // The panel mounts once the fileset resolves, which is after the hash lands.
+  // The panel mounts once the fileset resolves, which is after the hash lands. Keyed on the
+  // navigation rather than the hash so a repeat click scrolls again but a re-render does not.
   useEffect(() => {
-    if (hash === `#${SOURCE_PANEL_ID}` && source) {
-      panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }, [hash, source]);
+    if (hash !== `#${SOURCE_PANEL_ID}` || !source || scrolledForKey.current === key) return;
+    scrolledForKey.current = key;
+    panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [hash, key, source]);
 
   if (isLoading || !source) return null;
 
