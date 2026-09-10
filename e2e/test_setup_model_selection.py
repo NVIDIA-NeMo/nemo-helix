@@ -21,7 +21,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from nemo_platform import APIStatusError, NeMoPlatform
 from nemo_platform_ext.cli.commands import setup as setup_commands
-from nemo_platform_ext.cli.commands.setup import ModelPair
+from nemo_platform_ext.cli.commands.setup import ModelPair, SetupClients
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_platform_plugin.models.client import ModelsClient
+from nemo_platform_plugin.secrets.client import SecretsClient
 from nmp.common.config import Configuration
 from nmp.core.inference_gateway.api.mock_provider import MOCK_RESPONSE_HEADER, MOCK_SERVED_MODELS_HEADER
 from nmp.core.inference_gateway.config import InferenceGatewayConfig
@@ -89,9 +93,14 @@ def _run_auto_setup(sdk: NeMoPlatform, workspace: str, provider_name: str) -> Mo
         patch(f"{SETUP_MOD}._maybe_deploy_agent"),
         patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
     ):
+        clients = SetupClients(
+            models=client_from_platform(sdk, ModelsClient),
+            secrets=client_from_platform(sdk, SecretsClient),
+            gateway=client_from_platform(sdk, InferenceGatewayClient),
+        )
         setup_commands._run_auto_mode(
             MagicMock(),
-            sdk,
+            clients,
             workspace,
             str(sdk.base_url),
             install_skills=False,

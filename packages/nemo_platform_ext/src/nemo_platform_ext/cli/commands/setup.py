@@ -18,19 +18,23 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum, StrEnum
 from importlib.resources import files
 from importlib.resources.abc import Traversable
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
 import httpx
 import typer
 import yaml as _yaml
-from nemo_platform import APIConnectionError, APIStatusError, APITimeoutError, NeMoPlatform
 from nemo_platform_plugin.capabilities import probe_docker
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError
+from nemo_platform_plugin.client.types import RetryPolicy
+from nemo_platform_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_platform_plugin.inference_gateway.types import JsonBody
+from nemo_platform_plugin.models.client import ModelsClient
+from nemo_platform_plugin.models.types import CreateModelProviderRequest, UpsertModelProviderRequest
 from nemo_platform_plugin.secrets.client import SecretsClient
 from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest, PlatformSecretUpdateRequest
 from nemo_platform_plugin.workspaces.client import WorkspacesClient
@@ -229,6 +233,23 @@ class ModelPair:
 
     default: str
     fast: str
+
+
+@dataclass(frozen=True)
+class SetupClients:
+    """Typed service clients the setup flow talks to, all sharing the CLI's auth and transport."""
+
+    models: ModelsClient
+    secrets: SecretsClient
+    gateway: InferenceGatewayClient
+
+    @classmethod
+    def from_context(cls, cli_context: CLIContext) -> SetupClients:
+        return cls(
+            models=cli_context.typed_client(ModelsClient),
+            secrets=cli_context.typed_client(SecretsClient),
+            gateway=cli_context.typed_client(InferenceGatewayClient),
+        )
 
 
 # Env vars probed during --auto mode, in priority order.
@@ -580,37 +601,38 @@ def _verify_platform_health(base_url: str, *, certificate_authority: str | None 
     return False
 
 
-def _provider_exists(client: NeMoPlatform, name: str, workspace: str) -> bool:
+def _provider_exists(clients: SetupClients, name: str, workspace: str) -> bool:
     """Return True if a provider with *name* already exists."""
     try:
-        client.inference.providers.retrieve(name, workspace=workspace)
+        clients.models.get_provider(name=name, workspace=workspace)
         return True
     except Exception:
         return False
 
 
-def _secret_exists(client: NeMoPlatform, name: str, workspace: str) -> bool:
+def _secret_exists(clients: SetupClients, name: str, workspace: str) -> bool:
     """Return True if a secret with *name* already exists."""
-    secrets = client_from_platform(client, SecretsClient)
     try:
-        secrets.get_secret(name=name, workspace=workspace)
+        clients.secrets.get_secret(name=name, workspace=workspace)
         return True
     except Exception:
         return False
 
 
-def _create_secret(client: NeMoPlatform, name: str, value: str, workspace: str) -> None:
-    secrets = client_from_platform(client, SecretsClient)
-    secrets.create_secret(body=PlatformSecretCreateRequest(name=name, value=SecretStr(value)), workspace=workspace)
+def _create_secret(clients: SetupClients, name: str, value: str, workspace: str) -> None:
+    clients.secrets.create_secret(
+        body=PlatformSecretCreateRequest(name=name, value=SecretStr(value)), workspace=workspace
+    )
 
 
-def _update_secret(client: NeMoPlatform, name: str, value: str, workspace: str) -> None:
-    secrets = client_from_platform(client, SecretsClient)
-    secrets.update_secret(name=name, body=PlatformSecretUpdateRequest(value=SecretStr(value)), workspace=workspace)
+def _update_secret(clients: SetupClients, name: str, value: str, workspace: str) -> None:
+    clients.secrets.update_secret(
+        name=name, body=PlatformSecretUpdateRequest(value=SecretStr(value)), workspace=workspace
+    )
 
 
 def _create_provider(
-    client: NeMoPlatform,
+    clients: SetupClients,
     *,
     name: str,
     host_url: str,
@@ -619,20 +641,16 @@ def _create_provider(
     auth_header_format: str | None = None,
     default_extra_headers: dict[str, str] | None = None,
 ) -> None:
-    kwargs: dict = {
-        "name": name,
-        "host_url": host_url,
-        "workspace": workspace,
-    }
+    fields: dict[str, Any] = {"name": name, "host_url": host_url}
     if secret_name:
-        kwargs["api_key_secret_name"] = secret_name
+        fields["api_key_secret_name"] = secret_name
     if auth_header_format:
-        kwargs["auth_header_format"] = auth_header_format
+        fields["auth_header_format"] = auth_header_format
     if default_extra_headers:
-        kwargs["default_extra_headers"] = default_extra_headers
+        fields["default_extra_headers"] = default_extra_headers
     provider_type = _provider_type_for_connection(name, host_url)
     try:
-        client.inference.providers.create(**kwargs)
+        clients.models.create_provider(body=CreateModelProviderRequest(**fields), workspace=workspace)
     except Exception:
         emit.emit_event(
             OnboardingStepEvent(
@@ -648,7 +666,7 @@ def _create_provider(
 
 
 def _update_provider(
-    client: NeMoPlatform,
+    clients: SetupClients,
     *,
     name: str,
     host_url: str,
@@ -657,20 +675,17 @@ def _update_provider(
     auth_header_format: str | None = None,
     default_extra_headers: dict[str, str] | None = None,
 ) -> None:
-    kwargs: dict = {
-        "host_url": host_url,
-        "workspace": workspace,
-    }
+    fields: dict[str, Any] = {"host_url": host_url}
     if secret_name:
-        kwargs["api_key_secret_name"] = secret_name
+        fields["api_key_secret_name"] = secret_name
     if auth_header_format:
-        kwargs["auth_header_format"] = auth_header_format
-        kwargs["required_extra_headers"] = None
+        fields["auth_header_format"] = auth_header_format
+        fields["required_extra_headers"] = None
     if default_extra_headers:
-        kwargs["default_extra_headers"] = default_extra_headers
+        fields["default_extra_headers"] = default_extra_headers
     provider_type = _provider_type_for_connection(name, host_url)
     try:
-        client.inference.providers.update(name, **kwargs)
+        clients.models.upsert_provider(name=name, body=UpsertModelProviderRequest(**fields), workspace=workspace)
     except Exception:
         emit.emit_event(
             OnboardingStepEvent(
@@ -710,7 +725,7 @@ def _bucket_model_count(count: int) -> str:
 
 
 def _wait_for_models(
-    client: NeMoPlatform,
+    clients: SetupClients,
     provider_name: str,
     workspace: str,
     host_url: str = "",
@@ -723,7 +738,7 @@ def _wait_for_models(
     the discovered-count bucket on success, ERROR (re-raised) if polling blows up.
     """
     try:
-        models = _wait_for_models_impl(client, provider_name, workspace, host_url, round_seconds, max_rounds)
+        models = _wait_for_models_impl(clients, provider_name, workspace, host_url, round_seconds, max_rounds)
     except Exception:
         emit.emit_event(OnboardingStepEvent(step="models_discovered", task_status=TaskStatusEnum.ERROR))
         raise
@@ -738,7 +753,7 @@ def _wait_for_models(
 
 
 def _wait_for_models_impl(
-    client: NeMoPlatform,
+    clients: SetupClients,
     provider_name: str,
     workspace: str,
     host_url: str = "",
@@ -760,14 +775,15 @@ def _wait_for_models_impl(
                 elapsed = int(time.monotonic() - start)
                 status.update(f"[bold cyan]Waiting for model discovery... ({elapsed}s)")
                 try:
-                    provider = client.inference.providers.retrieve(provider_name, workspace=workspace)
+                    provider = clients.models.get_provider(name=provider_name, workspace=workspace).data()
                     served = getattr(provider, "served_models", None) or []
                     if served:
                         model_ids = [m.model_entity_id for m in served if getattr(m, "model_entity_id", None)]
                         if model_ids:
                             return model_ids
 
-                    provider_status = getattr(provider, "status", None) or ""
+                    raw_status = getattr(provider, "status", None)
+                    provider_status = raw_status.value if isinstance(raw_status, Enum) else (raw_status or "")
                     provider_msg = getattr(provider, "status_message", None) or ""
 
                     if _NON_COMPLIANT_MARKER in provider_msg:
@@ -800,7 +816,7 @@ def _wait_for_models_impl(
 
 
 def _get_all_model_entity_ids(
-    client: NeMoPlatform,
+    clients: SetupClients,
     workspace: str,
     *,
     provider_name: str | None = None,
@@ -808,8 +824,7 @@ def _get_all_model_entity_ids(
     """Return model entity IDs, optionally scoped to one provider."""
     entity_ids: list[str] = []
     try:
-        page = client.inference.providers.list(workspace=workspace)
-        for provider in page.data:
+        for provider in clients.models.list_providers(workspace=workspace).items():
             if provider_name is not None and getattr(provider, "name", None) != provider_name:
                 continue
             for model in getattr(provider, "served_models", None) or []:
@@ -876,7 +891,7 @@ def _order_candidates_by_size(entity_ids: list[str], *, largest_first: bool) -> 
     return sorted(entity_ids, key=sort_key)
 
 
-def _probe_model_entity(client: NeMoPlatform, workspace: str, entity_id: str) -> bool:
+def _probe_model_entity(gateway: InferenceGatewayClient, workspace: str, entity_id: str) -> bool:
     """Return True when a short chat request against *entity_id* succeeds.
 
     Retries route 404s; timeouts skip; connection errors raise.
@@ -885,23 +900,25 @@ def _probe_model_entity(client: NeMoPlatform, workspace: str, entity_id: str) ->
     retries = 0
     while True:
         try:
-            client.inference.gateway.openai.post(
-                "v1/chat/completions",
+            gateway.openai_post(
+                trailing_uri="v1/chat/completions",
                 workspace=workspace,
-                body={
-                    "model": entity_id,
-                    "messages": [{"role": "user", "content": "Respond with 'OK'"}],
-                    "max_tokens": 16,
-                },
+                body=JsonBody(
+                    {
+                        "model": entity_id,
+                        "messages": [{"role": "user", "content": "Respond with 'OK'"}],
+                        "max_tokens": 16,
+                    }
+                ),
             )
-        except APITimeoutError:
+        except NemoTransportError as exc:
+            if not isinstance(exc.error, httpx.TimeoutException):
+                raise
             logger.debug("Model probe for '%s' timed out", entity_id, exc_info=True)
             console.print(f"  {WARN} Skipping {_display_model_name(entity_id)} (timed out)")
             return False
-        except APIConnectionError:
-            raise
-        except APIStatusError as exc:
-            detail = str(exc.body or exc.response.text or exc)
+        except NemoHTTPError as exc:
+            detail = str(exc.body or exc.http_response.text or exc)
             entitlement_miss = "not found for account" in detail.lower()
             if (
                 exc.status_code == 404
@@ -921,7 +938,7 @@ def _probe_model_entity(client: NeMoPlatform, workspace: str, entity_id: str) ->
         return True
 
 
-def _select_usable_model_pair(client: NeMoPlatform, workspace: str, entity_ids: list[str]) -> ModelPair | None:
+def _select_usable_model_pair(clients: SetupClients, workspace: str, entity_ids: list[str]) -> ModelPair | None:
     """Choose the largest and smallest models that answer a chat request.
 
     Returns ``None`` when nothing answers, including when the gateway is
@@ -932,7 +949,7 @@ def _select_usable_model_pair(client: NeMoPlatform, workspace: str, entity_ids: 
         return None
 
     usable: dict[str, bool] = {}
-    probe_client = client.with_options(max_retries=0, timeout=_MODEL_PROBE_TIMEOUT)
+    probe_client = clients.gateway.with_options(retry=RetryPolicy(max_retries=0), timeout=_MODEL_PROBE_TIMEOUT)
     started = time.monotonic()
     deadline = started + _MODEL_PROBE_BUDGET_SECONDS
 
@@ -954,14 +971,14 @@ def _select_usable_model_pair(client: NeMoPlatform, workspace: str, entity_ids: 
         if default_model is None:
             return None
         fast_model = first_usable(_order_candidates_by_size(candidates, largest_first=False)) or default_model
-    except APIConnectionError as exc:
+    except NemoTransportError as exc:
         console.print(f"  {WARN} Could not verify models ({exc}).")
         return None
     return ModelPair(default=default_model, fast=fast_model)
 
 
 def _get_all_model_choices(
-    client: NeMoPlatform,
+    clients: SetupClients,
     workspace: str,
     *,
     provider_name: str | None = None,
@@ -969,8 +986,7 @@ def _get_all_model_choices(
     """Return picker choices, optionally scoped to one provider."""
     choices: list[tuple[str, str]] = []
     try:
-        page = client.inference.providers.list(workspace=workspace)
-        for provider in page.data:
+        for provider in clients.models.list_providers(workspace=workspace).items():
             current_provider_name = getattr(provider, "name", "unknown-provider")
             if provider_name is not None and current_provider_name != provider_name:
                 continue
@@ -2043,7 +2059,7 @@ def _collect_credential(provider: KnownProvider) -> str:
 
 
 def _register_provider_interactive(
-    client: NeMoPlatform,
+    clients: SetupClients,
     *,
     provider_name: str,
     host_url: str,
@@ -2056,16 +2072,16 @@ def _register_provider_interactive(
     secret_name: str | None = None
     if api_key:
         secret_name = f"{provider_name}-api-key"
-        if _secret_exists(client, secret_name, workspace):
-            _update_secret(client, secret_name, api_key, workspace)
+        if _secret_exists(clients, secret_name, workspace):
+            _update_secret(clients, secret_name, api_key, workspace)
             console.print(f"  {CHECK} Updated secret '{secret_name}'")
         else:
-            _create_secret(client, secret_name, api_key, workspace)
+            _create_secret(clients, secret_name, api_key, workspace)
             console.print(f"  {CHECK} Created secret '{secret_name}'")
 
-    if _provider_exists(client, provider_name, workspace):
+    if _provider_exists(clients, provider_name, workspace):
         _update_provider(
-            client,
+            clients,
             name=provider_name,
             host_url=host_url,
             secret_name=secret_name,
@@ -2076,7 +2092,7 @@ def _register_provider_interactive(
         console.print(f"  {CHECK} Updated provider '{provider_name}' ({host_url})")
     else:
         _create_provider(
-            client,
+            clients,
             name=provider_name,
             host_url=host_url,
             secret_name=secret_name,
@@ -2242,13 +2258,13 @@ def _validate_api_key(
 
 
 def _select_model_pair(
-    client: NeMoPlatform,
+    clients: SetupClients,
     workspace: str,
     *,
     provider_name: str | None = None,
 ) -> ModelPair | None:
     """Let the user pick default and fast models from one provider."""
-    display_models = _get_all_model_choices(client, workspace, provider_name=provider_name)
+    display_models = _get_all_model_choices(clients, workspace, provider_name=provider_name)
     if not display_models:
         console.print(f"  {WARN} No models discovered yet. You can select models later.")
         return None
@@ -2258,7 +2274,7 @@ def _select_model_pair(
         console.print(f"  {WARN} No usable chat models discovered yet. You can select models later.")
         return None
 
-    suggested = _select_usable_model_pair(client, workspace, entity_ids)
+    suggested = _select_usable_model_pair(clients, workspace, entity_ids)
     if suggested is None:
         console.print(f"  {WARN} None of the discovered models served a test request; choose a model explicitly.")
 
@@ -2301,7 +2317,7 @@ def _check_ollama_running(host_url: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _auto_setup(client: NeMoPlatform, workspace: str) -> str | None:
+def _auto_setup(clients: SetupClients, workspace: str) -> str | None:
     """Register a provider from environment variables and return its name."""
     for key_var, url_var in _AUTO_ENV_VARS:
         api_key = os.environ.get(key_var)
@@ -2345,16 +2361,16 @@ def _auto_setup(client: NeMoPlatform, workspace: str) -> str | None:
             console.print(f"  {WARN} {escape(key_result.message)}")
 
         secret_name = f"{provider_name}-api-key"
-        if _secret_exists(client, secret_name, workspace):
-            _update_secret(client, secret_name, api_key, workspace)
+        if _secret_exists(clients, secret_name, workspace):
+            _update_secret(clients, secret_name, api_key, workspace)
             console.print(f"  {CHECK} Updated secret '{secret_name}' (from ${key_var})")
         else:
-            _create_secret(client, secret_name, api_key, workspace)
+            _create_secret(clients, secret_name, api_key, workspace)
             console.print(f"  {CHECK} Created secret '{secret_name}' (from ${key_var})")
 
-        if _provider_exists(client, provider_name, workspace):
+        if _provider_exists(clients, provider_name, workspace):
             _update_provider(
-                client,
+                clients,
                 name=provider_name,
                 host_url=host_url,
                 secret_name=secret_name,
@@ -2365,7 +2381,7 @@ def _auto_setup(client: NeMoPlatform, workspace: str) -> str | None:
             console.print(f"  {CHECK} Updated provider '{provider_name}' ({host_url})")
         else:
             _create_provider(
-                client,
+                clients,
                 name=provider_name,
                 host_url=host_url,
                 secret_name=secret_name,
@@ -2572,8 +2588,7 @@ def setup_command(
     cli_context.reset_sdk_context()
     certificate_authority = cli_context.get_sdk_context().cluster.certificate_authority
 
-    client = cli_context.get_client()
-    workspaces = client_from_platform(client, WorkspacesClient)
+    workspaces = cli_context.typed_client(WorkspacesClient)
 
     try:
         workspaces.get_workspace(name=workspace).data()
@@ -2591,12 +2606,13 @@ def setup_command(
 
     skills_agents_list = _parse_csv_flag(skills_agents)
     skills_from_list = _parse_csv_flag(skills_from)
+    clients = SetupClients.from_context(cli_context)
 
     try:
         if auto:
             _run_auto_mode(
                 cli_context,
-                client,
+                clients,
                 workspace,
                 base_url,
                 install_skills,
@@ -2609,7 +2625,7 @@ def setup_command(
         else:
             _run_interactive_mode(
                 cli_context,
-                client,
+                clients,
                 workspace,
                 base_url,
                 install_skills,
@@ -2635,7 +2651,7 @@ def setup_command(
 
 def _run_auto_mode(
     cli_context: CLIContext,
-    client: NeMoPlatform,
+    clients: SetupClients,
     workspace: str,
     base_url: str,
     install_skills: bool | None,
@@ -2648,7 +2664,7 @@ def _run_auto_mode(
 ) -> None:
     """Non-interactive provider registration from environment variables."""
     console.print("[bold]Auto-detecting provider from environment...[/bold]\n")
-    provider_name = _auto_setup(client, workspace)
+    provider_name = _auto_setup(clients, workspace)
     if provider_name is None:
         console.print(f"{CROSS} No provider credentials found in environment.")
         env_var_names = ", ".join(key for key, _ in _AUTO_ENV_VARS)
@@ -2660,7 +2676,7 @@ def _run_auto_mode(
     for attempt in range(_MODEL_DISCOVERY_MAX_ROUNDS):
         deadline = time.time() + _MODEL_DISCOVERY_ROUND_SECONDS
         while time.time() < deadline:
-            entity_ids = _get_all_model_entity_ids(client, workspace, provider_name=provider_name)
+            entity_ids = _get_all_model_entity_ids(clients, workspace, provider_name=provider_name)
             if entity_ids:
                 break
             _pause(_MODEL_DISCOVERY_POLL_INTERVAL)
@@ -2686,7 +2702,7 @@ def _run_auto_mode(
     if default_override:
         model_pair = ModelPair(default=default_override, fast=fast_override or default_override)
     elif entity_ids:
-        selected = _select_usable_model_pair(client, workspace, entity_ids)
+        selected = _select_usable_model_pair(clients, workspace, entity_ids)
         model_pair = ModelPair(default=selected.default, fast=fast_override or selected.fast) if selected else None
     else:
         model_pair = None
@@ -2737,7 +2753,7 @@ def _run_auto_mode(
 
 def _run_interactive_mode(
     cli_context: CLIContext,
-    client: NeMoPlatform,
+    clients: SetupClients,
     workspace: str,
     base_url: str,
     install_skills: bool | None,
@@ -2772,7 +2788,7 @@ def _run_interactive_mode(
 
         console.print("\n[bold]Step 3: Register model provider[/bold]\n")
         _register_provider_interactive(
-            client,
+            clients,
             provider_name=provider_name,
             host_url=host_url,
             api_key=api_key,
@@ -2783,18 +2799,18 @@ def _run_interactive_mode(
 
         console.print("\n[bold]Step 4: Discover models[/bold]\n")
         console.print("  Waiting for model discovery...")
-        models = _wait_for_models(client, provider_name, workspace, host_url=host_url)
+        models = _wait_for_models(clients, provider_name, workspace, host_url=host_url)
         if models:
             console.print(f"  {CHECK} Found {len(models)} model(s)")
         else:
             console.print(f"  {WARN} No models discovered yet (provider may still be syncing)")
 
         console.print("\n[bold]Step 5: Choose agent models[/bold]\n")
-        fallback_model_choices = _get_all_model_choices(client, workspace) if not models else []
+        fallback_model_choices = _get_all_model_choices(clients, workspace) if not models else []
         if not models and fallback_model_choices:
             console.print(f"  {WARN} Models from existing providers are available, but not from '{provider_name}' yet.")
 
-        model_pair = _select_model_pair(client, workspace, provider_name=provider_name) if models else None
+        model_pair = _select_model_pair(clients, workspace, provider_name=provider_name) if models else None
         default_model = model_pair.default if model_pair else None
         if model_pair:
             _save_model_pair(cli_context, model_pair)
