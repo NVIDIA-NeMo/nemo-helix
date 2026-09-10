@@ -1,13 +1,28 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# NOTE: This file is auto-generated
+"""``nemo inference providers`` command group, backed by the typed Models client."""
+
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 import typer
+from nemo_platform_plugin.models.client import ModelsClient
+from nemo_platform_plugin.models.types import (
+    CreateModelProviderRequest,
+    ListProvidersQueryParams,
+    UpdateModelProviderStatusRequest,
+    UpsertModelProviderRequest,
+)
 
+from nemo_platform_ext.cli.commands.inference._common import (
+    filter_query_value,
+    offset_query_params,
+    pop_exist_ok,
+    pop_workspace,
+    read_input_payload,
+)
 from nemo_platform_ext.cli.core.api import build_kwargs, merge_filter_dict
 from nemo_platform_ext.cli.core.code_generator import handle_code_generation
 from nemo_platform_ext.cli.core.context import CLIContext
@@ -19,8 +34,8 @@ from nemo_platform_ext.cli.core.formatters import (
     validate_stream_output_format,
 )
 from nemo_platform_ext.cli.core.help_formatter import collect_warnings, create_typer_app
-from nemo_platform_ext.cli.core.pagination import PaginationType, fetch_all_pages, warn_if_more_pages
-from nemo_platform_ext.cli.core.stdin_utils import read_data_input_with_flags, read_payload, validate_required_fields
+from nemo_platform_ext.cli.core.pagination import PaginationType, collect_offset_pages, warn_if_more_pages
+from nemo_platform_ext.cli.core.stdin_utils import build_request_body, read_payload, validate_required_fields
 from nemo_platform_ext.cli.core.types import (
     EntityOutputFormatOption,
     ListOutputFormatOption,
@@ -30,6 +45,8 @@ from nemo_platform_ext.cli.core.types import (
 )
 
 app = create_typer_app(name="providers", help="Manage providers")
+
+ProviderStatusValue = Literal["UNKNOWN", "CREATED", "PENDING", "READY", "ERROR", "DELETING", "DELETED", "LOST"]
 
 
 @app.command("create")
@@ -109,7 +126,7 @@ def create_providers(
         ),
     ] = None,
     status: Annotated[
-        Literal["UNKNOWN", "CREATED", "PENDING", "READY", "ERROR", "DELETING", "DELETED", "LOST"] | None,
+        ProviderStatusValue | None,
         typer.Option("--status", help="Status enum for ModelProvider objects."),
     ] = None,
     status_message: Annotated[str | None, typer.Option("--status-message", help="Status message")] = None,
@@ -139,13 +156,8 @@ def create_providers(
     echo '{"json": "data"}' | nemo inference providers create <name> --input-file -
     nemo inference providers create <name> --<option> "value"
     """
-    # Read base input (optional if all fields provided via flags)
-    if input_file or input_data:
-        input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
-    else:
-        input_payload = {}
+    input_payload = read_input_payload(input_file, input_data)
 
-    # Apply CLI flag overrides (flags take precedence)
     if workspace is not None:
         input_payload["workspace"] = workspace
     if host_url is not None:
@@ -178,7 +190,6 @@ def create_providers(
         input_payload["status_message"] = status_message
     if exist_ok is not None:
         input_payload["exist_ok"] = exist_ok
-    # Validate required fields are present after merging
     validate_required_fields(
         input_payload,
         ["host_url", "name"],
@@ -189,20 +200,24 @@ def create_providers(
         },
     )
 
-    all_kwargs = input_payload
+    request_workspace = pop_workspace(input_payload)
+    request_exist_ok = pop_exist_ok(input_payload)
+    body = build_request_body(CreateModelProviderRequest, input_payload, command_name="inference providers create")
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["inference", "providers"], "create", all_kwargs, output_format, state):
+    kwargs = build_kwargs(workspace=request_workspace, body=body, exist_ok=request_exist_ok)
+    if handle_code_generation(ModelsClient, "create_provider", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.inference.providers.create(**all_kwargs)
+    result = state.typed_client(ModelsClient).create_provider(
+        workspace=request_workspace, body=body, exist_ok=bool(request_exist_ok)
+    )
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -218,12 +233,7 @@ def delete_providers(
 ) -> None:
     """Delete a model provider by workspace and name."""
     state: CLIContext = ctx.obj
-    client = state.get_client()
-
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-    client.inference.providers.delete(name, **kwargs)
+    state.typed_client(ModelsClient).delete_provider(name=name, workspace=workspace)
 
     typer.echo("✓ Deleted successfully")
 
@@ -272,22 +282,22 @@ def list_providers(
 ) -> None:
     """List model providers for a specific workspace."""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
-    validate_stream_output_format(output_format, stream)
+    resolved_output_format = state.get_output_format(output_format)
+    validate_stream_output_format(resolved_output_format, stream)
 
-    check_output_columns_with_format(columns, output_format)
+    check_output_columns_with_format(columns, resolved_output_format)
 
     default_columns = [
         Column("name", None),
         Column("description", None),
         Column("created_at", None),
     ]
+    output_columns: str | list[Column] | None = columns
     if columns is None or str(columns).strip() == "default":
-        columns = default_columns
+        output_columns = default_columns
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-        filter=merge_filter_dict(
+    filter_value = filter_query_value(
+        merge_filter_dict(
             filter,
             description=filter_description,
             host_url=filter_host_url,
@@ -296,33 +306,25 @@ def list_providers(
             project=filter_project,
             status=filter_status,
             workspace=filter_workspace,
-        ),
-        page=page,
-        page_size=page_size,
-        sort=sort,
+        )
     )
-
-    if handle_code_generation(["inference", "providers"], "list", kwargs, output_format, state):
+    query_params = cast(
+        "ListProvidersQueryParams | None",
+        offset_query_params(filter_value=filter_value, page=page, page_size=page_size, sort=sort),
+    )
+    kwargs = build_kwargs(workspace=workspace, query_params=query_params)
+    if handle_code_generation(ModelsClient, "list_providers", kwargs, resolved_output_format, state, result="list"):
         return
 
-    client = state.get_client()
-    path_args = ()
+    response = state.typed_client(ModelsClient).list_providers(workspace=workspace, query_params=query_params)
     pagination_type = PaginationType.PAGE_NUMBER
-    if all_pages:
-        items = fetch_all_pages(
-            client.inference.providers.list,
-            path_args=path_args,
-            body_args=kwargs,
-            pagination_type=pagination_type,
-        )
-    else:
-        items = client.inference.providers.list(*path_args, **kwargs)
+    items = collect_offset_pages(response, all_pages=all_pages)
 
     format_output(
         items,
         is_list=True,
-        output_format=output_format,
-        output_columns=columns,
+        output_format=resolved_output_format,
+        output_columns=output_columns,
         no_truncate=state.get_no_truncate(no_truncate),
         timestamp_format=state.get_timestamp_format(),
         stream=stream,
@@ -342,21 +344,18 @@ def retrieve_providers(
 ) -> None:
     """Get a model provider by workspace and name."""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-    if handle_code_generation(["inference", "providers"], "retrieve", kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=workspace)
+    if handle_code_generation(ModelsClient, "get_provider", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.inference.providers.retrieve(name, **kwargs)
+    result = state.typed_client(ModelsClient).get_provider(name=name, workspace=workspace)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -434,7 +433,7 @@ def update_providers(
         ),
     ] = None,
     status: Annotated[
-        Literal["UNKNOWN", "CREATED", "PENDING", "READY", "ERROR", "DELETING", "DELETED", "LOST"] | None,
+        ProviderStatusValue | None,
         typer.Option("--status", help="Status enum for ModelProvider objects."),
     ] = None,
     status_message: Annotated[str | None, typer.Option("--status-message", help="Status message")] = None,
@@ -458,13 +457,8 @@ def update_providers(
     echo '{"json": "data"}' | nemo inference providers update <name> --input-file -
     nemo inference providers update <name> --<option> "value"
     """
-    # Read base input (optional if all fields provided via flags)
-    if input_file or input_data:
-        input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
-    else:
-        input_payload = {}
+    input_payload = read_input_payload(input_file, input_data)
 
-    # Apply CLI flag overrides (flags take precedence)
     if workspace is not None:
         input_payload["workspace"] = workspace
     if host_url is not None:
@@ -493,7 +487,6 @@ def update_providers(
         input_payload["status"] = status
     if status_message is not None:
         input_payload["status_message"] = status_message
-    # Validate required fields are present after merging
     validate_required_fields(
         input_payload,
         ["host_url"],
@@ -503,21 +496,21 @@ def update_providers(
         },
     )
 
-    all_kwargs = {"name": name, **input_payload}
-
+    request_workspace = pop_workspace(input_payload)
+    body = build_request_body(UpsertModelProviderRequest, input_payload, command_name="inference providers update")
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["inference", "providers"], "update", all_kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=request_workspace, body=body)
+    if handle_code_generation(ModelsClient, "upsert_provider", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.inference.providers.update(**all_kwargs)
+    result = state.typed_client(ModelsClient).upsert_provider(name=name, workspace=request_workspace, body=body)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -545,7 +538,7 @@ def update_status_providers(
         ),
     ] = None,
     status: Annotated[
-        Literal["UNKNOWN", "CREATED", "PENDING", "READY", "ERROR", "DELETING", "DELETED", "LOST"] | None,
+        ProviderStatusValue | None,
         typer.Option("--status", help="Status enum for ModelProvider objects."),
     ] = None,
     status_message: Annotated[
@@ -583,13 +576,8 @@ def update_status_providers(
         echo '{"json": "data"}' | nemo inference providers update-status <name> --input-file -
         nemo inference providers update-status <name> --<option> "value"
     """
-    # Read base input (optional if all fields provided via flags)
-    if input_file or input_data:
-        input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
-    else:
-        input_payload = {}
+    input_payload = read_input_payload(input_file, input_data)
 
-    # Apply CLI flag overrides (flags take precedence)
     if workspace is not None:
         input_payload["workspace"] = workspace
     if model_deployment_id is not None:
@@ -601,21 +589,23 @@ def update_status_providers(
     if status_message is not None:
         input_payload["status_message"] = status_message
 
-    all_kwargs = {"name": name, **input_payload}
-
+    request_workspace = pop_workspace(input_payload)
+    body = build_request_body(
+        UpdateModelProviderStatusRequest, input_payload, command_name="inference providers update-status"
+    )
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["inference", "providers"], "update_status", all_kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=request_workspace, body=body)
+    if handle_code_generation(ModelsClient, "update_provider_status", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.inference.providers.update_status(**all_kwargs)
+    result = state.typed_client(ModelsClient).update_provider_status(name=name, workspace=request_workspace, body=body)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )

@@ -26,30 +26,17 @@ top_level:
     panel: Core plugins
     help: Manage access keys.
     hidden: true
-  adapters:
-    panel: Core plugins
-    help: Manage adapters.
-    hidden: true
   audit:
     panel: Functional plugins
   experiments:
     panel: Functional plugins
     help: Manage experiments.
-  files:
-    panel: Core plugins
-    help: Manage files.
   guardrail:
     panel: Functional plugins
     help: Manage guardrails.
-  inference:
-    panel: Core plugins
-    help: Inference operations.
   intake:
     panel: Functional plugins
     help: Intake operations.
-  models:
-    panel: Core plugins
-    help: Manage models.
   secrets:
     panel: Core plugins
     help: Manage secrets.
@@ -62,12 +49,6 @@ config:
   skip: true
 - resource: [iam]
   skip: true
-- resource: [models]
-  methods:
-    list:
-      columns:
-      - name
-      - description
 - resource: [datasets]
   methods:
     list:
@@ -136,13 +117,6 @@ config:
       - created_at
 - resource: [jobs]
   skip: true
-- resource: [models]
-  methods:
-    list:
-      columns:
-      - name
-      - description
-      - created_at
 - resource: [evaluation, jobs]
   methods:
     list:
@@ -157,56 +131,6 @@ config:
       columns:
       - timestamp
       - message
-- resource: [inference, deployment_configs]
-  methods:
-    list:
-      columns:
-      - name
-      - description
-      - created_at
-    list_workspace:
-      columns:
-      - name
-      - description
-      - created_at
-- resource: [inference, deployments]
-  methods:
-    create:
-      wait:
-        type: inference_deployment
-        resource_label: deployment
-      watch:
-        type: inference_deployment
-        resource_label: deployment
-    list:
-      columns:
-      - name
-      - status
-      - created_at
-    list_workspace:
-      columns:
-      - name
-      - status
-      - created_at
-- resource: [inference, providers]
-  methods:
-    list:
-      columns:
-      - name
-      - description
-      - created_at
-    list_workspace:
-      columns:
-      - name
-      - description
-      - created_at
-- resource: [inference, models]
-  methods:
-    list:
-      columns:
-      - id
-      - owned_by
-      - created
 - resource: [audit]
   help: Auditor operations.
 - resource: [audit, configs]
@@ -262,34 +186,8 @@ config:
   skip: true
 
 # Gateway proxy commands: `name` is a workspace query param, not a resource identifier
-- resource: [inference, gateway, model]
-  methods:
-    delete:
-      name_positional: false
-    get:
-      name_positional: false
-    patch:
-      name_positional: false
-- resource: [inference, gateway, provider]
-  methods:
-    delete:
-      name_positional: false
-    get:
-      name_positional: false
-    patch:
-      name_positional: false
 
 # High-level file operations at the `nmp files` level
-- resource: [files]
-  additional_methods:
-    upload:
-      override: files/upload.py
-    download:
-      override: files/download.py
-    list:
-      override: files/list.py
-    delete:
-      override: files/delete.py
 
 # The body is binary protobuf, which cannot be passed as a shell argument. Producers
 # use an OTLP exporter or the SDK's create(body=...) instead.
@@ -309,13 +207,21 @@ config:
         nemo intake ingest spans create --source langsmith --spans '[{"span_id":"span-1","trace_id":"trace-1","started_at":"2026-08-14T00:00:00Z"}]'
 
 # High-level inference operations at the `nemo inference` level
-- resource: [inference]
-  additional_methods:
-    get-url:
-      override: inference/get_url.py
 
 - resource: [workspaces]
   skip: true
 
 - resource: [projects]
+  skip: true
+
+- resource: [files]
+  skip: true
+
+- resource: [models]
+  skip: true
+
+- resource: [adapters]
+  skip: true
+
+- resource: [inference]
   skip: true

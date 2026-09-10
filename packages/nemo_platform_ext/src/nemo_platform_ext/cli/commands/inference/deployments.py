@@ -1,14 +1,29 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# NOTE: This file is auto-generated
+"""``nemo inference deployments`` command group, backed by the typed Models client."""
+
 from __future__ import annotations
 
-from importlib import import_module as _importlib_import_module
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 import typer
+from nemo_platform_plugin.models.client import ModelsClient
+from nemo_platform_plugin.models.types import (
+    CreateModelDeploymentRequest,
+    ListDeploymentsQueryParams,
+    UpdateDeploymentStatusQueryParams,
+    UpdateModelDeploymentRequest,
+    UpdateModelDeploymentStatusRequest,
+)
 
+from nemo_platform_ext.cli.commands.inference._common import (
+    filter_query_value,
+    offset_query_params,
+    pop_exist_ok,
+    pop_workspace,
+    read_input_payload,
+)
 from nemo_platform_ext.cli.core.api import build_kwargs, merge_filter_dict
 from nemo_platform_ext.cli.core.code_generator import handle_code_generation
 from nemo_platform_ext.cli.core.context import CLIContext
@@ -20,9 +35,8 @@ from nemo_platform_ext.cli.core.formatters import (
     validate_stream_output_format,
 )
 from nemo_platform_ext.cli.core.help_formatter import collect_warnings, create_typer_app
-from nemo_platform_ext.cli.core.pagination import PaginationType, fetch_all_pages, warn_if_more_pages
-from nemo_platform_ext.cli.core.stdin_utils import read_data_input_with_flags, validate_required_fields
-from nemo_platform_ext.cli.core.stdin_utils import read_payload as read_payload
+from nemo_platform_ext.cli.core.pagination import PaginationType, collect_offset_pages, warn_if_more_pages
+from nemo_platform_ext.cli.core.stdin_utils import build_request_body, validate_required_fields
 from nemo_platform_ext.cli.core.types import (
     EntityOutputFormatOption,
     ListOutputFormatOption,
@@ -32,11 +46,11 @@ from nemo_platform_ext.cli.core.types import (
 )
 from nemo_platform_ext.cli.core.waiters import wait_for_inference_deployment
 
-_cli_child_versions = _importlib_import_module("nemo_platform_ext.cli.commands.api.inference.deployments.versions")
-
 app = create_typer_app(name="deployments", help="Manage deployments")
+versions_app = create_typer_app(name="versions", help="Manage versions")
+app.add_typer(versions_app, name="versions")
 
-app.add_typer(_cli_child_versions.app, name="versions")
+DeploymentStatusValue = Literal["UNKNOWN", "CREATED", "PENDING", "READY", "ERROR", "DELETING", "DELETED", "LOST"]
 
 
 @app.command("create")
@@ -116,13 +130,8 @@ def create_deployments(
     echo '{"json": "data"}' | nemo inference deployments create <name> --input-file -
     nemo inference deployments create <name> --<option> "value"
     """
-    # Read base input (optional if all fields provided via flags)
-    if input_file or input_data:
-        input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
-    else:
-        input_payload = {}
+    input_payload = read_input_payload(input_file, input_data)
 
-    # Apply CLI flag overrides (flags take precedence)
     if workspace is not None:
         input_payload["workspace"] = workspace
     if config is not None:
@@ -135,7 +144,6 @@ def create_deployments(
         input_payload["project"] = project
     if exist_ok is not None:
         input_payload["exist_ok"] = exist_ok
-    # Validate required fields are present after merging
     validate_required_fields(
         input_payload,
         ["config", "name"],
@@ -146,18 +154,21 @@ def create_deployments(
         },
     )
 
-    all_kwargs = input_payload
+    request_workspace = pop_workspace(input_payload)
+    request_exist_ok = pop_exist_ok(input_payload)
+    body = build_request_body(CreateModelDeploymentRequest, input_payload, command_name="inference deployments create")
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
     if wait and watch:
         raise typer.BadParameter("Cannot combine --wait and --watch.")
 
+    kwargs = build_kwargs(workspace=request_workspace, body=body, exist_ok=request_exist_ok)
     if handle_code_generation(
-        ["inference", "deployments"],
-        "create",
-        all_kwargs,
-        output_format,
+        ModelsClient,
+        "create_deployment",
+        kwargs,
+        resolved_output_format,
         state,
         watch_config={"type": "inference_deployment", "resource_label": "deployment"} if watch else None,
         watch_options={"timeout": timeout, "poll_interval": poll_interval} if watch else None,
@@ -166,25 +177,25 @@ def create_deployments(
     ):
         return
 
-    client = state.get_client()
-    result = client.inference.deployments.create(**all_kwargs)
+    result = state.typed_client(ModelsClient).create_deployment(
+        workspace=request_workspace, body=body, exist_ok=bool(request_exist_ok)
+    )
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
     if wait or watch:
-        wait_name = getattr(result, "name", None) or all_kwargs.get("name")
+        wait_name = getattr(result.data(), "name", None) or body.name
         if not wait_name:
             raise RuntimeError("Unable to determine created resource name for --wait/--watch")
-        wait_workspace = all_kwargs.get("workspace")
         if not wait_for_inference_deployment(
-            client,
+            state.get_client(),
             wait_name,
-            workspace=wait_workspace,
+            workspace=request_workspace,
             timeout=timeout,
             poll_interval=poll_interval,
         ):
@@ -218,12 +229,7 @@ def delete_deployments(
       DELETED)
     - 404 Not Found: Deployment doesn't exist"""
     state: CLIContext = ctx.obj
-    client = state.get_client()
-
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-    client.inference.deployments.delete(name, **kwargs)
+    state.typed_client(ModelsClient).delete_deployment(name=name, workspace=workspace)
 
     typer.echo("✓ Deleted successfully")
 
@@ -281,23 +287,22 @@ def list_deployments(
 
     By default, returns only the latest version of each deployment."""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
-    validate_stream_output_format(output_format, stream)
+    resolved_output_format = state.get_output_format(output_format)
+    validate_stream_output_format(resolved_output_format, stream)
 
-    check_output_columns_with_format(columns, output_format)
+    check_output_columns_with_format(columns, resolved_output_format)
 
     default_columns = [
         Column("name", None),
         Column("status", None),
         Column("created_at", None),
     ]
+    output_columns: str | list[Column] | None = columns
     if columns is None or str(columns).strip() == "default":
-        columns = default_columns
+        output_columns = default_columns
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-        all_versions=all_versions,
-        filter=merge_filter_dict(
+    filter_value = filter_query_value(
+        merge_filter_dict(
             filter,
             config=filter_config,
             model_provider_id=filter_model_provider_id,
@@ -306,33 +311,27 @@ def list_deployments(
             status=filter_status,
             status_message=filter_status_message,
             workspace=filter_workspace,
-        ),
-        page=page,
-        page_size=page_size,
-        sort=sort,
+        )
     )
-
-    if handle_code_generation(["inference", "deployments"], "list", kwargs, output_format, state):
+    query_params = cast(
+        "ListDeploymentsQueryParams | None",
+        offset_query_params(
+            filter_value=filter_value, page=page, page_size=page_size, sort=sort, all_versions=all_versions
+        ),
+    )
+    kwargs = build_kwargs(workspace=workspace, query_params=query_params)
+    if handle_code_generation(ModelsClient, "list_deployments", kwargs, resolved_output_format, state, result="list"):
         return
 
-    client = state.get_client()
-    path_args = ()
+    response = state.typed_client(ModelsClient).list_deployments(workspace=workspace, query_params=query_params)
     pagination_type = PaginationType.PAGE_NUMBER
-    if all_pages:
-        items = fetch_all_pages(
-            client.inference.deployments.list,
-            path_args=path_args,
-            body_args=kwargs,
-            pagination_type=pagination_type,
-        )
-    else:
-        items = client.inference.deployments.list(*path_args, **kwargs)
+    items = collect_offset_pages(response, all_pages=all_pages)
 
     format_output(
         items,
         is_list=True,
-        output_format=output_format,
-        output_columns=columns,
+        output_format=resolved_output_format,
+        output_columns=output_columns,
         no_truncate=state.get_no_truncate(no_truncate),
         timestamp_format=state.get_timestamp_format(),
         stream=stream,
@@ -361,35 +360,31 @@ def list_models_deployments(
 
     TODO: Implement model entity retrieval based on deployment config."""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
-    validate_stream_output_format(output_format, stream)
+    resolved_output_format = state.get_output_format(output_format)
+    validate_stream_output_format(resolved_output_format, stream)
 
-    check_output_columns_with_format(columns, output_format)
+    check_output_columns_with_format(columns, resolved_output_format)
 
     default_columns = [
         Column("name", None),
         Column("workspace", None),
         Column("created_at", None),
     ]
+    output_columns: str | list[Column] | None = columns
     if columns is None or str(columns).strip() == "default":
-        columns = default_columns
+        output_columns = default_columns
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-
-    if handle_code_generation(["inference", "deployments"], "list_models", kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=workspace)
+    if handle_code_generation(ModelsClient, "get_deployment_models", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    path_args = (name,)
-    items = client.inference.deployments.list_models(*path_args, **kwargs)
+    items = state.typed_client(ModelsClient).get_deployment_models(name=name, workspace=workspace)
 
     format_output(
         items,
         is_list=True,
-        output_format=output_format,
-        output_columns=columns,
+        output_format=resolved_output_format,
+        output_columns=output_columns,
         no_truncate=state.get_no_truncate(no_truncate),
         timestamp_format=state.get_timestamp_format(),
         stream=stream,
@@ -407,21 +402,18 @@ def retrieve_deployments(
 ) -> None:
     """Get the latest version of a ModelDeployment."""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-    if handle_code_generation(["inference", "deployments"], "retrieve", kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=workspace)
+    if handle_code_generation(ModelsClient, "get_deployment", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.inference.deployments.retrieve(name, **kwargs)
+    result = state.typed_client(ModelsClient).get_deployment(name=name, workspace=workspace)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -464,20 +456,14 @@ def update_deployments(
     echo '{"json": "data"}' | nemo inference deployments update <name> --input-file -
     nemo inference deployments update <name> --<option> "value"
     """
-    # Read base input (optional if all fields provided via flags)
-    if input_file or input_data:
-        input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
-    else:
-        input_payload = {}
+    input_payload = read_input_payload(input_file, input_data)
 
-    # Apply CLI flag overrides (flags take precedence)
     if workspace is not None:
         input_payload["workspace"] = workspace
     if config is not None:
         input_payload["config"] = config
     if config_version is not None:
         input_payload["config_version"] = config_version
-    # Validate required fields are present after merging
     validate_required_fields(
         input_payload,
         ["config"],
@@ -487,21 +473,21 @@ def update_deployments(
         },
     )
 
-    all_kwargs = {"name": name, **input_payload}
-
+    request_workspace = pop_workspace(input_payload)
+    body = build_request_body(UpdateModelDeploymentRequest, input_payload, command_name="inference deployments update")
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["inference", "deployments"], "update", all_kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=request_workspace, body=body)
+    if handle_code_generation(ModelsClient, "update_deployment", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.inference.deployments.update(**all_kwargs)
+    result = state.typed_client(ModelsClient).update_deployment(name=name, workspace=request_workspace, body=body)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -515,7 +501,7 @@ def update_status_deployments(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     status: Annotated[
-        Literal["UNKNOWN", "CREATED", "PENDING", "READY", "ERROR", "DELETING", "DELETED", "LOST"] | None,
+        DeploymentStatusValue | None,
         typer.Option("--status", help="Status enum for ModelDeployment objects. (required)"),
     ] = None,
     version: Annotated[str | None, typer.Option("--version")] = None,
@@ -550,13 +536,8 @@ def update_status_deployments(
         echo '{"json": "data"}' | nemo inference deployments update-status <name> --input-file -
         nemo inference deployments update-status <name> --<option> "value"
     """
-    # Read base input (optional if all fields provided via flags)
-    if input_file or input_data:
-        input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
-    else:
-        input_payload = {}
+    input_payload = read_input_payload(input_file, input_data)
 
-    # Apply CLI flag overrides (flags take precedence)
     if workspace is not None:
         input_payload["workspace"] = workspace
     if status is not None:
@@ -567,7 +548,6 @@ def update_status_deployments(
         input_payload["model_provider_id"] = model_provider_id
     if status_message is not None:
         input_payload["status_message"] = status_message
-    # Validate required fields are present after merging
     validate_required_fields(
         input_payload,
         ["status"],
@@ -577,21 +557,139 @@ def update_status_deployments(
         },
     )
 
-    all_kwargs = {"name": name, **input_payload}
-
+    request_workspace = pop_workspace(input_payload)
+    request_version = input_payload.pop("version", None)
+    query_params: UpdateDeploymentStatusQueryParams | None = None
+    if request_version is not None:
+        query_params = {"version": str(request_version)}
+    body = build_request_body(
+        UpdateModelDeploymentStatusRequest, input_payload, command_name="inference deployments update-status"
+    )
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["inference", "deployments"], "update_status", all_kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=request_workspace, body=body, query_params=query_params)
+    if handle_code_generation(ModelsClient, "update_deployment_status", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.inference.deployments.update_status(**all_kwargs)
+    result = state.typed_client(ModelsClient).update_deployment_status(
+        name=name, workspace=request_workspace, body=body, query_params=query_params
+    )
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
+
+
+@versions_app.command("delete")
+@collect_warnings
+@handle_errors
+def delete_versions(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument()],
+    *,
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    deployment: Annotated[str, typer.Option("--deployment")],
+) -> None:
+    """Delete a specific version of a ModelDeployment.
+
+    If the deployment is in any state other than DELETED, this will set its status
+    to DELETING. The models controller will then:
+
+    1. Delete the infrastructure (e.g., K8s NimService)
+    2. Update the status to DELETED
+
+    If the deployment is already in DELETED status, calling delete again will
+    permanently remove it from the database.
+
+    Returns:
+
+    - 202 Accepted: Deployment version marked for deletion (status set to DELETING)
+    - 204 No Content: Deployment version permanently removed from database (was
+      already DELETED)
+    - 404 Not Found: Deployment version doesn't exist"""
+    state: CLIContext = ctx.obj
+    state.typed_client(ModelsClient).delete_deployment_version(deployment=deployment, name=name, workspace=workspace)
+
+    typer.echo("✓ Deleted successfully")
+
+
+@versions_app.command("list")
+@collect_warnings
+@handle_errors
+def list_versions(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument()],
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    output_format: ListOutputFormatOption = None,
+    no_truncate: NoTruncateOption = None,
+    columns: OutputColumnsOption = None,
+    stream: StreamOutputOption = False,
+) -> None:
+    """List all versions of a ModelDeployment."""
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+    validate_stream_output_format(resolved_output_format, stream)
+
+    check_output_columns_with_format(columns, resolved_output_format)
+
+    default_columns = [
+        Column("name", None),
+        Column("workspace", None),
+        Column("created_at", None),
+    ]
+    output_columns: str | list[Column] | None = columns
+    if columns is None or str(columns).strip() == "default":
+        output_columns = default_columns
+
+    kwargs = build_kwargs(name=name, workspace=workspace)
+    if handle_code_generation(ModelsClient, "list_deployment_versions", kwargs, resolved_output_format, state):
+        return
+
+    items = state.typed_client(ModelsClient).list_deployment_versions(name=name, workspace=workspace)
+
+    format_output(
+        items,
+        is_list=True,
+        output_format=resolved_output_format,
+        output_columns=output_columns,
+        no_truncate=state.get_no_truncate(no_truncate),
+        timestamp_format=state.get_timestamp_format(),
+        stream=stream,
+    )
+
+
+@versions_app.command("get")
+@collect_warnings
+@handle_errors
+def retrieve_versions(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument()],
+    *,
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    deployment: Annotated[str, typer.Option("--deployment")],
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Get a specific version of a ModelDeployment."""
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+
+    kwargs = build_kwargs(deployment=deployment, name=name, workspace=workspace)
+    if handle_code_generation(ModelsClient, "get_deployment_version", kwargs, resolved_output_format, state):
+        return
+
+    result = state.typed_client(ModelsClient).get_deployment_version(
+        deployment=deployment, name=name, workspace=workspace
+    )
+
+    format_output(
+        result,
+        is_list=False,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
