@@ -1051,6 +1051,10 @@ core:
     securityContext: {}
     # -- Kubernetes deployment resources configuration for the controller service.
     resources: {}
+    # -- Additional volume mounts to add to the controller container.
+    extraVolumeMounts: []
+    # -- Additional volumes to add to the controller pod.
+    extraVolumes: []
 
     # -- Startup probe configuration for the core service.
     # @default -- This object has the following default values for the startup probe configuration.
