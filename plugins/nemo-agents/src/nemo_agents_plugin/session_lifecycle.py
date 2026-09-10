@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from urllib.parse import quote
 
 import httpx
-from nemo_agents_plugin.deployment_routing import get_deployment_endpoint
+from nemo_agents_plugin.deployment_routing import get_deployment_endpoint, get_deployment_transport
 from nemo_agents_plugin.entities import AgentDeployment, AgentSession
 from nemo_platform_plugin.entity_client import NemoEntitiesClient
 
@@ -80,13 +80,15 @@ async def cleanup_fabric_runtime(
         _log_cleanup_failure(session, "deployment has no routable endpoint")
         return
 
-    cleanup_url = f"{endpoint.rstrip('/')}/v1/sessions/{quote(session.id, safe='')}"
+    transport = get_deployment_transport(deployment)
+    cleanup_url, routing_headers = transport.target(f"{endpoint.rstrip('/')}/v1/sessions/{quote(session.id, safe='')}")
     try:
         async with httpx.AsyncClient(
             timeout=_FABRIC_CLEANUP_TIMEOUT_SECONDS,
             follow_redirects=False,
+            **transport.client_kwargs(),
         ) as client:
-            response = await client.delete(cleanup_url)
+            response = await client.delete(cleanup_url, headers=routing_headers)
     except Exception as exc:
         _log_cleanup_failure(session, f"request failed: {exc}", exc_info=True)
         return

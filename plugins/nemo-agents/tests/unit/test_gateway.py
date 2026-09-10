@@ -43,6 +43,7 @@ from nemo_agents_plugin.entities import (
     SessionStatus,
 )
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
+from nemo_deployments_plugin.endpoint_transport import EndpointTransport
 from nemo_platform_plugin.dependencies import get_effective_principal_id
 from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 
@@ -1099,6 +1100,58 @@ class TestContainerModeByDeploymentName:
         assert stream_call.call_args.kwargs["url"] == (
             "http://calc-dep.default.svc.cluster.local:8080/v1/chat/completions"
         )
+
+    def test_gateway_routed_container_dials_its_gateway_with_host_preserved(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        """An openshell endpoint is dialed at the gateway with the advertised host as Host and the executor's TLS."""
+        dep = _make_container_deployment(
+            mode="k8s",
+            status="running",
+            endpoints=[Endpoint(name="http", url="https://default--calc-dep--http.openshell.localhost:8080/")],
+        )
+        mock_entity_client.get = AsyncMock(return_value=dep)
+        transport = EndpointTransport(
+            connect_base="https://openshell.openshell.svc.cluster.local:8080",
+            ca_cert="/tls/ca.crt",
+            client_cert=("/tls/tls.crt", "/tls/tls.key"),
+        )
+        tls_context = object()
+
+        httpx_mock = _make_httpx_mock(200, b'{"answer": 42}')
+
+        with (
+            patch("nemo_agents_plugin.api.v2.gateway.get_deployment_transport", return_value=transport),
+            patch.object(EndpointTransport, "client_kwargs", return_value={"verify": tls_context}),
+            patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock) as mock_cls,
+        ):
+            resp = client.post(
+                "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
+                json={"messages": []},
+            )
+
+        assert resp.status_code == 200
+        assert mock_cls.call_args.kwargs["verify"] is tls_context
+        stream_kwargs = mock_cls.return_value.__aenter__.return_value.stream.call_args.kwargs
+        assert stream_kwargs["url"] == "https://openshell.openshell.svc.cluster.local:8080/v1/chat/completions"
+        assert stream_kwargs["headers"]["Host"] == "default--calc-dep--http.openshell.localhost:8080"
+
+    def test_direct_container_sends_no_host_override(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        """Docker/k8s endpoints are dialed as advertised; the inbound Host is stripped, none is added."""
+        dep = _make_container_deployment(mode="k8s", status="running")
+        mock_entity_client.get = AsyncMock(return_value=dep)
+        httpx_mock = _make_httpx_mock(200, b"{}")
+
+        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock) as mock_cls:
+            resp = client.post(
+                "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
+                json={"messages": []},
+            )
+
+        assert resp.status_code == 200
+        assert "verify" not in mock_cls.call_args.kwargs
+        stream_kwargs = mock_cls.return_value.__aenter__.return_value.stream.call_args.kwargs
+        assert "host" not in {k.lower() for k in stream_kwargs["headers"]}
 
     def test_docker_container_resolves_from_endpoints(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         """Docker mode is mode-agnostic to the gateway: resolve from endpoints just like k8s."""
