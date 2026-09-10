@@ -11,6 +11,7 @@ import {
 } from '@studio/hooks/useCustomizationDatasetValidation';
 import { mockUseParams } from '@studio/tests/util/mockUseParams';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import { FORM_DEFAULTS, type CustomizationFormFields } from '@studio/util/forms/customization';
 import userEvent from '@testing-library/user-event';
 
 const mutateAutomodel = vi.fn();
@@ -42,6 +43,29 @@ vi.mock('@studio/hooks/useCustomizationDatasetValidation', async (importOriginal
   return { ...actual, useCustomizationDatasetValidation: vi.fn() };
 });
 
+const mockReadiness = vi.hoisted(() => vi.fn());
+const mockCreateWorkspaceDeployment = vi.hoisted(() => vi.fn());
+
+vi.mock('@studio/hooks/useBaseModelDeploymentReadiness', () => ({
+  useBaseModelDeploymentReadiness: mockReadiness,
+}));
+
+vi.mock(
+  '@studio/routes/DeploymentsListRoute/CreateDeploymentSidePanel/useCreateDeploymentBySource',
+  () => ({ createWorkspaceDeployment: mockCreateWorkspaceDeployment })
+);
+
+/** Minimum automodel payload that clears `customizationFormSchema`. */
+const validAutomodelValues = (): CustomizationFormFields => ({
+  ...FORM_DEFAULTS,
+  outputName: 'my-adapter',
+  automodel: {
+    ...FORM_DEFAULTS.automodel,
+    model: 'default/base-model',
+    dataset: { training: 'default/my-dataset' },
+  },
+});
+
 const emptyValidation: CustomizationDatasetValidationResult = {
   isPending: false,
   discoveryError: null,
@@ -63,8 +87,19 @@ const emptyValidation: CustomizationDatasetValidationResult = {
 
 describe('NewCustomizationForm', () => {
   beforeEach(() => {
-    mutateAutomodel.mockReset();
-    mutateUnsloth.mockReset();
+    // `onSubmit` chains `.catch()` onto the mutation, so these must be thenable.
+    mutateAutomodel.mockReset().mockResolvedValue({ name: 'job-1' });
+    mutateUnsloth.mockReset().mockResolvedValue({ name: 'job-1' });
+    mutateRl.mockReset().mockResolvedValue({ name: 'job-1' });
+    mockCreateWorkspaceDeployment.mockReset();
+    mockCreateWorkspaceDeployment.mockResolvedValue(undefined);
+    mockReadiness.mockReset();
+    mockReadiness.mockReturnValue({
+      state: 'none',
+      deploymentName: null,
+      status: null,
+      isLoading: false,
+    });
     mockUseParams({ [ROUTE_PARAMS.workspace]: 'default' });
     vi.mocked(useCustomizationDatasetValidation).mockReturnValue(emptyValidation);
     mockListModels.mockReset();
@@ -191,5 +226,113 @@ describe('NewCustomizationForm', () => {
         expect.objectContaining({ filter: expect.objectContaining({ fileset: true }) })
       )
     );
+  });
+
+  describe('base model deployment', () => {
+    // The section is gated on `producesAdapter`, not on the backend: only an
+    // unmerged LoRA run emits an adapter, and only an adapter is served by a
+    // deployment of its *base* model.
+    it('offers the Deployment section for a LoRA run', async () => {
+      renderRoute(<NewCustomizationForm workspace="default" />);
+      expect(await screen.findByText('Deployment')).toBeInTheDocument();
+    });
+
+    it('hides the Deployment section for lora_merged, whose output is full weights', async () => {
+      const values = validAutomodelValues();
+      values.automodel.training = {
+        ...values.automodel.training,
+        finetuning_type: 'lora_merged',
+      };
+      renderRoute(<NewCustomizationForm workspace="default" initialValues={values} />);
+
+      await screen.findByText('Compute Resources');
+      expect(screen.queryByText('Deployment')).not.toBeInTheDocument();
+    });
+
+    it('hides the Deployment section for DPO, which is always full-weight', async () => {
+      const values: CustomizationFormFields = { ...FORM_DEFAULTS, backend: 'rl' };
+      renderRoute(<NewCustomizationForm workspace="default" initialValues={values} />);
+
+      await screen.findByText('Compute Resources');
+      expect(screen.queryByText('Deployment')).not.toBeInTheDocument();
+    });
+
+    it('offers no deployment controls when the base already serves LoRA', async () => {
+      mockReadiness.mockReturnValue({
+        state: 'serving-lora',
+        deploymentName: 'base-deployment',
+        status: 'READY',
+        isLoading: false,
+      });
+      renderRoute(
+        <NewCustomizationForm workspace="default" initialValues={validAutomodelValues()} />
+      );
+
+      expect(await screen.findByText(/base-deployment/)).toBeInTheDocument();
+      expect(screen.queryByText('Engine')).not.toBeInTheDocument();
+    });
+
+    it('creates the base deployment before the job', async () => {
+      const user = userEvent.setup();
+      renderRoute(
+        <NewCustomizationForm workspace="default" initialValues={validAutomodelValues()} />
+      );
+
+      await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+
+      await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
+      expect(mockCreateWorkspaceDeployment).toHaveBeenCalled();
+      // Ordering is the point: a deployment that fails must not cost a training run.
+      expect(mockCreateWorkspaceDeployment.mock.invocationCallOrder[0]).toBeLessThan(
+        mutateAutomodel.mock.invocationCallOrder[0]
+      );
+    });
+
+    it('does not start the job when the deployment fails', async () => {
+      mockCreateWorkspaceDeployment.mockRejectedValue(new Error('image pull denied'));
+      const user = userEvent.setup();
+      renderRoute(
+        <NewCustomizationForm workspace="default" initialValues={validAutomodelValues()} />
+      );
+
+      await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+
+      expect(await screen.findByText(/image pull denied/i)).toBeInTheDocument();
+      await waitFor(() => expect(mutateAutomodel).not.toHaveBeenCalled());
+    });
+
+    // Opting out is allowed — the user may have their own serving plan. The job
+    // still runs; the section warns the adapter will not be servable until the
+    // base model is deployed.
+    it('starts the job without deploying when the user opts out', async () => {
+      const user = userEvent.setup();
+      renderRoute(
+        <NewCustomizationForm workspace="default" initialValues={validAutomodelValues()} />
+      );
+
+      await user.click(await screen.findByRole('radio', { name: /Don't deploy/ }));
+      await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+
+      await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
+      expect(mockCreateWorkspaceDeployment).not.toHaveBeenCalled();
+    });
+
+    it('skips the deployment call when the base already serves LoRA', async () => {
+      mockReadiness.mockReturnValue({
+        state: 'serving-lora',
+        deploymentName: 'base-deployment',
+        status: 'READY',
+        isLoading: false,
+      });
+      const user = userEvent.setup();
+      renderRoute(
+        <NewCustomizationForm workspace="default" initialValues={validAutomodelValues()} />
+      );
+
+      await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+
+      await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
+      expect(mockCreateWorkspaceDeployment).not.toHaveBeenCalled();
+    });
   });
 });

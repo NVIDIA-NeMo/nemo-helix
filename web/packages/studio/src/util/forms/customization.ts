@@ -71,6 +71,53 @@ export const DATASET_FIELD_BY_BACKEND: Record<CustomizationBackend, DatasetField
   rl: 'rl.dataset',
 };
 
+/**
+ * The subset of the form these predicates read.
+ *
+ * Stated structurally rather than as `Partial<CustomizationFormFields>` so that
+ * callers watching two or three individual fields can pass what they have —
+ * `Partial` only loosens the top level, which would force a cast at every call
+ * site. `CustomizationFormFields` satisfies this shape.
+ */
+export interface FinetuningTypeSource {
+  backend: CustomizationBackend;
+  automodel?: { training?: { finetuning_type?: string } };
+  unsloth?: { training?: { finetuning_type?: string } };
+  grpo?: { trainingType?: string; finetuning_type?: string };
+}
+
+/**
+ * The active backend's `finetuning_type`, or undefined when it has none.
+ *
+ * The field lives at a different path per backend, and RL keeps it in the
+ * form-only `grpo` namespace rather than on `rl.training` (see `GrpoFormFields`).
+ * DPO has no `finetuning_type` at all — it is always full-weight.
+ */
+export const getActiveFinetuningType = (fields: FinetuningTypeSource): string | undefined => {
+  switch (fields.backend) {
+    case 'automodel':
+      return fields.automodel?.training?.finetuning_type;
+    case 'unsloth':
+      return fields.unsloth?.training?.finetuning_type;
+    case 'rl':
+      return fields.grpo?.trainingType === 'grpo' ? fields.grpo?.finetuning_type : undefined;
+    default:
+      return undefined;
+  }
+};
+
+/**
+ * Whether the run's **output** is a separately deployable LoRA adapter.
+ *
+ * Deliberately narrower than "trains with LoRA": `lora_merged` uses LoRA during
+ * training but merges the result into full weights, so its output is a normal
+ * model, not an adapter. Anything reasoning about how the output gets *served*
+ * wants this predicate; anything deciding whether to show LoRA hyperparameter
+ * controls wants the broader test and must not use it.
+ */
+export const producesAdapter = (fields: FinetuningTypeSource): boolean =>
+  getActiveFinetuningType(fields) === 'lora';
+
 type ModelFieldName = 'automodel.model' | 'unsloth.model.name' | 'rl.model';
 
 /** Likewise for the base model reference. */

@@ -54,7 +54,7 @@ import { NO_SECRET_SELECT_VALUE } from '@studio/routes/SecretsListRoute/SecretSe
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 
-type ReportStage = (message: string) => void;
+export type ReportStage = (message: string) => void;
 
 /**
  * Image overrides for the engines that accept one.
@@ -198,7 +198,14 @@ async function createHuggingFaceDeployment(
   });
 }
 
-async function createWorkspaceDeployment(
+/**
+ * Create a config + deployment for a model that already exists in the workspace.
+ *
+ * Exported because the fine-tuning form deploys a **base model** by the same two
+ * calls before submitting an adapter job. Callers outside the wizard own their own
+ * error surface and query invalidation.
+ */
+export async function createWorkspaceDeployment(
   workspace: string,
   values: WizardFormValues,
   deploymentName: string,

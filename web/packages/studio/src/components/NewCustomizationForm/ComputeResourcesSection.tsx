@@ -12,7 +12,6 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { ControlledJsonInput } from '@studio/components/NewCustomizationForm/ControlledJsonInput';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
 import {
@@ -215,12 +214,6 @@ const UnslothHardware = ({ disabled }: { disabled: boolean }) => {
         useControllerProps={{ name: 'unsloth.hardware.gpus', control }}
         label="GPU Indices"
         placeholder="0  or  0,1"
-        disabled={disabled}
-      />
-      <ControlledJsonInput
-        useControllerProps={{ name: 'unsloth.deployment_config', control }}
-        formFieldProps={{ slotLabel: 'Deployment Config (name or JSON)' }}
-        placeholder='"my-config"  or  { "gpu": 1 }'
         disabled={disabled}
       />
     </Stack>
