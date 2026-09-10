@@ -3,7 +3,8 @@
 
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
-import { Button, Flex, Stack, StatusIndicator, Text } from '@nvidia/foundations-react-core';
+import { Anchor, Button, Flex, Stack, StatusIndicator, Text } from '@nvidia/foundations-react-core';
+import { type AgentSpecSource, githubCommitUrl } from '@studio/api/agents/useAgentSpecFileset';
 import {
   deploymentStatusColor,
   shortRevision,
@@ -23,8 +24,8 @@ interface DeploymentsTabProps {
   onViewLogs: (deployment: AgentDeployment) => void;
   /** Deploying requires a Platform-managed agent config (Fabric integration). */
   canDeploy: boolean;
-  /** The spec fileset's revision now, to mark deployments staged from an older one. */
-  currentSpecRevision?: string;
+  /** Where the agent's files come from, to link each staged commit and mark stale ones. */
+  specSource?: AgentSpecSource;
 }
 
 /** Deployments list with per-deployment actions. */
@@ -38,7 +39,7 @@ export const DeploymentsTab: FC<DeploymentsTabProps> = ({
   onDelete,
   onViewLogs,
   canDeploy,
-  currentSpecRevision,
+  specSource,
 }) => (
   <Stack gap="5" className="w-full">
     <DetailPanel title="Deployments" flush>
@@ -76,8 +77,26 @@ export const DeploymentsTab: FC<DeploymentsTabProps> = ({
                 )}
                 {deployment.spec_revision && (
                   <Text kind="body/regular/xs" color="secondary" className="truncate">
-                    {`Staged from ${shortRevision(deployment.spec_revision)}`}
-                    {currentSpecRevision && deployment.spec_revision !== currentSpecRevision
+                    Staged from commit{' '}
+                    {specSource ? (
+                      <Anchor
+                        href={githubCommitUrl(
+                          specSource.owner,
+                          specSource.repo,
+                          deployment.spec_revision
+                        )}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        textKind="body/regular/xs"
+                        underline
+                        className="text-brand"
+                      >
+                        {shortRevision(deployment.spec_revision)}
+                      </Anchor>
+                    ) : (
+                      shortRevision(deployment.spec_revision)
+                    )}
+                    {specSource && deployment.spec_revision !== specSource.revision
                       ? ' — the source has moved on since'
                       : ''}
                   </Text>

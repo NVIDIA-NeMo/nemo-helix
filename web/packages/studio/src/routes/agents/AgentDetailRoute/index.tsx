@@ -6,6 +6,8 @@ import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfi
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import {
+  Badge,
+  Button,
   Flex,
   PageHeader,
   Stack,
@@ -29,8 +31,10 @@ import { DeploymentLogsView } from '@studio/routes/agents/AgentDetailRoute/Deplo
 import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/DeploymentsTab';
 import { DetailsTab } from '@studio/routes/agents/AgentDetailRoute/DetailsTab';
 import { EvaluationsTab } from '@studio/routes/agents/AgentDetailRoute/EvaluationsTab';
+import { shortRevision } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { OptimizeJobsTable } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizeJobsTable';
 import { OverviewTab } from '@studio/routes/agents/AgentDetailRoute/OverviewTab';
+import { SOURCE_PANEL_ID } from '@studio/routes/agents/AgentDetailRoute/SourcePanel';
 import {
   type AgentDetailTab,
   DEFAULT_TAB,
@@ -44,10 +48,10 @@ import {
   clearAgentWalkthroughPending,
   isAgentWalkthroughPending,
 } from '@studio/routes/agents/AgentDetailRoute/walkthroughStorage';
-import { getAgentsListRoute } from '@studio/routes/utils';
-import { Dot } from 'lucide-react';
+import { getAgentsListRoute, getIntakeTracesRoute } from '@studio/routes/utils';
+import { ClipboardCheck, Dot, GitCommitHorizontal, ListTree, Rocket } from 'lucide-react';
 import { type FC, useEffect, useRef, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 
 export const AgentDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
@@ -81,6 +85,7 @@ export const AgentDetailRoute: FC = () => {
     isDeploymentsLoading,
   } = useAgentDetails({ workspace, agentName, selectedDeploymentName });
   const { data: specFileset } = useAgentSpecFileset(workspace, agentName);
+  const specSource = agentSpecSource(specFileset);
 
   useBreadcrumbs({
     items: [
@@ -151,6 +156,18 @@ export const AgentDetailRoute: FC = () => {
               <Flex align="baseline" gap="3">
                 <Text kind="title/md">{agent?.name ?? agentName ?? 'Agent details'}</Text>
                 <StatusBadge status={status} label={statusPillLabel} />
+                {specSource && (
+                  <Link
+                    to={{ search: `?${TAB_SEARCH_PARAM}=details`, hash: `#${SOURCE_PANEL_ID}` }}
+                    className="contents"
+                    aria-label={`Source: ${specSource.repository} at ${specSource.revision}`}
+                  >
+                    <Badge kind="solid" color="gray" className="cursor-pointer">
+                      <GitCommitHorizontal size={12} aria-hidden />
+                      {shortRevision(specSource.revision)}
+                    </Badge>
+                  </Link>
+                )}
               </Flex>
               <Flex align="center" gap="1">
                 <Text kind="body/regular/sm" className="text-secondary">
@@ -241,7 +258,7 @@ export const AgentDetailRoute: FC = () => {
               onDelete={setDeleteDeploymentTarget}
               onViewLogs={viewLogs}
               canDeploy={canDeploy}
-              currentSpecRevision={agentSpecSource(specFileset)?.revision}
+              specSource={specSource}
             />
           </TabsContent>
 

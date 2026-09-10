@@ -12,6 +12,8 @@ import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewA
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 export interface AgentSpecSource {
+  owner: string;
+  repo: string;
   /** `owner/repo`, with the sub-directory appended when the fileset is scoped to one. */
   repository: string;
   /** The mutable ref the fileset tracks, if any. Absent when it was pinned to an id. */
@@ -20,6 +22,9 @@ export interface AgentSpecSource {
   revision: string;
   webUrl: string;
 }
+
+export const githubCommitUrl = (owner: string, repo: string, revision: string): string =>
+  `https://github.com/${owner}/${repo}/commit/${revision}`;
 
 const isGithubStorage = (
   storage: FilesetOutput['storage'] | undefined
@@ -32,6 +37,8 @@ export const agentSpecSource = (
 
   const { owner, repo, path, revision, original_revision: tracked } = fileset.storage;
   return {
+    owner,
+    repo,
     repository: path ? `${owner}/${repo}/${path}` : `${owner}/${repo}`,
     // The service records the requested ref even when it was already a commit, and a ref
     // equal to what it resolved to cannot name anything else — so it is not tracking.
