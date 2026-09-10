@@ -447,6 +447,26 @@ describe('NewAgentModal GitHub import', () => {
     await waitFor(() => expect(within(dialog).getByDisplayValue('my-repo')).toBeInTheDocument());
   });
 
+  it('says why a repository it cannot read is not accepted, once the field is left', async () => {
+    const user = userEvent.setup();
+    mockPlatform();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await user.type(
+      within(dialog).getByRole('textbox', { name: 'Repository' }),
+      'https://gitlab.com/owner/repo'
+    );
+
+    expect(within(dialog).queryByText(/is not a GitHub repository/)).not.toBeInTheDocument();
+
+    await user.tab();
+
+    expect(await within(dialog).findByText(/is not a GitHub repository/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+  });
+
   it('rolls the fileset back when the repository has no agent.yaml', async () => {
     const user = userEvent.setup();
     const { created, deleted } = mockPlatform();

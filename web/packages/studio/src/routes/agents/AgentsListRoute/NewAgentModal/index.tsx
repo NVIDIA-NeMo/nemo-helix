@@ -86,6 +86,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   const [replaceArmedFor, setReplaceArmedFor] = useState<string | null>(null);
   const [tab, setTab] = useState<NewAgentTab>('coding-agent-prompt');
   const [isSecretModalOpen, setSecretModalOpen] = useState(false);
+  const [repoBlurred, setRepoBlurred] = useState(false);
 
   const onAgentCreated = (agent: Agent) => {
     toast.success(`Agent "${agent.name}" created`);
@@ -139,14 +140,17 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   const watchedSecretKey = useWatch({ control, name: 'secretKey' });
 
   // A repository is only a source once it parses; a half-typed URL must not enable submit.
-  const repoSource = useMemo((): GitHubAgentSource | undefined => {
-    if (!watchedRepoUrl?.trim()) return undefined;
+  const parsedRepo = useMemo((): { source?: GitHubAgentSource; problem?: string } => {
+    if (!watchedRepoUrl?.trim()) return {};
     try {
-      return parseGitHubSource(watchedRepoUrl);
-    } catch {
-      return undefined;
+      return { source: parseGitHubSource(watchedRepoUrl) };
+    } catch (error) {
+      return { problem: getErrorMessage(error as Error) };
     }
   }, [watchedRepoUrl]);
+  const repoSource = parsedRepo.source;
+  // Held back until the field is left, so the message is not a running commentary on typing.
+  const repoFieldError = errors.repoUrl?.message ?? (repoBlurred ? parsedRepo.problem : undefined);
   // Derived, not stored: an armed replace targets one fileset, so editing the name
   // disarms it in the same render rather than one render later.
   const replaceOrphan = replaceArmedFor !== null && replaceArmedFor === watchedName?.trim();
@@ -159,6 +163,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     setSourceLabel('');
     setSelectionError(undefined);
     setReplaceArmedFor(null);
+    setRepoBlurred(false);
     setTab('coding-agent-prompt');
     onClose();
   };
@@ -226,6 +231,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     );
 
   const onRepoUrlBlur = () => {
+    setRepoBlurred(true);
     if (!repoSource || watchedName?.trim()) return;
     setValue('name', agentNameFromSource(repoSource), { shouldValidate: true });
   };
@@ -276,8 +282,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     await acceptPicked(picked, superseded);
   };
 
-  // A repository wins over a picked directory: the fileset can only have one source, and the
-  // repository is the one the user typed last.
+  // Keyed on the active tab: the fileset has one source, and it is the one the user can see.
   const onSubmit: SubmitHandler<UploadAgentFormData> = async (formData) => {
     const name = formData.name.trim();
     try {
@@ -380,7 +385,9 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
                 formFieldProps={{
                   slotInfo:
                     'github.com/owner/repo, optionally with @branch and #sub/directory. The files are read from GitHub on demand, not copied.',
-                  slotError: errors.repoUrl?.message,
+                  slotError: repoFieldError,
+                  // FormField drops slotError unless the field is also marked failed.
+                  status: repoFieldError ? 'error' : undefined,
                 }}
                 attributes={{ Input: { onBlur: onRepoUrlBlur } }}
               />
