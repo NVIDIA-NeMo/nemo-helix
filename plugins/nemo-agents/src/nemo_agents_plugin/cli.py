@@ -87,7 +87,6 @@ from nemo_agents_plugin.leaderboard.cli import register_leaderboard_commands
 from nemo_agents_plugin.session_lifecycle import session_expiration_is_due
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
 from nemo_agents_plugin.usage.cli import register_usage_commands
-from nemo_platform import NeMoPlatform
 from nemo_platform_ext.cli.chat_tui import ExitAction, StreamingResponse, run_chat_tui
 from nemo_platform_ext.cli.core.api import is_tty
 from nemo_platform_ext.cli.core.formatters import Column, format_output
@@ -109,7 +108,8 @@ from nemo_platform_plugin.agents.types import (
 from nemo_platform_plugin.cli import NemoCLI
 from nemo_platform_plugin.cli_errors import print_http_request_error, print_http_status_error
 from nemo_platform_plugin.cli_progress import request_progress
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.adapter import SyncPlatformClient, client_from_platform
+from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.client.errors import (
     NemoClientError,
     NemoHTTPError,
@@ -2725,12 +2725,12 @@ def _resolve_timestamp_format(ctx: typer.Context) -> str | None:
     return None
 
 
-def _platform_sdk(base_url: str) -> Any:
-    """Return an auth-aware platform SDK client for fileset upload/delete."""
+def _platform_sdk(base_url: str) -> NemoClient:
+    """Return an auth-aware platform client for fileset upload/delete."""
     headers = _resolve_context_headers()
     if headers:
-        return NeMoPlatform(base_url=base_url, default_headers=headers)
-    return NeMoPlatform(base_url=base_url)
+        return NemoClient(base_url=base_url, default_headers=headers)
+    return NemoClient(base_url=base_url)
 
 
 def _run_sdk(action: str, call: Callable[[], _T]) -> _T:
@@ -2834,7 +2834,7 @@ def _collect_text_agent_artifacts(
 
 def _clear_existing_ethos_artifacts(
     *,
-    sdk: NeMoPlatform,
+    sdk: SyncPlatformClient,
     fileset: str,
     workspace: str,
 ) -> None:

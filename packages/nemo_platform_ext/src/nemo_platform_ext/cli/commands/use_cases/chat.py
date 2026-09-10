@@ -15,6 +15,7 @@ import typer
 
 from nemo_platform_ext.cli.chat_tui import (
     StreamingResponse,
+    as_streaming_response,
     collect_stream_response,
     parse_thinking,
     run_chat_tui,
@@ -268,11 +269,13 @@ def chat(
             )
 
         def get_response(body: dict[str, Any]) -> StreamingResponse:
-            return client.inference.gateway.provider.with_streaming_response.post(
-                trailing_uri="v1/chat/completions",
-                workspace=resolved_workspace,
-                name=provider,
-                body=body,
+            return as_streaming_response(
+                client.inference.gateway.provider.with_streaming_response.post(
+                    trailing_uri="v1/chat/completions",
+                    workspace=resolved_workspace,
+                    name=provider,
+                    body=body,
+                )
             )
 
         model_for_body = model
@@ -282,10 +285,12 @@ def chat(
         resolved_workspace, model_entity_id = _parse_model_and_workspace(model, workspace, workspace_from_config)
 
         def get_response(body: dict[str, Any]) -> StreamingResponse:
-            return client.inference.gateway.openai.with_streaming_response.post(
-                trailing_uri="v1/chat/completions",
-                workspace=resolved_workspace,
-                body=body,
+            return as_streaming_response(
+                client.inference.gateway.openai.with_streaming_response.post(
+                    trailing_uri="v1/chat/completions",
+                    workspace=resolved_workspace,
+                    body=body,
+                )
             )
 
         model_for_body = model_entity_id

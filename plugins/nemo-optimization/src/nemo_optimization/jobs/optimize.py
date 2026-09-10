@@ -17,11 +17,10 @@ import re
 import shutil
 from collections.abc import Iterator, Mapping
 from pathlib import Path, PurePosixPath
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar
 
 import yaml
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient, SyncPlatformClient, client_from_platform
 from nemo_platform_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
@@ -78,13 +77,13 @@ class OptimizeJob(NemoJob):
     input_spec_schema: ClassVar[type[BaseModel]] = OptimizeSubmitSpec
 
     @classmethod
-    async def to_spec(  # ty: ignore[invalid-method-override]
+    async def to_spec(  # ty: ignore[invalid-method-override]  (narrows the spec types)
         cls,
         input_spec: OptimizeSubmitSpec,
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncPlatformClient,
         is_local: bool,
     ) -> OptimizeSpec:
         del entity_client, async_sdk
@@ -93,14 +92,14 @@ class OptimizeJob(NemoJob):
         return OptimizeSpec.model_validate(payload, context={"is_local": is_local})
 
     @classmethod
-    async def compile(  # ty: ignore[invalid-method-override]
+    async def compile(  # ty: ignore[invalid-method-override]  (narrows the spec types)
         cls,
         *,
         workspace: str,
         spec: OptimizeSpec,
         entity_client: object,
         job_name: str | None,
-        async_sdk: object,
+        async_sdk: AsyncPlatformClient,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
@@ -137,7 +136,7 @@ class OptimizeJob(NemoJob):
             ],
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoPlatform | None = None) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: SyncPlatformClient | None = None) -> dict:
         spec = OptimizeSpec.model_validate(config)
         with _staged_bundle(spec, ctx=ctx, sdk=sdk) as (config_path, bundle_root):
             optimize_config = _load_yaml(config_path)
@@ -189,9 +188,7 @@ async def _resolve_executor(*, profile: str, async_sdk: object) -> ExecutorSpec:
         raise _profiles_unavailable(profile)
 
     try:
-        profiles = (
-            await client_from_platform(cast(AsyncNeMoPlatform, async_sdk), AsyncJobsClient).get_execution_profiles()
-        ).data()
+        profiles = (await client_from_platform(async_sdk, AsyncJobsClient).get_execution_profiles()).data()
     except (NemoTransportError, NemoResponseValidationError, InternalServerError) as exc:
         raise _profiles_unavailable(profile) from exc
 
@@ -229,7 +226,7 @@ def _staged_bundle(
     spec: OptimizeSpec,
     *,
     ctx: JobContext,
-    sdk: NeMoPlatform | None,
+    sdk: SyncPlatformClient | None,
 ) -> Iterator[tuple[Path, Path | None]]:
     """Yield ``(optimize config path, bundle root)`` for the run.
 
@@ -304,7 +301,7 @@ def _staged_dataset(
     *,
     workspace: str,
     ctx: JobContext,
-    sdk: NeMoPlatform | None,
+    sdk: SyncPlatformClient | None,
 ) -> Iterator[dict[str, Any]]:
     """Yield *optimize_config* with a fileset dataset reference replaced by a local path.
 
@@ -366,7 +363,7 @@ def _publish_results(
     *,
     workspace: str,
     ctx: JobContext,
-    sdk: NeMoPlatform | None,
+    sdk: SyncPlatformClient | None,
 ) -> dict[str, str] | None:
     """Copy the study's artifacts to *output*, returning a pointer for the job result.
 

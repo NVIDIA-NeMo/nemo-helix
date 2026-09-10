@@ -67,7 +67,7 @@ from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTas
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTarget
 from nemo_evaluator_sdk.metrics.protocol import Metric
 from nemo_evaluator_sdk.values import RunConfigOnline, RunConfigOnlineModel
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient, client_from_platform
 from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_platform_plugin.client.errors import (
     InternalServerError,
@@ -126,7 +126,7 @@ async def _resolve_gym_environment(
     target: Target | None,
     *,
     workspace: str,
-    async_sdk: AsyncNeMoPlatform | None,
+    async_sdk: AsyncPlatformClient | None,
 ) -> Target | None:
     """Validate and qualify a Gym environment FileSet through the Files service."""
     if not isinstance(target, GymRunnerTarget) or target.environment is None:
@@ -280,7 +280,7 @@ class AgentEvalJob(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform | None,
+        async_sdk: AsyncPlatformClient | None,
         is_local: bool,
     ) -> BaseModel:
         """Resolve each task's metric references into inline metrics for the canonical spec."""
@@ -339,7 +339,7 @@ class AgentEvalJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform | None,
+        async_sdk: AsyncPlatformClient | None,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
@@ -386,7 +386,7 @@ class AgentEvalJob(NemoJob):
     @staticmethod
     async def _execution_profile(
         *,
-        async_sdk: AsyncNeMoPlatform | None,
+        async_sdk: AsyncPlatformClient | None,
         profile: str,
         require_pvc_storage: bool = False,
     ) -> BaseExecutionProfile | None:
@@ -423,7 +423,7 @@ class AgentEvalJob(NemoJob):
 
     @staticmethod
     async def _resolve_harbor_subprocess_executor(
-        *, executor: dict[str, Any], async_sdk: AsyncNeMoPlatform | None
+        *, executor: dict[str, Any], async_sdk: AsyncPlatformClient | None
     ) -> SubprocessExecutionProviderSpec:
         """Resolve Harbor's selected profile to an explicit host subprocess executor."""
         profile = cast(str, executor["profile"])

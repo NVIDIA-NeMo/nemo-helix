@@ -20,8 +20,8 @@ from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
 from nemo_agent_hardener_plugin.jobs.manifest import DEFENDER_ENTRIES
 from nemo_agent_hardener_plugin.model_config import ANALYSIS_DEFAULT_BASE_URL, ATTACK_DEFAULT_BASE_URL
 from nemo_agent_hardener_plugin.sdk import AgentHardenerPluginResource
-from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.agent_hardener.types import JsonMap, JsonValue
+from nemo_platform_plugin.client.adapter import SyncPlatformClient
 
 # The entity's own Literal is the single source of truth for the valid presets.
 ATTACK_INTENSITIES: tuple[str, ...] = get_args(AgentHardenerManifest.model_fields["attack_intensity"].annotation)
@@ -32,7 +32,7 @@ class CommandContext:
     """Resolved preamble every SDK-backed command needs."""
 
     config: AgentHardenerConfig
-    sdk: NeMoPlatform
+    sdk: SyncPlatformClient
     agent_hardener: AgentHardenerPluginResource
     base_url: str
     workspace: str

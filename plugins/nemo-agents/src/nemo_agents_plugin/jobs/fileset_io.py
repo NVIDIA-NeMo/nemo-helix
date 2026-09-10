@@ -24,8 +24,7 @@ from pathlib import Path
 from typing import Iterator
 
 from filesets import FilesetFileSystem
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.adapter import SyncPlatformClient, client_from_platform
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.file_manager import FilesetFileManager
@@ -69,7 +68,7 @@ def resolve_staged_config(
     *,
     workspace: str,
     ctx: JobContext,
-    sdk: NeMoPlatform | None,
+    sdk: SyncPlatformClient | None,
     kind: str,
 ) -> Iterator[Path]:
     """Yield a local path to a config file, staging it from a fileset if requested.
@@ -121,7 +120,7 @@ def resolve_output(
     *,
     workspace: str,
     ctx: JobContext,
-    sdk: NeMoPlatform | None,
+    sdk: SyncPlatformClient | None,
     kind: str,
 ) -> Iterator[Path]:
     """Yield a local base directory for job outputs, uploading to a fileset on success.
@@ -173,7 +172,7 @@ def resolve_output(
                 upload_to_fileset(tmp_path, fileset=name, workspace=ws, sdk=sdk)
 
 
-def upload_to_fileset(local_dir: Path, *, fileset: str, workspace: str, sdk: NeMoPlatform) -> None:
+def upload_to_fileset(local_dir: Path, *, fileset: str, workspace: str, sdk: SyncPlatformClient) -> None:
     """Upload *local_dir*'s contents recursively to the named fileset (auto-created)."""
     files_client = client_from_platform(sdk, FilesClient)
     manager = _fileset_manager(files_client, workspace=workspace, fileset=fileset, ensure_fileset_exists=True)
