@@ -709,7 +709,10 @@ _DOCUMENTED_PLUGIN_CLIS = (
     "customization",
     "data-designer",
     "evaluator",
+    "experiments",
+    "guardrail",
     "insights",
+    "intake",
     "safe-synthesizer",
 )
 
