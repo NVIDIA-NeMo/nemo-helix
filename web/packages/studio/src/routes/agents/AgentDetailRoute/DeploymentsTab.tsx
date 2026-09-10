@@ -4,7 +4,10 @@
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Button, Flex, Stack, StatusIndicator, Text } from '@nvidia/foundations-react-core';
-import { deploymentStatusColor } from '@studio/routes/agents/AgentDetailRoute/helpers';
+import {
+  deploymentStatusColor,
+  shortRevision,
+} from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { NoHealthyDeploymentsBanner } from '@studio/routes/agents/AgentDetailRoute/NoHealthyDeploymentsBanner';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import type { FC } from 'react';
@@ -20,6 +23,8 @@ interface DeploymentsTabProps {
   onViewLogs: (deployment: AgentDeployment) => void;
   /** Deploying requires a Platform-managed agent config (Fabric integration). */
   canDeploy: boolean;
+  /** The spec fileset's revision now, to mark deployments staged from an older one. */
+  currentSpecRevision?: string;
 }
 
 /** Deployments list with per-deployment actions. */
@@ -33,6 +38,7 @@ export const DeploymentsTab: FC<DeploymentsTabProps> = ({
   onDelete,
   onViewLogs,
   canDeploy,
+  currentSpecRevision,
 }) => (
   <Stack gap="5" className="w-full">
     <DetailPanel title="Deployments" flush>
@@ -66,6 +72,14 @@ export const DeploymentsTab: FC<DeploymentsTabProps> = ({
                 {deployment.error && (
                   <Text kind="body/regular/xs" color="danger" className="truncate">
                     {deployment.error}
+                  </Text>
+                )}
+                {deployment.spec_revision && (
+                  <Text kind="body/regular/xs" color="secondary" className="truncate">
+                    {`Staged from ${shortRevision(deployment.spec_revision)}`}
+                    {currentSpecRevision && deployment.spec_revision !== currentSpecRevision
+                      ? ' — the source has moved on since'
+                      : ''}
                   </Text>
                 )}
               </Stack>

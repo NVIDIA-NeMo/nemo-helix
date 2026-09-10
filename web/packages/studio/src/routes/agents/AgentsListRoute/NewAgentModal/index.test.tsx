@@ -6,6 +6,7 @@ import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentModal';
+import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import { getAgentsListRoute } from '@studio/routes/utils';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import { fireEvent, within } from '@testing-library/react';
@@ -126,6 +127,11 @@ const renderModal = () =>
 const openUploadTab = async (dialog: HTMLElement) => {
   fireEvent.click(within(dialog).getByRole('tab', { name: 'Upload agent' }));
   await screen.findByTestId('agent-directory-input');
+};
+
+const openGitHubTab = async (dialog: HTMLElement) => {
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'GitHub repository' }));
+  await within(dialog).findByRole('textbox', { name: 'Repository' });
 };
 
 const pickDirectory = (dialog: HTMLElement, files: File[] = DEFAULT_FILES) => {
@@ -372,6 +378,23 @@ describe('NewAgentModal GitHub import', () => {
     await user.tab();
   };
 
+  it('does not let a typed repository submit from the upload tab', async () => {
+    const user = userEvent.setup();
+    mockPlatform();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Create' })).toBeEnabled()
+    );
+
+    await openUploadTab(dialog);
+
+    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+  });
+
   it('backs the spec fileset with the repository instead of uploading files', async () => {
     const user = userEvent.setup();
     const { uploaded, created, filesets } = mockPlatform();
@@ -379,7 +402,7 @@ describe('NewAgentModal GitHub import', () => {
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
-    await openUploadTab(dialog);
+    await openGitHubTab(dialog);
     await typeRepo(dialog, user, 'github.com/owner/repo@v2#agents/calc');
     await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
     await submit(dialog, user);
@@ -395,6 +418,22 @@ describe('NewAgentModal GitHub import', () => {
     });
   });
 
+  it('leaves the repository import for the new agent, not sitting on the open modal', async () => {
+    const user = userEvent.setup();
+    mockPlatform();
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(FABRIC_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('repo')).toBeInTheDocument());
+    await submit(dialog, user);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(await screen.findByText(/Agent "repo" created/)).toBeInTheDocument();
+  });
+
   it('names the agent after the repository so the fileset name is settled up front', async () => {
     const user = userEvent.setup();
     mockPlatform();
@@ -402,7 +441,7 @@ describe('NewAgentModal GitHub import', () => {
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
-    await openUploadTab(dialog);
+    await openGitHubTab(dialog);
     await typeRepo(dialog, user, 'github.com/owner/my-repo');
 
     await waitFor(() => expect(within(dialog).getByDisplayValue('my-repo')).toBeInTheDocument());
@@ -417,7 +456,7 @@ describe('NewAgentModal GitHub import', () => {
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
-    await openUploadTab(dialog);
+    await openGitHubTab(dialog);
     await typeRepo(dialog, user);
     await waitFor(() => expect(within(dialog).getByDisplayValue('repo')).toBeInTheDocument());
 
@@ -425,7 +464,7 @@ describe('NewAgentModal GitHub import', () => {
 
     expect(await within(dialog).findByText(/Could not read agent\.yaml/)).toBeInTheDocument();
     expect(created).toHaveLength(0);
-    await waitFor(() => expect(deleted).toContain('repo-spec'));
+    await waitFor(() => expect(deleted).toContain(agentSpecFilesetName('repo')));
   });
 });
 

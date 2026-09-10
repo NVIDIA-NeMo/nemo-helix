@@ -10,6 +10,7 @@ import type { AgentConfig } from '@studio/components/dataViews/AgentsDataView';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
 import { ConfigValue } from '@studio/routes/agents/AgentDetailRoute/ConfigValue';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
+import { SourcePanel } from '@studio/routes/agents/AgentDetailRoute/SourcePanel';
 import type { FC } from 'react';
 
 /** Config keys rendered by dedicated structured panels below. */
@@ -62,6 +63,8 @@ export const DetailsTab: FC<DetailsTabProps> = ({ workspace, agentName, agent })
           )}
         </Stack>
       </DetailPanel>
+
+      <SourcePanel workspace={workspace} agentName={agent?.name ?? agentName} />
 
       {workflow && (
         <DetailPanel title="Workflow">

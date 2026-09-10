@@ -7,6 +7,7 @@ import { ControlledTextInput } from '@nemo/common/src/components/form/Controlled
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getAgentsListAgentsQueryKey } from '@nemo/sdk/generated/agents/agents';
+import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import {
   Button,
   Stack,
@@ -86,21 +87,30 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   const [tab, setTab] = useState<NewAgentTab>('coding-agent-prompt');
   const [isSecretModalOpen, setSecretModalOpen] = useState(false);
 
+  const onAgentCreated = (agent: Agent) => {
+    toast.success(`Agent "${agent.name}" created`);
+    void queryClient.invalidateQueries({ queryKey: getAgentsListAgentsQueryKey(workspace) });
+    resetAndClose();
+    if (agent.name) navigate(getAgentDetailRoute(workspace, agent.name));
+  };
+
   const {
     mutateAsync: createAgent,
     error: createError,
-    isPending,
+    isPending: isUploading,
     reset: resetMutation,
-  } = useCreateAgentFromUpload({
-    onSuccess: (agent) => {
-      toast.success(`Agent "${agent.name}" created`);
-      void queryClient.invalidateQueries({ queryKey: getAgentsListAgentsQueryKey(workspace) });
-      resetAndClose();
-      if (agent.name) navigate(getAgentDetailRoute(workspace, agent.name));
-    },
-  });
+  } = useCreateAgentFromUpload({ onSuccess: onAgentCreated });
 
-  const { mutateAsync: createAgentFromRepo, error: repoError } = useCreateAgentFromGitHub();
+  const {
+    mutateAsync: createAgentFromRepo,
+    error: repoError,
+    isPending: isImporting,
+    reset: resetRepoMutation,
+  } = useCreateAgentFromGitHub({ onSuccess: onAgentCreated });
+
+  const isPending = isUploading || isImporting;
+  const onUploadTab = tab === 'upload';
+  const onGitHubTab = tab === 'github';
 
   const {
     control,
@@ -143,6 +153,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
 
   const resetAndClose = () => {
     resetMutation();
+    resetRepoMutation();
     resetForm({ name: '', repoUrl: '', secretKey: '' });
     setEntries([]);
     setSourceLabel('');
@@ -158,6 +169,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     const selection = ++selectionSeq.current;
     // Dropping the entries disables submit until this selection validates.
     resetMutation();
+    resetRepoMutation();
     setEntries([]);
     setSelectionError(undefined);
     setReplaceArmedFor(null);
@@ -269,7 +281,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   const onSubmit: SubmitHandler<UploadAgentFormData> = async (formData) => {
     const name = formData.name.trim();
     try {
-      if (repoSource) {
+      if (onGitHubTab) {
+        if (!repoSource) return;
         await createAgentFromRepo({
           workspace,
           name,
@@ -287,13 +300,13 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   };
 
   // No fallback argument: getErrorMessage prefers one over a plain Error's own message.
+  const failure = onGitHubTab ? repoError : (selectionError ?? createError);
   const errorMessage =
-    selectionError ??
-    ((createError ?? repoError)
-      ? getErrorMessage((createError ?? repoError) as Error) || 'Failed to create agent'
-      : undefined);
-
-  const onUploadTab = tab === 'upload';
+    typeof failure === 'string'
+      ? failure
+      : failure
+        ? getErrorMessage(failure) || 'Failed to create agent'
+        : undefined;
 
   return (
     <>
@@ -307,10 +320,10 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
         onSubmit={handleSubmit(onSubmit)}
         disabled={isPending}
         loading={isPending}
-        submitDisabled={entries.length === 0 && !repoSource}
-        errorText={onUploadTab ? errorMessage : undefined}
+        submitDisabled={onGitHubTab ? !repoSource : entries.length === 0}
+        errorText={onUploadTab || onGitHubTab ? errorMessage : undefined}
         slotFooterRight={
-          onUploadTab ? undefined : (
+          onUploadTab || onGitHubTab ? undefined : (
             <Button color="brand" type="button" onClick={resetAndClose}>
               Close
             </Button>
@@ -321,6 +334,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
           <TabsList aria-label="Ways to instrument an agent">
             <TabsTrigger value="coding-agent-prompt">Coding agent prompt</TabsTrigger>
             <TabsTrigger value="upload">Upload agent</TabsTrigger>
+            <TabsTrigger value="github">GitHub repository</TabsTrigger>
           </TabsList>
 
           <TabsContent value="coding-agent-prompt" className="items-stretch p-0 pt-density-lg">
@@ -349,34 +363,41 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
                 </UploadTrigger>
               </UploadRoot>
               {entriesSummary ? <Text kind="body/regular/sm">{entriesSummary}</Text> : null}
-              <Stack gap="density-sm">
-                <Text kind="label/semibold/md">Or import from a GitHub repository</Text>
-                <ControlledTextInput
-                  label="Repository"
-                  disabled={isPending}
-                  useControllerProps={{ control, name: 'repoUrl' }}
-                  formFieldProps={{
-                    slotInfo:
-                      'github.com/owner/repo, optionally with @branch and #sub/directory. The files are read from GitHub on demand, not copied.',
-                    slotError: errors.repoUrl?.message,
-                  }}
-                  attributes={{ Input: { onBlur: onRepoUrlBlur } }}
-                />
-                <SecretSearchableSelect
-                  workspace={workspace}
-                  queryEnabled={open && Boolean(workspace)}
-                  ensureOptionValue={watchedSecretKey || undefined}
-                  useControllerProps={{ control, name: 'secretKey' }}
-                  onRequestNewSecret={() => setSecretModalOpen(true)}
-                  triggerPlaceholder=""
-                  formFieldProps={{
-                    slotLabel: 'Access token secret',
-                    slotInfo:
-                      'Required for a private repository. The token stays in the platform and is never sent to your browser.',
-                    slotError: errors.secretKey?.message,
-                  }}
-                />
-              </Stack>
+              <ControlledTextInput
+                useControllerProps={{ control, name: 'name' }}
+                label="Name"
+                formFieldProps={{ slotError: errors.name?.message }}
+              />
+            </Stack>
+          </TabsContent>
+
+          <TabsContent value="github" className="items-stretch p-0 pt-density-lg">
+            <Stack gap="density-md">
+              <ControlledTextInput
+                label="Repository"
+                disabled={isPending}
+                useControllerProps={{ control, name: 'repoUrl' }}
+                formFieldProps={{
+                  slotInfo:
+                    'github.com/owner/repo, optionally with @branch and #sub/directory. The files are read from GitHub on demand, not copied.',
+                  slotError: errors.repoUrl?.message,
+                }}
+                attributes={{ Input: { onBlur: onRepoUrlBlur } }}
+              />
+              <SecretSearchableSelect
+                workspace={workspace}
+                queryEnabled={open && onGitHubTab && Boolean(workspace)}
+                ensureOptionValue={watchedSecretKey || undefined}
+                useControllerProps={{ control, name: 'secretKey' }}
+                onRequestNewSecret={() => setSecretModalOpen(true)}
+                triggerPlaceholder=""
+                formFieldProps={{
+                  slotLabel: 'Access token secret',
+                  slotInfo:
+                    'Required for a private repository. The token stays in the platform and is never sent to your browser.',
+                  slotError: errors.secretKey?.message,
+                }}
+              />
               <ControlledTextInput
                 useControllerProps={{ control, name: 'name' }}
                 label="Name"
