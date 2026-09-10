@@ -54,8 +54,8 @@ export const SourcePanel: FC<SourcePanelProps> = ({ workspace, agentName }) => {
         const revision = agentSpecSource(updated)?.revision ?? '';
         toast.success(
           revision === source.revision
-            ? `Already on the latest commit of ${source.trackedRevision}`
-            : `Updated to ${shortRevision(revision)}`
+            ? 'Already on the latest commit'
+            : `Updated to commit ${shortRevision(revision)}`
         );
       },
       onError: (error) => toast.error(getErrorMessage(error as Error) || 'Could not refresh'),

@@ -28,6 +28,23 @@ interface DeploymentsTabProps {
   specSource?: AgentSpecSource;
 }
 
+/** A commit, linked to GitHub when the source it came from is still known. */
+const CommitLink: FC<{ source?: AgentSpecSource; revision: string }> = ({ source, revision }) =>
+  source ? (
+    <Anchor
+      href={githubCommitUrl(source.owner, source.repo, revision)}
+      target="_blank"
+      rel="noreferrer noopener"
+      textKind="body/regular/xs"
+      underline
+      className="text-brand"
+    >
+      {shortRevision(revision)}
+    </Anchor>
+  ) : (
+    <>{shortRevision(revision)}</>
+  );
+
 /** Deployments list with per-deployment actions. */
 export const DeploymentsTab: FC<DeploymentsTabProps> = ({
   agentName,
@@ -75,32 +92,18 @@ export const DeploymentsTab: FC<DeploymentsTabProps> = ({
                     {deployment.error}
                   </Text>
                 )}
-                {deployment.spec_revision && (
+                {deployment.spec_revision ? (
                   <Text kind="body/regular/xs" color="secondary" className="truncate">
                     Staged from commit{' '}
-                    {specSource ? (
-                      <Anchor
-                        href={githubCommitUrl(
-                          specSource.owner,
-                          specSource.repo,
-                          deployment.spec_revision
-                        )}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        textKind="body/regular/xs"
-                        underline
-                        className="text-brand"
-                      >
-                        {shortRevision(deployment.spec_revision)}
-                      </Anchor>
-                    ) : (
-                      shortRevision(deployment.spec_revision)
-                    )}
-                    {specSource && deployment.spec_revision !== specSource.revision
-                      ? ' — the source has moved on since'
-                      : ''}
+                    <CommitLink source={specSource} revision={deployment.spec_revision} />
+                    {specSource && deployment.spec_revision !== specSource.revision ? (
+                      <>
+                        {' · source is now '}
+                        <CommitLink source={specSource} revision={specSource.revision} />
+                      </>
+                    ) : null}
                   </Text>
-                )}
+                ) : null}
               </Stack>
               <StatusBadge status={deployment.status} />
               <Flex gap="1" className="shrink-0">

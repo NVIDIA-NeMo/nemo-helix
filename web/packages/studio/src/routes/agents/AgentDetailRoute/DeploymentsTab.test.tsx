@@ -47,16 +47,20 @@ describe('DeploymentsTab staged commit', () => {
     expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
   });
 
-  it('says the source has moved on when the fileset points somewhere newer', () => {
+  it('names the newer commit the source points at', () => {
     renderTab([deployment({ spec_revision: STAGED })], source(MOVED));
 
-    expect(screen.getByText(/the source has moved on since/)).toBeInTheDocument();
+    expect(screen.getByText(/source is now/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'bbbbbbb' })).toHaveAttribute(
+      'href',
+      `https://github.com/acme/agents/commit/${MOVED}`
+    );
   });
 
-  it('says nothing about staleness while the deployment is on the current commit', () => {
+  it('says nothing about the source while the deployment is on its current commit', () => {
     renderTab([deployment({ spec_revision: STAGED })], source(STAGED));
 
-    expect(screen.queryByText(/moved on since/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/source is now/)).not.toBeInTheDocument();
   });
 
   it('names the commit without a link when the source is gone', () => {
