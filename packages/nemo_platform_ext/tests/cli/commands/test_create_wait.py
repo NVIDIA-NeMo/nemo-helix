@@ -312,7 +312,7 @@ def test_jobs_create_stamps_telemetry_custom_fields() -> None:
 
     with (
         patch("nemo_platform_ext.cli.commands.jobs.handle_code_generation", return_value=False),
-        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        _patch_jobs_client(jobs_client),
         patch("nemo_platform_ext.cli.commands.jobs.format_output"),
     ):
         create_jobs(

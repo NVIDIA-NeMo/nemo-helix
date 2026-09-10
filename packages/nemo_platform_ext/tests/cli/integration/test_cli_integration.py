@@ -120,13 +120,9 @@ def test_projects_list_pagination(runner: CliRunner, random_workspace):
     assert output["pagination"]["total_pages"] == 3
 
 
-@pytest.mark.skip(
-    reason="TODO: Entities service responses don't implement iter_pages() required by --all-pages. "
-    "Update this test once entities service has consistent pagination support with the SDK."
-)
 def test_list_with_all_pages(runner: CliRunner, random_workspace):
     """Test list commands with --all-pages flag fetches all pages."""
-    # Create multiple workspaces to test pagination
+    # Create multiple projects to test pagination
     for i in range(15):
         result = runner.invoke(
             app,
@@ -144,8 +140,11 @@ def test_list_with_all_pages(runner: CliRunner, random_workspace):
 
     output = json.loads(result.stdout)
     assert "data" in output
-    # Should have all 15 workspaces despite page_size=5
+    # Should have all 15 projects despite page_size=5
     assert len(output["data"]) == 15
+    assert output["pagination"]["total_results"] == 15
+    assert output["pagination"]["total_pages"] == 1
+    assert "More pages" not in result.stderr
 
 
 def test_global_format_flag():

@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Annotated, cast
 
 import typer
 
-from nemo_platform_ext.cli.commands.api import API_TOP_LEVEL_ENTRIES
 from nemo_platform_ext.cli.commands.manifest_registry import TOP_LEVEL_ENTRIES
 from nemo_platform_ext.cli.core.help_formatter import HELP_OPTION_NAMES
 from nemo_platform_ext.cli.core.lazy_load import (
@@ -50,15 +49,32 @@ app = typer.Typer(
 )
 
 
+# Panels whose built-in groups a plugin ``nemo.cli`` entry point of the same
+# name may replace. Setup and CLI-function commands are never shadowed.
+_PLUGIN_OVERRIDABLE_PANELS = frozenset({"Core plugins", "Functional plugins"})
+
+
 def _build_top_level_lazy_entries() -> tuple[TopLevelEntry, ...]:
     plugin_entry_points = _installed_plugin_command_entry_points()
-    # Plugin `nemo.cli` entry points own their command name. Drop generated API
-    # top-level groups with the same name so plugin-specific commands stay available.
-    api_entries = tuple(entry for entry in API_TOP_LEVEL_ENTRIES if entry.name not in plugin_entry_points)
     return build_top_level_entries(
-        (*TOP_LEVEL_ENTRIES, *api_entries),
+        module_entries_without_plugin_overrides(TOP_LEVEL_ENTRIES, plugin_entry_points),
         plugin_entry_points,
         include_hidden=True,
+    )
+
+
+def module_entries_without_plugin_overrides(
+    entries: tuple[TopLevelEntry, ...], plugin_entry_points: dict[str, EntryPoint]
+) -> tuple[TopLevelEntry, ...]:
+    """Drop built-in resource groups that an installed plugin CLI replaces by name.
+
+    Plugin ``nemo.cli`` entry points own their command name, so a plugin that
+    ships e.g. its own ``files`` group takes precedence over the built-in one.
+    """
+    return tuple(
+        entry
+        for entry in entries
+        if not (entry.panel in _PLUGIN_OVERRIDABLE_PANELS and entry.name in plugin_entry_points)
     )
 
 

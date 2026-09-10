@@ -19,9 +19,9 @@ set -euo pipefail
 #
 # Note: update-sdk = build-policy + refresh-openapi + stainless + update-cli, so we use
 # stainless directly here to avoid re-running refresh-openapi and update-cli redundantly.
-# Note: update-cli = generate-cli-commands + vendor-nemo-platform-ext + generate-cli-reference-docs,
-# but vendor-nemo-platform-ext is a subset of make vendor and generate-cli-reference-docs would
-# run twice. So we run generate-cli-commands alone, then let make vendor cover all vendoring.
+# Note: update-cli = vendor-nemo-platform-ext + generate-cli-reference-docs, but
+# vendor-nemo-platform-ext is a subset of make vendor, so we let make vendor cover
+# all vendoring and then regenerate the CLI reference docs once.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${CI_PROJECT_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 cd "${PROJECT_ROOT}" || exit 1
@@ -36,7 +36,6 @@ declare -a steps=(
   "web-sdk:bash tools/lint/lint-fix-web-sdk.sh"
   "stainless:uv run --frozen nemo-platform-sdk-tools is-up-to-date --output-dir \"${TMPDIR:-/tmp}/nmp-sdk-lint\" || make stainless"
   "python-style:uv run ruff format && uv run ruff check --fix"
-  "generate-cli-commands:make generate-cli-commands"
   "vendor+cli-reference-docs:make vendor && make generate-cli-reference-docs"
   "copyright-headers:make update-copyright-headers"
   "update-licenses:bash tools/lint/lint-fix-licenses.sh"

@@ -29,7 +29,7 @@ _INFERENCE_DEPLOYMENT_LIFECYCLE = "inference_deployment"
 
 
 def handle_code_generation(
-    client_cls: type | list[str],
+    client_cls: type,
     method: str,
     kwargs: Mapping[str, Any],
     output_format: str | None,
@@ -44,8 +44,7 @@ def handle_code_generation(
     """Print generated code and return True when *output_format* is ``code``.
 
     Args:
-        client_cls: Typed service client class the command uses (e.g. ``SecretsClient``),
-            or a Stainless resource path (``["models"]``) from a generated command.
+        client_cls: Typed service client class the command uses (e.g. ``SecretsClient``).
         method: Client method name (e.g. ``"create_secret"``).
         kwargs: Keyword arguments passed to the method. Pydantic models, enums,
             dicts, and primitives are rendered as Python source.
@@ -55,23 +54,6 @@ def handle_code_generation(
     """
     if output_format != "code":
         return False
-
-    if isinstance(client_cls, list):
-        # Generated commands hand over a Stainless resource path; they render
-        # through the legacy generator until they are replaced.
-        from nemo_platform_ext.cli.core.legacy_code_generator import handle_code_generation as legacy
-
-        return legacy(
-            client_cls,
-            method,
-            dict(kwargs),
-            output_format,
-            context,
-            wait_config=wait_config,
-            wait_options=wait_options,
-            watch_config=watch_config,
-            watch_options=watch_options,
-        )
 
     code = generate_python_code(
         client_cls,

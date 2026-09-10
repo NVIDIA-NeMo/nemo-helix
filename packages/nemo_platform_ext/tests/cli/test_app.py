@@ -6,12 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import click
-import nemo_platform
 import pytest
 import typer
 from click.testing import CliRunner as ClickCliRunner
 from nemo_platform_ext.cli.app import app
-from nemo_platform_ext.cli.commands.api import API_TOP_LEVEL_ENTRIES
 from nemo_platform_ext.cli.commands.manifest_registry import TOP_LEVEL_ENTRIES
 from nemo_platform_ext.cli.core.lazy_load import (
     ManifestBackedNmpGroup,
@@ -21,6 +19,7 @@ from nemo_platform_ext.cli.core.lazy_load import (
     lazy_plugin_loader,
 )
 from nemo_platform_ext.cli.manifest import TopLevelEntry, build_top_level_entries
+from nemo_platform_ext.cli.version import client_version
 from nemo_platform_ext.quickstart.config import QuickstartConfig
 from nemo_platform_plugin.cli import NemoCLI
 from typer.testing import CliRunner
@@ -33,7 +32,7 @@ def test_version_flag(flag):
     result = runner.invoke(app, [flag])
 
     assert result.exit_code == 0
-    assert result.stdout.strip() == f"nemo version {nemo_platform.__version__}"
+    assert result.stdout.strip() == f"nemo version {client_version()}"
 
 
 def test_version_flag_before_command():
@@ -42,7 +41,7 @@ def test_version_flag_before_command():
     result = runner.invoke(app, ["--version", "projects", "list"])
 
     assert result.exit_code == 0
-    assert result.stdout.strip() == f"nemo version {nemo_platform.__version__}"
+    assert result.stdout.strip() == f"nemo version {client_version()}"
 
 
 def test_help_includes_getting_started():
@@ -88,12 +87,6 @@ def test_generated_list_validates_stream_output_before_client_setup():
     assert result.exit_code == 2
     assert "--stream requires --output json or --output raw" in result.stderr
     mock_get_client.assert_not_called()
-
-
-def test_generated_api_manifest_excludes_source_owned_auth_commands():
-    entry_names = {entry.name for entry in API_TOP_LEVEL_ENTRIES}
-
-    assert {"auth", "access-keys", "iam"}.isdisjoint(entry_names)
 
 
 @pytest.mark.parametrize(
@@ -234,9 +227,9 @@ def test_generated_api_group_no_arg_help_exits_successfully():
 
 def test_root_help_includes_lazy_api_commands():
     runner = CliRunner()
-    sys.modules.pop("nemo_platform_ext.cli.commands.api.entities", None)
-    sys.modules.pop("nemo_platform_ext.cli.commands.files", None)
+    sys.modules.pop("nemo_platform_ext.cli.commands.entities", None)
     sys.modules.pop("nmp.intake.cli", None)
+    sys.modules.pop("nemo_platform_ext.cli.commands.files", None)
     sys.modules.pop("nemo_platform_ext.cli.commands.auth", None)
     sys.modules.pop("nemo_platform_ext.cli.commands.use_cases.chat", None)
     sys.modules.pop("nemo_platform_ext.cli.commands.config", None)
@@ -247,17 +240,17 @@ def test_root_help_includes_lazy_api_commands():
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    assert "experiments" in result.stdout
     # intake and experiments are nmp-intake plugin CLIs (nemo.cli entry points).
+    assert "experiments" in result.stdout
     assert "Plugin commands for experiments." in result.stdout
     assert "files" in result.stdout
     assert "Manage files" in result.stdout
     assert "intake" in result.stdout
     assert "Plugin commands for intake." in result.stdout
     assert "entities" not in result.stdout
-    assert "nemo_platform_ext.cli.commands.api.entities" not in sys.modules
-    assert "nemo_platform_ext.cli.commands.files" not in sys.modules
+    assert "nemo_platform_ext.cli.commands.entities" not in sys.modules
     assert "nmp.intake.cli" not in sys.modules
+    assert "nemo_platform_ext.cli.commands.files" not in sys.modules
     assert "nemo_platform_ext.cli.commands.auth" not in sys.modules
     assert "nemo_platform_ext.cli.commands.use_cases.chat" not in sys.modules
     assert "nemo_platform_ext.cli.commands.config" not in sys.modules
@@ -269,13 +262,13 @@ def test_root_help_includes_lazy_api_commands():
 
 def test_entities_api_command_is_not_registered():
     runner = CliRunner()
-    sys.modules.pop("nemo_platform_ext.cli.commands.api.entities", None)
+    sys.modules.pop("nemo_platform_ext.cli.commands.entities", None)
 
     result = runner.invoke(app, ["entities", "--help"])
 
     assert result.exit_code != 0
     assert "No such command 'entities'" in result.stderr
-    assert "nemo_platform_ext.cli.commands.api.entities" not in sys.modules
+    assert "nemo_platform_ext.cli.commands.entities" not in sys.modules
 
 
 def test_members_api_command_is_nested_under_workspaces():
@@ -289,6 +282,44 @@ def test_members_api_command_is_nested_under_workspaces():
     assert "Manage members" in result.stdout
     assert "nemo_platform_ext.cli.commands.workspaces" in sys.modules
     assert "nemo_platform_ext.cli.commands.members" not in sys.modules
+
+
+def test_workspaces_group_help_loads_on_demand():
+    runner = CliRunner()
+    sys.modules.pop("nemo_platform_ext.cli.commands.workspaces", None)
+
+    result = runner.invoke(app, ["workspaces", "--help"])
+
+    assert result.exit_code == 0
+    assert "Manage workspaces" in result.stdout
+    for command in ("create", "delete", "list", "get", "update", "members"):
+        assert f"\n  {command}" in result.stdout
+    assert "nemo_platform_ext.cli.commands.workspaces" in sys.modules
+
+
+def test_workspaces_no_arg_help_exits_successfully():
+    runner = CliRunner()
+    qs_config = QuickstartConfig(auth_enabled=False)
+
+    with patch("nemo_platform_ext.quickstart.QuickstartConfig.load", return_value=qs_config):
+        result = runner.invoke(app, ["workspaces"])
+
+    assert result.exit_code == 0
+    assert "Usage:" in result.stdout
+    assert "Manage workspaces" in result.stdout
+
+
+def test_workspaces_list_help_includes_stream_option():
+    runner = CliRunner()
+    qs_config = QuickstartConfig(auth_enabled=False)
+
+    with patch("nemo_platform_ext.quickstart.QuickstartConfig.load", return_value=qs_config):
+        result = runner.invoke(app, ["workspaces", "list", "--help"])
+
+    assert result.exit_code == 0
+    assert "--stream" in result.stdout
+    assert "--all-pages" in result.stdout
+    assert "--output-format, --output, -f" in result.stdout
 
 
 def test_members_api_command_is_not_registered_at_top_level():
@@ -464,9 +495,9 @@ def test_build_top_level_lazy_entries_prefers_plugin_over_api_name_collision():
     plugin_entry_points = {
         "custom-plugin": SimpleNamespace(value="nemo_custom_plugin.cli:CustomPluginCLI"),
     }
-    api_entries = (
+    module_entries = (
         TopLevelEntry(
-            import_path="nemo_platform_ext.cli.commands.api.custom_plugin:app",
+            import_path="nemo_platform_ext.cli.commands.custom_plugin:app",
             name="custom-plugin",
             help="Custom plugin operations.",
             panel="Functional plugins",
@@ -482,8 +513,7 @@ def test_build_top_level_lazy_entries_prefers_plugin_over_api_name_collision():
     )
 
     with (
-        patch("nemo_platform_ext.cli.app.TOP_LEVEL_ENTRIES", ()),
-        patch("nemo_platform_ext.cli.app.API_TOP_LEVEL_ENTRIES", api_entries),
+        patch("nemo_platform_ext.cli.app.TOP_LEVEL_ENTRIES", module_entries),
         patch(
             "nemo_platform_ext.cli.app._installed_plugin_command_entry_points",
             return_value=plugin_entry_points,

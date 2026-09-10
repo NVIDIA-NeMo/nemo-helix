@@ -12,7 +12,7 @@ def test_main_help_lists_preserved_command_groups() -> None:
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    assert "generate-cli" in result.output
+    assert "generate-cli" not in result.output
     assert "license" in result.output
     assert "openapi-stainless" in result.output
     assert "publish" not in result.output

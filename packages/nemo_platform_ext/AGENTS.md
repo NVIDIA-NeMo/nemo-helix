@@ -34,37 +34,37 @@ uv run _nmp --help
 
 This is useful for testing new CLI changes before running `make vendor-nemo-platform-ext`.
 
-## Auto-Generated Code
+## CLI Command Groups
 
-**IMPORTANT:** Files in `src/nemo_platform_ext/cli/commands/api/` are auto-generated.
-- Do NOT manually edit these files
-- Do NOT include in code reviews
-- Generated from templates in `<ROOT>/tools/nemo-platform-sdk-tools/src/nemo_platform_sdk_tools/sdk/cli_generator/templates/`
+Every `nemo <group> *` command is hand-written Python on the typed clients in
+`nemo_platform_plugin` (for example `commands/secrets.py` uses `SecretsClient`).
+There is no code generator and the CLI has no dependency on the generated
+`nemo_platform` (Stainless) SDK; `tests/cli/test_stainless_boundary.py` enforces
+this and runs the CLI with `nemo_platform` un-importable.
+
+- Core resource groups (`files`, `inference`, `jobs`, `models`, `secrets`, `workspaces`, and the hidden
+  `adapters`, `iam`, `projects`) live in `src/nemo_platform_ext/cli/commands/` and are registered in
+  `commands/manifest_registry.py`.
+- Functional groups ship with the package that owns the service as `nemo.cli` entry points
+  (`guardrail` in `plugins/nemo-guardrails`, `intake` and `experiments` in `services/intake`), so they
+  appear only when that package is installed.
+- Commands obtain a service client with `state.typed_client(<Client>)`; `--output-format code`
+  renders the typed-client call via `cli/core/code_generator.py`.
+
+Use `commands/secrets.py` and `tests/cli/commands/test_secrets.py` as the reference when adding a group:
+mirror the structure, add wire-level tests (real Typer app over a recorded `httpx.MockTransport`) and,
+when the service can be hosted by `nmp.testing`, in-process integration tests.
 
 ### Build
 
-To build the CLI run this command:
+To vendor the CLI into the distribution package and regenerate its reference docs:
 ```shell
 make update-cli
 ```
 
-It includes all 3 steps.
+It includes 2 steps.
 
 #### Step 1.
-The CLI is built with the `nemo-platform-sdk-tools generate-cli` command. The build process uses these inputs:
-- The SDK (`sdk/python/nemo-platform`) - it introspects the SDK and creates a command for each SDK operation. 
-  - The CLI structure follows the SDK structure (based on `sdk/stainless.yaml`). `sdk.customization.jobs.list` becomes `nmp customization jobs list`.
-- The CLI config (`tools/nemo-platform-sdk-tools/src/nemo_platform_sdk_tools/sdk/cli_generator/cli_config.yaml`) - configures some aspects of the CLI generation (default columns for list operations, methods/resources to skip, etc.)
-- Templates + code inside of the CLI generator (`tools/nemo-platform-sdk-tools/src/nemo_platform_sdk_tools/sdk/cli_generator/`)
-
-After the generation is done, we run ruff for formatting and to ensure correctness (e.g. there are no missing imports).
-
-This step can be run with:
-```shell
-make generate-cli-commands
-```
-
-#### Step 2.
 Once the CLI is generated, we vendored it into the `sdk/python/nemo-platform` package. This way we bundle the SDK and the CLI together and the user needs to only install a single package.
 
 In a nutshell, the vendoring process copies the code and updates all the imports.
@@ -76,7 +76,7 @@ make vendor-nemo-platform-ext
 
 Note: this vendors all the extensions, not just the CLI.
 
-#### Step 3.
+#### Step 2.
 We generate CLI reference for our documentation.
 
 This step can be run with:

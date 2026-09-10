@@ -9,13 +9,12 @@ import json
 import logging
 import re
 import sys
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Iterator, Protocol
 
 import click
-from nemo_platform_plugin.client.response import NemoBinaryResponse
 from rich.align import Align
 from rich.console import Console
 from rich.live import Live
@@ -304,34 +303,6 @@ def _partial_tag_suffix_length(text: str, tag: str) -> int:
         if tag.startswith(text[-length:]):
             return length
     return 0
-
-
-class _LegacyStreamAdapter:
-    """Present a generated-SDK streaming context manager as a :class:`StreamingResponse`.
-
-    Removed with the last ``nemo_platform`` streaming caller (``nemo chat``).
-    """
-
-    def __init__(self, response: Any) -> None:
-        self._response = response
-        self._body: Any = None
-
-    @contextmanager
-    def stream(self) -> Iterator[Iterator[bytes]]:
-        with self._response as body:
-            self._body = body
-            yield body.iter_bytes()
-
-    @property
-    def http_response(self) -> Any:
-        return self._body
-
-
-def as_streaming_response(response: Any) -> StreamingResponse:
-    """Accept a typed-client binary response or a generated-SDK streaming context manager."""
-    if isinstance(response, NemoBinaryResponse):
-        return response
-    return _LegacyStreamAdapter(response)
 
 
 def _iter_stream_deltas(response: StreamingResponse) -> Iterator[dict[str, Any]]:
