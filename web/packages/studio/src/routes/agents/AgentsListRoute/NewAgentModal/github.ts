@@ -17,9 +17,43 @@ export interface GitHubAgentSource {
   path: string;
 }
 
+/** Browser URLs that carry `/<ref>/<path>` after the repository. */
+const REF_BEARING_ROUTES = new Set(['tree', 'blob', 'raw', 'blame', 'commit']);
+
+/** Browser URLs that name something other than repository content. */
+const NON_CONTENT_ROUTES = new Set([
+  'actions',
+  'branches',
+  'commits',
+  'compare',
+  'discussions',
+  'issues',
+  'pull',
+  'pulls',
+  'releases',
+  'security',
+  'settings',
+  'tags',
+  'wiki',
+]);
+
 const trimSlashes = (value: string): string => value.replace(/^\/+|\/+$/g, '');
 
 const dropGitSuffix = (value: string): string => value.replace(/\.git$/, '');
+
+/**
+ * Where the host ends. An `@` before this is `user@host` userinfo; one after it opens a ref,
+ * which may itself contain slashes.
+ */
+const authorityEnd = (locator: string): number => {
+  const scheme = locator.indexOf('://');
+  const start = scheme === -1 ? 0 : scheme + 3;
+  const slash = locator.indexOf('/', start);
+  // Only the SCP form separates the host with a colon; in a URL a colon is the port.
+  const colon = scheme === -1 ? locator.indexOf(':', start) : -1;
+  const ends = [slash, colon].filter((index) => index !== -1);
+  return ends.length > 0 ? Math.min(...ends) : locator.length;
+};
 
 /** Repository path segments, or undefined when this is not a GitHub locator. */
 const githubPathSegments = (locator: string): string[] | undefined => {
@@ -64,9 +98,7 @@ export const parseGitHubSource = (input: string): GitHubAgentSource => {
   const fragmentPath = hash === -1 ? '' : trimSlashes(trimmed.slice(hash + 1));
   const locatorAndRef = hash === -1 ? trimmed : trimmed.slice(0, hash);
 
-  // Only an `@` in the last segment marks a ref; earlier ones are the `git@host` userinfo.
-  const lastSlash = locatorAndRef.lastIndexOf('/');
-  const refAt = locatorAndRef.indexOf('@', lastSlash + 1);
+  const refAt = locatorAndRef.indexOf('@', authorityEnd(locatorAndRef));
   const explicitRef = refAt === -1 ? undefined : locatorAndRef.slice(refAt + 1) || undefined;
   const locator = refAt === -1 ? locatorAndRef : locatorAndRef.slice(0, refAt);
 
@@ -83,8 +115,13 @@ export const parseGitHubSource = (input: string): GitHubAgentSource => {
     throw new GitHubSourceError(`"${trimmed}" is missing an owner or a repository name.`);
   }
 
-  // Browser URLs: /tree/<ref>/<path> and /blob/<ref>/<path>.
-  const browsed = kind === 'tree' || kind === 'blob';
+  if (kind && NON_CONTENT_ROUTES.has(kind)) {
+    throw new GitHubSourceError(
+      `"${trimmed}" points at ${owner}/${repo}'s ${kind}, not at its files. Use the repository URL, or a /tree/ URL for a branch and directory.`
+    );
+  }
+
+  const browsed = Boolean(kind && REF_BEARING_ROUTES.has(kind));
   const urlRef = browsed ? rest[0] : undefined;
   const urlPath = browsed ? rest.slice(1).join('/') : segments.slice(2).join('/');
 

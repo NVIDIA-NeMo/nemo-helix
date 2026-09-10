@@ -33,6 +33,40 @@ describe('parseGitHubSource', () => {
 
   it('does not read the git@ userinfo as a ref', () => {
     expect(parseGitHubSource('git@github.com:owner/repo').ref).toBeUndefined();
+    expect(parseGitHubSource('https://user@github.com/owner/repo').ref).toBeUndefined();
+  });
+
+  it.each([
+    'owner/repo@release/1.2',
+    'github.com/owner/repo@release/1.2',
+    'https://github.com/owner/repo@release/1.2',
+    'git@github.com:owner/repo@release/1.2',
+  ])('keeps a slash inside an explicit ref out of the repository name: %s', (input) => {
+    expect(parseGitHubSource(input)).toEqual({
+      owner: 'owner',
+      repo: 'repo',
+      ref: 'release/1.2',
+      path: '',
+    });
+  });
+
+  it('reads a commit URL as a pinned ref', () => {
+    expect(parseGitHubSource('https://github.com/owner/repo/commit/abc123')).toMatchObject({
+      repo: 'repo',
+      ref: 'abc123',
+      path: '',
+    });
+  });
+
+  it.each(['https://github.com/owner/repo/pull/123', 'github.com/owner/repo/issues/4'])(
+    'rejects %s, which names no files',
+    (input) => {
+      expect(() => parseGitHubSource(input)).toThrow(GitHubSourceError);
+    }
+  );
+
+  it('still reads a bare sub-directory as a path', () => {
+    expect(parseGitHubSource('github.com/owner/repo/agents/calc').path).toBe('agents/calc');
   });
 
   it('rejects a host that is not GitHub', () => {
