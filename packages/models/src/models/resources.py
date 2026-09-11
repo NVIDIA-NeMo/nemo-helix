@@ -30,6 +30,7 @@ class ResolvedModelReference:
     url: str
     name: str
     host_url: str | None
+    served_model_name: str | None = None
 
 
 def parse_workspace_name_ref(ref: str, *, label: str, expected_format: str = "workspace/name") -> tuple[str, str]:
@@ -65,13 +66,24 @@ def resolved_model_reference(
     route_workspace: str,
     route_model_name: str,
     host_url: str | None,
+    served_model_name: str | None = None,
 ) -> ResolvedModelReference:
     """Build route details for a resolved model entity."""
     return ResolvedModelReference(
         url=model_entity_route_openai_url(base_url=base_url, workspace=route_workspace, name=route_model_name),
         name=name,
         host_url=host_url,
+        served_model_name=served_model_name,
     )
+
+
+def served_model_name_for_entity(provider: ModelProvider, model_entity: ModelEntity) -> str | None:
+    """Return the provider model id mapped to this Model Entity."""
+    entity_ref = f"{model_entity.workspace}/{model_entity.name}"
+    for mapping in getattr(provider, "served_models", None) or ():
+        if mapping.model_entity_id == entity_ref:
+            return mapping.served_model_name
+    return None
 
 
 def warn_provider_host_url_resolution_failure(
@@ -361,16 +373,18 @@ class ModelsResource(BaseModelsResource):
         """Resolve ``workspace/model`` to inference-gateway route details."""
         workspace, name = parse_workspace_name_ref(ref, label="Model reference", expected_format="workspace/model_name")
         model_entity = self.retrieve(name, workspace=workspace)
+        provider = self._try_resolve_model_provider_with_warning(model_entity)
         return resolved_model_reference(
             base_url=self._get_base_url_str(),
             name=name,
             route_workspace=model_entity.workspace,
             route_model_name=model_entity.name,
-            host_url=self._try_resolve_model_provider_host_url_with_warning(model_entity),
+            host_url=provider.host_url if provider is not None else None,
+            served_model_name=served_model_name_for_entity(provider, model_entity) if provider is not None else None,
         )
 
-    def _try_resolve_model_provider_host_url_with_warning(self, model_entity: ModelEntity) -> str | None:
-        """Resolve the model entity's first provider host URL, if available."""
+    def _try_resolve_model_provider_with_warning(self, model_entity: ModelEntity) -> ModelProvider | None:
+        """Resolve the model entity's first provider, if available."""
         provider_parts = first_provider_ref(model_entity.model_providers)
         if provider_parts is None:
             return None
@@ -380,7 +394,7 @@ class ModelsResource(BaseModelsResource):
         except Exception as exc:
             warn_provider_host_url_resolution_failure(provider_ref, exc, not_found_error_type=NotFoundError)
             return None
-        return provider.host_url
+        return provider
 
     def wait_for_status(
         self,
@@ -821,16 +835,18 @@ class AsyncModelsResource(BaseAsyncModelsResource):
         """Resolve ``workspace/model`` to inference-gateway route details."""
         workspace, name = parse_workspace_name_ref(ref, label="Model reference", expected_format="workspace/model_name")
         model_entity = await self.retrieve(name, workspace=workspace)
+        provider = await self._try_resolve_model_provider_with_warning(model_entity)
         return resolved_model_reference(
             base_url=self._get_base_url_str(),
             name=name,
             route_workspace=model_entity.workspace,
             route_model_name=model_entity.name,
-            host_url=await self._try_resolve_model_provider_host_url_with_warning(model_entity),
+            host_url=provider.host_url if provider is not None else None,
+            served_model_name=served_model_name_for_entity(provider, model_entity) if provider is not None else None,
         )
 
-    async def _try_resolve_model_provider_host_url_with_warning(self, model_entity: ModelEntity) -> str | None:
-        """Resolve the model entity's first provider host URL, if available."""
+    async def _try_resolve_model_provider_with_warning(self, model_entity: ModelEntity) -> ModelProvider | None:
+        """Resolve the model entity's first provider, if available."""
         provider_parts = first_provider_ref(model_entity.model_providers)
         if provider_parts is None:
             return None
@@ -840,7 +856,7 @@ class AsyncModelsResource(BaseAsyncModelsResource):
         except Exception as exc:
             warn_provider_host_url_resolution_failure(provider_ref, exc, not_found_error_type=NotFoundError)
             return None
-        return provider.host_url
+        return provider
 
     async def wait_for_status(
         self,

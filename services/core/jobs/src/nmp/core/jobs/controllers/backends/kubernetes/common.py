@@ -101,6 +101,11 @@ TASK_STORAGE_VOLUME_NAME = "task-storage"
 JOB_STORAGE_VOLUME_NAME = "job-storage"
 STEP_CONFIG_VOLUME_NAME = "job-step-config"
 
+NVIDIA_VISIBLE_DEVICES_ENVVAR = "NVIDIA_VISIBLE_DEVICES"
+# "void" keeps the nvidia container runtime out of the container entirely, unlike
+# "none", which still injects the driver.
+NVIDIA_VISIBLE_DEVICES_DISABLED = "void"
+
 
 class PodStatus(BaseModel):
     task_id: str
@@ -999,6 +1004,16 @@ def create_pod_template_spec(
 
     # Profile-level env vars first (e.g. HOME=/tmp); system, step, and shared env override these
     env = [client.V1EnvVar(name=name, value=value) for name, value in config.env.items()]
+    if not num_gpus and NVIDIA_VISIBLE_DEVICES_ENVVAR not in config.env:
+        # NGC-derived images bake in NVIDIA_VISIBLE_DEVICES=all, so on nodes where the
+        # nvidia runtime is the default (e.g. `minikube start --gpus all`) every device
+        # on the host is mounted into steps that never asked for a GPU.
+        env.append(
+            client.V1EnvVar(
+                name=NVIDIA_VISIBLE_DEVICES_ENVVAR,
+                value=NVIDIA_VISIBLE_DEVICES_DISABLED,
+            ),
+        )
     env.extend(_opensandbox_job_env(platform_config))
     validate_no_reserved_managed_job_environment_variable_names(
         (envvar.name for envvar in step.step_spec.environment or []),
