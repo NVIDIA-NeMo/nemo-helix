@@ -217,6 +217,10 @@ USER ${BUILD_UID}:${BUILD_GID}
 # RL's uv.lock. Set to "" to relock if you bump RL to a commit whose lock has drifted.
 ARG UV_SYNC_MODE=--frozen
 
+# The driver installs this from PyPI rather than from RL's lock, which resolves it for the actor
+# venvs only. Keep in lockstep with the pin in NeMo-RL's pyproject.toml.
+ARG NEMO_SANDBOXED_GYM_VERSION=0.1.0rc0
+
 # Warm the uv CACHE, one extra at a time (they conflict). This is where the heavy compiles happen
 # (mamba-ssm, causal-conv1d, deep_ep, deep_gemm, and Transformer-Engine via automodel); the wheels
 # land in the cache so the prefetch below materializes each venv without recompiling.
@@ -317,18 +321,20 @@ uv pip install --python /opt/nemo_rl_venv/bin/python \
     "sqlparse>=0.6.0,<0.7" \
     "wandb>=0.29.0"
 
-# NeMo-Gym in the BASE venv, for the DRIVER - not a duplicate of the nemo_gym extra above.
-# Sandboxed (mode B) GRPO imports nemo_rl.environments.sandbox in the driver process:
-# host/models.py needs BROKER_TOKEN_ENV / BROKER_URL_ENV and backends/base.py needs
-# EpisodeResources, both from nemo_gym.sandbox.broker. The `--all-groups` sync above is EXACT, so
-# it prunes the nemo_gym extra back out of the base venv and the driver dies with
-# `ModuleNotFoundError: No module named 'nemo_gym'` at Gym spin-up. Worker venvs are unaffected -
-# they get nemo_gym from the extra.
-# --no-deps is safe and deliberate: the driver's import closure is
-# nemo_gym.sandbox.broker -> broker/wire.py -> providers/base.py, whose only third-party import is
-# pydantic (already present). Resolving Gym's full dependency set here could move RL's pinned stack.
+# NeMo-Gym and nemo-sandboxed-gym in the BASE venv, for the DRIVER - not duplicates of the
+# nemo_gym extra above. `spinup_nemo_gym_actor` runs in the driver process and, on the sandboxed
+# path, imports the adapter, which imports sandboxed_gym.{host,orchestrator,ray,runtime} at module
+# scope. The `--all-groups` sync above is EXACT, so it prunes the nemo_gym extra back out of the
+# base venv and the driver dies with `ModuleNotFoundError` at Gym spin-up - minutes into a run, and
+# only on a sandbox-capable cluster. Worker venvs are unaffected; they get both from the extra.
+#
+# --no-deps is safe and deliberate for both: sandboxed-gym's base install is Pydantic alone, and
+# Gym's driver-side closure reaches only pydantic too. Resolving either full dependency set here
+# could move RL's pinned stack.
 uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps \
     -e /opt/nemo-rl/3rdparty/Gym-workspace/Gym
+uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps \
+    "nemo-sandboxed-gym==${NEMO_SANDBOXED_GYM_VERSION}"
 EOF
 
 # Full RL source (Automodel + Gym). Copied AFTER the heavy uv sync so a source-only RL bump is a
