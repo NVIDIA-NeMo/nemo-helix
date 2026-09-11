@@ -9,6 +9,7 @@ import time
 import httpx
 import jwt
 from jwt.types import Options
+from nmp.common import http_clients
 from nmp.common.config import AuthConfig
 
 from . import token_claims
@@ -84,6 +85,120 @@ class JWTValidator:
         jwks_client = await self._get_jwks_client()
         return await jwks_client.get_jwks()
 
+    async def _introspection_endpoint(self) -> str | None:
+        """Return the configured or discovered RFC 7662 introspection endpoint, if any."""
+        if self.config.oidc.introspection_endpoint:
+            return self.config.oidc.introspection_endpoint
+        discovery = await self._discover_oidc_config()
+        endpoint = discovery.get("introspection_endpoint")
+        return endpoint if isinstance(endpoint, str) and endpoint else None
+
+    async def _introspect_token(self, token: str) -> JsonObject | None:
+        """Resolve an opaque access token to claims via RFC 7662 introspection.
+
+        Returns None when introspection is unavailable or reports the token as inactive.
+        """
+        introspection_endpoint = await self._introspection_endpoint()
+        if introspection_endpoint is None:
+            logger.warning("Cannot introspect opaque token: no introspection_endpoint configured or discoverable")
+            return None
+
+        client = http_clients.shared_async_http_client()
+        client_secret = self.config.oidc.introspection_client_secret
+        auth = (self.config.oidc.client_id, client_secret) if client_secret else None
+        response = await client.post(
+            introspection_endpoint,
+            data={"token": token, "token_type_hint": "access_token"},
+            auth=auth if auth is not None else httpx.USE_CLIENT_DEFAULT,
+            timeout=10.0,
+        )
+        response.raise_for_status()
+        try:
+            claims = self._json_deserializer.deserialize(response.content)
+        except JsonObjectDeserializationError as exc:
+            raise jwt.InvalidTokenError("Introspection response was not a JSON object") from exc
+
+        if claims.get("active") is not True:
+            logger.warning("Introspection reported the token as inactive")
+            return None
+
+        audience = self.config.oidc.audience
+        if audience and not self._introspected_audience_matches(claims.get("aud"), audience):
+            logger.warning(f"Introspected token audience does not include {audience!r}")
+            return None
+
+        return claims
+
+    @staticmethod
+    def _introspected_audience_matches(claim_audience: object, expected: str) -> bool:
+        """Check an RFC 7662 aud claim (string or list) contains the expected audience."""
+        if isinstance(claim_audience, str):
+            return claim_audience == expected
+        if isinstance(claim_audience, list):
+            return expected in claim_audience
+        return False
+
+    async def _userinfo_endpoint(self) -> str | None:
+        """Return the configured or discovered OIDC UserInfo endpoint, if any."""
+        if self.config.oidc.userinfo_endpoint:
+            return self.config.oidc.userinfo_endpoint
+        discovery = await self._discover_oidc_config()
+        endpoint = discovery.get("userinfo_endpoint")
+        return endpoint if isinstance(endpoint, str) and endpoint else None
+
+    async def _resolve_via_userinfo(self, token: str) -> JsonObject | None:
+        """Resolve an opaque access token to claims via the OIDC UserInfo endpoint.
+
+        Unlike RFC 7662 introspection, the UserInfo endpoint (OIDC Core 5.3) is
+        authenticated with the access token itself (no separate client credential)
+        and its response has no active/aud/scope claims: a successful response is
+        itself proof the token is valid for the caller, but audience and the
+        token's original OAuth scope grant cannot be recovered or enforced for
+        tokens resolved this way. Callers must not invoke this when oidc.audience
+        is configured — see validate_token, which skips this path in that case.
+
+        The scope gap matters: TokenClaims.scopes ends up empty for every token
+        resolved here, and the platform's scope check
+        (services/core/auth/src/nmp/core/auth/app/policies/scopes.rego,
+        scope_check_passed) treats an empty scope list as "no platform scopes
+        provided" and skips scope enforcement entirely, falling back to
+        RBAC/permissions only. A caller holding an access token that the IdP
+        scoped down (e.g. to a single read-only scope) is therefore not
+        restricted to that scope once resolved through this path — only their
+        role/group-based permissions apply. Enable this only for IdPs, like
+        Starfleet, that don't hand out narrower per-token scopes in practice.
+
+        Returns None when the UserInfo endpoint is unavailable or rejects the token.
+        """
+        userinfo_endpoint = await self._userinfo_endpoint()
+        if userinfo_endpoint is None:
+            logger.warning("Cannot resolve opaque token: no userinfo_endpoint configured or discoverable")
+            return None
+
+        client = http_clients.shared_async_http_client()
+        try:
+            response = await client.get(
+                userinfo_endpoint,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10.0,
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 401:
+                logger.warning("UserInfo endpoint rejected the token")
+                return None
+            raise
+
+        logger.warning(
+            "Resolved opaque token via UserInfo endpoint; the token's original OAuth scope "
+            "grant cannot be recovered, so scope enforcement is skipped for this request "
+            "(RBAC/permissions still apply)"
+        )
+        try:
+            return self._json_deserializer.deserialize(response.content)
+        except JsonObjectDeserializationError as exc:
+            raise jwt.InvalidTokenError("UserInfo response was not a JSON object") from exc
+
     async def _get_jwks_client(self) -> AsyncJWKSClient:
         """Get or create JWKS client for token validation.
 
@@ -115,6 +230,23 @@ class JWTValidator:
                 token_alg = str(token_header.get("alg", "")).lower()
             except jwt.PyJWTError:
                 token_alg = ""
+                if self.config.oidc.resolve_opaque_tokens_via_userinfo:
+                    if self.config.oidc.audience:
+                        logger.warning(
+                            "Skipping UserInfo resolution because oidc.audience is configured and "
+                            "UserInfo responses cannot be checked against it; falling back to "
+                            "introspection if enabled"
+                        )
+                    else:
+                        claims = await self._resolve_via_userinfo(token)
+                        if claims is None:
+                            return None
+                        return self._claims_extractor.extract(claims)
+                if self.config.oidc.introspect_opaque_tokens:
+                    claims = await self._introspect_token(token)
+                    if claims is None:
+                        return None
+                    return self._claims_extractor.extract(claims)
 
             if token_alg == "none":
                 if not self.config.allow_unsigned_jwt:
