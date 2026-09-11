@@ -301,6 +301,9 @@ nemo auth access-keys create [OPTIONS]
 * `--description, -d`: Optional description for the Scoped Access Key.
 * `--expires-in`: Scoped Access Key lifetime in seconds. Use 'none' to request no expiration.
 * `--service-account`: Bind the key to a non-human service account (PlatformAdmin only).
+* `--scope`: Comma-separated service names to scope this key to, e.g. 'intake,entities'. Omit for an unscoped key.
+* `--rotate`: JTI of a previous Scoped Access Key owned by the caller to revoke once this key is created. Primarily for rotating personal keys, which have no service-account identity to correlate rotations against automatically.
+* `--workspace`: Grant the key's principal workspace membership, formatted '\<workspace>' or '\<workspace>:\<role1>,\<role2>' (role defaults to Editor). Repeat for multiple workspaces. Replaces a separate 'nemo workspaces members create' call.
 
 **Help:**
 

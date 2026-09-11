@@ -23,7 +23,10 @@ from nemo_platform_plugin.auth.access_keys.issuer import (
     AccessKeyFeatureDisabledError,
     AccessKeyOperationNotImplementedError,
 )
-from nemo_platform_plugin.auth.access_keys.types import AccessKeyCreateRequest
+from nemo_platform_plugin.auth.access_keys.types import (
+    AccessKeyCreateRequest,
+    AccessKeyWorkspaceGrant,
+)
 from nemo_platform_plugin.client.adapter import client_from_platform
 from rich.console import Console
 
@@ -88,6 +91,39 @@ def _parse_access_key_expires_in(value: str | None) -> tuple[bool, int | None]:
     if expires_in_seconds < 1:
         raise AuthError("--expires-in must be a positive integer number of seconds or 'none'.")
     return True, expires_in_seconds
+
+
+def _parse_access_key_scope(value: str | None) -> list[str] | None:
+    if value is None:
+        return None
+    return list(dict.fromkeys(service.strip() for service in value.split(",") if service.strip()))
+
+
+def _parse_access_key_workspace_grants(
+    values: list[str] | None,
+) -> list[AccessKeyWorkspaceGrant] | None:
+    if values is None:
+        return None
+
+    grants: list[AccessKeyWorkspaceGrant] = []
+    for value in values:
+        workspace, separator, roles_value = value.partition(":")
+        roles = [role.strip() for role in roles_value.split(",") if role.strip()] if separator else []
+        if separator and not roles:
+            # An explicit ':' with no roles after it (e.g. 'team-a:' or 'team-a:,,') is more
+            # likely a typo than a request for the default role; only omitting ':' entirely
+            # should fall back to Editor.
+            raise typer.BadParameter(
+                f"Invalid workspace grant {value!r}: specify at least one role after ':'.",
+                param_hint="--workspace",
+            )
+        grants.append(
+            AccessKeyWorkspaceGrant(
+                workspace=workspace.strip(),
+                roles=roles if separator else ["Editor"],
+            )
+        )
+    return grants
 
 
 def is_auth_disabled(base_url: str, timeout: float = 3.0, certificate_authority: str | None = None) -> bool:
@@ -866,6 +902,35 @@ def create_access_key(
             help="Bind the key to a non-human service account (PlatformAdmin only).",
         ),
     ] = None,
+    scope: Annotated[
+        str | None,
+        typer.Option(
+            "--scope",
+            help="Comma-separated service names to scope this key to, e.g. 'intake,entities'. Omit for an unscoped key.",
+        ),
+    ] = None,
+    rotate: Annotated[
+        str | None,
+        typer.Option(
+            "--rotate",
+            help=(
+                "JTI of a previous Scoped Access Key owned by the caller to revoke once this key is created. "
+                "Primarily for rotating personal keys, which have no service-account identity to correlate "
+                "rotations against automatically."
+            ),
+        ),
+    ] = None,
+    workspace: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--workspace",
+            help=(
+                "Grant the key's principal workspace membership, formatted '<workspace>' or "
+                "'<workspace>:<role1>,<role2>' (role defaults to Editor). Repeat for multiple workspaces. "
+                "Replaces a separate 'nemo workspaces members create' call."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Create a user-bound or service-bound Scoped Access Key."""
     expires_in_was_set, parsed_expires_in = _parse_access_key_expires_in(expires_in)
@@ -873,6 +938,9 @@ def create_access_key(
         name=name,
         description=description,
         service_account_id=service_account,
+        scope=_parse_access_key_scope(scope),
+        rotates=rotate,
+        workspaces=_parse_access_key_workspace_grants(workspace),
         **({"expires_in_seconds": parsed_expires_in} if expires_in_was_set else {}),
     )
     try:
@@ -920,6 +988,7 @@ def list_access_keys(
             Column("status", None),
             Column("issuer", None),
             Column("audiences", None),
+            Column("scope", None),
             Column("created_at", None),
             Column("expires_at", None),
             Column("last_used_at", None),

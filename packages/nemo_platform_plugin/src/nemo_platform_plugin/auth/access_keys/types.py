@@ -4,13 +4,36 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, TypedDict
+from typing import Literal, Self, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 AccessKeyStatus = Literal["ACTIVE", "EXPIRED", "REVOKED", "SUSPENDED", "ROTATING"]
 AccessKeyReversibleStatus = Literal["ACTIVE", "EXPIRED", "SUSPENDED"]
 AccessKeyEntityType = Literal["USER", "SERVICE_ACCOUNT"]
+ACCESS_KEY_JTI_PATTERN = r"^ak_[0-9a-f]{32}$"
+
+
+class AccessKeyWorkspaceGrant(BaseModel):
+    """Workspace membership to grant to a newly created access key principal."""
+
+    workspace: str
+    roles: list[str] = Field(default_factory=lambda: ["Editor"])
+
+    @model_validator(mode="after")
+    def _normalize(self) -> Self:
+        workspace = self.workspace.strip()
+        if not workspace:
+            raise ValueError("workspace must not be blank")
+        # An explicit empty/blank-only roles list would otherwise reach the workspace-members
+        # API as a no-op grant (no exception, no binding created) — reject it here instead of
+        # silently creating a key whose requested access was never provisioned.
+        roles = [role.strip() for role in self.roles if role.strip()]
+        if not roles:
+            raise ValueError("roles, if provided, must contain at least one non-empty role")
+        self.workspace = workspace
+        self.roles = roles
+        return self
 
 
 class AccessKeyListQueryParams(TypedDict, total=False):
@@ -58,6 +81,44 @@ class AccessKeyCreateRequest(BaseModel):
             "created by a PlatformAdmin and authenticate as service-account:<id>."
         ),
     )
+    scope: list[str] | None = Field(
+        default=None,
+        json_schema_extra={"nullable": True},
+        description="Optional service names that restrict this key to read and write access for those services.",
+    )
+    rotates: str | None = Field(
+        default=None,
+        pattern=ACCESS_KEY_JTI_PATTERN,
+        json_schema_extra={"nullable": True},
+        description=(
+            "JTI of a prior Scoped Access Key owned by the caller to revoke after creation. "
+            "Intended primarily for personal keys without a service-account identity."
+        ),
+    )
+    workspaces: list[AccessKeyWorkspaceGrant] | None = Field(
+        default=None,
+        json_schema_extra={"nullable": True},
+        description="Optional workspace memberships to grant to the newly created key principal.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_scope(self) -> Self:
+        if self.scope is None:
+            return self
+        # An explicitly empty (or whitespace/comma-only) scope would otherwise mint the same
+        # unscoped, full-access token as omitting `scope` entirely — the opposite of what a
+        # caller asking to restrict a key would expect. Fail closed instead.
+        normalized = [service.strip() for service in self.scope]
+        if not normalized or any(not service for service in normalized):
+            raise ValueError("scope, if provided, must contain at least one non-empty service name")
+        # Service names are later joined into a single space-delimited `service:read
+        # service:write ...` claim, so a name containing whitespace or `:` would corrupt that
+        # claim's delimiters and could be reinterpreted downstream as a different service's
+        # scope entirely.
+        if any(char.isspace() or char == ":" for service in normalized for char in service):
+            raise ValueError("scope service names must not contain whitespace or ':' characters")
+        self.scope = normalized
+        return self
 
 
 class AccessKeyRotateRequest(BaseModel):
@@ -99,6 +160,10 @@ class AccessKeyMetadataResponse(BaseModel):
     audiences: list[str] = Field(
         description="Audiences accepted for the Scoped Access Key JWT.",
         json_schema_extra={"uniqueItems": True},
+    )
+    scope: list[str] = Field(
+        default_factory=list,
+        description="Services this key is restricted to. An empty list means the key is unscoped.",
     )
     created_at: datetime
     expires_at: datetime | None = Field(default=None, json_schema_extra={"nullable": True})

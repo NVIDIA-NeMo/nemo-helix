@@ -13,6 +13,8 @@ from nemo_platform_plugin.auth.access_keys.issuer import (
     AccessKeyOperationNotImplementedError,
 )
 from nemo_platform_plugin.auth.access_keys.types import AccessKeyReversibleStatus
+from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_platform_plugin.workspaces.client import AsyncWorkspacesClient
 from nmp.common.auth import AuthClient, get_auth_client
 from nmp.common.auth.access_keys import (
     ACCESS_KEY_JTI_PATTERN,
@@ -20,6 +22,7 @@ from nmp.common.auth.access_keys import (
 )
 from nmp.common.config import get_auth_config
 from nmp.common.entities import EntityConflictError
+from nmp.common.service.dependencies import get_nemo_client
 from nmp.core.auth.app.access_keys import (
     AccessKeyNotFoundError,
     AccessKeyRegistry,
@@ -114,14 +117,22 @@ async def _is_platform_admin(auth_client: AuthClient) -> bool:
     return auth_client.auth_enabled and await auth_client.has_role("system", "PlatformAdmin")
 
 
+def get_workspaces_client(
+    nemo_client: AsyncNemoClient = Depends(get_nemo_client),
+) -> AsyncWorkspacesClient:
+    return AsyncWorkspacesClient.from_client(nemo_client)
+
+
 def get_access_key_issuer(
     auth_client: AuthClient = Depends(get_auth_client),
     registry: AccessKeyRegistry = Depends(get_access_key_registry),
+    workspaces_client: AsyncWorkspacesClient = Depends(get_workspaces_client),
 ) -> PersistentAccessKeyIssuer:
     return PersistentAccessKeyIssuer(
         get_auth_config(),
         auth_client.principal.effective_principal,
         registry,
+        workspaces_client,
         admin_override=lambda: _is_platform_admin(auth_client),
     )
 

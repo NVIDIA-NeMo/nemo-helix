@@ -335,6 +335,65 @@ def test_access_key_issuer_service_stamps_current_principal(tmp_path):
     assert unverified["exp"] == 1785280600
 
 
+def test_access_key_issuer_service_omits_scope_claim_when_unset(tmp_path):
+    config = _access_key_config(tmp_path)
+    issuer = AccessKeyIssuerService(
+        config=config,
+        principal=Principal(id="alice@example.com"),
+        now=lambda: 1785280000,
+    )
+
+    created = issuer.create(AccessKeyCreateRequest())
+    unverified = jwt.decode(created.token, options={"verify_signature": False})
+
+    assert "scope" not in unverified
+    assert created.scope == []
+
+
+@pytest.mark.parametrize("scope", [[], [""], ["  "], ["intake", ""]])
+def test_access_key_create_request_rejects_explicit_empty_scope(scope):
+    # An explicitly empty (or blank-only) scope must not silently fall back to the unscoped,
+    # full-access behavior of omitting `scope` entirely.
+    with pytest.raises(ValidationError, match="non-empty service name"):
+        AccessKeyCreateRequest(scope=scope)
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        ["intake entities"],
+        ["intake\tentities"],
+        ["intake\nentities"],
+        ["intake\rentities"],
+        ["intake entities"],
+        ["intake:read"],
+    ],
+)
+def test_access_key_create_request_rejects_scope_with_whitespace_or_colon(scope):
+    # Service names are serialized into a single space-delimited `service:read service:write ...`
+    # claim, so a name containing one of those delimiters would corrupt the claim and could be
+    # reinterpreted downstream as an unrelated service's scope.
+    with pytest.raises(ValidationError, match="whitespace or ':'"):
+        AccessKeyCreateRequest(scope=scope)
+
+
+def test_access_key_issuer_service_mints_service_scopes_without_platform_scope(tmp_path):
+    config = _access_key_config(tmp_path)
+    issuer = AccessKeyIssuerService(
+        config=config,
+        principal=Principal(id="alice@example.com"),
+        now=lambda: 1785280000,
+    )
+
+    created = issuer.create(AccessKeyCreateRequest(scope=["intake", "entities", "intake"]))
+    unverified = jwt.decode(created.token, options={"verify_signature": False})
+
+    assert unverified["scope"] == "intake:read intake:write entities:read entities:write"
+    assert "platform:read" not in unverified["scope"]
+    assert "platform:write" not in unverified["scope"]
+    assert created.scope == ["intake", "entities"]
+
+
 def test_access_key_issuer_service_serializes_groups_for_gateway_header(tmp_path):
     config = _access_key_config(tmp_path)
     principal = Principal(

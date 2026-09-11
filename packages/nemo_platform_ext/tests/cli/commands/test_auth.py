@@ -23,6 +23,7 @@ from nemo_platform_plugin.auth.access_keys.types import (
     AccessKeyRotateRequest,
     AccessKeyRotateResponse,
     AccessKeyStatusChangeResponse,
+    AccessKeyWorkspaceGrant,
 )
 from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_platform_plugin.client.errors import NotFoundError
@@ -461,6 +462,75 @@ def test_auth_access_keys_create_sends_service_account(monkeypatch: pytest.Monke
     )
 
 
+def test_auth_access_keys_create_sends_scope_rotation_and_workspace_grants(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_access_keys_client = MagicMock()
+    fake_access_keys_client.create_access_key.return_value.data.return_value = _created_access_key("intake-worker")
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.core.context.CLIContext.get_client",
+        lambda self: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.commands.auth.client_from_platform",
+        lambda platform, client_cls: fake_access_keys_client,
+    )
+    rotated_jti = "ak_00000000000000000000000000000000"
+
+    result = runner.invoke(
+        app,
+        [
+            "auth",
+            "access-keys",
+            "create",
+            "--scope",
+            "intake, entities, intake",
+            "--rotate",
+            rotated_jti,
+            "--workspace",
+            "team-a",
+            "--workspace",
+            "team-b:Viewer, Admin",
+        ],
+    )
+
+    assert_exit_code(result, 0)
+    fake_access_keys_client.create_access_key.assert_called_once_with(
+        body=AccessKeyCreateRequest(
+            scope=["intake", "entities"],
+            rotates=rotated_jti,
+            workspaces=[
+                AccessKeyWorkspaceGrant(workspace="team-a", roles=["Editor"]),
+                AccessKeyWorkspaceGrant(workspace="team-b", roles=["Viewer", "Admin"]),
+            ],
+        )
+    )
+
+
+@pytest.mark.parametrize("workspace_value", ["team-a:", "team-a:,,"])
+def test_auth_access_keys_create_rejects_workspace_grant_with_empty_roles(
+    monkeypatch: pytest.MonkeyPatch, workspace_value: str
+):
+    fake_access_keys_client = MagicMock()
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.core.context.CLIContext.get_client",
+        lambda self: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.commands.auth.client_from_platform",
+        lambda platform, client_cls: fake_access_keys_client,
+    )
+
+    result = runner.invoke(
+        app,
+        ["auth", "access-keys", "create", "--workspace", workspace_value],
+    )
+
+    assert_exit_code(result, 2)
+    assert "specify" in result.output and "role after ':'" in result.output
+    fake_access_keys_client.create_access_key.assert_not_called()
+
+
 def test_auth_access_keys_create_sends_explicit_null_expiration(monkeypatch: pytest.MonkeyPatch):
     fake_platform_client = MagicMock()
     fake_access_keys_client = MagicMock()
@@ -573,6 +643,7 @@ def test_auth_access_keys_list_table_includes_key_name(monkeypatch: pytest.Monke
                 status="ROTATING",
                 issuer="https://platform.example.com/apis/auth",
                 audiences=["nemo-platform-access-key"],
+                scope=["intake"],
             )
         ]
     )
@@ -593,6 +664,7 @@ def test_auth_access_keys_list_table_includes_key_name(monkeypatch: pytest.Monke
     assert "grace_period_expires_at" in result.output
     assert "2026-07-28T12:30:00Z" in result.output
     assert "2026-07-28T13:00:00Z" in result.output
+    assert "intake" in result.output
     fake_access_keys_client.list_access_keys.assert_called_once_with(query_params={"page": 1, "page_size": 100})
 
 

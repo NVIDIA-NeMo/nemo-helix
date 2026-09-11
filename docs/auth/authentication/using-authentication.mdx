@@ -134,6 +134,21 @@ Pass `--expires-in <seconds>` to request a specific finite lifetime. Pass
 `--expires-in none` only for deployments where the administrator has explicitly
 allowed unlimited keys.
 
+Restrict a key to specific services with `--scope`, and grant its principal
+workspace membership with `--workspace` (formatted `<workspace>` or
+`<workspace>:<role1>,<role2>`, repeatable) instead of a separate
+`nemo workspaces members create` call:
+
+```bash
+nemo auth access-keys create --name "intake-worker" --service-account service-id \
+  --scope intake,entities --workspace ml-team:Editor
+```
+
+Rotate a personal key (one without `--service-account`) by passing `--rotate
+<jti>` with the prior key's `jti`: once the replacement key is created and its
+requested workspace grants are provisioned, the referenced key is revoked.
+`--rotate` only accepts a key you own that has no service account bound to it.
+
 List keys, temporarily suspend and restore one, rotate one, or permanently revoke one by
 its stable `jti`:
 

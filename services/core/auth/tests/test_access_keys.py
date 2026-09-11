@@ -12,13 +12,16 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_platform_plugin.auth.access_keys.issuer import AccessKeyOperationNotImplementedError
 from nemo_platform_plugin.auth.access_keys.types import AccessKeyCreateResponse
+from nemo_platform_plugin.workspaces.client import AsyncWorkspacesClient
+from nemo_platform_plugin.workspaces.types import CreateWorkspaceMemberRequest
+from nmp.common.auth.access_keys import AccessKeyValidationError
 from nmp.common.auth.client import AuthClient
 from nmp.common.auth.dependencies import auth_client_context
 from nmp.common.auth.models import Principal
 from nmp.common.config import AuthConfig
 from nmp.common.config.base import AccessKeyConfig, TokenSigningConfig
 from nmp.common.entities import EntityConflictError
-from nmp.core.auth.api.v2.access_keys.endpoints import get_access_key_issuer, router
+from nmp.core.auth.api.v2.access_keys.endpoints import get_access_key_issuer, get_workspaces_client, router
 from nmp.core.auth.app.access_keys import AccessKeyNotFoundError, AccessKeyStateConflictError, get_access_key_registry
 
 
@@ -119,6 +122,18 @@ class InMemoryAccessKeyRegistry:
         self.suspended.discard(jti)
         return revoked
 
+    async def get_for_rotation(self, jti, principal, *, admin_override=None):
+        key = await self._may_manage(jti, principal, admin_override=admin_override)
+        if key is None:
+            raise AccessKeyValidationError(
+                f"rotates references a Scoped Access Key that does not exist or is not owned by the caller: {jti}"
+            )
+        if key.entity_type == "SERVICE_ACCOUNT":
+            raise AccessKeyValidationError(
+                "rotates only supports personal Scoped Access Keys without a service account"
+            )
+        return key
+
     async def suspend(self, jti, principal, *, admin_override=None):
         key = await self._may_manage(jti, principal, admin_override=admin_override)
         if key is None:
@@ -165,6 +180,7 @@ class InMemoryAccessKeyRegistry:
             principal=owner,
             subject_principal=key.principal if key.principal != owner else None,
             entity_type=key.entity_type,
+            scope=key.scope or [],
             issued_at=key.created_at,
             expires_at=key.expires_at,
             status=self._status(jti, key),
@@ -224,7 +240,12 @@ class InMemoryAccessKeyRegistry:
 
 
 @pytest.fixture
-def client(tmp_path):
+def access_key_workspaces_client():
+    return AsyncMock(spec=AsyncWorkspacesClient)
+
+
+@pytest.fixture
+def client(tmp_path, access_key_workspaces_client):
     config = AuthConfig(
         enabled=True,
         token_signing=TokenSigningConfig(
@@ -254,6 +275,7 @@ def client(tmp_path):
     app.include_router(router)
     registry = InMemoryAccessKeyRegistry()
     app.dependency_overrides[get_access_key_registry] = lambda: registry
+    app.dependency_overrides[get_workspaces_client] = lambda: access_key_workspaces_client
 
     token = auth_client_context.set(
         AuthClient(
@@ -267,11 +289,12 @@ def client(tmp_path):
 
 
 @pytest.fixture
-def disabled_client():
+def disabled_client(access_key_workspaces_client):
     config = AuthConfig(enabled=True, access_keys=AccessKeyConfig())
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_access_key_registry] = lambda: InMemoryAccessKeyRegistry()
+    app.dependency_overrides[get_workspaces_client] = lambda: access_key_workspaces_client
     token = auth_client_context.set(
         AuthClient(
             principal=Principal(id="alice@example.com", email="alice@example.com", groups=["team-ml"]),
@@ -300,8 +323,184 @@ def test_create_access_key_returns_token_for_current_principal(client):
     assert body["description"] == "CI intake automation"
     assert body["token_type"] == "Bearer"
     assert body["principal"] == "alice@example.com"
+    assert body["scope"] == []
     assert body["expires_at"] is not None
     assert body["token"].count(".") == 2
+
+
+def test_create_access_key_rotates_prior_owned_key(client):
+    prior = client.post("/v2/access-keys", json={"name": "prior"}).json()
+
+    response = client.post(
+        "/v2/access-keys",
+        json={"name": "replacement", "rotates": prior["jti"]},
+    )
+
+    assert response.status_code == 200
+    listed = client.get("/v2/access-keys").json()["data"]
+    assert next(key for key in listed if key["jti"] == prior["jti"])["status"] == "REVOKED"
+
+
+def test_create_access_key_rejects_rotation_of_missing_key(client):
+    missing_jti = "ak_00000000000000000000000000000000"
+
+    response = client.post(
+        "/v2/access-keys",
+        json={"name": "replacement", "rotates": missing_jti},
+    )
+
+    assert response.status_code == 400
+    listed = client.get("/v2/access-keys").json()["data"]
+    assert [key["name"] for key in listed] == []
+
+
+def test_create_access_key_rejects_rotation_of_service_bound_key(client):
+    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+        service_key = client.post(
+            "/v2/access-keys",
+            json={"name": "service-key", "service_account_id": "otel-collector"},
+        ).json()
+
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "replacement", "rotates": service_key["jti"]},
+        )
+
+    assert response.status_code == 400
+    assert "service account" in response.json()["detail"]
+
+
+def test_create_access_key_rotation_revoke_failure_fails_the_request_and_compensates(client, caplog, monkeypatch):
+    prior = client.post("/v2/access-keys", json={"name": "prior"}).json()
+
+    # Simulate an unexpected failure revoking the rotation target specifically (e.g. a
+    # concurrent delete), while leaving revocation of any other jti (the compensating
+    # self-revoke of the new key) working normally.
+    from nmp.core.auth.app.access_keys import PersistentAccessKeyIssuer
+
+    original_revoke_async = PersistentAccessKeyIssuer.revoke_async
+
+    async def _boom_for_target_only(self, jti):
+        if jti == prior["jti"]:
+            raise RuntimeError("entity storage unavailable")
+        return await original_revoke_async(self, jti)
+
+    monkeypatch.setattr(
+        "nmp.core.auth.app.access_keys.PersistentAccessKeyIssuer.revoke_async",
+        _boom_for_target_only,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        # The request fails instead of silently returning a key while the predecessor stays live.
+        with pytest.raises(RuntimeError, match="entity storage unavailable"):
+            client.post(
+                "/v2/access-keys",
+                json={"name": "replacement", "rotates": prior["jti"]},
+            )
+
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "audit_event", None) == "access_key.rotation_revoke_failed"
+    )
+    assert record.rotated_from_jti == prior["jti"]
+
+    listed = client.get("/v2/access-keys").json()["data"]
+    prior_listed = next(key for key in listed if key["jti"] == prior["jti"])
+    assert prior_listed["status"] == "ACTIVE"
+    # The half-created replacement was compensated away (revoked) rather than left dangling.
+    replacement_listed = next(key for key in listed if key["name"] == "replacement")
+    assert replacement_listed["status"] == "REVOKED"
+
+
+def test_create_access_key_rotation_revoke_failure_logs_when_compensation_also_fails(client, caplog, monkeypatch):
+    prior = client.post("/v2/access-keys", json={"name": "prior"}).json()
+
+    async def _boom(self, jti):
+        raise RuntimeError("entity storage unavailable")
+
+    monkeypatch.setattr(
+        "nmp.core.auth.app.access_keys.PersistentAccessKeyIssuer.revoke_async",
+        _boom,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(RuntimeError, match="entity storage unavailable"):
+            client.post(
+                "/v2/access-keys",
+                json={"name": "replacement", "rotates": prior["jti"]},
+            )
+
+    assert any(
+        getattr(record, "audit_event", None) == "access_key.compensating_revoke_failed" for record in caplog.records
+    )
+
+
+def test_create_access_key_rejects_rotation_combined_with_service_account(client):
+    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+        prior = client.post("/v2/access-keys", json={"name": "prior"}).json()
+
+        response = client.post(
+            "/v2/access-keys",
+            json={
+                "name": "replacement",
+                "rotates": prior["jti"],
+                "service_account_id": "otel-collector",
+            },
+        )
+
+    assert response.status_code == 400
+    assert "rotates cannot be combined with service_account_id" in response.json()["detail"]
+    listed = client.get("/v2/access-keys").json()["data"]
+    assert [key["name"] for key in listed] == ["prior"]
+
+
+def test_create_access_key_grants_workspace_membership(client, access_key_workspaces_client):
+    response = client.post(
+        "/v2/access-keys",
+        json={
+            "name": "workspace-key",
+            "workspaces": [{"workspace": "team-a", "roles": ["Viewer"]}],
+        },
+    )
+
+    assert response.status_code == 200
+    access_key_workspaces_client.create_workspace_member.assert_awaited_once_with(
+        workspace="team-a",
+        body=CreateWorkspaceMemberRequest(
+            principal="alice@example.com",
+            roles=["Viewer"],
+        ),
+    )
+
+
+def test_create_access_key_workspace_grant_failure_fails_the_request_and_revokes_the_key(
+    client,
+    access_key_workspaces_client,
+    caplog,
+):
+    access_key_workspaces_client.create_workspace_member.side_effect = RuntimeError("workspace not found")
+
+    with caplog.at_level(logging.WARNING):
+        # The request fails instead of returning a 200 for a key that lacks the access it was
+        # supposed to have -- --workspace is meant to replace a separate, failure-visible call.
+        with pytest.raises(RuntimeError, match="workspace not found"):
+            client.post(
+                "/v2/access-keys",
+                json={"name": "workspace-key", "workspaces": [{"workspace": "missing"}]},
+            )
+
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "audit_event", None) == "access_key.workspace_grant_failed"
+    )
+    assert record.workspace == "missing"
+    assert record.roles == ["Editor"]
+
+    listed = client.get("/v2/access-keys").json()["data"]
+    workspace_key_listed = next(key for key in listed if key["name"] == "workspace-key")
+    assert workspace_key_listed["status"] == "REVOKED"
 
 
 def test_access_key_issuer_uses_effective_principal_for_delegated_requests():
@@ -314,7 +513,11 @@ def test_access_key_issuer_uses_effective_principal_for_delegated_requests():
         config=AuthConfig(enabled=True),
     )
 
-    issuer = get_access_key_issuer(auth_client=auth_client, registry=InMemoryAccessKeyRegistry())
+    issuer = get_access_key_issuer(
+        auth_client=auth_client,
+        registry=InMemoryAccessKeyRegistry(),
+        workspaces_client=AsyncMock(),
+    )
 
     assert issuer.principal == "admin@example.com"
 
@@ -1020,6 +1223,7 @@ def test_list_access_keys_returns_current_principals_persisted_keys(client):
             "status": "ACTIVE",
             "issuer": "http://testserver/apis/auth",
             "audiences": ["nemo-platform-access-key"],
+            "scope": [],
         }
     ]
     assert response.json()["has_more"] is False
@@ -1178,6 +1382,31 @@ def test_rotate_access_key_mints_successor_and_starts_grace_period(client):
     assert listing[jti]["grace_period_expires_at"] == body["grace_period_expires_at"]
     assert listing[new_key["jti"]]["status"] == "ACTIVE"
     assert listing[new_key["jti"]]["grace_period_expires_at"] is None
+
+
+def test_rotate_access_key_preserves_scope(client):
+    created = client.post("/v2/access-keys", json={"name": "intake-worker", "scope": ["intake", "entities"]}).json()
+    jti = created["jti"]
+
+    response = client.post(f"/v2/access-keys/{jti}/rotate")
+
+    assert response.status_code == 200
+    new_key = response.json()["new_key"]
+    assert new_key["scope"] == ["intake", "entities"]
+
+    listing = {entry["jti"]: entry for entry in client.get("/v2/access-keys").json()["data"]}
+    assert listing[new_key["jti"]]["scope"] == ["intake", "entities"]
+
+
+def test_rotate_access_key_keeps_unscoped_successor_unscoped(client):
+    created = client.post("/v2/access-keys", json={"name": "ci-intake"}).json()
+    jti = created["jti"]
+
+    response = client.post(f"/v2/access-keys/{jti}/rotate")
+
+    assert response.status_code == 200
+    new_key = response.json()["new_key"]
+    assert new_key["scope"] == []
 
 
 def test_rotate_access_key_accepts_explicit_grace_period_seconds(client):

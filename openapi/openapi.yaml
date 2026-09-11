@@ -8426,6 +8426,30 @@ components:
           maxLength: 240
           minLength: 1
           pattern: ^[a-zA-Z0-9][a-zA-Z0-9._+/-]*$
+        scope:
+          title: Scope
+          description: Optional service names that restrict this key to read and write
+            access for those services.
+          nullable: true
+          items:
+            type: string
+          type: array
+        rotates:
+          title: Rotates
+          description: JTI of a prior Scoped Access Key owned by the caller to revoke
+            after creation. Intended primarily for personal keys without a service-account
+            identity.
+          nullable: true
+          type: string
+          pattern: ^ak_[0-9a-f]{32}$
+        workspaces:
+          title: Workspaces
+          description: Optional workspace memberships to grant to the newly created
+            key principal.
+          nullable: true
+          items:
+            $ref: '#/components/schemas/AccessKeyWorkspaceGrant'
+          type: array
       type: object
       title: AccessKeyCreateRequest
       description: Request body for creating a Scoped Access Key.
@@ -8477,6 +8501,13 @@ components:
           uniqueItems: true
           title: Audiences
           description: Audiences accepted for the Scoped Access Key JWT.
+        scope:
+          items:
+            type: string
+          type: array
+          title: Scope
+          description: Services this key is restricted to. An empty list means the
+            key is unscoped.
         created_at:
           type: string
           format: date-time
@@ -8600,6 +8631,13 @@ components:
           uniqueItems: true
           title: Audiences
           description: Audiences accepted for the Scoped Access Key JWT.
+        scope:
+          items:
+            type: string
+          type: array
+          title: Scope
+          description: Services this key is restricted to. An empty list means the
+            key is unscoped.
         created_at:
           type: string
           format: date-time
@@ -8745,6 +8783,21 @@ components:
       - changed
       title: AccessKeyStatusChangeResponse
       description: Response returned after a reversible Scoped Access Key status change.
+    AccessKeyWorkspaceGrant:
+      properties:
+        workspace:
+          type: string
+          title: Workspace
+        roles:
+          items:
+            type: string
+          type: array
+          title: Roles
+      type: object
+      required:
+      - workspace
+      title: AccessKeyWorkspaceGrant
+      description: Workspace membership to grant to a newly created access key principal.
     ActionRails:
       properties:
         instant_actions:
