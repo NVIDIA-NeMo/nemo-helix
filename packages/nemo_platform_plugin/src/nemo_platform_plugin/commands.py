@@ -109,7 +109,7 @@ from nemo_platform_plugin.cli_renderer import CLIRenderer, RendererContext
 from nemo_platform_plugin.cli_state import resolve_local_cli_sdks
 from nemo_platform_plugin.function import NemoFunction, returns_async_iterator
 from nemo_platform_plugin.function_context import FunctionContext
-from nemo_platform_plugin.functions.routes import DEFAULT_FUNCTION_PATH, NDJSON_MEDIA_TYPE
+from nemo_platform_plugin.functions.frames import DEFAULT_FUNCTION_PATH, NDJSON_MEDIA_TYPE
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.jobs._cli_options import (
     load_options_file,

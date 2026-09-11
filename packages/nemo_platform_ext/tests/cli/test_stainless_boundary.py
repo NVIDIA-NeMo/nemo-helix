@@ -6,8 +6,7 @@
 Two complementary checks:
 
 1. A static scan asserts no module under ``nemo_platform_ext.cli`` imports the
-   generated ``nemo_platform`` SDK. Modules still being migrated are listed in
-   ``MIGRATING`` and must be removed from it as they land.
+   generated ``nemo_platform`` SDK.
 2. A runtime check runs the CLI in a subprocess with ``nemo_platform`` made
    un-importable, proving the CLI's import graph and the migrated command
    groups work without the generated SDK installed.
@@ -29,11 +28,6 @@ import nemo_platform_ext.cli as cli_package
 import pytest
 
 CLI_ROOT = Path(cli_package.__file__).parent
-
-# Modules (relative to the cli package) that still import the generated SDK.
-# Shrinks to empty as command groups migrate to typed clients.
-MIGRATING: frozenset[str] = frozenset()
-MIGRATING_DIRS: tuple[str, ...] = ("commands/api/",)
 
 STAINLESS_PACKAGE = "nemo_platform"
 
@@ -59,22 +53,10 @@ def test_cli_modules_do_not_import_generated_sdk() -> None:
     offenders: dict[str, list[str]] = {}
     for path in _cli_modules():
         relative = path.relative_to(CLI_ROOT).as_posix()
-        if relative in MIGRATING or relative.startswith(MIGRATING_DIRS):
-            continue
         hits = _imports_stainless(ast.parse(path.read_text(encoding="utf-8")))
         if hits:
             offenders[relative] = hits
     assert not offenders, f"CLI modules importing the generated SDK: {json.dumps(offenders, indent=2)}"
-
-
-def test_migrating_allow_list_is_current() -> None:
-    """Entries in MIGRATING must still exist and still import the SDK; otherwise remove them."""
-    stale = []
-    for relative in MIGRATING:
-        path = CLI_ROOT / relative
-        if not path.exists() or not _imports_stainless(ast.parse(path.read_text(encoding="utf-8"))):
-            stale.append(relative)
-    assert not stale, f"MIGRATING entries no longer needed: {stale}"
 
 
 _RUNTIME_PROBE = r"""

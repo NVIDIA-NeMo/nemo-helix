@@ -67,17 +67,10 @@ from nemo_platform_plugin.authz import AuthzScope, CallerKind, path_rule
 from nemo_platform_plugin.dependencies import get_sdk_client, get_sync_sdk_client
 from nemo_platform_plugin.function import NemoFunction, returns_async_iterator
 from nemo_platform_plugin.function_context import FunctionContext
-from nemo_platform_plugin.functions.frames import Heartbeat
+from nemo_platform_plugin.functions.frames import DEFAULT_FUNCTION_PATH, NDJSON_MEDIA_TYPE, Heartbeat
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
-
-# NDJSON over chunked HTTP. Matches what the SDK and Studio clients
-# expect when ``returns_async_iterator(...)`` is True. DD's existing
-# ``application/jsonl`` is treated as a synonym by clients today;
-# ``application/x-ndjson`` is what `plan-functions.md` standardises on
-# for new functions.
-NDJSON_MEDIA_TYPE = "application/x-ndjson"
 
 
 class NdjsonFrameResponse(JSONResponse):
@@ -97,14 +90,6 @@ class NdjsonFrameResponse(JSONResponse):
 # when wiring a router for a function with very different latency
 # expectations.
 HEARTBEAT_INTERVAL_SECONDS: float = 5.0
-
-# Default mount path. Routers are typically included under a
-# ``/apis/<plugin>/v2/workspaces/{workspace}`` prefix, so the bare
-# ``/{name}`` here resolves to the canonical
-# ``POST /apis/<plugin>/v2/workspaces/{workspace}/{name}``. Functions
-# overriding :attr:`NemoFunction.endpoint` substitute its template
-# instead — see :func:`_resolve_route_path`.
-DEFAULT_FUNCTION_PATH: str = "/{name}"
 
 
 def add_function_routes(
