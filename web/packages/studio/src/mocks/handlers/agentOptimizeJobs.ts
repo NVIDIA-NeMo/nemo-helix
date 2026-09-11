@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { OptimizeJob } from '@nemo/sdk/generated/agents/schema';
+import type { OptimizeJob, OptimizeJobRequest } from '@nemo/sdk/generated/agents/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { http, HttpResponse } from 'msw';
 
@@ -135,5 +135,29 @@ export const agentOptimizeJobsHandlers = [
         total_results: matches.length,
       },
     });
+  }),
+
+  /** Point lookup by name. The 404 is load-bearing: it is how the submit form's name-availability
+   *  check learns a name is still free. */
+  http.get(`${OPTIMIZE_JOBS_URL}/:name`, ({ params }) => {
+    const job = mockOptimizeJobs.find((candidate) => candidate.name === String(params.name));
+    if (!job) return HttpResponse.json({ detail: 'Job not found' }, { status: 404 });
+    return HttpResponse.json(job);
+  }),
+
+  /** Echoes the submitted study back as a queued job, the way the API does. */
+  http.post(OPTIMIZE_JOBS_URL, async ({ request, params }) => {
+    const body = (await request.json()) as OptimizeJobRequest;
+    return HttpResponse.json(
+      {
+        id: `opt-${body.name}`,
+        name: body.name ?? 'unnamed-study',
+        workspace: String(params.workspace),
+        status: 'pending',
+        created_at: new Date().toISOString(),
+        spec: body.spec,
+      } satisfies OptimizeJob,
+      { status: 201 }
+    );
   }),
 ];
