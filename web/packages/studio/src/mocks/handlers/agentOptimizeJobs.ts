@@ -137,15 +137,12 @@ export const agentOptimizeJobsHandlers = [
     });
   }),
 
-  /** Point lookup by name. The 404 is load-bearing: it is how the submit form's name-availability
-   *  check learns a name is still free. */
   http.get(`${OPTIMIZE_JOBS_URL}/:name`, ({ params }) => {
     const job = mockOptimizeJobs.find((candidate) => candidate.name === String(params.name));
     if (!job) return HttpResponse.json({ detail: 'Job not found' }, { status: 404 });
     return HttpResponse.json(job);
   }),
 
-  /** Echoes the submitted study back as a queued job, the way the API does. */
   http.post(OPTIMIZE_JOBS_URL, async ({ request, params }) => {
     const body = (await request.json()) as OptimizeJobRequest;
     return HttpResponse.json(

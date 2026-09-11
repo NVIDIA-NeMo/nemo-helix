@@ -3,15 +3,7 @@
 
 import { Scalar, stringify as stringifyYaml } from 'yaml';
 
-/** Config prefix every swept parameter hangs off. The study overlays a Fabric agent config
- *  (`nemo-agents-spec-v1`), whose sampling knobs live under `models.<role>` — and `default` is the
- *  role the build path scaffolds, so it is the only one we can assume without reading the agent's
- *  config. The Advanced section is where a different role gets fixed. */
 export const LLM_CONFIG_PREFIX = 'models.default';
-
-/** Objective the study optimizes. The only metric the optimize trial path emits is the judge's
- *  `average_score` — `tunable_rag_evaluator` publishes it under that name whatever the evaluator is
- *  called — so it is what `optimizer.eval_metrics` has to name for the reducer to find a value. */
 export const STUDY_METRIC = 'average_score';
 
 export interface SearchParameter {
@@ -37,23 +29,11 @@ export interface OptimizationIntent {
   id: IntentId;
   title: string;
   description: string;
-  /** Plain-language restatement of the objective, echoed in the run summary. */
   objective: string;
   parameters: SearchParameter[];
 }
 
-/**
- * What the user is tuning for, and the search space that follows from it.
- *
- * Picking an intent is the only way the form sets a search space, so the user never has to know
- * which config key moves their objective. The Advanced section edits the result; it does not
- * replace this choice.
- *
- * Every intent sweeps temperature and nothing else. It is the only sampling knob a Fabric agent
- * exposes — `ModelConfig` forbids unknown keys, and the deepagents adapter forwards temperature
- * alone — so an intent differs from its neighbours in the range it searches, not in the parameters
- * it touches. Add a parameter here only once the adapter actually reads it.
- */
+/** What the user is tuning for, and the search space that follows from it. */
 export const OPTIMIZATION_INTENTS: OptimizationIntent[] = [
   {
     id: 'accuracy',
@@ -98,7 +78,6 @@ export interface OptimizationBudget {
   id: BudgetId;
   title: string;
   trials: number;
-  /** Rough wall-clock, stated as a range the user can plan around rather than a promise. */
   estimatedMinutes: number;
 }
 
@@ -111,18 +90,12 @@ export const OPTIMIZATION_BUDGETS: OptimizationBudget[] = [
 export const budgetById = (id: BudgetId): OptimizationBudget =>
   OPTIMIZATION_BUDGETS.find((budget) => budget.id === id) ?? OPTIMIZATION_BUDGETS[1];
 
-/** `0.0–1.0` for a float, `128–768` for an int — floats keep a decimal so the range does not read
- *  as an integer one the sampler would round into. */
 export const formatRange = (parameter: SearchParameter): string =>
   parameter.type === 'float'
     ? `${parameter.low.toFixed(1)}–${parameter.high.toFixed(1)}`
     : `${parameter.low}–${parameter.high}`;
 
-/** A bound that survives YAML round-tripping as the type it was authored as.
- *
- *  The backend picks `suggest_int` vs `suggest_float` from the parsed Python type of `low`/`high`,
- *  and a plain `0` serializes as `0`, which parses back as an int. Without the forced decimal a
- *  0–1 temperature sweep would be sampled as the two integers 0 and 1. */
+/** A bound that survives YAML round-tripping as the type it was authored as. */
 const bound = (value: number, type: SearchParameter['type']): number | Scalar => {
   if (type !== 'float') return value;
   const scalar = new Scalar(value);
@@ -133,19 +106,16 @@ const bound = (value: number, type: SearchParameter['type']): number | Scalar =>
 export interface OptimizeConfigInput {
   parameters: SearchParameter[];
   trials: number;
-  /** Bundle-relative path of the staged rows; omitted while they are still loading. */
   datasetPath?: string;
-  /** Bare name of the virtual model that judges each trial, and the gateway URL it answers on. */
   judgeModel?: string;
   judgeModelUrl?: string;
   experimentId?: string;
 }
 
-/** Fabric model role the judge is registered under. Named for the study so it cannot collide with
- *  a role the agent already defines — the overlay's models are merged over the agent's. */
+/** Fabric model role the judge is registered under. */
 const JUDGE_ROLE = 'optimize_judge';
 
-/** Evaluator name. Only its `average_score` output is read, so what it is called is cosmetic. */
+/** Evaluator name. */
 const EVALUATOR_NAME = 'quality';
 
 const JUDGE_PROMPT = `Score whether the generated answer satisfies the expected answer for the
@@ -154,8 +124,6 @@ only.`;
 
 const evalBlock = (datasetPath: string) => ({
   general: { dataset: { file_path: datasetPath }, max_concurrency: 4 },
-  // Trajectories are per-trial intermediate evidence the study never reads back, and capturing
-  // them multiplies the artifacts a sweep writes by its trial count.
   fabric: { capture_trajectory: false },
   evaluators: {
     [EVALUATOR_NAME]: {
@@ -168,25 +136,7 @@ const evalBlock = (datasetPath: string) => ({
   },
 });
 
-/**
- * The Fabric-native optimization YAML the job runs.
- *
- * Written out in full rather than patched into an existing config: the study needs a search space
- * and an eval block, and the agent's own config carries neither. `metadata.experiment_id` is what
- * lands the trials alongside the evaluations they are being compared against.
- *
- * Shape is dictated by the Optuna backend's parser, not by convenience: `search_space` hangs off
- * `optimizer` (not off `numeric`, which only carries the sampler's own settings), every entry names
- * the applicator `type: fabric` plus the `path` it writes, and `eval_metrics` must declare at least
- * one metric or the study has no objective to create.
- *
- * The eval block is self-contained rather than a pointer at the evaluation it came from. The trial
- * path scores through its own `tunable_rag_evaluator` and reads rows from a JSON file, neither of
- * which is the shape Studio stores an evaluation in — so the study borrows that evaluation's
- * prompts and expected answers (staged separately as `datasetPath`) and re-scores them with the
- * judge named here. Trial scores are therefore comparable across trials, but not with the numbers
- * the original evaluation published.
- */
+/** The Fabric-native optimization YAML the job runs. */
 export const buildOptimizeConfig = ({
   parameters,
   trials,

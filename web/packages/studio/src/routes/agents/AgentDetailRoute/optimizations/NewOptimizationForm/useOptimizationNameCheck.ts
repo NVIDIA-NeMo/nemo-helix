@@ -7,7 +7,6 @@ import { useAgentsGetOptimizeJob } from '@nemo/sdk/generated/agents/agents';
 export type NameCheckStatus = 'idle' | 'checking' | 'available' | 'conflict' | 'failed';
 
 export interface NameCheckResult {
-  /** The sanitized name the result describes; `idle` when there is nothing to describe. */
   candidate: string;
   status: NameCheckStatus;
 }

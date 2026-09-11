@@ -8,8 +8,6 @@ export interface OptimizationTarget {
   experimentId: string;
   experimentName: string | null;
   evaluation: AgentEvaluationRow;
-  /** Evaluator names, preferring the evaluation's own list and falling back to whatever actually
-   *  published a score — a run in flight has the former but not yet the latter. */
   evaluators: string[];
 }
 

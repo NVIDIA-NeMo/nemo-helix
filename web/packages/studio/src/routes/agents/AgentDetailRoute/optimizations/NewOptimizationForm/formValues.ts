@@ -9,9 +9,6 @@ import {
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/optimizeConfig';
 import { z } from 'zod';
 
-/** Entity-naming contract: the literal typed value is never rewritten, and the sanitized name is
- *  what reaches submit — so a cosmetic deviation is a preview concern, not a validation error.
- *  Only input `sanitizeEntityName` cannot salvage becomes an issue. */
 const nameSchema = z
   .string()
   .superRefine((value, ctx) => {
@@ -46,15 +43,11 @@ export const optimizationFormSchema = z.object({
   name: nameSchema,
   intent: z.enum(['accuracy', 'brevity', 'creativity', 'cost']),
   budget: z.enum(['quick', 'standard', 'thorough']),
-  /** Empty when the agent has no evaluation to score against, which blocks submission. */
   experimentId: z.string().min(1, 'Pick an evaluation to score trials against.'),
-  /** The study re-scores every trial with its own LLM judge, so one has to be named. */
   judgeModel: z.string().min(1, 'Pick a judge model to score trials with.'),
   searchSpace: z.array(searchParameterSchema).min(1, 'Sweep at least one parameter.'),
 });
 
-/** What the fields hold while editing — `name` before its transform, numbers still possibly
- *  mid-keystroke — as opposed to `z.output`, which is the submitted shape. */
 export type OptimizationFormValues = {
   name: string;
   intent: IntentId;

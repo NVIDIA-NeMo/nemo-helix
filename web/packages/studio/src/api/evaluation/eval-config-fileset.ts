@@ -131,13 +131,11 @@ export const ensureEvalConfigFileset = async (
       await filesCreateFileset(workspace, { name: fileset, description }, signal);
     } catch (createErr) {
       if (isCanceledError(createErr)) throw createErr;
-      // Ignore only 409 (parallel apply already created it); surface everything else.
       if (!isConflictError(createErr)) throw createErr;
       const reListing = await filesListFilesetFiles(workspace, fileset, undefined, signal);
       existingPaths = new Set((reListing?.data ?? []).map((f) => f.path));
     }
   }
-  // Idempotent: never overwrite files already present in the fileset.
   const uploads = files.filter((f) => !existingPaths.has(f.path));
   for (const u of uploads) {
     const blob = new Blob([u.content], { type: u.type });

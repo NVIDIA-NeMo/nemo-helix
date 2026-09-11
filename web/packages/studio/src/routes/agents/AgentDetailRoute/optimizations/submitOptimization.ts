@@ -13,9 +13,7 @@ import {
  *  resolved relative to the fileset root, so a bare filename is all the job needs. */
 export const OPTIMIZE_CONFIG_PATH = 'optimize.yaml';
 
-/** One fileset per study, named after it. Job names are unique per workspace, so this never
- *  collides with another study's bundle — which matters because the staging helper below refuses
- *  to overwrite files, and a shared fileset would silently run the first study's config. */
+/** One fileset per study, named after it. Job names are unique per workspace, so this never collides with another study's bundle. */
 export const optimizeFilesetName = (jobName: string): string => `${jobName}-optimize`;
 
 interface SubmitOptimizationInput {
@@ -29,14 +27,7 @@ interface SubmitOptimizationInput {
   signal?: AbortSignal;
 }
 
-/**
- * Stage the generated config and submit the study.
- *
- * Two steps because a remote submission has no access to the client's filesystem: the job reads its
- * config out of a fileset, so the fileset has to exist and carry the YAML — and the rows the config
- * points at — before the job is created. Ordering matters: a job created against a missing bundle
- * fails at run time, where the user has already left this form.
- */
+/** Stage the generated config and submit the study. */
 export const submitOptimization = async ({
   workspace,
   agentName,
@@ -50,7 +41,6 @@ export const submitOptimization = async ({
   await ensureEvalConfigFileset(
     workspace,
     fileset,
-    // The staging helper types its signal as required; a never-aborted one is the no-op form.
     signal ?? new AbortController().signal,
     [
       { path: OPTIMIZE_CONFIG_PATH, content: config, type: 'application/yaml' },
