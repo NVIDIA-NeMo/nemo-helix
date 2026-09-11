@@ -69,8 +69,13 @@ describe('parseGitHubSource', () => {
     expect(parseGitHubSource('github.com/owner/repo/agents/calc').path).toBe('agents/calc');
   });
 
-  it('rejects a host that is not GitHub', () => {
-    expect(() => parseGitHubSource('https://gitlab.com/owner/repo')).toThrow(GitHubSourceError);
+  it.each([
+    'https://gitlab.com/owner/repo',
+    'gitlab.com/owner/repo',
+    'bitbucket.org/owner/repo',
+    'git@gitlab.com:owner/repo',
+  ])('rejects %s, which is not on GitHub', (input) => {
+    expect(() => parseGitHubSource(input)).toThrow(GitHubSourceError);
   });
 
   it('rejects input that names no repository', () => {

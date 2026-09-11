@@ -80,10 +80,11 @@ const githubPathSegments = (locator: string): string[] | undefined => {
     return trimSlashes(locator.slice(colon + 1)).split('/');
   }
 
-  const bare = trimSlashes(locator);
-  return GITHUB_HOSTS.has(bare.split('/')[0]?.toLowerCase() ?? '')
-    ? bare.split('/').slice(1)
-    : bare.split('/');
+  const segments = trimSlashes(locator).split('/');
+  const first = segments[0]?.toLowerCase() ?? '';
+  if (GITHUB_HOSTS.has(first)) return segments.slice(1);
+  // A GitHub owner is alphanumerics and hyphens, so a dot here is a host — and not ours.
+  return first.includes('.') ? undefined : segments;
 };
 
 /**
