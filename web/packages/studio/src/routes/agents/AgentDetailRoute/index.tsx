@@ -7,7 +7,6 @@ import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import {
   Badge,
-  Button,
   Flex,
   PageHeader,
   Stack,
@@ -48,10 +47,10 @@ import {
   clearAgentWalkthroughPending,
   isAgentWalkthroughPending,
 } from '@studio/routes/agents/AgentDetailRoute/walkthroughStorage';
-import { getAgentsListRoute, getIntakeTracesRoute } from '@studio/routes/utils';
-import { ClipboardCheck, Dot, GitCommitHorizontal, ListTree, Rocket } from 'lucide-react';
+import { getAgentsListRoute } from '@studio/routes/utils';
+import { Dot, GitCommitHorizontal } from 'lucide-react';
 import { type FC, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
 
 export const AgentDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();

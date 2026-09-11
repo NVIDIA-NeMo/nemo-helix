@@ -45,7 +45,11 @@ const mockFileset = (body: JsonBodyType, refreshed?: JsonBodyType) => {
   return refreshes;
 };
 
-const renderPanel = () => render(<SourcePanel workspace="ws" agentName="calc" />);
+// The hook retries a non-404 three times; without this the backoff outlasts the assertion.
+const renderPanel = () =>
+  render(<SourcePanel workspace="ws" agentName="calc" />, {
+    queryClientConfig: { defaultOptions: { queries: { retryDelay: 0 } } },
+  });
 
 describe('SourcePanel', () => {
   it('names the repository and the commit the fileset is pinned to', async () => {
@@ -92,5 +96,26 @@ describe('SourcePanel', () => {
     renderPanel();
 
     await waitFor(() => expect(screen.queryByText('Source')).not.toBeInTheDocument());
+  });
+
+  it('says the source could not be read when the fileset request fails, and offers a retry', async () => {
+    const user = userEvent.setup();
+    let attempts = 0;
+    server.use(
+      http.get(FILESET_URL, () => {
+        attempts += 1;
+        return attempts > 4
+          ? HttpResponse.json(githubFileset(PINNED))
+          : HttpResponse.json({ detail: 'boom' }, { status: 500 });
+      })
+    );
+
+    renderPanel();
+
+    expect(await screen.findByText(/Could not read where/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByText('acme/agents')).toBeInTheDocument();
   });
 });
