@@ -13,9 +13,6 @@
  * Do NOT import React -- the `react` module is not resolvable in Fern's build.
  *
  * Usage in MDX:
- *   import { TrajectoryViewer } from "@/components/TrajectoryViewer";
- *   import trajectory from "@/components/devnotes/<post-slug>/<example>";
- *
  *   <TrajectoryViewer {...trajectory} defaultOpen />
  */
 

@@ -32,7 +32,12 @@ from nemo_data_designer_plugin.jobs.retrieval_spec import (
 )
 from nemo_data_designer_plugin.jobs.spec import DataDesignerJobConfig
 from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec, PlatformJobStep
+from nemo_platform_plugin.sdk import AsyncNeMoPlatform
 from pydantic import ValidationError
+
+
+def _async_platform() -> AsyncNeMoPlatform:
+    return AsyncNeMoPlatform(base_url="http://platform.test", workspace="default")
 
 
 def _steps(compiled: PlatformJobSpec) -> list[PlatformJobStep]:
@@ -82,7 +87,7 @@ async def test_retrieval_generate_compile_is_cpu() -> None:
         spec=spec,
         entity_client=Mock(),
         job_name=None,
-        async_sdk=AsyncMock(),
+        async_sdk=_async_platform(),
     )
     steps = _steps(compiled)
     assert len(steps) == 1
@@ -104,7 +109,7 @@ async def test_retrieval_generate_compile_ignores_subprocess_profiles() -> None:
         spec=spec,
         entity_client=Mock(),
         job_name=None,
-        async_sdk=AsyncMock(),
+        async_sdk=_async_platform(),
     )
     executor = _executor(_steps(compiled)[0])
     assert executor["provider"] == "cpu"
@@ -124,7 +129,7 @@ async def test_retrieval_prepare_compile_uses_one_container_profile() -> None:
         spec=spec,
         entity_client=Mock(),
         job_name=None,
-        async_sdk=AsyncMock(),
+        async_sdk=_async_platform(),
         profile="gpu",
     )
     steps = _steps(compiled)
@@ -150,7 +155,7 @@ async def test_retrieval_prepare_compile_uses_one_container_profile() -> None:
             _generate_config(),
             workspace="default",
             entity_client=Mock(),
-            async_sdk=AsyncMock(),
+            async_sdk=_async_platform(),
             is_local=False,
         )
     assert isinstance(step, RetrievalGenerateStepConfig)
@@ -196,7 +201,7 @@ async def test_retrieval_prepare_convert_only_is_cpu() -> None:
         spec=spec,
         entity_client=Mock(),
         job_name=None,
-        async_sdk=AsyncMock(),
+        async_sdk=_async_platform(),
     )
     steps = _steps(compiled)
     assert len(steps) == 1
@@ -219,7 +224,7 @@ async def test_retrieval_prepare_resolves_model_fileset_for_mining() -> None:
             RetrievalPrepareJobConfig(sdg_input="default/stage0", enable_mining=True),
             workspace="default",
             entity_client=Mock(),
-            async_sdk=AsyncMock(),
+            async_sdk=_async_platform(),
             is_local=False,
         )
 
@@ -242,7 +247,7 @@ async def test_retrieval_prepare_compile_adds_gpu_mining_step() -> None:
         spec=spec,
         entity_client=Mock(),
         job_name=None,
-        async_sdk=AsyncMock(),
+        async_sdk=_async_platform(),
     )
     steps = _steps(compiled)
     assert len(steps) == 3
@@ -400,7 +405,7 @@ async def test_retrieval_run_compile_chains_generate_then_prepare() -> None:
             spec=spec,
             entity_client=Mock(),
             job_name=None,
-            async_sdk=AsyncMock(),
+            async_sdk=_async_platform(),
         )
     names = [step["name"] for step in _steps(compiled)]
     assert names[0] == "retrieval-generate"
@@ -585,7 +590,7 @@ async def test_retrieval_generate_compile_projects_hf_token_secret() -> None:
         spec=spec,
         entity_client=Mock(),
         job_name=None,
-        async_sdk=AsyncMock(),
+        async_sdk=_async_platform(),
     )
     step = _steps(compiled)[0]
     assert _secret_env(step) == {"HF_TOKEN": "default/hf-token"}
@@ -606,7 +611,7 @@ async def test_retrieval_generate_compile_omits_hf_token_without_secret() -> Non
         spec=spec,
         entity_client=Mock(),
         job_name=None,
-        async_sdk=AsyncMock(),
+        async_sdk=_async_platform(),
     )
     assert _secret_env(_steps(compiled)[0]) == {}
 
@@ -627,7 +632,7 @@ async def test_retrieval_prepare_compile_projects_hf_token_secret_on_convert_onl
         spec=spec,
         entity_client=Mock(),
         job_name=None,
-        async_sdk=AsyncMock(),
+        async_sdk=_async_platform(),
     )
     steps = _steps(compiled)
     assert _secret_env(steps[0]) == {"HF_TOKEN": "hf-token"}

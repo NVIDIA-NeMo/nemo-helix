@@ -21,7 +21,7 @@ async def validate_secret(sdk: AsyncNeMoPlatform, secret: str, default_workspace
     Data Designer library engine execution (which requires the
     NMPSecretResolver).
     """
-    workspace, name = _parse_secret_reference(secret, default_workspace)
+    workspace, name = parse_secret_reference(secret, default_workspace)
     secrets = client_from_platform(sdk, AsyncSecretsClient)
     try:
         await secrets.access_secret(name=name, workspace=workspace)
@@ -30,9 +30,9 @@ async def validate_secret(sdk: AsyncNeMoPlatform, secret: str, default_workspace
     except PermissionDeniedError as e:
         raise NDDInvalidConfigError(f"Access denied to workspace {workspace!r}") from e
     except Exception as e:
-        logger.exception("Error accessing secret", extra={"secret_name": name, "workspace": workspace})
+        logger.exception("Error accessing configured secret")
         raise NDDInternalError(
-            f"An unexpected error occurred while accessing secret {name!r} in workspace {workspace!r}: {e}"
+            f"An unexpected error occurred while accessing a configured secret in workspace {workspace!r}"
         ) from e
 
 
@@ -53,7 +53,7 @@ class NMPSecretResolver:
 
     def resolve(self, secret: str) -> str:
         try:
-            workspace, name = _parse_secret_reference(secret, self._default_workspace)
+            workspace, name = parse_secret_reference(secret, self._default_workspace)
             secrets = client_from_platform(self._sdk, SecretsClient)
             result = secrets.access_secret(name=name, workspace=workspace).data()
             return result.value
@@ -61,7 +61,7 @@ class NMPSecretResolver:
             raise SecretResolutionError(f"Error resolving secret {secret!r}: {e}") from e
 
 
-def _parse_secret_reference(secret: str, default_workspace: str) -> tuple[str, str]:
+def parse_secret_reference(secret: str, default_workspace: str) -> tuple[str, str]:
     """Parse a secret reference into workspace and name.
 
     Args:
@@ -81,3 +81,6 @@ def _parse_secret_reference(secret: str, default_workspace: str) -> tuple[str, s
             return workspace, name
         case _:
             raise NDDInvalidConfigError(f"The secret {secret!r} is formatted incorrectly")
+
+
+_parse_secret_reference = parse_secret_reference

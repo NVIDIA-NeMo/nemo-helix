@@ -60,11 +60,8 @@ const notebooks: Record<string, unknown> = {
  * to a sanitizer (e.g. DOMPurify) before merging.
  *
  * Usage in MDX:
- *   import { NotebookViewer } from "@/components/NotebookViewer";
- *   import notebook from "@/components/notebooks/1-the-basics";
- *
  *   <NotebookViewer
- *     notebook={notebook}
+ *     name="1-the-basics"
  *     colabUrl="https://colab.research.google.com/github/NVIDIA-NeMo/DataDesigner/blob/main/docs/colab_notebooks/1-the-basics.ipynb"
  *   />
  */

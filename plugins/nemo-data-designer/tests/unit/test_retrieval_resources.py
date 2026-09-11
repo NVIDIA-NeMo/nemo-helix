@@ -2,12 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import logging
 import sys
 import types
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import httpx
 import pytest
+from data_designer_nemo.errors import NDDInternalError, NDDInvalidConfigError
 from nemo_data_designer_plugin.retrieval.corpus import _download_fileset, hf_token_from_env, materialize_corpus
 from nemo_data_designer_plugin.retrieval.manifest import (
     GENERATION_MANIFEST_SCHEMA_VERSION,
@@ -15,6 +18,7 @@ from nemo_data_designer_plugin.retrieval.manifest import (
     write_generation_manifest,
 )
 from nemo_data_designer_plugin.retrieval.secrets import resolve_hf_token
+from nemo_platform_plugin.client.errors import InternalServerError, NotFoundError, PermissionDeniedError
 
 
 def test_fileset_corpus_must_match_job_workspace(tmp_path: Path) -> None:
@@ -217,6 +221,62 @@ async def test_resolve_hf_token_reads_named_secret(reference: str, expected_work
 
     assert token == "hf_secret_value"
     assert requested == {"name": expected_name, "workspace": expected_workspace}
+
+
+@pytest.mark.asyncio
+async def test_resolve_hf_token_rejects_malformed_secret_reference() -> None:
+    with patch("nemo_data_designer_plugin.retrieval.secrets.client_from_platform") as client:
+        with pytest.raises(NDDInvalidConfigError, match="formatted incorrectly"):
+            await resolve_hf_token(Mock(), "too/many/parts", "default")
+
+    client.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (
+            NotFoundError(httpx.Response(404, json={"detail": "missing"}, request=httpx.Request("POST", "http://x"))),
+            "Could not find secret 'hf-token' in workspace 'default'",
+        ),
+        (
+            PermissionDeniedError(
+                httpx.Response(403, json={"detail": "denied"}, request=httpx.Request("POST", "http://x"))
+            ),
+            "Access denied to workspace 'default'",
+        ),
+    ],
+)
+async def test_resolve_hf_token_maps_missing_or_denied_secret_to_invalid_config(error: Exception, message: str) -> None:
+    async def access_secret(name: str, workspace: str) -> Mock:
+        del name, workspace
+        raise error
+
+    secrets = Mock(access_secret=access_secret)
+    with patch("nemo_data_designer_plugin.retrieval.secrets.client_from_platform", return_value=secrets):
+        with pytest.raises(NDDInvalidConfigError, match=message):
+            await resolve_hf_token(Mock(), "default/hf-token", "shared")
+
+
+@pytest.mark.asyncio
+async def test_resolve_hf_token_maps_unexpected_secret_error_to_internal_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def access_secret(name: str, workspace: str) -> Mock:
+        del name, workspace
+        raise InternalServerError(
+            httpx.Response(500, json={"detail": "boom"}, request=httpx.Request("POST", "http://x"))
+        )
+
+    secrets = Mock(access_secret=access_secret)
+    with patch("nemo_data_designer_plugin.retrieval.secrets.client_from_platform", return_value=secrets):
+        with caplog.at_level(logging.ERROR, logger="nemo_data_designer_plugin.retrieval.secrets"):
+            with pytest.raises(NDDInternalError, match="unexpected error occurred"):
+                await resolve_hf_token(Mock(), "default/hf-token", "shared")
+
+    assert "hf-token" not in caplog.text
+    assert "default/hf-token" not in caplog.text
 
 
 @pytest.mark.asyncio

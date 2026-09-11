@@ -108,30 +108,25 @@ nemo agents optimize \
 
 **Success:** job finishes with `status: completed` and `n_trials: 2`.
 
-Local-only Python run of the same config:
+Python submission of the staged fileset:
 
 ```python
 import os
-from pathlib import Path
 
 from nemo_optimization.jobs.optimize import OptimizeJob
-from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.scheduler import NemoJobScheduler
 
 WORKSPACE = "default"
-bundle = Path(os.environ["BUNDLE"]).resolve()
-os.chdir(bundle)  # the config's dataset / base_dir are relative to the bundle
-
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
 print(
-    NemoJobScheduler().run_local(
+    NemoJobScheduler().submit_remote(
         OptimizeJob,
-        {"optimize_config": str(bundle / "optimize-chatonly.yaml"), "workspace": WORKSPACE},
+        {
+            "optimize_config": "optimize-chatonly.yaml",
+            "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-chatonly",
+            "workspace": WORKSPACE,
+        },
+        base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
         workspace=WORKSPACE,
-        sdk=client,
     )
 )
 ```
@@ -380,34 +375,25 @@ analyzer tool call, or re-call the tool. Those trials score low on
 the study optimizes over. If every sample fails outright, check
 `$BUNDLE/artifacts/.fabric/hermes/runtimes/*/logs/`.
 
-Local-only Python run of the same config:
+Python submission of the staged fileset:
 
 ```python
 import os
-from pathlib import Path
 
 from nemo_optimization.jobs.optimize import OptimizeJob
-from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.scheduler import NemoJobScheduler
 
 WORKSPACE = "default"
-bundle = Path(os.environ["BUNDLE"]).resolve()
-agent_root = Path(
-    os.environ.get("PHISHING_AGENT_ROOT", Path.home() / "work/email-phishing-analyzer-harnesses")
-)
-os.environ.setdefault("PHISHING_MCP_BIN", str(agent_root / ".venv/bin/email-phishing-analyzer-mcp"))
-os.chdir(bundle)
-
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
 print(
-    NemoJobScheduler().run_local(
+    NemoJobScheduler().submit_remote(
         OptimizeJob,
-        {"optimize_config": str(bundle / "optimize-mcp.yaml"), "workspace": WORKSPACE},
+        {
+            "optimize_config": "optimize-mcp.yaml",
+            "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-mcp",
+            "workspace": WORKSPACE,
+        },
+        base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
         workspace=WORKSPACE,
-        sdk=client,
     )
 )
 ```

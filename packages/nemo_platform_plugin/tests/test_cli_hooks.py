@@ -126,14 +126,14 @@ class TestUpdateJobCli:
         app = _app_with_jobs(_GreetJob, cli=_NoOpCLI())
         result = runner.invoke(app, ["greet", "--help"])
         assert result.exit_code == 0
-        assert "run" in result.output
+        assert "run" not in result.output
         assert "submit" in result.output
         assert "explain" in result.output
 
     def test_no_cli_argument_means_no_hook_called(self) -> None:
-        # Smoke: the default no-cli path still works (backwards compat).
+        # Smoke: the default no-cli path still registers generated verbs.
         app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "run", "--config", '{"name": "X"}'])
+        result = runner.invoke(app, ["greet", "explain"])
         assert result.exit_code == 0
 
     def test_hook_invoked_once_per_job(self) -> None:
@@ -146,32 +146,31 @@ class TestUpdateJobCli:
         _app_with_jobs(_GreetJob, _ByeJob, cli=_CLI())
         assert sorted(seen) == ["bye", "greet"]
 
-    def test_hook_can_replace_run_with_a_new_signature(self) -> None:
+    def test_hook_can_replace_submit_with_a_new_signature(self) -> None:
         class _CLI(_NoOpCLI):
             def update_job_cli(self, job_cls, group) -> None:
                 if job_cls is not _GreetJob:
                     return
-                original = next(c for c in group.registered_commands if c.name == "run").callback
+                original = next(c for c in group.registered_commands if c.name == "submit").callback
                 assert original is not None
 
-                @group.command("run")
-                def run(
-                    typer_ctx: typer.Context,
+                @group.command("submit")
+                def submit(
                     name: str = typer.Option(..., "--name"),
                     spec: str = typer.Option("{}", "--spec"),
                 ) -> None:
-                    merged = json.dumps({**json.loads(spec), "name": name})
-                    original(typer_ctx, spec=merged, spec_file=None, config=None, config_file=None)
+                    payload = {**json.loads(spec), "name": name}
+                    typer.echo(json.dumps({"message": f"Hello, {payload['name']}!"}))
 
         app = _app_with_jobs(_GreetJob, cli=_CLI())
 
         # The new flag shows up in --help.
-        help_result = runner.invoke(app, ["greet", "run", "--help"])
+        help_result = runner.invoke(app, ["greet", "submit", "--help"])
         assert help_result.exit_code == 0
         assert "--name" in help_result.output
 
-        # Invoking with --name calls wrapper -> original chain.
-        result = runner.invoke(app, ["greet", "run", "--name", "Wrapped"])
+        # Invoking with --name calls the replacement command.
+        result = runner.invoke(app, ["greet", "submit", "--name", "Wrapped"])
         assert result.exit_code == 0
         assert json.loads(result.output) == {"message": "Hello, Wrapped!"}
 
@@ -183,7 +182,7 @@ class TestUpdateJobCli:
         app = _app_with_jobs(_GreetJob, cli=_CLI())
         result = runner.invoke(app, ["greet", "--help"])
         assert result.exit_code == 0
-        assert "run" in result.output
+        assert "explain" in result.output
         assert "submit" not in result.output
 
     def test_hook_can_add_a_verb(self) -> None:
@@ -225,11 +224,14 @@ class TestUpdateJobCli:
             def update_job_cli(self, job_cls, group) -> None:
                 if job_cls is not _FlatGreetJob:
                     return
-                original = next(c for c in group.registered_commands if c.name == "greet").callback
-                assert original is not None
+                registered_callback = group.registered_callback
+                assert registered_callback is not None
+                assert registered_callback.callback is not None
 
-                @group.command("greet")
-                def greet() -> None:
+                @group.callback(invoke_without_command=True)
+                def greet(typer_ctx: typer.Context) -> None:
+                    if typer_ctx.invoked_subcommand is not None:
+                        return
                     typer.echo("flat-job-replaced")
 
         app = _app_with_jobs(_FlatGreetJob, cli=_CLI())

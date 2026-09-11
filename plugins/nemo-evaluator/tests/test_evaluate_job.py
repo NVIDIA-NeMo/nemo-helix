@@ -22,6 +22,7 @@ from nemo_evaluator.jobs.evaluate import (
     DEFAULT_FILE_NAME,
     DEFAULT_RESULT_NAME,
     ROW_SCORES_RESULT_NAME,
+    AsyncEvaluateJob,
     EvaluateInputSpec,
     EvaluateJob,
     EvaluateSpec,
@@ -58,12 +59,12 @@ from nemo_evaluator_sdk.values.models import ModelRef
 from nemo_evaluator_sdk.values.scores import JSONScoreParser, RangeScore
 from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_platform_plugin.commands import add_job_commands
+from nemo_platform_plugin.intake.client import AsyncIntakeClient
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
 from nemo_platform_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_platform_plugin.jobs.spec import PlatformJobSpec
 from nemo_platform_plugin.models.client import AsyncModelsClient
-from nemo_platform_plugin.scheduler import NemoJobScheduler
 from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
 from pydantic import BaseModel, ConfigDict
 from pytest_mock import MockerFixture
@@ -101,11 +102,6 @@ def _assert_metric_step_entrypoint(job_spec: PlatformJobSpec) -> None:
     container = cast(Any, step.executor).container
     assert container.entrypoint == ["python", "-m"]
     assert container.command == ["nemo_evaluator.tasks.evaluate"]
-
-
-def _load_cli_run_payload(output: str) -> dict[str, Any]:
-    """Return the evaluator run JSON payload from CLI stdout."""
-    return cast(dict[str, Any], json.loads(output[output.index('{\n  "status"') :]))
 
 
 def _make_job_context(tmp_path: Path) -> JobContext:
@@ -232,6 +228,24 @@ def _generated_async_sdk() -> AsyncNeMoPlatform:
     )
 
 
+def _sync_client() -> NemoClient:
+    return NemoClient(
+        base_url="http://platform.test",
+        workspace="dev",
+        http_client=httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(500, request=request))),
+    )
+
+
+def _run_evaluate_job(
+    config: dict[str, Any],
+    tmp_path: Path,
+    *,
+    ctx: JobContext | None = None,
+    client: NemoClient | None = None,
+) -> dict[str, Any]:
+    return EvaluateJob().run(config, ctx=ctx or _make_job_context(tmp_path), client=client or _sync_client())
+
+
 def _patch_async_model_reference_resolution(mocker: MockerFixture) -> None:
     async def resolve_model_reference(self: AsyncModelsClient, ref: str) -> ResolvedModelReference:
         del self
@@ -298,7 +312,7 @@ async def test_checked_in_example_spec_transforms_and_compiles(spec_path: Path) 
         input_spec,
         workspace="default",
         entity_client=None,
-        async_sdk=None,
+        async_sdk=_generated_async_sdk(),
         is_local=False,
     )
     assert isinstance(spec, EvaluateSpec)
@@ -307,7 +321,7 @@ async def test_checked_in_example_spec_transforms_and_compiles(spec_path: Path) 
         spec=spec,
         entity_client=None,
         job_name=None,
-        async_sdk=None,
+        async_sdk=_generated_async_sdk(),
     )
 
     assert "metric" not in payload
@@ -315,8 +329,8 @@ async def test_checked_in_example_spec_transforms_and_compiles(spec_path: Path) 
     assert PlatformJobSpec.model_validate(compiled).steps[0].config is not None
 
 
-def test_evaluate_job_runs_inline_exact_match_metric() -> None:
-    result = NemoJobScheduler().run_local(EvaluateJob, _exact_match_spec())
+def test_evaluate_job_runs_inline_exact_match_metric(tmp_path: Path) -> None:
+    result = _run_evaluate_job(_exact_match_spec(), tmp_path)
 
     assert result["status"] == "completed"
     assert "result" not in result
@@ -325,30 +339,36 @@ def test_evaluate_job_runs_inline_exact_match_metric() -> None:
     assert aggregate_scores[0]["mean"] == 0.5
 
 
-def test_evaluate_job_survives_result_persistence_failure(mocker: MockerFixture) -> None:
+def test_evaluate_job_survives_result_persistence_failure(tmp_path: Path, mocker: MockerFixture) -> None:
     # Mirror of the agent-eval job: the queryable result record is a best-effort convenience index;
     # a persistence failure must not fail an otherwise-successful eval (its artifacts are already saved).
     persist = mocker.patch(
         "nemo_evaluator.jobs.evaluate.persist_evaluate_result",
         side_effect=RuntimeError("entity store unavailable"),
     )
+    publish = mocker.patch.object(EvaluateJob, "_publish_result")
 
-    result = NemoJobScheduler().run_local(EvaluateJob, _exact_match_spec())
+    result = _run_evaluate_job(_exact_match_spec(), tmp_path)
 
     persist.assert_called_once()
+    async_client = persist.call_args.kwargs["async_client"]
+    assert isinstance(async_client, AsyncNemoClient)
+    publish.assert_called_once()
+    intake = publish.call_args.kwargs["intake"]
+    assert isinstance(intake, AsyncIntakeClient)
     assert result["status"] == "completed"
     aggregate_scores = _load_artifact_payload(result)["aggregate_scores"]["scores"]
     assert aggregate_scores[0]["name"] == "exact-match.exact-match"
 
 
-def test_evaluate_job_applies_metric_job_params_once() -> None:
+def test_evaluate_job_applies_metric_job_params_once(tmp_path: Path) -> None:
     spec = {
         "metrics": [_bundle_payload(_CountingJobParamsMetric())],
         "dataset": [{"value": "ignored"}],
         "params": {"parallelism": 2},
     }
 
-    result = NemoJobScheduler().run_local(EvaluateJob, spec)
+    result = _run_evaluate_job(spec, tmp_path)
 
     assert result["status"] == "completed"
     aggregate_scores = _load_artifact_payload(result)["aggregate_scores"]["scores"]
@@ -384,16 +404,22 @@ def test_cli_info_reports_registered_evaluator_job_keys() -> None:
     ]
 
 
-def test_cli_evaluate_still_exposes_run_during_stainless_migration() -> None:
+def test_cli_evaluate_uses_flat_submit_without_local_run() -> None:
     app = EvaluatorPluginCLI().get_cli()
     add_job_commands(app, {"evaluator.evaluate": EvaluateJob}, cli=EvaluatorPluginCLI())
 
     result = CliRunner().invoke(app, ["evaluate", "--help"])
 
     assert result.exit_code == 0
-    assert "run" in result.output
-    assert "submit" in result.output
-    assert "explain" in result.output
+    output = result.output
+    assert "--spec" in output
+    assert "--base-url" in output
+    assert "--profile" in output
+    assert "Run locally, in-process." not in result.output
+    assert "explain" in output
+
+    run_result = CliRunner().invoke(app, ["evaluate", "run"])
+    assert run_result.exit_code != 0
 
 
 def test_cli_metric_types_reports_sdk_metric_union_types() -> None:
@@ -478,17 +504,13 @@ def test_cli_metric_types_rejects_unknown_metric_types_name() -> None:
     assert "nemo evaluator metric-types" in result.output
 
 
-def test_cli_run_executes_evaluator_job() -> None:
+def test_cli_evaluate_rejects_local_run() -> None:
     app = EvaluatorPluginCLI().get_cli()
     add_job_commands(app, {"evaluator.evaluate": EvaluateJob})
 
     result = CliRunner().invoke(app, ["evaluate", "run", "--spec", json.dumps(_exact_match_spec())])
 
-    assert result.exit_code == 0
-    payload = _load_cli_run_payload(result.output)
-    assert payload["status"] == "completed"
-    assert "result" not in payload
-    assert _load_artifact_payload(payload)["aggregate_scores"]["scores"][0]["mean"] == 0.5
+    assert result.exit_code != 0
 
 
 def test_unbundle_metric_dispatches_mixed_bundle_kinds_by_payload_kind() -> None:
@@ -548,6 +570,7 @@ async def test_evaluate_job_resolves_metric_model_refs_before_sdk_run(
     run_result = EvaluateJob().run(
         spec.model_dump(mode="json"),
         ctx=ctx,
+        client=_sync_client(),
     )
 
     payload = _load_artifact_payload(run_result)
@@ -562,7 +585,7 @@ async def test_evaluate_job_compile_produces_cpu_task_step() -> None:
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=None,
+        async_sdk=_generated_async_sdk(),
     )
     job_spec = PlatformJobSpec.model_validate(compiled)
     assert len(job_spec.steps) == 1
@@ -614,7 +637,7 @@ async def test_evaluate_job_to_spec_resolves_bundled_metric_model_refs_before_co
         spec=canonical,
         entity_client=object(),
         job_name=None,
-        async_sdk=None,
+        async_sdk=_generated_async_sdk(),
     )
 
     job_spec = PlatformJobSpec.model_validate(compiled)
@@ -651,7 +674,7 @@ async def test_evaluate_job_to_spec_preserves_metric_without_model_refs() -> Non
         ),
         workspace="default",
         entity_client=object(),
-        async_sdk=None,
+        async_sdk=_generated_async_sdk(),
         is_local=False,
     )
 
@@ -676,7 +699,7 @@ async def test_evaluate_job_compile_produces_online_model_job() -> None:
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=None,
+        async_sdk=_generated_async_sdk(),
     )
 
     job_spec = PlatformJobSpec.model_validate(compiled)
@@ -703,7 +726,7 @@ async def test_evaluate_job_compile_normalizes_generic_online_model_params() -> 
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=None,
+        async_sdk=_generated_async_sdk(),
     )
 
     job_spec = PlatformJobSpec.model_validate(compiled)
@@ -733,7 +756,7 @@ async def test_evaluate_job_compile_produces_online_agent_job() -> None:
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=None,
+        async_sdk=_generated_async_sdk(),
     )
 
     job_spec = PlatformJobSpec.model_validate(compiled)
@@ -783,7 +806,7 @@ async def test_evaluate_job_compile_injects_metric_and_target_secrets() -> None:
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=None,
+        async_sdk=_generated_async_sdk(),
     )
 
     step = PlatformJobSpec.model_validate(compiled).steps[0]
@@ -815,7 +838,7 @@ async def test_evaluate_job_compile_rejects_secret_reserved_env_names() -> None:
             spec=spec,
             entity_client=object(),
             job_name=None,
-            async_sdk=None,
+            async_sdk=_generated_async_sdk(),
         )
 
 
@@ -949,7 +972,7 @@ class TestEvaluateJobCompile:
             spec=EquivalentSpec.model_validate(_exact_match_spec()),
             entity_client=object(),
             job_name=None,
-            async_sdk=None,
+            async_sdk=_generated_async_sdk(),
         )
 
         job_spec = PlatformJobSpec.model_validate(compiled)
@@ -976,7 +999,7 @@ class TestEvaluateJobCompile:
             spec=spec,
             entity_client=object(),
             job_name=None,
-            async_sdk=None,
+            async_sdk=_generated_async_sdk(),
         )
 
         config = cast(dict[str, Any], PlatformJobSpec.model_validate(compiled).steps[0].config)
@@ -1018,7 +1041,7 @@ class TestEvaluateJobCompile:
                 spec=spec,
                 entity_client=object(),
                 job_name=None,
-                async_sdk=None,
+                async_sdk=_generated_async_sdk(),
             )
 
     @pytest.mark.parametrize(
@@ -1066,7 +1089,7 @@ class TestEvaluateJobCompile:
             spec=EvaluateSpec.model_validate({**_exact_match_spec(), "dataset": dataset}),
             entity_client=object(),
             job_name=None,
-            async_sdk=None,
+            async_sdk=_generated_async_sdk(),
         )
 
         job_spec = PlatformJobSpec.model_validate(compiled)
@@ -1127,7 +1150,7 @@ class TestEvaluateJobRun:
         assert isinstance(expected_config, expected_config_type)
         ctx = _make_job_context(tmp_path)
 
-        run_result = EvaluateJob().run(config, ctx=ctx)
+        run_result = EvaluateJob().run(config, ctx=ctx, client=_sync_client())
 
         assert run_result == {
             "status": "completed",
@@ -1159,7 +1182,7 @@ class TestEvaluateJobRun:
         expected_spec = EvaluateSpec.model_validate(config)
         ctx = _make_job_context(tmp_path)
 
-        run_result = EvaluateJob().run(config, ctx=ctx)
+        run_result = EvaluateJob().run(config, ctx=ctx, client=_sync_client())
 
         assert run_result == {
             "status": "completed",
@@ -1190,10 +1213,12 @@ class TestEvaluateJobRun:
             create=True,
         )
         download_dataset_sync = mocker.patch("nemo_evaluator.jobs.evaluate.download_dataset_sync", create=True)
-        async_sdk = AsyncNemoClient(
+        async_transport = AsyncMock(spec=httpx.AsyncClient)
+        async_transport.event_hooks = {}
+        async_client = AsyncNemoClient(
             base_url="http://platform.test",
             workspace="default",
-            http_client=AsyncMock(spec=httpx.AsyncClient),
+            http_client=async_transport,
         )
         http_client = mocker.AsyncMock(name="http_client")
         http_client.__aenter__.return_value = http_client
@@ -1203,15 +1228,15 @@ class TestEvaluateJobRun:
         dataset = FilesetRef(root="default/helpsteer2#validation.jsonl")
         config = {**_exact_match_spec(), "dataset": dataset}
 
-        run_result = EvaluateJob().run(config, ctx=ctx, async_sdk=async_sdk)
+        run_result = AsyncEvaluateJob().run(config, ctx=ctx, async_client=async_client)
 
         _assert_saved_result_artifact(run_result, ctx, result_payload)
         assert download_dataset.await_count == 1
         cloned_client = download_dataset.await_args.kwargs["client"]
         assert isinstance(cloned_client, AsyncNemoClient)
-        assert cloned_client is not async_sdk
-        assert cloned_client.base_url == async_sdk.base_url
-        assert cloned_client.workspace == async_sdk.workspace
+        assert cloned_client is not async_client
+        assert cloned_client.base_url == async_client.base_url
+        assert cloned_client.workspace == async_client.workspace
         assert cloned_client._client is http_client
         assert download_dataset.await_args.kwargs["dataset"] == dataset
         assert download_dataset.await_args.kwargs["destination"] == str(ctx.storage.persistent / "dataset")
@@ -1239,16 +1264,16 @@ class TestEvaluateJobRun:
             create=True,
         )
         ctx = _make_job_context(tmp_path)
-        sync_sdk = mocker.Mock()
+        client = _sync_client()
         dataset = FilesetRef(root="default/helpsteer2#validation.jsonl")
         config = {**_exact_match_spec(), "dataset": dataset}
 
-        run_result = EvaluateJob().run(config, ctx=ctx, sdk=sync_sdk)
+        run_result = EvaluateJob().run(config, ctx=ctx, client=client)
 
         _assert_saved_result_artifact(run_result, ctx, result_payload)
         download_dataset.assert_not_called()
         download_dataset_sync.assert_called_once_with(
-            client=sync_sdk,
+            client=client,
             dataset=dataset,
             destination=str(ctx.storage.persistent / "dataset"),
         )
@@ -1259,9 +1284,8 @@ class TestEvaluateJobRun:
         assert call_kwargs["target"] is None
         assert call_kwargs["prompt_template"] is None
 
-    def test_run_adapts_the_generated_sdk_the_local_cli_injects(self, tmp_path: Path, mocker: MockerFixture) -> None:
-        """``nemo evaluator evaluate run`` injects a generated ``NeMoPlatform``, but resolving a
-        ``FilesetRef`` dataset only accepts a typed client."""
+    def test_run_uses_the_declared_typed_client_for_fileset_refs(self, tmp_path: Path, mocker: MockerFixture) -> None:
+        """The sync job entrypoint uses the typed client declared by the job."""
         evaluator = mocker.Mock()
         evaluator.run_sync.return_value = _empty_evaluation_result()
         mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=evaluator)
@@ -1270,24 +1294,27 @@ class TestEvaluateJobRun:
             return_value=tmp_path / "persistent" / "dataset" / "default" / "helpsteer2" / "validation.jsonl",
             create=True,
         )
-        platform = NeMoPlatform(base_url="http://platform.test", workspace="dev", http_client=httpx.Client())
+        client = _sync_client()
         config = {**_exact_match_spec(), "dataset": FilesetRef(root="default/helpsteer2#validation.jsonl")}
+        ctx = _make_job_context(tmp_path)
 
-        EvaluateJob().run(config, ctx=_make_job_context(tmp_path), sdk=platform)
+        EvaluateJob().run(config, ctx=ctx, client=client)
 
-        assert isinstance(download_dataset_sync.call_args.kwargs["client"], NemoClient)
+        assert download_dataset_sync.call_args.kwargs["client"] is client
 
-    def test_prefers_sync_sdk_for_fileset_ref_when_both_sdks_injected(
-        self, tmp_path: Path, mocker: MockerFixture
-    ) -> None:
-        """Avoid binding async_sdk's httpx client before result-entity persistence."""
+    def test_async_task_job_uses_async_sdk_for_fileset_ref(self, tmp_path: Path, mocker: MockerFixture) -> None:
+        """The task-container variant has an async client contract, not sync/async precedence."""
         result = _empty_evaluation_result()
         result_payload = result.model_dump(mode="json")
         evaluator = mocker.Mock()
         evaluator.run_sync.return_value = result
         mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=evaluator)
         downloaded_path = tmp_path / "persistent" / "dataset" / "default" / "helpsteer2" / "validation.jsonl"
-        download_dataset = mocker.patch("nemo_evaluator.jobs.evaluate.download_dataset", create=True)
+        download_dataset = mocker.patch(
+            "nemo_evaluator.jobs.evaluate.download_dataset",
+            new=AsyncMock(return_value=downloaded_path),
+            create=True,
+        )
         download_dataset_sync = mocker.patch(
             "nemo_evaluator.jobs.evaluate.download_dataset_sync",
             return_value=downloaded_path,
@@ -1295,23 +1322,36 @@ class TestEvaluateJobRun:
         )
         persist = mocker.patch("nemo_evaluator.jobs.evaluate.persist_evaluate_result")
         ctx = _make_job_context(tmp_path)
-        sync_sdk = mocker.Mock()
-        async_sdk = mocker.Mock()
+        http_client = AsyncMock(spec=httpx.AsyncClient)
+        http_client.event_hooks = {}
+        async_client = AsyncNemoClient(
+            base_url="http://platform.test",
+            workspace="dev",
+            http_client=http_client,
+        )
         dataset = FilesetRef(root="default/helpsteer2#validation.jsonl")
         config = {**_exact_match_spec(), "dataset": dataset}
 
-        run_result = EvaluateJob().run(config, ctx=ctx, sdk=sync_sdk, async_sdk=async_sdk)
+        run_result = AsyncEvaluateJob().run(config, ctx=ctx, async_client=async_client)
 
         _assert_saved_result_artifact(run_result, ctx, result_payload)
-        download_dataset.assert_not_called()
-        download_dataset_sync.assert_called_once_with(
-            client=sync_sdk,
-            dataset=dataset,
-            destination=str(ctx.storage.persistent / "dataset"),
+        download_dataset_sync.assert_not_called()
+        download_dataset.assert_awaited_once()
+        await_args = download_dataset.await_args
+        assert await_args is not None
+        assert isinstance(await_args.kwargs["client"], AsyncNemoClient)
+        assert await_args.kwargs["client"] is not async_client
+        assert await_args.kwargs["dataset"] == dataset
+        assert await_args.kwargs["destination"] == str(ctx.storage.persistent / "dataset")
+        persist.assert_called_once_with(
+            result,
+            target=EvaluateSpec.model_validate(config).target,
+            dataset_ref=dataset.root,
+            metric_types=["exact-match"],
+            ctx=ctx,
+            bundle_ref=f"file://{ctx.storage.persistent / 'results' / DEFAULT_RESULT_NAME}",
+            async_client=async_client,
         )
-        persist.assert_called_once()
-        assert persist.call_args.kwargs["async_sdk"] is async_sdk
-        assert persist.call_args.kwargs["dataset_ref"] == dataset.root
 
 
 class TestEvaluateTask:
@@ -1319,34 +1359,31 @@ class TestEvaluateTask:
 
     def test_main_dispatches_evaluate_job_with_task_sdk(self, mocker: MockerFixture) -> None:
         sdk = NeMoPlatform(base_url="http://platform.test", workspace="default")
-        client = NemoClient(
-            base_url="http://platform.test", workspace="default", http_client=MagicMock(spec=httpx.Client)
-        )
         async_client = AsyncNemoClient(
             base_url="http://platform.test", workspace="default", http_client=AsyncMock(spec=httpx.AsyncClient)
         )
         ctx = MagicMock()
         get_platform_sdk = mocker.patch("nemo_evaluator.tasks.runner.get_task_sdk", return_value=sdk)
         build_ctx = mocker.patch("nemo_evaluator.tasks.runner.build_ctx_from_env", return_value=ctx)
-        get_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_task_nemo_client", return_value=client)
+        get_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_task_nemo_client")
         get_async_task_client = mocker.patch(
             "nemo_evaluator.tasks.runner.get_async_task_nemo_client", return_value=async_client
         )
-        run_task = mocker.patch("nemo_evaluator.tasks.runner.run_task", return_value=0)
+        run_task = mocker.patch("nemo_evaluator.tasks.runner.run_task_with_async_client", return_value=0)
 
         exit_code = evaluate_task_main()
 
         assert exit_code == 0
         get_platform_sdk.assert_called_once_with("evaluator")
         build_ctx.assert_called_once_with(sdk)
-        get_task_client.assert_called_once_with("evaluator")
+        get_task_client.assert_not_called()
         get_async_task_client.assert_called_once_with("evaluator")
-        run_task.assert_called_once_with(EvaluateJob, sdk=client, async_sdk=async_client, ctx=ctx)
+        run_task.assert_called_once_with(AsyncEvaluateJob, async_client=async_client, ctx=ctx)
 
     def test_main_returns_setup_exit_code_when_task_sdk_fails(self, mocker: MockerFixture) -> None:
         get_platform_sdk = mocker.patch("nemo_evaluator.tasks.runner.get_task_sdk", side_effect=RuntimeError("boom"))
         get_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_task_nemo_client")
-        run_task = mocker.patch("nemo_evaluator.tasks.runner.run_task")
+        run_task = mocker.patch("nemo_evaluator.tasks.runner.run_task_with_async_client")
 
         exit_code = evaluate_task_main()
 

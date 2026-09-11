@@ -3,17 +3,12 @@
 
 """Unit tests for nemo_platform_plugin.commands.
 
-Phase 1 MR 1.2c replaces the single-verb ``nemo <plugin> <job>`` CLI with a
-three-verb sub-group — ``run`` / ``submit`` / ``explain`` — and makes the
-bare form print usage and exit non-zero. These tests pin:
+These tests pin:
 
 - Each job registers a sub-group under ``<job-name>``.
 - The bare sub-group (no verb) prints usage and exits with status 1.
-- ``run`` parses ``--config`` / ``--config-file`` and executes the job
-  in-process via :class:`NemoJobScheduler`.
-- ``submit`` / ``explain`` delegate to the scheduler stubs and exit 2 with
-  a helpful error message in phase 1 (until MR 1.3 / MR 1.4 wire them).
-- Invalid JSON on ``--config`` / ``--config-file`` exits 1 cleanly.
+- ``submit`` delegates to the scheduler and exits cleanly on network errors.
+- ``explain`` exposes schema metadata locally.
 """
 
 from __future__ import annotations
@@ -76,7 +71,7 @@ class _FailJob(NemoJob):
 
 class _RunNamedJob(NemoJob):
     name = "run"
-    description = "A job whose name collides with the local run verb."
+    description = "A job whose name collides with a common command verb."
 
     def run(self, config: dict) -> dict:
         return config
@@ -143,11 +138,10 @@ class TestSubgroupRegistration:
         result = runner.invoke(app, ["--help"])
         assert "existing" in result.output
 
-    def test_subgroup_lists_three_verbs(self) -> None:
+    def test_subgroup_lists_submit_and_explain(self) -> None:
         app = _app_with_jobs(_GreetJob)
         result = runner.invoke(app, ["greet", "--help"])
         assert result.exit_code == 0
-        assert "run" in result.output
         assert "submit" in result.output
         assert "explain" in result.output
 
@@ -161,7 +155,6 @@ class TestSubgroupRegistration:
         result = runner.invoke(app, ["run", "--help"])
 
         assert result.exit_code == 0
-        assert "Run locally, in-process." in result.output
         assert "Submit to a cluster." in result.output
         assert "Show input/output schemas." in result.output
         assert "Run run locally" not in result.output
@@ -172,16 +165,25 @@ class TestSubgroupRegistration:
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
         assert "greet" in result.output
-        assert "Return a greeting." in result.output
 
         help_result = runner.invoke(app, ["greet", "--help"])
         assert help_result.exit_code == 0
         output = _plain(help_result.output)
-        assert "COMMAND" not in output
-        assert "Return a greeting." in output
         assert "--base-url" in output
         assert "--profile" in output
-        assert "explain" not in output
+        assert "explain" in output
+
+        run_result = runner.invoke(app, ["greet", "run"])
+        assert run_result.exit_code != 0
+
+    def test_non_legacy_job_keeps_explain_compatibility_command(self) -> None:
+        app = _app_with_jobs(_FlatGreetJob)
+
+        result = runner.invoke(app, ["greet", "explain"])
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["job_key"] == "packages.greet"
 
 
 # ---------------------------------------------------------------------------
@@ -201,70 +203,11 @@ class TestBareFormBreaks:
         result = runner.invoke(app, ["greet"])
         # Usage should mention at least one of the verbs so the user knows
         # what to type next.
-        assert "run" in result.output or "submit" in result.output
+        assert "submit" in result.output or "explain" in result.output
 
 
 # ---------------------------------------------------------------------------
-# run verb
-# ---------------------------------------------------------------------------
-
-
-class TestRunVerb:
-    def test_runs_job_with_json_config(self) -> None:
-        app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "run", "--config", '{"name": "Claude"}'])
-        assert result.exit_code == 0
-        output = json.loads(result.output)
-        assert output == {"message": "Hello, Claude!"}
-
-    def test_runs_job_with_default_config(self) -> None:
-        app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "run"])
-        assert result.exit_code == 0
-        output = json.loads(result.output)
-        assert output == {"message": "Hello, world!"}
-
-    def test_runs_job_with_config_file(self, tmp_path: Path) -> None:
-        config_file = tmp_path / "config.json"
-        config_file.write_text('{"name": "File"}')
-        app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "run", "--config-file", str(config_file)])
-        assert result.exit_code == 0
-        output = json.loads(result.output)
-        assert output == {"message": "Hello, File!"}
-
-    def test_config_file_takes_precedence_over_config(self, tmp_path: Path) -> None:
-        config_file = tmp_path / "config.json"
-        config_file.write_text('{"name": "FromFile"}')
-        app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(
-            app,
-            [
-                "greet",
-                "run",
-                "--config",
-                '{"name": "Ignored"}',
-                "--config-file",
-                str(config_file),
-            ],
-        )
-        assert result.exit_code == 0
-        output = json.loads(result.output)
-        assert output["message"] == "Hello, FromFile!"
-
-    def test_invalid_json_exits_with_error(self) -> None:
-        app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "run", "--config", "not-json"])
-        assert result.exit_code != 0
-
-    def test_job_exception_propagates(self) -> None:
-        app = _app_with_jobs(_FailJob)
-        with pytest.raises(RuntimeError, match="job exploded"):
-            runner.invoke(app, ["fail", "run", "--config", "{}"], catch_exceptions=False)
-
-
-# ---------------------------------------------------------------------------
-# submit verb — phase 1 MR 1.2c stubs
+# submit verb
 # ---------------------------------------------------------------------------
 
 
@@ -350,7 +293,6 @@ class TestSubmitVerb:
         assert "Traceback" not in combined
 
     def test_submit_accepts_profile_and_cluster_flags(self) -> None:
-        """Flags must be declared so MR 1.3 only needs to fill in behavior."""
         app = _app_with_jobs(_GreetJob)
         result = runner.invoke(app, ["greet", "submit", "--help"])
         assert result.exit_code == 0
@@ -446,7 +388,7 @@ class TestSubmitVerb:
 
 
 # ---------------------------------------------------------------------------
-# explain verb — phase 1 MR 1.2c stubs
+# explain verb
 # ---------------------------------------------------------------------------
 
 
@@ -481,31 +423,45 @@ class TestExplainVerb:
 
 
 # ---------------------------------------------------------------------------
-# --spec / --spec-file rename (MR 1.3b)
+# Job submit spec source flags
 # ---------------------------------------------------------------------------
 
 
 class TestSpecFlagRename:
-    def test_run_accepts_spec_flag(self) -> None:
-        app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "run", "--spec", '{"name": "Claude"}'])
-        assert result.exit_code == 0
-        assert json.loads(result.output) == {"message": "Hello, Claude!"}
+    def test_submit_accepts_spec_flag(self, monkeypatch) -> None:
+        captured: dict[str, object] = {}
 
-    def test_run_accepts_spec_file_yaml(self, tmp_path: Path) -> None:
+        def _capture(_self, _job_cls, spec, **_kwargs) -> dict:
+            captured["spec"] = spec
+            return {"id": "job-123"}
+
+        monkeypatch.setattr("nemo_platform_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
+        app = _app_with_jobs(_GreetJob)
+        result = runner.invoke(app, ["greet", "submit", "--spec", '{"name": "Claude"}'])
+        assert result.exit_code == 0
+        assert captured["spec"] == {"name": "Claude"}
+
+    def test_submit_accepts_spec_file_yaml(self, tmp_path: Path, monkeypatch) -> None:
+        captured: dict[str, object] = {}
+
+        def _capture(_self, _job_cls, spec, **_kwargs) -> dict:
+            captured["spec"] = spec
+            return {"id": "job-123"}
+
+        monkeypatch.setattr("nemo_platform_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
         spec_file = tmp_path / "spec.yaml"
         spec_file.write_text("name: FromYaml\n")
         app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "run", "--spec-file", str(spec_file)])
+        result = runner.invoke(app, ["greet", "submit", "--spec-file", str(spec_file)])
         assert result.exit_code == 0
-        assert json.loads(result.output)["message"] == "Hello, FromYaml!"
+        assert captured["spec"] == {"name": "FromYaml"}
 
-    def test_run_missing_spec_file_exits_cleanly(self, tmp_path: Path) -> None:
+    def test_submit_missing_spec_file_exits_cleanly(self, tmp_path: Path) -> None:
         missing_file = tmp_path / "missing.yaml"
         app = _app_with_jobs(_GreetJob)
         result = runner.invoke(
             app,
-            ["greet", "run", "--spec-file", str(missing_file)],
+            ["greet", "submit", "--spec-file", str(missing_file)],
             catch_exceptions=False,
         )
         assert result.exit_code == 1
@@ -513,11 +469,11 @@ class TestSpecFlagRename:
         assert "invalid spec" in combined
         assert str(missing_file) in combined
 
-    def test_run_directory_spec_file_exits_cleanly(self, tmp_path: Path) -> None:
+    def test_submit_directory_spec_file_exits_cleanly(self, tmp_path: Path) -> None:
         app = _app_with_jobs(_GreetJob)
         result = runner.invoke(
             app,
-            ["greet", "run", "--spec-file", str(tmp_path)],
+            ["greet", "submit", "--spec-file", str(tmp_path)],
             catch_exceptions=False,
         )
         assert result.exit_code == 1
@@ -525,16 +481,23 @@ class TestSpecFlagRename:
         assert "invalid spec" in combined
         assert str(tmp_path) in combined
 
-    def test_run_config_alias_still_works(self) -> None:
+    def test_submit_config_alias_still_works(self, monkeypatch) -> None:
         """--config remains as a deprecated alias for --spec during the transition."""
+        captured: dict[str, object] = {}
+
+        def _capture(_self, _job_cls, spec, **_kwargs) -> dict:
+            captured["spec"] = spec
+            return {"id": "job-123"}
+
+        monkeypatch.setattr("nemo_platform_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
         app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "run", "--config", '{"name": "Legacy"}'])
+        result = runner.invoke(app, ["greet", "submit", "--config", '{"name": "Legacy"}'])
         assert result.exit_code == 0
-        assert json.loads(result.output)["message"] == "Hello, Legacy!"
+        assert captured["spec"] == {"name": "Legacy"}
 
 
 # ---------------------------------------------------------------------------
-# submit options passthrough (MR 1.3b)
+# submit options passthrough
 # ---------------------------------------------------------------------------
 
 
@@ -1353,36 +1316,50 @@ class _NestedSpecJob(NemoJob):
 
 
 class TestJobAutoSpecFlags:
-    """Per-field flags auto-derived from a job's ``spec_schema`` on ``run``/``submit``.
+    """Per-field flags auto-derived from a job's submitter-facing schema.
 
     Mirrors :class:`TestFunctionAutoSpecFlags` so the two CLIs stay in
     lockstep — the wiring is shared via :mod:`nemo_platform_plugin._spec_flags`.
     """
 
-    def test_run_help_lists_one_flag_per_scalar_leaf(self) -> None:
+    def test_submit_help_lists_one_flag_per_scalar_leaf(self) -> None:
         app = _app_with_jobs(_GreetSpecJob)
-        result = runner.invoke(app, ["greet-spec", "run", "--help"])
+        result = runner.invoke(app, ["greet-spec", "submit", "--help"])
         assert result.exit_code == 0
         plain = _plain(result.output)
         assert "--name" in plain
         assert "--loud" in plain
         assert "Job Spec" in plain
 
-    def test_run_accepts_per_field_flag(self) -> None:
-        app = _app_with_jobs(_GreetSpecJob)
-        result = runner.invoke(app, ["greet-spec", "run", "--name", "Razvan"])
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.output) == {"message": "Hello, Razvan!"}
+    def test_submit_accepts_per_field_flag(self, monkeypatch) -> None:
+        captured: dict[str, object] = {}
 
-    def test_per_field_flag_overlays_on_top_of_spec(self) -> None:
+        def _capture(_self, _job_cls, spec, **_kwargs) -> dict:
+            captured["spec"] = spec
+            return {"id": "job-123"}
+
+        monkeypatch.setattr("nemo_platform_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
+        app = _app_with_jobs(_GreetSpecJob)
+        result = runner.invoke(app, ["greet-spec", "submit", "--name", "Razvan"])
+        assert result.exit_code == 0, result.output
+        assert captured["spec"] == {"name": "Razvan"}
+
+    def test_per_field_flag_overlays_on_top_of_spec(self, monkeypatch) -> None:
         # --spec sets the base; --name overlays on top per the
         # documented precedence (spec-file → spec → per-field).
+        captured: dict[str, object] = {}
+
+        def _capture(_self, _job_cls, spec, **_kwargs) -> dict:
+            captured["spec"] = spec
+            return {"id": "job-123"}
+
+        monkeypatch.setattr("nemo_platform_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
         app = _app_with_jobs(_GreetSpecJob)
         result = runner.invoke(
             app,
             [
                 "greet-spec",
-                "run",
+                "submit",
                 "--spec",
                 '{"name": "from-spec", "loud": true}',
                 "--name",
@@ -1390,25 +1367,31 @@ class TestJobAutoSpecFlags:
             ],
         )
         assert result.exit_code == 0, result.output
-        # Loud carries over from --spec; name is overridden by the flag.
-        assert json.loads(result.output) == {"message": "HELLO, FROM-FLAG!"}
+        assert captured["spec"] == {"name": "from-flag", "loud": True}
 
     def test_nested_field_uses_dotted_flag_name(self) -> None:
         app = _app_with_jobs(_NestedSpecJob)
-        result = runner.invoke(app, ["ping-spec", "run", "--help"])
+        result = runner.invoke(app, ["ping-spec", "submit", "--help"])
         assert result.exit_code == 0
         plain = _plain(result.output)
         assert "--name" in plain
         assert "--target.url" in plain
         assert "--target.timeout-seconds" in plain
 
-    def test_nested_field_overlay_round_trips(self) -> None:
+    def test_nested_field_overlay_round_trips(self, monkeypatch) -> None:
+        captured: dict[str, object] = {}
+
+        def _capture(_self, _job_cls, spec, **_kwargs) -> dict:
+            captured["spec"] = spec
+            return {"id": "job-123"}
+
+        monkeypatch.setattr("nemo_platform_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
         app = _app_with_jobs(_NestedSpecJob)
         result = runner.invoke(
             app,
             [
                 "ping-spec",
-                "run",
+                "submit",
                 "--name",
                 "site-a",
                 "--target.url",
@@ -1418,10 +1401,9 @@ class TestJobAutoSpecFlags:
             ],
         )
         assert result.exit_code == 0, result.output
-        assert json.loads(result.output) == {
+        assert captured["spec"] == {
             "name": "site-a",
-            "url": "https://example.test",
-            "timeout": 5,
+            "target": {"url": "https://example.test", "timeout_seconds": 5},
         }
 
     def test_workspace_field_in_spec_does_not_collide_with_static_flag(self) -> None:
@@ -1429,8 +1411,7 @@ class TestJobAutoSpecFlags:
         # ``submit``-side ``--workspace`` flag (which feeds the URL
         # segment, not the spec). The reserved-flag set drops it from
         # the auto-generated ``submit`` panel; users still pass it via
-        # --spec. ``run`` doesn't reserve ``workspace`` (it has no such
-        # static flag), so the auto-flag still appears there.
+        # --spec.
         class _WorkspaceSpec(BaseModel):
             workspace: str = "default-ws"
 
@@ -1465,7 +1446,7 @@ class TestJobAutoSpecFlags:
         # panel — the user passes values exclusively via --spec /
         # --spec-file under the "Spec Source" panel.
         app = _app_with_jobs(_GreetJob)
-        result = runner.invoke(app, ["greet", "run", "--help"])
+        result = runner.invoke(app, ["greet", "submit", "--help"])
         plain = _plain(result.output)
         assert "Job Spec" not in plain
         assert "Spec Source" in plain
@@ -1489,7 +1470,7 @@ class TestJobAutoSpecFlags:
                 return {"got": config}
 
         app = _app_with_jobs(_TwoShapeJob)
-        result = runner.invoke(app, ["two-shape", "run", "--help"])
+        result = runner.invoke(app, ["two-shape", "submit", "--help"])
         plain = _plain(result.output)
         # The flag follows ``input_spec_schema``, not ``spec_schema``.
         assert "--target-name" in plain
