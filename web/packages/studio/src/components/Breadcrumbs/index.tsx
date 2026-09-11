@@ -8,6 +8,7 @@ import { FC, useMemo } from 'react';
 import { Link, useParams } from 'react-router';
 
 // Breadcrumb links navigate "up" the hierarchy, so query/hash from the current detail context is irrelevant at the parent level and only leaks state.
+// Items that need theirs — a parent whose tab comes from `?tab=` — opt out with `preserveQuery`.
 const pathnameOnly = (href: string) => href.split(/[?#]/)[0];
 
 export const Breadcrumbs: FC = () => {
@@ -20,8 +21,8 @@ export const Breadcrumbs: FC = () => {
       allItems.push(WORKSPACE_BREADCRUMB_ITEM);
     }
     return allItems.concat(
-      breadcrumbs.map(({ href = '#', slotLabel }) => ({
-        children: <Link to={pathnameOnly(href)}>{slotLabel}</Link>,
+      breadcrumbs.map(({ href = '#', slotLabel, preserveQuery }) => ({
+        children: <Link to={preserveQuery ? href : pathnameOnly(href)}>{slotLabel}</Link>,
       }))
     );
   }, [breadcrumbs, workspace]);
