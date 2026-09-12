@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  type DeltaTone,
+  deltaTone,
+  formatSignedDelta,
+} from '@nemo/common/src/components/DeltaText';
 import { Flex, Stack, Tag, Text } from '@nvidia/foundations-react-core';
 import { SeriesButtonGroup } from '@studio/components/charts/MetricTrend/SeriesButtonGroup';
 import { useNvColorMode } from '@studio/components/DagCanvas/useNvColorMode';
@@ -66,8 +71,14 @@ const AREA_GRADIENT = {
 
 const formatPercent = (value: number): string => `${value.toFixed(1)}%`;
 
-const formatSignedDelta = (delta: number): string =>
-  `${delta > 0 ? '+' : delta < 0 ? '−' : ''}${Math.abs(delta).toFixed(1)}`;
+const formatTrendDelta = (delta: number): string => formatSignedDelta(delta, 1);
+
+/** The chip form of the same green/red/muted scale {@link DeltaText} paints as bare text. */
+const TAG_COLOR: Record<DeltaTone, 'green' | 'red' | 'gray'> = {
+  improved: 'green',
+  regressed: 'red',
+  unchanged: 'gray',
+};
 
 /**
  * The latest value for the selected series, its change over the compared period, and a trendline
@@ -82,7 +93,7 @@ export const MetricTrend: FC<MetricTrendProps> = ({
   selectedSeriesId,
   onSeriesChange,
   formatValue = formatPercent,
-  formatDelta = formatSignedDelta,
+  formatDelta = formatTrendDelta,
   chartHeight = DEFAULT_CHART_HEIGHT,
   isPending = false,
   className,
@@ -107,7 +118,7 @@ export const MetricTrend: FC<MetricTrendProps> = ({
   const delta = active?.delta;
   const isNegative = delta !== undefined && delta < 0;
   const isZero = delta === 0;
-  const deltaColor = isZero ? 'gray' : isNegative ? 'red' : 'green';
+  const deltaColor = TAG_COLOR[deltaTone(delta ?? 0)];
   const lineColor = isNegative ? 'var(--text-color-accent-red)' : 'var(--text-color-brand)';
   const colorMode = useNvColorMode();
   const gradient = colorMode === 'dark' ? AREA_GRADIENT.dark : AREA_GRADIENT.light;
