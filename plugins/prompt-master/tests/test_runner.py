@@ -53,9 +53,12 @@ def test_builds_a_deepagents_fabric_agent_with_the_bundled_skill() -> None:
     assert agent.models["default"].api_key_env == "OPENAI_API_KEY"
     assert agent.skills is not None
     assert len(agent.skills.paths) == 1
-    skill_path = Path(agent.skills.paths[0])
-    assert skill_path.name == "prompt-master"
-    assert (skill_path / "SKILL.md").is_file()
+    # The path must be the skills *library*, not the skill: harnesses enumerate the directory's
+    # children and take each one holding a SKILL.md, so naming the skill itself loads nothing —
+    # silently, with no error.  Asserting the library both ways pins the level, not just the name.
+    library_path = Path(agent.skills.paths[0])
+    assert (library_path / "prompt-master" / "SKILL.md").is_file()
+    assert not (library_path / "SKILL.md").exists()
     assert agent.environment.workspace == "workspace"
     assert agent.environment.artifacts == "artifacts"
     assert agent.instructions is not None

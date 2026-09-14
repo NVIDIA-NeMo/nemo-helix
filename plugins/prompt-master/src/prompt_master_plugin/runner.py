@@ -55,8 +55,11 @@ def build_optimizer_agent(config: PromptMasterConfig) -> AgentConfig:
             "models": {
                 "default": config.model.model_dump(exclude_none=True),
             },
+            # A skills path is a *library* of skills, not one skill: the harness lists the
+            # directory's children and takes each one holding a SKILL.md.  Naming the skill
+            # itself loads nothing, and reports no error while doing it.
             "skills": {
-                "paths": [str((skills_dir() / "prompt-master").resolve())],
+                "paths": [str(skills_dir().resolve())],
             },
             "tools": {"blocked": []},
             "environment": {
