@@ -49,19 +49,15 @@ variable "DISTROLESS_BASE_3_13" {
 }
 
 variable "NMP_API_RUNTIME_BASE" {
-  default = "root-distroless-base-3-13"
+  default = "nmp-python-base"
 }
 
 variable "NMP_CORE_RUNTIME_BASE" {
-  default = "root-distroless-base-3-13"
+  default = "nmp-python-base"
 }
 
 variable "NMP_CPU_TASKS_RUNTIME_BASE" {
-  default = "root-distroless-base-3-13"
-}
-
-variable "AUDITOR_RUNTIME_BASE" {
-  default = "root-distroless-base-3-13"
+  default = "nmp-python-base"
 }
 
 variable "AUTOMODEL_BASE_CONTEXT" {
@@ -652,7 +648,6 @@ target "nmp-api-docker" {
     nmp-studio-ui             = "target:nmp-studio-ui"
     policy-wasm-artifacts     = "target:root-policy-wasm-artifacts"
     root-busybox              = "target:root-busybox"
-    root-distroless-base-3-13 = "target:root-distroless-base-3-13"
     fastembed-cache           = FASTEMBED_CACHE_CONTEXT
   }
   args = {
@@ -679,7 +674,6 @@ target "nmp-core-docker" {
     nmp-jobs-launcher         = "target:nmp-jobs-launcher"
     policy-wasm-artifacts     = "target:root-policy-wasm-artifacts"
     root-busybox              = "target:root-busybox"
-    root-distroless-base-3-13 = "target:root-distroless-base-3-13"
   }
   args = {
     NMP_CORE_RUNTIME_BASE = NMP_CORE_RUNTIME_BASE
@@ -701,7 +695,6 @@ target "nmp-cpu-tasks-docker" {
     nmp-python-base           = "target:nmp-python-base"
     nmp-workspace             = "target:nmp-workspace"
     root-busybox              = "target:root-busybox"
-    root-distroless-base-3-13 = "target:root-distroless-base-3-13"
   }
   args = {
     NMP_COLLECT_SOURCES        = NMP_COLLECT_SOURCES
@@ -723,7 +716,6 @@ target "nmp-cpu-tasks-smoke-test" {
     nmp-python-base           = "target:nmp-python-base"
     nmp-workspace             = "target:nmp-workspace"
     root-busybox              = "target:root-busybox"
-    root-distroless-base-3-13 = "target:root-distroless-base-3-13"
   }
   args = {
     NMP_COLLECT_SOURCES        = NMP_COLLECT_SOURCES
@@ -1146,12 +1138,10 @@ target "auditor-tasks-docker" {
   contexts = {
     root-lib-source-artifacts = "target:root-lib-source-artifacts"
     root-busybox              = "target:root-busybox"
-    root-distroless-base-3-13 = "target:root-distroless-base-3-13"
   }
   dockerfile = "docker/Dockerfile.auditor-tasks"
   args = {
-    NMP_COLLECT_SOURCES  = NMP_COLLECT_SOURCES
-    AUDITOR_RUNTIME_BASE = AUDITOR_RUNTIME_BASE
+    NMP_COLLECT_SOURCES = NMP_COLLECT_SOURCES
   }
   cache-to   = maybe_registry_cache_to("auditor-tasks")
   cache-from = maybe_registry_cache_from("auditor-tasks")
