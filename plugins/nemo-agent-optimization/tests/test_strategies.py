@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-from importlib.metadata import EntryPoint
 from typing import Any
 
 import pytest
@@ -30,8 +29,25 @@ class _Mismatched(_FakeStrategy):
     name = "other-name"
 
 
+class _NotAStrategy:
+    """Lacks the OptimizationStrategy protocol surface entirely."""
+
+
+class _StubEntryPoint:
+    """Stands in for importlib.metadata.EntryPoint: discovery only uses .name and .load()."""
+
+    def __init__(self, name: str, loads: object) -> None:
+        self.name = name
+        self._loads = loads
+
+    def load(self) -> object:
+        if isinstance(self._loads, Exception):
+            raise self._loads
+        return self._loads
+
+
 def test_discover_optimization_strategies_loads_entry_points(monkeypatch: pytest.MonkeyPatch) -> None:
-    entry = EntryPoint(name="fake", value="test_strategies:_FakeStrategy", group=OPTIMIZATION_STRATEGY_GROUP)
+    entry = _StubEntryPoint("fake", _FakeStrategy)
     monkeypatch.setattr(
         "nemo_agent_optimization_plugin.strategies.importlib.metadata.entry_points",
         lambda group: [entry] if group == OPTIMIZATION_STRATEGY_GROUP else [],
@@ -43,11 +59,33 @@ def test_discover_optimization_strategies_loads_entry_points(monkeypatch: pytest
 
 
 def test_discover_optimization_strategies_rejects_name_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
-    entry = EntryPoint(name="fake", value="test_strategies:_Mismatched", group=OPTIMIZATION_STRATEGY_GROUP)
+    entry = _StubEntryPoint("fake", _Mismatched)
     monkeypatch.setattr(
         "nemo_agent_optimization_plugin.strategies.importlib.metadata.entry_points",
         lambda group: [entry] if group == OPTIMIZATION_STRATEGY_GROUP else [],
     )
     discover_optimization_strategies.cache_clear()
     with pytest.raises(OptimizationStrategyDiscoveryError, match="loaded a strategy named"):
+        discover_optimization_strategies()
+
+
+def test_discover_optimization_strategies_wraps_load_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    entry = _StubEntryPoint("fake", ImportError("boom"))
+    monkeypatch.setattr(
+        "nemo_agent_optimization_plugin.strategies.importlib.metadata.entry_points",
+        lambda group: [entry] if group == OPTIMIZATION_STRATEGY_GROUP else [],
+    )
+    discover_optimization_strategies.cache_clear()
+    with pytest.raises(OptimizationStrategyDiscoveryError, match="Failed to load"):
+        discover_optimization_strategies()
+
+
+def test_discover_optimization_strategies_rejects_non_protocol_strategy(monkeypatch: pytest.MonkeyPatch) -> None:
+    entry = _StubEntryPoint("fake", _NotAStrategy)
+    monkeypatch.setattr(
+        "nemo_agent_optimization_plugin.strategies.importlib.metadata.entry_points",
+        lambda group: [entry] if group == OPTIMIZATION_STRATEGY_GROUP else [],
+    )
+    discover_optimization_strategies.cache_clear()
+    with pytest.raises(OptimizationStrategyDiscoveryError, match="must implement OptimizationStrategy"):
         discover_optimization_strategies()
