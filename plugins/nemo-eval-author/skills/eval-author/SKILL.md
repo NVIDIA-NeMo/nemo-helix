@@ -23,7 +23,7 @@ triggers:
 not-for:
   - eval-author-discover (use to run the discovery pass and get a runnable verdict)
   - eval-author-audit (use to generate, validate, measure, or aggregate audit.md coverage)
-  - eval-author-task-create (use to propose dataset improvements, then create and prove an eligible Harbor task)
+  - eval-author-task-create (use to propose dataset improvements; when task creation is requested, create and prove an eligible Harbor task)
   - eval-author-inspect-trace (use after this skill selects the trace sub-flow)
   - eval-author-trace-environment (use to derive a Harbor environment from canonical ATIF evidence)
   - nemo-intake (use to instrument agents, ingest telemetry, or query Intake outside Eval Author)
