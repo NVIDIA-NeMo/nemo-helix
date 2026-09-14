@@ -187,13 +187,14 @@ kubectl -n "$OPENSHELL_NS" port-forward svc/openshell "${OPENSHELL_PORT}:8080" >
 echo $! > "$WORKDIR/pf-openshell.pid"
 sleep 2
 cat "$WORKDIR/pf-openshell.log"
+openshell gateway list
 openshell gateway add "http://127.0.0.1:${OPENSHELL_PORT}" --local --name nemo-k8s
 openshell gateway select nemo-k8s
 openshell gateway list
 openshell sandbox list
 ```
 
-Expected: the log shows `Forwarding from 127.0.0.1:18080` and `Forwarding from [::1]:18080` (both address families, so `localhost` resolves to this forward whichever one the client picks); `sandbox list` prints `No sandboxes found.`; `gateway list` marks `nemo-k8s` active with auth `plaintext`. An `UNAUTHENTICATED` here means the values file was not applied; see the recovery table. If the log says the address is already in use, or shows only one of the two families, something else holds the port: leave it alone, choose another `OPENSHELL_PORT`, and start over from the port-forward.
+Expected: the log shows `Forwarding from 127.0.0.1:18080` and `Forwarding from [::1]:18080` (both address families, so `localhost` resolves to this forward whichever one the client picks); `sandbox list` prints `No sandboxes found.`; `gateway list` marks `nemo-k8s` active with auth `plaintext`. If the first `gateway list` already shows a `nemo-k8s` entry from an earlier session, pick another name for this one rather than removing it. An `UNAUTHENTICATED` here means the values file was not applied; see the recovery table. If the log says the address is already in use, or shows only one of the two families, something else holds the port: leave it alone, choose another `OPENSHELL_PORT`, and start over from the port-forward.
 
 Note for the user: sandbox pods are created in the `openshell` namespace, and sandboxes with a workspace volume need a default StorageClass. If discovery found no default StorageClass, set `server.workspaceStorageClass` in the values file before installing.
 
@@ -303,7 +304,7 @@ nemo wait inference provider local-models
 nemo models list --all-pages
 ```
 
-Then choose a model for the agent and export it as `NEMO_DEFAULT_MODEL=default/<model name>` so `nemo agents create` can resolve the placeholder in Step 7. Prefer a plain instruction-tuned chat model. A reasoning model can spend its whole token budget on hidden reasoning and return an empty answer, which looks like a broken deployment when it is not.
+Then choose a model for the agent and note its id (`default/<model name>`); Step 7 writes it into the agent config. Prefer a plain instruction-tuned chat model. A reasoning model can spend its whole token budget on hidden reasoning and return an empty answer, which looks like a broken deployment when it is not. If every served model is a reasoning model, pick the smallest and expect short answers only.
 
 Model ids on the platform are `<workspace>/<model name>` as printed by `nemo models list`, for example `default/qwen35-9b`. The Inference Gateway route is `/apis/inference-gateway/v2/workspaces/default/openai/-/v1`; there is no per-provider route to try, and the `system` workspace is not for user models.
 
@@ -325,7 +326,7 @@ Create a minimal agent directory holding only `agent.yaml` (the register step up
 mkdir -p "$WORKDIR/agents/$AGENT_NAME"
 ```
 
-Write [references/agent.yaml](references/agent.yaml) to `$WORKDIR/agents/$AGENT_NAME/agent.yaml`, replacing `sandbox-hello` with `$AGENT_NAME` if different. It uses `${NEMO_DEFAULT_MODEL}`, which `nemo agents create` resolves to the default model chosen in Step 6, and `provider: nvidia`; use `provider: openai` when the platform provider is OpenAI. The deploy step rewrites the model `base_url` to the in-cluster Inference Gateway, so the agent needs no key of its own.
+Write [references/agent.yaml](references/agent.yaml) to `$WORKDIR/agents/$AGENT_NAME/agent.yaml`, replacing `sandbox-hello` with `$AGENT_NAME` if different and `MODEL_ID` with the model id from Step 6 (for example `default/qwen35-9b`). Keep `provider: nvidia` for a build.nvidia.com or keyless OpenAI-compatible provider; use `provider: openai` when the platform provider is OpenAI. The deploy step rewrites the model `base_url` to the in-cluster Inference Gateway, so the agent needs no key of its own.
 
 Build the image with the OpenShell runtime profile. Pass `--platform` when the node architecture from discovery differs from the operator machine:
 
@@ -369,7 +370,7 @@ nemo agents create --name "$AGENT_NAME" --agent-config "$WORKDIR/agents/$AGENT_N
 nemo agents get "$AGENT_NAME" | head -20
 ```
 
-Expected: the agent is returned with `config_format: nemo-agents-spec-v1` and a concrete model name where `${NEMO_DEFAULT_MODEL}` was.
+Expected: the agent is returned with `config_format: nemo-agents-spec-v1` and `models.default.model` set to the id you wrote.
 
 ## Step 8: Deploy into the sandbox and invoke
 
@@ -406,6 +407,14 @@ nemo agents invoke --agent-deployment "$AGENT_NAME-sandbox" \
 ```
 
 Expected: a chat completion whose `content` is a real sentence, in about ten seconds. The platform proxies the request to the sandbox through the OpenShell gateway. Exit code 0 with an empty `content` is not success; if `content` is empty and the model is a reasoning model, switch to a plain chat model.
+
+The `base_url` shown by `nemo agents deployments get` is the API server's own view and may carry the short Service name. The config the sandbox actually received is what matters; confirm it if in doubt:
+
+```bash
+openshell sandbox exec --name "$SBX" -- grep base_url /tmp/nemo/agent.yaml
+```
+
+Expected: the FQDN from the platform values.
 
 If the deploy fails or `invoke` cannot reach the endpoint, read `nemo agents deployments get` for the status message, then the serve log inside the sandbox:
 

@@ -30,8 +30,8 @@ models:
     # routed through the platform Inference Gateway at deploy time, so no
     # api_key_env or base_url is needed here.
     provider: nvidia
-    # Resolved by `nemo agents create` to the default model chosen in nemo setup.
-    model: ${NEMO_DEFAULT_MODEL}
+    # The platform model id from `nemo models list`, for example default/qwen35-9b.
+    model: MODEL_ID
 
 skills:
   paths: []
