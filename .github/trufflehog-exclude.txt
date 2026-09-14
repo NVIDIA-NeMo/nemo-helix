@@ -1,3 +1,5 @@
 # Newline-separated regexes for paths TruffleHog should skip.
 # uv.lock contains many sha256 hex digests that false-positive as SentryToken.
 uv\.lock
+# This test intentionally exercises redaction with synthetic URL credentials.
+services/core/jobs/tests/test_telemetry\.py
