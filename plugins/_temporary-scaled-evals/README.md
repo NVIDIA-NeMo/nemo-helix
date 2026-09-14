@@ -10,7 +10,9 @@ Vendors the scaled-evals control plane into NeMo Platform as an ephemeral plugin
 Portable behavior is reconciled through standalone scaled-evals `1.13.0`
 (`c64f23e71dc829414ab9279483973a84a17eea8d`). This remains a platform-adapted
 fork: hosted deployment, identity-provider, and private corpus surfaces are not
-vendored.
+vendored. Benchmark-wide Harbor archive exports are additionally ported from
+standalone `1.22.0` (`cffd0af2d7aa3e9cc323cc4c32204faf785688fe`); this does not
+imply reconciliation of the other changes after `1.13.0`.
 
 ## Install (ephemeral — not in `enabled-plugins` yet)
 
@@ -119,6 +121,109 @@ registered the external auth middleware, so installing the package handed you a
 command that bypassed the curation above. That app is gone: this service class is
 the only HTTP surface, which makes "not mounted" a property of the code rather
 than a convention.
+
+## Download a benchmark as one Harbor experiment
+
+The plugin can combine a Harbor benchmark run's member evaluation archives into
+one experiment directory. This is separate from the existing per-evaluation
+archive and Harbor Viewer download routes.
+
+Point the bundled CLI at the plugin mount (the CLI appends `/v1`):
+
+```bash
+export SCALED_EVALS_BASE_URL=http://localhost:8080/apis/scaled-evals
+# Supply SCALED_EVALS_TOKEN when platform authentication requires it.
+uv run scaled-evals benchmark-run archive <run-id> --build
+uv run scaled-evals benchmark-run download <run-id> --wait -o ./harbor-results
+# Alternatively, keep the gzip tarball without extracting it:
+uv run scaled-evals benchmark-run download <run-id> --archive-only -o ./results.tar.gz
+# Re-snapshot member executions after a retry or to refresh a ready export:
+uv run scaled-evals benchmark-run archive <run-id> --force
+```
+
+The API exposes `GET` and `POST /v1/benchmark-runs/{run_id}/archive`, plus
+`GET /v1/benchmark-runs/{run_id}/archive/download`, under `/apis/scaled-evals`.
+POST accepts `{"force": false}` and returns 202; GET reports `missing`, `queued`,
+`building`, `ready`, or `failed`. A non-Harbor run, an empty run, or members that
+have not finished execution, evidence, teardown, and individual archive generation
+produce a 409 rather than an incomplete snapshot. Repeated requests reuse queued,
+building, or ready work; `force` replaces a ready/failed export, not an active build.
+
+The separate **dispatch worker must be running**. It processes benchmark archives
+after higher-priority lifecycle, evaluation, evidence, and per-evaluation archive
+work. Leases survive worker restarts, and changed member executions/archives
+prevent publication of the in-progress export. Upload failures and lease loss
+trigger cleanup of unpublished claim-token objects. Cleanup rechecks the archive
+row under a lock before deleting: a lost commit acknowledgement must not delete
+a successfully published archive. If the database or object store is unavailable,
+cleanup defers rather than guessing.
+
+Idle dispatch workers also reconcile archive prefixes periodically, retaining the
+published object and the current building claim's object. This recovers objects
+left by process crashes, failed deletions, superseded generations, or an upload
+that completed after a revoked worker exited. The per-run throttle is persisted
+in Postgres (`BENCHMARK_ARCHIVE_CLEANUP_INTERVAL_SECONDS`, default 300 seconds);
+sweeps repeat, rather than treating an initially empty prefix as permanently clean.
+The dispatcher handles evaluation/archive work before these maintenance sweeps.
+
+The API records the completed
+tarball's SHA-256, and the CLI verifies its size and digest **before** extracting
+or keeping it. Old exports without a recorded checksum still download with an
+explicit warning; rebuild them with `benchmark-run archive <run-id> --force` to
+get checksum-verified downloads. Without `--wait`, download queues
+a missing archive and returns; `--wait --timeout 600` waits up to ten minutes.
+A timeout leaves the server build running. Existing local destinations are refused.
+
+The export contains combined `config.json`/`result.json`, distinct trial directories,
+original member metadata under `_scaled_evals/evaluations/`, shared benchmark
+artifacts under `_scaled_evals/benchmark/artifacts/`, and
+`scaled-evals-benchmark-archive.json`, a validated Pydantic manifest with source
+identities, the complete already-redacted per-member provenance (including agent
+bundle, framework/adapter versions, runner images, source revisions and config
+hashes), and checksums for every final exported file except the manifest itself.
+Original producer metadata remains alongside the exported data; no live/private
+execution snapshot or credential payload is added to the export.
+
+Before rewriting Harbor metadata, the exporter cross-checks each downloaded
+member's files against its producer `scaled-evals-manifest.json`. Size, checksum,
+missing/extra file, duplicate-path and unsafe-path mismatches fail the export.
+Legacy members without that manifest explicitly report
+`artifact_integrity: manifest_missing`, rather than claiming verification.
+Producer checksums detect content inconsistency; they are not signatures or proof
+against replacement of both the data and its manifest. The API's outer tarball
+checksum independently verifies the subsequent download. Inspect it with
+`scaled-evals --json benchmark-run archive <run-id>` and compare a saved tarball
+using `sha256sum` when downloading outside the CLI.
+
+Run/evaluation IDs are validated as safe directory components, not special test
+IDs. The exported Harbor job UUID is derived from the benchmark run and archive
+generation: it is stable across worker retries, and changes on a forced rebuild.
+Missing trial data or explicitly unavailable campaign evidence is marked `partial` and
+reported by the CLI. Custom metrics and pass@k are **not** aggregated; recompute
+them downstream. This is an analysis export, not an exact rerun configuration.
+
+Source extraction is bounded across members and shared artifacts by
+`BENCHMARK_ARCHIVE_MAX_FILES` (default 100,000) and
+`BENCHMARK_ARCHIVE_MAX_SOURCE_BYTES` (default 10,000,000,000). These are not total
+scratch-space or tenant quotas; workers need space for extracted inputs and the
+compressed output. New migration `042_benchmark_run_archives.sql` is schema-scoped
+and safe to replay at startup. No new platform database or Studio UI is introduced.
+
+### Provider boundary
+
+Archive assembly, input integrity, and the typed manifest are provider-independent.
+The dispatcher injects evidence checks; Switchyard-specific campaign reference
+validation lives in `dispatch/switchyard_archive.py`, not in the generic exporter.
+Future workload implementations can supply their own evidence checks without
+modifying archive assembly. Callers of the HTTP API cannot disable these checks.
+
+The existing Switchyard provisioning/cleanup lifecycle still belongs to the
+standalone-compatible dispatcher. When moving it into a separate workload service,
+that boundary should own provisioning, readiness, cleanup, lease persistence and
+public evidence publication together. The dispatcher would sequence the workload
+contract, and the archive would consume its published evidence through the same
+validator seam. This port does not introduce a speculative workload framework or
+rewrite existing execution/credential lifecycle behavior.
 
 ## Who a caller is
 
