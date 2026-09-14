@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+import os
 import socket
 import threading
 import time
@@ -752,14 +753,27 @@ def test_bootstrap_installs_wheels_before_starting_gym(monkeypatch):
         "_install_wheels_v1_dependencies",
         lambda loaded_package, work_path: events.append("wheels-installed") if loaded_package is package else None,
     )
+    monkeypatch.setattr(
+        runtime,
+        "_install_huggingface_cache_fallback",
+        lambda dataset_path, work_path: events.append(f"hf-cache-installed:{dataset_path}:{work_path}"),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_apply_huggingface_offline_policy",
+        lambda: events.append("hf-offline-policy-applied"),
+    )
     monkeypatch.setenv("NMP_ENVIRONMENT_PATH", "/job/environment")
     monkeypatch.setenv(runtime.ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY, "true")
     monkeypatch.setenv("NMP_WORK_PATH", "/job/work")
+    monkeypatch.setenv("NMP_DATASET_PATH", "/job/dataset")
 
     _, head_server_config, rollout_helper = runtime.bootstrap_gym_host()
 
     # Dependencies must be ready before RunHelper starts any Gym servers.
     assert events == [
+        "hf-offline-policy-applied",
+        "hf-cache-installed:/job/dataset:/job/work",
         "environment-validated",
         "environment-composed",
         "environment-root-prepended",
@@ -1338,3 +1352,151 @@ def test_an_empty_chunk_is_never_written():
 
     handler._write_chunk(b" ")
     assert written == [b"1\r\n \r\n"]
+
+
+@pytest.fixture(autouse=True)
+def _isolated_hf_environment(monkeypatch):
+    for key in ("HF_HOME", "HF_DATASETS_CACHE", "HF_HUB_CACHE", "HF_HUB_OFFLINE", "HF_DATASETS_OFFLINE"):
+        monkeypatch.delenv(key, raising=False)
+
+
+def _vendored_hf_cache(tmp_path):
+    dataset_path = tmp_path / "dataset"
+    (dataset_path / runtime.HF_CACHE_DIRNAME / "hub").mkdir(parents=True)
+    (dataset_path / runtime.HF_CACHE_DIRNAME / "hub" / "snapshot.bin").write_text("weights")
+    work_path = tmp_path / "work"
+    work_path.mkdir()
+    return dataset_path, work_path
+
+
+def test_a_vendored_hf_cache_is_copied_into_writable_work(tmp_path, monkeypatch):
+    dataset_path, work_path = _vendored_hf_cache(tmp_path)
+    monkeypatch.delenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, raising=False)
+
+    runtime._install_huggingface_cache_fallback(str(dataset_path), str(work_path))
+
+    copied = work_path / runtime.HF_CACHE_DIRNAME
+    assert (copied / "hub" / "snapshot.bin").read_text() == "weights"
+    assert os.environ["HF_HOME"] == str(copied)
+    assert os.environ["HF_DATASETS_CACHE"] == str(copied / "datasets")
+    assert os.environ["HF_HUB_CACHE"] == str(copied / "hub")
+
+
+def test_the_copy_is_writable_so_datasets_can_take_its_lock(tmp_path, monkeypatch):
+    dataset_path, work_path = _vendored_hf_cache(tmp_path)
+    dataset_path.chmod(0o555)
+    (dataset_path / runtime.HF_CACHE_DIRNAME).chmod(0o555)
+
+    runtime._install_huggingface_cache_fallback(str(dataset_path), str(work_path))
+
+    lock = work_path / runtime.HF_CACHE_DIRNAME / "hub" / "datasets.lock"
+    lock.write_text("held")
+    assert lock.read_text() == "held"
+
+
+def test_offline_environments_pin_the_hf_libraries_offline(monkeypatch):
+    monkeypatch.setenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, "true")
+
+    runtime._apply_huggingface_offline_policy()
+
+    assert os.environ["HF_HUB_OFFLINE"] == "1"
+    assert os.environ["HF_DATASETS_OFFLINE"] == "1"
+
+
+def test_an_offline_job_is_pinned_offline_even_with_no_snapshot_to_fall_back_on(monkeypatch):
+    monkeypatch.setenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, "true")
+
+    runtime._apply_huggingface_offline_policy()
+    runtime._install_huggingface_cache_fallback("", "")
+
+    # Without this the libraries hit a blocked network instead of reporting a missing file.
+    assert os.environ["HF_HUB_OFFLINE"] == "1"
+    assert os.environ["HF_DATASETS_OFFLINE"] == "1"
+
+
+def test_an_online_environment_may_still_reach_the_hub_for_what_the_snapshot_lacks(monkeypatch):
+    monkeypatch.setenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, "false")
+
+    runtime._apply_huggingface_offline_policy()
+
+    assert "HF_HUB_OFFLINE" not in os.environ
+    assert "HF_DATASETS_OFFLINE" not in os.environ
+
+
+def test_an_online_job_keeps_offline_flags_a_caller_set_deliberately(monkeypatch):
+    monkeypatch.setenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, "false")
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+
+    runtime._apply_huggingface_offline_policy()
+
+    assert os.environ["HF_HUB_OFFLINE"] == "1"
+
+
+def test_a_hub_snapshot_stays_a_symlink_instead_of_duplicating_every_blob(tmp_path):
+    dataset_path = tmp_path / "dataset"
+    model = dataset_path / runtime.HF_CACHE_DIRNAME / "hub" / "models--org--name"
+    (model / "blobs").mkdir(parents=True)
+    (model / "snapshots" / "rev1").mkdir(parents=True)
+    blob = model / "blobs" / "deadbeef"
+    blob.write_bytes(b"x" * 8192)
+    entry = model / "snapshots" / "rev1" / "model.bin"
+    os.symlink(os.path.relpath(blob, entry.parent), entry)
+    work_path = tmp_path / "work"
+    work_path.mkdir()
+
+    runtime._install_huggingface_cache_fallback(str(dataset_path), str(work_path))
+
+    copied = work_path / runtime.HF_CACHE_DIRNAME / "hub" / "models--org--name"
+    copied_entry = copied / "snapshots" / "rev1" / "model.bin"
+    assert copied_entry.is_symlink()
+    # Resolving inside the copy, not back to the read-only mount.
+    assert copied_entry.resolve() == (copied / "blobs" / "deadbeef").resolve()
+    on_disk = sum(p.stat().st_size for p in copied.rglob("*") if p.is_file() and not p.is_symlink())
+    assert on_disk == 8192
+
+
+def test_a_stale_copy_from_an_earlier_run_is_replaced(tmp_path, monkeypatch):
+    dataset_path, work_path = _vendored_hf_cache(tmp_path)
+    stale = work_path / runtime.HF_CACHE_DIRNAME
+    (stale / "hub").mkdir(parents=True)
+    (stale / "hub" / "snapshot.bin").write_text("stale")
+    (stale / "hub" / "gone.bin").write_text("gone")
+
+    runtime._install_huggingface_cache_fallback(str(dataset_path), str(work_path))
+
+    assert (stale / "hub" / "snapshot.bin").read_text() == "weights"
+    assert not (stale / "hub" / "gone.bin").exists()
+
+
+@pytest.mark.parametrize("kind", ["regular-file", "directory-symlink", "dangling-symlink"])
+def test_whatever_the_environment_left_at_the_cache_path_is_replaced(tmp_path, kind):
+    dataset_path, work_path = _vendored_hf_cache(tmp_path)
+    stale = work_path / runtime.HF_CACHE_DIRNAME
+    if kind == "regular-file":
+        stale.write_text("not a directory")
+    elif kind == "directory-symlink":
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        os.symlink(elsewhere, stale)
+    else:
+        os.symlink(tmp_path / "never-existed", stale)
+
+    runtime._install_huggingface_cache_fallback(str(dataset_path), str(work_path))
+
+    assert not stale.is_symlink()
+    assert (stale / "hub" / "snapshot.bin").read_text() == "weights"
+
+
+@pytest.mark.parametrize(
+    "dataset_path,work_path",
+    [("", "work"), ("dataset", ""), ("dataset-without-snapshot", "work")],
+)
+def test_the_fallback_is_inert_without_a_vendored_snapshot(tmp_path, monkeypatch, dataset_path, work_path):
+    (tmp_path / "dataset-without-snapshot").mkdir()
+
+    runtime._install_huggingface_cache_fallback(
+        str(tmp_path / dataset_path) if dataset_path else "",
+        str(tmp_path / work_path) if work_path else "",
+    )
+
+    assert "HF_HOME" not in os.environ
