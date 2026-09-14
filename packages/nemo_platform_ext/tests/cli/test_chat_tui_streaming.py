@@ -1,12 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The SSE decoder and the two streaming-response shapes ``nemo chat`` consumes."""
+"""The SSE decoder and the typed streaming response ``nemo chat`` consumes."""
 
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any
 from unittest.mock import MagicMock
 
 import click
@@ -16,8 +15,6 @@ from nemo_platform_ext.cli.chat_tui import (
     ServerSentEvent,
     SSEDecoder,
     _iter_stream_deltas,
-    _LegacyStreamAdapter,
-    as_streaming_response,
 )
 from nemo_platform_plugin.client.response import NemoBinaryResponse
 
@@ -62,7 +59,7 @@ def _binary_response(body: bytes) -> NemoBinaryResponse:
 def test_iter_stream_deltas_reads_a_typed_binary_response() -> None:
     body = b'data: {"choices": [{"delta": {"content": "hi"}}]}\n\ndata: [DONE]\n\n'
 
-    deltas = list(_iter_stream_deltas(as_streaming_response(_binary_response(body))))
+    deltas = list(_iter_stream_deltas(_binary_response(body)))
 
     assert deltas == [{"choices": [{"delta": {"content": "hi"}}]}]
 
@@ -71,17 +68,4 @@ def test_iter_stream_deltas_surfaces_error_events() -> None:
     body = b'event: error\ndata: {"detail": "upstream exploded"}\n\n'
 
     with pytest.raises(click.ClickException, match="upstream exploded"):
-        list(_iter_stream_deltas(as_streaming_response(_binary_response(body))))
-
-
-def test_legacy_context_manager_is_adapted() -> None:
-    legacy: Any = MagicMock()
-    legacy.__enter__ = MagicMock(return_value=legacy)
-    legacy.__exit__ = MagicMock(return_value=False)
-    legacy.iter_bytes = MagicMock(return_value=[b'data: {"choices": [{"delta": {"content": "legacy"}}]}\n\n'])
-
-    adapted = as_streaming_response(legacy)
-
-    assert isinstance(adapted, _LegacyStreamAdapter)
-    assert list(_iter_stream_deltas(adapted)) == [{"choices": [{"delta": {"content": "legacy"}}]}]
-    assert adapted.http_response is legacy
+        list(_iter_stream_deltas(_binary_response(body)))

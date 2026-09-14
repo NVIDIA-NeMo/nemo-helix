@@ -23,7 +23,7 @@ from pydantic import BaseModel, RootModel, SecretBytes, SecretStr
 
 from nemo_platform_ext.cli.core.context import CLIContext
 
-ResultKind = Literal["entity", "list", "none", "binary"]
+ResultKind = Literal["entity", "list", "all-pages", "none", "binary"]
 
 _INFERENCE_DEPLOYMENT_LIFECYCLE = "inference_deployment"
 
@@ -221,6 +221,8 @@ def _render_result(result: ResultKind) -> list[str]:
         return ["", "print(response.data())"]
     if result == "list":
         return ["", "for item in response.page().items:", "    print(item)"]
+    if result == "all-pages":
+        return ["", "for item in response.items():", "    print(item)"]
     if result == "binary":
         return ["", "with response.stream() as chunks:", "    for chunk in chunks:", "        ..."]
     return []

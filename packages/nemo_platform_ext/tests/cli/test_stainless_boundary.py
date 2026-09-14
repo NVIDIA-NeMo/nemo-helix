@@ -145,11 +145,35 @@ def test_cli_runs_without_generated_sdk_installed(tmp_path: Path) -> None:
     assert not failures, f"commands failing without the generated SDK: {json.dumps(failures, indent=2)}"
 
 
+def test_code_output_never_references_the_generated_sdk(tmp_path: Path) -> None:
+    # Exiting 0 is not enough: a command can run without nemo_platform and still
+    # hand the user a snippet that imports it.
+    code_commands = [args for args in RUNTIME_COMMANDS if args[-2:] == ["-f", "code"]]
+    results = _run_probe(code_commands, tmp_path)
+
+    offenders = {
+        cmd: info["output"]
+        for cmd, info in results.items()
+        if "nemo_platform import" in str(info["output"]) or "NeMoPlatform(" in str(info["output"])
+    }
+    assert not offenders, f"-f code snippets still built on the generated SDK: {json.dumps(offenders, indent=2)}"
+    for cmd, info in results.items():
+        assert "from nemo_platform_plugin." in str(info["output"]), f"{cmd} emitted no typed-client import"
+
+
 # Plugin CLI groups discovered through the ``nemo.cli`` entry-point group. The
 # discovery path (``nemo_platform_plugin.discovery`` and the modules it pulls in)
 # must not need the generated SDK, or every plugin group silently disappears
-# from ``nemo --help``.
-PLUGIN_GROUPS: tuple[str, ...] = ("agents", "guardrail", "intake", "experiments")
+# from ``nemo --help``. This probes discovery and the listed groups' own
+# ``--help``; plugin job internals (``jobs/*`` modules that still import the
+# generated SDK for their own runtime) are each plugin's migration, not the CLI's.
+def _installed_plugin_groups() -> tuple[str, ...]:
+    from importlib.metadata import entry_points
+
+    return tuple(sorted({ep.name for ep in entry_points(group="nemo.cli")}))
+
+
+PLUGIN_GROUPS: tuple[str, ...] = _installed_plugin_groups()
 
 
 def test_plugin_groups_are_discovered_without_generated_sdk(tmp_path: Path) -> None:
@@ -157,6 +181,7 @@ def test_plugin_groups_are_discovered_without_generated_sdk(tmp_path: Path) -> N
 
     root_help = results["--help"]
     assert root_help["exit_code"] == 0, root_help
+    assert PLUGIN_GROUPS, "no nemo.cli entry points installed; the probe would prove nothing"
     missing = [group for group in PLUGIN_GROUPS if f"Plugin commands for {group}." not in str(root_help["output"])]
     assert not missing, f"plugin groups missing from `nemo --help` without the generated SDK: {missing}"
 
