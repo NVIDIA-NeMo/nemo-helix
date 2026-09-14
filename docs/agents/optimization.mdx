@@ -309,6 +309,7 @@ nemo agents optimize prepare-fileset \
   --fileset hermes-optimize-chatonly \
   --workspace default
 nemo agents optimize \
+  --strategy nat \
   --optimize-config-fileset default/hermes-optimize-chatonly \
   --optimize-config optimize-chatonly.yaml \
   --workspace default
@@ -344,7 +345,7 @@ What it does under the hood:
 import os
 from pathlib import Path
 
-from nemo_optimization.jobs.optimize import OptimizeJob
+from nemo_agent_optimization_plugin.jobs.optimize import OptimizeJob
 from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.scheduler import NemoJobScheduler
 
@@ -361,8 +362,8 @@ client = NeMoPlatform(
 result = NemoJobScheduler().run_local(
     OptimizeJob,
     {
+        "strategy": "nat",
         "optimize_config": str(optimize_config),
-        "workspace": WORKSPACE,
     },
     workspace=WORKSPACE,
     sdk=client,
@@ -398,6 +399,7 @@ nemo agents optimize prepare-fileset \
   --fileset hermes-optimize-mcp \
   --workspace default
 nemo agents optimize \
+  --strategy nat \
   --optimize-config-fileset default/hermes-optimize-mcp \
   --optimize-config optimize-mcp.yaml \
   --workspace default
@@ -410,7 +412,7 @@ nemo agents optimize \
 import os
 from pathlib import Path
 
-from nemo_optimization.jobs.optimize import OptimizeJob
+from nemo_agent_optimization_plugin.jobs.optimize import OptimizeJob
 from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.scheduler import NemoJobScheduler
 
@@ -439,8 +441,8 @@ client = NeMoPlatform(
 result = NemoJobScheduler().run_local(
     OptimizeJob,
     {
+        "strategy": "nat",
         "optimize_config": str(optimize_config),
-        "workspace": WORKSPACE,
     },
     workspace=WORKSPACE,
     sdk=client,
@@ -502,6 +504,7 @@ the bundle before staging.
 
 ```bash
 nemo agents optimize \
+  --strategy nat \
   --optimize-config-fileset default/hermes-optimize-chatonly \
   --optimize-config optimize-chatonly.yaml \
   --workspace default
@@ -519,8 +522,8 @@ actually registered, for the requested profile (currently always `default`):
 
 | Registered profile | Executor | What the deployment must provide |
 |--------------------|----------|----------------------------------|
-| `subprocess` | Host subprocess running `python -m nemo_optimization.tasks.optimize` | The jobs host venv must carry the optimization and Fabric harness dependencies (and the Docker socket, if trials need it) |
-| `cpu` (docker or `kubernetes_job`) | The `nmp-cpu-tasks` image, same entry point | The task image must carry those dependencies; `nemo-optimization-plugin` is in the `cpu-tasks` dependency group for this reason |
+| `subprocess` | Host subprocess running `python -m nemo_agent_optimization_plugin.tasks.optimize` | The jobs host venv must carry the optimization and Fabric harness dependencies (and the Docker socket, if trials need it) |
+| `cpu` (docker or `kubernetes_job`) | The `nmp-cpu-tasks` image, same entry point | The task image must carry those dependencies; `nemo-agent-optimization-plugin` and the strategy plugins are in the `cpu-tasks` dependency group for this reason |
 
 Subprocess wins when both are registered, because a study drives Fabric trials
 that often need the host's Docker daemon and harness adapters. If neither is
