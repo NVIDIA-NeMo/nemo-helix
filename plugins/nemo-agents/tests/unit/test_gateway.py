@@ -34,6 +34,7 @@ from nemo_agents_plugin.api.v2 import gateway as gateway_module
 from nemo_agents_plugin.api.v2 import openai_errors
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client
 from nemo_agents_plugin.entities import (
+    NEMO_AGENTS_SPEC_CONFIG_FORMAT,
     Agent,
     AgentDeployment,
     AgentSession,
@@ -64,8 +65,11 @@ def _make_deployment(
     status: DeploymentStatus = "running",
     endpoint: str = "http://localhost:9001",
     deployment_id: str | None = None,
+    config: dict | None = None,
 ) -> AgentDeployment:
-    deployment = AgentDeployment(name=name, workspace=workspace, agent=agent, status=status, endpoint=endpoint)
+    deployment = AgentDeployment(
+        name=name, workspace=workspace, agent=agent, status=status, endpoint=endpoint, config=config or {}
+    )
     if deployment_id is not None:
         deployment._id = deployment_id
     return deployment
@@ -1061,6 +1065,122 @@ class TestModelNamePatching:
 
         assert resp.status_code == 200
         assert resp.json()["model"] == "calc-v2"
+
+
+# ---------------------------------------------------------------------------
+# Request model stripping — NAT deployments must not see the inbound ``model``
+# ---------------------------------------------------------------------------
+
+
+def _forwarded_request(httpx_mock: MagicMock) -> dict:
+    """Return the kwargs the gateway passed to ``httpx.AsyncClient().stream(...)``."""
+    return httpx_mock.__aenter__.return_value.stream.call_args.kwargs
+
+
+class TestRequestModelStripping:
+    """The gateway routes by URL path; ``nat serve`` would otherwise forward ``model`` to IGW (AALGO-644)."""
+
+    _NAT_CONFIG = {"workflow": {"_type": "react_agent"}, "llms": {"llm": {"model_name": "meta/llama"}}}
+    _FABRIC_CONFIG = {"config_format": NEMO_AGENTS_SPEC_CONFIG_FORMAT, "harness": {"model": "meta/llama"}}
+
+    def test_nat_deployment_drops_model_from_chat_completions(
+        self, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        dep = _make_deployment(config=self._NAT_CONFIG)
+        mock_entity_client.get = AsyncMock(return_value=dep)
+        httpx_mock = _make_httpx_mock(200, b'{"choices": []}')
+
+        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+            resp = client.post(
+                "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
+                json={"model": "calc-dep", "messages": [{"role": "user", "content": "2+2"}], "stream": False},
+            )
+
+        assert resp.status_code == 200
+        forwarded = _forwarded_request(httpx_mock)
+        assert json.loads(forwarded["content"]) == {"messages": [{"role": "user", "content": "2+2"}], "stream": False}
+        assert "content-length" not in {k.lower() for k in forwarded["headers"]}
+
+    def test_agent_route_also_drops_model(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        mock_entity_client.get = AsyncMock(return_value=_make_agent("calc"))
+        dep = _make_deployment(agent="calc", config=self._NAT_CONFIG)
+        mock_entity_client.list = AsyncMock(return_value=_list_response([dep]))
+        httpx_mock = _make_httpx_mock(200, b'{"choices": []}')
+
+        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+            resp = client.post(
+                "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
+                json={"model": "default/calc", "messages": []},
+            )
+
+        assert resp.status_code == 200
+        assert json.loads(_forwarded_request(httpx_mock)["content"]) == {"messages": []}
+
+    def test_fabric_deployment_body_is_untouched(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        dep = _make_deployment(config=self._FABRIC_CONFIG)
+        mock_entity_client.get = AsyncMock(return_value=dep)
+        httpx_mock = _make_httpx_mock(200, b'{"choices": []}')
+        payload = {"model": "calc-dep", "messages": []}
+
+        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+            client.post(
+                "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
+                json=payload,
+            )
+
+        forwarded = _forwarded_request(httpx_mock)
+        assert json.loads(forwarded["content"]) == payload
+        assert "content-length" in {k.lower() for k in forwarded["headers"]}
+
+    def test_non_openai_surface_is_untouched(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        dep = _make_deployment(config=self._NAT_CONFIG)
+        mock_entity_client.get = AsyncMock(return_value=dep)
+        httpx_mock = _make_httpx_mock(200, b"{}")
+        payload = {"model": "calc-dep", "input_message": "hi"}
+
+        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+            client.post("/apis/agents/v2/workspaces/default/deployments/calc-dep/-/generate", json=payload)
+
+        assert json.loads(_forwarded_request(httpx_mock)["content"]) == payload
+
+    @pytest.mark.parametrize(
+        "raw",
+        [b"", b"not json", b"[1, 2]", b'{"messages": []}'],
+        ids=["empty", "non-json", "json-array", "no-model-key"],
+    )
+    def test_bodies_without_a_model_object_pass_through_verbatim(
+        self, client: TestClient, mock_entity_client: AsyncMock, raw: bytes
+    ) -> None:
+        dep = _make_deployment(config=self._NAT_CONFIG)
+        mock_entity_client.get = AsyncMock(return_value=dep)
+        httpx_mock = _make_httpx_mock(200, b"{}")
+
+        with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
+            client.post(
+                "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
+                content=raw,
+                headers={"content-type": "application/json"},
+            )
+
+        assert _forwarded_request(httpx_mock)["content"] == raw
+
+
+class TestStripRequestModelHelper:
+    def test_removes_only_the_model_key(self) -> None:
+        out = gateway_module._strip_request_model(b'{"model": "x", "messages": [], "temperature": 0}')
+        assert out is not None
+        assert json.loads(out) == {"messages": [], "temperature": 0}
+
+    @pytest.mark.parametrize("raw", [b"", b"\xff\xfe", b"[]", b"42", b'{"messages": []}'])
+    def test_returns_none_when_nothing_to_strip(self, raw: bytes) -> None:
+        assert gateway_module._strip_request_model(raw) is None
+
+    def test_is_nat_deployment(self) -> None:
+        assert gateway_module._is_nat_deployment(_make_deployment(config={}))
+        assert gateway_module._is_nat_deployment(_make_deployment(config={"workflow": {}}))
+        assert not gateway_module._is_nat_deployment(
+            _make_deployment(config={"config_format": NEMO_AGENTS_SPEC_CONFIG_FORMAT})
+        )
 
 
 # ---------------------------------------------------------------------------
