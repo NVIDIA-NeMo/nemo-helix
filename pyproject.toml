@@ -250,6 +250,12 @@ functional-services = [
 cpu-tasks = [
   { include-group = "nmp-base" },
   { include-group = "nmp-task-runtime" },
+  # agents.execute task module plus the bundled Fabric adapters (claude, codex,
+  # deepagents, hermes). Without this the job's declared `container = "cpu-tasks"`
+  # is not true: nemo_agents_plugin.tasks.execute is not importable here.
+  "nemo-agents-plugin",
+  # insights.analyze bridge, which is a ModuleNotFoundError in a built image otherwise.
+  "nemo-insights-plugin",
   "nemo-evaluator-plugin",
   "sandboxed-gym[server,opensandbox]",
   "nemo-anonymizer-plugin",
