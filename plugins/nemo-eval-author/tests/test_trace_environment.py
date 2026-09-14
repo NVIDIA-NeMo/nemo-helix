@@ -131,6 +131,159 @@ def _candidate(
     _write_json(task_dir / "candidate.json", payload)
 
 
+@pytest.mark.parametrize("status", ["candidate", "no_candidate"])
+def test_check_candidate_is_read_only_before_construction(tmp_path: Path, status: str) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir, status=status)
+    before = {
+        path.relative_to(task_dir): (path.read_bytes(), path.stat().st_mode)
+        for path in task_dir.rglob("*")
+        if path.is_file()
+    }
+
+    code, result = _run("check-candidate", "--task-dir", str(task_dir))
+
+    assert code == 0, result
+    assert result["scope"] == "candidate_metadata"
+    assert result["execution_verified"] is False
+    assert result["status"] == status
+    assert not (task_dir / "task/task.toml").exists()
+    assert json.loads((task_dir / "summary.json").read_text())["status"] == "pending"
+    assert before == {
+        path.relative_to(task_dir): (path.read_bytes(), path.stat().st_mode)
+        for path in task_dir.rglob("*")
+        if path.is_file()
+    }
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("category", "runtime"),
+        ("license", "Apache-2.0"),
+        ("availability", "not_installed"),
+        ("category", []),
+        ("license", {}),
+        ("availability", []),
+    ],
+)
+def test_check_candidate_rejects_unknown_software_enum_without_repair(tmp_path: Path, field: str, value: Any) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    software = _software(required=False, availability="unknown")
+    software[field] = value
+    _candidate(task_dir, software_requirements=[software])
+    before = (task_dir / "candidate.json").read_bytes()
+
+    code, result = _run("check-candidate", "--task-dir", str(task_dir))
+
+    assert code == 1
+    assert f"software_requirements[0].{field} is not recognized" in result["error"]
+    assert (task_dir / "candidate.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("field,value", [("availability", []), ("use", {})])
+def test_check_candidate_rejects_invalid_ground_truth_enum(tmp_path: Path, field: str, value: Any) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    path = task_dir / "candidate.json"
+    candidate = json.loads(path.read_text())
+    candidate["ground_truth"][field] = value
+    _write_json(path, candidate)
+    code, result = _run("check-candidate", "--task-dir", str(task_dir))
+    assert code == 1
+    assert f"ground_truth.{field} is not recognized" in result["error"]
+
+
+def test_check_candidate_rejects_unknown_evidence_step(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    path = task_dir / "candidate.json"
+    candidate = json.loads(path.read_text())
+    candidate["evidence_steps"] = [999]
+    _write_json(path, candidate)
+
+    code, result = _run("check-candidate", "--task-dir", str(task_dir))
+
+    assert code == 1
+    assert "evidence_steps" in result["error"]
+
+
+def test_check_candidate_rejects_changed_safe_trace(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    path = task_dir / "safe/trace.atif.json"
+    safe = json.loads(path.read_text())
+    safe["steps"][0]["message"] = "Changed evidence"
+    _write_json(path, safe)
+
+    code, result = _run("check-candidate", "--task-dir", str(task_dir))
+
+    assert code == 1
+    assert "safe ATIF digest or size changed" in result["error"]
+
+
+@pytest.mark.parametrize("status", ["pending", [], None])
+def test_check_candidate_rejects_invalid_status(tmp_path: Path, status: Any) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    path = task_dir / "candidate.json"
+    candidate = json.loads(path.read_text())
+    candidate["status"] = status
+    _write_json(path, candidate)
+    code, result = _run("check-candidate", "--task-dir", str(task_dir))
+    assert code == 1
+    assert "candidate.status" in result["error"]
+
+
+def test_check_candidate_requires_prepared_evidence(tmp_path: Path) -> None:
+    root = tmp_path / ".eval-author" / "trace-environments"
+    code, result = _run("init", "--root", str(root), "--task-id", "repair-fixture")
+    assert code == 0, result
+    task_dir = Path(result["task_dir"])
+    _candidate(task_dir)
+    code, result = _run("check-candidate", "--task-dir", str(task_dir))
+    assert code == 1
+    assert "prepare ATIF evidence" in result["error"]
+
+
+def test_check_candidate_rejects_summary_fields_without_moving_them(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir, status="no_candidate")
+    path = task_dir / "candidate.json"
+    candidate = json.loads(path.read_text())
+    candidate["did_not_work"] = ["Construction note for the summary."]
+    _write_json(path, candidate)
+    before = path.read_bytes()
+    summary_before = (task_dir / "summary.json").read_bytes()
+    code, result = _run("check-candidate", "--task-dir", str(task_dir))
+    assert code == 1
+    assert "candidate fields do not match" in result["error"]
+    assert path.read_bytes() == before
+    assert (task_dir / "summary.json").read_bytes() == summary_before
+
+
+def test_check_candidate_rejects_oversized_safe_trace_before_loading(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    path = task_dir / "safe/trace.atif.json"
+    with path.open("wb") as stream:
+        stream.truncate(25 * 1024 * 1024 + 1)
+    code, result = _run("check-candidate", "--task-dir", str(task_dir))
+    assert code == 1
+    assert "safe ATIF exceeds" in result["error"]
+
+
+def test_check_candidate_rejects_symlinked_safe_trace(tmp_path: Path) -> None:
+    task_dir, source = _workspace(tmp_path)
+    _candidate(task_dir)
+    path = task_dir / "safe/trace.atif.json"
+    path.unlink()
+    path.symlink_to(source)
+    code, result = _run("check-candidate", "--task-dir", str(task_dir))
+    assert code == 1
+    assert "safe ATIF must be a retained regular file" in result["error"]
+
+
 def _review_privacy(task_dir: Path, *, reviewer_kind: str = "agent") -> None:
     code, result = _run(
         "review-privacy",
@@ -317,6 +470,26 @@ def test_init_creates_private_gitignored_workspace(tmp_path: Path) -> None:
         assert root.stat().st_mode & 0o777 == 0o700
         assert task_dir.stat().st_mode & 0o777 == 0o700
         assert (task_dir / "summary.json").stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("symlink", [False, True])
+def test_init_preserves_unexpected_gitignore(tmp_path: Path, symlink: bool) -> None:
+    root = tmp_path / ".eval-author" / "trace-environments"
+    root.mkdir(parents=True)
+    ignore = root / ".gitignore"
+    original = "*\n!.gitignore\n" if symlink else "existing-user-rule\n"
+    target = tmp_path / "existing-ignore" if symlink else ignore
+    target.write_text(original, encoding="utf-8")
+    if symlink:
+        ignore.symlink_to(target)
+
+    code, result = _run("init", "--root", str(root), "--task-id", "repair-fixture")
+
+    assert code == 1
+    assert "workspace .gitignore" in result["error"]
+    assert target.read_text(encoding="utf-8") == original
+    assert ignore.is_symlink() is symlink
+    assert not (root / "repair-fixture").exists()
 
 
 def test_init_refuses_to_write_outside_eval_author(tmp_path: Path) -> None:

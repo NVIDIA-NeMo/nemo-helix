@@ -249,7 +249,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
             <DeploymentIndicator
               workspace={workspace}
               providerIds={row.original.model_providers}
-              baseModel={row.original.base_model ?? ''}
+              modelName={row.original.name ?? ''}
             />
           )}
         </span>

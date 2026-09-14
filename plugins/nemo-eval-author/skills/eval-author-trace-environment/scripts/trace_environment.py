@@ -336,13 +336,13 @@ def _init(args: argparse.Namespace) -> dict[str, Any]:
     if ".eval-author" not in root.parts:
         raise ContractError("task workspace root must stay under a .eval-author directory")
     _mkdir_private(root)
-    ignore = root / ".gitignore"
-    ignore_text = "*\n!.gitignore\n"
-    if ignore.exists():
-        if ignore.is_symlink() or ignore.read_text(encoding="utf-8") != ignore_text:
-            raise ContractError(f"refusing to replace unexpected ignore rules at {ignore}")
+    gitignore_path = root / ".gitignore"
+    expected_gitignore = "*\n!.gitignore\n"
+    if gitignore_path.exists():
+        if gitignore_path.is_symlink() or gitignore_path.read_text(encoding="utf-8") != expected_gitignore:
+            raise ContractError(f"workspace .gitignore must contain only the required exclusions: {gitignore_path}")
     else:
-        _write_text(ignore, ignore_text)
+        _write_text(gitignore_path, expected_gitignore)
 
     task_dir = root / args.task_id
     if task_dir.exists():
@@ -967,14 +967,14 @@ def _validate_ground_truth(task_dir: Path, value: Any, step_ids: set[int]) -> di
     if not isinstance(value, dict) or set(value) != _GROUND_TRUTH_KEYS:
         raise ContractError("candidate.ground_truth fields do not match the versioned contract")
     availability = value.get("availability")
-    if availability not in {"available", "partial", "absent", "unknown"}:
+    if not isinstance(availability, str) or availability not in {"available", "partial", "absent", "unknown"}:
         raise ContractError("candidate.ground_truth.availability is not recognized")
     artifacts = value.get("artifacts")
     if not isinstance(artifacts, list):
         raise ContractError("candidate.ground_truth.artifacts must be a list")
     absence_reason = value.get("absence_reason")
     use = value.get("use")
-    if use not in {"none", "comparison_only", "verification"}:
+    if not isinstance(use, str) or use not in {"none", "comparison_only", "verification"}:
         raise ContractError("candidate.ground_truth.use is not recognized")
     if absence_reason is not None and (not isinstance(absence_reason, str) or not absence_reason.strip()):
         raise ContractError("candidate.ground_truth.absence_reason must be null or nonempty text")
@@ -1004,7 +1004,7 @@ def _validate_ground_truth(task_dir: Path, value: Any, step_ids: set[int]) -> di
         label = f"candidate.ground_truth.artifacts[{index}]"
         if not isinstance(artifact, dict) or set(artifact) != _GROUND_TRUTH_ARTIFACT_KEYS:
             raise ContractError(f"{label} fields do not match the versioned contract")
-        if artifact.get("kind") not in allowed_kinds:
+        if not isinstance(artifact.get("kind"), str) or artifact["kind"] not in allowed_kinds:
             raise ContractError(f"{label}.kind is not recognized")
         relative_path = artifact.get("path")
         if not isinstance(relative_path, str) or not relative_path.startswith("private/ground-truth/"):
@@ -1044,16 +1044,19 @@ def _validate_software_requirements(value: Any, step_ids: set[int]) -> list[dict
         if not isinstance(name, str) or not name.strip() or name.casefold() in names:
             raise ContractError(f"{label}.name must be nonempty and unique")
         names.add(name.casefold())
-        if requirement.get("category") not in allowed_categories:
+        if not isinstance(requirement.get("category"), str) or requirement["category"] not in allowed_categories:
             raise ContractError(f"{label}.category is not recognized")
         if type(requirement.get("required")) is not bool:
             raise ContractError(f"{label}.required must be a boolean")
         version = requirement.get("version")
         if version is not None and (not isinstance(version, str) or not version.strip()):
             raise ContractError(f"{label}.version must be null or nonempty text")
-        if requirement.get("license") not in allowed_licenses:
+        if not isinstance(requirement.get("license"), str) or requirement["license"] not in allowed_licenses:
             raise ContractError(f"{label}.license is not recognized")
-        if requirement.get("availability") not in allowed_availability:
+        if (
+            not isinstance(requirement.get("availability"), str)
+            or requirement["availability"] not in allowed_availability
+        ):
             raise ContractError(f"{label}.availability is not recognized")
         redistributable = requirement.get("redistributable")
         if redistributable is not None and type(redistributable) is not bool:
@@ -1101,6 +1104,36 @@ def _validate_candidate(task_dir: Path, status: str, step_ids: set[int]) -> dict
         if candidate.get("requirements") != []:
             raise ContractError("no_candidate records must set requirements to an empty list")
     return candidate
+
+
+def _check_candidate(args: argparse.Namespace) -> dict[str, Any]:
+    """Check authored metadata against its prepared evidence without changing it."""
+    task_dir = _ensure_task_dir(args.task_dir)
+    summary = _load_summary(task_dir)
+    source = summary["source"]
+    if source is None:
+        raise ContractError("prepare ATIF evidence before checking candidate metadata")
+    safe_path = task_dir / source["safe_path"]
+    if safe_path.is_symlink() or not safe_path.is_file():
+        raise ContractError("safe ATIF must be a retained regular file")
+    if safe_path.stat().st_size > MAX_CANONICAL_BYTES:
+        raise ContractError(f"safe ATIF exceeds the {MAX_CANONICAL_BYTES}-byte limit")
+    safe_bytes = safe_path.read_bytes()
+    if _sha256(safe_bytes) != source["safe_sha256"] or len(safe_bytes) != source["safe_size_bytes"]:
+        raise ContractError("safe ATIF digest or size changed")
+    safe_payload = _load_object(safe_path, label="safe ATIF")
+    _validate_trajectory(safe_payload)
+    status = _load_object(task_dir / "candidate.json", label="candidate").get("status")
+    if status not in ("candidate", "no_candidate"):
+        raise ContractError("candidate.status must be candidate or no_candidate")
+    _validate_candidate(task_dir, status, {step["step_id"] for step in safe_payload["steps"]})
+    return {
+        "task_dir": str(task_dir),
+        "valid": True,
+        "scope": "candidate_metadata",
+        "status": status,
+        "execution_verified": False,
+    }
 
 
 def _task_tree_info(root: Path) -> dict[str, Any]:
@@ -2107,7 +2140,9 @@ def _check(args: argparse.Namespace) -> dict[str, Any]:
                     or not privacy["contextual_review_complete"]
                     or privacy["blocking_reasons"]
                 ):
-                    errors.append("finalized candidate lacks a clear contextual privacy review")
+                    errors.append(
+                        "finalized candidate lacks a completed contextual privacy review with no blocking findings"
+                    )
                 task_contract = _validate_task(task_dir)
                 _validate_reproducibility(task_dir)
                 if environment.get("verifier_environment_mode") != task_contract["verifier_environment_mode"]:
@@ -2499,6 +2534,13 @@ def _parser() -> argparse.ArgumentParser:
     review.add_argument("--reviewer-kind", choices=("agent", "human"), required=True)
     review.add_argument("--note", required=True)
     review.set_defaults(run=_review_privacy)
+
+    candidate_check = subparsers.add_parser(
+        "check-candidate",
+        help="read-only metadata and evidence-reference check; does not prove execution or privacy review",
+    )
+    candidate_check.add_argument("--task-dir", required=True, type=Path)
+    candidate_check.set_defaults(run=_check_candidate)
 
     reproducibility = subparsers.add_parser(
         "record-reproducibility", help="hash the task tree and record portability and contamination evidence"

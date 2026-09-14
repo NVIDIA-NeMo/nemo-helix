@@ -32,7 +32,6 @@ jobs:
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SLACK_ALERTS_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
-          SLACK_ALERT_USERGROUP_ID: ${{ secrets.SLACK_ALERT_USERGROUP_ID }}
           FORWARD_MERGE_RECOVERY_DOCS_URL: ${{ secrets.FORWARD_MERGE_RECOVERY_DOCS_URL }}
         with:
           script: |

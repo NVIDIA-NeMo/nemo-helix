@@ -14,7 +14,6 @@ const {
   resolveSource,
   selectSourcePullRequest,
   sendForwardMergeAlert,
-  slackUserGroupMention,
 } = require("../forward-merge-alert.cjs");
 
 function git(workspace, ...args) {
@@ -170,26 +169,6 @@ test("shows only ten conflict files and links the remainder", () => {
   assert.match(message, /\+2 more/);
 });
 
-test("tags the configured Slack user group", () => {
-  const message = buildSlackMessage(
-    messageFixture({ userGroupId: "S0123456789" }),
-  );
-
-  assert.match(
-    message,
-    /^<!subteam\^S0123456789> :warning: \*Forward merge needs attention\*/,
-  );
-});
-
-test("omits a missing or invalid Slack user group", () => {
-  assert.equal(slackUserGroupMention(), "");
-  assert.equal(slackUserGroupMention("not-a-slack-group"), "");
-  assert.match(
-    buildSlackMessage(messageFixture()),
-    /^:warning: \*Forward merge needs attention\*/,
-  );
-});
-
 test("includes the configured recovery guide for every failure kind", () => {
   for (const kind of ["conflicts", "clean", "unavailable"]) {
     const message = buildSlackMessage(
@@ -289,8 +268,9 @@ test("falls back to the basic alert when PR metadata fails", async () => {
   assert.equal(requests[0].options.redirect, "error");
   assert.match(
     JSON.parse(requests[0].options.body).text,
-    /^<!subteam\^S0123456789>/,
+    /^:warning: \*Forward merge needs attention\*/,
   );
+  assert.doesNotMatch(result.text, /<!subteam\^/);
   assert.match(result.text, /Source: unavailable/);
   assert.ok(
     JSON.parse(requests[0].options.body).text.includes(

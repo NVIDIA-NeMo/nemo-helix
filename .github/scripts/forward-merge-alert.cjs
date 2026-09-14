@@ -14,14 +14,6 @@ function escapeSlackText(value) {
     .replaceAll("\n", "\\n");
 }
 
-function slackUserGroupMention(value) {
-  const userGroupId = String(value || "").trim();
-  if (!/^S[A-Z0-9]{8,}$/.test(userGroupId)) {
-    return "";
-  }
-  return `<!subteam^${userGroupId}>`;
-}
-
 function selectSourcePullRequest({
   pulls,
   forwardPullNumber,
@@ -175,12 +167,10 @@ function buildSlackMessage({
   source,
   conflicts,
   runUrl,
-  userGroupId,
   recoveryDocsUrl,
 }) {
-  const mention = slackUserGroupMention(userGroupId);
   const lines = [
-    `${mention ? `${mention} ` : ""}:warning: *Forward merge needs attention*`,
+    ":warning: *Forward merge needs attention*",
     `Repository: ${escapeSlackText(repository)}`,
     `PR: <${pullUrl}|${escapeSlackText(pullTitle)}>`,
     sourceLine(source),
@@ -314,7 +304,6 @@ async function sendForwardMergeAlert({
     source,
     conflicts,
     runUrl: env.RUN_URL,
-    userGroupId: env.SLACK_ALERT_USERGROUP_ID,
     recoveryDocsUrl: env.FORWARD_MERGE_RECOVERY_DOCS_URL,
   });
   await postSlack({
@@ -336,5 +325,4 @@ module.exports = {
   resolveSource,
   selectSourcePullRequest,
   sendForwardMergeAlert,
-  slackUserGroupMention,
 };

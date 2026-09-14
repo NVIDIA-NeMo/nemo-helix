@@ -119,7 +119,9 @@ The SDK ships three runners you'll usually reach for first:
   [Quickstart](/documentation/evaluate-models/agent-eval/quickstart). Return a `TrialDraft` to attach
   a trajectory or other evidence (see [Score by Component](/documentation/evaluate-models/agent-eval/score-by-component)).
 - **`HarborAgentTaskRunner`** runs a [Harbor](https://www.harborframework.com) task suite in Docker and
-  scores its verifier reward. See [Harbor Task Suite](/documentation/evaluate-models/agent-eval/harbor-runner).
+  scores its verifier reward. Point `agent_import_path` at your own Harbor agent and pass its
+  constructor arguments as `agent_kwargs` (Harbor's `--ak`). See
+  [Harbor Task Suite](/documentation/evaluate-models/agent-eval/harbor-runner).
 - **`GymAgentTaskRunner`** runs a [NeMo Gym](https://github.com/NVIDIA-NeMo/Gym) environment and agent,
   and scores each rollout's reward. See [NeMo Gym Environment](/documentation/evaluate-models/agent-eval/gym-runner).
 
