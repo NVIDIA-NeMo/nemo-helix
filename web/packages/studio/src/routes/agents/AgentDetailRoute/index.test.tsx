@@ -63,6 +63,17 @@ describe('AgentDetailRoute', () => {
     expect(await screen.findByText('intake-traces-page')).toBeInTheDocument();
   });
 
+  it('narrows the header to a single primary action off the overview tab', async () => {
+    const user = userEvent.setup();
+    renderDetail();
+
+    await user.click(await screen.findByRole('tab', { name: 'Details' }));
+
+    expect(await screen.findByRole('button', { name: 'Deploy' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run evaluation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open traces' })).not.toBeInTheDocument();
+  });
+
   it('switches to the chat tab', async () => {
     const user = userEvent.setup();
     renderDetail();

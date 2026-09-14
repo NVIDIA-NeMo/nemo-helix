@@ -46,6 +46,7 @@ from nemo_agents_plugin.entities import (
 from nemo_agents_plugin.fabric.gateway_credentials import platform_gateway_credential_env
 from nemo_agents_plugin.runner.backend import DeploymentInfo, LocalLog, LogLocation, NotYetAvailable, RunnerBackend
 from nemo_agents_plugin.runner.fabric_artifact_staging import stage_fabric_ethos_dir
+from nemo_agents_plugin.spec_revision import SpecRevision, stage_with_spec_revision
 from nemo_platform_plugin.auth import AuthContext
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.files.client import AsyncFilesClient
@@ -293,7 +294,7 @@ class InMemoryRunnerBackend(RunnerBackend):
         base_dir = self._fabric_base_dir_for(workspace, name)
         await asyncio.to_thread(base_dir.mkdir, parents=True, exist_ok=True)
         try:
-            await self._stage_ethos(workspace, agent, config, base_dir)
+            staged_spec = await self._stage_ethos(workspace, agent, config, base_dir)
             config_path = await asyncio.to_thread(self._write_fabric_config, base_dir, config)
             await validate_platform_agent_config(config, base_dir=base_dir)
             log_path = self.log_path_for(workspace, name)
@@ -318,6 +319,7 @@ class InMemoryRunnerBackend(RunnerBackend):
             endpoint=f"http://127.0.0.1:{port}",
             log_path=str(log_path),
             extra={"base_dir": str(base_dir)},
+            staged_spec=staged_spec,
         )
         self._processes[key] = proc
         self._deployments[key] = info
@@ -432,16 +434,31 @@ class InMemoryRunnerBackend(RunnerBackend):
         agent: str,
         config: dict[str, Any],
         base_dir: Path,
-    ) -> None:
-        """Deliver the agent's Ethos fileset into *base_dir*."""
+    ) -> SpecRevision | None:
+        """Deliver the agent's Ethos fileset into *base_dir* and report what it staged."""
         sdk = get_async_platform_sdk(as_service="agents", internal=True) if agent else None
-        await stage_fabric_ethos_dir(
+        files_client = client_from_platform(sdk, AsyncFilesClient) if sdk else None
+
+        async def _stage() -> None:
+            await stage_fabric_ethos_dir(
+                workspace=workspace,
+                agent_name=agent,
+                agent_config=config,
+                base_dir=base_dir,
+                files_client=files_client,
+            )
+
+        if files_client is None:
+            await _stage()
+            return None
+
+        _, spec = await stage_with_spec_revision(
+            files_client,
             workspace=workspace,
             agent_name=agent,
-            agent_config=config,
-            base_dir=base_dir,
-            files_client=client_from_platform(sdk, AsyncFilesClient) if sdk else None,
+            stage=_stage,
         )
+        return spec
 
     def _spawn(
         self,

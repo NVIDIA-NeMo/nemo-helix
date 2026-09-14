@@ -84,7 +84,12 @@ class PlatformMetricModelResolver(ModelResolver):
             resolved = await self.models_client.resolve_model_reference(model_ref.root)
         except NotFoundError as exc:
             raise _model_not_found_error(model_ref, workspace, name) from exc
-        return Model(url=resolved.url, name=resolved.name, host_url=resolved.host_url)
+        return Model(
+            url=resolved.url,
+            name=resolved.name,
+            host_url=resolved.host_url,
+            served_model_name=resolved.served_model_name,
+        )
 
 
 async def resolve_metrics_to_inline(

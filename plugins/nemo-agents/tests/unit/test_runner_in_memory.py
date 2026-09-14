@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
@@ -35,6 +35,21 @@ from nemo_agents_plugin.runner.backend import DeploymentInfo
 from nemo_agents_plugin.runner.fabric_artifact_staging import FabricArtifactStagingError
 from nemo_agents_plugin.runner.in_memory import InMemoryRunnerBackend, _resolve_nat_bin
 from nemo_platform_plugin.config import Configuration, nmp_user_data_dir
+from nemo_platform_plugin.files.storage_config import GithubStorageConfig
+
+STAGED_SHA = "1" * 40
+
+
+def _files_client_at(revision: str) -> AsyncMock:
+    """A files client whose Ethos fileset reports *revision*."""
+    fileset = SimpleNamespace(
+        data=lambda: SimpleNamespace(
+            storage=GithubStorageConfig(owner="acme", repo="agents", revision=revision, original_revision="main")
+        )
+    )
+    client = AsyncMock()
+    client.get_fileset = AsyncMock(return_value=fileset)
+    return client
 
 
 def _backend(workspace_dir: Path) -> InMemoryRunnerBackend:
@@ -575,13 +590,15 @@ async def test_create_deployment_stages_ethos_fileset_into_base_dir(tmp_path: Pa
         patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", _validate_platform_agent_config),
         patch("nemo_agents_plugin.runner.in_memory.stage_fabric_ethos_dir", _stage_fabric_ethos_dir),
         patch("nemo_agents_plugin.runner.in_memory.get_async_platform_sdk", MagicMock()),
-        patch("nemo_agents_plugin.runner.in_memory.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.runner.in_memory.client_from_platform", return_value=_files_client_at(STAGED_SHA)),
         patch.object(InMemoryRunnerBackend, "_spawn_fabric", _spawn_fabric),
     ):
         info = await backend.create_deployment("ws", "fabric-dep", config, port=49212, agent="fabric-agent")
 
     base_dir = Path(info.extra["base_dir"])
     assert staged == [{"workspace": "ws", "agent_name": "fabric-agent", "base_dir": base_dir}]
+    assert info.staged_spec is not None
+    assert (info.staged_spec.revision, info.staged_spec.tracked_revision) == (STAGED_SHA, "main")
     assert (base_dir / "mcps" / "calculator.py").exists()
     assert yaml.safe_load((base_dir / "agent.yaml").read_text()) == config
 
