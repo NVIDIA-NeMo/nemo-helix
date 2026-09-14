@@ -277,12 +277,18 @@ needs installed.
 ## Example 2 — MCP (phishing analyzer)
 
 Same optimize flow, but the agent calls an **MCP email-phishing analyzer** on
-each dataset row. The analyzer is a deterministic, rule-based server that ships
-in this bundle ([`phishing_analyzer_mcp/server.py`](phishing_analyzer_mcp/server.py))
-and is installed into the platform `.venv` as the `phishing-analyzer-mcp`
-console script, so the example needs no other checkout and no analyzer
-credential. The study tunes the Hermes coordinator that calls the tool, which is
-what a fixed LLM analyzer would have measured too.
+each dataset row. The analyzer is a mock that ships in this bundle
+([`phishing_analyzer_mcp/server.py`](phishing_analyzer_mcp/server.py)) and is
+installed into the platform `.venv` as the `phishing-analyzer-mcp` console
+script, so the example needs no other checkout and no analyzer credential. It
+replays the `analysis` stored on each row of `dataset-mcp.json`, keyed on the
+email text: an agent that passes the email verbatim gets the canned verdict, one
+that edits it gets `unknown`. The study tunes the Hermes coordinator that calls
+the tool, which is what a fixed LLM analyzer would have measured too.
+
+To add an email to the eval set, run a real analyzer on it once and store its
+result as the row's `analysis` (the fixture reads `PHISHING_ANALYZER_DATASET` if
+you keep the dataset elsewhere).
 
 Two evaluators score each trial: the judge compares the final classification with
 the dataset label (`average_score`), and `tool_call_count` reads the ATIF
@@ -298,7 +304,7 @@ command -v phishing-analyzer-mcp   # installed by `make bootstrap-python` / `uv 
 If it is missing, sync the workspace again from the repo root: the bundle's
 `pyproject.toml` is a workspace member.
 
-The dataset is 5 emails (3 phishing, 2 benign).
+The dataset is 5 emails (3 phishing, 2 benign), each with its canned `analysis`.
 
 ### Run
 

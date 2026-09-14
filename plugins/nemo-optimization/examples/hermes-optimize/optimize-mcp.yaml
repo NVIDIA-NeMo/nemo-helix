@@ -1,12 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# --optimize-config: Hermes + a deterministic phishing-analyzer MCP server.
+# --optimize-config: Hermes + a mock phishing-analyzer MCP server.
 # Broader search space than chat-only — temperature + top_p, several trials.
 # The analyzer is the `phishing-analyzer-mcp` console script from this bundle's
-# pyproject (installed with the platform workspace); the study tunes the Hermes
-# coordinator that calls it, and scores both the classification and that the
-# tool was called exactly once.
+# pyproject (installed with the platform workspace). It replays the `analysis`
+# stored on each dataset-mcp.json row, so the study tunes the Hermes coordinator
+# that calls it and scores both the classification and that the tool was called
+# exactly once. To add a task, run a real analyzer once and store its result.
 schema_version: fabric.agent/v1alpha1
 metadata:
   name: hermes-optimize-mcp

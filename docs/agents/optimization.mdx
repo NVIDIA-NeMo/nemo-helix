@@ -377,9 +377,11 @@ print(result)
 
 ### MCP Hermes (phishing analyzer)
 
-The agent calls a deterministic phishing-analyzer MCP server that ships in the
-example bundle and is installed into the platform venv as `phishing-analyzer-mcp`
-(`command -v phishing-analyzer-mcp` to confirm). Trials are scored on the judged
+The agent calls a mock phishing-analyzer MCP server that ships in the example
+bundle and is installed into the platform venv as `phishing-analyzer-mcp`
+(`command -v phishing-analyzer-mcp` to confirm). It replays the `analysis` stored
+on each `dataset-mcp.json` row, so new tasks only need a real analyzer's result
+recorded once. Trials are scored on the judged
 classification and on the analyzer being called exactly once, read from the ATIF
 trajectory. Full steps are in `plugins/nemo-optimization/examples/hermes-optimize/README.md`.
 

@@ -25,15 +25,25 @@ _DATASET = json.loads((_EXAMPLE / "dataset-mcp.json").read_text(encoding="utf-8"
 
 
 def _email(row: dict[str, str]) -> str:
-    return f"Subject: {row['subject']}\n\n{row['body']}"
+    """The instruction the optimizer builds from a row (``_row_instruction``): ``subject\\n\\nbody``."""
+    return f"{row['subject']}\n\n{row['body']}"
 
 
-def test_the_bundled_analyzer_labels_every_dataset_row_as_the_dataset_does() -> None:
-    """The judge scores the coordinator against these labels, so the tool must agree with them."""
-    from phishing_analyzer_mcp.server import analyze
+def test_the_mock_analyzer_replays_each_row_s_canned_analysis() -> None:
+    """The judge scores the coordinator against the row label, so the replayed analysis must agree with it."""
+    from phishing_analyzer_mcp.server import analyze, load_responses
 
+    responses = load_responses(_EXAMPLE / "dataset-mcp.json")
     for row in _DATASET:
-        assert analyze(_email(row))["label"] == row["label"], row["id"]
+        verbatim = analyze(_email(row), responses)
+        assert verbatim["label"] == row["label"] == row["analysis"]["label"], row["id"]
+        assert verbatim["matched"] == "exact"
+        # Framing around the email is tolerated as long as the body is intact...
+        framed = analyze(f"Please analyze this:\n{row['body']}\nThanks", responses)
+        assert (framed["label"], framed["matched"]) == (row["label"], "body")
+    # ...but an edited body is not analyzed: the fixture is the input-binding check.
+    edited = analyze(_DATASET[0]["body"].replace("iPhone", "laptop"), responses)
+    assert (edited["label"], edited["matched"]) == ("unknown", "none")
 
 
 async def test_the_analyzer_serves_its_tool_over_mcp_stdio() -> None:
