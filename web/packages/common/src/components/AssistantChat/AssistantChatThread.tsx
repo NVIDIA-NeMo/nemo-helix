@@ -113,6 +113,7 @@ export const AssistantChatThread = ({
                 className="h-full min-h-[250px] w-full"
                 slotHeading={emptyState?.slotHeading}
                 slotSubheading={emptyState?.slotSubheading}
+                slotAction={emptyState?.slotAction}
               />
             </ThreadPrimitive.Empty>
             <ThreadPrimitive.Messages components={messageComponents} />
