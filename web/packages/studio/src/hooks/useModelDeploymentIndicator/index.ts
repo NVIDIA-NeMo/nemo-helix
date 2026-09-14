@@ -16,14 +16,27 @@ export type DeploymentIndicatorState =
   | { kind: 'loading' }
   /**
    * A provider lists this exact id in its `served_models`, so inference would
-   * route. `status` is absent when the serving provider has no backing
-   * deployment (an external provider such as `default/build`).
+   * route. `hasDeployment` says whether the serving provider names a backing
+   * deployment: false means an external provider (such as `default/build`) that
+   * is reachable but has no deployment to report on, whereas true with no
+   * `status` means a deployment exists but could not be read.
    */
-  | { kind: 'served'; status?: ModelDeploymentStatus; statusMessage?: string; providerRef?: string }
+  | {
+      kind: 'served';
+      hasDeployment: boolean;
+      status?: ModelDeploymentStatus;
+      statusMessage?: string;
+      providerRef?: string;
+    }
   /** Adapter only: the base model is served, but this adapter is not loaded. */
   | { kind: 'adapter-not-loaded' }
   /** Nothing serves this id, and (for an adapter) nothing serves its base either. */
-  | { kind: 'not-deployed' };
+  | { kind: 'not-deployed' }
+  /**
+   * A provider could not be fetched, so whether this is served is genuinely
+   * unknown. Distinct from `not-deployed`, which asserts nothing serves it.
+   */
+  | { kind: 'unknown' };
 
 /**
  * Resolve whether a model entity — or a specific adapter of it — is actually being
@@ -50,16 +63,18 @@ export function useModelDeploymentIndicator(
     provider,
     providerRef,
     isLoading: isTargetLoading,
+    isError: isTargetError,
   } = useServedModel(model, targetId);
 
   // Only needed to tell "base is up but this adapter isn't loaded" from "nothing is
   // deployed". Passing '' disables the lookup; for a top-level row targetId === baseId
   // so it never runs at all.
   const needsBaseProbe = Boolean(adapter) && !isTargetLoading && !servedModel;
-  const { servedModel: baseServedModel, isLoading: isBaseLoading } = useServedModel(
-    model,
-    needsBaseProbe ? baseId : ''
-  );
+  const {
+    servedModel: baseServedModel,
+    isLoading: isBaseLoading,
+    isError: isBaseError,
+  } = useServedModel(model, needsBaseProbe ? baseId : '');
 
   const deploymentParts = provider?.model_deployment_id
     ? getPartsFromReference(provider.model_deployment_id)
@@ -77,6 +92,10 @@ export function useModelDeploymentIndicator(
     if (deploymentParts && isDeploymentLoading) return { kind: 'loading' };
     return {
       kind: 'served',
+      // Whether a deployment is *expected*, which is not the same as having read
+      // one. Callers need the difference to avoid reporting a provider whose
+      // deployment request failed as though it had no deployment at all.
+      hasDeployment: Boolean(deploymentParts),
       status: deployment?.status,
       statusMessage: deployment?.status_message,
       providerRef,
@@ -86,7 +105,11 @@ export function useModelDeploymentIndicator(
   if (needsBaseProbe) {
     if (isBaseLoading) return { kind: 'loading' };
     if (baseServedModel) return { kind: 'adapter-not-loaded' };
+    if (isBaseError) return { kind: 'unknown' };
   }
+
+  // Only assert "nothing serves this" when every provider was actually read.
+  if (isTargetError) return { kind: 'unknown' };
 
   return { kind: 'not-deployed' };
 }

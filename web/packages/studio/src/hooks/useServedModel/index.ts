@@ -30,6 +30,14 @@ export interface UseServedModelResult {
    */
   provider?: ModelProvider;
   isLoading: boolean;
+  /**
+   * A provider referenced by `model.model_providers` could not be fetched. Only set
+   * when no provider matched, where it is the difference between "nothing serves
+   * this" and "we could not find out". Provider queries do not retry, so a single
+   * 5xx, an authorization failure, or a stale provider reference lands here — and
+   * reporting that as "not served" would be confidently wrong.
+   */
+  isError?: boolean;
 }
 
 /**
@@ -80,6 +88,6 @@ export function useServedModel(
       }
     }
 
-    return { isLoading };
+    return { isLoading, isError: queries.some((q) => q.isError) };
   }, [enabled, queries, modelEntityId, providerRefs]);
 }

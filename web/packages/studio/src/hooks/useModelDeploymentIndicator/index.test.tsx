@@ -45,9 +45,11 @@ const model = {
 
 const adapter = { name: 'my-adapter', workspace: 'other-ws' } as Adapter;
 
+// `modelDeploymentId: null` means a provider that names no deployment (an external
+// provider). It must not be `undefined`, which would re-apply the default below.
 const buildProvider = (
   servedEntityIds: string[],
-  modelDeploymentId: string | undefined = 'ws/dep-a'
+  modelDeploymentId: string | null = 'ws/dep-a'
 ): ModelProvider =>
   ({
     name: 'provider-a',
@@ -55,7 +57,7 @@ const buildProvider = (
     host_url: 'https://example.com',
     created_at: '2025-01-01T00:00:00Z',
     updated_at: '2025-01-01T00:00:00Z',
-    model_deployment_id: modelDeploymentId,
+    model_deployment_id: modelDeploymentId ?? undefined,
     served_models: servedEntityIds.map((id) => ({
       model_entity_id: id,
       served_model_name: id.replace(/\//g, '-'),
@@ -139,11 +141,43 @@ describe('useModelDeploymentIndicator', () => {
   });
 
   it('treats a provider without a deployment as served with no status', async () => {
-    mockedGetProvider.mockResolvedValue(buildProvider([BASE_ID], undefined));
+    mockedGetProvider.mockResolvedValue(buildProvider([BASE_ID], null));
     mockDeployment(undefined);
     const { result } = renderIndicator();
     await waitFor(() => expect(result.current.kind).toBe('served'));
     expect(result.current).toMatchObject({ status: undefined, providerRef: 'ws/provider-a' });
+  });
+
+  it('reports unknown, not not-deployed, when the provider fetch fails', async () => {
+    // Provider queries do not retry, so one 5xx or auth failure means we never
+    // learned what is served. Reporting "not deployed" there is confidently wrong.
+    mockedGetProvider.mockRejectedValue(new Error('boom'));
+    const { result } = renderIndicator();
+    await waitFor(() => expect(result.current.kind).not.toBe('loading'));
+    expect(result.current.kind).toBe('unknown');
+  });
+
+  it('reports unknown for an adapter when the base probe fails', async () => {
+    mockedGetProvider.mockRejectedValue(new Error('boom'));
+    const { result } = renderIndicator(adapter);
+    await waitFor(() => expect(result.current.kind).not.toBe('loading'));
+    expect(result.current.kind).toBe('unknown');
+  });
+
+  it('marks hasDeployment false only when the provider names no deployment', async () => {
+    mockedGetProvider.mockResolvedValue(buildProvider([BASE_ID], null));
+    mockDeployment(undefined);
+    const { result } = renderIndicator();
+    await waitFor(() => expect(result.current.kind).toBe('served'));
+    expect(result.current).toMatchObject({ hasDeployment: false });
+  });
+
+  it('keeps hasDeployment true when the deployment exists but its status is unreadable', async () => {
+    mockedGetProvider.mockResolvedValue(buildProvider([BASE_ID]));
+    mockDeployment(undefined);
+    const { result } = renderIndicator();
+    await waitFor(() => expect(result.current.kind).toBe('served'));
+    expect(result.current).toMatchObject({ hasDeployment: true, status: undefined });
   });
 
   it('reports not-deployed when the model has no providers', () => {

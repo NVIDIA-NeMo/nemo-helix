@@ -42,10 +42,19 @@ function toStatusKey(state: DeploymentIndicatorState, isAdapter: boolean): strin
     case 'not-deployed':
       return 'not-deployed';
 
+    case 'unknown':
+      return 'unknown';
+
     case 'served': {
-      // Served by a provider with no backing deployment (an external provider such
-      // as `default/build`). Reachable, but there is no deployment status to report.
-      if (!state.status) return 'available';
+      // Reachable through a provider that names no deployment (an external provider
+      // such as `default/build`), so there is genuinely no deployment status to
+      // report. Only this case is "Available".
+      if (!state.hasDeployment) return 'available';
+
+      // A deployment is expected but its status could not be read — a failed
+      // request, or a response that omitted the optional field. Saying "Available"
+      // here would report a green, confident status we never actually confirmed.
+      if (!state.status) return 'unknown';
 
       switch (state.status) {
         case ModelDeploymentStatus.READY:
