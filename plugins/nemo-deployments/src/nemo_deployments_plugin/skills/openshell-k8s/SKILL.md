@@ -60,6 +60,7 @@ This skill installs OpenShell in an evaluation posture: plaintext gateway (`serv
 - Never ask the user to paste an API key or token into the chat. Ask them to export it in the shell you run in, or to run the credential-bearing command themselves in a terminal.
 - Never delete or modify anything you discovered as pre-existing. Record what this skill installed so cleanup only removes that.
 - One state change at a time. No compound `&&` chains that hide which step failed.
+- Never stop or restart a process you did not start in this session, including port-forwards and local servers that happen to hold a port you wanted. Pick a different port.
 
 Set these names once and reuse them. Adjust only if discovery shows a conflict.
 
@@ -92,7 +93,7 @@ Run every command in [references/discovery-checklist.md](references/discovery-ch
 | Operator tools | kubectl, helm, docker, nemo, openshell and their versions | install missing (Step 2) |
 | Registry access | can pull the platform chart and image anonymously; where agent images can be pushed | pull secrets (Step 5), push vs import (Step 7) |
 | Credentials | which of NVIDIA_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, NGC_API_KEY, GITHUB_TOKEN are set (names only, never values) | provider choice (Step 6), pull secrets (Step 5) |
-| Ports | 8080 and 18080 free on the operator machine | port-forward targets |
+| Ports | 8080 and 18080 free on the operator machine | port-forward targets; a busy port means pick another, never free it |
 
 If an existing OpenShell gateway is found, check its TLS and auth posture with `helm get values openshell -n openshell`. A gateway with TLS enabled and no `allowUnauthenticatedUsers` cannot be driven by the platform executor today; tell the user and offer either a second evaluation gateway in another namespace or stopping here. Do not weaken an existing shared gateway.
 
@@ -118,10 +119,12 @@ kubectl and helm: use the user's package manager (`brew install kubectl helm` on
 nemo CLI (needs `uv`):
 
 ```bash
-uv tool install --python 3.13 "nemo-platform[all]"
+uv tool install --python 3.13 --prerelease=allow "nemo-platform[all]>=0.5.1"
 nemo --version
 nemo agents --help >/dev/null && echo NEMO_AGENTS_OK
 ```
+
+Expected: `nemo version 0.5.1` or newer. Both flags matter. The 0.5.x releases pin pre-release `nemo-fabric` packages, and without `--prerelease=allow` the resolver quietly falls back to 0.4.0, whose packaged images reject a current agent config with `5 validation errors for AgentConfig`. The `>=0.5.1` bound turns that silent fallback into a loud resolver error instead. In `zsh`, keep the quotes: an unquoted `[all]` is a glob.
 
 `[all]` includes the agents and deployments plugins, which `nemo agents package --sandbox-runtime openshell` needs. Fabric packaging pins the installed `nemo-platform` version inside the image, so a released version from PyPI works as is. If `nemo` comes from a source checkout instead, `nemo agents package` refuses the unpublished version; build a wheel first with `uv build --package nemo-platform --wheel --out-dir dist` in that checkout and export `NEMO_AGENTS_WHEEL=<path to the wheel>` before packaging.
 
@@ -179,16 +182,18 @@ Expected: `openshell-0` is `Running` and `1/1`. The chart's preflight fails fast
 Connect the CLI through a port-forward on 18080 (8080 is reserved for the platform):
 
 ```bash
-kubectl -n "$OPENSHELL_NS" port-forward svc/openshell 18080:8080 >"$WORKDIR/pf-openshell.log" 2>&1 &
+export OPENSHELL_PORT=18080
+kubectl -n "$OPENSHELL_NS" port-forward svc/openshell "${OPENSHELL_PORT}:8080" >"$WORKDIR/pf-openshell.log" 2>&1 &
 echo $! > "$WORKDIR/pf-openshell.pid"
 sleep 2
-openshell gateway add http://127.0.0.1:18080 --local --name nemo-k8s
+cat "$WORKDIR/pf-openshell.log"
+openshell gateway add "http://127.0.0.1:${OPENSHELL_PORT}" --local --name nemo-k8s
 openshell gateway select nemo-k8s
 openshell gateway list
 openshell sandbox list
 ```
 
-Expected: `sandbox list` prints `No sandboxes found.` and `gateway list` marks `nemo-k8s` active with auth `plaintext`. An `UNAUTHENTICATED` here means the values file was not applied; see the recovery table. If the port is already bound on the operator machine, pick another local port for both the port-forward and `gateway add`.
+Expected: the log shows `Forwarding from 127.0.0.1:18080` and `Forwarding from [::1]:18080` (both address families, so `localhost` resolves to this forward whichever one the client picks); `sandbox list` prints `No sandboxes found.`; `gateway list` marks `nemo-k8s` active with auth `plaintext`. An `UNAUTHENTICATED` here means the values file was not applied; see the recovery table. If the log says the address is already in use, or shows only one of the two families, something else holds the port: leave it alone, choose another `OPENSHELL_PORT`, and start over from the port-forward.
 
 Note for the user: sandbox pods are created in the `openshell` namespace, and sandboxes with a workspace volume need a default StorageClass. If discovery found no default StorageClass, set `server.workspaceStorageClass` in the values file before installing.
 
@@ -262,13 +267,16 @@ Expected: the api rollout completes, the Service exists with that exact name, th
 Port-forward the API and confirm readiness:
 
 ```bash
-kubectl -n "$NMP_NS" port-forward svc/"${NMP_RELEASE}-api" 8080:8080 >"$WORKDIR/pf-nemo.log" 2>&1 &
+export NMP_PORT=8080
+kubectl -n "$NMP_NS" port-forward svc/"${NMP_RELEASE}-api" "${NMP_PORT}:8080" >"$WORKDIR/pf-nemo.log" 2>&1 &
 echo $! > "$WORKDIR/pf-nemo.pid"
 sleep 2
-curl -sf http://localhost:8080/health/ready
+cat "$WORKDIR/pf-nemo.log"
+curl -sf "http://localhost:${NMP_PORT}/health/ready"
+curl -sf "http://localhost:${NMP_PORT}/apis/models/v2/workspaces/default/providers"
 ```
 
-Expected: `{"status":"ready"}`.
+Expected: the log shows `Forwarding from 127.0.0.1:8080` and `Forwarding from [::1]:8080`, health prints `{"status":"ready"}`, and the providers list is empty (`"data": []`) because this platform is new. A non-empty provider list, or a log with only one address family or an address-in-use error, means another platform is answering on that port: leave it alone, choose another `NMP_PORT`, and start over from the port-forward. Every later step uses `http://localhost:${NMP_PORT}`; the skill writes 8080 where it appears.
 
 Existing platform branch: if a release already exists without the `openshell` executor, take its current values with `helm get values "$NMP_RELEASE" -n "$NMP_NS" -o yaml > "$WORKDIR/current-values.yaml"`, merge the `platformConfig` block from the reference values into it by hand (keeping every executor the user already has), show the diff to the user, and run `helm upgrade` with the same chart version they run. Then run the same verification.
 
@@ -296,6 +304,8 @@ nemo models list --all-pages
 ```
 
 Then choose a model for the agent and export it as `NEMO_DEFAULT_MODEL=default/<model name>` so `nemo agents create` can resolve the placeholder in Step 7. Prefer a plain instruction-tuned chat model. A reasoning model can spend its whole token budget on hidden reasoning and return an empty answer, which looks like a broken deployment when it is not.
+
+Model ids on the platform are `<workspace>/<model name>` as printed by `nemo models list`, for example `default/qwen35-9b`. The Inference Gateway route is `/apis/inference-gateway/v2/workspaces/default/openai/-/v1`; there is no per-provider route to try, and the `system` workspace is not for user models.
 
 Whichever route you took, confirm inference works through the in-cluster gateway before building anything:
 

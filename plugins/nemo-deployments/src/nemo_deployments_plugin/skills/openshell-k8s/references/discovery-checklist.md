@@ -130,4 +130,4 @@ lsof -iTCP:8080 -sTCP:LISTEN
 lsof -iTCP:18080 -sTCP:LISTEN
 ```
 
-Decisions: both should print nothing. A listener on 8080 is often a local `nemo services run`; ask before reusing another port and remember to pass it to `nemo config set --base-url`.
+Decisions: both should print nothing. If either port has a listener, it belongs to something else: never stop it, whatever it looks like. Choose a free port for `NMP_PORT` or `OPENSHELL_PORT` in the steps that follow and carry it through to `nemo config set --base-url` and `openshell gateway add`.
