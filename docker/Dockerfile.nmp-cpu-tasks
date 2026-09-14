@@ -85,38 +85,13 @@ ENTRYPOINT ["/app/.venv/bin/nemo-platform"]
 CMD ["--help"]
 
 FROM runtime AS smoke-test
-RUN /app/.venv/bin/python -c \
-    'import nemo_evaluator.tasks.agent_evaluate, nemo_evaluator.tasks.evaluate, nemo_evaluator.tasks.stage_environment, uvicorn, yaml; from opensandbox.config import ConnectionConfig; from sandboxed_gym import SandboxedGymOrchestrator; print({"connection_config": ConnectionConfig.__name__, "orchestrator": SandboxedGymOrchestrator.__name__, "uvicorn": uvicorn.__version__, "yaml": yaml.__version__})'
-
-# agents.execute and insights.analyze both schedule onto this image and both run
-# their task module via `python -m`, so validate the __main__ entrypoints rather
-# than the packages. A unit test asserting pyproject group membership passes
-# while the built image is broken; this does not.
-RUN /app/.venv/bin/python -c \
-    'import sys, importlib.util as u; \
-     mods = ["nemo_agents_plugin.tasks.execute.__main__", "nemo_insights_plugin.jobs.bridge"]; \
-     missing = [m for m in mods if u.find_spec(m) is None]; \
-     sys.exit("missing task entrypoints: %r" % missing) if missing else print("task entrypoints:", mods)'
-
-# The Fabric native runtime discovers adapters by listing this directory, so the
-# adapters must survive into the image as data files, not merely be importable.
-RUN /app/.venv/bin/python -c \
-    'import os, sys, sysconfig; \
-     d = os.path.join(sysconfig.get_path("data"), "share", "nemo-fabric", "adapters"); \
-     found = set(os.listdir(d)) if os.path.isdir(d) else set(); \
-     want = {"claude", "codex", "deepagents", "hermes"}; \
-     sys.exit("missing Fabric adapters in %s: %r (found %r)" % (d, sorted(want - found), sorted(found))) if want - found else print("fabric adapters:", sorted(found))'
-
-# The claude and codex CLIs ship as vendored native executables inside their
-# wheels. A wheel-platform mismatch, a stripped executable bit, or a future
-# CVE-removal rule aimed at a ~260 MB vendored binary all pass the import and
-# adapter checks above and fail only here.
-#
-# Actually launch each CLI rather than stat-ing it: an isfile/X_OK check cannot
-# detect a binary built for the wrong architecture or a missing dynamic loader,
-# which is precisely the wheel-platform mismatch this is meant to catch. Both
-# `--version` calls are non-mutating and need no network or credentials.
-RUN --mount=type=bind,source=docker/scripts/check-bundled-harness-clis.py,target=/tmp/check-bundled-harness-clis.py,readonly \
-    /app/.venv/bin/python /tmp/check-bundled-harness-clis.py
+# Every job declaring `container = "cpu-tasks"` runs its task module in this
+# image, so a plugin missing from the cpu-tasks dependency group surfaces as an
+# import error at job runtime rather than at build time. The script verifies the
+# Evaluator/Gym imports, the `python -m` task entrypoints, the Fabric adapter
+# data files, and that the vendored claude/codex CLIs actually launch. It
+# reports every failure in one run rather than aborting at the first.
+RUN --mount=type=bind,source=docker/scripts/smoke-test-cpu-tasks.py,target=/tmp/smoke-test-cpu-tasks.py,readonly \
+    /app/.venv/bin/python /tmp/smoke-test-cpu-tasks.py
 
 FROM runtime
