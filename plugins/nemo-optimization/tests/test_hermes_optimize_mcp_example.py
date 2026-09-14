@@ -9,19 +9,33 @@ repository, so these tests pin the three pieces that would otherwise only be che
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 import yaml
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from nemo_evaluator_sdk.agent_eval.metrics import ToolCallCountMetric
 from nemo_optimization.backends.optuna.fabric_trial import _build_metrics
 
 _EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "hermes-optimize"
+# Loaded from the bundle rather than imported: the bundle is a workspace member the platform venv
+# installs, but a test run synced without `--all-packages` must still exercise the fixture.
+_SERVER_PATH = _EXAMPLE / "phishing_analyzer_mcp" / "server.py"
 _CONFIG = yaml.safe_load((_EXAMPLE / "optimize-mcp.yaml").read_text(encoding="utf-8"))
 _DATASET = json.loads((_EXAMPLE / "dataset-mcp.json").read_text(encoding="utf-8"))
+
+
+def _server_module() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("hermes_optimize_phishing_analyzer", _SERVER_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _email(row: dict[str, str]) -> str:
@@ -31,7 +45,8 @@ def _email(row: dict[str, str]) -> str:
 
 def test_the_mock_analyzer_replays_each_row_s_canned_analysis() -> None:
     """The judge scores the coordinator against the row label, so the replayed analysis must agree with it."""
-    from phishing_analyzer_mcp.server import analyze, load_responses
+    server = _server_module()
+    analyze, load_responses = server.analyze, server.load_responses
 
     responses = load_responses(_EXAMPLE / "dataset-mcp.json")
     for row in _DATASET:
@@ -50,7 +65,7 @@ def test_the_mock_analyzer_replays_each_row_s_canned_analysis() -> None:
 
 async def test_the_analyzer_serves_its_tool_over_mcp_stdio() -> None:
     """Hermes reaches the analyzer as a stdio MCP server, so exercise that transport, not the function."""
-    params = StdioServerParameters(command=sys.executable, args=["-m", "phishing_analyzer_mcp.server"])
+    params = StdioServerParameters(command=sys.executable, args=[str(_SERVER_PATH)])
     async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
         await session.initialize()
         tools = await session.list_tools()
@@ -67,8 +82,7 @@ def test_the_example_config_declares_the_bundled_server_and_the_exactly_once_eva
     assert _CONFIG["eval"]["fabric"]["capture_trajectory"] is True  # the evaluator reads the trajectory
 
     metrics = _build_metrics(_CONFIG, _CONFIG["eval"])
-    by_type = {type(metric).__name__: metric for metric in metrics}
-    exactly_once = by_type["ToolCallCountMetric"]
+    (exactly_once,) = [metric for metric in metrics if isinstance(metric, ToolCallCountMetric)]
     assert (exactly_once.tool_name, exactly_once.expected_calls) == ("email_phishing_analyzer", 1)
     # Every study objective must be an output some evaluator actually emits.
     emitted = {spec.name for metric in metrics for spec in metric.output_spec()}
