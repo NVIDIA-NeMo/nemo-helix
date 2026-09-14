@@ -56,6 +56,32 @@ async def test_ranking_client_rewrites_reranking_and_embeddings_routes() -> None
 
 
 @pytest.mark.asyncio
+async def test_ranking_client_strips_legacy_reranking_suffix_before_fallback() -> None:
+    urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        urls.append(str(request.url))
+        if request.url.path.endswith("/ranking"):
+            return httpx.Response(404, request=request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={"results": [{"index": 0, "relevance_score": 0.5}]},
+        )
+
+    model = Model(url="https://igw.example.test/v1/reranking", name="rerank")
+    ranker = NimRankingClient(model=model, max_retries=0)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await ranker.rank("q", ["only"], client=client)
+
+    assert urls == [
+        "https://igw.example.test/v1/ranking",
+        "https://igw.example.test/v1/rerank",
+    ]
+    assert ranker.resolved_path == "/rerank"
+
+
+@pytest.mark.asyncio
 async def test_ranking_client_falls_back_to_hosted_rerank_contract() -> None:
     requests: list[httpx.Request] = []
 

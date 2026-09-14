@@ -159,7 +159,7 @@ def _ranking_url(url: str) -> str:
 def _base_url(url: str) -> str:
     parsed = urlparse(url)
     path = parsed.path.rstrip("/")
-    for suffix in ("/chat/completions", "/completions", "/embeddings", "/ranking", "/rerank"):
+    for suffix in ("/chat/completions", "/completions", "/embeddings", "/reranking", "/ranking", "/rerank"):
         if path.endswith(suffix):
             path = path[: -len(suffix)]
             break
