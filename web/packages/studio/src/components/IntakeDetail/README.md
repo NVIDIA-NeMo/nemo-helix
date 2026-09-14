@@ -133,6 +133,10 @@ Templates read `raw_attributes` through `SpanTemplates/rawAttributes.ts` (`parse
 
 Expand/collapse-all from the trace toolbar drives section state via `expandToken` / `collapseToken` props (tree view). "Add note" on a row opens the Annotations section and focuses its note field via `focusNoteNonce`.
 
+### Stepping through the list
+
+The header pages to the trace run either side of this one in the list the page was opened from. The traces list keeps its state in its own search params, which the detail route does not share, so `IntakeTracesTable` hands the row click the request it just ran (`traceListQuery.ts`, carried as `traceList`) and `useTraceListNeighbors` replays it — normally a React Query cache hit on the entry the table already filled. When the current row sits at a page edge the adjacent page is fetched for that one neighbour, and stepping onto it moves the carried `page` with it. The pager hides itself when the URL carries no list request, or when the row is no longer in it.
+
 ### Payload formats
 
 Every payload renders through `SpanPayloadView` in one of four formats: `raw` (verbatim text), `md` (rendered markdown), `json` (pretty-printed and syntax-highlighted), or `chat` (an OpenAI-compatible payload read as the conversation it describes). A payload opens in `chat` when it holds a conversation, `json` when it merely parses as JSON, and `raw` otherwise, so the common case needs no click.

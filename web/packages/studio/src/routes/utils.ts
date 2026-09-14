@@ -564,10 +564,11 @@ export const getIntakeSessionTraceRoute = (
   workspace: string,
   sessionId: string,
   traceId: string,
-  options?: { spanId?: string }
+  options?: { spanId?: string; traceList?: string }
 ) => {
   const searchParams = new URLSearchParams({ [QUERY_PARAMETERS.traceId]: traceId });
   if (options?.spanId) searchParams.set(QUERY_PARAMETERS.spanId, options.spanId);
+  if (options?.traceList) searchParams.set(QUERY_PARAMETERS.traceList, options.traceList);
   return `${getIntakeSessionRoute(workspace, sessionId)}?${searchParams.toString()}`;
 };
 
