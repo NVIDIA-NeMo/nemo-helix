@@ -88,4 +88,35 @@ FROM runtime AS smoke-test
 RUN /app/.venv/bin/python -c \
     'import nemo_evaluator.tasks.agent_evaluate, nemo_evaluator.tasks.evaluate, nemo_evaluator.tasks.stage_environment, uvicorn, yaml; from opensandbox.config import ConnectionConfig; from sandboxed_gym import SandboxedGymOrchestrator; print({"connection_config": ConnectionConfig.__name__, "orchestrator": SandboxedGymOrchestrator.__name__, "uvicorn": uvicorn.__version__, "yaml": yaml.__version__})'
 
+# agents.execute and insights.analyze both schedule onto this image and both run
+# their task module via `python -m`, so validate the __main__ entrypoints rather
+# than the packages. A unit test asserting pyproject group membership passes
+# while the built image is broken; this does not.
+RUN /app/.venv/bin/python -c \
+    'import sys, importlib.util as u; \
+     mods = ["nemo_agents_plugin.tasks.execute.__main__", "nemo_insights_plugin.jobs.bridge"]; \
+     missing = [m for m in mods if u.find_spec(m) is None]; \
+     sys.exit("missing task entrypoints: %r" % missing) if missing else print("task entrypoints:", mods)'
+
+# The Fabric native runtime discovers adapters by listing this directory, so the
+# adapters must survive into the image as data files, not merely be importable.
+RUN /app/.venv/bin/python -c \
+    'import os, sys, sysconfig; \
+     d = os.path.join(sysconfig.get_path("data"), "share", "nemo-fabric", "adapters"); \
+     found = set(os.listdir(d)) if os.path.isdir(d) else set(); \
+     want = {"claude", "codex", "deepagents", "hermes"}; \
+     sys.exit("missing Fabric adapters in %s: %r (found %r)" % (d, sorted(want - found), sorted(found))) if want - found else print("fabric adapters:", sorted(found))'
+
+# The claude and codex CLIs ship as vendored native executables inside their
+# wheels. A wheel-platform mismatch, a stripped executable bit, or a future
+# CVE-removal rule aimed at a ~240 MB vendored binary all pass the import and
+# adapter checks above and fail only here.
+RUN /app/.venv/bin/python -c \
+    'import os, sys; \
+     from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport as T; \
+     from codex_cli_bin import bundled_codex_path; \
+     bins = {"claude": T._find_bundled_cli(None), "codex": bundled_codex_path()}; \
+     bad = {n: p for n, p in bins.items() if not (p and os.path.isfile(p) and os.access(p, os.X_OK))}; \
+     sys.exit("unusable bundled harness binaries: %r" % bad) if bad else print("harness binaries:", bins)'
+
 FROM runtime
