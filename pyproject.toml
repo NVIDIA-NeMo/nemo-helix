@@ -255,6 +255,9 @@ cpu-tasks = [
   "nemo-anonymizer-plugin",
   "nemo-data-designer-plugin[retrieval-sdg]",
   "nemo-optimization-plugin",
+  # Ships the `switchyard` nemo.optimization-strategy entry point, which the optimize task
+  # discovers at runtime. Without it `--strategy switchyard` resolves only on local runs.
+  "nemo-switchyard",
   "prompt-master-plugin",
   "nmp-hello-world",
 ]

@@ -5,7 +5,7 @@
 name = "nemo-agent-optimization-plugin"
 version = "0.1.0"
 description = "Entry point for `nemo agents optimize` — discovers and dispatches nemo.optimization-strategy plugins."
-requires-python = ">=3.12,<3.15"
+requires-python = ">=3.11,<3.15"
 dependencies = [
   "nemo-optimization-plugin",
   "nemo-platform",

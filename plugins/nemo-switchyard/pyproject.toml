@@ -7,6 +7,8 @@ version = "0.1.0"
 description = "Switchyard inference middleware plugin for NeMo Inference Gateway — routing, translation, and request filtering."
 requires-python = ">=3.11,<3.15"
 dependencies = [
+    "nemo-agent-optimization-plugin",
+    "nemo-platform",
     "nemo-platform-plugin",
     "switchyard-vendored",
 ]
@@ -15,9 +17,14 @@ dependencies = [
 # Vendored snapshot of switchyard at commit 9407922 — see vendor/switchyard/README.md.
 # Swap to a git submodule once CI has reliable access to the upstream repo.
 switchyard-vendored = { path = "vendor/switchyard", editable = true }
+nemo-agent-optimization-plugin = { workspace = true }
+nemo-platform = { workspace = true }
 
 [project.entry-points."nemo.inference_middleware"]
 nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
+
+[project.entry-points."nemo.optimization-strategy"]
+switchyard = "nemo_switchyard.optimization_strategy:SwitchyardOptimizationStrategy"
 
 [build-system]
 requires = ["hatchling"]

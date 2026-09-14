@@ -7159,12 +7159,16 @@ name = "nemo-switchyard"
 version = "0.1.0"
 source = { editable = "plugins/nemo-switchyard" }
 dependencies = [
+    { name = "nemo-agent-optimization-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-platform", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-platform-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "switchyard-vendored", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "nemo-agent-optimization-plugin", editable = "plugins/nemo-agent-optimization" },
+    { name = "nemo-platform", editable = "packages/nemo_platform" },
     { name = "nemo-platform-plugin", editable = "packages/nemo_platform_plugin" },
     { name = "switchyard-vendored", editable = "plugins/nemo-switchyard/vendor/switchyard" },
 ]
@@ -7329,6 +7333,7 @@ cpu-tasks = [
     { name = "nemo-optimization-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-platform", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-platform-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-switchyard", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nmp-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nmp-hello-world", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nmp-platform", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -7470,6 +7475,7 @@ gym-task-orchestrator = [
     { name = "nemo-optimization-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-platform", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-platform-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-switchyard", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nmp-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nmp-hello-world", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nmp-platform", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -7576,6 +7582,7 @@ cpu-tasks = [
     { name = "nemo-optimization-plugin", editable = "plugins/nemo-optimization" },
     { name = "nemo-platform", editable = "packages/nemo_platform" },
     { name = "nemo-platform-plugin", editable = "packages/nemo_platform_plugin" },
+    { name = "nemo-switchyard", editable = "plugins/nemo-switchyard" },
     { name = "nmp-common", editable = "packages/nmp_common" },
     { name = "nmp-hello-world", editable = "services/hello-world" },
     { name = "nmp-platform", editable = "packages/nmp_platform" },
@@ -7721,6 +7728,7 @@ gym-task-orchestrator = [
     { name = "nemo-optimization-plugin", editable = "plugins/nemo-optimization" },
     { name = "nemo-platform", editable = "packages/nemo_platform" },
     { name = "nemo-platform-plugin", editable = "packages/nemo_platform_plugin" },
+    { name = "nemo-switchyard", editable = "plugins/nemo-switchyard" },
     { name = "nmp-common", editable = "packages/nmp_common" },
     { name = "nmp-hello-world", editable = "services/hello-world" },
     { name = "nmp-platform", editable = "packages/nmp_platform" },
