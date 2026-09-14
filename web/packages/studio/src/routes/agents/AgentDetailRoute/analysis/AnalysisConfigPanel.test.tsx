@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { createToastMock } from '@nemo/common/src/providers/toast/useToastMock';
 import {
   getInsightsGetAnalysisConfigQueryKey,
   useInsightsGetAnalysisConfig,
@@ -16,19 +18,7 @@ import {
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-const { toastError, toastSuccess } = vi.hoisted(() => ({
-  toastError: vi.fn(),
-  toastSuccess: vi.fn(),
-}));
-
-vi.mock('@nemo/common/src/providers/toast/useToast', () => ({
-  useToast: () => ({
-    success: toastSuccess,
-    error: toastError,
-    info: vi.fn(),
-    warning: vi.fn(),
-  }),
-}));
+vi.mock('@nemo/common/src/providers/toast/useToast');
 
 vi.mock('@nemo/sdk/generated/insights/insights-analysis-configs', () => ({
   useInsightsGetAnalysisConfig: vi.fn(),
@@ -110,8 +100,12 @@ const renderPanel = (agent: string) =>
     </ThemeProvider>
   );
 
+let toast = createToastMock();
+
 beforeEach(() => {
   vi.clearAllMocks();
+  toast = createToastMock();
+  vi.mocked(useToast).mockReturnValue(toast);
   invalidateQueries.mockResolvedValue(undefined);
 });
 
@@ -128,9 +122,9 @@ describe('AnalysisConfigPanel', () => {
     await user.type(screen.getByLabelText('Default model'), 'demo-epa/new-slow');
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(toastError).toHaveBeenCalled());
-    expect(toastError.mock.calls[0][0]).toContain('may still be enabled');
-    expect(toastSuccess).not.toHaveBeenCalled();
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(vi.mocked(toast.error).mock.calls[0][0]).toContain('may still be enabled');
+    expect(toast.success).not.toHaveBeenCalled();
 
     expect(getInsightsGetAnalysisConfigQueryKey).toHaveBeenCalledWith(
       'demo-epa',
@@ -154,7 +148,7 @@ describe('AnalysisConfigPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Edit' }));
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ['analysis-config', 'demo-epa', 'email-security-triage'],
     });
