@@ -12,7 +12,7 @@ from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob
 from nemo_agents_plugin.jobs.evaluate_suite import EvaluateSuiteJob
 from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
 from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
-from nemo_agents_plugin.service import AgentsService
+from nemo_agents_plugin.service import AgentsService, _job_collections
 from nemo_platform_plugin.scheduler import submit_path_for
 
 
@@ -56,6 +56,19 @@ def test_optimize_skills_job_route_matches_generated_submit_path() -> None:
 
 def test_optimize_job_route_matches_generated_submit_path() -> None:
     assert submit_path_for(OptimizeJob, workspace="{workspace}") in _mounted_post_paths()
+
+
+def test_optimize_route_accepts_the_strategy_field() -> None:
+    """The optimize route must bind the strategy-dispatching spec, not the reverted HPO-only one.
+
+    Both OptimizeJob classes share ``name = "optimize"``, so their URL paths coincide and
+    route-shape assertions alone can't tell them apart. Assert on the schema the route actually
+    binds instead, so a future repoint back to the wrong job class can't silently regress.
+    """
+    collection = next(c for c in _job_collections() if c.job_cls.name == "optimize")
+    assert collection.job_cls is OptimizeJob
+    schema = collection.job_cls.input_spec_schema or collection.job_cls.spec_schema
+    assert "strategy" in schema.model_fields
 
 
 def test_analyze_job_route_matches_generated_submit_path() -> None:

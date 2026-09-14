@@ -40,13 +40,13 @@ class _JobCollection(NamedTuple):
 # (add_job_routes filters source=service_name); sharing the default would let /jobs/<x> pull in
 # sibling-type rows and 500 on the wrong schema.
 def _job_collections() -> list[_JobCollection]:
+    from nemo_agent_optimization_plugin.jobs.optimize import OptimizeJob
     from nemo_agents_plugin.jobs.analyze_batch import AnalyzeBatchJob
     from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob
     from nemo_agents_plugin.jobs.evaluate_suite import EvaluateSuiteJob
     from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
     from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
     from nemo_agents_plugin.jobs.package_agent import PackageAgentJob
-    from nemo_optimization.jobs.optimize import OptimizeJob
 
     return [
         _JobCollection(EvaluateAgentJob, "evaluate", None, "Submit and track agent evaluation jobs"),
@@ -66,7 +66,7 @@ def _job_collections() -> list[_JobCollection]:
             OptimizeJob,
             "optimize",
             "nemo-agents-plugin-optimize",
-            "Submit and track numeric optimize jobs (Fabric-backed Optuna HPO).",
+            "Submit and track agent optimization jobs (strategy-dispatched).",
         ),
         _JobCollection(
             OptimizeSkillsJob,
