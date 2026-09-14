@@ -28,7 +28,7 @@ import { DeploymentLogsView } from '@studio/routes/agents/AgentDetailRoute/Deplo
 import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/DeploymentsTab';
 import { DetailsTab } from '@studio/routes/agents/AgentDetailRoute/DetailsTab';
 import { EvaluationsTab } from '@studio/routes/agents/AgentDetailRoute/EvaluationsTab';
-import { OptimizeJobsTable } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizeJobsTable';
+import { OptimizationsTab } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationsTab';
 import { OverviewTab } from '@studio/routes/agents/AgentDetailRoute/OverviewTab';
 import {
   type AgentDetailTab,
@@ -48,6 +48,9 @@ import { Dot } from 'lucide-react';
 import { type FC, useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router';
 
+const VIEW_SEARCH_PARAM = 'view';
+const VIEW_NEW = 'new';
+
 export const AgentDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { [ROUTE_PARAMS.agentName]: agentName } = useParams<{ agentName: string }>();
@@ -66,6 +69,8 @@ export const AgentDetailRoute: FC = () => {
   const [walkthroughDismissed, setWalkthroughDismissed] = useState(false);
   const tabFromUrl = searchParams.get(TAB_SEARCH_PARAM);
   const selectedTab: AgentDetailTab = isAgentDetailTab(tabFromUrl) ? tabFromUrl : DEFAULT_TAB;
+  const isCreatingOptimization =
+    selectedTab === 'optimizations' && searchParams.get(VIEW_SEARCH_PARAM) === VIEW_NEW;
 
   const {
     agent,
@@ -108,6 +113,12 @@ export const AgentDetailRoute: FC = () => {
 
   const setSelectedTab = (tab: AgentDetailTab) => {
     setSearchParams({ [TAB_SEARCH_PARAM]: tab }, { replace: true });
+  };
+
+  const setOptimizationView = (creating: boolean) => {
+    const params = new URLSearchParams({ [TAB_SEARCH_PARAM]: 'optimizations' });
+    if (creating) params.set(VIEW_SEARCH_PARAM, VIEW_NEW);
+    setSearchParams(params);
   };
 
   const switchToChat = (deployment: AgentDeployment) => {
@@ -172,10 +183,11 @@ export const AgentDetailRoute: FC = () => {
               canDeploy={canDeploy}
               canRunEvaluation={canRunEvaluation}
               isDeploying={isDeploying}
-              canOptimize
+              canOptimize={!isCreatingOptimization}
               deployButtonRef={deployButtonRef}
               onDeploy={() => setCreateDeploymentOpen(true)}
               onRunEvaluation={() => setSubmitEvalOpen(true)}
+              onOptimize={() => setOptimizationView(true)}
             />
           }
         ></PageHeader>
@@ -224,7 +236,13 @@ export const AgentDetailRoute: FC = () => {
 
           {AGENT_OPTIMIZATIONS_ENABLED && (
             <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="optimizations">
-              <OptimizeJobsTable agentName={agentName} />
+              <OptimizationsTab
+                agentName={agentName}
+                evals={agentEvals}
+                isEvalsPending={isAgentEvalsPending}
+                isCreating={isCreatingOptimization}
+                onCloseForm={() => setOptimizationView(false)}
+              />
             </TabsContent>
           )}
 
