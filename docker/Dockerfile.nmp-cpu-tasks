@@ -109,14 +109,14 @@ RUN /app/.venv/bin/python -c \
 
 # The claude and codex CLIs ship as vendored native executables inside their
 # wheels. A wheel-platform mismatch, a stripped executable bit, or a future
-# CVE-removal rule aimed at a ~240 MB vendored binary all pass the import and
+# CVE-removal rule aimed at a ~260 MB vendored binary all pass the import and
 # adapter checks above and fail only here.
-RUN /app/.venv/bin/python -c \
-    'import os, sys; \
-     from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport as T; \
-     from codex_cli_bin import bundled_codex_path; \
-     bins = {"claude": T._find_bundled_cli(None), "codex": bundled_codex_path()}; \
-     bad = {n: p for n, p in bins.items() if not (p and os.path.isfile(p) and os.access(p, os.X_OK))}; \
-     sys.exit("unusable bundled harness binaries: %r" % bad) if bad else print("harness binaries:", bins)'
+#
+# Actually launch each CLI rather than stat-ing it: an isfile/X_OK check cannot
+# detect a binary built for the wrong architecture or a missing dynamic loader,
+# which is precisely the wheel-platform mismatch this is meant to catch. Both
+# `--version` calls are non-mutating and need no network or credentials.
+COPY docker/scripts/check-bundled-harness-clis.py /tmp/check-bundled-harness-clis.py
+RUN /app/.venv/bin/python /tmp/check-bundled-harness-clis.py && rm /tmp/check-bundled-harness-clis.py
 
 FROM runtime
