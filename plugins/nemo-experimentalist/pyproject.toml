@@ -19,6 +19,7 @@ dependencies = [
     "nemo-platform",
     "nemo-platform-plugin",
     "tomlkit>=0.13.3",
+    "nemo-agent-optimization-plugin",
 ]
 
 [project.entry-points."nemo.cli.agents"]
@@ -26,6 +27,9 @@ experimentalist = "nemo_experimentalist_plugin.cli:ExperimentalistCLI"
 
 [project.entry-points."nemo.skills"]
 experimentalist = "nemo_experimentalist_plugin.skills:skills_dir"
+
+[project.entry-points."nemo.optimization-strategy"]
+experimentalist = "nemo_experimentalist_plugin.optimization_strategy:ExperimentalistOptimizationStrategy"
 
 # Our own components are discovered exactly the way a third party's are: one entry point
 # per module, whose only job is to import it so its classes self-register. There are no
