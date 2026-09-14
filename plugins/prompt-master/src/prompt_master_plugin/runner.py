@@ -15,8 +15,8 @@ from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.fabric.invocation import AgentConfigInvocationRequest, invoke_agent_config_request_once
 from nemo_agents_plugin.fabric.runtime import FabricRuntimeExecutionError
 from nemo_agents_plugin.fabric.translator import FabricTranslationError
-from nemo_prompt_master_plugin.config import PromptMasterConfig
-from nemo_prompt_master_plugin.skills import skills_dir
+from prompt_master_plugin.config import PromptMasterConfig
+from prompt_master_plugin.skills import skills_dir
 
 _PROMPT_BLOCK = re.compile(r"```[^\n]*\n(?P<prompt>.*?)\n```", flags=re.DOTALL)
 

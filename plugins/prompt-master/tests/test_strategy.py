@@ -8,7 +8,7 @@ import pytest
 import yaml
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_prompt_master_plugin.strategy import PromptMasterStrategy
+from prompt_master_plugin.strategy import PromptMasterStrategy
 
 
 @pytest.fixture
@@ -46,9 +46,15 @@ def _source_agent_config() -> dict:
 
 
 def test_strategy_is_registered_as_an_optimization_entrypoint() -> None:
-    entry = next(entry for entry in entry_points(group="nemo.optimization.strategies") if entry.name == "prompt-master")
+    entry = next(entry for entry in entry_points(group="nemo.optimization-strategy") if entry.name == "prompt-master")
 
     assert entry.load() is PromptMasterStrategy
+
+
+def test_satisfies_optimization_strategy_protocol() -> None:
+    from nemo_agent_optimization_plugin.strategies import OptimizationStrategy
+
+    assert isinstance(PromptMasterStrategy(), OptimizationStrategy)
 
 
 def test_strategy_requires_a_platform_agent() -> None:
@@ -64,18 +70,26 @@ def test_strategy_writes_an_optimized_fabric_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "nemo_prompt_master_plugin.strategy.run_prompt_master",
+        "prompt_master_plugin.strategy.run_prompt_master",
         lambda config, agent_config, base_dir: "Return the exact numeric answer with no explanation.",
     )
     agent_config = _agent_config()
     strategy = PromptMasterStrategy()
-    config = {"model": {"provider": "nvidia", "model": "optimizer-model"}}
+    config = {
+        "model": {
+            "provider": "nvidia",
+            "model": "optimizer-model",
+            "base_url": "https://integrate.api.nvidia.com/v1",
+            "api_key_env": "NVIDIA_API_KEY",
+        }
+    }
 
     result = strategy.run(
         agent_config=agent_config,
         source_agent_config=_source_agent_config(),
         config=config,
         ctx=ctx,
+        workspace="default",
     )
 
     artifact = ctx.storage.persistent / "results" / "prompt_master_results" / "optimized_config.yml"

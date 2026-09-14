@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from nemo_prompt_master_plugin.skills import skills_dir
+from prompt_master_plugin.skills import skills_dir
 
 
 def test_bundles_prompt_master_skill_and_references() -> None:

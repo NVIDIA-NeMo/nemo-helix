@@ -4,7 +4,7 @@
 from pathlib import Path
 
 import pytest
-from nemo_prompt_master_plugin.config import PromptMasterConfigError, load_prompt_master_config
+from prompt_master_plugin.config import PromptMasterConfigError, load_prompt_master_config
 
 
 def test_prompt_master_example_is_valid() -> None:

@@ -13,8 +13,8 @@ import yaml
 from nemo_agent_optimization_plugin.strategies import PRIMARY_ARTIFACT_KEY
 from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.job_context import JobContext
-from nemo_prompt_master_plugin.config import PromptMasterConfig
-from nemo_prompt_master_plugin.runner import run_prompt_master
+from prompt_master_plugin.config import PromptMasterConfig
+from prompt_master_plugin.runner import run_prompt_master
 
 RESULT_NAME = "prompt_master_results"
 
@@ -32,13 +32,16 @@ class PromptMasterStrategy:
     def run(
         self,
         *,
-        agent_config: dict[str, Any],
+        agent_config: dict[str, Any] | None,
         source_agent_config: dict[str, Any] | None = None,
         config: dict[str, Any],
         ctx: JobContext,
+        workspace: str,
         sdk: NeMoPlatform | None = None,
     ) -> dict[str, Any]:
-        del sdk
+        del sdk, workspace
+        if agent_config is None:
+            raise ValueError("The prompt-master strategy requires --agent.")
         parsed = PromptMasterConfig.model_validate(config)
         runtime_dir = ctx.storage.ephemeral / "prompt-master"
         runtime_dir.mkdir(parents=True, exist_ok=True)

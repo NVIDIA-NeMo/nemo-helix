@@ -200,7 +200,7 @@ enabled-plugins = [
   "nemo-safe-synthesizer-plugin",
   "nemo-switchyard",
   "nemo-agents-plugin",
-  "nemo-prompt-master-plugin",
+  "prompt-master-plugin",
   "nemo-deployments-plugin[docker,k8s]",
   "nemo-customizer-plugin",
   "nemo-automodel-plugin",
@@ -255,7 +255,7 @@ cpu-tasks = [
   "nemo-anonymizer-plugin",
   "nemo-data-designer-plugin[retrieval-sdg]",
   "nemo-optimization-plugin",
-  "nemo-prompt-master-plugin",
+  "prompt-master-plugin",
   "nmp-hello-world",
 ]
 
@@ -441,7 +441,7 @@ nemo-auditor-plugin = { workspace = true }
 nemo-safe-synthesizer-plugin = { workspace = true }
 nemo-switchyard = { workspace = true }
 nemo-agents-plugin = { workspace = true }
-nemo-prompt-master-plugin = { workspace = true }
+prompt-master-plugin = { workspace = true }
 nemo-deployments-plugin = { workspace = true }
 nemo-agents-example-calculator = { workspace = true }
 nemo-agents-example-email-phishing = { workspace = true }
@@ -505,7 +505,7 @@ members = [
   "plugins/nemo-safe-synthesizer",
   "plugins/nemo-switchyard",
   "plugins/nemo-agents",
-  "plugins/nemo-prompt-master",
+  "plugins/prompt-master",
   "plugins/nemo-deployments",
   "plugins/nemo-insights",
   "plugins/nemo-eval-author",

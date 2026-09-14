@@ -241,6 +241,15 @@ models-service = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
+nemo-agent-optimization-plugin = [
+  "nemo-optimization-plugin",
+  "nemo-platform-plugin",
+  "pydantic>=2.12.0",
+  "pyyaml>=6.0.3",
+  "typer>=0.20.0",
+]
+
+# Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-example-calculator = [
   "nvidia-nat-core>=1.9.0a20260811,<1.10",
   "nvidia-nat-langchain>=1.9.0a20260811,<1.10",
@@ -251,6 +260,7 @@ nemo-agents-plugin = [
   "nemo-platform-plugin",
   "nemo-deployments-plugin",
   "nemo-optimization-plugin",
+  "nemo-agent-optimization-plugin",
   "nemo-agents-example-calculator",
   "nvidia-nat-core>=1.9.0a20260811,<1.10",
   "nvidia-nat-langchain>=1.9.0a20260811,<1.10",
@@ -454,16 +464,6 @@ nemo-platform-sdk = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
-nemo-prompt-master-plugin = [
-  "nemo-agents-plugin",
-  "nemo-optimization-plugin",
-  "nemo-platform-plugin",
-  "pydantic>=2.12.0",
-  "pyyaml>=6.0.3",
-  "typer>=0.20.0",
-]
-
-# Generated from [tool.bundle-package]; do not edit by hand.
 nemo-rl-plugin = [
   "nemo-platform-plugin",
   "nmp-rl",
@@ -558,6 +558,7 @@ platform-seed-service = [
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 plugins = [
+    "nemo-platform[nemo-agent-optimization-plugin]",
     "nemo-platform[nemo-agents-example-calculator]",
     "nemo-platform[nemo-agents-plugin]",
     "nemo-platform[nemo-anonymizer-plugin]",
@@ -571,11 +572,21 @@ plugins = [
     "nemo-platform[nemo-guardrails-plugin]",
     "nemo-platform[nemo-insights-plugin]",
     "nemo-platform[nemo-optimization-plugin]",
-    "nemo-platform[nemo-prompt-master-plugin]",
     "nemo-platform[nemo-rl-plugin]",
     "nemo-platform[nemo-safe-synthesizer-plugin]",
     "nemo-platform[nemo-switchyard]",
     "nemo-platform[nemo-unsloth-plugin]",
+    "nemo-platform[prompt-master-plugin]",
+]
+
+# Generated from [tool.bundle-package]; do not edit by hand.
+prompt-master-plugin = [
+  "nemo-agent-optimization-plugin",
+  "nemo-agents-plugin",
+  "nemo-platform-plugin",
+  "pydantic>=2.12.0",
+  "pyyaml>=6.0.3",
+  "typer>=0.20.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -683,6 +694,7 @@ customization = "nemo_customizer.cli:CustomizationCLI"
 [project.entry-points."nemo.cli.agents"]
 experimentalist = "nemo_experimentalist_plugin.cli:ExperimentalistCLI"
 analyst = "nemo_insights_plugin.analyst.cli:AnalystCLI"
+optimization-strategies = "nemo_agent_optimization_plugin.cli:OptimizationStrategiesCLI"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.client_provider"]
@@ -733,7 +745,7 @@ nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 "agents.evaluate" = "nemo_agents_plugin.jobs.evaluate_agent:EvaluateAgentJob"
 "agents.evaluate-suite" = "nemo_agents_plugin.jobs.evaluate_suite:EvaluateSuiteJob"
 "agents.analyze" = "nemo_agents_plugin.jobs.analyze_batch:AnalyzeBatchJob"
-"agents.optimize" = "nemo_optimization.jobs.optimize:OptimizeJob"
+"agents.optimize" = "nemo_agent_optimization_plugin.jobs.optimize:OptimizeJob"
 "agents.optimize-skills" = "nemo_agents_plugin.jobs.optimize_skills:OptimizeSkillsJob"
 "anonymizer.run" = "nemo_anonymizer_plugin.jobs.run:RunJob"
 "auditor.audit" = "nemo_auditor.jobs.audit:AuditJob"
@@ -752,13 +764,14 @@ nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 "data-designer.retrieval-run" = "nemo_data_designer_plugin.jobs.retrieval_run:RetrievalRunJob"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
+[project.entry-points."nemo.optimization-strategy"]
+nat = "nemo_optimization.optimization_strategy:NatOptimizationStrategy"
+prompt-master = "prompt_master_plugin.strategy:PromptMasterStrategy"
+
+# Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.optimization.backends"]
 optuna = "nemo_optimization.backends.optuna.backend:OptunaBackend"
 ga = "nemo_optimization.backends.ga.backend:GaBackend"
-
-# Generated from [tool.bundle-package]; do not edit this table by hand.
-[project.entry-points."nemo.optimization.strategies"]
-prompt-master = "nemo_prompt_master_plugin.strategy:PromptMasterStrategy"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.sandbox_profiles"]
@@ -809,7 +822,7 @@ experimentalist = "nemo_experimentalist_plugin.skills:skills_dir"
 insights = "nemo_insights_plugin.skills:skills_dir"
 deployments = "nemo_deployments_plugin.skills:skills_dir"
 customizer = "nemo_customizer.skills:get_skills_path"
-prompt-master = "nemo_prompt_master_plugin.skills:skills_dir"
+prompt-master = "prompt_master_plugin.skills:skills_dir"
 
 [tool.uv.sources]
 nemo-platform-sdk = { workspace = true }
@@ -865,7 +878,8 @@ switchyard-vendored = { source = "../../plugins/nemo-switchyard/vendor/switchyar
 
 # Default first-party plugins
 nemo-agents-plugin = { source = "../../plugins/nemo-agents/src/nemo_agents_plugin", module = "nemo_agents_plugin", inherit = { "entry-points" = ["nemo.*", "nat.plugins", "nat.components"] }, force_include = { "../../vendor/claude_code_agent_adapter/src/nat_claude_code_agent_adapter" = "nat_claude_code_agent_adapter", "../../vendor/codex_agent_adapter/src/nat_codex_agent_adapter" = "nat_codex_agent_adapter", "../../vendor/cursor_agent_adapter/src/nat_cursor_agent_adapter" = "nat_cursor_agent_adapter", "../../vendor/hermes_agent_adapter/src/nat_hermes_agent_adapter" = "nat_hermes_agent_adapter", "../../vendor/openclaw_agent_adapter/src/nat_openclaw_agent_adapter" = "nat_openclaw_agent_adapter" } }
-nemo-prompt-master-plugin = { source = "../../plugins/nemo-prompt-master/src/nemo_prompt_master_plugin", module = "nemo_prompt_master_plugin", inherit = { "entry-points" = ["nemo.*"] } }
+nemo-agent-optimization-plugin = { source = "../../plugins/nemo-agent-optimization/src/nemo_agent_optimization_plugin", module = "nemo_agent_optimization_plugin", inherit = { "entry-points" = ["nemo.*"] } }
+prompt-master-plugin = { source = "../../plugins/prompt-master/src/prompt_master_plugin", module = "prompt_master_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-anonymizer-plugin = { source = "../../plugins/nemo-anonymizer/src/nemo_anonymizer_plugin", module = "nemo_anonymizer_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-auditor-plugin = { source = "../../plugins/nemo-auditor/src/nemo_auditor", module = "nemo_auditor", inherit = { "entry-points" = ["nemo.*"] } }
 # Customization router plus its backend contributors. Heavy ML stacks stay in the
@@ -877,7 +891,8 @@ nemo-deployments-plugin = { source = "../../plugins/nemo-deployments/src/nemo_de
 nemo-evaluator-plugin = { source = "../../plugins/nemo-evaluator/src/nemo_evaluator", module = "nemo_evaluator", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-experimentalist-plugin = { source = "../../plugins/nemo-experimentalist/src/nemo_experimentalist_plugin", module = "nemo_experimentalist_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-insights-plugin = { source = "../../plugins/nemo-insights/src/nemo_insights_plugin", module = "nemo_insights_plugin", inherit = { "entry-points" = ["nemo.*"] } }
-# Required by agents.optimize (OptimizeJob lives here; agents plugin imports it at router setup).
+# Required by agents.optimize: nemo-agent-optimization-plugin owns OptimizeJob and dispatches to
+# the nemo.optimization-strategy plugins, of which this package supplies the `nat` strategy.
 nemo-optimization-plugin = { source = "../../plugins/nemo-optimization/src/nemo_optimization", module = "nemo_optimization", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-guardrails-plugin = { source = "../../plugins/nemo-guardrails/src/nemo_guardrails_plugin", module = "nemo_guardrails_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-rl-plugin = { source = "../../plugins/nemo-rl/src/nemo_rl_plugin", module = "nemo_rl_plugin", inherit = { "entry-points" = ["nemo.*"] } }

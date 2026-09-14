@@ -68,14 +68,14 @@ plugins/nemo-agents/vendor/codex_agent_adapter/
     plugins/nemo-agents/vendor/codex_agent_adapter/
 
 --------------------------------------------------------------------------------
-plugins/nemo-prompt-master/src/nemo_prompt_master_plugin/skills/prompt-master/
+plugins/prompt-master/src/prompt_master_plugin/skills/prompt-master/
   Prompt Master v1.8.0 vendored snapshot at commit
   2bd92518e26bf659e21e3d9ab90573fcf3ddeccb
   Copyright (c) 2026 Nidhin Joseph Nelson
   Home: https://github.com/nidhinjs/prompt-master
   License: MIT
 
-  The `nemo-prompt-master` plugin vendors the upstream skill and reference
+  The `prompt-master` plugin vendors the upstream skill and reference
   files without modification. The vendored snapshot retains its own LICENSE
   and provenance in the skill directory.
 

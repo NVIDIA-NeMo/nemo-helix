@@ -12,5 +12,5 @@ modification from:
 - License: MIT (see `LICENSE`)
 
 NeMo-specific one-shot execution instructions are supplied by
-`nemo_prompt_master_plugin.runner`; keeping them outside the vendored files
+`prompt_master_plugin.runner`; keeping them outside the vendored files
 makes the upstream boundary explicit.

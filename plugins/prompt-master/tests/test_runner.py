@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 from nemo_agents_plugin.fabric.translator import translate_agent_config
-from nemo_prompt_master_plugin.config import PromptMasterConfig
-from nemo_prompt_master_plugin.runner import (
+from prompt_master_plugin.config import PromptMasterConfig
+from prompt_master_plugin.runner import (
     PromptMasterExecutionError,
     build_optimizer_agent,
     extract_optimized_prompt,
@@ -94,7 +94,7 @@ def test_executes_the_skill_through_fabric_and_returns_the_prompt(
         )
 
     monkeypatch.setattr(
-        "nemo_prompt_master_plugin.runner.invoke_agent_config_request_once",
+        "prompt_master_plugin.runner.invoke_agent_config_request_once",
         fake_invoke,
     )
 
@@ -116,7 +116,7 @@ def test_rejects_a_failed_fabric_run(tmp_path: Path, monkeypatch: pytest.MonkeyP
         return SimpleNamespace(status="failed", response=None, error="provider unavailable")
 
     monkeypatch.setattr(
-        "nemo_prompt_master_plugin.runner.invoke_agent_config_request_once",
+        "prompt_master_plugin.runner.invoke_agent_config_request_once",
         fake_invoke,
     )
 
@@ -131,7 +131,7 @@ def test_wraps_fabric_execution_errors(tmp_path: Path, monkeypatch: pytest.Monke
         raise FabricRuntimeExecutionError("adapter could not start")
 
     monkeypatch.setattr(
-        "nemo_prompt_master_plugin.runner.invoke_agent_config_request_once",
+        "prompt_master_plugin.runner.invoke_agent_config_request_once",
         fake_invoke,
     )
 

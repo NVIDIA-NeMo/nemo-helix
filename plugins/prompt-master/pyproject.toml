@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [project]
-name = "nemo-prompt-master-plugin"
+name = "prompt-master-plugin"
 version = "0.1.0"
 description = "Prompt Master optimization for NeMo Fabric agents."
 requires-python = ">=3.12,<3.15"
 dependencies = [
+  "nemo-agent-optimization-plugin",
   "nemo-agents-plugin",
-  "nemo-optimization-plugin",
   "nemo-platform",
   "nemo-platform-plugin",
   "pydantic>=2.12.0",
@@ -16,22 +16,22 @@ dependencies = [
   "typer>=0.20.0",
 ]
 
-[project.entry-points."nemo.optimization.strategies"]
-prompt-master = "nemo_prompt_master_plugin.strategy:PromptMasterStrategy"
+[project.entry-points."nemo.optimization-strategy"]
+prompt-master = "prompt_master_plugin.strategy:PromptMasterStrategy"
 
 [project.entry-points."nemo.skills"]
-prompt-master = "nemo_prompt_master_plugin.skills:skills_dir"
+prompt-master = "prompt_master_plugin.skills:skills_dir"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nemo_prompt_master_plugin"]
+packages = ["src/prompt_master_plugin"]
 
 [tool.uv.sources]
+nemo-agent-optimization-plugin = { workspace = true }
 nemo-agents-plugin = { workspace = true }
-nemo-optimization-plugin = { workspace = true }
 nemo-platform = { workspace = true }
 nemo-platform-plugin = { workspace = true }
 

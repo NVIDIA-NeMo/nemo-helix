@@ -14,6 +14,8 @@ docs/fern/openapi/
 plugins/*/openapi/
 web/packages/studio/src/generated/
 web/vendor/
+# vendored upstream MIT skill (see NOTICE); must stay byte-identical to upstream
+plugins/prompt-master/src/prompt_master_plugin/skills/prompt-master/
 plugins/nemo-experimentalist/examples/smoke-agent/dataset/_shared/records.json
 plugins/nemo-experimentalist/examples/smoke-agent/dataset/task-template/instruction.md
 plugins/nemo-experimentalist/examples/smoke-agent/dataset/task-template/records.json

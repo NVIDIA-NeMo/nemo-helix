@@ -42,7 +42,7 @@ Run Prompt Master directly against the local Calculator Agent config:
 uv run nemo agents optimize \
   --strategy prompt-master \
   --agent plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml \
-  --optimize-config plugins/nemo-prompt-master/examples/prompt-master.yaml \
+  --optimize-config plugins/prompt-master/examples/prompt-master.yaml \
   --output new-agent.yaml
 ```
 
