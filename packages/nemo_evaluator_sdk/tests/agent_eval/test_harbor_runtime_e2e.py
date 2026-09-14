@@ -49,6 +49,29 @@ class WrappedAgent(BaseAgent):
 """
 
 
+_ENV_PROBE_AGENT = """\
+from harbor import BaseAgent
+
+
+class WrappedAgent(BaseAgent):
+    @staticmethod
+    def name() -> str:
+        return "env-probe"
+
+    def version(self) -> str | None:
+        return "1.0.0"
+
+    async def setup(self, environment) -> None:
+        return None
+
+    async def run(self, instruction, environment, context) -> None:
+        await environment.exec(
+            'test "$PROBE_TOKEN" = "probe-value" && printf "Hello, world!" > /app/hello.txt',
+            env=self.extra_env,
+        )
+"""
+
+
 def _docker_available() -> bool:
     if shutil.which("docker") is None:
         return False
@@ -146,3 +169,40 @@ async def test_harbor_resumes_a_partial_job_with_a_custom_agent_dir(tmp_path: Pa
     assert [trial.status for trial in second.trials] == [AgentEvalTrialStatus.COMPLETED] * 2
     assert {trial.task_id for trial in second.trials} == {_TASK_NAME}
     assert [trial.metadata["reward"] for trial in second.trials] == [1.0, 1.0]
+
+
+@pytest.mark.asyncio
+async def test_agent_env_names_reach_the_agent_and_persist_as_templates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A host variable named in ``agent_env_names`` reaches the agent, and only its name reaches disk.
+
+    Harbor resolves the ``${NAME}`` template when it constructs the agent and serializes the template
+    back into the job dir's ``config.json``. If either half broke, the platform's ``env_secrets`` route
+    would silently run the agent without its credential or persist that credential in plaintext.
+    """
+    pytest.importorskip("harbor")
+    if not _docker_available():
+        pytest.skip("Docker daemon is required to run a Harbor job")
+
+    monkeypatch.setenv("PROBE_TOKEN", "probe-value")
+    agent_dir = tmp_path / "agent"
+    agent_dir.mkdir()
+    (agent_dir / "harbor_wrapper.py").write_text(_ENV_PROBE_AGENT, encoding="utf-8")
+    jobs_dir = tmp_path / "jobs"
+    config = HarborRuntimeConfig(
+        jobs_dir=jobs_dir,
+        job_name="env-probe",
+        agent_import_path="harbor_wrapper:WrappedAgent",
+        agent_dir=agent_dir,
+        agent_env_names=["PROBE_TOKEN"],
+    )
+
+    result = await run_harbor_eval(config, _DATASET_DIR)
+
+    assert [trial.status for trial in result.trials] == [AgentEvalTrialStatus.COMPLETED]
+    assert [(score.metric_type, score.outputs[0].value) for score in result.scores] == [("harbor_reward", 1.0)]
+    persisted = json.loads((jobs_dir / "env-probe" / "config.json").read_text(encoding="utf-8"))
+    assert persisted["agents"][0]["env"] == {"PROBE_TOKEN": "${PROBE_TOKEN}"}
+    on_disk = [path for path in (jobs_dir / "env-probe").rglob("*") if path.is_file()]
+    assert not any("probe-value" in path.read_text(encoding="utf-8", errors="ignore") for path in on_disk)

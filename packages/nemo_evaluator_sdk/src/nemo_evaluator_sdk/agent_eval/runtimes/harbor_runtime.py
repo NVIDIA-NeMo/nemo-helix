@@ -155,7 +155,15 @@ class HarborRuntimeConfig(BaseModel):
         description=(
             "Keyword arguments forwarded to the Harbor agent's constructor, the equivalent of Harbor's "
             "``--ak key=value``. Not for secrets: Harbor persists them unredacted in the job dir's "
-            "``config.json``; inject secrets through the environment instead."
+            "``config.json``; name credentials in ``agent_env_names`` instead."
+        ),
+    )
+    agent_env_names: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Host environment variables forwarded to the Harbor agent as ``AgentConfig.env`` templates "
+            "(``${NAME}``). Harbor resolves each from this process's environment when it creates the agent and "
+            "persists only the template, so the value never reaches the job dir's ``config.json``."
         ),
     )
     n_attempts: int = Field(default=1, ge=1, description="Number of attempts Harbor runs per task.")
@@ -257,6 +265,7 @@ class HarborAgentTaskRunner:
                 "agent_import_path": config.agent_import_path if config is not None else None,
                 "agent_model_name": config.agent_model_name if config is not None else None,
                 "agent_kwargs": redact_credentials(config.agent_kwargs) if config is not None else None,
+                "agent_env_names": list(config.agent_env_names) if config is not None else None,
                 "effective_agent": _effective_harbor_agent(config),
                 "n_attempts": config.n_attempts if config is not None else None,
                 # Native mode resolves the concrete job directory inside run_tasks (the name defaults
@@ -701,6 +710,8 @@ def _cache_stamp(
     *content* is hashed separately, so a relocated but identical agent still hits;
     and ``reward_key``, which only selects which reward
     :func:`build_trials_from_job_dir` reads back and must not cost a Docker re-run.
+    ``agent_env_names`` participates by name only: the values they resolve to at run
+    time are not fingerprinted, so rotating a credential keeps the cache valid.
     """
     options = config.model_dump(exclude=set(_CACHE_IRRELEVANT_OPTIONS), mode="json")
     # `_safe_resolve` throughout, matching `_task_dirs_for`: fingerprinting is
@@ -927,11 +938,13 @@ def _build_native_job(
                 shutil.rmtree(job_dir)
                 await _attempt()
 
-        agent_kwargs = dict(config.agent_kwargs)
+        agent_options: dict[str, Any] = {
+            "model_name": config.agent_model_name,
+            "kwargs": dict(config.agent_kwargs),
+            "env": {name: f"${{{name}}}" for name in config.agent_env_names},
+        }
         if config.agent_import_path is None:
-            await _create_and_run(
-                AgentConfig(name=config.agent_name or "oracle", model_name=config.agent_model_name, kwargs=agent_kwargs)
-            )
+            await _create_and_run(AgentConfig(name=config.agent_name or "oracle", **agent_options))
         elif config.agent_dir is not None:
             # Loose wrapper file: make its directory importable for the run. The
             # jobs_dir exclusion must match _cache_stamp's, or a jobs_dir nested under
@@ -941,16 +954,10 @@ def _build_native_job(
             with scoped_harbor_agent_import(
                 agent_dir, config.agent_import_path, exclude=excluded_roots
             ) as scoped_import:
-                await _create_and_run(
-                    AgentConfig(import_path=scoped_import, model_name=config.agent_model_name, kwargs=agent_kwargs)
-                )
+                await _create_and_run(AgentConfig(import_path=scoped_import, **agent_options))
         else:
             # Already-importable module (installed package): let Harbor import it directly.
-            await _create_and_run(
-                AgentConfig(
-                    import_path=config.agent_import_path, model_name=config.agent_model_name, kwargs=agent_kwargs
-                )
-            )
+            await _create_and_run(AgentConfig(import_path=config.agent_import_path, **agent_options))
 
     return job_dir, run_job
 

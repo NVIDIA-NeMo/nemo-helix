@@ -314,12 +314,16 @@ def test_resolve_target_builds_fabric_runtime_from_runner_target(tmp_path: Path)
     assert params is None
 
 
-def test_resolve_target_builds_harbor_runtime_from_runner_target(tmp_path: Path) -> None:
+def test_resolve_target_builds_harbor_runtime_from_runner_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ctx = _job_context(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-resolved-by-the-service")
     harbor_target = HarborRunnerTarget(
         agent_name="oracle",
         agent_model_name="openai/gpt-5.4",
         agent_kwargs={"fabric_adapter_id": "nvidia.fabric.codex", "fabric_harness_settings": {"max_turns": 3}},
+        env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
         n_attempts=2,
         n_concurrent_trials=8,
         max_retries=1,
@@ -336,6 +340,8 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(tmp_path: Path)
         "fabric_adapter_id": "nvidia.fabric.codex",
         "fabric_harness_settings": {"max_turns": 3},
     }
+    # Only the name travels; the runtime hands Harbor a `${OPENAI_API_KEY}` template it expands itself.
+    assert target._config.agent_env_names == ["OPENAI_API_KEY"]
     assert target._config.n_attempts == 2
     assert target._config.reward_key == "score"
     # A runner shapes its own request, so it contributes no prompt template or inference params.
@@ -453,6 +459,18 @@ def test_runner_target_is_accepted(tmp_path: Path) -> None:
 def test_harbor_runner_target_is_accepted() -> None:
     spec = AgentEvalSpec(tasks=[_task_spec()], target=HarborRunnerTarget(agent_name="oracle"))
     assert isinstance(spec.target, HarborRunnerTarget)
+
+
+def test_resolve_target_refuses_harbor_env_secret_missing_from_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unresolved `env_secrets` entry fails by name here, not inside a Docker trial as a bare auth error."""
+    ctx = _job_context(tmp_path)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    harbor_target = HarborRunnerTarget(env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")})
+
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+        AgentEvalJob._resolve_target(harbor_target, ctx)
 
 
 def test_harbor_agent_kwargs_round_trip_the_wire_unchanged() -> None:
@@ -1791,3 +1809,30 @@ async def test_compile_resolves_gym_runner_env_secrets() -> None:
     stored_target = cast(dict[str, Any], step.config)["target"]
     assert stored_target["env_secrets"] == {"OPENAI_API_KEY": "my-workspace/openai-key"}
     assert stored_target["env_vars"] == {"WMT_TRANSLATION_COMET_PY_CACHE": "/shared/cache"}
+
+
+async def test_compile_resolves_harbor_runner_env_secrets(mocker: MockerFixture) -> None:
+    """A Harbor agent's model key reaches it through the job environment, not through `agent_kwargs`.
+
+    `agent_kwargs` is persisted verbatim by Harbor into the job dir's config.json, so a credential there
+    lands in plaintext on disk; the secret reference is the only thing allowed to travel on the spec.
+    """
+    _patch_execution_profiles(mocker, [SubprocessJobExecutionProfile()])
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=HarborRunnerTarget(
+            agent_import_path="nemo_fabric.integrations.harbor:FabricAgent",
+            agent_kwargs={"fabric_adapter_id": "nvidia.fabric.codex"},
+            env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
+        ),
+    )
+
+    compiled = await AgentEvalJob.compile(
+        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_platform()
+    )
+
+    step = PlatformJobSpec.model_validate(compiled).steps[0]
+    secrets = {env.name: env.from_secret.name for env in step.environment or [] if env.from_secret}
+    assert secrets == {"OPENAI_API_KEY": "my-workspace/openai-key"}
+    stored_target = cast(dict[str, Any], step.config)["target"]
+    assert stored_target["env_secrets"] == {"OPENAI_API_KEY": "my-workspace/openai-key"}

@@ -941,7 +941,7 @@ async def test_under_covered_job_resumes_when_harbor_can(tmp_path: Path, monkeyp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mutation", ["agent", "agent_kwargs", "task", "option"])
+@pytest.mark.parametrize("mutation", ["agent", "agent_kwargs", "agent_env_names", "task", "option"])
 async def test_changed_inputs_invalidate_the_cache(tmp_path: Path, mutation: str) -> None:
     # Each of these changes what a run would produce, so the stamped dir must not be
     # served. Reaching run_job (and failing there) is the observable signal.
@@ -959,6 +959,8 @@ async def test_changed_inputs_invalidate_the_cache(tmp_path: Path, mutation: str
         )
     elif mutation == "agent_kwargs":
         config = config.model_copy(update={"agent_kwargs": {"fabric_telemetry": "relay"}})
+    elif mutation == "agent_env_names":
+        config = config.model_copy(update={"agent_env_names": ["AGENT_MODE"]})
     elif mutation == "task":
         (dataset_path / "t" / "task.toml").write_text('[task]\nname = "t"\nchanged = true\n')
     else:
@@ -969,20 +971,24 @@ async def test_changed_inputs_invalidate_the_cache(tmp_path: Path, mutation: str
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("agent_shape", ["builtin", "installed_import_path", "agent_dir"])
-async def test_agent_kwargs_reach_harbor_agent_config_unchanged(
+async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent_shape: str
 ) -> None:
-    """``agent_kwargs`` must land on Harbor's ``AgentConfig.kwargs`` (its ``--ak``) for every agent shape.
+    """``agent_kwargs`` and ``agent_env_names`` must land on Harbor's ``AgentConfig`` for every agent shape.
 
-    Harbor merges ``AgentConfig.kwargs`` into the agent constructor for built-in and import-path agents
-    alike, so a shape that dropped them would silently run the agent with its defaults.
+    Harbor merges ``AgentConfig.kwargs`` into the agent constructor and resolves ``AgentConfig.env``
+    templates from the host environment for built-in and import-path agents alike, so a shape that
+    dropped either would silently run the agent with its defaults or without its credential.
     """
     import harbor.job
 
     agent_kwargs = {"fabric_adapter_id": "nvidia.fabric.codex", "fabric_harness_settings": {"turns": [1, 2]}}
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir()
-    agent_options: dict[str, object] = {"agent_kwargs": agent_kwargs}
+    agent_options: dict[str, object] = {
+        "agent_kwargs": agent_kwargs,
+        "agent_env_names": ["OPENAI_API_KEY", "FABRIC_LOG"],
+    }
     if agent_shape == "installed_import_path":
         agent_options["agent_import_path"] = "mypkg.agent:WrappedAgent"
     elif agent_shape == "agent_dir":
@@ -1010,6 +1016,7 @@ async def test_agent_kwargs_reach_harbor_agent_config_unchanged(
     assert len(created) == 1
     (agent_config,) = created[0].agents
     assert agent_config.kwargs == agent_kwargs
+    assert agent_config.env == {"OPENAI_API_KEY": "${OPENAI_API_KEY}", "FABRIC_LOG": "${FABRIC_LOG}"}
     if agent_shape == "builtin":
         assert agent_config.name == "oracle"
     else:
