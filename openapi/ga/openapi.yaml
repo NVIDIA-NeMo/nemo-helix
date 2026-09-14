@@ -8427,13 +8427,15 @@ components:
           minLength: 1
           pattern: ^[a-zA-Z0-9][a-zA-Z0-9._+/-]*$
         scope:
+          items:
+            type: string
+            pattern: ^\s*[^\s:]+\s*$
           title: Scope
           description: Optional service names that restrict this key to read and write
             access for those services.
           nullable: true
-          items:
-            type: string
           type: array
+          minItems: 1
         rotates:
           title: Rotates
           description: JTI of a prior Scoped Access Key owned by the caller to revoke
@@ -8787,12 +8789,21 @@ components:
       properties:
         workspace:
           type: string
+          pattern: ^\s*\S.*$
           title: Workspace
+          description: Workspace name. Must not be blank.
         roles:
           items:
             type: string
+          contains:
+            pattern: ^\s*\S.*$
           type: array
+          minContains: 1
           title: Roles
+          description: Roles to grant in the workspace. Defaults to ['Editor'] when
+            omitted.
+          default:
+          - Editor
       type: object
       required:
       - workspace

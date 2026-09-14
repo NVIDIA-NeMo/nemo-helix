@@ -12,22 +12,36 @@ AccessKeyStatus = Literal["ACTIVE", "EXPIRED", "REVOKED", "SUSPENDED", "ROTATING
 AccessKeyReversibleStatus = Literal["ACTIVE", "EXPIRED", "SUSPENDED"]
 AccessKeyEntityType = Literal["USER", "SERVICE_ACCOUNT"]
 ACCESS_KEY_JTI_PATTERN = r"^ak_[0-9a-f]{32}$"
+# Not blank once trimmed. Keep in sync with the `.strip()` checks below (this is what OpenAPI shows).
+_NON_BLANK_PATTERN = r"^\s*\S.*$"
+# A service/role name with no whitespace or ':' once trimmed (those chars are claim delimiters).
+_SCOPE_ITEM_PATTERN = r"^\s*[^\s:]+\s*$"
 
 
 class AccessKeyWorkspaceGrant(BaseModel):
     """Workspace membership to grant to a newly created access key principal."""
 
-    workspace: str
-    roles: list[str] = Field(default_factory=lambda: ["Editor"])
+    workspace: str = Field(
+        pattern=_NON_BLANK_PATTERN,
+        description="Workspace name. Must not be blank.",
+    )
+    roles: list[str] = Field(
+        default_factory=lambda: ["Editor"],
+        json_schema_extra={
+            "x-schema-default": ["Editor"],
+            # Blank entries get dropped below, but at least one non-blank role must remain.
+            "contains": {"pattern": _NON_BLANK_PATTERN},
+            "minContains": 1,
+        },
+        description="Roles to grant in the workspace. Defaults to ['Editor'] when omitted.",
+    )
 
     @model_validator(mode="after")
     def _normalize(self) -> Self:
         workspace = self.workspace.strip()
         if not workspace:
             raise ValueError("workspace must not be blank")
-        # An explicit empty/blank-only roles list would otherwise reach the workspace-members
-        # API as a no-op grant (no exception, no binding created) — reject it here instead of
-        # silently creating a key whose requested access was never provisioned.
+        # Reject empty roles instead of silently creating a no-op grant.
         roles = [role.strip() for role in self.roles if role.strip()]
         if not roles:
             raise ValueError("roles, if provided, must contain at least one non-empty role")
@@ -83,7 +97,8 @@ class AccessKeyCreateRequest(BaseModel):
     )
     scope: list[str] | None = Field(
         default=None,
-        json_schema_extra={"nullable": True},
+        min_length=1,
+        json_schema_extra={"nullable": True, "items": {"type": "string", "pattern": _SCOPE_ITEM_PATTERN}},
         description="Optional service names that restrict this key to read and write access for those services.",
     )
     rotates: str | None = Field(
@@ -105,19 +120,23 @@ class AccessKeyCreateRequest(BaseModel):
     def _validate_scope(self) -> Self:
         if self.scope is None:
             return self
-        # An explicitly empty (or whitespace/comma-only) scope would otherwise mint the same
-        # unscoped, full-access token as omitting `scope` entirely — the opposite of what a
-        # caller asking to restrict a key would expect. Fail closed instead.
+        # Reject empty scope instead of silently minting an unscoped, full-access token.
         normalized = [service.strip() for service in self.scope]
         if not normalized or any(not service for service in normalized):
             raise ValueError("scope, if provided, must contain at least one non-empty service name")
-        # Service names are later joined into a single space-delimited `service:read
-        # service:write ...` claim, so a name containing whitespace or `:` would corrupt that
-        # claim's delimiters and could be reinterpreted downstream as a different service's
-        # scope entirely.
+        # Service names later join into one space-delimited claim, so ':' or whitespace would corrupt it.
         if any(char.isspace() or char == ":" for service in normalized for char in service):
             raise ValueError("scope service names must not contain whitespace or ':' characters")
         self.scope = normalized
+        return self
+
+    @model_validator(mode="after")
+    def _validate_workspace_grants(self) -> Self:
+        seen: set[str] = set()
+        for grant in self.workspaces or []:
+            if grant.workspace in seen:
+                raise ValueError(f"workspaces must not contain duplicate workspace names: {grant.workspace}")
+            seen.add(grant.workspace)
         return self
 
 

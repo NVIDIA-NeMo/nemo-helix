@@ -352,9 +352,8 @@ def test_access_key_issuer_service_omits_scope_claim_when_unset(tmp_path):
 
 @pytest.mark.parametrize("scope", [[], [""], ["  "], ["intake", ""]])
 def test_access_key_create_request_rejects_explicit_empty_scope(scope):
-    # An explicitly empty (or blank-only) scope must not silently fall back to the unscoped,
-    # full-access behavior of omitting `scope` entirely.
-    with pytest.raises(ValidationError, match="non-empty service name"):
+    # Empty/blank scope must not quietly fall back to unscoped, full-access.
+    with pytest.raises(ValidationError):
         AccessKeyCreateRequest(scope=scope)
 
 
@@ -370,9 +369,7 @@ def test_access_key_create_request_rejects_explicit_empty_scope(scope):
     ],
 )
 def test_access_key_create_request_rejects_scope_with_whitespace_or_colon(scope):
-    # Service names are serialized into a single space-delimited `service:read service:write ...`
-    # claim, so a name containing one of those delimiters would corrupt the claim and could be
-    # reinterpreted downstream as an unrelated service's scope.
+    # Service names join into one space-delimited claim, so these chars would corrupt it.
     with pytest.raises(ValidationError, match="whitespace or ':'"):
         AccessKeyCreateRequest(scope=scope)
 
