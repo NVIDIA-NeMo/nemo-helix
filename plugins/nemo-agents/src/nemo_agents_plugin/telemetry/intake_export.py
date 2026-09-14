@@ -110,20 +110,8 @@ def configure_intake_atif_export(
             the agent process; the values deliberately never enter the config,
             which is written into the run's artifacts.
     """
-    section = config.get("telemetry")
-    try:
-        telemetry = TelemetryConfig.model_validate(section if isinstance(section, dict) else {})
-    except ValidationError as exc:
-        # Leave a section we do not understand exactly as we found it. The jobs
-        # path validates the whole config moments later and will report this
-        # properly; deployments do not, and a telemetry key is no reason to
-        # fail one.
-        logger.warning("Leaving an unrecognized telemetry section unwired: %s", exc)
-        return False
-
-    if telemetry.enabled is False:
-        return False
-    if _declares_atif_storage(telemetry):
+    telemetry = _telemetry_awaiting_destination(config)
+    if telemetry is None:
         return False
 
     storage: dict[str, object] = {
@@ -134,11 +122,6 @@ def configure_intake_atif_export(
         storage["header_env"] = dict(header_env)
 
     atif = dict(telemetry.atif or {})
-    if atif.get("enabled") is False:
-        # Declining ATIF while leaving telemetry on is a real choice -- an agent
-        # may want only OTel -- and overriding it would be the opposite of
-        # preserving an explicit declaration.
-        return False
     atif["enabled"] = True
     atif["storage"] = [storage]
 
@@ -152,6 +135,53 @@ def configure_intake_atif_export(
     )
     config["telemetry"] = wired.model_dump(exclude_none=True)
     return True
+
+
+def wants_intake_atif_export(config: dict[str, Any]) -> bool:
+    """Whether *config* leaves its ATIF destination for the backend to fill in.
+
+    Reads the config's own ``telemetry`` section and nothing else, which makes
+    this cheap enough to ask first. :func:`supports_intake_atif_export` resolves
+    a Fabric plan to answer what the *adapter* can do; an agent that already
+    opted out, or that named its own destination, should not pay for that.
+
+    Answering True is not a promise that wiring will happen -- the adapter still
+    has to support the export -- only that nothing in the config forbids it.
+    """
+    return _telemetry_awaiting_destination(config) is not None
+
+
+def _telemetry_awaiting_destination(config: dict[str, Any]) -> TelemetryConfig | None:
+    """Return the parsed telemetry when the backend should fill in a destination.
+
+    ``None`` means leave the config alone, for any of the reasons that amount to
+    "someone already decided": an unreadable section, an explicit opt-out, a
+    declared ATIF destination, or ATIF declined while telemetry stays on.
+
+    Single source of truth for that reading, so the predicate callers ask up
+    front and the wiring itself cannot drift apart.
+    """
+    section = config.get("telemetry")
+    try:
+        telemetry = TelemetryConfig.model_validate(section if isinstance(section, dict) else {})
+    except ValidationError as exc:
+        # Leave a section we do not understand exactly as we found it. The jobs
+        # path validates the whole config moments later and will report this
+        # properly; deployments do not, and a telemetry key is no reason to
+        # fail one.
+        logger.warning("Leaving an unrecognized telemetry section unwired: %s", exc)
+        return None
+
+    if telemetry.enabled is False:
+        return None
+    if _declares_atif_storage(telemetry):
+        return None
+    if isinstance(telemetry.atif, dict) and telemetry.atif.get("enabled") is False:
+        # Declining ATIF while leaving telemetry on is a real choice -- an agent
+        # may want only OTel -- and overriding it would be the opposite of
+        # preserving an explicit declaration.
+        return None
+    return telemetry
 
 
 def _declares_atif_storage(telemetry: TelemetryConfig) -> bool:

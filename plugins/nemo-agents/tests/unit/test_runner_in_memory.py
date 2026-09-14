@@ -42,6 +42,16 @@ def _backend(workspace_dir: Path) -> InMemoryRunnerBackend:
     return InMemoryRunnerBackend(cfg)
 
 
+def _without_telemetry(config: dict[str, Any]) -> dict[str, Any]:
+    """Drop the ``telemetry`` the backend wires in on its own.
+
+    Tests about staging and validation care that the *agent's* config reaches
+    the child unchanged. The auto-wired export is the backend's addition and is
+    pinned by the telemetry tests at the bottom of this module.
+    """
+    return {key: value for key, value in config.items() if key != "telemetry"}
+
+
 # ---------------------------------------------------------------------------
 # Default workspace_dir resolves through nmp_user_data_dir()
 # ---------------------------------------------------------------------------
@@ -235,8 +245,11 @@ async def test_create_deployment_validates_platform_agent_config(tmp_path: Path)
     assert info.port == 49210
     assert info.pid == 4242
     assert Path(info.log_path).exists()
-    assert validation_calls == [{"config": config, "base_dir": tmp_path / "system" / "ws" / "fabric-dep-fabric"}]
-    assert yaml.safe_load((Path(info.extra["base_dir"]) / "agent.yaml").read_text()) == config
+    assert validation_calls == [
+        {"config": ANY, "base_dir": tmp_path / "system" / "ws" / "fabric-dep-fabric"},
+    ]
+    assert _without_telemetry(validation_calls[0]["config"]) == config
+    assert _without_telemetry(yaml.safe_load((Path(info.extra["base_dir"]) / "agent.yaml").read_text())) == config
     status = await backend.get_deployment_status("ws", "fabric-dep")
     assert status is info
 
@@ -582,7 +595,7 @@ async def test_create_deployment_stages_ethos_fileset_into_base_dir(tmp_path: Pa
     base_dir = Path(info.extra["base_dir"])
     assert staged == [{"workspace": "ws", "agent_name": "fabric-agent", "base_dir": base_dir}]
     assert (base_dir / "mcps" / "calculator.py").exists()
-    assert yaml.safe_load((base_dir / "agent.yaml").read_text()) == config
+    assert _without_telemetry(yaml.safe_load((base_dir / "agent.yaml").read_text())) == config
 
 
 @pytest.mark.asyncio
@@ -664,3 +677,195 @@ async def test_redeploy_after_crash_does_not_merge_previous_fileset(tmp_path: Pa
 
     assert base_dirs[0] == base_dirs[1]
     assert sorted(path.name for path in (base_dirs[1] / "skills").iterdir()) == ["new.md"]
+
+
+# ---------------------------------------------------------------------------
+# Intake ATIF telemetry is auto-wired for Fabric-backed subprocess deployments
+#
+# The child runs on the platform host, so the platform's own base URL reaches
+# it with no container rebase and no auth-proxy sidecar in front.
+# ---------------------------------------------------------------------------
+
+
+_INTAKE_ENDPOINT = "http://platform.test:8080/apis/intake/v2/workspaces/ws/ingest/atif"
+
+
+def _telemetry_agent_config(telemetry: dict[str, Any] | None = None) -> dict[str, Any]:
+    config: dict[str, Any] = {
+        "config_format": "nemo-agents-spec-v1",
+        "name": "fabric-agent",
+        "default_harness": "hermes",
+        "harnesses": {"hermes": {"kind": "hermes"}},
+        "models": {
+            "default": {
+                "provider": "nvidia",
+                "model": "default/test-model",
+                "base_url": "http://platform/apis/inference-gateway/v2/workspaces/ws/openai/-/v1",
+                "api_key_env": "NVIDIA_API_KEY",
+            }
+        },
+    }
+    if telemetry is not None:
+        config["telemetry"] = telemetry
+    return config
+
+
+async def _deploy_and_read_staged_config(
+    backend: InMemoryRunnerBackend,
+    config: dict[str, Any],
+    *,
+    port: int = 49400,
+) -> tuple[DeploymentInfo, dict[str, Any]]:
+    """Deploy *config* with validation and spawn stubbed; return the staged YAML."""
+
+    async def _validate(config_: dict[str, Any], *, base_dir: Path) -> Any:
+        del config_, base_dir
+        return SimpleNamespace(agent_config=SimpleNamespace(name="fabric-agent"))
+
+    def _spawn_fabric(self_, name, config_path, log_path, port_, credential_env=None):  # noqa: ANN001
+        del self_, name, config_path, port_, credential_env
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("")
+        return SimpleNamespace(pid=4242, returncode=None, poll=lambda: None)
+
+    with (
+        patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", _validate),
+        patch.object(InMemoryRunnerBackend, "_spawn_fabric", _spawn_fabric),
+    ):
+        info = await backend.create_deployment("ws", "fabric-dep", config, port=port)
+
+    staged = yaml.safe_load((Path(info.extra["base_dir"]) / "agent.yaml").read_text())
+    return info, staged
+
+
+@pytest.fixture
+def platform_base_url(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Pin the platform URL the wired endpoint must be built from."""
+    monkeypatch.delenv("NEMO_BASE_URL", raising=False)
+    monkeypatch.setenv("NMP_BASE_URL", "http://platform.test:8080")
+    return "http://platform.test:8080"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_wires_intake_telemetry_when_config_is_silent(tmp_path: Path) -> None:
+    backend = _backend(tmp_path)
+
+    _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config())
+
+    assert staged["telemetry"]["enabled"] is True
+    assert staged["telemetry"]["provider"] == "relay"
+    assert staged["telemetry"]["agent_name"] == "fabric-agent"
+    assert staged["telemetry"]["atif"] == {
+        "enabled": True,
+        "storage": [{"type": "http", "endpoint": _INTAKE_ENDPOINT}],
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_omits_header_env(tmp_path: Path) -> None:
+    """No sidecar and no env-named credentials: subprocess exports unauthenticated.
+
+    Pinned so that wiring identity here later is a deliberate change rather than
+    a silent one — it only makes sense together with the rest of subprocess mode
+    under platform auth.
+    """
+    backend = _backend(tmp_path)
+
+    _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config())
+
+    assert "header_env" not in staged["telemetry"]["atif"]["storage"][0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_honors_telemetry_opt_out(tmp_path: Path) -> None:
+    backend = _backend(tmp_path)
+
+    _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config({"enabled": False}))
+
+    assert staged["telemetry"] == {"enabled": False}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_preserves_declared_atif_storage(tmp_path: Path) -> None:
+    """An explicit destination beats an inferred one."""
+    declared = {
+        "atif": {"storage": [{"type": "http", "endpoint": "https://telemetry.example.com/atif"}]},
+    }
+    backend = _backend(tmp_path)
+
+    _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config(declared))
+
+    assert staged["telemetry"] == declared
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_does_not_mutate_the_caller_config(tmp_path: Path) -> None:
+    """The mapping passed in is the live AgentDeployment entity the controller re-saves.
+
+    Wiring it in place would persist an inferred endpoint into the stored
+    deployment, which no later run would know to recompute.
+    """
+    backend = _backend(tmp_path)
+    config = _telemetry_agent_config()
+
+    _, staged = await _deploy_and_read_staged_config(backend, config)
+
+    assert "telemetry" not in config
+    assert "telemetry" in staged
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_starts_when_adapter_cannot_export_atif(tmp_path: Path) -> None:
+    """An adapter with no Relay ATIF output runs untraced rather than failing.
+
+    Patched at the probe rather than expressed as a config, because "this
+    adapter does not advertise ATIF" is a property of the adapter descriptor,
+    not of anything the agent config can say.
+    """
+    backend = _backend(tmp_path)
+    config = _telemetry_agent_config()
+
+    with patch("nemo_agents_plugin.telemetry.intake_export.supports_intake_atif_export", return_value=False):
+        info, staged = await _deploy_and_read_staged_config(backend, config)
+
+    assert info.status == "starting"
+    assert "telemetry" not in staged
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_skips_adapter_probe_when_telemetry_is_opted_out(tmp_path: Path) -> None:
+    """The opt-out is answered before the probe resolves a Fabric plan.
+
+    Ordering, not behavior: the staged config is the same either way. Pinned
+    because the wasted plan is invisible from the output -- only the call count
+    shows it.
+    """
+    backend = _backend(tmp_path)
+    probe = MagicMock(return_value=True)
+
+    with patch("nemo_agents_plugin.telemetry.intake_export.supports_intake_atif_export", probe):
+        _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config({"enabled": False}))
+
+    probe.assert_not_called()
+    assert staged["telemetry"] == {"enabled": False}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_probes_adapter_when_config_is_silent(tmp_path: Path) -> None:
+    """The counterpart: a config that wants wiring does reach the probe."""
+    backend = _backend(tmp_path)
+    probe = MagicMock(return_value=True)
+
+    with patch("nemo_agents_plugin.telemetry.intake_export.supports_intake_atif_export", probe):
+        _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config())
+
+    probe.assert_called_once()
+    assert staged["telemetry"]["atif"]["storage"] == [{"type": "http", "endpoint": _INTAKE_ENDPOINT}]
