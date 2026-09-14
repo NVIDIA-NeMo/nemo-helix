@@ -103,6 +103,7 @@ from scaled_evals.dispatch.switchyard import (
     switchyard_routing_runner_env,
     switchyard_runner_env,
 )
+from scaled_evals.dispatch.switchyard_archive import check_campaign_evidence
 from scaled_evals.dispatch.switchyard_run_manifest import write_switchyard_run_manifest
 from scaled_evals.harbor_runners import resolve_harbor_runner
 from scaled_evals.harbor_viewer import (
@@ -576,7 +577,7 @@ class Dispatcher:
         try:
             with self.connect() as conn:
                 BenchmarkArchiveRepository(conn).validate_members(job["benchmark_run_id"], job["members"])
-            archive = build_benchmark_archive(job, check_claim=check_claim)
+            archive = build_benchmark_archive(job, check_claim=check_claim, evidence_checks=(check_campaign_evidence,))
             check_claim()
             with self.connect() as conn:
                 BenchmarkArchiveRepository(conn).finish(job, **archive)

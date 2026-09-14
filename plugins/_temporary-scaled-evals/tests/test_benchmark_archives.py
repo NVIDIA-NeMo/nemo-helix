@@ -25,6 +25,7 @@ from scaled_evals.api.repositories.base_repository import Conflict, NotFound
 from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
 from scaled_evals.api.settings import settings
 from scaled_evals.benchmark_archive import BenchmarkArchiveError, build_benchmark_archive
+from scaled_evals.dispatch.switchyard_archive import check_campaign_evidence
 from scaled_evals.dispatch.worker import Dispatcher
 
 NOW = datetime(2026, 9, 11, tzinfo=UTC)
@@ -142,8 +143,11 @@ def build(monkeypatch, tmp_path, sources, *, benchmark_artifacts=None, listing=N
         return destination.stat().st_size
 
     monkeypatch.setattr(s3, "upload_file", upload)
-    built = build_benchmark_archive(job(members=members), check_claim=lambda: None)
+    built = build_benchmark_archive(
+        job(members=members), check_claim=lambda: None, evidence_checks=(check_campaign_evidence,)
+    )
     assert built["size_bytes"] > 0
+    assert built["sha256"] == hashlib.sha256((tmp_path / "result.tar.gz").read_bytes()).hexdigest()
     assert captured["key"] == "benchmark-runs/bmr_1/archives/gen/claim.tar.gz"
     files = {}
     with tarfile.open(tmp_path / "result.tar.gz") as archive:
@@ -260,9 +264,10 @@ def test_api_missing_and_ready_archive(api_db, monkeypatch):
     api_db.benchmark_archives.get.return_value = None
     assert client.get("/v1/benchmark-runs/bmr_1/archive").json()["status"] == "missing"
     assert client.get("/v1/benchmark-runs/bmr_1/archive/download").status_code == 404
-    api_db.benchmark_archives.get.return_value = job(status="ready", object_key="private/key")
+    api_db.benchmark_archives.get.return_value = job(status="ready", object_key="private/key", sha256="a" * 64)
     data = client.get("/v1/benchmark-runs/bmr_1/archive").json()
     assert data["download"] == "/benchmark-runs/bmr_1/archive/download"
+    assert data["sha256"] == "a" * 64
     assert "object_key" not in data
     monkeypatch.setattr(s3, "stream_object", lambda key: iter([b"archive"]))
     response = client.get("/v1/benchmark-runs/bmr_1/archive/download")
@@ -496,7 +501,7 @@ def test_mounted_openapi_includes_benchmark_archive_contract():
     assert "200" in operations["get"]["responses"]
     assert "get" in schema["paths"]["/v1/benchmark-runs/{run_id}/archive/download"]
     fields = schema["components"]["schemas"]["BenchmarkArchiveResponse"]["properties"]
-    assert {"members", "download", "generation", "partial"} <= fields.keys()
+    assert {"members", "download", "generation", "partial", "sha256"} <= fields.keys()
     assert not {"claim_token", "object_key", "attempts"} & fields.keys()
 
 
@@ -557,7 +562,8 @@ def test_archive_heartbeat_distinguishes_transient_errors_from_lost_ownership(mo
     def connect():
         yield MagicMock()
 
-    def build_archive(job, *, check_claim):
+    def build_archive(job, *, check_claim, evidence_checks):
+        assert evidence_checks == (check_campaign_evidence,)
         check_claim()
         return {"object_key": "archive", "size_bytes": 123}
 

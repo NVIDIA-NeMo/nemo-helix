@@ -18,5 +18,9 @@ CREATE TABLE IF NOT EXISTS benchmark_run_archives (
     built_at TIMESTAMPTZ,
     error TEXT
 );
+-- Additive so preview databases that already applied the initial 042 also upgrade.
+ALTER TABLE benchmark_run_archives ADD COLUMN IF NOT EXISTS sha256 TEXT
+    CHECK (sha256 IS NULL OR sha256 ~ '^[0-9a-f]{64}$');
+
 CREATE INDEX IF NOT EXISTS benchmark_run_archives_queue ON benchmark_run_archives (requested_at)
     WHERE status IN ('queued', 'building');

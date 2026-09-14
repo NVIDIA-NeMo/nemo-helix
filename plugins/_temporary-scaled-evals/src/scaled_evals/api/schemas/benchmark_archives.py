@@ -21,6 +21,7 @@ class BenchmarkArchiveResponse(BaseModel):
     requested_at: datetime | None = None
     built_at: datetime | None = None
     size_bytes: int | None = None
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     error: str | None = None
     partial: bool | None = None
     members: list[BenchmarkArchiveMember] = Field(default_factory=list)

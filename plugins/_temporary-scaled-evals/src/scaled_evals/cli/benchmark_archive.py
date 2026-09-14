@@ -3,6 +3,7 @@
 
 """Download and safely materialize a benchmark archive without partial outputs."""
 
+import hashlib
 import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
@@ -19,11 +20,20 @@ def save_benchmark_archive(
     dest: Path,
     *,
     archive_only: bool,
+    expected_sha256: str | None = None,
+    expected_size_bytes: int | None = None,
 ) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".benchmark-download-", dir=dest.parent) as tmp:
         archive_path = Path(tmp) / "archive.tar.gz"
         download_artifact(client, url, archive_path)
+        if expected_size_bytes is not None and archive_path.stat().st_size != expected_size_bytes:
+            raise click.ClickException("downloaded archive size does not match the API; retry the download")
+        if expected_sha256 is not None:
+            with archive_path.open("rb") as body:
+                actual_sha256 = hashlib.file_digest(body, "sha256").hexdigest()
+            if actual_sha256 != expected_sha256:
+                raise click.ClickException("downloaded archive checksum does not match the API; retry the download")
         if archive_only:
             # Exclusive creation protects an existing destination even if it appeared mid-download.
             dest.hardlink_to(archive_path)

@@ -2890,8 +2890,21 @@ def benchmark_run_download(
             f"archive {data['status']}: {data.get('error') or 'not ready'}; "
             f"retry with benchmark-run archive {run_id} --build"
         )
-    save_benchmark_archive(ctx.obj["client"], data["download"], dest, archive_only=archive_only)
+    save_benchmark_archive(
+        ctx.obj["client"],
+        data["download"],
+        dest,
+        archive_only=archive_only,
+        expected_sha256=data.get("sha256"),
+        expected_size_bytes=data.get("size_bytes"),
+    )
     summary = [f"downloaded Harbor experiment -> {dest}"]
+    if data.get("sha256"):
+        summary.append(f"verified archive sha256: {data['sha256']}")
+    else:
+        summary.append(
+            "Legacy archive has no server checksum; rebuild it with benchmark-run archive --force to verify downloads."
+        )
     if data.get("partial"):
         summary.append("Some member trial data is missing; see scaled-evals-benchmark-archive.json.")
     emit({**data, "path": str(dest)}, ctx.obj["json"], summary)

@@ -60,6 +60,10 @@ def test_archive_upgrade_replay_and_queue(tmp_path: Path, monkeypatch: pytest.Mo
                  archive_status, archive_object_key, archive_built_at, archive_size_bytes, evidence_status)
                 VALUES ('ev_1', 'Eval', 'task_1', 1, 'bmr_1', 'succeeded', 'ready', 'archive', NOW(), 42, 'ready')""")
         assert migrations.apply_sql(dsn, schema="scaled_evals")[0] == 0
+        # An early preview may have applied 042 before checksum storage existed.
+        with psycopg.connect(dsn, autocommit=True) as preview:
+            preview.execute("ALTER TABLE benchmark_run_archives DROP COLUMN sha256")
+        migrations.apply_sql(dsn, schema="scaled_evals")
         with psycopg.Connection[dict[str, Any]].connect(dsn, autocommit=True, row_factory=dict_row) as conn:
             repo = BenchmarkArchiveRepository(conn)
             queued = repo.request("bmr_1")
@@ -79,11 +83,14 @@ def test_archive_upgrade_replay_and_queue(tmp_path: Path, monkeypatch: pytest.Mo
             repo.fail(stale, "must not overwrite")
             repo.finish(stale, object_key="stale", size_bytes=1)
             assert _archive(repo)["status"] == "building"
-            repo.finish(claim, object_key="combined", size_bytes=100)
+            repo.finish(claim, object_key="combined", size_bytes=100, sha256="c" * 64)
+            migrations.apply_sql(dsn, schema="scaled_evals")
             assert _archive(repo)["object_key"] == "combined"
+            assert _archive(repo)["sha256"] == "c" * 64
             assert repo.request("bmr_1")["generation"] == queued["generation"]
             rebuilt = repo.request("bmr_1", force=True)
             assert rebuilt["generation"] != queued["generation"]
+            assert rebuilt["sha256"] is None
             claim = repo.claim(claim_timeout=30)
             assert claim is not None
             conn.execute("UPDATE evaluations SET current_execution = 2 WHERE id = 'ev_1'")

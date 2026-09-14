@@ -80,7 +80,7 @@ class BenchmarkArchiveRepository:
                     generation = EXCLUDED.generation, status = 'queued',
                     members = EXCLUDED.members, requested_at = NOW(),
                     claimed_at = NULL, claim_token = NULL, attempts = 0,
-                    object_key = NULL, size_bytes = NULL, partial = NULL,
+                    object_key = NULL, size_bytes = NULL, sha256 = NULL, partial = NULL,
                     built_at = NULL, error = NULL
                 RETURNING *
                 """,
@@ -147,6 +147,7 @@ class BenchmarkArchiveRepository:
         *,
         object_key: str,
         size_bytes: int,
+        sha256: str | None = None,
         partial: bool = False,
     ) -> None:
         with self.conn.transaction(), self.conn.cursor() as cur:
@@ -154,10 +155,10 @@ class BenchmarkArchiveRepository:
             cur.execute(
                 """
                 UPDATE benchmark_run_archives SET status = 'ready', object_key = %s,
-                    size_bytes = %s, partial = %s, built_at = NOW(), error = NULL, claimed_at = NULL
+                    size_bytes = %s, sha256 = %s, partial = %s, built_at = NOW(), error = NULL, claimed_at = NULL
                 WHERE benchmark_run_id = %s AND claim_token = %s AND status = 'building'
                 """,
-                (object_key, size_bytes, partial, job["benchmark_run_id"], job["claim_token"]),
+                (object_key, size_bytes, sha256, partial, job["benchmark_run_id"], job["claim_token"]),
             )
 
     def fail(self, job: dict, error: str) -> None:

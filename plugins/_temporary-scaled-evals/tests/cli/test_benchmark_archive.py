@@ -199,3 +199,64 @@ def test_download_keeps_platform_mount_prefix_and_auth(monkeypatch, tmp_path) ->
         "/apis/scaled-evals/v1/benchmark-runs/bmr_1/archive",
         "/apis/scaled-evals/v1/benchmark-runs/bmr_1/archive/download",
     ]
+
+
+@pytest.mark.parametrize("archive_only", [False, True])
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_download_checks_server_digest_before_publishing(monkeypatch, tmp_path, archive_only, corrupt) -> None:
+    import hashlib
+    import io
+    import tarfile
+
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w:gz") as archive:
+        info = tarfile.TarInfo("bmr_1/result.json")
+        info.size = 2
+        archive.addfile(info, io.BytesIO(b"{}"))
+    original = stream.getvalue()
+    # Change bytes without changing the length; size checks alone cannot detect this.
+    downloaded = bytes([original[0] ^ 1]) + original[1:] if corrupt else original
+
+    def handler(request):
+        if request.url.path.endswith("/download"):
+            return httpx.Response(200, content=downloaded)
+        return httpx.Response(
+            200,
+            json={
+                "status": "ready",
+                "download": "/benchmark-runs/bmr_1/archive/download",
+                "size_bytes": len(original),
+                "sha256": hashlib.sha256(original).hexdigest(),
+            },
+        )
+
+    dest = tmp_path / ("archive.tar.gz" if archive_only else "experiment")
+    args = ["benchmark-run", "download", "bmr_1", "-o", str(dest)]
+    if archive_only:
+        args.append("--archive-only")
+    result = runner_with(monkeypatch, handler).invoke(cli, args)
+    if corrupt:
+        assert result.exit_code == 1
+        assert "checksum" in result.output
+        assert list(tmp_path.iterdir()) == []
+    else:
+        assert result.exit_code == 0, result.output
+        assert dest.exists()
+        assert "Legacy" not in result.output
+
+
+def test_download_rejects_size_mismatch(monkeypatch, tmp_path) -> None:
+    def handler(request):
+        if request.url.path.endswith("/download"):
+            return httpx.Response(200, content=b"short")
+        return httpx.Response(
+            200, json={"status": "ready", "size_bytes": 123, "download": "/benchmark-runs/bmr_1/archive/download"}
+        )
+
+    dest = tmp_path / "archive.tar.gz"
+    result = runner_with(monkeypatch, handler).invoke(
+        cli, ["benchmark-run", "download", "bmr_1", "--archive-only", "-o", str(dest)]
+    )
+    assert result.exit_code == 1
+    assert "size" in result.output
+    assert list(tmp_path.iterdir()) == []
