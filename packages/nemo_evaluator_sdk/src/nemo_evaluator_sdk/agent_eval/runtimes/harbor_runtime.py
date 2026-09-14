@@ -154,7 +154,8 @@ class HarborRuntimeConfig(BaseModel):
         default_factory=dict,
         description=(
             "Keyword arguments forwarded to the Harbor agent's constructor, the equivalent of Harbor's "
-            "``--ak key=value``. Recorded in run provenance with credential-looking values redacted."
+            "``--ak key=value``. Not for secrets: Harbor persists them unredacted in the job dir's "
+            "``config.json``; inject secrets through the environment instead."
         ),
     )
     n_attempts: int = Field(default=1, ge=1, description="Number of attempts Harbor runs per task.")

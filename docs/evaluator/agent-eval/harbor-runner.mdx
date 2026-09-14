@@ -141,10 +141,29 @@ Swap `agent_name` (or `agent_import_path`) for your own agent to get a real scor
 - **`agent_model_name`** — the model slug handed to the agent.
 - **`agent_kwargs`** — keyword arguments forwarded to the agent's constructor, the equivalent of
   Harbor's `--ak key=value` flags. Values must be JSON (strings, numbers, booleans, lists, mappings).
-  They are recorded in the run's provenance with credential-looking keys (`api_key`, `token`,
-  `secret`, ...) redacted; still prefer passing secrets through the environment.
+  Do not put secrets here: Harbor persists the kwargs unredacted in the job directory's
+  `config.json`, and the run's provenance records them with only credential-looking keys
+  (`api_key`, `token`, `secret`, ...) redacted. Inject secrets into the job environment instead.
 
-For example, a Harbor agent whose constructor takes `fabric_adapter_id` and `fabric_telemetry`:
+The three agent fields map one-to-one onto Harbor's `AgentConfig`, which Harbor's agent factory
+unpacks into the agent's constructor:
+
+```text
+HarborRunnerTarget / HarborRuntimeConfig
+        │
+        ├─ agent_import_path  → Harbor AgentConfig.import_path
+        ├─ agent_model_name   → Harbor AgentConfig.model_name
+        └─ agent_kwargs       → Harbor AgentConfig.kwargs
+                                       │
+                                       ▼
+                     Harbor AgentFactory constructs
+                     FabricAgent(model_name=..., **kwargs)
+```
+
+For example, NeMo Fabric's
+[`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.3.0-beta.2/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
+is one of Harbor's [existing agents](https://www.harborframework.com/docs/agents#existing-agents);
+its constructor requires `fabric_adapter_id` and accepts `fabric_package` and `fabric_telemetry`:
 
 ```python
 config = HarborRuntimeConfig(
