@@ -3,15 +3,20 @@
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 from nemo_agent_optimization_plugin.jobs.optimize import OptimizeJob
+from nemo_agent_optimization_plugin.schemas.optimize import OptimizeSpec
 from nemo_agent_optimization_plugin.strategies import PRIMARY_ARTIFACT_KEY, discover_optimization_strategies
+from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
+from nemo_platform_plugin.run_dependencies import LocalRunError
 
 AGENT_CONFIG = {"schema_version": "fabric.agent/v1alpha1"}
 
@@ -125,7 +130,7 @@ def test_run_raises_for_unknown_strategy(tmp_path: Path) -> None:
     config_path = _write_config(tmp_path)
     job = OptimizeJob()
     ctx = _ctx(tmp_path)
-    with pytest.raises(Exception, match="not installed"):
+    with pytest.raises(LocalRunError, match=r"not installed\. Available strategies: \['fake'\]"):
         job.run(
             {
                 "strategy": "does-not-exist",
@@ -136,6 +141,41 @@ def test_run_raises_for_unknown_strategy(tmp_path: Path) -> None:
             ctx=ctx,
             sdk=None,
         )
+
+
+def test_unknown_strategy_is_rejected_before_the_bundle_is_staged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A typo in ``--strategy`` must not cost a fileset download and an agent fetch first."""
+    staged: list[str] = []
+
+    @contextlib.contextmanager
+    def _record_staging(
+        spec: OptimizeSpec,
+        *,
+        ctx: JobContext,
+        sdk: NeMoPlatform | None,
+    ) -> Iterator[tuple[Path, Path | None]]:
+        staged.append(spec.strategy)
+        yield _write_config(tmp_path), None
+
+    monkeypatch.setattr("nemo_agent_optimization_plugin.jobs.optimize._staged_bundle", _record_staging)
+
+    with pytest.raises(LocalRunError, match="Available strategies"):
+        OptimizeJob().run(
+            {
+                "strategy": "does-not-exist",
+                "optimize_config": "config.yaml",
+                "optimize_config_fileset": "default/bundle",
+                "agent": "some-agent",
+                "workspace": "default",
+            },
+            ctx=_ctx(tmp_path),
+            sdk=None,
+        )
+
+    assert staged == []
 
 
 def test_task_entrypoint_imports() -> None:

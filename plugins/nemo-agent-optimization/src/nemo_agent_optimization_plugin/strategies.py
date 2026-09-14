@@ -13,6 +13,14 @@ from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.job_context import JobContext
 
 OPTIMIZATION_STRATEGY_GROUP = "nemo.optimization-strategy"
+
+#: Optional key in a strategy's result dict naming the single file that *is* the optimization's
+#: output (e.g. the optimized agent config), so ``--output foo.yaml`` can publish it directly
+#: instead of copying the whole results tree.  ``OptimizeJob`` strips the key before returning.
+#:
+#: The value **must be an absolute path**: the job resolves it after ``_bundle_workdir`` has
+#: restored the original working directory, so a relative path would resolve against the wrong
+#: root.  Strategies build theirs from ``ctx.storage.persistent``, which is already absolute.
 PRIMARY_ARTIFACT_KEY = "_primary_artifact"
 
 
@@ -41,10 +49,10 @@ class OptimizationStrategy(Protocol):
     ) -> dict[str, Any]:
         """Execute the strategy against a resolved agent and return a result dict.
 
-        ``agent_config`` is ``None`` when the run named no agent, which ``OptimizeSpec`` permits
-        for the ``nat`` strategy (its agent package may be inline in ``config``).  A strategy that
-        needs a resolved agent rejects the omission from ``validate_config``, which sees the
-        original ``agent`` value.
+        ``agent_config`` is ``None`` when the run named no agent.  ``OptimizeSpec`` permits that
+        for every strategy — some need no agent at all, and ``nat`` can carry its agent package
+        inline in ``config`` — so a strategy that does need a resolved agent rejects the omission
+        from its own ``validate_config``, which sees the original ``agent`` value.
         """
 
 

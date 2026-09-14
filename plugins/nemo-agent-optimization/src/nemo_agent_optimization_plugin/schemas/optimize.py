@@ -47,7 +47,10 @@ def is_fileset_relative(value: str) -> bool:
 class OptimizeSubmitSpec(BaseModel):
     """Client-submitted fields for ``nemo agents optimize`` (workspace added server-side)."""
 
-    strategy: str = Field(description="Installed nemo.optimization-strategy name, e.g. 'nat' or 'prompt-master'.")
+    strategy: str = Field(
+        min_length=1,
+        description="Installed nemo.optimization-strategy name, e.g. 'nat' or 'prompt-master'.",
+    )
     optimize_config: str = Field(
         min_length=1,
         description="Location of the strategy configuration YAML. With optimize_config_fileset "
@@ -65,7 +68,8 @@ class OptimizeSubmitSpec(BaseModel):
         default=None,
         min_length=1,
         description="Agent source: a platform reference ('name' or 'workspace/name') or a local "
-        "nemo-agents-spec-v1 agent.yaml path. Required for every strategy except 'nat'.",
+        "nemo-agents-spec-v1 agent.yaml path. Whether it is required is decided by the selected "
+        "strategy, which rejects the omission from its own validate_config.",
     )
     output: str | None = Field(
         default=None,
@@ -82,8 +86,6 @@ class OptimizeSpec(OptimizeSubmitSpec):
 
     @model_validator(mode="after")
     def _validate(self) -> OptimizeSpec:
-        if self.strategy != "nat" and self.agent is None:
-            raise ValueError(f"agent is required when strategy is {self.strategy!r} (only 'nat' allows omitting it).")
         if self.optimize_config_fileset is None:
             return self
         if not re.match(ENTITY_REF_PATTERN, self.optimize_config_fileset):

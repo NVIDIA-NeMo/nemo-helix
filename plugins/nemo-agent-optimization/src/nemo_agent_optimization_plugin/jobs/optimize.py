@@ -136,18 +136,21 @@ class OptimizeJob(NemoJob):
 
     def run(self, config: dict, *, ctx: JobContext, sdk: NeMoPlatform | None = None) -> dict:
         spec = OptimizeSpec.model_validate(config)
+        # Resolve the strategy before anything expensive runs: ``--strategy`` is a required flag
+        # with no client-side validation, so a typo is the likeliest user error and it should not
+        # cost a full fileset download and an agent fetch first.  ``validate_config`` and ``run``
+        # still happen below, where the staged config exists.
+        strategies = discover_optimization_strategies()
+        strategy = strategies.get(spec.strategy)
+        if strategy is None:
+            raise LocalRunError(
+                f"Optimization strategy {spec.strategy!r} is not installed. Available strategies: {sorted(strategies)}"
+            )
         with _staged_bundle(spec, ctx=ctx, sdk=sdk) as (config_path, bundle_root):
             optimize_config = _load_yaml(config_path)
             source_agent_config = _load_local_source_agent_config(spec.agent)
             agent_config = resolve_agent_config(spec.agent, workspace=spec.workspace, sdk=sdk)
             with _bundle_workdir(bundle_root):
-                strategies = discover_optimization_strategies()
-                strategy = strategies.get(spec.strategy)
-                if strategy is None:
-                    raise LocalRunError(
-                        f"Optimization strategy {spec.strategy!r} is not installed. "
-                        f"Available strategies: {sorted(strategies)}"
-                    )
                 strategy.validate_config(optimize_config, agent=spec.agent)
                 logger.info("Dispatching agents optimize strategy %s", spec.strategy)
                 result = strategy.run(
@@ -178,7 +181,13 @@ def _load_local_source_agent_config(agent: str | None) -> dict[str, Any] | None:
     agent_path = Path(agent).expanduser()
     if not agent_path.is_file():
         return None
-    from nemo_agents_plugin.agent_config import load_agent_config
+    # Soft dependency: nemo-agent-optimization-plugin cannot declare nemo-agents-plugin (it would
+    # cycle), so the package only ever arrives transitively.  Mirrors the guard in
+    # ``nemo_agent_optimization_plugin.agents``.
+    try:
+        from nemo_agents_plugin.agent_config import load_agent_config
+    except ImportError as exc:  # pragma: no cover - agents plugin always present for CLI path
+        raise LocalRunError("Loading a local agent.yaml requires nemo-agents-plugin.") from exc
 
     return load_agent_config(agent_path).model_dump(mode="json", exclude_none=True)
 
