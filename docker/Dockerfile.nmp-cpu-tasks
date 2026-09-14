@@ -116,7 +116,7 @@ RUN /app/.venv/bin/python -c \
 # detect a binary built for the wrong architecture or a missing dynamic loader,
 # which is precisely the wheel-platform mismatch this is meant to catch. Both
 # `--version` calls are non-mutating and need no network or credentials.
-COPY docker/scripts/check-bundled-harness-clis.py /tmp/check-bundled-harness-clis.py
-RUN /app/.venv/bin/python /tmp/check-bundled-harness-clis.py && rm /tmp/check-bundled-harness-clis.py
+RUN --mount=type=bind,source=docker/scripts/check-bundled-harness-clis.py,target=/tmp/check-bundled-harness-clis.py,readonly \
+    /app/.venv/bin/python /tmp/check-bundled-harness-clis.py
 
 FROM runtime
