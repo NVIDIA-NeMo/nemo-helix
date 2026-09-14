@@ -17,7 +17,7 @@ export interface StudySummary {
   nTrials: number | null;
   bestTrial: number | null;
   metricNames: string[];
-  bestValues: number[];
+  bestValues: (number | null)[];
 }
 
 export interface TrialMetric {
@@ -72,7 +72,7 @@ const parseSummary = (text: string): StudySummary => {
   const raw = JSON.parse(text) as Record<string, unknown>;
   const metricNames = Array.isArray(raw.metric_names) ? raw.metric_names.map(String) : [];
   const bestValues = Array.isArray(raw.best_values)
-    ? raw.best_values.map((v) => toNumber(v as number)).filter((v): v is number => v !== null)
+    ? raw.best_values.map((v) => toNumber(v as number))
     : [];
   return {
     nTrials: toNumber(raw.n_trials as number),

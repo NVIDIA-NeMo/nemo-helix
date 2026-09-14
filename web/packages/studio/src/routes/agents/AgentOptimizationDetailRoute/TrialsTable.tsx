@@ -43,7 +43,8 @@ const TRIAL_STATUS_CONFIG: Record<string, StatusConfigEntry> = {
 const formatParamValue = (value: string): string => {
   const parsed = Number(value);
   if (value.trim() === '' || Number.isNaN(parsed) || Number.isInteger(parsed)) return value;
-  return String(Number(parsed.toFixed(3)));
+  const rounded = Number(parsed.toFixed(3));
+  return rounded === 0 ? value : String(rounded);
 };
 
 const paramsText = (trial: Trial): string =>

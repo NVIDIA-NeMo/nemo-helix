@@ -32,7 +32,11 @@ export const AgentOptimizationDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { optimizeJobName: jobName } = useRequiredPathParams([ROUTE_PARAMS.optimizeJobName]);
 
-  const { data: job, isLoading: isLoadingJob } = useAgentsGetOptimizeJob(workspace, jobName, {
+  const {
+    data: job,
+    isLoading: isLoadingJob,
+    error: jobError,
+  } = useAgentsGetOptimizeJob(workspace, jobName, {
     query: {
       enabled: !!workspace && !!jobName,
       refetchInterval: (query) =>
@@ -72,7 +76,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
     queryKey: ['optimize-study-results', workspace, jobName] as const,
     queryFn: ({ signal }) => fetchStudyResults(workspace, jobName, signal),
     enabled: !!workspace && !!jobName && isTerminal && !hasFailed,
-    refetchInterval: (query) => (query.state.data == null ? JOB_POLLING_INTERVAL_MS : false),
+    refetchInterval: (query) => (query.state.data === undefined ? JOB_POLLING_INTERVAL_MS : false),
   });
 
   const {
@@ -91,6 +95,14 @@ export const AgentOptimizationDetailRoute: FC = () => {
       <Flex align="center" justify="center" className="h-full w-full">
         <Spinner size="medium" aria-label="Loading optimization..." />
       </Flex>
+    );
+  }
+
+  if (!job && jobError && jobError.response?.status !== 404) {
+    return (
+      <Stack padding="density-2xl">
+        <ErrorMessage header="Could not load optimization" message={jobError.message} />
+      </Stack>
     );
   }
 
