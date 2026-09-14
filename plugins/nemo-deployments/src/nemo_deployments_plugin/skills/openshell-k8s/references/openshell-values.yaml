@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# OpenShell gateway values for the NeMo Platform evaluation on Kubernetes.
+# Chart: oci://ghcr.io/nvidia/openshell/helm-chart --version 0.0.116
+#
+# EVALUATION POSTURE, NOT PRODUCTION. Both settings below exist so the NeMo
+# Platform executor can drive the gateway without an OIDC token:
+#   - disableTls: the gateway listens on plaintext HTTP inside the cluster.
+#   - allowUnauthenticatedUsers: user-level calls (create sandbox, expose a
+#     service) are accepted without a bearer token.
+# For production, set both back to false, enable cert-manager PKI
+# (certManager.enabled=true) and configure server.oidc.* for user auth.
+server:
+  disableTls: true
+  auth:
+    allowUnauthenticatedUsers: true
+
+  # Uncomment when the cluster has no default StorageClass. Sandbox workspace
+  # volumes stay Pending without one.
+  # workspaceStorageClass: <storageclass-name>
+
+  # Uncomment for a private registry the sandbox pods must pull the agent
+  # image from. The Secret must exist in the sandbox namespace (openshell).
+  # sandboxImagePullSecrets:
+  #   - name: regcred

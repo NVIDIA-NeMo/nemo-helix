@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Smallest Fabric (LangChain Deep Agents) agent that proves the sandbox path.
+# Keep this file alone in its directory: the directory is both the Docker build
+# context for `nemo agents package` and the bundle `nemo agents create` uploads.
+
+config_format: nemo-agents-spec-v1
+name: sandbox-hello
+description: Small Deep Agents assistant used to prove an OpenShell sandbox deployment on Kubernetes.
+
+instructions:
+  system:
+    content: |
+      You are a concise assistant running inside a NeMo Platform sandbox.
+      Answer in one or two sentences. If asked where you run, say you are a
+      sandboxed NeMo agent and that you cannot reach the public internet.
+
+default_harness: deepagents
+
+harnesses:
+  deepagents:
+    kind: deepagents
+    settings:
+      deepagents: {}
+
+models:
+  default:
+    # "nvidia" for a build.nvidia.com provider, "openai" for OpenAI. Both are
+    # routed through the platform Inference Gateway at deploy time, so no
+    # api_key_env or base_url is needed here.
+    provider: nvidia
+    # Resolved by `nemo agents create` to the default model chosen in nemo setup.
+    model: ${NEMO_DEFAULT_MODEL}
+
+skills:
+  paths: []
+
+mcp:
+  servers: {}
+
+tools:
+  blocked: []
+
+environment:
+  workspace: ./workspace

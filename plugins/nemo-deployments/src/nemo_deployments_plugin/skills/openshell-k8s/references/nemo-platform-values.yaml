@@ -1,0 +1,68 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# NeMo Platform values for the OpenShell evaluation on Kubernetes.
+# Assumes release name "nemo-platform" in namespace "nemo-platform" and an
+# OpenShell gateway Service "openshell" in namespace "openshell". If any of
+# those names differ, change the three hostnames below to match.
+
+# The chart reads the NGC key from an existing Secret named ngc-api (create it
+# in Step 5; a placeholder value is fine when no NGC downloads happen).
+existingSecret: ngc-api
+
+# Name the pull secret you created for the chart's image registry. Remove the
+# list entirely when the registry allows anonymous pulls.
+imagePullSecrets:
+  - name: ghcr-pull
+
+# Single-node local clusters (k3d, kind, minikube) cannot bind ReadWriteMany.
+# Delete this block on a cluster with an RWX-capable StorageClass, or set
+# storageClass to that class and keep ReadWriteMany.
+core:
+  storage:
+    accessModes:
+      - ReadWriteOnce
+    size: 20Gi
+
+platformConfig:
+  deployments:
+    default_executor: local-k8s
+    # This list REPLACES the chart's built-in executor list, so local-k8s is
+    # restated here. Dropping it removes the default executor and the platform
+    # fails to start.
+    executors:
+      - name: local-k8s
+        backend: k8s
+        config:
+          default_namespace: "{{ .Release.Namespace }}"
+      - name: openshell
+        backend: openshell
+        config:
+          # gRPC and HTTP share this listener. Plaintext because the gateway
+          # was installed with server.disableTls=true.
+          gateway_endpoint: http://openshell.openshell.svc.cluster.local:8080
+          # The one network route a sandbox is allowed: the platform API
+          # Service, where the Inference Gateway lives. The sandbox proxy
+          # matches this hostname exactly, so it must be the same string the
+          # agent dials (see agents.deployments.k8s_internal_base_url).
+          platform_egress:
+            host: nemo-platform-api.nemo-platform.svc.cluster.local
+            port: 8080
+            # Binaries allowed to open that connection. The Fabric server runs
+            # as /workspace/.venv/bin/python; OpenShell resolves symlinks to the
+            # real interpreter. curl is kept for the egress proof.
+            binaries:
+              - /workspace/.venv/bin/python3.13
+              - /workspace/.venv/bin/python
+              - /usr/bin/curl
+          # The Kubernetes driver runs the workload as uid 1000, which cannot
+          # enter /home/sandbox (the docker-driver default). /tmp is writable.
+          serve_workdir: /tmp
+  agents:
+    deployments:
+      # nemo agents deploy --mode k8s lands on the openshell executor.
+      k8s_executor: openshell
+      # The chart exports the namespace-less Service name (http://nemo-platform-api:8080),
+      # which does not resolve from the openshell namespace and would not match
+      # the egress rule host. Use the fully qualified name.
+      k8s_internal_base_url: http://nemo-platform-api.nemo-platform.svc.cluster.local:8080
