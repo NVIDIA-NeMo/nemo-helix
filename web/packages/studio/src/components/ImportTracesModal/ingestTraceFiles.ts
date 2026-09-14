@@ -153,16 +153,22 @@ const ingestSpansFile = async (
   { workspace, agent, source }: IngestOptions
 ): Promise<IngestOutcome> => {
   const document = 'document' in detection ? detection.document : undefined;
-  const body = isRecord(document) ? document : { spans: document };
-  const rawSpans = Array.isArray(body.spans) ? body.spans : [];
+  const wrapper = isRecord(document) && Array.isArray(document.spans) ? document : undefined;
+  const rawSpans: unknown[] = wrapper
+    ? (wrapper.spans as unknown[])
+    : Array.isArray(document)
+      ? document
+      : isRecord(document)
+        ? [document]
+        : [];
   const batchSource =
-    (typeof body.source === 'string' && body.source) || source || DEFAULT_SPANS_SOURCE;
+    (typeof wrapper?.source === 'string' && wrapper.source) || source || DEFAULT_SPANS_SOURCE;
 
   const errors: string[] = [];
   const spans: DirectSpanInput[] = [];
   rawSpans.forEach((entry, index) => {
     if (isRecord(entry)) {
-      spans.push(entry as DirectSpanInput);
+      spans.push(entry as unknown as DirectSpanInput);
     } else {
       errors.push(`Span ${index + 1}: not a valid span object.`);
     }

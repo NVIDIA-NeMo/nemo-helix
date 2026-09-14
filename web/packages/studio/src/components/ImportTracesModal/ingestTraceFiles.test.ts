@@ -144,6 +144,17 @@ describe('ingestTraceFile', () => {
     expect(spansMock.mock.calls[0][1].source).toBe('mlflow');
   });
 
+  it('imports a file holding one standalone span', async () => {
+    const outcome = await ingestTraceFile(selected('span.json', span('s1')), {
+      workspace,
+      source: 'langsmith',
+    });
+
+    expect(spansMock).toHaveBeenCalledTimes(1);
+    expect(spansMock.mock.calls[0][1].spans).toHaveLength(1);
+    expect(outcome.results[0].message).toBe('1 span imported as source "langsmith".');
+  });
+
   it('stamps the pinned agent onto every span, and reads it back', async () => {
     const outcome = await ingestTraceFile(
       selected('spans.json', [span('s1', { 'gen_ai.agent.name': 'from-the-file' })]),
