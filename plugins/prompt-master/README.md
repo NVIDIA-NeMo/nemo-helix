@@ -51,7 +51,7 @@ uv run nemo agents create \
 
 # 2. Stage the optimize config into a fileset.
 uv run nemo files filesets create prompt-master-bundle
-uv run nemo files upload plugins/prompt-master/examples prompt-master-bundle
+uv run nemo files upload plugins/prompt-master/examples/ prompt-master-bundle
 
 # 3. Optimize. --optimize-config is relative to the fileset root.
 uv run nemo agents optimize \

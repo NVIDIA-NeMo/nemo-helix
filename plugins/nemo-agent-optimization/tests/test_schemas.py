@@ -13,8 +13,9 @@ def test_optimize_spec_leaves_the_agent_requirement_to_the_strategy(strategy: st
     """The generic spec names no strategy: whether ``agent`` is required is strategy-defined.
 
     Each strategy enforces its own rule in ``validate_config`` (see
-    ``test_strategy_requires_a_platform_agent`` in the prompt-master and switchyard plugins),
-    so a third-party strategy that needs no agent does not have to edit this schema.
+    ``test_strategy_requires_a_platform_agent`` in prompt-master and
+    ``test_validate_config_rejects_missing_agent`` in switchyard), so a third-party strategy
+    that needs no agent does not have to edit this schema.
     """
     spec = OptimizeSpec(strategy=strategy, optimize_config="/tmp/config.yaml", workspace="default")
     assert spec.agent is None

@@ -523,7 +523,7 @@ actually registered, for the requested profile (currently always `default`):
 | Registered profile | Executor | What the deployment must provide |
 |--------------------|----------|----------------------------------|
 | `subprocess` | Host subprocess running `python -m nemo_agent_optimization_plugin.tasks.optimize` | The jobs host venv must carry the optimization and Fabric harness dependencies (and the Docker socket, if trials need it) |
-| `cpu` (docker or `kubernetes_job`) | The `nmp-cpu-tasks` image, same entry point | The task image must carry those dependencies; `nemo-agent-optimization-plugin` and the strategy plugins are in the `cpu-tasks` dependency group for this reason |
+| `cpu` (docker or `kubernetes_job`) | The `nmp-cpu-tasks` image, same entry point | The task image must carry those dependencies; `nemo-agent-optimization-plugin`, `nemo-optimization-plugin`, `nemo-switchyard`, and `prompt-master-plugin` are in the `cpu-tasks` dependency group for this reason |
 
 Subprocess wins when both are registered, because a study drives Fabric trials
 that often need the host's Docker daemon and harness adapters. If neither is
