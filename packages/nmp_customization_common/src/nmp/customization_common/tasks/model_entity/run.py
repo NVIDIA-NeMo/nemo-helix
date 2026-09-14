@@ -31,12 +31,9 @@ from nemo_platform_plugin.models.types import (
     CreateModelDeploymentRequest,
     CreateModelEntityRequest,
     Engine,
-    ListDeploymentConfigsQueryParams,
-    ListDeploymentsQueryParams,
     Lora,
     ModelDeploymentConfig,
     ModelDeploymentConfigModelSpec,
-    ModelDeploymentStatus,
     ModelEntity,
     ToolCallConfig,
     UpdateAdapterRequest,
@@ -60,10 +57,6 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 3
 INITIAL_BACKOFF_SECONDS = 1.0
 MAX_BACKOFF_SECONDS = 30.0
-
-ACTIVE_DEPLOYMENT_STATUSES = frozenset(
-    {ModelDeploymentStatus.CREATED, ModelDeploymentStatus.PENDING, ModelDeploymentStatus.READY}
-)
 
 SPEC_POLL_INTERVAL_SECONDS = 10
 SPEC_POLL_TIMEOUT_SECONDS = 600
@@ -287,15 +280,21 @@ class ModelEntityRunner:
             raise ModelEntityCreationError(f"Failed to create model entity: {e}") from e
 
     def launch_model(self, config: ModelEntityTaskConfig, me: ModelEntity) -> None:
-        """Deploy a model entity after creation."""
+        """Deploy a model entity after creation.
+
+        ``deployment_config`` is an explicit request, so it always launches a
+        deployment. Previously a LoRA job whose base model already had any active
+        deployment skipped silently -- including when that deployment was serving
+        with ``lora_enabled=false`` and so could never load the adapter, which left
+        the job reporting success with nothing deployed. Creating the deployment is
+        idempotent: a name collision on the config or the deployment is resolved
+        against the existing object rather than duplicating it.
+        """
         dc = config.deployment_config
         if dc is None:
             return
 
         is_lora = config.peft is not None and config.peft.type == FinetuningType.LORA
-        if is_lora and self._has_active_deployment(me):
-            return
-
         if is_lora and isinstance(dc, DeploymentParams) and not dc.lora_enabled:
             logger.warning(f"Deployment requested but lora_enabled is false for a LoRA job: {dc}")
             return
@@ -308,31 +307,6 @@ class ModelEntityRunner:
             deployment_config = self._create_deployment_config(dc, me)
 
         self._create_deployment(deployment_config, me)
-
-    def _has_active_deployment(self, me: ModelEntity) -> bool:
-        """Check if the model entity already has an active deployment."""
-        config_query = ListDeploymentConfigsQueryParams(
-            filter=json.dumps({"model_entity_id": f"{me.workspace}/{me.name}"})
-        )
-        deployment_configs = self.models.list_deployment_configs(
-            workspace=me.workspace,
-            query_params=config_query,
-        ).items()
-
-        for c in deployment_configs:
-            deployment_query = ListDeploymentsQueryParams(
-                filter=json.dumps({"config": c.name, "workspace": me.workspace})
-            )
-            deployments = self.models.list_deployments(
-                workspace=me.workspace,
-                query_params=deployment_query,
-            ).items()
-            for d in deployments:
-                if d.status in ACTIVE_DEPLOYMENT_STATUSES:
-                    logger.info(f"Active deployment (status={d.status}) exists for config {c.name}, skipping")
-                    return True
-
-        return False
 
     def _resolve_config_ref(self, config_ref: str, me_workspace: str) -> ModelDeploymentConfig:
         """Resolve a ``name`` or ``workspace/name`` reference to a ``ModelDeploymentConfig``."""
