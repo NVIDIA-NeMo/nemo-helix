@@ -138,6 +138,14 @@ const pickDirectory = (dialog: HTMLElement, files: File[] = DEFAULT_FILES) => {
   fireEvent.change(within(dialog).getByTestId('agent-directory-input'), { target: { files } });
 };
 
+/** Individually picked files carry no relative path, the way a file picker reports them. */
+const pickFiles = (dialog: HTMLElement, files: File[]) => {
+  fireEvent.change(within(dialog).getByTestId('agent-files-input'), { target: { files } });
+};
+
+const looseFile = (name: string, contents: string): File =>
+  new File([contents], name, { type: 'text/plain' });
+
 const submit = async (dialog: HTMLElement, user: ReturnType<typeof userEvent.setup>) => {
   await user.click(within(dialog).getByRole('button', { name: /^(Create|Replace and create)$/ }));
 };
@@ -221,6 +229,42 @@ describe('NewAgentModal upload tab', () => {
     await waitFor(() => expect(created).toHaveLength(1));
     expect([...uploaded].sort()).toEqual(['agent.yaml', 'mcps/calculator.py']);
     expect(created[0]?.name).toBe('calc');
+  });
+
+  it('uploads individually picked files, with no directory to hold them', async () => {
+    const user = userEvent.setup();
+    const { uploaded, created } = mockPlatform();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openUploadTab(dialog);
+    pickFiles(dialog, [
+      looseFile('agent.yaml', FABRIC_YAML),
+      looseFile('calculator.py', 'print(1)\n'),
+    ]);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+
+    await submit(dialog, user);
+
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect([...uploaded].sort()).toEqual(['agent.yaml', 'calculator.py']);
+  });
+
+  it('uploads agent.yaml on its own', async () => {
+    const user = userEvent.setup();
+    const { uploaded, created } = mockPlatform();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openUploadTab(dialog);
+    pickFiles(dialog, [looseFile('agent.yaml', FABRIC_YAML)]);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+    expect(within(dialog).getByText(/^1 files/)).toBeInTheDocument();
+
+    await submit(dialog, user);
+
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(uploaded).toEqual(['agent.yaml']);
   });
 
   it('shows why an owned name is refused instead of a generic failure', async () => {
@@ -342,10 +386,9 @@ describe('NewAgentModal upload tab', () => {
     renderModal();
     const dialog = await screen.findByRole('dialog');
     await openUploadTab(dialog);
-    pickDirectory(dialog, [
-      makeFile('calc-agent/agent.yaml', FABRIC_YAML),
-      new File([new Uint8Array([0xff, 0xfe, 0x00])], 'logo.bin'),
-    ]);
+    const binary = new File([new Uint8Array([0xff, 0xfe, 0x00])], 'logo.bin');
+    Object.defineProperty(binary, 'webkitRelativePath', { value: 'calc-agent/logo.bin' });
+    pickDirectory(dialog, [makeFile('calc-agent/agent.yaml', FABRIC_YAML), binary]);
 
     expect(await within(dialog).findByText(/is not a text file/)).toBeInTheDocument();
   });
