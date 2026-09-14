@@ -888,11 +888,11 @@ async def test_update_job_status_from_step_emits_job_run_telemetry_on_terminal_t
     emit_event.assert_called_once()
     event = emit_event.call_args.args[0]
     assert event.session_id == "session-123"
-    assert event.status == "completed"
-    assert event.job_type == "custom"
-    assert event.model == "defined"
-    assert event.input_tokens == 3
-    assert event.output_tokens == 5
+    assert event.event.task_status == "completed"
+    assert event.event.job_type == "custom"
+    assert event.event.model == "defined"
+    assert event.event.input_tokens == 3
+    assert event.event.output_tokens == 5
 
 
 @pytest.mark.asyncio
