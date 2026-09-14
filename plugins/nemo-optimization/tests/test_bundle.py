@@ -142,7 +142,11 @@ def test_checks_stdio_mcp_server_scripts_ship_in_the_bundle(tmp_path: Path) -> N
     config = full_config()
     config["mcp"] = {
         "servers": {
-            "analyzer": {"transport": "stdio", "url": "python3", "args": ["mcps/analyzer.py", "--quiet"]},
+            "analyzer": {
+                "transport": "stdio",
+                "url": "python3",
+                "args": ["mcps/analyzer.py", "--quiet", "--endpoint", "https://api.example.test/v1/chat", "42"],
+            },
             "remote": {"transport": "http", "url": "https://example.test/mcp"},
         }
     }
@@ -152,7 +156,8 @@ def test_checks_stdio_mcp_server_scripts_ship_in_the_bundle(tmp_path: Path) -> N
         preflight_bundle(tmp_path, "optimize.yml")
     message = str(excinfo.value)
     assert "mcp.servers.analyzer.args[0]" in message
-    assert "--quiet" not in message  # flags are not paths
+    for not_a_path in ("--quiet", "https://api.example.test", "args[3]", "args[4]"):
+        assert not_a_path not in message  # flags, URLs and plain values are not bundle files
 
     (tmp_path / "mcps").mkdir()
     (tmp_path / "mcps" / "analyzer.py").write_text("print(1)\n", encoding="utf-8")

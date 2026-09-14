@@ -211,7 +211,9 @@ def _mcp_server_references(config: Mapping[str, Any]) -> Iterator[PathReference]
 
     A server shipped in the bundle is spawned as ``url: python3, args: [path/in/bundle.py]``; the
     optimizer makes that path absolute at run time, so preflight has to know the file exists.
-    Only entries that look like files are checked, since ``args`` also carries flags and values.
+    Only entries that look like relative files are checked, since ``args`` also carries flags, URLs
+    and plain values. An extensionless script with no directory part (``analyzer``) is not
+    recognised here; the runtime still resolves it if it exists in the bundle.
     """
     mcp = config.get("mcp")
     servers = mcp.get("servers") if isinstance(mcp, Mapping) else None
@@ -227,7 +229,9 @@ def _mcp_server_references(config: Mapping[str, Any]) -> Iterator[PathReference]
 
 
 def _looks_like_bundle_script(value: str) -> bool:
-    return not value.startswith("-") and ("/" in value or value.endswith((".py", ".js", ".sh")))
+    if not value or value.startswith("-") or "://" in value or Path(value).is_absolute():
+        return False
+    return "/" in value or value.endswith((".py", ".js", ".sh"))
 
 
 def _dataset_reference(dataset: Any) -> Iterator[PathReference]:
