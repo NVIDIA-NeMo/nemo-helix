@@ -92,14 +92,17 @@ and the boundaries; the sub-flow carries the steps.
 | Sub-flow | Use it to |
 |---|---|
 | `eval-author-discover` | Establish whether a repository's evaluations run, name the rung that fails, and get the exact command to run them |
-| `eval-author-audit` | Generate and validate a finite `audit.md` coverage denominator, write per-method coverage/details files for one ATIF trace, then aggregate coverage reports |
+| `eval-author-audit` | Generate and validate a finite `audit.md` coverage denominator, measure and aggregate trace coverage, then recommend concrete dataset improvements |
 | `eval-author-task-create` | Create one Harbor-native task from one actionable uncovered tool, prove it with Oracle, and accept it only when repeated measured runs close the gap |
 | `eval-author-inspect-trace` | Understand one Intake trace without presuming that the trace contains a failure. Not user-invocable; this skill selects it |
 | `eval-author-trace-environment` | Normalize one trace to ATIF, make a privacy-reviewed candidate decision, and build a private Harbor task when evidence supports it |
 
 `eval-author-audit` works one level above tasks: it generates and validates the
 coverage denominator, measures traces against it, and aggregates deterministic
-coverage reports. `eval-author-task-create` consumes only actionable tool gaps
+coverage reports, then prioritizes dataset recommendations from coverage gaps
+and observed behavior. Recommendations can address tools, capabilities, and
+failure cases while preserving their measured or unmeasured status.
+`eval-author-task-create` consumes only actionable tool gaps
 from that report and uses Harbor's native task scaffolder rather than guessing a
 task layout.
 
@@ -133,6 +136,10 @@ user, not to you.
 ## Reporting
 
 Lead with the verdict or outcome, then the evidence.
+
+For an audit review, follow `eval-author-audit` Step 6: lead with concrete dataset
+recommendations and their evidence, then coverage counts and limits. An empty
+task-generation selection does not establish that the dataset needs no changes.
 
 State whether the findings are proven, whether the suite is ready, and the names
 of the checks that failed. Never describe a suite as ready while a required check

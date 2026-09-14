@@ -67,9 +67,12 @@ uv run <skill_dir>/scripts/task_pipeline.py select \
   --report .eval-author/audit-coverage-report.json
 ```
 
-Choose one item from `actionable_tools`. Stop when the list is empty. Capability
-or failure-case items with `reason: not_measured_by_any_method` are not task
-generation inputs in v1.
+Choose one item from `actionable_tools`. Stop task creation when the list is
+empty, and surface the dataset recommendations from `eval-author-audit` Step 6
+(or complete that step if needed). An empty selector means no eligible tool
+gaps, not that there are no useful dataset improvements. Capability and
+failure-case items are not task-generation inputs in v1, even when capability
+coverage was measured.
 
 Each actionable tool includes a deterministic `task_slug` of the form
 `cover-<tool-name>` and a `paths` object for the proposal, draft, and
