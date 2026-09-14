@@ -5,12 +5,10 @@
 name: eval-author-audit
 description: >-
   Generate, validate, measure, and report on an audit-spec coverage denominator
-  for Eval Author, then recommend dataset improvements from the findings.
-  Use when the user wants a hand-editable audit.md file derived
+  for Eval Author. Use when the user wants a hand-editable audit.md file derived
   from Ethos, needs schema enforcement for declared tools, capabilities, failure
   cases, evidence, and references, wants to measure which audit items one ATIF
-  trace covers, wants to aggregate coverage across measured traces, or asks what
-  to add or strengthen in the eval dataset. Changes
+  trace covers, or wants to aggregate coverage across measured traces. Changes
   none of the user's source, and saves audit artifacts under `.eval-author/`.
 triggers:
   - generate audit.md from ETHOS.md
@@ -20,7 +18,6 @@ triggers:
   - check audit.md coverage denominator
   - what should my evals cover from the agent ethos
   - review the audit coverage denominator
-  - suggest dataset improvements from audit findings
 not-for:
   - eval-author (use for the standard, the boundaries, and to pick a sub-flow)
   - eval-author-discover (use to prove whether a Harbor suite is runnable)
@@ -36,22 +33,6 @@ license: Apache-2.0
 user-invocable: true
 allowed-tools: [Bash, Read, Write, Grep, Glob]
 ---
-
-# Eval Author: audit
-
-Read `eval-author` for the shared standard, vocabulary, and boundaries. This
-sub-flow generates and validates a finite coverage denominator from `<ethos_path>`
-and reviewed audit items, measures ATIF traces, and turns the findings into
-prioritized dataset recommendations. Runnable task creation is a separate
-follow-up.
-
-For an audit or coverage review, lead the final response with the most valuable
-concrete dataset improvements and why they matter; put coverage counts and
-artifact links after them. Produce these recommendations as part of the audit,
-without waiting for the user to ask what to change. Full tool coverage or an
-unsupported task-generation path does not mean there is nothing to recommend.
-Use Step 6 to distinguish evidence, proposals, and execution readiness. Respect
-narrow requests such as validation-only; do not expand them into a full audit.
 
 ## Ethos Pre-flight
 
@@ -131,7 +112,12 @@ for a missing Ethos. Do not synthesize an audit denominator from those materials
 even if the output is marked as draft. The audit denominator depends on the
 durable agent contract that `nemo-explore` and `nemo-ethos` produce.
 
-## Audit Items
+# Eval Author: audit
+
+Read `eval-author` for the shared standard, vocabulary, and boundaries. This
+sub-flow generates and validates a finite coverage denominator from `<ethos_path>`
+and reviewed audit items, then can measure one ATIF trace and aggregate coverage
+reports against it. It does not generate tasks yet.
 
 The audit-spec approach has three item kinds in v1:
 
@@ -425,66 +411,21 @@ includes the original audit item plus generation-oriented context: a stable
 Use `reason: not_measured_by_any_method` to distinguish gaps that no included
 measurement method could close from `reason: not_covered_by_any_input_report`,
 which means the item kind was measured but no input report covered that item.
-Use that list in Step 6 alongside the trace evidence and existing tasks. The
-aggregate report unions coverage; it does not establish why an item is uncovered
-or whether an existing task already exposes an agent failure.
-
-## Step 6: Recommend Dataset Improvements
-
-Read the aggregate report, relevant per-trace `details.json` and capability
-judgments, and the source traces or verifier results needed to explain the
-findings. Check existing task instructions, fixtures, and verifiers before
-claiming a scenario is absent or proposing a duplicate. A capability covered in
-one run can still fail in another; review observed failures even when the item
-is absent from `uncovered_items`.
-
-Distinguish the basis for each recommendation:
-
-| Basis | What it supports |
-|---|---|
-| Observed failure | A trace or verifier shows incorrect behavior on an exercised scenario. Preserve the existing failing task as a regression; propose strengthening it only when a specific fixture or verifier change adds value. An agent fix may be the next action without any dataset change. |
-| Coverage gap in inspected inputs | A measured item is not demonstrated and the inspected tasks or traces lack the intended scenario. Propose a concrete new task or extension; state the inspected scope rather than claiming the entire dataset lacks coverage. |
-| Unmeasured or insufficient evidence | The method was not selected or is unsupported, judgments are missing or unclear, or the scenario's trigger is unverified. Recommend measurement or inspection first. Ethos-backed scenarios may still be proposed as candidates, with their unmeasured status explicit. |
-
-`not_covered_by_any_input_report` alone does not distinguish an absent scenario,
-an agent failure, or missing judgments. `not_measured_by_any_method` is a
-measurement limitation, not proof of a dataset deficiency. Failure-case items
-remain unmeasured in v1; manual trace observations do not change that status.
-
-Write the recommendations to `.eval-author/dataset-recommendations.md` as
-skill-authored analysis; keep the generated coverage JSON unchanged. Rank by
-expected value and strength of evidence, explaining why the first action comes
-first. Prefer a short, useful list over one suggestion per uncovered item.
-For each recommendation, include:
-
-- **Change and scenario:** add a task, strengthen a named existing task, retain
-  an existing regression, or gather evidence; describe the concrete request and
-  fixture or failure trigger that makes it useful.
-- **Expected behavior and verification:** the outcome to check and how a verifier
-  would distinguish correct from incorrect behavior. For failure cases, identify
-  evidence that the trigger actually occurred as well as the expected response.
-- **Basis and evidence:** the category above, stable audit item names, and task,
-  run, trace-step, judgment, or verifier references supporting the recommendation.
-  Mark proposed fixture details as proposals, not observed facts.
-- **Next action:** say whether the suggestion is eligible for
-  `eval-author-task-create`, needs manual task design, or needs more measurement.
-  A written recommendation is not a generated, validated, or accepted Harbor task.
-
-Surface the highest-value recommendations directly in the final response, with
-enough scenario and expected-behavior detail to act on them. Follow with coverage
-counts by kind, measurement limits, and links to the recommendations and coverage
-report. If evidence supports no dataset change, say why and identify any useful
-measurement or agent-fix action instead of inventing additions.
+Treat that list as evidence for the proposal step in `eval-author-task-create`.
+The aggregate report unions coverage; it does not establish why an item is
+uncovered or whether an existing task already exposes an agent failure.
 
 ## Next Steps
 
 - For audit-generation inputs and reconciliation modes, return to
   [Step 2: Generate Or Reconcile Audit.md](#step-2-generate-or-reconcile-auditmd).
-- When aggregate `uncovered_items` includes an actionable **tool** item
-  (`reason: not_covered_by_any_input_report`), hand off to
-  [`eval-author-task-create`](../eval-author-task-create/SKILL.md) to scaffold
-  and prove one gap at a time. The current task-creation path accepts only tools.
-  Capability and failure-case suggestions remain visible in the recommendations,
-  with manual design or measurement as their next action. Do not suppress them
-  because automatic task creation is unavailable, or relabel them as tool gaps
-  to pass the selector.
+- Report coverage by kind, observed findings, measurement limits, and artifact
+  links. Dataset recommendations belong to the proposal step in
+  [`eval-author-task-create`](../eval-author-task-create/SKILL.md). Hand off there
+  when the user requests proposals or continuation through the full workflow;
+  an audit-only request ends with the findings.
+- The proposal step considers tools, capabilities, and failure cases. Automatic
+  task creation still accepts only uncovered tool items with
+  `reason: not_covered_by_any_input_report`. Items with
+  `reason: not_measured_by_any_method` remain unmeasured, even when the proposal
+  step suggests a candidate scenario for them.
