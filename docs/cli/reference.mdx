@@ -5869,7 +5869,7 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 * `execute`: Execute an agent to completion as a scheduled platform job.
 * `optimize-skills`: Optimize an agent's skills against eval failures via a...
 * `package-agent`: Build a container image for an agent stored on the platform.
-* `optimize`: Optimize a Fabric agent workflow (numeric HPO).
+* `optimize`: Optimize a platform agent with an installed optimization...
 
 *Local commands:*
 
@@ -5886,6 +5886,7 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 
 * `analyst`: Analyze agent telemetry and record what the agent gets...
 * `experimentalist`: NeMo Experimentalist commands.
+* `optimization-strategies`: List installed nemo agents optimize strategies.
 
 #### nemo agents create
 
@@ -6948,7 +6949,7 @@ Job Spec flags are generated from the PackageAgentInput Pydantic schema. Precede
 
 #### nemo agents optimize
 
-Optimize a Fabric agent workflow (numeric HPO).
+Optimize a platform agent with an installed optimization strategy.
 
 **Usage:**
 
@@ -6962,10 +6963,11 @@ nemo agents optimize [OPTIONS] [COMMAND] [ARGS]...
 
 **Job Spec:**
 
-* `--optimize-config`: Location of the Fabric-native optimization YAML.  With optimize_config_fileset set — required for remote submission — this is a path relative to the fileset root.  Without it (programmatic local runs only) it is an absolute path on the host running the job.
-* `--optimize-config-fileset FILESET_REF`: Fileset holding the optimization bundle: the config named by optimize_config plus every asset it references (Agent under Test package, dataset, eval.fabric.base_dir tree, hooks and MCP configs).  Stage one with `nemo agents optimize prepare-fileset`. Required for remote submissions, where the job has no access to the client's filesystem. Programmatic local runs may omit it and use an absolute host path for optimize_config.
-* `--agent`: Optional platform agent reference ('name' or 'workspace/name'). When omitted, the optimization config must include an inline Fabric agent package.
-* `--output PATH | FILESET_REF`: Where to publish the study artifacts (optimized config, trials dataframe, pareto plots, ATIF evidence) once the study succeeds — either a local directory (path-shaped: starts with '/', './', '../', '~/') or a NeMo Platform fileset reference ('name' or 'workspace/name').  Filesets are created on demand if missing.  This is in addition to the per-job artifacts that ``ctx.results.save`` always registers; it gives remote clients a stable, addressable location to read from.
+* `--strategy`: Installed nemo.optimization-strategy name, e.g. 'nat' or 'prompt-master'.
+* `--optimize-config`: Location of the strategy configuration YAML. With optimize_config_fileset set — required for remote submission — this is a path relative to the fileset root. Without it (programmatic local runs only) it is an absolute path on the host running the job.
+* `--optimize-config-fileset`: Fileset holding the optimization bundle: the config named by optimize_config plus every asset it references. Stage one with `nemo agents optimize prepare-fileset`. Required for remote submissions, where the job has no access to the client's filesystem.
+* `--agent`: Agent source: a platform reference ('name' or 'workspace/name') or a local nemo-agents-spec-v1 agent.yaml path. Whether it is required is decided by the selected strategy, which rejects the omission from its own validate_config.
+* `--output`: Where to publish the optimization artifacts once the run succeeds — either a local directory or a NeMo Platform fileset reference ('name' or 'workspace/name'). Classification of which is handled by this plugin's own job, not by this spec.
 
 **Spec Source:**
 
@@ -6982,8 +6984,6 @@ nemo agents optimize [OPTIONS] [COMMAND] [ARGS]...
 * `--workspace`: Workspace scope for the submission. [default: default]
 
 Job Spec flags are generated from the OptimizeSubmitSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
-
-Some spec fields cannot be represented as CLI flags: `workspace`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**
@@ -7372,6 +7372,40 @@ nemo agents experimentalist doctor [OPTIONS]
 * `--insight-id`: Select an exact id/title or zero-based index from a local multi-insight file.
 * `--profile <PATH>`: Path to optimizer.yaml.
 * `--base-url`: Base URL of the running NMP instance. Default: NMP_BASE_URL (shell or profile-dir .env), else http://localhost:8080. [env: NMP_BASE_URL=]
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo agents optimization-strategies
+
+List installed nemo agents optimize strategies.
+
+**Usage:**
+
+```shell
+nemo agents optimization-strategies [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--install-completion`: Install completion for the current shell.
+* `--show-completion`: Show completion for the current shell, to copy it or customize the installation.
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `list`: Print every installed nemo.optimization-strategy name.
+
+##### nemo agents optimization-strategies list
+
+Print every installed nemo.optimization-strategy name.
+
+**Usage:**
+
+```shell
+nemo agents optimization-strategies list [OPTIONS]
+```
 
 **Help:**
 
