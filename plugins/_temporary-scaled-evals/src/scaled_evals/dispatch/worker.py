@@ -47,7 +47,7 @@ import socket
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -234,12 +234,12 @@ def assert_lifecycle_covers_agent_floor(row: Mapping[str, Any], floor_sec: int) 
         )
 
 
-def _connect_database() -> psycopg.Connection:
+def _connect_database() -> psycopg.Connection[Any]:
     deadline = time.monotonic() + _DATABASE_CONNECT_RETRY_SECONDS
     attempt = 0
     while True:
         try:
-            return psycopg.connect(settings.resolved_database_url(), row_factory=dict_row)
+            return psycopg.Connection[dict[str, Any]].connect(settings.resolved_database_url(), row_factory=dict_row)
         except psycopg.OperationalError:
             attempt += 1
             remaining = deadline - time.monotonic()
@@ -254,7 +254,7 @@ def _connect_database() -> psycopg.Connection:
 
 
 @contextmanager
-def _default_connect() -> AbstractContextManager[psycopg.Connection]:
+def _default_connect() -> Iterator[psycopg.Connection[Any]]:
     # Standalone connection for the background task. Mirrors api.db.get_conn
     # rather than importing it — get_conn is a request-scoped generator
     # dependency, not a context manager. Autocommit so status writes from the
@@ -862,7 +862,7 @@ class Dispatcher:
         execution_number: int | None = None
         try:
             with self.connect() as conn:
-                row = EvaluationRepository(conn).load_for_dispatch(evaluation_id)
+                row: dict[str, Any] | None = EvaluationRepository(conn).load_for_dispatch(evaluation_id)
                 if row is None:
                     raise RuntimeError(f"evaluation not found: {evaluation_id}")
                 if row.get("status") not in _DB_TERMINAL_STATUSES:
@@ -1246,7 +1246,7 @@ class Dispatcher:
         ``benchmark_run_repository.derive_run_view``), so there is no fan-in here.
         """
         with self.connect() as conn:
-            row = self._load(conn, evaluation_id)
+            row: dict[str, Any] | None = self._load(conn, evaluation_id)
             if row is None:
                 return
             if row["status"] == "cancelled" and row.get("cancel_teardown_status") == "pending":
@@ -1502,7 +1502,11 @@ class Dispatcher:
                         )
                         switchyard_lease = switchyard_lease_from_row(resource_row)
                         switchyard_render = None
-                        if switchyard_lease is None or resource_row.get("status") != "provisioned":
+                        if (
+                            switchyard_lease is None
+                            or resource_row is None
+                            or resource_row.get("status") != "provisioned"
+                        ):
 
                             def persist_lease(lease: SwitchyardLease) -> None:
                                 nonlocal resource_row
@@ -1646,13 +1650,12 @@ class Dispatcher:
                     )
                     return
 
-            snapshot_evaluation = (
-                snapshot.get("evaluation")
-                if snapshot is not None and isinstance(snapshot.get("evaluation"), Mapping)
-                else row
-            )
+            # validate_execution_snapshot already guarantees an evaluation object.
+            snapshot_evaluation: Mapping[str, Any] = snapshot["evaluation"] if snapshot is not None else row
             runner_metadata = snapshot_evaluation.get("runner_metadata") or {}
-            runner_artifact = runner_metadata.get("artifact") if isinstance(runner_metadata, Mapping) else {}
+            runner_artifact: Mapping[str, Any] | None = (
+                runner_metadata.get("artifact") if isinstance(runner_metadata, Mapping) else {}
+            )
             if not isinstance(runner_artifact, Mapping):
                 runner_artifact = {}
             agent_floor = snapshot_agent_timeout_floor(row)

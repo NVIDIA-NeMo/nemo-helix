@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import psycopg
 
 
 class OperationsRepository:
-    def __init__(self, conn: psycopg.Connection) -> None:
+    def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self.conn = conn
 
     def ping(self) -> None:

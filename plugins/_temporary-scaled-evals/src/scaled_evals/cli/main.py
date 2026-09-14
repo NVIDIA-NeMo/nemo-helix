@@ -325,7 +325,7 @@ def benchmark_import_validate(
     ctx: click.Context, manifest: Path, output_root: Path | None, max_pack_bytes: int | None
 ) -> None:
     """Validate one materialized catalog without server access or state mutation."""
-    kwargs = {"output_root": output_root}
+    kwargs: dict[str, Any] = {"output_root": output_root}
     if max_pack_bytes is not None:
         kwargs["max_pack_bytes"] = max_pack_bytes
     result = validate_benchmark_import(manifest, **kwargs)
@@ -1181,7 +1181,7 @@ def _parse_task_refs(specs: tuple[str, ...]) -> list[dict[str, object]]:
     return refs
 
 
-def _benchmark_summary(data: dict[str, object]) -> list[str]:
+def _benchmark_summary(data: dict[str, Any]) -> list[str]:
     summary = [
         f"benchmark {data['id']}",
         f"  name:       {data.get('name')}",
@@ -1477,7 +1477,8 @@ def credential_create(ctx: click.Context, name: str, provider: str, key: str | N
     if key:
         body["key"] = key
     else:
-        body["yaml"] = load_arg(yaml_)  # type: ignore[arg-type]
+        assert yaml_ is not None  # The exclusive key/yaml check above guarantees this.
+        body["yaml"] = load_arg(yaml_)
 
     data = request(ctx.obj["client"], "POST", "/credentials", json=body)
     emit(
@@ -1579,7 +1580,8 @@ def credential_rotate(ctx: click.Context, credential_id: str, key: str | None, y
     if key:
         body["key"] = key
     else:
-        body["yaml"] = load_arg(yaml_)  # type: ignore[arg-type]
+        assert yaml_ is not None  # The exclusive key/yaml check above guarantees this.
+        body["yaml"] = load_arg(yaml_)
     data = request(ctx.obj["client"], "POST", f"/credentials/{credential_id}/rotate", json=body)
     emit(data, ctx.obj["json"], _credential_summary(data))
 
@@ -2285,7 +2287,9 @@ def evaluation_wait(
 def evaluation_provenance(ctx: click.Context, evaluation_id: str, output: Path | None) -> None:
     """Print or download the run provenance manifest."""
     data = request(ctx.obj["client"], "GET", f"/evaluations/{evaluation_id}")
-    links = data.get("links") if isinstance(data.get("links"), dict) else {}
+    links = data.get("links")
+    if not isinstance(links, dict):
+        links = {}
     api_path = links.get("provenance") or (f"/evaluations/{evaluation_id}/artifacts/scaled-evals-provenance.json")
     try:
         content = fetch_artifact(ctx.obj["client"], api_path)
@@ -2322,7 +2326,9 @@ def evaluation_provenance(ctx: click.Context, evaluation_id: str, output: Path |
 def evaluation_sbom(ctx: click.Context, evaluation_id: str, output: Path | None) -> None:
     """Print or download the run-composition CycloneDX BOM."""
     data = request(ctx.obj["client"], "GET", f"/evaluations/{evaluation_id}")
-    links = data.get("links") if isinstance(data.get("links"), dict) else {}
+    links = data.get("links")
+    if not isinstance(links, dict):
+        links = {}
     api_path = links.get("sbom") or (f"/evaluations/{evaluation_id}/artifacts/scaled-evals-sbom.cdx.json")
     try:
         content = fetch_artifact(ctx.obj["client"], api_path)
@@ -2600,7 +2606,9 @@ def evaluation_harbor_viewer(
 ) -> None:
     """Show, download, or manually upload a Harbor Viewer-compatible archive."""
     data = request(ctx.obj["client"], "GET", f"/evaluations/{evaluation_id}")
-    links = data.get("links") if isinstance(data.get("links"), dict) else {}
+    links = data.get("links")
+    if not isinstance(links, dict):
+        links = {}
     archive_url = links.get("harbor_viewer_archive")
     upload_url = links.get("harbor_viewer_upload")
     viewer_url = links.get("harbor_viewer")
@@ -2609,7 +2617,7 @@ def evaluation_harbor_viewer(
     if upload_ and not upload_url:
         raise click.ClickException("evaluation has no Harbor Viewer upload endpoint")
 
-    result = {
+    result: dict[str, Any] = {
         "evaluation_id": evaluation_id,
         "archive_url": archive_url,
         "upload_url": upload_url,
@@ -2666,7 +2674,7 @@ def evaluation_harbor_viewer(
 # ---------- benchmark runs --------------------------------------------------
 
 
-def _benchmark_member_failure_codes(member: dict[str, object]) -> list[str]:
+def _benchmark_member_failure_codes(member: dict[str, Any]) -> list[str]:
     codes: list[str] = []
     direct = member.get("failure_code") or member.get("last_failure_code")
     if direct:
@@ -2718,7 +2726,7 @@ def _filter_benchmark_members(
     return filtered
 
 
-def _benchmark_member_evaluation_summary(member: dict[str, object]) -> str:
+def _benchmark_member_evaluation_summary(member: dict[str, Any]) -> str:
     codes = _benchmark_member_failure_codes(member)
     category = _benchmark_member_failure_category(member)
     failure = f"  failure={category or 'unknown'}/{','.join(codes)}" if codes else ""
@@ -2737,7 +2745,7 @@ def _benchmark_member_evaluation_summary(member: dict[str, object]) -> str:
     )
 
 
-def _benchmark_run_summary(data: dict[str, object], *, member_total: int | None = None) -> list[str]:
+def _benchmark_run_summary(data: dict[str, Any], *, member_total: int | None = None) -> list[str]:
     detail = f" ({data['status_detail']})" if data.get("status_detail") else ""
     lines = [
         f"benchmark run {data['id']}",
@@ -3237,7 +3245,7 @@ def benchmark_run_cancel(ctx: click.Context, run_id: str) -> None:
     emit(data, ctx.obj["json"], _benchmark_run_summary(data))
 
 
-def _evaluation_summary(data: dict[str, object]) -> list[str]:
+def _evaluation_summary(data: dict[str, Any]) -> list[str]:
     """Human-readable lines shared by evaluation create/get."""
     detail = f" ({data['status_detail']})" if data.get("status_detail") else ""
     lines = [
