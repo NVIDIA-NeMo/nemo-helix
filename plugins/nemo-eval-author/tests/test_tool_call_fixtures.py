@@ -54,7 +54,9 @@ registration = importlib.import_module("mock_registration")
 
 
 @pytest.mark.parametrize("import_mode", ["prepend", "importlib"])
-def test_standalone_collection_without_test_directory_on_pythonpath(tmp_path, import_mode):
+def test_standalone_collection_without_test_directory_on_pythonpath(tmp_path, monkeypatch, import_mode):
+    # Explicit plugins load even when entry-point plugin autoload is disabled.
+    monkeypatch.setenv("PYTEST_PLUGINS", "unavailable_parent_only_pytest_plugin")
     test_path = Path(__file__).resolve()
     result = subprocess.run(
         [
@@ -71,7 +73,11 @@ def test_standalone_collection_without_test_directory_on_pythonpath(tmp_path, im
             "-q",
         ],
         cwd=tmp_path,
-        env={key: value for key, value in os.environ.items() if key not in {"PYTHONPATH", "PYTEST_ADDOPTS"}}
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"PYTHONPATH", "PYTEST_ADDOPTS", "PYTEST_PLUGINS"}
+        }
         | {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
         capture_output=True,
         text=True,
