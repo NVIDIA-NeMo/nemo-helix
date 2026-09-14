@@ -40,10 +40,12 @@ variable "NMP_PYTHON_IMAGE" {
 }
 
 variable "DISTROLESS_BASE_3_13" {
-  # NGC 3.13-v4.0.9 (2026-08-06) is still CPython 3.13.14 and ships
-  # libexpat1 2.8.2-1~deb13u1 (sheet CVE-2026-66046). No newer 3.13 tag
-  # was published as of 2026-08-27; do not invent one.
-  default = "nvcr.io/nvidia/distroless/python:3.13-v4.0.9"
+  # NGC 3.13-v4.1.3 (2026-09-09) ships CPython 3.13.15 and OpenSSL 3.5.7,
+  # clearing the interpreter and OpenSSL CVEs open against 3.13-v4.0.9.
+  # glibc is still 2.41-12+deb13u3 (CVE-2026-5450/5928 need deb13u4) as of
+  # this tag; tracked separately pending a newer NGC publish, not blocking
+  # this bump.
+  default = "nvcr.io/nvidia/distroless/python:3.13-v4.1.3"
 }
 
 variable "NMP_API_RUNTIME_BASE" {
