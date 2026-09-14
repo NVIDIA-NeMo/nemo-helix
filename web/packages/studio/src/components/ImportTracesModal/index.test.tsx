@@ -4,6 +4,7 @@
 import { ImportTracesModal } from '@studio/components/ImportTracesModal';
 import { ingestTraceFiles } from '@studio/components/ImportTracesModal/ingestTraceFiles';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
+import { mockAnalysisConfig } from '@studio/mocks/handlers/insights';
 import { renderRoute, screen } from '@studio/tests/util/render';
 import { fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -17,6 +18,9 @@ vi.mock('@studio/components/ImportTracesModal/ingestTraceFiles', async (importOr
 const ingest = vi.mocked(ingestTraceFiles);
 
 const workspace = workspace1.workspace;
+
+/** What the model pickers show for the stored pair: the reference without its workspace. */
+const storedModel = mockAnalysisConfig.default_model.split('/')[1] as string;
 
 const renderModal = (onClose = () => {}) =>
   renderRoute(
@@ -182,16 +186,57 @@ describe('ImportTracesModal', () => {
     };
     renderRoute(<Harness />);
 
-    await user.click(await screen.findByRole('tab', { name: 'Select files' }));
-    await waitFor(() =>
-      expect(screen.queryByText('Select a default model')).not.toBeInTheDocument()
-    );
+    /** The model pair lives behind the accordion, so it has to be opened to be read. */
+    const showModels = async () => {
+      await user.click(await screen.findByRole('tab', { name: 'Select files' }));
+      await user.click(await screen.findByText('Advanced Options'));
+    };
+
+    await showModels();
+    await waitFor(() => expect(screen.getAllByText(storedModel)).toHaveLength(2));
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await user.click(await screen.findByRole('button', { name: 'Reopen' }));
-    await user.click(await screen.findByRole('tab', { name: 'Select files' }));
+    await showModels();
 
+    await waitFor(() => expect(screen.getAllByText(storedModel)).toHaveLength(2));
     expect(screen.queryByText('Select a default model')).not.toBeInTheDocument();
     expect(screen.queryByText('Select a fast model')).not.toBeInTheDocument();
+  });
+
+  /** The workspace-wide Traces page opens the same modal with no agent to attribute to. */
+  describe('without an agent', () => {
+    const renderWorkspaceModal = (onClose = () => {}) =>
+      renderRoute(<ImportTracesModal open onClose={onClose} workspace={workspace} />);
+
+    it('offers no insights trigger, because analysis is enabled one agent at a time', async () => {
+      const user = userEvent.setup();
+      renderWorkspaceModal();
+
+      await user.click(await screen.findByRole('tab', { name: 'Select files' }));
+
+      expect(await screen.findByRole('button', { name: 'Upload files' })).toBeInTheDocument();
+      expect(screen.queryByText('Advanced Options')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('checkbox', { name: /Run insights analysis/ })
+      ).not.toBeInTheDocument();
+    });
+
+    it('imports without queueing analysis for the agents the files named', async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+      ingest.mockResolvedValue({
+        results: [{ label: 'trace.json', status: 'success', message: '1 trajectory imported.' }],
+        agents: ['email-triage'],
+      });
+      renderWorkspaceModal(onClose);
+
+      await user.click(await screen.findByRole('tab', { name: 'Select files' }));
+      await choose(atifFile);
+      await user.click(screen.getByRole('button', { name: /Import/ }));
+
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+      expect(screen.queryByText('Insights')).not.toBeInTheDocument();
+    });
   });
 });

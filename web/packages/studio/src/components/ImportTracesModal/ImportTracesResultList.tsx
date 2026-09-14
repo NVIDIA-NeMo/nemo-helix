@@ -57,9 +57,9 @@ export const ImportTracesResultList: FC<ImportTracesResultListProps> = ({
   <Stack gap="density-lg" role="status" aria-label="Import results">
     <Stack gap="density-md">
       <Text kind="body/semibold/sm">Results</Text>
-      {results.map(({ label, status, message }) => (
+      {results.map(({ label, status, message }, index) => (
         <ResultRow
-          key={`${label}-${status}`}
+          key={`${label}-${status}-${index}`}
           slotIcon={status === 'success' ? successIcon : errorIcon}
           title={label}
           message={message}

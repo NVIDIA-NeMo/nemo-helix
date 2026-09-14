@@ -282,9 +282,9 @@ export const AgentDetailRoute: FC = () => {
         workspace={workspace}
         agent={agentName}
       />
-      {agentName && (
+      {agentName && importTracesOpen && (
         <ImportTracesModal
-          open={importTracesOpen}
+          open
           onClose={() => setImportTracesOpen(false)}
           workspace={workspace}
           agent={agentName}

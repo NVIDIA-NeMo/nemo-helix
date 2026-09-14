@@ -3,11 +3,8 @@
 
 import { Block, Button, Flex } from '@nvidia/foundations-react-core';
 import { INTAKE_ENABLED } from '@studio/constants/environment';
-import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import type { AgentDetailTab } from '@studio/routes/agents/AgentDetailRoute/tabs';
-import { getIntakeTracesRoute } from '@studio/routes/utils';
 import { type FC, type RefObject } from 'react';
-import { useNavigate } from 'react-router';
 
 /** The action each tab promotes to the brand-colored slot. Tabs left out promote `deploy`, which
  *  is the only action every tab can offer — the others depend on a tab-specific target. */
@@ -63,9 +60,6 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
   onOptimize,
   onImportTraces,
 }) => {
-  const workspace = useWorkspaceFromPath();
-  const navigate = useNavigate();
-
   const actions: Action[] = [
     {
       id: 'evaluate',
@@ -108,9 +102,6 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
         <>
           <Button kind="secondary" onClick={onImportTraces} disabled={!agentName}>
             Import traces
-          </Button>
-          <Button kind="secondary" onClick={() => navigate(getIntakeTracesRoute(workspace))}>
-            Open traces
           </Button>
         </>
       )}

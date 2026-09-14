@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { PLATFORM_BASE_URL } from '@e2e-tests/utils/environment';
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { useInsightsGetAnalysisConfig } from '@nemo/sdk/generated/insights/insights-analysis-configs';
@@ -26,7 +25,6 @@ import {
   TextInput,
 } from '@nvidia/foundations-react-core';
 import {
-  agentsFromTrajectories,
   type InsightsTriggerResult,
   isQualifiedModelRef,
   triggerInsightsRuns,
@@ -41,12 +39,11 @@ import {
   type SelectedTraceFile,
 } from '@studio/components/ImportTracesModal/ingestTraceFiles';
 import { InsightsModelPairFields } from '@studio/components/ImportTracesModal/InsightsModelPairFields';
-import { parseAtifValue } from '@studio/components/ImportTracesModal/parseAtifTraces';
 import { SelectedTraceFileTags } from '@studio/components/ImportTracesModal/SelectedTraceFileTags';
 import type { ImportMethod, ImportTraceResult } from '@studio/components/ImportTracesModal/types';
+import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { traceImportPrompt } from '@studio/routes/agents/AgentDetailRoute/overview/codingAgentPrompts';
-import { Upload } from 'lucide-react';
-import { type ChangeEvent, type FC, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, type FC, useEffect, useRef, useState } from 'react';
 
 /** Formats whose records carry no agent field, so an agent-scoped import cannot reattribute them. */
 const UNATTRIBUTABLE_FORMATS = new Set(['chat-completions', 'otlp-protobuf']);
@@ -90,28 +87,17 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
   const toast = useToast();
 
   /**
-   * The agent whose stored pair can be shown up front: either the one this modal is
-   * pinned to, or the single agent named by the chosen ATIF files. With several agents in
-   * one import there is no single stored pair to display, so the fields stay empty
-   * and any value entered applies to all of them.
+   * Analysis is configured and queued per agent, so the trigger and the model pair it would use
+   * only belong to an import pinned to one. A workspace-wide import names whichever agents its
+   * files happen to carry, which is not a set the user picked — it offers ingest alone.
    */
-  const previewAgent = useMemo(() => {
-    if (agent) return agent;
-    const trajectories = files
-      .filter(({ detection }) => detection.format === 'atif')
-      .flatMap(
-        ({ label, detection }) =>
-          parseAtifValue(label, 'document' in detection ? detection.document : undefined).traces
-      )
-      .map(({ trajectory }) => trajectory);
-    const named = agentsFromTrajectories(trajectories);
-    return named.length === 1 ? named[0] : undefined;
-  }, [agent, files]);
+  const insightsAvailable = !!agent;
+  const willRunInsights = insightsAvailable && runInsights;
 
   const { data: analysisConfig, isError: configFailed } = useInsightsGetAnalysisConfig(
     workspace,
-    previewAgent ?? '',
-    { query: { enabled: runInsights && !!previewAgent, retry: false } }
+    agent ?? '',
+    { query: { enabled: willRunInsights, retry: false } }
   );
 
   /**
@@ -146,7 +132,6 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
   /** Selections accumulate, so a set spread across directories can be picked up in passes. */
   const handleFilesSelected = async (event: ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(event.target.files ?? []);
-    // Frees the input to re-fire for a file that was picked, removed, then picked again.
     event.target.value = '';
     if (selected.length === 0) return;
 
@@ -174,16 +159,16 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
     setResults(imported);
 
     const succeeded = imported.filter(({ status }) => status === 'success').length;
+    const failed = imported.filter(({ status, detail }) => status === 'error' && !detail).length;
     if (succeeded > 0) {
       void queryClient.invalidateQueries({ queryKey: getListTracesQueryKey(workspace) });
       void queryClient.invalidateQueries({ queryKey: getListSpansQueryKey(workspace) });
       toast.success(`Imported ${succeeded} file${succeeded === 1 ? '' : 's'}.`);
     }
-    const failed = imported.length - succeeded;
     if (failed > 0) toast.error(`${failed} import${failed === 1 ? '' : 's'} failed.`);
 
     let insightsNeedsAttention = false;
-    if (runInsights && agents.length > 0) {
+    if (willRunInsights && agents.length > 0) {
       const triggered = await triggerInsightsRuns(workspace, agents, {
         default_model: defaultModel,
         fast_model: fastModel,
@@ -199,8 +184,6 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
 
     setIsImporting(false);
 
-    // A clean import has nothing left to read — the toasts carry the counts. Anything that
-    // failed, or an agent that was not enabled for analysis, keeps its reason on screen.
     if (failed === 0 && !insightsNeedsAttention) {
       reset();
       onClose();
@@ -216,7 +199,7 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
 
   /** A malformed override would only fail once the analyze-job is already running. */
   const hasInvalidModelRef =
-    runInsights &&
+    willRunInsights &&
     [defaultModel, fastModel].some(
       (ref) => ref.trim().length > 0 && !isQualifiedModelRef(ref.trim())
     );
@@ -250,7 +233,6 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
               }
               loading={isImporting}
             >
-              <Upload />
               {isImporting ? 'Importing...' : 'Import'}
             </LoadingButton>
           )}
@@ -355,36 +337,38 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
                 </FormField>
               )}
 
-              <AccordionRoot>
-                <AccordionItem value="settings" className="border-b-0">
-                  <AccordionTrigger chevronPosition="start">Advanced Options</AccordionTrigger>
-                  <AccordionContent>
-                    <Stack gap="density-xs" className="pt-density-md">
-                      <Checkbox
-                        checked={runInsights}
-                        onChange={(event) => setRunInsights(event.target.checked)}
-                        slotLabel="Run insights analysis after import"
-                      />
-                      <Text kind="body/regular/xs" color="secondary">
-                        Queues one analyst run per agent named in the imported traces. The agent
-                        must already be enabled with <code>nemo insights analysis enable</code>.
-                      </Text>
-
-                      {runInsights && (
-                        <InsightsModelPairFields
-                          workspace={workspace}
-                          agent={previewAgent}
-                          unresolved={!!previewAgent && configFailed}
-                          defaultModel={defaultModel}
-                          fastModel={fastModel}
-                          onDefaultModelChange={setDefaultModel}
-                          onFastModelChange={setFastModel}
+              {insightsAvailable && (
+                <AccordionRoot>
+                  <AccordionItem value="settings" className="border-b-0">
+                    <AccordionTrigger chevronPosition="start">Advanced Options</AccordionTrigger>
+                    <AccordionContent>
+                      <Stack gap="density-xs" className="pt-density-md">
+                        <Checkbox
+                          checked={runInsights}
+                          onChange={(event) => setRunInsights(event.target.checked)}
+                          slotLabel="Run insights analysis after import"
                         />
-                      )}
-                    </Stack>
-                  </AccordionContent>
-                </AccordionItem>
-              </AccordionRoot>
+                        <Text kind="body/regular/xs" color="secondary">
+                          Queues an analyst run for <strong>{agent}</strong>, which must already be
+                          enabled with <code>nemo insights analysis enable</code>.
+                        </Text>
+
+                        {runInsights && (
+                          <InsightsModelPairFields
+                            workspace={workspace}
+                            agent={agent}
+                            unresolved={configFailed}
+                            defaultModel={defaultModel}
+                            fastModel={fastModel}
+                            onDefaultModelChange={setDefaultModel}
+                            onFastModelChange={setFastModel}
+                          />
+                        )}
+                      </Stack>
+                    </AccordionContent>
+                  </AccordionItem>
+                </AccordionRoot>
+              )}
 
               {results && (
                 <ImportTracesResultList results={results} insightsResults={insightsResults} />

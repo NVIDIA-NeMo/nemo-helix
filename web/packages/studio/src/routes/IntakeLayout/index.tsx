@@ -10,7 +10,6 @@ import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getIntakeSpansRoute, getIntakeTracesRoute } from '@studio/routes/utils';
-import { Upload } from 'lucide-react';
 import { FC, Suspense, useState } from 'react';
 import { Link, Outlet, matchPath, useLocation } from 'react-router';
 
@@ -58,15 +57,12 @@ export const IntakeLayout: FC = () => {
           }
           slotActions={
             <Button kind="secondary" onClick={() => setImportOpen(true)}>
-              <Upload />
               Import traces
             </Button>
           }
         />
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-density-lg">
           <Tabs
-            // Override KUI's default overflow:hidden since we're using Tabs purely for
-            // navigation (with renderLink), not for containing tab panel content.
             className="min-w-0 flex-1 overflow-visible"
             value={selectedTab}
             items={[
