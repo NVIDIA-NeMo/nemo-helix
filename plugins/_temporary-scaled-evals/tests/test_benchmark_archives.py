@@ -366,14 +366,15 @@ def test_export_preserves_package_task_identity(monkeypatch, tmp_path):
     assert result["config"]["task"] == task
 
 
-def test_export_captures_shared_benchmark_artifacts_once(monkeypatch, tmp_path):
+@pytest.mark.parametrize("digest_prefix", ["", "sha256:"])
+def test_export_captures_shared_benchmark_artifacts_once(monkeypatch, tmp_path, digest_prefix):
     key = "benchmark-runs/bmr_1/artifacts/switchyard/routing_stats_final.json"
     stats = b'{"requests": 4, "cost_usd": 0.25}'
     source = harbor_files()
     source["switchyard/campaign_evidence.json"] = {
         "status": "ready",
         "routing_stats_object_key": key,
-        "routing_stats_sha256": hashlib.sha256(stats).hexdigest(),
+        "routing_stats_sha256": digest_prefix + hashlib.sha256(stats).hexdigest(),
     }
     binary = b"\x00\xffbenchmark evidence"
     artifacts = {key: stats, "benchmark-runs/bmr_1/artifacts/trace.bin": binary}
@@ -461,13 +462,14 @@ def test_benchmark_artifacts_share_member_resource_limits(monkeypatch, tmp_path,
 
 
 @pytest.mark.parametrize("present", [False, True])
-def test_export_rejects_missing_or_mismatched_campaign_evidence(monkeypatch, tmp_path, present):
+@pytest.mark.parametrize("digest_prefix", ["", "sha256:"])
+def test_export_rejects_missing_or_mismatched_campaign_evidence(monkeypatch, tmp_path, present, digest_prefix):
     key = "benchmark-runs/bmr_1/artifacts/switchyard/routing_stats_final.json"
     source = harbor_files()
     source["switchyard/campaign_evidence.json"] = {
         "status": "ready",
         "routing_stats_object_key": key,
-        "routing_stats_sha256": "0" * 64,
+        "routing_stats_sha256": digest_prefix + "0" * 64,
     }
     with pytest.raises(BenchmarkArchiveError, match="missing or changed"):
         build(
@@ -525,3 +527,46 @@ def test_idle_dispatcher_processes_benchmark_archive_queue(monkeypatch, status):
     assert worker.work_once() is (status is not None)
     repo.claim.assert_called_once_with(claim_timeout=worker.claim_timeout)
     assert builder.call_count == (1 if status == "building" else 0)
+
+
+@pytest.mark.parametrize("ownership_lost", [False, True])
+def test_archive_heartbeat_distinguishes_transient_errors_from_lost_ownership(monkeypatch, ownership_lost):
+    import threading
+    from types import SimpleNamespace
+
+    repo = MagicMock(spec=BenchmarkArchiveRepository)
+    repo.heartbeat.side_effect = [False] if ownership_lost else [RuntimeError("temporary DB failure"), True]
+    monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveRepository", lambda conn: repo)
+    stop = MagicMock()
+    stop.wait.side_effect = [False, False, True]
+    lost = threading.Event()
+    events = iter([stop, lost])
+
+    def make_thread(*, target, daemon):
+        thread = MagicMock()
+        # Drive the heartbeat deterministically without sleeps or a real thread.
+        thread.start.side_effect = target
+        return thread
+
+    monkeypatch.setattr(
+        "scaled_evals.dispatch.worker.threading",
+        SimpleNamespace(Event=lambda: next(events), Thread=make_thread),
+    )
+
+    @contextmanager
+    def connect():
+        yield MagicMock()
+
+    def build_archive(job, *, check_claim):
+        check_claim()
+        return {"object_key": "archive", "size_bytes": 123}
+
+    monkeypatch.setattr("scaled_evals.dispatch.worker.build_benchmark_archive", build_archive)
+    Dispatcher(connect=connect).build_benchmark_archive(job())
+    if ownership_lost:
+        repo.finish.assert_not_called()
+        repo.fail.assert_called_once_with(job(), "benchmark archive worker lease lost")
+    else:
+        assert repo.heartbeat.call_count == 2
+        repo.fail.assert_not_called()
+        repo.finish.assert_called_once_with(job(), object_key="archive", size_bytes=123)

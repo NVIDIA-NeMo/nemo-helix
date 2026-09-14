@@ -564,10 +564,8 @@ class Dispatcher:
                     if not owned:
                         lost.set()
                         return
-                except Exception:
-                    lost.set()
+                except Exception:  # noqa: BLE001 - a transient DB failure is not proof of lease loss
                     LOG.exception("benchmark archive heartbeat failed")
-                    return
 
         def check_claim() -> None:
             if lost.is_set():

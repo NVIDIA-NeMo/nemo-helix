@@ -182,11 +182,8 @@ def _check_campaign_evidence(output: Path, members: list[dict], artifacts: list[
             unavailable.append({"evaluation_id": member["id"], "kind": "switchyard_campaign"})
             continue
         artifact = captured.get(reference.get("routing_stats_object_key"))
-        if (
-            reference.get("status") != "ready"
-            or artifact is None
-            or artifact["sha256"] != reference.get("routing_stats_sha256")
-        ):
+        expected_sha256 = str(reference.get("routing_stats_sha256") or "").removeprefix("sha256:")
+        if reference.get("status") != "ready" or artifact is None or artifact["sha256"] != expected_sha256:
             raise BenchmarkArchiveError("referenced Switchyard campaign evidence is missing or changed")
     return unavailable
 
