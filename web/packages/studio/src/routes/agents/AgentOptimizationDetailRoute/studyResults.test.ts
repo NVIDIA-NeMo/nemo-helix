@@ -166,6 +166,26 @@ describe('fetchStudyResults', () => {
     );
   });
 
+  it('finds sibling study files when the artifact URL points at a specific file', async () => {
+    mockResults(`fileset://${workspace}/study-artifacts#${resultDir}/study_summary.json`);
+    mockFiles([`${resultDir}/study_summary.json`, `${resultDir}/trials_dataframe_params.csv`]);
+    mockDownloads({
+      [`${resultDir}/study_summary.json`]: SUMMARY,
+      [`${resultDir}/trials_dataframe_params.csv`]: TRIALS_CSV,
+    });
+
+    const results = await fetchStudyResults(workspace, jobName);
+
+    expect(filesListFilesetFiles).toHaveBeenCalledWith(
+      workspace,
+      'study-artifacts',
+      { path: resultDir },
+      undefined
+    );
+    expect(results?.summary).not.toBeNull();
+    expect(results?.trials).toHaveLength(3);
+  });
+
   it('reads trials even when the summary is missing, falling back to CSV metric order', async () => {
     mockResults(`fileset://${workspace}/study-artifacts#${resultDir}`);
     mockFiles([`${resultDir}/trials_dataframe_params.csv`]);

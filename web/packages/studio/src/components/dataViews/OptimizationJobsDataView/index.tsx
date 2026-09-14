@@ -22,8 +22,14 @@ const METRIC_SORT_PREFIX = 'metric:';
 /** Sort id prefix for the one-column-per-parameter columns. */
 const PARAM_SORT_PREFIX = 'param:';
 
-const formatMetric = (value: number | null): string =>
-  value === null ? EM_DASH : value.toLocaleString(undefined, { maximumFractionDigits: 4 });
+const formatMetric = (value: number | null): string => {
+  if (value === null) return EM_DASH;
+  const fixed = value.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  if (value !== 0 && Number(fixed.replace(/,/g, '')) === 0) {
+    return value.toLocaleString(undefined, { maximumSignificantDigits: 4 });
+  }
+  return fixed;
+};
 
 /** `COMPLETE` → `Complete`, matching the sentence-case status text in the design. */
 const formatState = (state: string): string =>
@@ -120,11 +126,11 @@ const sortValue = (
   return null;
 };
 
-export interface TrialsTableProps {
+export interface TrialsDataViewProps {
   results: StudyResults;
 }
 
-export const TrialsTable: FC<TrialsTableProps> = ({ results }) => {
+export const TrialsDataView: FC<TrialsDataViewProps> = ({ results }) => {
   const { trials, metricNames } = results;
   const primaryMetric = metricNames[0];
 

@@ -148,7 +148,7 @@ const locateStudyFiles = async (
     const { data: files } = await filesListFilesetFiles(
       parsed.workspace,
       parsed.name,
-      { path: parsed.objectPath || undefined },
+      { path: parsed.filesListPathPrefix },
       signal
     );
     const at = (fileName: string) =>

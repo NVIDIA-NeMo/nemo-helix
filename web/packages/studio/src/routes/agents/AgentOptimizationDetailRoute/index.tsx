@@ -12,12 +12,12 @@ import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
 import { useAgentsGetOptimizeJob } from '@nemo/sdk/generated/agents/agents';
 import type { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Flex, PageHeader, Panel, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
+import { TrialsDataView } from '@studio/components/dataViews/OptimizationJobsDataView';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { fetchStudyResults } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
 import { StudyStatTiles } from '@studio/routes/agents/AgentOptimizationDetailRoute/StudyStatTiles';
-import { TrialsTable } from '@studio/routes/agents/AgentOptimizationDetailRoute/TrialsTable';
 import { getAgentOptimizationsTabRoute, getAgentsListRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { useQuery } from '@tanstack/react-query';
@@ -173,7 +173,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
         ) : (
           <>
             <StudyStatTiles results={results} />
-            <TrialsTable results={results} />
+            <TrialsDataView results={results} />
           </>
         )}
       </Stack>
