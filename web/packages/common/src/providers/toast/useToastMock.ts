@@ -3,7 +3,7 @@
 
 import { vi } from 'vitest';
 
-import { ToastObject } from './types';
+import type { ToastObject } from './types';
 
 /**
  * Builds a ToastObject with every method stubbed as a vi.fn(), so tests only
