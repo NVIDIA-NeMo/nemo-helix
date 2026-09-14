@@ -64,6 +64,5 @@ export const parseJsonPayload = (value: string | null | undefined): string | nul
   return parsed === null ? null : JSON.stringify(parsed, null, 2);
 };
 
-/** A chat payload opens as a conversation; the structure is the point of reading it. */
 export const autoFormat = (isJson: boolean, isChat = false): SpanPayloadFormat =>
   isChat ? 'chat' : isJson ? 'json' : 'raw';
