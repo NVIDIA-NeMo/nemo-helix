@@ -896,6 +896,40 @@ async def test_update_job_status_from_step_emits_job_run_telemetry_on_terminal_t
 
 
 @pytest.mark.asyncio
+async def test_update_job_status_from_step_emits_job_run_telemetry_on_pause(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreatePlatformJobRequest,
+):
+    request = sample_platform_job_request.model_copy(
+        update={"custom_fields": build_job_telemetry_custom_fields("session-123")}
+    )
+    job = await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
+    current_step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert current_step is not None
+    current_step.status = PlatformJobStatus.ACTIVE
+    current_step = await mock_store.update(current_step)
+
+    attempt = await mock_dispatcher.get_current_attempt(job.name, DEFAULT_WORKSPACE)
+    assert attempt is not None
+    attempt.status = PlatformJobStatus.ACTIVE
+    await mock_store.update(attempt)
+
+    with patch("nmp.core.jobs.app.dispatcher.emit_job_run_event") as emit_event:
+        await mock_dispatcher.update_job_status_from_step(
+            current_step,
+            PlatformJobStatus.PAUSED,
+            status_details={"message": "Job is paused"},
+        )
+
+    emit_event.assert_called_once()
+    event = emit_event.call_args.args[0]
+    assert event.session_id == "session-123"
+    assert event.event.task_status == "undefined"
+    assert event.event.job_type == "custom"
+
+
+@pytest.mark.asyncio
 async def test_update_job_status_from_step_skips_job_run_telemetry_without_session_id(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,

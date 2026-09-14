@@ -89,7 +89,25 @@ operations_counter = create_counter(
 
 _DELETE_PAGE_SIZE = 1000
 _JOB_MUTATION_LOCKS: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = weakref.WeakValueDictionary()
+_JOB_RUN_TELEMETRY_TERMINAL_STATUSES = frozenset(
+    {
+        PlatformJobStatus.COMPLETED,
+        PlatformJobStatus.ERROR,
+        PlatformJobStatus.CANCELLED,
+        PlatformJobStatus.PAUSED,
+    }
+)
 EntityT = TypeVar("EntityT")
+
+
+def _should_emit_job_run_telemetry(
+    previous_status: PlatformJobStatus,
+    new_status: PlatformJobStatus,
+) -> bool:
+    return (
+        previous_status not in _JOB_RUN_TELEMETRY_TERMINAL_STATUSES
+        and new_status in _JOB_RUN_TELEMETRY_TERMINAL_STATUSES
+    )
 
 
 def _get_job_mutation_lock(job_name: str, workspace: str) -> asyncio.Lock:
@@ -1104,7 +1122,7 @@ class JobDispatcher:
                 if attempt.status == PlatformJobStatus.ERROR:
                     attempt.error_details = saved_step.error_details
                 attempt = await self.store.update(attempt)
-                if not previous_attempt_status.is_terminal() and attempt.status.is_terminal():
+                if _should_emit_job_run_telemetry(previous_attempt_status, attempt.status):
                     try:
                         job = await self.store.get_by_id(PlatformJob, attempt.job)
                         status_details = dict(attempt.status_details or {})
