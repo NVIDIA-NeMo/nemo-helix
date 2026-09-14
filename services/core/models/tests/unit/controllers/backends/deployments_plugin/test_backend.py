@@ -4,10 +4,11 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import TypeAlias
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, Volume
+from nemo_deployments_plugin.reconciler.volume_reconciler import VolumeReconciler
 from nemo_deployments_plugin.types import Endpoint
 from nemo_platform_plugin.auth import AuthContext as DeploymentAuthContext
 from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
@@ -381,6 +382,87 @@ async def test_delete_retries_on_next_call_when_deployment_still_exists() -> Non
 
 
 @pytest.mark.asyncio
+async def test_delete_marks_weights_and_scratch_volumes_deleting_and_waits() -> None:
+    backend = DeploymentsPluginServiceBackend(AsyncMock(), {}, "puller:latest")
+    backend.init()
+    backend._entities = AsyncMock()
+    volumes = {
+        "my-dep-weights": Volume(name="my-dep-weights", workspace="default", size="50Gi", status="BOUND"),
+        "my-dep-scratch": Volume(name="my-dep-scratch", workspace="default", size="10Gi", status="BOUND"),
+    }
+
+    async def _get(entity_type: type, name: str, workspace: str | None = None) -> Volume:
+        del workspace
+        if entity_type is Volume and name in volumes:
+            return volumes[name]
+        raise NemoEntityNotFoundError("missing")
+
+    backend._entities.get = AsyncMock(side_effect=_get)
+    backend._entities.update = AsyncMock(side_effect=lambda entity: entity)
+    backend._entities.delete = AsyncMock()
+    with patch(
+        "nmp.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
+        AsyncMock(return_value=[]),
+    ):
+        result = await backend.delete_model_deployment("default", "my-dep")
+
+    assert result.status == "DELETING"
+    assert {volume.status for volume in volumes.values()} == {"DELETING"}
+    assert {call.args[0].name for call in backend._entities.update.await_args_list} == {
+        "my-dep-scratch",
+        "my-dep-weights",
+    }
+    assert all(call.args[0] is not Volume for call in backend._entities.delete.await_args_list)
+
+    substrate_backend = AsyncMock()
+    registry = AsyncMock()
+    registry.resolve = Mock(return_value=substrate_backend)
+    volume_reconciler = VolumeReconciler(backend._entities, registry)
+    weights = volumes["my-dep-weights"]
+
+    await volume_reconciler.reconcile_one(weights)
+
+    substrate_backend.delete_volume.assert_awaited_once_with(
+        "default",
+        "my-dep-weights",
+        backend_config=weights.backend_config.model_dump(by_alias=True, exclude_none=True),
+    )
+    backend._entities.delete.assert_any_await(
+        Volume,
+        name="my-dep-weights",
+        workspace="default",
+        expected_db_version=weights.db_version,
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_preserves_volume_referenced_by_another_config() -> None:
+    backend = DeploymentsPluginServiceBackend(AsyncMock(), {}, "puller:latest")
+    backend.init()
+    backend._entities = AsyncMock()
+    weights = Volume(name="my-dep-weights", workspace="default", size="50Gi", status="BOUND")
+
+    async def _get(entity_type: type, name: str, workspace: str | None = None) -> Volume:
+        del workspace
+        if entity_type is Volume and name == weights.name:
+            return weights
+        raise NemoEntityNotFoundError("missing")
+
+    backend._entities.get = AsyncMock(side_effect=_get)
+    backend._entities.delete = AsyncMock()
+    with patch(
+        "nmp.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
+        AsyncMock(return_value=["shared-config"]),
+    ):
+        result = await backend.delete_model_deployment("default", "my-dep")
+
+    assert result.status == "DELETED"
+    assert weights.status == "BOUND"
+    backend._entities.update.assert_not_awaited()
+    assert all(call.args[0] is not Volume for call in backend._entities.delete.await_args_list)
+
+
+@pytest.mark.asyncio
 async def test_delete_completes_when_plugin_deployment_failed() -> None:
     backend = DeploymentsPluginServiceBackend(AsyncMock(), {}, "puller:latest")
     backend.init()
@@ -392,7 +474,14 @@ async def test_delete_completes_when_plugin_deployment_failed() -> None:
         status="FAILED",
         desired_state="STOPPED",
     )
-    backend._entities.get = AsyncMock(return_value=server)
+
+    async def _get(entity_type: type, name: str, workspace: str | None = None) -> Deployment:
+        del workspace
+        if entity_type is Deployment and name == server.name:
+            return server
+        raise NemoEntityNotFoundError("missing")
+
+    backend._entities.get = AsyncMock(side_effect=_get)
     backend._entities.delete = AsyncMock()
 
     result = await backend.delete_model_deployment("default", "my-dep")
