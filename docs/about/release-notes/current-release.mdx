@@ -2,136 +2,136 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "v0.5.0 - 2026-09-04"
+title: "v0.6.0 - 2026-09-23"
 description: ""
 ---
-NeMo Platform v0.5.0 focuses on productionizing the agent and customization
-workflows introduced in the previous releases. The release adds GRPO training
-with custom reward environments, completes the `rl` backend path for DPO and
-GRPO in Studio, expands Fabric-backed agent packaging and deployment, improves
-task-driven agent evaluation, and hardens local, Docker, Kubernetes, and Helm
-operations for the 0.5 release line.
+NeMo Platform v0.6.0 expands the 0.5 agent, evaluator, customization, and
+Studio workflows into a broader self-managed platform release. The release adds
+sandboxed NeMo Gym evaluation, retrieval evaluation support, source-checkout
+agent packaging, deployment-backed agent sessions, richer Studio workflows,
+workload credential delegation, and operational hardening for Kubernetes,
+Docker, and local development.
 
 ## Highlights
 
-- **GRPO with custom reward environments.** Customizer can run GRPO jobs on the
-  `rl` backend against uploaded NeMo Gym reward environment FileSets, including
-  native Gym layouts, vendored wheel packages, and `verifiers` hub adapters.
-- **RL customization in Studio.** Studio can create and inspect DPO and GRPO
-  customization jobs, including GRPO reward-environment selection, compute
-  settings, status, and reward-oriented training metrics.
-- **Fabric 0.2 agent runtime.** Platform-managed agents move to Fabric 0.2.0
-  fields, with reusable environment and compute specs, environment-aware
-  deployments and execute jobs, and packaged agent images for Docker and
-  Kubernetes.
-- **Task-driven evaluation improvements.** Agent evaluation has built-in runner
-  reward metrics, clearer local and Harbor runners, richer run bundles, and
-  Intake trace inspection for evaluation authoring.
-- **Operational hardening.** Jobs and deployments have better wait/watch
-  behavior, Docker GPU cleanup is safer, NIM weight permissions are repaired at
-  startup, and the 0.5 images include dependency and container CVE remediation.
+- **Sandboxed task-driven evaluation.** Agent evaluation can run NeMo Gym tasks
+  in a sandboxed host, capture model calls, project Gym trajectories to OTLP,
+  publish trial traces to Intake, and use clearer Harbor and Gym result models.
+- **Retrieval evaluation and retrieval SDG.** Evaluator adds BEIR and dense
+  retrieval helpers, NIM embedding and ranking integrations, retrieval metrics,
+  and value types. Data Designer adds retrieval synthetic-data generation for
+  Nemotron models.
+- **Fabric-backed agent lifecycle.** Agents can be packaged from source
+  checkouts, published as images, executed as jobs with inline agent
+  definitions, invoked through deployment-backed sessions, and wired to Intake
+  telemetry with less manual setup.
+- **Studio workflow depth.** Studio adds agent creation from uploaded
+  directories, a shared Run Evaluation wizard, experiment trend and layout
+  controls, improved agent overview panels, Customizer quick-start templates,
+  deployment wizard improvements, and virtual model detail routes.
+- **Auth and deployment hardening.** Workload delegation and token exchange
+  support credential propagation for deployed workloads. Kubernetes workloads
+  gain default pod metadata and scheduling controls, and agent deployments fail
+  earlier when their image or executor configuration is invalid.
+- **Release-process automation.** Fern release-version materialization can
+  include release branches, stable GitHub releases are created by release
+  automation, and forward-merge alerts now report failures to the on-call path.
 
 ## What's included
 
-### Customizer
+### Agent Evaluation
 
-- GRPO jobs are available through `nemo customization rl submit` with
-  `training.type: "grpo"`.
-- GRPO trains against a separate environment FileSet and prompt dataset
-  FileSet. The environment package declares its layout in
-  `nemo-environment.yaml`.
-- Supported environment formats are `native-v1`, `wheels-v1`, and
-  `adapter-wheels-v1`; the converter and validator help package
-  `verifiers` environments and validate environment FileSet structure before
-  upload.
-- GRPO supports full-weight and LoRA fine-tuning modes, reward and off-policy
-  time-series metrics, generation controls, batching controls, micro-batching,
-  Hugging Face config overrides, and backend-specific policy knobs.
-- DPO continues on the `rl` backend with NeMo-RL and Ray, with Studio support
-  for DPO job creation and status review.
-- Customizer docs and coding-agent skills now cover GRPO environment packages,
-  RL hyperparameters, Kubernetes/Ray setup, OpenSandbox, Volcano, and common
-  troubleshooting paths.
-- Customizer task images include the model SDK and FileSet handling needed by
-  customization jobs and model-entity publication.
+- NeMo Gym evaluations can run in a sandboxed Gym host instead of sharing the
+  evaluator process. The sandboxed path supports a locked `nmp-gym-host` image,
+  the `nmp-cpu-tasks` task image, broker placement controls, rollout streaming,
+  and long-running rollout batches.
+- Gym trials can capture model calls and project `ng_trajectory` data into OTLP
+  spans. Trials with traces can publish those traces to Intake so Evaluator,
+  Experiments, and optimization workflows can inspect the same evidence.
+- The Gym runtime exposes more public cross-module names, clearer task and
+  trial result values, typed runner reward keys, optional output aggregation,
+  skill-use metrics, and better error rollups.
+- Harbor task suites use a stronger trial adapter and improved resume and
+  reconciliation behavior, with better error propagation into the shared agent
+  evaluation result model.
+- Retrieval evaluation support includes BEIR loading, dense search, NIM
+  embeddings, NIM ranking, retrieval value objects, and retrieval metrics.
+- Evaluator documentation now covers Gym runners, custom Gym environments,
+  sandboxed Gym configuration, Fabric harness evaluation, scoring by component,
+  target and runner configuration, metric authoring, and result interpretation.
 
 ### Agents and Fabric
 
-- Agents can store reusable `AgentEnvironmentSpec`, `AgentComputeSpec`, and
-  `AgentEnvironment` entities through the API, Python SDK, and CLI.
-- `nemo agents deploy --environment` can deploy an agent with a stored or
-  inline environment, merging the environment spec into the Fabric config and
-  snapshotting compute and secret references onto the deployment.
-- Agent execute jobs can use environment and compute specs, so batch execution
-  and service deployment share the same runtime configuration model.
-- Fabric-backed packaging supports Platform-managed `agent.yaml` packages,
-  staged relative artifacts, custom image entrypoints, and Docker/Kubernetes
-  deployment modes.
-- Agent gateway errors on the OpenAI-compatible surface now preserve useful
-  upstream messages and codes for OpenAI SDK clients.
-- Session ownership rules and no-auth session lifecycle access are tightened so
-  agent sessions behave predictably across authenticated and local setups.
-
-### Agent Intent and Optimization
-
-- The durable agent-intent document is now `ETHOS.md`. The old
-  `AGENT-SPEC.md` contract is replaced by Ethos terminology across agent
-  creation, analysis, experimentalist, and packaging workflows.
-- `nemo agents ethos migrate` provides a guided migration for platform-owned
-  legacy spec packages, Filesets, and optimizer profiles.
-- The Ethos schema records `Purpose & Outcomes`, `Principles`, `Trade-offs`,
-  `Constraints`, `Metric Semantics`, and `Vision`, with explicit migration
-  behavior for older agent-spec packages.
-- Agent optimization jobs support FileSets and inline configuration, and the
-  optimizer can continue using Intake evidence and Harbor-compatible evaluation
-  runs when validating candidate changes.
-
-### Agent Evaluation
-
-- Agent-eval runner metrics such as Harbor reward, Gym reward, phase success,
-  evidence presence, and skill use are built in instead of requiring pickled
-  custom metric bundles.
-- Local SDK evaluation remains available without platform services, with a
-  runnable quickstart, on-disk run bundles, `summary.json`, `scores.jsonl`,
-  `trials.jsonl`, `tasks.jsonl`, and `report.html`.
-- The Harbor runner path is clearer: Harbor task suites run through the same
-  `AgentEvaluator` result model and use the built-in Harbor reward metric.
-- Result summaries expose per-task metric values and task outcomes, making it
-  easier to identify which tasks or trials drove aggregate scores.
-- Eval Author is now represented as coding-agent skills for Harbor discovery
-  and Intake trace inspection, rather than a standalone CLI command group.
+- Fabric agents can be packaged directly from a source checkout, including
+  staged relative artifacts, packaged image publication to a registry, and
+  simpler CLI flows for source packages.
+- Execute-agent jobs can accept inline agent definitions and have SDK support,
+  CLI coverage, extension hooks, and documentation for batch execution through
+  the platform jobs system.
+- Deployment-backed sessions support chat lifecycle operations so long-running
+  deployed agents can keep session state behind the OpenAI-compatible gateway.
+- Agent telemetry can be wired automatically into Intake export paths, including
+  trace attribution by agent name and richer logging for task execution,
+  execute-agent jobs, and analyst runs.
+- Fabric adapter IDs can be fully qualified, and agent configs can bind
+  multiple models.
+- Agent deployments now reject missing container images, unsupported deployment
+  modes, and executor/backend mismatches before creating records. Kubernetes
+  agent roots are staged into writable directories when mounted read-only.
+- Agent documentation adds the `ETHOS.md` optimization contract, agent
+  environment guidance, and executing agents as jobs.
 
 ### Studio
 
-- Studio adds GRPO customization form support and GRPO job detail panels with
-  reward environment and training-health views.
-- Studio adds RL/DPO customization job support and removes the older Prompt
-  Tuning form from the navigation.
-- Agents pages show metrics and open Insight details from an agent detail view.
-- Data Designer adds transform flows for existing files, with field mapping,
-  format presets, previews, and custom template rows.
-- Guardrail configuration in Studio now uses explicit rail toggles, starting
-  with self-check, plus configurable rail descriptions, model selection for
-  checks, and self-check generation controls.
-- Studio can chat with virtual models and has cleaner model filtering for
-  fine-tunable and base-model views.
+- Studio can create Fabric agents by uploading an agent directory and has
+  refreshed sample-agent flows.
+- Agent detail pages show richer overview panels, recent experiments, open
+  insights, trace metrics, deployment health, and cleaner evaluation tables.
+- Run Evaluation is now a wizard over a shared experiment form, with support for
+  uploading agent-eval data and configuration from Studio.
+- Experiments gain metric trend charts, favorite markers, saved column layouts,
+  and improved detail-page metrics.
+- Customizer adds quick-start templates, defaults from model specs, GRPO input
+  and metrics fixes, clearer job failure banners, and improved job log loading.
+- The deployment wizard can choose an inference engine, defaults deployment
+  names from Hugging Face repos, filters deployable models more accurately, and
+  orders source tabs as Hugging Face, Workspace, and NGC.
+- Virtual models move to detail routes with chat support, and guardrail config
+  pages show related virtual models.
+- Anonymizer is enabled by default in Studio feature flags for this release
+  line.
+
+### Customizer and Data Designer
+
+- Customizer adds a reranking recipe and model-spec head type support.
+- Automodel training configuration and checkpoint handling are more complete,
+  including embedding contract outputs and validation coverage.
+- GRPO configuration, documentation, Studio forms, hyperparameter handling, and
+  serialization paths are hardened for RL and SFT workflows.
+- Data Designer adds retrieval synthetic-data generation for Nemotron models,
+  plus CLI and provider updates for filesystem-backed seed handling.
 
 ### Platform, CLI, and Deployment
 
-- The Python SDK gains typed clients for additional platform and plugin service
-  areas, with a `NemoClient` compatibility layer for plugin SDK resources.
-- `nemo jobs watch` and `--watch` on job creation stream job events until a
-  terminal status, with better rendering for terminal task state and Docker
-  task fallback.
-- Generated CLI reference docs include plugin commands.
-- Helm deployments can configure controller and API groups, and the docs add
-  OpenSandbox, OpenSandbox with Kata, and Volcano setup guidance.
-- Docker-backed jobs preserve cancellation intent and release GPU allocations
-  when deleted.
-- Model-serving startup repairs pulled-weight permissions before launching NIM.
-- Release images and dependency locks include 0.5 CVE remediation, CPython
-  3.13.15 backports, and extended distroless Python runtimes.
-- Pending-deletion workspaces are hidden from the list API.
+- Auth adds workload delegation, workload token exchange, and plugin SDK helpers
+  for workload identity. Scoped access-key behavior is tightened in API and test
+  coverage.
+- The CLI adds job log tailing, richer config help, TLS and context-delete
+  support, improved setup behavior when NVIDIA Build probe models have reached
+  end of life, and generated reference coverage for more plugin commands.
+- Kubernetes workloads can receive executor-level default pod annotations,
+  selectors, tolerations, and affinity settings.
+- Model and inference paths improve Docker LoRA sidecar commands, deployment
+  backed provider links to model entities, string `/v1/models` response
+  handling, upstream inference-gateway error rewriting, and client `x-api-key`
+  stripping before upstream proxying.
+- The platform runner reports controller thread failures as unhealthy, and
+  ClickHouse readiness failures are surfaced more clearly.
+- Helm and Docker assets add OpenSandbox and Gym-host guidance, clearer chart
+  and app-version placeholders, locked Gym-host dependencies, and release image
+  maintenance.
+- Release automation now supports nightly wheels, stable GitHub Release
+  creation for each release scope, and forward-merge alerting.
 
 ## Install
 
@@ -141,12 +141,13 @@ activation, the system-toolchain fallback, and provider configuration.
 
 For self-managed Kubernetes, start with
 [Install NeMo Platform Helm Chart](/documentation/kubernetes-deployment/setup/helm/install).
-GRPO jobs also require Kubernetes/Ray, OpenSandbox-enabled Gym execution, and
-job-storage PVC configuration; see
-[GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments)
+Sandboxed Gym evaluation and GRPO reward environments also require OpenSandbox
+and job-storage configuration; see
+[Configure Sandboxed Gym for Evaluator](/documentation/evaluate-models/agent-eval/gym-sandbox-configuration),
+[GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments),
 and [OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox).
 
-## Upgrade from v0.4.x
+## Upgrade from v0.5.x
 
 From an existing local checkout:
 
@@ -170,12 +171,13 @@ nemo setup
 After setup, restart local services before using CLI, SDK, Studio, or plugin
 workflows against the upgraded checkout.
 
-If you have pre-0.5 platform-owned agent intent packages, migrate them from
-`AGENT-SPEC.md` to `ETHOS.md` before using newer optimization workflows:
+If you run Kubernetes agent deployments, review your deployment executor and
+default image configuration before redeploying agents. v0.6.0 rejects missing
+images and deployment-mode mismatches earlier than previous releases.
 
-```bash
-nemo agents ethos migrate --name <agent-name>
-```
+If you use task-driven evaluation, update Gym and Harbor evaluation configs to
+the documented runner fields before moving production suites to sandboxed Gym
+execution.
 
 ## Compatibility
 
@@ -185,22 +187,28 @@ nemo agents ethos migrate --name <agent-name>
 - CUDA 13-capable NVIDIA drivers for local GPU workloads
 - Self-managed Kubernetes clusters deployed with Helm
 - Docker for local services, Docker-backed platform jobs, local ClickHouse,
-  Docker Sandboxes, and local model-serving workflows
+  Docker Sandboxes, local model-serving workflows, and Gym task images
 - Kubernetes/Ray runtime for NeMo-RL DPO and GRPO customization jobs
-- OpenSandbox and a job-storage PVC for sandboxed GRPO reward environments
+- OpenSandbox and a job-storage PVC for sandboxed Gym and GRPO reward
+  environments
 - ClickHouse for Intake trace storage and Experiments rollups
 - NVIDIA GPU access for local training, model serving, RL training, and
   GPU-backed synthetic data workflows
 - Node 22.18.0+ for Studio assets
-- Platform API and `nemo-platform` Python SDK `0.5.0`
+- Platform API and `nemo-platform` Python SDK `0.6.0`
 
 ## Current constraints
 
-- **Self-managed scope.** v0.5.0 documents local setup and user-managed
+- **Self-managed scope.** v0.6.0 documents local setup and user-managed
   Kubernetes deployment. It is not a managed hosted-service release.
 - **Research-preview optimizer.** Analyst and Experimentalist are early agentic
   workflows. They are useful for guided optimization, but quality and autonomy
   are still research-preview and require developer review.
+- **Sandboxed Gym runtime.** Sandboxed Gym evaluation requires Kubernetes or a
+  configured sandbox-capable environment, OpenSandbox setup for cluster runs,
+  and task images that include the environment dependencies.
+- **Retrieval evaluation.** Retrieval evaluation requires the relevant BEIR data
+  or retrieval corpus inputs and configured embedding or ranking model access.
 - **GRPO runtime.** GRPO jobs require Kubernetes/Ray execution and sandboxed
   Gym configuration. They do not have a local Docker fallback.
 - **GRPO environment packaging.** `adapter-wheels-v1` packages require network
@@ -209,16 +217,15 @@ nemo agents ethos migrate --name <agent-name>
   Python and node architecture.
 - **DPO runtime.** Customizer `rl` DPO jobs run on Kubernetes/Ray and do not
   have a local Docker fallback. DPO remains full-weight only.
-- **Eval Author migration.** Eval Author discovery is now skill-driven. The
-  old `nemo agents eval-author` CLI group is no longer the supported surface.
 - **Agent intent migration.** `AGENT-SPEC.md` is legacy. Use `ETHOS.md` for
   new work and run `nemo agents ethos migrate` for platform-owned legacy
   packages before relying on optimizer workflows.
 - **Optuna HPO runtime.** Optuna-based hyperparameter optimization runs locally
   from a developer workstation. It is not available as a horizontally scaled
   cluster service in this release.
-- **Access keys.** Scoped access keys remain optional and must be enabled by
-  the platform administrator.
+- **Access keys and workload delegation.** Scoped access keys and workload
+  credential delegation require administrator configuration before workloads can
+  rely on them in shared deployments.
 - **Embedded ClickHouse scope.** Helm's embedded ClickHouse is intended for
   development, evaluation, and non-critical single-node deployments. Use an
   externally managed ClickHouse for production deployments that require high
@@ -228,8 +235,12 @@ nemo agents ethos migrate --name <agent-name>
 
 - Repository: [https://github.com/NVIDIA-NeMo/nemo-platform](https://github.com/NVIDIA-NeMo/nemo-platform)
 - Issues: [https://github.com/NVIDIA-NeMo/nemo-platform/issues](https://github.com/NVIDIA-NeMo/nemo-platform/issues)
-- GRPO and Reward Environments: [https://docs.nvidia.com/nemo-platform/documentation/customizer-reference/grpo-and-reward-environments](https://docs.nvidia.com/nemo-platform/documentation/customizer-reference/grpo-and-reward-environments)
-- GRPO Environment Packages: [https://docs.nvidia.com/nemo-platform/documentation/customizer-reference/tutorials/grpo-environment-packages](https://docs.nvidia.com/nemo-platform/documentation/customizer-reference/tutorials/grpo-environment-packages)
-- OpenSandbox setup: [https://docs.nvidia.com/nemo-platform/documentation/kubernetes-deployment/setup/helm/open-sandbox](https://docs.nvidia.com/nemo-platform/documentation/kubernetes-deployment/setup/helm/open-sandbox)
+- Execute Agents as Jobs: [/documentation/agents/execute-agents-as-jobs](/documentation/agents/execute-agents-as-jobs)
+- Evaluate a NeMo Gym Environment: [/documentation/evaluate-models/agent-eval/gym-runner](/documentation/evaluate-models/agent-eval/gym-runner)
+- Configure Sandboxed Gym for Evaluator: [/documentation/evaluate-models/agent-eval/gym-sandbox-configuration](/documentation/evaluate-models/agent-eval/gym-sandbox-configuration)
+- Evaluate with a NeMo Fabric Harness: [/documentation/evaluate-models/agent-eval/fabric-runner](/documentation/evaluate-models/agent-eval/fabric-runner)
+- Retrieval SDG: [/documentation/design-synthetic-data/retrieval-sdg](/documentation/design-synthetic-data/retrieval-sdg)
+- Credential Propagation: [/documentation/access-control/deployment/credential-propagation](/documentation/access-control/deployment/credential-propagation)
+- OpenSandbox setup: [/documentation/kubernetes-deployment/setup/helm/open-sandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox)
 - NeMo Fabric: [https://docs.nvidia.com/nemo/fabric/about-nemo-fabric/overview/](https://docs.nvidia.com/nemo/fabric/about-nemo-fabric/overview/)
 - NeMo Agent Toolkit: [https://docs.nvidia.com/nemo/agent-toolkit/latest/](https://docs.nvidia.com/nemo/agent-toolkit/latest/)
