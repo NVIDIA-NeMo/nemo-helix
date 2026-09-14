@@ -83,13 +83,18 @@ const collectNumericParams = (trials: Trial[], names: string[]): Set<string> =>
 const searchableText = (trial: Trial): string =>
   `trial ${trial.number} ${paramsText(trial)}`.toLowerCase();
 
-/** Missing values sort last in ascending order (and first when the sort is inverted). */
-const compareNullable = (a: number | string | null, b: number | string | null): number => {
+/** Missing values sort last in both directions, so an empty metric never tops the table. */
+const compareNullable = (
+  a: number | string | null,
+  b: number | string | null,
+  desc: boolean
+): number => {
   if (a === null && b === null) return 0;
   if (a === null) return 1;
   if (b === null) return -1;
-  if (typeof a === 'string' || typeof b === 'string') return String(a).localeCompare(String(b));
-  return a - b;
+  const order =
+    typeof a === 'string' || typeof b === 'string' ? String(a).localeCompare(String(b)) : a - b;
+  return desc ? -order : order;
 };
 
 const sortValue = (
@@ -149,13 +154,13 @@ export const TrialsTable: FC<TrialsTableProps> = ({ results }) => {
 
     const [sort] = sorting;
     if (!sort) return filtered;
-    return [...filtered].sort((a, b) => {
-      const order = compareNullable(
+    return [...filtered].sort((a, b) =>
+      compareNullable(
         sortValue(a, sort.id, numericParams),
-        sortValue(b, sort.id, numericParams)
-      );
-      return sort.desc ? -order : order;
-    });
+        sortValue(b, sort.id, numericParams),
+        !!sort.desc
+      )
+    );
   }, [trials, debouncedSearchBar, sorting, numericParams]);
 
   const lastPageIndex = Math.max(0, Math.ceil(processedTrials.length / pageSize) - 1);

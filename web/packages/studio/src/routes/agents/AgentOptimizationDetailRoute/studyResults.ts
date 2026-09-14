@@ -132,7 +132,12 @@ const locateStudyFiles = async (
   workspace: string,
   jobName: string,
   signal?: AbortSignal
-): Promise<{ fileset: string; summaryPath?: string; trialsPath?: string } | null> => {
+): Promise<{
+  workspace: string;
+  fileset: string;
+  summaryPath?: string;
+  trialsPath?: string;
+} | null> => {
   const { data: results } = await agentsListOptimizeJobResults(workspace, jobName, signal);
 
   for (const result of results) {
@@ -152,7 +157,7 @@ const locateStudyFiles = async (
     const summaryPath = at(SUMMARY_FILE);
     const trialsPath = at(TRIALS_FILE);
     if (summaryPath ?? trialsPath) {
-      return { fileset: parsed.name, summaryPath, trialsPath };
+      return { workspace: parsed.workspace, fileset: parsed.name, summaryPath, trialsPath };
     }
   }
 
@@ -180,10 +185,10 @@ export const fetchStudyResults = async (
   const located = await locateStudyFiles(workspace, jobName, signal);
   if (!located) return null;
 
-  const { fileset, summaryPath, trialsPath } = located;
+  const { workspace: artifactWorkspace, fileset, summaryPath, trialsPath } = located;
   const [summaryText, trialsText] = await Promise.all([
-    summaryPath ? downloadText(workspace, fileset, summaryPath, signal) : null,
-    trialsPath ? downloadText(workspace, fileset, trialsPath, signal) : null,
+    summaryPath ? downloadText(artifactWorkspace, fileset, summaryPath, signal) : null,
+    trialsPath ? downloadText(artifactWorkspace, fileset, trialsPath, signal) : null,
   ]);
 
   const summary = summaryText ? parseSummary(summaryText) : null;

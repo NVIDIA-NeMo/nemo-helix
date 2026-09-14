@@ -10,7 +10,7 @@ import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
 import { useAgentsGetOptimizeJob } from '@nemo/sdk/generated/agents/agents';
-import { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Flex, PageHeader, Panel, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -63,7 +63,12 @@ export const AgentOptimizationDetailRoute: FC = () => {
     return () => setBreadcrumbs([]);
   }, [setBreadcrumbs, workspace, agentName, jobName]);
 
-  const { data: results, isLoading: isLoadingResults } = useQuery({
+  const {
+    data: results,
+    isLoading: isLoadingResults,
+    isError: isResultsError,
+    error: resultsError,
+  } = useQuery({
     queryKey: ['optimize-study-results', workspace, jobName] as const,
     queryFn: ({ signal }) => fetchStudyResults(workspace, jobName, signal),
     enabled: !!workspace && !!jobName && isTerminal && !hasFailed,
@@ -139,10 +144,20 @@ export const AgentOptimizationDetailRoute: FC = () => {
           <Text kind="body/regular/md" className="text-secondary">
             Trials appear once the study finishes.
           </Text>
-        ) : isLoadingResults || !results ? (
+        ) : isResultsError ? (
+          <ErrorMessage
+            header="Could not load trials"
+            message={resultsError.message}
+            height="auto"
+          />
+        ) : isLoadingResults ? (
           <Flex align="center" justify="center" className="min-h-[200px] w-full">
             <Spinner size="medium" aria-label="Loading trials..." />
           </Flex>
+        ) : !results ? (
+          <Text kind="body/regular/md" className="text-secondary">
+            This study did not register any trial results.
+          </Text>
         ) : (
           <>
             <StudyStatTiles results={results} />

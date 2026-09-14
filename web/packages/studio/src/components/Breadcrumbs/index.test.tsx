@@ -7,9 +7,8 @@ import {
   useBreadcrumbs,
   type BreadcrumbsItemProps,
 } from '@studio/providers/breadcrumbs/useBreadcrumbs';
-import { render, screen } from '@studio/tests/util/render';
+import { renderRoute, screen } from '@studio/tests/util/render';
 import type { FC } from 'react';
-import { MemoryRouter } from 'react-router';
 
 const SetCrumbs: FC<{ items: BreadcrumbsItemProps[] }> = ({ items }) => {
   useBreadcrumbs({ items });
@@ -17,13 +16,12 @@ const SetCrumbs: FC<{ items: BreadcrumbsItemProps[] }> = ({ items }) => {
 };
 
 const renderCrumbs = (items: BreadcrumbsItemProps[]) =>
-  render(
-    <MemoryRouter initialEntries={['/workspaces/default/agents/optimizations/sweep-3']}>
-      <BreadcrumbsProvider>
-        <SetCrumbs items={items} />
-        <Breadcrumbs />
-      </BreadcrumbsProvider>
-    </MemoryRouter>
+  renderRoute(
+    <BreadcrumbsProvider>
+      <SetCrumbs items={items} />
+      <Breadcrumbs />
+    </BreadcrumbsProvider>,
+    { history: '/workspaces/default/agents/optimizations/sweep-3' }
   );
 
 describe('Breadcrumbs', () => {

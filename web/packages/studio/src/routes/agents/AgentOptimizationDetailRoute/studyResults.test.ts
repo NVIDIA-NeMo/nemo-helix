@@ -145,6 +145,27 @@ describe('fetchStudyResults', () => {
     expect(filesDownloadFile).not.toHaveBeenCalled();
   });
 
+  it('downloads from the workspace the artifact URL names, not the job workspace', async () => {
+    mockResults(`fileset://shared-artifacts/study-artifacts#${resultDir}`);
+    mockFiles([`${resultDir}/trials_dataframe_params.csv`]);
+    mockDownloads({ [`${resultDir}/trials_dataframe_params.csv`]: TRIALS_CSV });
+
+    await fetchStudyResults(workspace, jobName);
+
+    expect(filesListFilesetFiles).toHaveBeenCalledWith(
+      'shared-artifacts',
+      'study-artifacts',
+      expect.anything(),
+      undefined
+    );
+    expect(filesDownloadFile).toHaveBeenCalledWith(
+      'shared-artifacts',
+      'study-artifacts',
+      `${resultDir}/trials_dataframe_params.csv`,
+      undefined
+    );
+  });
+
   it('reads trials even when the summary is missing, falling back to CSV metric order', async () => {
     mockResults(`fileset://${workspace}/study-artifacts#${resultDir}`);
     mockFiles([`${resultDir}/trials_dataframe_params.csv`]);
