@@ -28,29 +28,29 @@ const getStatusColor = (status: ModelDeploymentStatus) => {
 interface DeploymentIndicatorProps {
   workspace: string;
   providerIds?: string[];
-  baseModel: string;
+  modelName: string;
 }
 
 export const DeploymentIndicator: FC<DeploymentIndicatorProps> = ({
   workspace,
   providerIds,
-  baseModel,
+  modelName,
 }) => {
-  const { data: baseModelEntity, isLoading: isLoadingBaseModel } = useModelsGetModel(
+  const { data: modelEntity, isLoading: isLoadingModel } = useModelsGetModel(
     workspace,
-    baseModel,
+    modelName,
     undefined,
-    { query: { enabled: Boolean(baseModel), retry: false } }
+    { query: { enabled: Boolean(modelName), retry: false } }
   );
 
   const resolvedModel =
-    providerIds?.length && baseModelEntity
-      ? { ...baseModelEntity, model_providers: providerIds }
-      : baseModelEntity;
+    providerIds?.length && modelEntity
+      ? { ...modelEntity, model_providers: providerIds }
+      : modelEntity;
 
   const { status, isLoading: isStatusLoading } = useModelDeploymentStatus(resolvedModel);
 
-  const isLoading = isLoadingBaseModel || isStatusLoading;
+  const isLoading = isLoadingModel || isStatusLoading;
 
   if (isLoading) return <Skeleton animated className="size-2 rounded-full" />;
   if (!status) {
