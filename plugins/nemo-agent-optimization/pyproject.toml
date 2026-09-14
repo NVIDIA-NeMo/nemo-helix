@@ -7,6 +7,7 @@ version = "0.1.0"
 description = "Entry point for `nemo agents optimize` — discovers and dispatches nemo.optimization-strategy plugins."
 requires-python = ">=3.12,<3.15"
 dependencies = [
+  "nemo-optimization-plugin",
   "nemo-platform",
   "nemo-platform-plugin",
   "pydantic>=2.12.0",
@@ -22,6 +23,7 @@ build-backend = "hatchling.build"
 packages = ["src/nemo_agent_optimization_plugin"]
 
 [tool.uv.sources]
+nemo-optimization-plugin = { workspace = true }
 nemo-platform = { workspace = true }
 nemo-platform-plugin = { workspace = true }
 

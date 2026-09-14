@@ -23,6 +23,7 @@ members = [
     "garak-api",
     "models",
     "nemo-agent-config-example-calculator",
+    "nemo-agent-optimization-plugin",
     "nemo-agents-example-calculator",
     "nemo-agents-example-email-phishing",
     "nemo-agents-example-email-security",
@@ -4068,6 +4069,29 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "mcp", specifier = ">=1.28.1,<2" }]
+
+[[package]]
+name = "nemo-agent-optimization-plugin"
+version = "0.1.0"
+source = { editable = "plugins/nemo-agent-optimization" }
+dependencies = [
+    { name = "nemo-optimization-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-platform", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-platform-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "pydantic", extra = ["email"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "pyyaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "nemo-optimization-plugin", editable = "plugins/nemo-optimization" },
+    { name = "nemo-platform", editable = "packages/nemo_platform" },
+    { name = "nemo-platform-plugin", editable = "packages/nemo_platform_plugin" },
+    { name = "pydantic", specifier = ">=2.12.0" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "typer", specifier = ">=0.20.0" },
+]
 
 [[package]]
 name = "nemo-agents-example-calculator"
@@ -12418,7 +12442,6 @@ dependencies = [
     { name = "wheel", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "xformers", marker = "platform_machine == 'x86_64' and sys_platform == 'linux' and 'linux' in sys_platform" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/46/0b/fb9344ea1bc745a2a113f8db502e4d8d7c8111db28ae3196a51228ee5518/unsloth-2026.8.4.tar.gz", hash = "sha256:e34d07f68e66c287769695ab7930508467584b2439a6f639158f44230f70993d", size = 84321638, upload-time = "2026-08-05T07:32:54.93Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f7/13/a2e9e26ae8e826a6d68e9279e96ca9ba096f9489cfbacf5927f3a08cdc48/unsloth-2026.8.4-py3-none-any.whl", hash = "sha256:c180cc5bae5597f420eaf3d27f92ac8c3fd0bf4d4c51ffed71e23dd36c569bfe", size = 79350425, upload-time = "2026-08-05T07:32:49.984Z" },
 ]
