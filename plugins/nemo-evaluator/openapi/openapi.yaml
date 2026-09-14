@@ -4334,6 +4334,15 @@ components:
           title: Agent Model Name
           description: Optional model slug passed to the Harbor agent.
           type: string
+        agent_kwargs:
+          additionalProperties:
+            $ref: '#/components/schemas/JsonValue'
+          type: object
+          title: Agent Kwargs
+          description: 'Keyword arguments forwarded to the Harbor agent''s constructor,
+            the equivalent of Harbor''s `--ak key=value`. Not for secrets: Harbor
+            persists them unredacted in the job dir''s `config.json`; inject secrets
+            through the environment instead.'
         n_attempts:
           type: integer
           minimum: 1.0

@@ -103,6 +103,7 @@ def test_every_shipped_runner_reports_a_stable_name_and_result_shaping_config() 
             {
                 "agent_name",
                 "agent_import_path",
+                "agent_kwargs",
                 "effective_agent",
                 "n_attempts",
                 "jobs_dir",
@@ -227,6 +228,35 @@ def test_gym_redacts_credential_looking_hydra_params() -> None:
         "models": [{"name": "m", "api_key": "<redacted>"}],
         # A credential-shaped key wins over descending into it — the whole list goes.
         "api_keys": "<redacted>",
+    }
+    assert "should-not-be-recorded" not in json.dumps(recorded)
+
+
+def test_harbor_redacts_credential_looking_agent_kwargs() -> None:
+    # agent_kwargs is forwarded verbatim to the Harbor agent's constructor and RunnerInfo.config is
+    # persisted into the run bundle — the same exposure as Gym's hydra_params, so the same redaction.
+    from pathlib import Path
+
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+
+    runner = HarborAgentTaskRunner(
+        config=HarborRuntimeConfig(
+            jobs_dir=Path("/jobs"),
+            agent_import_path="pkg:Agent",
+            agent_kwargs={
+                "fabric_adapter_id": "nvidia.fabric.codex",
+                "extra_env": {"OPENAI_API_KEY": "sk-should-not-be-recorded", "HOME": "/root"},
+                "fabric_harness_settings": {"auth": {"token": "tok-should-not-be-recorded"}},
+            },
+        )
+    )
+
+    recorded = runner.runner_info().config["agent_kwargs"]
+
+    assert recorded == {
+        "fabric_adapter_id": "nvidia.fabric.codex",
+        "extra_env": {"OPENAI_API_KEY": "<redacted>", "HOME": "/root"},
+        "fabric_harness_settings": {"auth": {"token": "<redacted>"}},
     }
     assert "should-not-be-recorded" not in json.dumps(recorded)
 
