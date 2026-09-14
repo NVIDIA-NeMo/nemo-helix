@@ -143,8 +143,8 @@ Swap `agent_name` (or `agent_import_path`) for your own agent to get a real scor
   Harbor's `--ak key=value` flags. Values must be JSON (strings, numbers, booleans, lists, mappings).
   Do not put secrets here: Harbor persists the kwargs unredacted in the job directory's
   `config.json`, and the run's provenance records them with only credential-looking keys
-  (`api_key`, `token`, `secret`, ...) redacted. Name credentials in `agent_env_names` instead.
-- **`agent_env_names`** — host environment variables to forward to the agent. Each becomes a
+  (`api_key`, `token`, `secret`, ...) redacted. Name credentials in `agent_env_from_host` instead.
+- **`agent_env_from_host`** — host environment variables to forward to the agent. Each becomes a
   `${NAME}` template on Harbor's `AgentConfig.env`: Harbor resolves it from the host environment when
   it creates the agent and persists only the template, so the value never reaches `config.json`.
   Provenance records the names, never the values.
@@ -155,10 +155,10 @@ into the agent's constructor:
 ```text
 HarborRunnerTarget / HarborRuntimeConfig
         │
-        ├─ agent_import_path  → Harbor AgentConfig.import_path
-        ├─ agent_model_name   → Harbor AgentConfig.model_name
-        ├─ agent_kwargs       → Harbor AgentConfig.kwargs
-        └─ agent_env_names    → Harbor AgentConfig.env   ({NAME: "${NAME}"}, resolved by Harbor)
+        ├─ agent_import_path   → Harbor AgentConfig.import_path
+        ├─ agent_model_name    → Harbor AgentConfig.model_name
+        ├─ agent_kwargs        → Harbor AgentConfig.kwargs
+        └─ agent_env_from_host → Harbor AgentConfig.env   ({NAME: "${NAME}"}, resolved by Harbor)
                                        │
                                        ▼
                      Harbor AgentFactory constructs
@@ -183,7 +183,7 @@ config = HarborRuntimeConfig(
 ```
 
 The same fields appear on the platform job's `HarborRunnerTarget`, so a spec submitted as a job carries
-them as `runner.agent_kwargs`. Instead of `agent_env_names`, the platform target takes `env_secrets`, a mapping
+them as `runner.agent_kwargs`. Instead of `agent_env_from_host`, the platform target takes `env_secrets`, a mapping
 of environment variable name to NeMo Platform secret reference. The service resolves each reference into
 the job's environment at compile time and the job hands Harbor a `${NAME}` template, so the credential
 appears on neither the spec, the run bundle, nor `config.json`:
@@ -336,7 +336,7 @@ The SDK stores the cache stamp in `jobs_dir/<job_name>/.nemo-eval-harbor-cache.j
   can serve A, but cached A cannot serve A and B.
 - **Scoring and scheduling settings** — `reward_key`, selected metrics, `quiet`, and
   `n_concurrent_trials` do not invalidate Harbor execution results.
-- **`agent_env_names`** — participates by name: adding or removing a forwarded variable invalidates,
+- **`agent_env_from_host`** — participates by name: adding or removing a forwarded variable invalidates,
   but the value it resolves to at run time is never fingerprinted, so rotating a credential keeps the
   cache valid.
 - **Installed agents** — when `agent_dir` is unset, the stamp covers the agent selection or import path,

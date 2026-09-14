@@ -264,7 +264,7 @@ def _to_runtime_task(task: AgentEvalTaskSpec) -> AgentEvalTask:
     )
 
 
-def _harbor_agent_env_names(target: HarborRunnerTarget) -> list[str]:
+def _harbor_agent_env_from_host(target: HarborRunnerTarget) -> list[str]:
     """The ``env_secrets`` names to forward to the Harbor agent, after checking the service resolved them."""
     missing = sorted(name for name in target.env_secrets if name not in os.environ)
     if missing:
@@ -598,7 +598,7 @@ class AgentEvalJob(NemoJob):
                     agent_import_path=target.agent_import_path,
                     agent_model_name=target.agent_model_name,
                     agent_kwargs=target.agent_kwargs,
-                    agent_env_names=_harbor_agent_env_names(target),
+                    agent_env_from_host=_harbor_agent_env_from_host(target),
                     n_attempts=target.n_attempts,
                     n_concurrent_trials=target.n_concurrent_trials,
                     max_retries=target.max_retries,

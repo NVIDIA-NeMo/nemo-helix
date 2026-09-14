@@ -341,7 +341,7 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(
         "fabric_harness_settings": {"max_turns": 3},
     }
     # Only the name travels; the runtime hands Harbor a `${OPENAI_API_KEY}` template it expands itself.
-    assert target._config.agent_env_names == ["OPENAI_API_KEY"]
+    assert target._config.agent_env_from_host == ["OPENAI_API_KEY"]
     assert target._config.n_attempts == 2
     assert target._config.reward_key == "score"
     # A runner shapes its own request, so it contributes no prompt template or inference params.

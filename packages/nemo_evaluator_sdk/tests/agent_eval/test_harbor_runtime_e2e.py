@@ -172,10 +172,10 @@ async def test_harbor_resumes_a_partial_job_with_a_custom_agent_dir(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_agent_env_names_reach_the_agent_and_persist_as_templates(
+async def test_agent_env_from_host_reach_the_agent_and_persist_as_templates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A host variable named in ``agent_env_names`` reaches the agent, and only its name reaches disk.
+    """A host variable named in ``agent_env_from_host`` reaches the agent, and only its name reaches disk.
 
     Harbor resolves the ``${NAME}`` template when it constructs the agent and serializes the template
     back into the job dir's ``config.json``. If either half broke, the platform's ``env_secrets`` route
@@ -195,7 +195,7 @@ async def test_agent_env_names_reach_the_agent_and_persist_as_templates(
         job_name="env-probe",
         agent_import_path="harbor_wrapper:WrappedAgent",
         agent_dir=agent_dir,
-        agent_env_names=["PROBE_TOKEN"],
+        agent_env_from_host=["PROBE_TOKEN"],
     )
 
     result = await run_harbor_eval(config, _DATASET_DIR)
