@@ -282,6 +282,43 @@ def test_tool_call_inventory_includes_embedded_subagent_calls(tmp_path: Path) ->
     assert inventory["tools"][0]["calls"][0]["trajectory_path"] == "$.subagent_trajectories[0]"
 
 
+def test_tool_call_inventory_deduplicates_equivalent_definition_shapes() -> None:
+    payload = _fixture_atif()
+    mcp_definition = payload["agent"]["tool_definitions"][0]
+    payload["subagent_trajectories"] = [
+        {
+            "schema_version": "ATIF-v1.7",
+            "agent": {
+                "name": "subagent",
+                "tool_definitions": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": mcp_definition["name"],
+                            "description": mcp_definition["description"],
+                            "parameters": mcp_definition["inputSchema"],
+                            "annotations": mcp_definition["annotations"],
+                        },
+                    }
+                ],
+            },
+            "steps": [],
+        }
+    ]
+
+    inventory = _TRACE_ENVIRONMENT.derive_tool_call_inventory(payload, safe_atif_sha256="sha256:safe")
+
+    lookup = next(tool for tool in inventory["tools"] if tool["name"] == "account.lookup")
+    assert lookup["definition_status"] == "complete"
+    assert lookup["definition"] == mcp_definition
+    assert lookup["normalized_definition"] == {
+        "name": "account.lookup",
+        "description": "Look up a synthetic account.",
+        "inputSchema": mcp_definition["inputSchema"],
+        "annotations": {"readOnlyHint": True},
+    }
+
+
 def test_tool_call_plan_reports_replay_support_and_side_effect_warnings(tmp_path: Path) -> None:
     task_dir = _fixture_workspace(tmp_path)
     code, result = _run("inventory-tool-calls", "--task-dir", str(task_dir))

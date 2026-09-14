@@ -46,6 +46,7 @@ TOOL_CALL_GENERATION_SCHEMA = "nemo.eval_author.trace_environment_tool_call_gene
 REPRODUCIBILITY_SCHEMA = "nemo.eval_author.trace_environment_reproducibility.v3"
 EXPORT_SCHEMA = "nemo.eval_author.trace_environment_product.v3"
 BATCH_SCHEMA = "nemo.eval_author.trace_environment_batch.v1"
+TOOL_CALL_AUDIT_LOG = "/tmp/tool-call-fixture-audit.jsonl"  # nosec B108 - isolated task-container scratch data
 MAX_RAW_SOURCE_BYTES = 128 * 1024 * 1024
 MAX_CANONICAL_BYTES = 25 * 1024 * 1024
 TASK_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -1045,7 +1046,7 @@ def _fixture_readme() -> str:
         "matches tool names and canonical JSON arguments exactly, and returns an error for every unmatched call.\n\n"
         "Copy this directory to `/opt/tool-call-fixtures` in the agent image, ensure Python 3 is present, and merge "
         "`integration.toml` into the task's `[environment]` config. The optional audit log is written to "
-        "`/tmp/tool-call-fixture-audit.jsonl`. Finalization rejects a candidate task that selected mock access but "
+        f"`{TOOL_CALL_AUDIT_LOG}`. Finalization rejects a candidate task that selected mock access but "
         "did not configure this MCP adapter.\n\n"
         "The stdio process and fixture files are inspectable by a shell-capable agent. Do not use them to hold "
         "hidden verifier truth. Prefer a filesystem-isolated sidecar when fixture contents must remain hidden.\n"
@@ -1062,7 +1063,7 @@ def _fixture_integration() -> str:
         'command = "/opt/tool-call-fixtures/mcp_replay.py"\n'
         "args = [\n"
         '  "--scenario", "/opt/tool-call-fixtures/mcp-scenario.json",\n'
-        '  "--audit-log", "/tmp/tool-call-fixture-audit.jsonl",\n'
+        f'  "--audit-log", "{TOOL_CALL_AUDIT_LOG}",\n'
         "]\n"
     )
 
@@ -1227,7 +1228,7 @@ def _validate_mock_tool_call_integration(task_dir: Path, config: dict[str, Any])
         "--scenario",
         "/opt/tool-call-fixtures/mcp-scenario.json",
         "--audit-log",
-        "/tmp/tool-call-fixture-audit.jsonl",
+        TOOL_CALL_AUDIT_LOG,
     ]
     if (
         server.get("transport") != "stdio"

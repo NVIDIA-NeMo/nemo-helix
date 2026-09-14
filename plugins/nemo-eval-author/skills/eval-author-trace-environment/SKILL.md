@@ -4,10 +4,8 @@
 
 name: eval-author-trace-environment
 description: >-
-  Turn one MLflow, Intake, OpenTelemetry, or existing ATIF trace into a private,
-  text-only candidate for a reproducible Harbor task environment. Use when a
-  coding agent should derive an evaluation environment from recorded behavior
-  and retain a candidate or no_candidate summary by task.
+  Use MLflow, Intake, OpenTelemetry, or ATIF trace evidence to derive a private,
+  reproducible Harbor environment candidate.
 triggers:
   - create an evaluation environment from a trace
   - turn ATIF into a Harbor task environment
@@ -18,12 +16,12 @@ not-for:
   - eval-author-task-create (use to close an actionable audit coverage gap)
   - eval-author-inspect-trace (use to explain an Intake trace without creating an environment)
 compatibility: >-
-  Python 3.11 or later for the standalone helper. MLflow normalization uses the
-  sibling mlflow-to-atif skill. Intake reads require the nemo CLI. Candidate
-  verification requires an existing Harbor installation and Docker.
-  Proof-input recording and proof checks use Harbor's Task API;
-  run those commands in the existing Harbor Python environment. No model,
-  provider, or agent-framework configuration is required.
+  Python 3.11+; mlflow-to-atif for MLflow; nemo CLI for Intake; Harbor and
+  Docker for proof. Run proof commands in Harbor's Python environment. No model
+  or provider configuration is required.
+metadata:
+  author: NVIDIA NeMo Platform
+  tags: [evaluation, harbor, traces]
 maturity: alpha
 license: Apache-2.0
 user-invocable: true
@@ -32,17 +30,28 @@ allowed-tools: [Bash, Read, Write, Grep, Glob]
 
 # Eval Author: trace to environment
 
-Read `eval-author` for the shared evidence standard and boundaries. This flow
-uses the current coding agent to turn one recorded interaction into one small,
-reproducible Harbor task. It does not require a particular coding agent, model,
-or framework.
+## Requirements
 
-```text
-bounded source → canonical ATIF → private text scrub → contextual audit
-                                                        └─ candidate decision
-                                                           ├─ no_candidate → summary
-                                                           └─ candidate → isolated Harbor proof → review → summary
-```
+Use the dependencies declared above. Harbor and Docker are needed only to prove
+a candidate environment.
+
+## Purpose
+
+Read `eval-author` for the shared evidence standard and boundaries. This flow
+turns one recorded interaction into a small, reproducible Harbor task without
+requiring a particular coding agent or framework.
+
+## Limitations
+
+This flow handles one bounded trace and execution verification. It cannot prove
+unrecorded side effects, subjective outcomes, unavailable software, or private
+and live external state.
+
+## Troubleshooting
+
+On a contract failure, preserve the artifacts and record the exact failed
+command with `finalize --did-not-work`; never bypass privacy, isolation, or proof
+gates.
 
 The ATIF file is the only handoff into candidate analysis. Keep exact source
 exports restricted. Do not put trace payloads, credentials, or generated task
@@ -75,9 +84,9 @@ bundled skill files; `extra.*` names elsewhere are ATIF fields, not file paths.
     summary.md
 ```
 
-The original bytes, normalized canonical ATIF, safe ATIF, privacy report, audit,
-ground truth, and Harbor jobs stay ignored. The declassified reproducibility
-manifest is published only through the helper's whitelist-only `export` command.
+Source, evidence, ground truth, and Harbor jobs stay ignored. Only the
+whitelist-only `export` command publishes the declassified reproducibility
+manifest.
 
 `scripts/trace_environment.py init` writes the parent `.gitignore` so every
 task directory is ignored, makes directories owner-only, and refuses to replace
@@ -140,10 +149,10 @@ Do not parse protobuf bytes, contact a collector, or ingest remote data in this
 flow. If the export cannot establish parentage or a human instruction, record
 no_candidate instead of guessing.
 
-Before continuing, verify the canonical file has one ATIF v1.0-v1.7 object, one-based
-sequential step IDs, at least one user step, and resolvable tool-call references.
-The helper accepts at most 128 MiB of exact source bytes and produces canonical
-and safe files of at most 25 MiB. It may make only two bounded normalizations:
+Before continuing, require one ATIF v1.0-v1.7 object with sequential one-based
+steps, a user step, and resolvable tool-call references. Limits are 128 MiB for
+source and 25 MiB for canonical or safe output. Only these normalizations are
+allowed:
 
 - insert a missing JSON escape when the parser-implicated quote immediately
   follows a provider-redaction placeholder; and
@@ -193,26 +202,23 @@ Never copy a redacted value into a verifier. An image-only user instruction is a
 blocking reason and must remain no_candidate. The scanner cannot establish that
 proprietary code is safe; the contextual reviewer owns that judgment.
 
-### Inventory and resolve tool-call access
+### Resolve tool-call access
 
-When the trace contains tool calls, read
-`../../docs/trace-derived-fixtures.md`, then select `real`, `mock`, or `none`
-for every observed function. Never silently replace real software with a mock.
+For traces with tool calls, read `../../docs/trace-derived-fixtures.md`, then run:
 
 ```bash
 python <skill_dir>/scripts/trace_environment.py inventory-tool-calls --task-dir <task-dir>
 python <skill_dir>/scripts/trace_environment.py plan-tool-call-access --task-dir <task-dir>
 python <skill_dir>/scripts/trace_environment.py resolve-tool-call-access \
   --task-dir <task-dir> --decisions <decisions.json> --reviewer-kind <agent|human>
-# Only after privacy review, and only when at least one decision is mock:
+# After privacy review, when at least one decision is mock:
 python <skill_dir>/scripts/trace_environment.py generate-mock-tool-calls --task-dir <task-dir>
 ```
 
-Generated call fixtures are transport-neutral; the current Harbor adapter
-exposes them as stdio MCP tools. Copy the directory into the task image and
-merge its `integration.toml` into `task.toml`. Finalization verifies selected
-mock access is wired in. Treat fixtures as agent-inspectable and let Harbor
-prove output replay is sufficient when side effects are uncertain.
+Select `real`, `mock`, or `none` for every function; never substitute silently.
+Copy generated fixtures into the task image and merge `integration.toml` into
+`task.toml`; finalization checks the wiring. The stdio MCP adapter performs
+exact-match replay. Fixtures are agent-visible and cannot hold verifier truth.
 
 ## Step 4: inventory ground truth and software requirements
 
@@ -272,25 +278,17 @@ This basic flow supports execution verification only. Do not add a model judge
 or convert a subjective, visual, or prose-quality outcome into a brittle string
 check.
 
-For no candidate, set `status` to `no_candidate`, `instruction` and
-`verification_mode` to `null`, keep `requirements` empty, and include one or more
-stable `reason_codes`. Keep the `ground_truth` and `software_requirements`
-inventories in the record even when they are empty or explain the blocker.
-Typical reasons are `missing_instruction`,
-`missing_outcome`, `requires_private_state`, `requires_live_external_state`,
-`non_text_evidence_required`, `subjective_verification`, and
-`insufficient_trace_evidence`. Use `required_software_unavailable` or
-`proprietary_runtime_unavailable` when the software inventory blocks a
-reproducible task. Ground truth may be absent without blocking a task, but its
-absence must be explicit.
+For no candidate, use the reference's null and empty fields and stable
+`reason_codes`; retain the `ground_truth` and `software_requirements`
+inventories even when empty. Ground truth may be absent without blocking a task,
+but its absence must be explicit. Use
+`required_software_unavailable` or `proprietary_runtime_unavailable` when the
+software inventory blocks reproducibility.
 
-For batch reporting, distinguish source and construction failures rather than
-folding them into `insufficient_trace_evidence`: use `malformed_atif`,
-`source_too_large`, `build_dependency_unavailable`,
-`verifier_dependency_unavailable`, `network_dependency_required`, and
-`verifier_not_isolated` where applicable. Record the concrete failed command or
-contract check in the summary using Step 7's `finalize --did-not-work`, not as an
-extra field in `candidate.json`; keep `reason_codes` stable and aggregateable.
+For batch failures, use the reference's specific source or construction
+`reason_codes` instead of `insufficient_trace_evidence`. Record the failed
+command or contract check through Step 7's `finalize --did-not-work`, not an
+extra `candidate.json` field.
 
 ## Step 6: author and prove a candidate environment
 

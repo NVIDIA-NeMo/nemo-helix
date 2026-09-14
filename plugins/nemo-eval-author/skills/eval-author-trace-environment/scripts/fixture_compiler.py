@@ -98,6 +98,15 @@ def _normalized_definition(definition: dict[str, Any]) -> dict[str, Any] | None:
     return normalized
 
 
+def _definitions_equivalent(first: dict[str, Any], second: dict[str, Any]) -> bool:
+    """Compare complete definitions by meaning and incomplete definitions by raw shape."""
+    first_normalized = _normalized_definition(first)
+    second_normalized = _normalized_definition(second)
+    if first_normalized is not None and second_normalized is not None:
+        return canonical_json(first_normalized) == canonical_json(second_normalized)
+    return canonical_json(first) == canonical_json(second)
+
+
 def _trajectories(trajectory: dict[str, Any], *, trajectory_path: str = "$") -> list[tuple[str, dict[str, Any]]]:
     trajectories = [(trajectory_path, trajectory)]
     for index, child in enumerate(trajectory.get("subagent_trajectories") or []):
@@ -118,7 +127,7 @@ def derive_tool_call_inventory(trajectory: dict[str, Any], *, safe_atif_sha256: 
             if not isinstance(definition, dict) or not (name := _definition_name(definition)):
                 continue
             known = definitions_by_name.setdefault(name, [])
-            if all(canonical_json(existing) != canonical_json(definition) for existing in known):
+            if all(not _definitions_equivalent(existing, definition) for existing in known):
                 known.append(definition)
 
     tools: dict[str, dict[str, Any]] = {}

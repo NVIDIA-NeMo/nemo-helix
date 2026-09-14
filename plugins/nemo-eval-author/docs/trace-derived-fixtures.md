@@ -3,6 +3,13 @@
 
 # Trace-derived tool-call access
 
+## Prerequisites
+
+- One bounded ATIF v1.0-v1.7 trace, normalized through the trace-environment
+  author workflow when needed.
+- Python 3.11 or later; Harbor and Docker when proving a candidate task.
+- A completed contextual privacy review before materializing mock calls.
+
 ## Purpose
 
 A tool is a software dependency such as a CAD application, CLI, database, or
@@ -164,3 +171,8 @@ updates, CAD artifacts, time progression, randomness, or other side effects. An
 author who chooses `mock` despite a side-effect warning is asserting only that
 the recorded output is sufficient for this bounded task; repeated Harbor proof
 must validate that assertion.
+
+## Next steps
+
+- Follow the [trace-environment author workflow](../skills/eval-author-trace-environment/SKILL.md).
+- Apply the [environment-integrity proof requirements](../skills/eval-author-trace-environment/references/environment-integrity.md).
