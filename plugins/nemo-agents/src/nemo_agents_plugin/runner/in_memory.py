@@ -98,7 +98,7 @@ def _resolve_nat_bin() -> str:
 
 async def validate_platform_agent_config(config: dict[str, Any], *, base_dir: Path) -> Any:
     """Validate Fabric configs lazily so NAT/container deployments do not import Fabric."""
-    # TODO(AIRCORE-902): Hoist once Fabric runtime is installed in the default Platform image.
+    # TODO: Hoist once Fabric runtime is installed in the default Platform image.
     from nemo_agents_plugin.fabric.validation import validate_platform_agent_config as _validate_platform_agent_config
 
     return await _validate_platform_agent_config(config, base_dir=base_dir)
@@ -127,7 +127,7 @@ def configure_intake_telemetry(config: dict[str, Any], *, workspace: str, base_d
     ``intake_export`` imports Fabric at module scope, and NAT deployments must
     not pay for it.
     """
-    # TODO(AIRCORE-902): Hoist once Fabric runtime is installed in the default Platform image.
+    # TODO: Hoist once Fabric runtime is installed in the default Platform image.
     from nemo_agents_plugin.telemetry.intake_export import (
         configure_intake_atif_export,
         supports_intake_atif_export,
