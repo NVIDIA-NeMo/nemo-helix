@@ -386,6 +386,7 @@ nemo-experimentalist-plugin = [
   "nemo-insights-plugin",
   "nemo-platform-plugin",
   "tomlkit>=0.13.3",
+  "nemo-agent-optimization-plugin",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -416,6 +417,7 @@ nemo-insights-plugin = [
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-optimization-plugin = [
+  "nemo-agent-optimization-plugin",
   "nemo-platform-plugin",
   "nemo-evaluator-sdk",
   "matplotlib>=3.8.0",
@@ -492,6 +494,7 @@ nemo-safe-synthesizer-plugin = [
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-switchyard = [
+  "nemo-agent-optimization-plugin",
   "nemo-platform-plugin",
   "switchyard-vendored",
 ]
@@ -767,6 +770,8 @@ nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 [project.entry-points."nemo.optimization-strategy"]
 nat = "nemo_optimization.optimization_strategy:NatOptimizationStrategy"
 prompt-master = "prompt_master_plugin.strategy:PromptMasterStrategy"
+experimentalist = "nemo_experimentalist_plugin.optimization_strategy:ExperimentalistOptimizationStrategy"
+switchyard = "nemo_switchyard.optimization_strategy:SwitchyardOptimizationStrategy"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.optimization.backends"]
