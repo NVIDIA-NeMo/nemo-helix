@@ -11,6 +11,7 @@ Located at: nemo_platform/filesets/ (after vendoring)
 
 from .filesystem.callbacks import RichFileProgressCallback as RichFileProgressCallback
 from .filesystem.callbacks import RichProgressCallback as RichProgressCallback
+from .filesystem.filesystem import AsyncFilesetFileSystem as AsyncFilesetFileSystem
 from .filesystem.filesystem import FilesetFileSystem as FilesetFileSystem
 from .filesystem.filesystem import FilesetPathError as FilesetPathError
 from .filesystem.filesystem import build_fileset_ref as build_fileset_ref

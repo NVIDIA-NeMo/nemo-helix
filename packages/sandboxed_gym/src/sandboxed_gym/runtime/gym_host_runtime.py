@@ -40,6 +40,7 @@ GYM_GLOBAL_CONFIG_ENV_KEY = "NMP_GYM_GLOBAL_CONFIG"
 #: for image-bundled Gym too; this flag is how a missing ``nemo-environment.yaml`` becomes a
 #: FileSet error instead of a silent fallback to the image-shipped environment.
 ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY = "NMP_ENVIRONMENT_PACKAGE_REQUIRED"
+ENVIRONMENT_OFFLINE_ENV_KEY = "NMP_ENVIRONMENT_OFFLINE"
 UV_CACHE_DIR_KEY = "uv_cache_dir"
 UV_VENV_DIR_KEY = "uv_venv_dir"
 # Writable /job/work subdirectory where wheels are installed for the running Gym host.
@@ -58,6 +59,7 @@ MODEL_CALL_CAPTURE_DIR_KEY = "model_call_capture_dir"
 MODEL_CALLS_RESULT_KEY = "_nmp_model_calls"
 # uv setting that points Gym's per-server dependency resolver at the staged wheelhouse.
 UV_FIND_LINKS_ENV_KEY = "UV_FIND_LINKS"
+UV_OFFLINE_ENV_KEY = "UV_OFFLINE"
 NEMO_GYM_EXTRA_ROOTS_ENV_KEY = "NEMO_GYM_EXTRA_ROOTS"
 #: Which agent, resources server, and model to run. Gym has no schema for this key, so
 #: the host pops it and rewrites ``config_paths`` before Gym parses the dict.
@@ -220,6 +222,10 @@ def _environment_package_required() -> bool:
     return os.environ.get(ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY, "").strip().lower() in {"1", "true", "yes"}
 
 
+def _environment_offline() -> bool:
+    return os.environ.get(ENVIRONMENT_OFFLINE_ENV_KEY, "").strip().lower() in {"1", "true", "yes"}
+
+
 def _load_runtime_environment_package(
     environment_path: str,
     *,
@@ -286,6 +292,16 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
     # requirements.txt. Prefer the staged component wheels while retaining package-index fallback
     # for image-owned Gym and its core dependencies.
     os.environ[UV_FIND_LINKS_ENV_KEY] = wheels_dir
+
+    if _environment_offline():
+        if UV_OFFLINE_ENV_KEY in os.environ:
+            print(
+                f"gym-host: offline requested, but {UV_OFFLINE_ENV_KEY}="
+                f"{os.environ[UV_OFFLINE_ENV_KEY]} is already set",
+                flush=True,
+            )
+        else:
+            os.environ[UV_OFFLINE_ENV_KEY] = "1"
 
     # Gym starts agent and resource servers as child Python processes. Prepend the wheel target so
     # those processes can import the environment's vendored dependencies.
@@ -606,33 +622,32 @@ def run_rollouts_sync(
 
 
 class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    _chunked: bool = False
     max_request_bytes: int = 268_435_456
     max_response_bytes: int = 268_435_456
     heartbeat_interval_s: float = _HEARTBEAT_INTERVAL_S
     rollout_deadline_s: float = _DEFAULT_ROLLOUT_DEADLINE_S
 
+    def parse_request(self) -> bool:
+        parsed = super().parse_request()
+        self.close_connection = True
+        return parsed
+
     def do_GET(self) -> None:
         if not self.path.startswith("/health"):
-            self.send_response(404)
-            self.end_headers()
+            self._send_empty(404)
             return
         # Must match do_POST: a host that passes /health and then 503s every rollout is
         # invisible to wait_ready.
         if not _READY or _HEAD_SERVER_CONFIG is None or _ROLLOUT_HELPER is None:
-            body = json.dumps({"status": "starting"}).encode("utf-8")
-            self.send_response(503)
+            self._send_json(503, {"status": "starting"})
         else:
-            body = json.dumps({"status": "ready"}).encode("utf-8")
-            self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+            self._send_json(200, {"status": "ready"})
 
     def do_POST(self) -> None:
         if not self.path.startswith("/rollouts/run"):
-            self.send_response(404)
-            self.end_headers()
+            self._send_empty(404)
             return
         if not _READY or _HEAD_SERVER_CONFIG is None or _ROLLOUT_HELPER is None:
             self._send_json(503, _runtime_error("bootstrap_failed", "Gym host not ready"))
@@ -690,14 +705,20 @@ class Handler(BaseHTTPRequestHandler):
         # Committed to 200 before the work is done, so the first byte leaves immediately and no hop
         # can mistake a long batch for a dead one. Everything judgeable from the request alone was
         # rejected with a real status above; failures from here travel in the body as
-        # {"error": ...}, which the caller already treats as fatal. No Content-Length: the body is
-        # delimited by the close that `Connection: close` promises, which is what allows the
-        # heartbeats below to precede a payload of unknown length.
+        # {"error": ...}, which the caller already treats as fatal.
+        self._chunked = self.request_version >= "HTTP/1.1"
+        if not self._chunked:
+            self._send_body(200, self._await_results(future, started))
+            return
+
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Connection", "close")
+        self.send_header("Transfer-Encoding", "chunked")
+        self._announce_close()
         self.end_headers()
-        self.wfile.write(self._await_results(future, started))
+        self._write_chunk(self._await_results(future, started))
+        self.wfile.write(b"0\r\n\r\n")
+        self.wfile.flush()
 
     def _await_results(self, future: concurrent.futures.Future[list[dict]], started: float) -> bytes:
         """Wait for ``future``, heartbeating while it runs, and return the body to send.
@@ -718,9 +739,10 @@ class Handler(BaseHTTPRequestHandler):
             # its own, which is not this loop's tick.
             done, _ = concurrent.futures.wait([future], timeout=min(self.heartbeat_interval_s, remaining))
             if not done:
+                if not self._chunked:
+                    continue
                 try:
-                    self.wfile.write(b" ")
-                    self.wfile.flush()
+                    self._write_chunk(b" ")
                 except OSError as exc:
                     # The caller is gone. Nothing will read this batch, so stop paying for it:
                     # cancelling the future propagates to the collector task on the shared loop.
@@ -765,13 +787,32 @@ class Handler(BaseHTTPRequestHandler):
     def _error_body(self, code: str, message: str) -> bytes:
         return json.dumps(_runtime_error(code, message)).encode("utf-8")
 
-    def _send_json(self, status: int, payload: dict[str, Any]) -> None:
-        body = json.dumps(payload).encode("utf-8")
+    def _write_chunk(self, data: bytes) -> None:
+        if not data:
+            return
+        self.wfile.write(b"%X\r\n%s\r\n" % (len(data), data))
+        self.wfile.flush()
+
+    def _announce_close(self) -> None:
+        if self.close_connection:
+            self.send_header("Connection", "close")
+
+    def _send_empty(self, status: int) -> None:
         self.send_response(status)
+        self._announce_close()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _send_body(self, status: int, body: bytes) -> None:
+        self.send_response(status)
+        self._announce_close()
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_json(self, status: int, payload: dict[str, Any]) -> None:
+        self._send_body(status, json.dumps(payload).encode("utf-8"))
 
     def log_message(self, format: str, *args: Any) -> None:
         return

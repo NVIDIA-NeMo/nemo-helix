@@ -253,6 +253,8 @@ def _install_fake_fabric(monkeypatch: pytest.MonkeyPatch, handler: Any) -> type:
     module.RelayAtifConfig = _FakeRelayModel  # type: ignore[attr-defined]
     module.RelayAtofConfig = _FakeRelayModel  # type: ignore[attr-defined]
     module.RelayAtofFileSinkConfig = _FakeRelayModel  # type: ignore[attr-defined]
+    module.RelayOpenTelemetryConfig = _FakeRelayModel  # type: ignore[attr-defined]
+    module.RelayOpenTelemetryEndpointConfig = _FakeRelayModel  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "nemo_fabric", module)
 
     # ``run_tasks`` fails fast on ``import nemo_relay.observability`` when capture_trajectory is on
@@ -1264,3 +1266,33 @@ def test_sum_step_metric_treats_missing_steps_as_unmeasured_and_non_list_as_inva
     assert fabric_runtime._sum_step_metric({}, "prompt_tokens", is_float=False) == (None, True)
     assert fabric_runtime._sum_step_metric({"steps": None}, "prompt_tokens", is_float=False) == (None, True)
     assert fabric_runtime._sum_step_metric({"steps": 7}, "prompt_tokens", is_float=False) == (None, False)
+
+
+@pytest.mark.asyncio
+async def test_a_failing_trace_fold_costs_the_trace_not_the_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fold that raises must not take the other tasks' trials with it.
+
+    The fold runs in ``finally``, past the per-task exception handlers, so an unguarded raise
+    propagates into the ``asyncio.gather`` over every task — turning one unwritable evidence
+    directory into a run with no results at all.
+    """
+
+    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
+        return _FakeResult(status="succeeded", output={"response": "ok"})
+
+    _install_fake_fabric(monkeypatch, handler)
+
+    def explode(directory: Path) -> int:
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(fabric_runtime, "fold_exports", explode)
+    runtime = fabric_runtime.FabricAgentRuntime(config=_CONFIG, work_root=tmp_path / "fabric", capture_trajectory=True)
+
+    first, second = await runtime.run_tasks([_TASK, _TASK])
+
+    for trial in (first, second):
+        assert trial.status == "completed"
+        assert trial.evidence is not None
+        assert EVIDENCE_TRACE not in trial.evidence.descriptors

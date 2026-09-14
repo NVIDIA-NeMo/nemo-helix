@@ -281,8 +281,12 @@ class DefaultSDKProvider:
                     headers["X-NMP-Principal-Email"] = principal["email"]
                 if principal.get("groups"):
                     headers["X-NMP-Principal-Groups"] = ",".join(principal["groups"])
+                if principal.get("on_behalf_of"):
+                    headers.update(_on_behalf_of_headers(principal))
 
         if on_behalf_of is not None:
+            headers.pop("X-NMP-Principal-On-Behalf-Of-Email", None)
+            headers.pop("X-NMP-Principal-On-Behalf-Of-Groups", None)
             headers["X-NMP-Principal-On-Behalf-Of"] = on_behalf_of
 
         return headers

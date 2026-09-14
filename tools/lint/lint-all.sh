@@ -18,7 +18,6 @@ declare -a scripts=(
   "lint-config-reference-docs:tools/lint/lint-config-reference-docs.sh"
   "lint-python-style:tools/lint/lint-python-style.sh"
   "lint-python-types:tools/lint/lint-python-types.sh"
-  "lint-python-sdk:tools/lint/lint-python-sdk.sh"
   "lint-sdk-vendored:tools/lint/lint-sdk-vendored.sh"
   "lint-web-sdk:tools/lint/lint-web-sdk.sh"
   "lint-cli:tools/lint/lint-cli.sh"

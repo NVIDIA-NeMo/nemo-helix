@@ -44,7 +44,7 @@ from nemo_guardrails_plugin.llmrails_cache import (
     source_has_output_flows,
     stabilize,
 )
-from nemo_platform.types.guardrail import RailsConfig as PlatformRailsConfig
+from nemo_platform_plugin.guardrail.types import RailsConfig as PlatformRailsConfig
 from nemo_platform_plugin.inference_middleware import OpenAICompatibleInferenceTarget
 from nemoguardrails import RailsConfig
 from nemoguardrails.rails.llm.config import Model

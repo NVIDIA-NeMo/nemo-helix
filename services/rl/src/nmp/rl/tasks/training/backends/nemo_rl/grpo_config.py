@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from copy import deepcopy
 from pathlib import Path
@@ -185,9 +186,25 @@ def _count_jsonl_rows(path: Path) -> int:
     return count
 
 
-# Formats whose wheels/ is a complete closure, so the job can resolve without an index.
-# adapter-wheels-v1 ships wheels too, but its agent harness still installs from GitHub.
-OFFLINE_ENVIRONMENT_FORMATS = frozenset({"wheels-v1"})
+def _warn_if_v4_compatible_on_v5_checkpoint(model_path: str, v4_compatible: bool) -> None:
+    if not v4_compatible:
+        return
+    try:
+        version = json.loads((Path(model_path) / "config.json").read_text(encoding="utf-8")).get("transformers_version")
+        major = int(str(version).split(".")[0])
+    except (OSError, ValueError, AttributeError):
+        return
+    if major >= 5:
+        logger.warning(
+            "v4_compatible is enabled but the base checkpoint is transformers v%s; "
+            "set training.v4_compatible=false to keep the v5 config.json.",
+            major,
+        )
+
+
+# Formats whose wheels/ can be a complete closure. This is capability, not policy:
+# sandbox egress configuration decides whether uv is actually forced offline.
+OFFLINE_CAPABLE_ENVIRONMENT_FORMATS = frozenset({"wheels-v1", "adapter-wheels-v1"})
 
 
 def _read_manifest(environment_path: str | None) -> dict:
@@ -202,10 +219,10 @@ def _read_manifest(environment_path: str | None) -> dict:
     return manifest if isinstance(manifest, dict) else {}
 
 
-def _environment_is_offline(environment_path: str | None) -> bool:
+def _environment_supports_offline(environment_path: str | None) -> bool:
     """Whether the package promises a self-sufficient wheelhouse."""
 
-    return _read_manifest(environment_path).get("format") in OFFLINE_ENVIRONMENT_FORMATS
+    return _read_manifest(environment_path).get("format") in OFFLINE_CAPABLE_ENVIRONMENT_FORMATS
 
 
 def _read_manifest_config_paths(environment_path: str | None) -> list[str]:
@@ -294,7 +311,7 @@ def _build_nemo_gym_env_config(
     if config_paths:
         nemo_gym["config_paths"] = config_paths
 
-    offline_environment = _environment_is_offline(manifest_root)
+    offline_environment = sandboxed and not gym.allow_internet and _environment_supports_offline(manifest_root)
     if offline_environment:
         nemo_gym["environment_offline"] = True
 
@@ -517,6 +534,13 @@ def compile_grpo_config(
     model_path = customizer_config.model.path
     precision = _adapt_precision(customizer_config.model.precision)
     parallelism = customizer_config.parallelism
+    # Automodel: write a consolidated HF export. V1 forbids model_save_format.
+    if parallelism.policy_backend is PolicyBackend.AUTOMODEL:
+        cfg["checkpointing"]["save_consolidated"] = True
+        cfg["checkpointing"]["v4_compatible"] = customizer_config.model.v4_compatible
+        _warn_if_v4_compatible_on_v5_checkpoint(model_path, customizer_config.model.v4_compatible)
+        if customizer_config.training.finetuning_type == FinetuningType.ALL_WEIGHTS:
+            cfg["checkpointing"]["model_save_format"] = "safetensors"
     lora_cfg = _build_lora_cfg(customizer_config)
     dynamic_batching_cfg, sequence_packing_cfg = _build_batching_config(customizer_config, grpo_hp)
     chat_template = resolve_chat_template(

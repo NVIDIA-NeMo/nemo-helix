@@ -20,6 +20,7 @@ from multidict import CIMultiDict, CIMultiDictProxy
 from nemo_platform import AsyncNeMoPlatform
 from nemo_platform.types.inference.virtual_model import VirtualModel as SDKVirtualModel
 from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.client import AsyncNemoClient
 from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_platform_plugin.inference_middleware import (
     BackendFormat,
@@ -771,16 +772,16 @@ def _build_inference_response_with_annotations(inference_response: InferenceResp
     if not annotations:
         return inference_response
 
+    response_result = inference_response.result
     # For streaming responses, annotations are accumulated but not serialized
     # in the initial implementation.
-    if not isinstance(inference_response.result, dict):
+    if not isinstance(response_result, dict):
         return inference_response
 
-    result_with_annotations: dict[str, Any] = {}
     if isinstance(inference_response.typed_body, BaseModel):
-        result_with_annotations.update(inference_response.typed_body.model_dump(mode="json"))
+        result_with_annotations: dict[str, Any] = inference_response.typed_body.model_dump(mode="json")
     else:
-        result_with_annotations.update(inference_response.result)
+        result_with_annotations = dict(response_result)
 
     # Merge annotations into the result, only if the key is not already present.
     result_with_annotations.update(
@@ -851,6 +852,7 @@ async def virtual_model_proxy(
     http_client: ClientSession,
     model_cache: "ModelCache",
     registry: "MiddlewareRegistry",
+    request_nemo_client: AsyncNemoClient | None = None,
 ) -> Response:
     """Execute the full VirtualModel middleware pipeline and return a streaming response.
 
@@ -911,6 +913,7 @@ async def virtual_model_proxy(
         virtual_model_name=vm_name,
         workspace=workspace,
         original_request=original_request,
+        request_nemo_client=request_nemo_client,
     )
     initial_request = build_inference_request(
         body=json_body,

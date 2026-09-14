@@ -31,11 +31,13 @@ from .fileset_outputs_page import FilesetOutputsPage as FilesetOutputsPage
 from .local_storage_config import LocalStorageConfig as LocalStorageConfig
 from .fileset_create_params import FilesetCreateParams as FilesetCreateParams
 from .fileset_update_params import FilesetUpdateParams as FilesetUpdateParams
+from .github_storage_config import GitHubStorageConfig as GitHubStorageConfig
 from .file_list_files_params import FileListFilesParams as FileListFilesParams
 from .file_upload_file_params import FileUploadFileParams as FileUploadFileParams
 from .s3_storage_config_param import S3StorageConfigParam as S3StorageConfigParam
 from .ngc_storage_config_param import NGCStorageConfigParam as NGCStorageConfigParam
 from .huggingface_storage_config import HuggingfaceStorageConfig as HuggingfaceStorageConfig
 from .local_storage_config_param import LocalStorageConfigParam as LocalStorageConfigParam
+from .github_storage_config_param import GitHubStorageConfigParam as GitHubStorageConfigParam
 from .list_fileset_files_response import ListFilesetFilesResponse as ListFilesetFilesResponse
 from .huggingface_storage_config_param import HuggingfaceStorageConfigParam as HuggingfaceStorageConfigParam

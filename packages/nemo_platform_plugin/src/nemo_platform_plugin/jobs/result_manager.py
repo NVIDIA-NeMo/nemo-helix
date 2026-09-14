@@ -7,7 +7,7 @@ import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from filesets import FilesetFileSystem, parse_fileset_ref
+from filesets import AsyncFilesetFileSystem, FilesetFileSystem, parse_fileset_ref
 from nemo_platform_plugin.client.errors import ConflictError as ClientConflictError
 from nemo_platform_plugin.client.errors import NemoClientError
 from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
@@ -140,7 +140,7 @@ class AsyncResultManager(BaseResultManager):
         return AsyncFilesetFileManager(
             workspace=self.workspace,
             fileset_name=fileset_name,
-            filesystem=FilesetFileSystem(client=self.files_client),
+            filesystem=AsyncFilesetFileSystem(client=self.files_client),
         )
 
     async def create_result(

@@ -229,6 +229,14 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     subheading:
       'Agent invocations populate this list once telemetry reaches the nemo-agent-telemetry fileset.',
   },
+  agentOptimizations: {
+    heading: 'No optimizations yet',
+    subheading:
+      "Sweep your agent's parameters against an evaluation to find a config that scores better.",
+    cliCommand:
+      'nemo agents optimize submit --optimize-config <config>.yaml --fileset <bundle> --agent <agent-name> --workspace <workspace>',
+    skillPrompt: 'Help me run my first agent optimization with the nemo-optimization skill',
+  },
   agents: {
     heading: 'No agents yet',
     subheading: 'Build and deploy an agent to see it listed here.',

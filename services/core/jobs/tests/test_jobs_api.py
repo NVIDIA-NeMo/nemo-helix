@@ -1096,8 +1096,8 @@ async def test_job_result_download(
 
     call_kwargs = factory.call_args.kwargs
     assert call_kwargs["job_name"] == sdk_job_resp.name
-    assert "workspace" not in call_kwargs
-    assert call_kwargs["sdk"].workspace == DEFAULT_WORKSPACE
+    assert call_kwargs["workspace"] == DEFAULT_WORKSPACE
+    assert call_kwargs["sdk"]._client is test_sdk._client
 
     # make sure we deleted the temp files on the server
     assert not tmp_dir.exists()

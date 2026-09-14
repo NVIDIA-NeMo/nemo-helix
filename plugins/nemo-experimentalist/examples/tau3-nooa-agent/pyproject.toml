@@ -9,7 +9,11 @@ readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "mcp==1.25.0",
+    "nemo-platform-plugin",
     "nooa[tracing]>=0.0.9",
     "opentelemetry-exporter-otlp-proto-http",
     "orjson==3.11.9",
 ]
+
+[tool.uv.sources]
+nemo-platform-plugin = { path = "../../../../packages/nemo_platform_plugin", editable = true }

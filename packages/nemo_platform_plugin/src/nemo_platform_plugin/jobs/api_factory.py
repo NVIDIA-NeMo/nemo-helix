@@ -167,9 +167,17 @@ class BaseJobsListFilter(Filter):
     workspace: str | None = Field(default=None, description="Workspace of the job.")
     project: str | None = Field(default=None, description="Project containing the job.")
     status: PlatformJobStatus | None = Field(default=None, description="The current status.")
+    spec: dict[str, Any] | None = Field(
+        default=None, description="Filter on a path within the job's spec, e.g. `spec.target.format`."
+    )
     updated_at: DatetimeFilter | None = Field(
         default=None, description="Jobs updated at 'gte' datetime or 'lte' datetime."
     )
+
+    @classmethod
+    def _get_entity_namespace_map(cls) -> dict[str, str]:
+        """Declare ``spec`` as a namespace so ``spec.<path>`` passes field validation."""
+        return {"spec": "data.spec"}
 
 
 class BaseJobsSortField(StrEnum):

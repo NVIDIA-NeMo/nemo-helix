@@ -85,7 +85,6 @@ automodel-service = [
   "nmp-common",
   "nmp-customization-common",
   "nemo-platform-plugin",
-  "nemo-platform-sdk",
   "pydantic>=2.10.6",
   "pydantic-settings>=2.6.1",
   "httpx>=0.27.0",
@@ -337,7 +336,6 @@ nemo-deployments-plugin = [
 nemo-evaluator-plugin = [
   "cloudpickle>=3.1.1",
   "nemo-evaluator-sdk",
-  "nemo-platform-sdk",
   "nemo-platform-plugin",
   "pydantic>=2.12.0",
   "typer>=0.20.0",
@@ -504,7 +502,7 @@ nmp-common = [
   "base58>=2.1.1",
   "pydantic>=2.10.3",
   "pydantic-settings>=2.8.1",
-  "fastapi[standard]>=0.115.4",
+  "fastapi[standard]>=0.137.2",
   "lark>=1.1.0",
   "nemo-platform-plugin",
   "pyyaml>=6.0.2",
@@ -532,8 +530,8 @@ nmp-common = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 nmp-customization-common = [
   "nmp-common",
-  "nemo-platform-sdk",
   "nemo-platform-plugin",
+  "filesets",
   "pydantic>=2.10.6",
   "pydantic-settings>=2.6.1",
   "httpx>=0.27.0",
@@ -574,7 +572,6 @@ rl-service = [
   "nmp-common",
   "nmp-customization-common",
   "nemo-platform-plugin",
-  "nemo-platform-sdk",
   "pydantic>=2.10.6",
   "pydantic-settings>=2.6.1",
   "httpx>=0.27.0",
@@ -643,6 +640,10 @@ nemo = "nemo_platform.cli.app:cli"
 nmp = "nemo_platform.cli.app:cli"
 
 [project.entry-points]
+# Generated from [tool.bundle-package]; do not edit this table by hand.
+[project.entry-points."data_designer.plugins"]
+fileset-seed-datasets = "data_designer_nemo.plugins:fileset_seed_datasets_plugin"
+
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nat.components"]
 nat_claude_code_agent_adapter = "nat_claude_code_agent_adapter.register"
@@ -862,11 +863,13 @@ nemo-auditor-plugin = { source = "../../plugins/nemo-auditor/src/nemo_auditor", 
 # training images; these carry only compile-side deps, so they are safe to bundle.
 nemo-automodel-plugin = { source = "../../plugins/nemo-automodel/src/nemo_automodel_plugin", module = "nemo_automodel_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-customizer-plugin = { source = "../../plugins/nemo-customizer/src/nemo_customizer", module = "nemo_customizer", inherit = { "entry-points" = ["nemo.*"] } }
-nemo-data-designer-plugin = { source = "../../plugins/nemo-data-designer/src/nemo_data_designer_plugin", module = "nemo_data_designer_plugin", inherit = { "entry-points" = ["nemo.*"] } }
+nemo-data-designer-plugin = { source = "../../plugins/nemo-data-designer/src/nemo_data_designer_plugin", module = "nemo_data_designer_plugin", inherit = { "entry-points" = ["nemo.*", "data_designer.plugins"] } }
 nemo-deployments-plugin = { source = "../../plugins/nemo-deployments/src/nemo_deployments_plugin", module = "nemo_deployments_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-evaluator-plugin = { source = "../../plugins/nemo-evaluator/src/nemo_evaluator", module = "nemo_evaluator", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-experimentalist-plugin = { source = "../../plugins/nemo-experimentalist/src/nemo_experimentalist_plugin", module = "nemo_experimentalist_plugin", inherit = { "entry-points" = ["nemo.*"] } }
-nemo-insights-plugin = { source = "../../plugins/nemo-insights/src/nemo_insights_plugin", module = "nemo_insights_plugin", inherit = { "entry-points" = ["nemo.*"] } }
+# shared_data mirrors the standalone plugin's wheel shared-data: Fabric resolves
+# adapter descriptors from <sys.prefix>/share/nemo-fabric/adapters at runtime.
+nemo-insights-plugin = { source = "../../plugins/nemo-insights/src/nemo_insights_plugin", module = "nemo_insights_plugin", inherit = { "entry-points" = ["nemo.*"] }, shared_data = { "../../insights-analyst.fabric-adapter.json" = "share/nemo-fabric/adapters/insights-analyst/insights-analyst.fabric-adapter.json" } }
 # Required by agents.optimize (OptimizeJob lives here; agents plugin imports it at router setup).
 nemo-optimization-plugin = { source = "../../plugins/nemo-optimization/src/nemo_optimization", module = "nemo_optimization", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-guardrails-plugin = { source = "../../plugins/nemo-guardrails/src/nemo_guardrails_plugin", module = "nemo_guardrails_plugin", inherit = { "entry-points" = ["nemo.*"] } }

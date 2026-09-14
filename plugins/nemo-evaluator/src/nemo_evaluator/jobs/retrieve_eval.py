@@ -5,11 +5,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar, Self
 
+import httpx
 from nemo_evaluator.filesets import (
     FilesetRef,
     download_dataset,
@@ -27,7 +29,7 @@ from nemo_evaluator.jobs.evaluate import (
 )
 from nemo_evaluator.jobs.metric_resolution import PlatformMetricModelResolver
 from nemo_evaluator.jobs.secret_env import build_task_environment
-from nemo_evaluator.jobs.utils import run_with_isolated_async_client
+from nemo_evaluator.jobs.utils import as_async_nemo_client, as_nemo_client, run_with_isolated_async_client
 from nemo_evaluator_sdk import Evaluator
 from nemo_evaluator_sdk.metrics.retrieval import (
     RetrievalMAPMetric,
@@ -35,10 +37,11 @@ from nemo_evaluator_sdk.metrics.retrieval import (
     RetrievalPrecisionMetric,
     RetrievalRecallMetric,
 )
+from nemo_evaluator_sdk.retrieval.nim_ranking import NimRankingClient, NimRankingError
 from nemo_evaluator_sdk.values.models import Model, ModelRef
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.retrieval import Retrieval, Truncation
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
@@ -49,6 +52,8 @@ from nemo_platform_plugin.jobs.api_factory import (
     PlatformJobStep,
 )
 from nemo_platform_plugin.jobs.image import get_qualified_image
+from nemo_platform_plugin.models.client import AsyncModelsClient
+from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 EVAL_RESULTS_FILE_NAME = "eval_results.json"
@@ -167,7 +172,6 @@ class RetrieveEvalJob(NemoJob):
         """Compile a CPU task that calls the embedding target through IGW."""
         del workspace, entity_client, job_name, async_sdk, options
         canonical = RetrieveEvalSpec.model_validate(spec.model_dump())
-        environment = []
         secret_refs = [
             (model.api_key_env, model.api_key_secret.root)
             for retrieval in (canonical.target, canonical.baseline)
@@ -175,8 +179,7 @@ class RetrieveEvalJob(NemoJob):
             for model in (retrieval.embeddings, retrieval.reranker)
             if model is not None and model.api_key_secret is not None and model.api_key_env
         ]
-        if secret_refs:
-            environment = build_task_environment(secret_refs)
+        environment = build_task_environment(secret_refs)
         return PlatformJobSpec(
             steps=[
                 PlatformJobStep(
@@ -200,20 +203,22 @@ class RetrieveEvalJob(NemoJob):
         self,
         config: dict,
         ctx: JobContext,
-        sdk: NemoClient | None = None,
-        async_sdk: AsyncNemoClient | None = None,
+        sdk: NemoClient | NeMoPlatform | None = None,
+        async_sdk: AsyncNemoClient | AsyncNeMoPlatform | None = None,
     ) -> dict:
         """Download, validate, score, and persist a BEIR retrieval result."""
+        client = as_nemo_client(sdk)
+        async_client = as_async_nemo_client(async_sdk)
         spec = RetrieveEvalSpec.model_validate(config)
-        if sdk is not None:
+        if client is not None:
             dataset_path = download_dataset_sync(
-                client=sdk,
+                client=client,
                 dataset=spec.dataset,
                 destination=str(ctx.storage.persistent / "dataset"),
             )
-        elif async_sdk is not None:
+        elif async_client is not None:
             dataset_path = run_with_isolated_async_client(
-                async_sdk,
+                async_client,
                 lambda isolated_client: download_dataset(
                     client=isolated_client,
                     dataset=spec.dataset,
@@ -283,7 +288,8 @@ async def _resolve_retrieval(
     if isinstance(value, ModelRef):
         if async_sdk is None:
             raise ValueError("a platform SDK client is required to resolve the retrieval target")
-        return Retrieval(embeddings=await PlatformMetricModelResolver(async_sdk.models).resolve_model(value))
+        models_client = client_from_platform(async_sdk, AsyncModelsClient)
+        return Retrieval(embeddings=await PlatformMetricModelResolver(models_client).resolve_model(value))
     if isinstance(value, Model):
         return Retrieval(embeddings=value)
     embeddings = value.embeddings
@@ -291,11 +297,25 @@ async def _resolve_retrieval(
     if isinstance(embeddings, ModelRef):
         if async_sdk is None:
             raise ValueError("a platform SDK client is required to resolve the retrieval target")
-        embeddings = await PlatformMetricModelResolver(async_sdk.models).resolve_model(embeddings)
+        models_client = client_from_platform(async_sdk, AsyncModelsClient)
+        embeddings = await PlatformMetricModelResolver(models_client).resolve_model(embeddings)
     if isinstance(reranker, ModelRef):
+        reranker_ref = reranker.root
         if async_sdk is None:
             raise ValueError("a platform SDK client is required to resolve the retrieval reranker")
-        reranker = await PlatformMetricModelResolver(async_sdk.models).resolve_model(reranker)
+        models_client = client_from_platform(async_sdk, AsyncModelsClient)
+        reranker = await PlatformMetricModelResolver(models_client).resolve_model(reranker)
+        try:
+            async with asyncio.timeout(15.0):
+                reranker = await NimRankingClient(model=reranker, max_retries=0, timeout=15.0).preflight()
+        except TimeoutError as error:
+            raise ValueError(
+                f"Reranker ModelRef '{reranker_ref}' compatibility preflight exceeded the 15-second deadline"
+            ) from error
+        except (httpx.HTTPError, NimRankingError) as error:
+            raise ValueError(
+                f"Reranker ModelRef '{reranker_ref}' has no compatible ranking endpoint: {error}"
+            ) from error
     return Retrieval(
         embeddings=embeddings,
         reranker=reranker,

@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { zodResolver } from '@hookform/resolvers/zod';
 import { ControlledJsonInput } from '@studio/components/NewCustomizationForm/ControlledJsonInput';
 import { act, render, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { FC } from 'react';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
+import { z } from 'zod';
 
 interface FormShape {
   cfg?: unknown;
@@ -14,6 +16,25 @@ interface FormShape {
 const Spy: FC = () => {
   const value = useWatch<FormShape>({ name: 'cfg' });
   return <div data-testid="value">{value === undefined ? 'UNDEFINED' : JSON.stringify(value)}</div>;
+};
+
+/** Same control, but behind a resolver that requires a record of strings. */
+const validatedSchema = z.object({ cfg: z.record(z.string()).optional() });
+
+const ValidatedHarness: FC = () => {
+  const methods = useForm<z.infer<typeof validatedSchema>>({
+    defaultValues: { cfg: undefined },
+    mode: 'onChange',
+    resolver: zodResolver(validatedSchema),
+  });
+  return (
+    <FormProvider {...methods}>
+      <ControlledJsonInput
+        useControllerProps={{ name: 'cfg', control: methods.control }}
+        formFieldProps={{ slotLabel: 'Config' }}
+      />
+    </FormProvider>
+  );
 };
 
 const Harness: FC<{ onReady?: (setValue: (v: unknown) => void) => void }> = ({ onReady }) => {
@@ -82,5 +103,60 @@ describe('ControlledJsonInput', () => {
     // Clearing the field externally empties the box.
     await act(async () => setValue(undefined));
     await waitFor(() => expect(box).toHaveValue(''));
+  });
+});
+
+describe('schema errors', () => {
+  /**
+   * Valid JSON of the wrong shape produces no parse error, so before this the field
+   * looked accepted and the problem only appeared in the submit banner.
+   */
+  it('shows the resolver error for well-formed JSON of the wrong shape', async () => {
+    const user = userEvent.setup();
+    render(<ValidatedHarness />);
+
+    await user.type(screen.getByRole('textbox'), '[[1, 2, 3]');
+
+    expect(await screen.findByText(/expected object|expected record/i)).toBeInTheDocument();
+  });
+
+  it('keeps reporting unparseable text as invalid JSON', async () => {
+    const user = userEvent.setup();
+    render(<ValidatedHarness />);
+
+    await user.type(screen.getByRole('textbox'), '{{oops');
+
+    expect(await screen.findByText('Invalid JSON')).toBeInTheDocument();
+  });
+
+  /**
+   * Unparseable text leaves the last parsed value in the form, so the resolver error is
+   * still live underneath. Typing over a rejected value is the case where both errors
+   * exist at once, and the parse error is the one the user can act on.
+   */
+  it('prefers the parse error while a resolver error is still outstanding', async () => {
+    const user = userEvent.setup();
+    render(<ValidatedHarness />);
+    const textbox = screen.getByRole('textbox');
+
+    await user.type(textbox, '[[1, 2, 3]');
+    await screen.findByText(/expected object|expected record/i);
+
+    // Appending rather than clearing: unparseable text leaves the rejected value in the
+    // form, so the resolver error stays live. Clearing would store `undefined`, which the
+    // optional field accepts, and the resolver error would go away on its own.
+    await user.type(textbox, '{{');
+
+    expect(await screen.findByText('Invalid JSON')).toBeInTheDocument();
+    expect(screen.queryByText(/expected object|expected record/i)).not.toBeInTheDocument();
+  });
+
+  it('shows no error for a valid object', async () => {
+    const user = userEvent.setup();
+    render(<ValidatedHarness />);
+
+    await user.type(screen.getByRole('textbox'), '{{"team": "nemo"}');
+
+    await waitFor(() => expect(screen.queryByText('Invalid JSON')).not.toBeInTheDocument());
   });
 });

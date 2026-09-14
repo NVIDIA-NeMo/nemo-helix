@@ -1,0 +1,73 @@
+diff --git a/nemo_rl/environments/sandbox/gym_host_runtime.py b/nemo_rl/environments/sandbox/gym_host_runtime.py
+--- a/nemo_rl/environments/sandbox/gym_host_runtime.py
++++ b/nemo_rl/environments/sandbox/gym_host_runtime.py
+@@ -28,6 +28,7 @@
+ import concurrent.futures
+ import json
+ import os
++import shutil
+ import socket
+ import subprocess
+ import threading
+@@ -48,6 +49,10 @@
+ ENVIRONMENT_PATH_ENV_KEY = "NMP_ENVIRONMENT_PATH"
+ # Set by the platform, which knows whether the package vendors a complete closure.
+ ENVIRONMENT_OFFLINE_ENV_KEY = "NMP_ENVIRONMENT_OFFLINE"
++DATASET_PATH_ENV_KEY = "NMP_DATASET_PATH"
++WORK_PATH_ENV_KEY = "NMP_WORK_PATH"
++# Vendored Hugging Face cache under the dataset FileSet (read-only mount).
++HF_CACHE_DIRNAME = ".huggingface"
+ UV_CACHE_DIR_KEY = "uv_cache_dir"
+ # Mirrors DEFAULT_GYM_PORT_RANGE_{LOW,HIGH} in nemo_rl.distributed.virtual_cluster.
+ DEFAULT_GYM_PORT_RANGE_LOW = 5000
+@@ -183,8 +188,43 @@
+     return os.environ.get(ENVIRONMENT_PATH_ENV_KEY, "").strip() or None
+ 
+ 
++
++def _install_huggingface_cache_fallback() -> None:
++    """Copy a vendored HF cache off the read-only dataset mount into writable work.
++
++    Hub loaders that ignore ``vf_env_args.dataset_path`` still call
++    ``load_dataset("org/name")``; pointing the HF caches at a writable copy lets
++    that resolve from disk. Do not point them at the dataset mount: ``datasets``
++    writes lock files there and fails on a read-only filesystem. Offline flags
++    follow ``NMP_ENVIRONMENT_OFFLINE`` so a job that allows internet can still
++    fetch Hub content missing from the snapshot. No-op when the FileSet has no
++    ``.huggingface/`` snapshot.
++    """
++    dataset_path = os.environ.get(DATASET_PATH_ENV_KEY, "").strip()
++    work_path = os.environ.get(WORK_PATH_ENV_KEY, "").strip()
++    if not dataset_path or not work_path:
++        return
++    src = os.path.join(dataset_path, HF_CACHE_DIRNAME)
++    if not os.path.isdir(src):
++        return
++    dest = os.path.join(work_path, HF_CACHE_DIRNAME)
++    if os.path.exists(dest):
++        shutil.rmtree(dest)
++    shutil.copytree(src, dest)
++    os.environ["HF_HOME"] = dest
++    # nemo_gym claims HF_DATASETS_CACHE under its own tree at import time when it is
++    # unset, and an explicit cache variable wins over HF_HOME, so name both leaves.
++    os.environ["HF_DATASETS_CACHE"] = os.path.join(dest, "datasets")
++    os.environ["HF_HUB_CACHE"] = os.path.join(dest, "hub")
++    if os.environ.get(ENVIRONMENT_OFFLINE_ENV_KEY, "").strip().lower() in {"1", "true"}:
++        os.environ["HF_HUB_OFFLINE"] = "1"
++        os.environ["HF_DATASETS_OFFLINE"] = "1"
++
++
+ def bootstrap_gym_host() -> tuple[Any, Any, Any]:
+     """Start Gym servers and return (RunHelper, head_server_config, RolloutCollectionHelper)."""
++    # Before RunHelper.start() so Gym child processes inherit the HF cache paths.
++    _install_huggingface_cache_fallback()
+     # Registered before nemo_gym is imported below: Gym's _augment_sys_path() folds the
+     # extra roots into sys.path at import time, and server directories are resolved during
+     # RunHelper.start.
+diff --git a/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/requirements.txt b/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/requirements.txt
+--- a/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/requirements.txt
++++ b/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/requirements.txt
+@@ -1,2 +1,2 @@
+ -e nemo-gym[dev] @ ../../
+-verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@v0.1.14
++verifiers==0.1.14

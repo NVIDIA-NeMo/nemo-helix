@@ -1,0 +1,249 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Run a War-Game"
+description: ""
+---
+<a id="agents-governance-run-a-war-game"></a>
+
+<Warning>
+
+Agent Governance is released with _early access_ availability and is subject to limited support and potential API changes in future releases.
+
+</Warning>
+
+This page runs a full attack, defend and validate cycle against an agent. It
+covers both starting points: an agent registered on the platform, and an agent
+project the platform does not manage at all, supplied as a directory or an
+uploaded archive.
+
+The cycle produces proposed fixes. Choosing which to keep and writing them back
+to the agent is covered in
+[Review and Apply Mitigations](/documentation/agents/governance/apply-mitigations).
+
+## Prerequisites
+
+1. Local services running with the models and jobs controllers:
+   ```bash
+   nemo services run --service-group all --controllers models,jobs \
+     --host 0.0.0.0 --port 8080
+   ```
+   Bind to `0.0.0.0` so the sandbox can reach the Inference Gateway through
+   `host.docker.internal`.
+1. Docker running on the host.
+1. The OpenShell gateway installed with its native installer. Installing
+   OpenShell as a standalone CLI tool gives you the command without the gateway
+   service.
+1. At least one model provider registered in the workspace.
+
+Provision Agent Hardener once per machine, then confirm the prerequisites:
+
+```bash
+nemo agent-hardener setup
+nemo agent-hardener doctor
+```
+
+`setup` creates the agent-hardener and garak virtual environments and the inference
+credential. `doctor` is read-only and checks all five: the agent-hardener venv, the
+garak venv, the inference credential, the Docker daemon and the OpenShell gateway.
+
+## 1. Create a Manifest
+
+A manifest is the war-game's target. Creating one resolves the agent and stores
+the result, so every later run attacks the same thing.
+
+<Tabs>
+
+<Tab title="Registered agent">
+
+```bash
+nemo agent-hardener init --agent react-agent
+```
+
+The agent must be registered with `nemo agents create`. It does not have to be
+deployed: Agent Hardener reads the stored config and builds its own sandboxed copy.
+
+The manifest is named after the agent, and that name is the `--manifest-id`
+every later command takes. `init` also writes `agent-hardener.yaml` as a readable
+rendering. Editing that file does not change a `--manifest-id` run, which reads
+the saved manifest — but `run --config` reads the local file, so edits do take
+effect there.
+
+Declare the hosts your agent's tools call:
+
+```bash
+nemo agent-hardener init --agent react-agent --egress en.wikipedia.org
+```
+
+A bare host opens port 443 only. Write `host:80` for plain HTTP. Hosts cannot
+be discovered automatically for an agent whose tool code lives in an installed
+package, so declare them here.
+
+If the agent reads non-secret environment variables, set them at the same time:
+
+```bash
+nemo agent-hardener init --agent react-agent \
+  --env BACKEND_URL=http://host.docker.internal:8086
+```
+
+`--env` is repeatable and splits on the first `=` only, so values may contain
+`=`. Keep credentials out of it: `--env` values are stored in plaintext on the
+manifest, while `--secrets` stores only the names and resolves the values from
+the platform Secrets store when the run starts.
+
+</Tab>
+<Tab title="Unregistered project">
+
+```bash
+nemo agent-hardener init --project-dir ~/my-agent
+```
+
+Use this for an agent the platform does not manage. Nothing needs to be
+registered.
+
+The project is archived, uploaded as a fileset, and inspected. Whatever the
+project states about itself is derived; anything it cannot state is reported —
+all of it at once, with the flag that supplies it — and the command stops so you
+can pass those flags. It never prompts. Once saved, the manifest behaves like any
+other, and every later command takes the same `--manifest-id`.
+
+The fields a project most often cannot state are the serving command, the
+harness, and whether the agent is instrumented with Relay:
+
+```bash
+nemo agent-hardener init --project-dir ~/my-agent \
+  --dockerfile Dockerfile \
+  --start-command "/usr/local/bin/python /app/server.py" \
+  --harness langchain \
+  --relay-confirmed
+```
+
+Without `--relay-confirmed` the victim emits no telemetry and the run cannot be
+scored. Egress hosts are discovered by scanning the project source at run time,
+so most projects need no `--egress` flag — but a host named only in an installed
+dependency, rather than in the project's own files, still has to be declared.
+
+The project supplies its own dependencies, so its `pyproject.toml` or
+`requirements.txt` must carry whatever the agent imports, including its harness
+and the NeMo Relay integration for that harness.
+
+`--binary` scopes which in-container processes may egress. It is derived for you
+and rarely needed: derivation proposes the image's virtualenv plus
+`/usr/local/bin/python*` and `/usr/bin/python*`. Set it for a **non-Python
+agent** — the sandbox matches its policy against the *resolved* executable, so
+globs that match no process grant nothing and outbound calls are refused
+mid-run. The image must carry a `sandbox` user and group and `iproute2`.
+
+</Tab>
+
+</Tabs>
+
+<Warning>
+
+If a tool's host is not allow-listed, the sandbox drops the call and the model
+usually answers from its own knowledge instead. The run then reports success
+while never exercising the tool path. Check egress before trusting a clean
+result.
+
+</Warning>
+
+## 2. Generate a Benign Suite
+
+The benign suite is the set of ordinary requests the agent should still answer
+after hardening. `nemo agent-hardener run` consumes a suite and never generates one,
+so create it before the first run:
+
+```bash
+nemo agent-hardener synth-benign --manifest-id react-agent
+```
+
+This opens an interview about what the agent does, then lets you review and
+edit the generated requests. The result is cached on the manifest and reused by
+later runs.
+
+Two non-interactive forms:
+
+```bash
+nemo agent-hardener synth-benign --manifest-id react-agent --yes
+nemo agent-hardener synth-benign --manifest-id react-agent --no-interactive
+```
+
+`--yes` accepts the interview's suggested answers. `--no-interactive` skips the
+interview and generates from rules alone, which suits CI.
+
+## 3. Run the Cycle
+
+```bash
+nemo agent-hardener run --manifest-id react-agent
+```
+
+The run attacks a sandboxed copy of the agent, generates fixes with both
+defenders, then replays the attacks and the benign suite against those fixes.
+
+Common options:
+
+| Option | Effect |
+|--------|--------|
+| `--rounds <n>` | Iterate attack, defend and validate more than once. Default is 1 |
+| `--attack-intensity <light\|standard\|thorough>` | garak effort preset |
+| `--defender <guardrails\|openshell>` | Enable one defender. Repeatable. Default is the manifest's saved selection |
+| `--replay-hitlog <fileset-ref>` | Replay a recorded garak hitlog instead of attacking live, for a deterministic result |
+| `--env-file <path>` | Dotenv supplying the agent's secrets |
+
+These flags apply to a single launch and never edit the saved manifest, so a
+run can deviate from the frozen baseline without breaking comparability. To
+change the stored defaults instead:
+
+```bash
+nemo agent-hardener manifest set react-agent --rounds 2 --attack-intensity thorough
+```
+
+Check recent runs:
+
+```bash
+nemo agent-hardener status --limit 5
+```
+
+## 4. Keep the Manifest Current
+
+Editing the agent does not change an existing manifest. Pick up the changes
+deliberately:
+
+```bash
+nemo agent-hardener refresh --manifest-id react-agent
+```
+
+Egress, secrets, models, defenders and the cached benign suite are all
+preserved. Only the target is rebuilt.
+
+Applying a mitigation refreshes the manifest for you, so a run, harden, apply,
+run sequence measures the change you just made.
+
+## Run It in Studio
+
+Studio drives the same cycle and is the only surface that can apply fixes back
+to the agent.
+
+In NeMo Studio, open **Governance → Agent Hardener** in the workspace sidebar.
+
+1. **Manifests → New Manifest.** Choose a source: a registered agent, or
+   **Upload Project** for an agent the platform does not manage. An uploaded
+   project is a single `.zip` containing an installable agent project, and
+   Studio inspects it to pre-fill the workflow and port.
+1. Accept or correct the detected port and secrets, add any egress hosts, then
+   **Create**.
+1. **Run war-game** on the manifest. The run opens on its **Swarm** tab.
+1. Watch the graph advance per phase with the live agent feed beside it. Click
+   any node for its prompts and model calls.
+1. When the run finishes, use the **Harden** panel. See
+   [Review and Apply Mitigations](/documentation/agents/governance/apply-mitigations).
+
+The Studio UI ships inside the plugin, so installing the plugin is what puts it
+in Studio. There is no feature flag.
+
+## Next Steps
+
+- [Review and Apply Mitigations](/documentation/agents/governance/apply-mitigations): choose which fixes to keep and write them back to the agent.
+- [Agent Hardener CLI Reference](/documentation/agents/governance/cli-reference): every command and flag.
+- [Troubleshooting](/documentation/agents/governance/troubleshooting): setup, sandbox and victim failures.

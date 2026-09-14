@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
+import { getInsightsGetInsightQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
 import type { Insight } from '@nemo/sdk/generated/insights/schema';
 import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
 import { getListExperimentsQueryKey } from '@nemo/sdk/generated/platform/experiments';
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
-import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { OptimizerInsightRoute } from '@studio/routes/optimizer/OptimizerInsightRoute';
 import { getOptimizerInsightRoute } from '@studio/routes/utils';
@@ -18,9 +19,9 @@ import { useParams } from 'react-router';
 
 const WORKSPACE = 'workspace-a';
 const INSIGHT_ID = 'insight-a';
-const INSIGHT_URL = `${PLATFORM_BASE_URL}/apis/insights/v2/workspaces/:workspace/insights/:insightId`;
-const GROUPS_URL = `${PLATFORM_BASE_URL}${getListExperimentsQueryKey(':workspace')[0]}`;
-const EVALUATIONS_URL = `${PLATFORM_BASE_URL}${getListEvaluationsQueryKey(':workspace')[0]}`;
+const INSIGHT_URL = mockApiUrl(getInsightsGetInsightQueryKey, ':workspace', ':insightId');
+const GROUPS_URL = mockApiUrl(getListExperimentsQueryKey, ':workspace');
+const EVALUATIONS_URL = mockApiUrl(getListEvaluationsQueryKey, ':workspace');
 
 const insight: Insight = {
   id: INSIGHT_ID,

@@ -15,8 +15,8 @@ Uses the create_test_client pattern for fast in-memory testing.
 import uuid
 from unittest.mock import AsyncMock, patch
 
-from nemo_platform import ConflictError
 from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.errors import ConflictError
 from nemo_platform_plugin.workspaces.client import WorkspacesClient
 from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
 from nmp.core.models.config import ControllerConfig, ModelsConfig
@@ -1529,13 +1529,16 @@ def test_backend_config_key_deployments_plugin_works_end_to_end():
             backends={"deployments_plugin": DeploymentsPluginBackendConfigModel(enabled=True)},
         )
     )
+    backend_configs: dict[str, DeploymentsPluginBackendConfigModel] = {
+        "deployments_plugin": config.controller.backends["deployments_plugin"],
+    }
 
     with patch(
         "nmp.core.models.controllers.backends.deployments_plugin.backend.NemoEntitiesClient",
     ):
         registry = BackendRegistry.from_config(
             nmp_sdk=AsyncMock(),
-            backend_configs=config.controller.backends,
+            backend_configs=backend_configs,
             huggingface_model_puller=config.huggingface_model_puller,
         )
 

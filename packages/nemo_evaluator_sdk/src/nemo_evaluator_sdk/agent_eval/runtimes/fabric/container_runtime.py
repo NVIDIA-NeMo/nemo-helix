@@ -13,8 +13,9 @@ Per task it:
 
 1. seeds ``/in`` with the composed Fabric agent config and framed input, plus the task's workspace
    seed files;
-2. execs Fabric's own CLI (``fabric run``), which writes a normalized ``RunResult`` to stdout and the
-   workspace + Relay ATIF trajectory under a fixed ``/out`` layout;
+2. runs one Fabric invocation through a seeded in-sandbox driver
+   (:mod:`~nemo_evaluator_sdk.agent_eval.runtimes.fabric.sandbox_driver`), which writes a normalized
+   ``RunResult`` to stdout and the workspace + Relay ATIF trajectory under a fixed ``/out`` layout;
 3. downloads ``/out`` across the boundary into the durable per-task evidence dir; and
 4. maps it into the shared :class:`CandidateEvidence` contract the eval metrics consume — ``result``
    (json), ``trace`` (ATIF), plus ``workspace`` (filesystem) and ``logs`` — so the workspace-file,
@@ -39,8 +40,16 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
 
-from nemo_evaluator_sdk.agent_eval.runtimes.fabric import _common
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric import _common, otlp_receiver
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.image import ensure_fabric_image
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.otlp_receiver import READY_FILENAME, TRACES_PATH
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.otlp_writer import (
+    TRACES_SUBDIR,
+    fold_exports,
+    otlp_trace_path,
+    register_trace_evidence,
+    traces_dir,
+)
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.skills import (
     CODEX_SKILLS_DIR,
     SKILL_MODE_CODEX_SKILLS_DIR,
@@ -61,9 +70,7 @@ from nemo_evaluator_sdk.resolver_protocols import SecretResolver
 from nemo_evaluator_sdk.resolvers import LocalSecretResolver
 from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.evidence import (
-    EVIDENCE_FORMAT_ATIF,
     EVIDENCE_LOGS,
-    EVIDENCE_TRACE,
     CandidateEvidence,
     EvidenceDescriptor,
 )
@@ -87,7 +94,7 @@ _MISSING_FABRIC_MSG = (
 )
 
 # Fixed in-container layout. The runtime seeds ``/in`` (agent config, input), execs Fabric's
-# CLI, and reads the produced ``/out`` subtree back across the boundary.
+# driver, and reads the produced ``/out`` subtree back across the boundary.
 _IN_DIR = "/in"
 _OUT_DIR = "/out"
 _WORKSPACE_DIR = f"{_OUT_DIR}/workspace"
@@ -95,9 +102,17 @@ _RELAY_DIR = f"{_OUT_DIR}/relay"
 _ARTIFACTS_DIR = f"{_OUT_DIR}/artifacts"
 _LOGS_DIR = f"{_OUT_DIR}/logs"
 _RESULT_PATH = f"{_OUT_DIR}/fabric_result.json"
+_TRACES_DIR = f"{_OUT_DIR}/{TRACES_SUBDIR}"
+_RECEIVER_PATH = f"{_IN_DIR}/otlp_receiver.py"
+#: OTLP/HTTP's default port, on the sandbox's own loopback. Nothing else in the image binds it.
+_OTLP_PORT = 4318
+_OTLP_ENDPOINT = f"http://127.0.0.1:{_OTLP_PORT}{TRACES_PATH}"
 _FABRIC_STDERR = f"{_LOGS_DIR}/fabric-stderr.txt"
-_AGENT_PATH = f"{_IN_DIR}/agent.yaml"
+_AGENT_PATH = f"{_IN_DIR}/agent.json"
 _INPUT_PATH = f"{_IN_DIR}/input.txt"
+#: Seeded as source rather than imported: the driver runs against the sandbox's Fabric, not the host's.
+_DRIVER_SOURCE = Path(__file__).with_name("sandbox_driver.py")
+_DRIVER_PATH = f"{_IN_DIR}/{_DRIVER_SOURCE.name}"
 # In-sandbox root for a natively-injected skill bundle. It lives under ``/in`` (not ``/out``), so it is
 # never part of the downloaded ``/out`` evidence — only codex-mode skills, which must sit in the workspace
 # for the harness to self-discover them, need post-download cleanup.
@@ -255,6 +270,17 @@ class FabricContainerRuntime:
                 await self._seed_workspace(sandbox, task)
                 result = await sandbox.exec(self._fabric_command(), timeout_s=DEFAULT_FABRIC_TIMEOUT_S)
                 await sandbox.download_dir(_OUT_DIR, out_dir)
+            # After download, because folding needs protobuf and the sandbox image is not
+            # guaranteed to have it.
+            folded = await asyncio.to_thread(fold_exports, traces_dir(out_dir))
+            if not folded:
+                # Zero also means the receiver never started -- no `python3`, or the port taken --
+                # and that failure is invisible from the trial otherwise.
+                logger.warning(
+                    "No OTLP export was captured for task %s; its trace falls back to ATIF. See %s.",
+                    task.id,
+                    out_dir / "logs" / "otlp-receiver.log",
+                )
             # Codex self-injection seeds each bundle inside the workspace so the harness discovers it during
             # the run; drop them from the downloaded evidence before the workspace is exposed (else the
             # injected files read as agent output to workspace-reading metrics). Native staging lives under
@@ -294,11 +320,21 @@ class FabricContainerRuntime:
         return str(adapter_id) if adapter_id is not None else ""
 
     def _fabric_command(self) -> str:
-        """The ``fabric run`` invocation: pre-create the /out dirs Fabric chdirs into, run, capture stdout."""
-        run = f"fabric run {shlex.quote(_AGENT_PATH)} --input-file {shlex.quote(_INPUT_PATH)}"
+        """The driver invocation: pre-create the /out dirs Fabric chdirs into, run, capture stdout."""
+        run = f"python3 {shlex.quote(_DRIVER_PATH)} {shlex.quote(_AGENT_PATH)} {shlex.quote(_INPUT_PATH)}"
+        ready = shlex.quote(f"{_TRACES_DIR}/{READY_FILENAME}")
+        # Wait for the file the receiver writes once bound: Relay's first export must not arrive
+        # before there is anything listening.
         return (
-            f"mkdir -p {_WORKSPACE_DIR} {_RELAY_DIR} {_ARTIFACTS_DIR} {_LOGS_DIR} && "
-            f"{run} > {shlex.quote(_RESULT_PATH)} 2> {shlex.quote(_FABRIC_STDERR)}"
+            f"mkdir -p {_WORKSPACE_DIR} {_RELAY_DIR} {_ARTIFACTS_DIR} {_LOGS_DIR} {_TRACES_DIR} && "
+            f"python3 {shlex.quote(_RECEIVER_PATH)} {shlex.quote(_TRACES_DIR)} {_OTLP_PORT} "
+            f"> {shlex.quote(f'{_LOGS_DIR}/otlp-receiver.log')} 2>&1 & "
+            f"RECEIVER=$!; "
+            f"for _ in $(seq 1 50); do [ -f {ready} ] && break; sleep 0.1; done; "
+            f"{run} > {shlex.quote(_RESULT_PATH)} 2> {shlex.quote(_FABRIC_STDERR)}; "
+            f"STATUS=$?; "
+            f"kill $RECEIVER 2>/dev/null; wait $RECEIVER 2>/dev/null; "
+            f"exit $STATUS"
         )
 
     def _seed_files(
@@ -306,16 +342,18 @@ class FabricContainerRuntime:
     ) -> tuple[dict[str, str], list[SkillProvenance]]:
         """Return (files to seed into the sandbox, skill provenances).
 
-        The agent config is written as JSON, which the Fabric CLI parses as YAML. Fabric 0.1.0rc2 removed
-        profile overlays (``--profile`` and the ``profiles`` config key are both gone), so everything —
-        the runtime's in-container settings and any natively-injected skill paths — is composed into the
-        single agent config here. When skills are injected each bundle is also rendered into the seed set
+        Everything — the runtime's in-container settings and any natively-injected skill paths — is
+        composed into the single agent config here, written as JSON for the driver to load. When skills are injected each bundle is also rendered into the seed set
         at the harness's in-sandbox discovery path (native: ``/in/skills/<name>``; codex:
         ``<workspace>/.agents/skills/<name>``).
         """
         skill_paths: list[str] = []
         provenances: list[SkillProvenance] = []
-        files: dict[str, str] = {_INPUT_PATH: task.agent_prompt()}
+        files: dict[str, str] = {
+            _INPUT_PATH: task.agent_prompt(),
+            _DRIVER_PATH: _DRIVER_SOURCE.read_text(encoding="utf-8"),
+            _RECEIVER_PATH: _receiver_source(),
+        }
         if self._skill_set.skills and skill_mode is not None:
             if skill_mode == SKILL_MODE_CODEX_SKILLS_DIR:
                 _check_codex_skill_collision(self._skill_set.skills, task.inputs.get(SEED_FILES_INPUT_KEY) or {})
@@ -358,13 +396,18 @@ class FabricContainerRuntime:
             "workspace": _WORKSPACE_DIR,
             "artifacts": _ARTIFACTS_DIR,
         }
-        # Relay ATIF/ATOF file exporter (sdk mode), built from nemo_relay's typed config via the shared
-        # helper so it stays a single source of truth with the host runtime. Replaced wholesale.
+        # Relay's ATIF/ATOF file exporter, spanning whatever keys Fabric currently serializes it into.
         # ``agent_name`` distinguishes this runtime from the host one; ``agent_version`` records the
         # agent framework and so matches the host's value, letting an ATIF consumer group both
-        # runtimes' traces. (Neither is a real version yet — see _common.trajectory_telemetry.)
-        config["telemetry"] = _common.trajectory_telemetry(
-            relay_dir=_RELAY_DIR, agent_name=_RUNTIME_NAME, agent_version=_common.FABRIC_AGENT_VERSION
+        # runtimes' traces. (Neither is a real version yet.)
+        config.update(
+            _common.relay_telemetry_fragment(
+                config,
+                relay_dir=_RELAY_DIR,
+                agent_name=_RUNTIME_NAME,
+                agent_version=_common.FABRIC_AGENT_VERSION,
+                otlp_endpoint=_OTLP_ENDPOINT,
+            )
         )
 
         declared_paths = _section(config, "skills").get("paths") or []
@@ -402,26 +445,29 @@ class FabricContainerRuntime:
         # a ``skills`` list plus the historical lone ``skill`` field, matching the host FabricAgentRuntime.
         base_metadata = {**self._base_metadata(), **_skill_metadata(skill_provenances or [])}
 
-        # Gate on the exec outcome first: a timed-out or non-zero ``fabric run`` is untrustworthy even
+        # Gate on the exec outcome first: a timed-out or non-zero driver run is untrustworthy even
         # when a stale/partial fabric_result.json is left behind (the shell ``>`` redirect truncates the
         # file regardless), so never grade such a run off that file.
         if result.error_type or result.return_code != 0:
             stderr = _read_text(out_dir / "logs" / "fabric-stderr.txt") or (result.stderr or "")
             detail = stderr.strip() or result.error_type or f"exit code {result.return_code}"
             return self._failed_trial(
-                task, evidence_dir, RuntimeError(f"fabric run failed: {detail}"), extra_metadata=base_metadata
+                task,
+                evidence_dir,
+                RuntimeError(f"fabric run failed in the sandbox: {detail}"),
+                extra_metadata=base_metadata,
             )
 
         result_path = out_dir / "fabric_result.json"
         result_payload = _read_json(result_path)
-        # `fabric run` writes a normalized RunResult object (a failed harness run still produces one, with
+        # The driver writes a normalized RunResult object (a failed harness run still produces one, with
         # status != "succeeded"). A missing, non-object, or unreadable payload means no usable result.
         if not isinstance(result_payload, Mapping):
             stderr = _read_text(out_dir / "logs" / "fabric-stderr.txt") or (result.stderr or "")
             return self._failed_trial(
                 task,
                 evidence_dir,
-                RuntimeError(f"fabric run produced no usable result: {stderr.strip()}"),
+                RuntimeError(f"the sandbox produced no usable Fabric result: {stderr.strip()}"),
                 extra_metadata=base_metadata,
             )
 
@@ -454,11 +500,7 @@ class FabricContainerRuntime:
         logs_dir = out_dir / "logs"
         if logs_dir.is_dir():
             descriptors[EVIDENCE_LOGS] = EvidenceDescriptor(kind="logs", ref=str(logs_dir))
-        atif = _find_atif(out_dir / "relay")
-        if atif is not None:
-            descriptors[EVIDENCE_TRACE] = EvidenceDescriptor(
-                kind=EVIDENCE_TRACE, format=EVIDENCE_FORMAT_ATIF, ref=str(atif)
-            )
+        register_trace_evidence(descriptors, atif=_find_atif(out_dir / "relay"), otlp=otlp_trace_path(out_dir))
         return CandidateEvidence(
             descriptors=descriptors,
             metadata={"runtime": _RUNTIME_NAME, "sandbox_provider": self._provider.name, "image": self._image},
@@ -487,6 +529,11 @@ class FabricContainerRuntime:
         # working state lives at /out inside the sandbox and is downloaded here.
         root = (config.work_dir or Path.cwd()) / "evidence" / "fabric_container"
         return root / _common.task_subdir_name(index, task.id)
+
+
+def _receiver_source() -> str:
+    """The shared receiver's own source, seeded into the sandbox and run there as a script."""
+    return (Path(otlp_receiver.__file__)).read_text(encoding="utf-8")
 
 
 def _to_mapping(config: FabricConfig | Mapping[str, Any]) -> dict[str, Any]:

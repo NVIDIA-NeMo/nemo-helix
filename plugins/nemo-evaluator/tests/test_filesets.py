@@ -38,7 +38,7 @@ class _FakeFilesetFileSystem:
 @pytest.mark.asyncio
 async def test_download_dataset_rejects_fragment_path_escape(mocker: MockerFixture, tmp_path: Path) -> None:
     """Fileset fragments should not write outside the requested destination."""
-    mocker.patch("nemo_evaluator.filesets.FilesetFileSystem", _FakeFilesetFileSystem)
+    mocker.patch("nemo_evaluator.filesets.AsyncFilesetFileSystem", _FakeFilesetFileSystem)
 
     with pytest.raises(ValueError, match="Fileset path escapes destination"):
         await download_dataset(
@@ -51,7 +51,7 @@ async def test_download_dataset_rejects_fragment_path_escape(mocker: MockerFixtu
 @pytest.mark.asyncio
 async def test_download_dataset_rejects_absolute_root_path(mocker: MockerFixture, tmp_path: Path) -> None:
     """Fileset roots should not be able to become absolute local paths."""
-    mocker.patch("nemo_evaluator.filesets.FilesetFileSystem", _FakeFilesetFileSystem)
+    mocker.patch("nemo_evaluator.filesets.AsyncFilesetFileSystem", _FakeFilesetFileSystem)
 
     with pytest.raises(ValueError, match="Fileset path escapes destination"):
         await download_dataset(

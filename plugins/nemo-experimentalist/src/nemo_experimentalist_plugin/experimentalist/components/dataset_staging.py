@@ -3,13 +3,17 @@
 
 """Experiment-local staging and hydration for Eval Author inputs."""
 
+import asyncio
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
+from filesets import FilesetPathError, parse_fileset_ref
 from nemo_experimentalist_plugin.entities import Dataset, DatasetRef, local_path_from_uri
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_platform_plugin.files.client import AsyncFilesClient
+from nemo_platform_plugin.files.types import ListFilesQueryParams
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +43,64 @@ def distribute_insight_suite_tasks(
     train_dataset.add_tasks(tasks[validation_count:])
 
 
+def _parse_fileset_uri(uri: str, *, workspace: str) -> tuple[str, str, str]:
+    if urlparse(uri).scheme != "fileset":
+        raise ValueError(f"Not a fileset URI: {uri}")
+    try:
+        return parse_fileset_ref(uri, workspace_fallback=workspace)
+    except FilesetPathError as exc:
+        raise ValueError(f"Invalid fileset URI {uri!r}: {exc}") from exc
+
+
+def _write_downloaded_file(target: Path, content: bytes) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(content)
+
+
+def _relative_download_path(remote_path: str, prefix: str) -> str:
+    clean_remote_path = remote_path.strip("/")
+    if not clean_remote_path:
+        return ""
+    if not prefix:
+        return clean_remote_path
+
+    clean_prefix = prefix.strip("/")
+    if clean_remote_path == clean_prefix:
+        return Path(clean_remote_path).name
+    if not clean_remote_path.startswith(f"{clean_prefix}/"):
+        raise ValueError(f"Fileset listing returned path outside requested prefix {clean_prefix!r}: {remote_path!r}")
+    return clean_remote_path[len(clean_prefix) + 1 :]
+
+
+def _safe_download_target(destination: Path, relative_path: str) -> Path:
+    resolved_destination = destination.resolve()
+    target = (resolved_destination / relative_path).resolve()
+    if not target.is_relative_to(resolved_destination):
+        raise ValueError(f"Fileset path escapes staging destination: {relative_path!r}")
+    return target
+
+
+async def _download_fileset_tree(
+    client: AsyncNemoClient,
+    *,
+    uri: str,
+    workspace: str,
+    destination: Path,
+) -> None:
+    files_workspace, fileset, prefix = _parse_fileset_uri(uri, workspace=workspace)
+    files = AsyncFilesClient.from_client(client)
+    query_params: ListFilesQueryParams | None = {"path": prefix} if prefix else None
+    listing = (await files.list_files(workspace=files_workspace, name=fileset, query_params=query_params)).data()
+    for item in listing.data:
+        remote_path = item.path.strip("/")
+        relative_path = _relative_download_path(remote_path, prefix)
+        if not relative_path:
+            continue
+        target = _safe_download_target(destination, relative_path)
+        response = await files.download_file(workspace=files_workspace, name=fileset, path=remote_path)
+        await asyncio.to_thread(_write_downloaded_file, target, await response.read())
+
+
 def _local_directory(ref: DatasetRef) -> Path:
     path = local_path_from_uri(ref.uri, context="Eval Author input").resolve()
     if not path.is_dir():
@@ -57,7 +119,7 @@ async def stage_task_template(
     experiment_dir: Path,
     task_template: DatasetRef,
     *,
-    client: AsyncNeMoPlatform,
+    client: AsyncNemoClient,
     workspace: str,
 ) -> DatasetRef:
     """Refresh a local or Fileset-backed task template in experiment-local staging."""
@@ -76,10 +138,11 @@ async def stage_task_template(
 
     if urlparse(task_template.uri).scheme == "fileset":
         try:
-            await client.files.download(
-                remote_path=task_template.uri,
-                local_path=str(destination),
+            await _download_fileset_tree(
+                client,
+                uri=task_template.uri,
                 workspace=workspace,
+                destination=destination,
             )
         except BaseException:
             if destination.exists():
@@ -102,7 +165,7 @@ async def stage_eval_author_inputs(
     train_dataset: DatasetRef,
     validation_dataset: DatasetRef,
     task_template: DatasetRef,
-    client: AsyncNeMoPlatform,
+    client: AsyncNemoClient,
     workspace: str,
 ) -> _StagedEvalAuthorInputs:
     """Stage mutable Eval Author inputs beneath the experiment directory."""

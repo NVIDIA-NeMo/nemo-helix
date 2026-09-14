@@ -4,7 +4,10 @@
 """Unit tests for ModelsController."""
 
 import asyncio
+import inspect
+import json
 import threading
+from collections.abc import Mapping
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,22 +15,26 @@ from nmp.core.models.config import config as models_config
 from nmp.core.models.controllers.context import ModelContext
 from nmp.core.models.controllers.models_controller import NON_TERMINAL_STATES, ModelsController
 
-from .conftest import _ModelResponse, make_async_models_client
+from .conftest import _AsyncPage, _ModelResponse, make_async_models_client
 
 
-class MockAsyncPaginator:
-    """Mock async paginator to simulate SDK's paginated response."""
+def _filter_status(kwargs: Mapping[str, object]) -> str | None:
+    query_params = kwargs.get("query_params")
+    if not isinstance(query_params, Mapping):
+        return None
+    raw_filter = query_params.get("filter")
+    if not isinstance(raw_filter, str):
+        return None
+    parsed = json.loads(raw_filter)
+    if not isinstance(parsed, dict):
+        return None
+    status = parsed.get("status")
+    return status if isinstance(status, str) else None
 
-    def __init__(self, items):
-        self.items = items
 
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        if not self.items:
-            raise StopAsyncIteration
-        return self.items.pop(0)
+def _close_coro(awaitable: object) -> None:
+    if inspect.iscoroutine(awaitable):
+        awaitable.close()
 
 
 @pytest.fixture(autouse=True)
@@ -37,14 +44,39 @@ def _patch_typed_model_client(mock_models_sdk):
     ``mock_models_sdk.models_client``, so tests drive ``get_model``/``list_models``
     directly instead of the legacy SDK resource."""
     mock_models_sdk.models_client = make_async_models_client()
+    mock_models_sdk.virtual_models_client = MagicMock()
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(return_value=_AsyncPage([]))
+    mock_models_sdk.virtual_models_client.create_virtual_model = AsyncMock(return_value=_ModelResponse())
+    mock_models_sdk.virtual_models_client.delete_virtual_model = AsyncMock(return_value=_ModelResponse())
+    mock_models_sdk.gateway_provider_client = MagicMock()
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock()
+
+    def _client_from_platform(sdk, cls):
+        match cls.__name__:
+            case "AsyncModelsClient":
+                return sdk.models_client
+            case "AsyncVirtualModelsClient":
+                return sdk.virtual_models_client
+            case "AsyncInferenceGatewayProviderClient":
+                return sdk.gateway_provider_client
+        raise AssertionError(f"Unexpected typed client class: {cls.__name__}")
+
     with (
         patch(
             "nmp.core.models.controllers.models_controller.client_from_platform",
-            side_effect=lambda sdk, cls: sdk.models_client,
+            side_effect=_client_from_platform,
         ),
         patch(
             "nmp.core.models.controllers.entity_cache.client_from_platform",
-            side_effect=lambda sdk, cls: sdk.models_client,
+            side_effect=_client_from_platform,
+        ),
+        patch(
+            "nmp.core.models.controllers.deployment_reconciler.client_from_platform",
+            side_effect=_client_from_platform,
+        ),
+        patch(
+            "nmp.core.models.controllers.provider_reconciler.client_from_platform",
+            side_effect=_client_from_platform,
         ),
     ):
         yield
@@ -105,8 +137,13 @@ def test_step_with_exception(
     mock_sdk_class_patch, mock_get_config_patch, mock_asyncio_run_patch, mock_backend_registry, assert_helpers
 ):
     """Test step() when an exception occurs."""
+
     # Mock asyncio.run to raise exception
-    mock_asyncio_run_patch.side_effect = Exception("Test error")
+    def _raise_test_error(awaitable):
+        _close_coro(awaitable)
+        raise Exception("Test error")
+
+    mock_asyncio_run_patch.side_effect = _raise_test_error
 
     controller = ModelsController(backend_registry=mock_backend_registry)
 
@@ -126,10 +163,9 @@ async def test_get_non_terminal_deployments_calls_sdk(
     mock_get_config_patch, mock_models_sdk, mock_backend_registry, sample_deployment
 ):
     """Test that retrieve_non_terminal_deployments calls SDK with correct statuses."""
-    # Setup SDK mock responses - SDK returns AsyncPaginator for each call
-    # Use MagicMock (not AsyncMock) because .list() returns an async iterator, not a coroutine
-    mock_models_sdk.inference.deployments.list = MagicMock(
-        side_effect=lambda **kwargs: MockAsyncPaginator([sample_deployment])
+    # Setup typed-client mock responses.
+    mock_models_sdk.models_client.list_deployments = AsyncMock(
+        side_effect=lambda **kwargs: _AsyncPage([sample_deployment])
     )
 
     # Create controller and inject mock SDK
@@ -140,7 +176,7 @@ async def test_get_non_terminal_deployments_calls_sdk(
         deployment_contexts = await controller.retrieve_non_terminal_deployments()
 
         # Verify SDK was called for each non-terminal status
-        assert mock_models_sdk.inference.deployments.list.call_count == len(NON_TERMINAL_STATES)
+        assert mock_models_sdk.models_client.list_deployments.call_count == len(NON_TERMINAL_STATES)
 
         # Verify we got ModelContext objects back
         assert len(deployment_contexts) > 0
@@ -157,14 +193,13 @@ async def test_get_non_terminal_deployments_handles_sdk_errors(
 
     # Setup SDK mock to raise exception on first call, succeed on others
     def side_effect(**kwargs):
-        filter_dict = kwargs.get("filter", {})
-        status = filter_dict.get("status")
+        status = _filter_status(kwargs)
         if status == "CREATED":
             raise Exception("API Error")
-        return MockAsyncPaginator([])
+        return _AsyncPage([])
 
     # Use MagicMock (not AsyncMock) because .list() returns an async iterator, not a coroutine
-    mock_models_sdk.inference.deployments.list = MagicMock(side_effect=side_effect)
+    mock_models_sdk.models_client.list_deployments = AsyncMock(side_effect=side_effect)
 
     # Create controller and inject mock SDK
     with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
@@ -193,16 +228,15 @@ async def test_get_non_terminal_deployments_with_multiple_deployments(
 
     # Setup SDK mock responses - return different deployments for each status
     def list_side_effect(**kwargs):
-        filter_dict = kwargs.get("filter", {})
-        status = filter_dict.get("status")
+        status = _filter_status(kwargs)
         if status == "CREATED":
-            return MockAsyncPaginator([sample_deployment])
+            return _AsyncPage([sample_deployment])
         elif status == "READY":
-            return MockAsyncPaginator([sample_deployment_ready])
-        return MockAsyncPaginator([])
+            return _AsyncPage([sample_deployment_ready])
+        return _AsyncPage([])
 
     # Use MagicMock (not AsyncMock) because .list() returns an async iterator, not a coroutine
-    mock_models_sdk.inference.deployments.list = MagicMock(side_effect=list_side_effect)
+    mock_models_sdk.models_client.list_deployments = AsyncMock(side_effect=list_side_effect)
 
     # Create controller and inject mock SDK
     with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
@@ -230,7 +264,7 @@ async def test_get_model_providers_calls_sdk(mock_get_config_patch, mock_models_
     mock_provider.model_deployment_id = None
 
     # Use MagicMock (not AsyncMock) because .list() returns an async iterator, not a coroutine
-    mock_models_sdk.inference.providers.list = MagicMock(return_value=MockAsyncPaginator([mock_provider]))
+    mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([mock_provider]))
 
     # Create controller and inject mock SDK
     with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
@@ -240,7 +274,7 @@ async def test_get_model_providers_calls_sdk(mock_get_config_patch, mock_models_
         provider_contexts = await controller.retrieve_model_providers()
 
         # Verify SDK was called
-        mock_models_sdk.inference.providers.list.assert_called_once()
+        mock_models_sdk.models_client.list_providers.assert_called_once()
 
         # Verify we got ModelContext objects back
         assert provider_contexts is not None
@@ -264,15 +298,14 @@ async def test_async_controller_step_calls_reconcilers(mock_get_config_patch, mo
 
     # Mock SDK to return deployment only for CREATED status
     def list_deployments_side_effect(**kwargs):
-        filter_dict = kwargs.get("filter", {})
-        status = filter_dict.get("status")
+        status = _filter_status(kwargs)
         if status == "CREATED":
-            return MockAsyncPaginator([mock_deployment])
-        return MockAsyncPaginator([])
+            return _AsyncPage([mock_deployment])
+        return _AsyncPage([])
 
     # Use MagicMock (not AsyncMock) because .list() returns an async iterator, not a coroutine
-    mock_models_sdk.inference.deployments.list = MagicMock(side_effect=list_deployments_side_effect)
-    mock_models_sdk.inference.providers.list = MagicMock(return_value=MockAsyncPaginator([mock_provider]))
+    mock_models_sdk.models_client.list_deployments = AsyncMock(side_effect=list_deployments_side_effect)
+    mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([mock_provider]))
 
     # Create controller and inject mock SDK
     with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
@@ -306,8 +339,8 @@ async def test_async_controller_step_runs_provider_reconciler_with_no_providers(
     mock_get_config_patch, mock_models_sdk, mock_backend_registry
 ):
     """The provider reconciler still runs with an empty list so VM orphan cleanup can execute."""
-    mock_models_sdk.inference.deployments.list = MagicMock(return_value=MockAsyncPaginator([]))
-    mock_models_sdk.inference.providers.list = MagicMock(return_value=MockAsyncPaginator([]))
+    mock_models_sdk.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
+    mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([]))
 
     with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
@@ -327,8 +360,8 @@ async def test_async_controller_step_skips_provider_reconciler_when_provider_lis
     mock_get_config_patch, mock_models_sdk, mock_backend_registry
 ):
     """A provider list failure must not look like a successful empty list to cleanup."""
-    mock_models_sdk.inference.deployments.list = MagicMock(return_value=MockAsyncPaginator([]))
-    mock_models_sdk.inference.providers.list = MagicMock(side_effect=RuntimeError("providers unavailable"))
+    mock_models_sdk.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
+    mock_models_sdk.models_client.list_providers = AsyncMock(side_effect=RuntimeError("providers unavailable"))
 
     with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
@@ -352,7 +385,12 @@ def test_step_handles_cancelled_error(
     mock_sdk_class_patch, mock_get_config_patch, mock_asyncio_run_patch, mock_backend_registry
 ):
     """Test that step() handles CancelledError gracefully without raising."""
-    mock_asyncio_run_patch.side_effect = asyncio.CancelledError()
+
+    def _raise_cancelled(awaitable):
+        _close_coro(awaitable)
+        raise asyncio.CancelledError()
+
+    mock_asyncio_run_patch.side_effect = _raise_cancelled
 
     controller = ModelsController(backend_registry=mock_backend_registry)
 
@@ -583,7 +621,7 @@ async def test_retrieve_error_deployments_calls_sdk(mock_get_config_patch, mock_
     mock_deployment = MagicMock()
     mock_deployment.status = "ERROR"
 
-    mock_models_sdk.inference.deployments.list = MagicMock(return_value=MockAsyncPaginator([mock_deployment]))
+    mock_models_sdk.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([mock_deployment]))
 
     with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
@@ -592,11 +630,13 @@ async def test_retrieve_error_deployments_calls_sdk(mock_get_config_patch, mock_
     assert len(result) == 1
     assert result[0] == mock_deployment
 
-    mock_models_sdk.inference.deployments.list.assert_called_once_with(
+    mock_models_sdk.models_client.list_deployments.assert_called_once_with(
         workspace="-",
-        filter={"status": "ERROR"},
-        all_versions=True,
-        page_size=1000,
+        query_params={
+            "filter": json.dumps({"status": "ERROR"}),
+            "all_versions": True,
+            "page_size": 1000,
+        },
     )
 
 
@@ -605,7 +645,7 @@ async def test_retrieve_error_deployments_handles_sdk_error(
     mock_get_config_patch, mock_models_sdk, mock_backend_registry
 ):
     """Test that retrieve_error_deployments returns empty list on SDK error."""
-    mock_models_sdk.inference.deployments.list = MagicMock(side_effect=Exception("API Error"))
+    mock_models_sdk.models_client.list_deployments = AsyncMock(side_effect=Exception("API Error"))
 
     with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
@@ -627,14 +667,13 @@ async def test_async_controller_step_calls_gc(mock_get_config_patch, mock_models
 
     def list_side_effect(**kwargs):
         nonlocal call_count
-        filter_dict = kwargs.get("filter", {})
-        status = filter_dict.get("status")
+        status = _filter_status(kwargs)
         if status == "ERROR":
-            return MockAsyncPaginator([mock_error_deployment])
-        return MockAsyncPaginator([])
+            return _AsyncPage([mock_error_deployment])
+        return _AsyncPage([])
 
-    mock_models_sdk.inference.deployments.list = MagicMock(side_effect=list_side_effect)
-    mock_models_sdk.inference.providers.list = MagicMock(return_value=MockAsyncPaginator([mock_provider]))
+    mock_models_sdk.models_client.list_deployments = AsyncMock(side_effect=list_side_effect)
+    mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([mock_provider]))
 
     with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
@@ -660,8 +699,8 @@ async def test_async_controller_step_skips_gc_when_no_error_deployments(
     mock_provider = MagicMock()
     mock_provider.model_deployment_id = None
 
-    mock_models_sdk.inference.deployments.list = MagicMock(return_value=MockAsyncPaginator([]))
-    mock_models_sdk.inference.providers.list = MagicMock(return_value=MockAsyncPaginator([mock_provider]))
+    mock_models_sdk.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
+    mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([mock_provider]))
 
     with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry)
@@ -683,8 +722,8 @@ async def test_async_controller_step_stop_signal_skips_gc(
     """Test that GC is skipped when stop signal is set before GC runs."""
     stop_signal = threading.Event()
 
-    mock_models_sdk.inference.deployments.list = MagicMock(return_value=MockAsyncPaginator([]))
-    mock_models_sdk.inference.providers.list = MagicMock(return_value=MockAsyncPaginator([]))
+    mock_models_sdk.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
+    mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([]))
 
     with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
         controller = ModelsController(backend_registry=mock_backend_registry, stop_signal=stop_signal)

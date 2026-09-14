@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
+import importlib.metadata
 import ipaddress
 import json
 import os
@@ -26,6 +28,7 @@ CANDIDATE_SCHEMA = "nemo.eval_author.trace_environment_candidate.v2"
 VALIDATION_SCHEMA = "nemo.eval_author.trace_environment_validation.v5"
 RUN_INPUT_SCHEMA = "nemo.eval_author.trace_environment_run_input.v1"
 PRIVACY_AUDIT_SCHEMA = "nemo.eval_author.trace_environment_privacy_audit.v1"
+PUBLICATION_REVIEW_SCHEMA = "nemo.eval_author.trace_environment_publication_review.v1"
 REPRODUCIBILITY_SCHEMA = "nemo.eval_author.trace_environment_reproducibility.v3"
 EXPORT_SCHEMA = "nemo.eval_author.trace_environment_product.v3"
 BATCH_SCHEMA = "nemo.eval_author.trace_environment_batch.v1"
@@ -333,13 +336,13 @@ def _init(args: argparse.Namespace) -> dict[str, Any]:
     if ".eval-author" not in root.parts:
         raise ContractError("task workspace root must stay under a .eval-author directory")
     _mkdir_private(root)
-    ignore = root / ".gitignore"
-    ignore_text = "*\n!.gitignore\n"
-    if ignore.exists():
-        if ignore.is_symlink() or ignore.read_text(encoding="utf-8") != ignore_text:
-            raise ContractError(f"refusing to replace unexpected ignore rules at {ignore}")
+    gitignore_path = root / ".gitignore"
+    expected_gitignore = "*\n!.gitignore\n"
+    if gitignore_path.exists():
+        if gitignore_path.is_symlink() or gitignore_path.read_text(encoding="utf-8") != expected_gitignore:
+            raise ContractError(f"workspace .gitignore must contain only the required exclusions: {gitignore_path}")
     else:
-        _write_text(ignore, ignore_text)
+        _write_text(gitignore_path, expected_gitignore)
 
     task_dir = root / args.task_id
     if task_dir.exists():
@@ -597,25 +600,50 @@ def _bound_stringified_images(payload: dict[str, Any]) -> dict[str, int]:
             parts.append({"type": "text", "text": content[emitted_cursor:]})
         return parts, converted_count, converted_characters
 
-    def bound_metadata(value: Any) -> None:
+    def bound_metadata(value: Any, *, image_context: bool = False) -> Any:
         if isinstance(value, dict):
-            image_like = value.get("type") in {"image", "base64"} or (
-                isinstance(value.get("media_type"), str) and value["media_type"].startswith("image/")
+            image_like = (
+                image_context
+                or value.get("type") in {"image", "base64"}
+                or (isinstance(value.get("media_type"), str) and value["media_type"].startswith("image/"))
             )
             for key, nested in value.items():
                 if (
                     isinstance(nested, str)
-                    and len(nested) > 100_000
-                    and (key == "base64" or (key == "data" and image_like))
+                    and nested
+                    and ((key in {"base64", "data"} and image_like) or (key == "base64" and len(nested) > 100_000))
                 ):
                     counts["metadata_field_count"] += 1
                     counts["metadata_omitted_characters"] += len(nested)
                     value[key] = ""
                 else:
-                    bound_metadata(nested)
+                    value[key] = bound_metadata(nested, image_context=image_like)
         elif isinstance(value, list):
-            for nested in value:
-                bound_metadata(nested)
+            for index, nested in enumerate(value):
+                value[index] = bound_metadata(nested, image_context=image_context)
+        elif isinstance(value, str):
+            # Tool observations may repeat image metadata as JSON inside a text
+            # part, not as a structured ATIF image. Preserve surrounding prose
+            # and nonbinary metadata; never decode or execute encoded contents.
+            decoder = json.JSONDecoder()
+            fragments: list[str] = []
+            search_cursor = emitted_cursor = 0
+            while match := _IMAGE_OBJECT_START.search(value, search_cursor):
+                try:
+                    metadata, end = decoder.raw_decode(value, match.start())
+                except json.JSONDecodeError:
+                    search_cursor = match.end()
+                    continue
+                previous_count = counts["metadata_field_count"]
+                bound_metadata(metadata)
+                if counts["metadata_field_count"] != previous_count:
+                    fragments.extend((value[emitted_cursor : match.start()], json.dumps(metadata, ensure_ascii=False)))
+                    emitted_cursor = end
+                search_cursor = end
+            if fragments:
+                fragments.append(value[emitted_cursor:])
+                return "".join(fragments)
+        return value
 
     def bound_image_parts(value: Any) -> None:
         if isinstance(value, dict):
@@ -928,7 +956,8 @@ def _validate_requirements(value: Any, step_ids: set[int]) -> list[dict[str, Any
         label = f"candidate.requirements[{index}]"
         if not isinstance(requirement, dict) or set(requirement) != _REQUIREMENT_KEYS:
             raise ContractError(f"{label} fields do not match the versioned contract")
-        if not isinstance(requirement.get("description"), str) or not requirement["description"].strip():
+        description = requirement.get("description")
+        if not isinstance(description, str) or not description.strip():
             raise ContractError(f"{label}.description must be nonempty text")
         _evidence_steps(requirement.get("evidence_steps"), step_ids, label=f"{label}.evidence_steps")
     return value
@@ -938,14 +967,14 @@ def _validate_ground_truth(task_dir: Path, value: Any, step_ids: set[int]) -> di
     if not isinstance(value, dict) or set(value) != _GROUND_TRUTH_KEYS:
         raise ContractError("candidate.ground_truth fields do not match the versioned contract")
     availability = value.get("availability")
-    if availability not in {"available", "partial", "absent", "unknown"}:
+    if not isinstance(availability, str) or availability not in {"available", "partial", "absent", "unknown"}:
         raise ContractError("candidate.ground_truth.availability is not recognized")
     artifacts = value.get("artifacts")
     if not isinstance(artifacts, list):
         raise ContractError("candidate.ground_truth.artifacts must be a list")
     absence_reason = value.get("absence_reason")
     use = value.get("use")
-    if use not in {"none", "comparison_only", "verification"}:
+    if not isinstance(use, str) or use not in {"none", "comparison_only", "verification"}:
         raise ContractError("candidate.ground_truth.use is not recognized")
     if absence_reason is not None and (not isinstance(absence_reason, str) or not absence_reason.strip()):
         raise ContractError("candidate.ground_truth.absence_reason must be null or nonempty text")
@@ -975,7 +1004,7 @@ def _validate_ground_truth(task_dir: Path, value: Any, step_ids: set[int]) -> di
         label = f"candidate.ground_truth.artifacts[{index}]"
         if not isinstance(artifact, dict) or set(artifact) != _GROUND_TRUTH_ARTIFACT_KEYS:
             raise ContractError(f"{label} fields do not match the versioned contract")
-        if artifact.get("kind") not in allowed_kinds:
+        if not isinstance(artifact.get("kind"), str) or artifact["kind"] not in allowed_kinds:
             raise ContractError(f"{label}.kind is not recognized")
         relative_path = artifact.get("path")
         if not isinstance(relative_path, str) or not relative_path.startswith("private/ground-truth/"):
@@ -1015,16 +1044,19 @@ def _validate_software_requirements(value: Any, step_ids: set[int]) -> list[dict
         if not isinstance(name, str) or not name.strip() or name.casefold() in names:
             raise ContractError(f"{label}.name must be nonempty and unique")
         names.add(name.casefold())
-        if requirement.get("category") not in allowed_categories:
+        if not isinstance(requirement.get("category"), str) or requirement["category"] not in allowed_categories:
             raise ContractError(f"{label}.category is not recognized")
         if type(requirement.get("required")) is not bool:
             raise ContractError(f"{label}.required must be a boolean")
         version = requirement.get("version")
         if version is not None and (not isinstance(version, str) or not version.strip()):
             raise ContractError(f"{label}.version must be null or nonempty text")
-        if requirement.get("license") not in allowed_licenses:
+        if not isinstance(requirement.get("license"), str) or requirement["license"] not in allowed_licenses:
             raise ContractError(f"{label}.license is not recognized")
-        if requirement.get("availability") not in allowed_availability:
+        if (
+            not isinstance(requirement.get("availability"), str)
+            or requirement["availability"] not in allowed_availability
+        ):
             raise ContractError(f"{label}.availability is not recognized")
         redistributable = requirement.get("redistributable")
         if redistributable is not None and type(redistributable) is not bool:
@@ -1072,6 +1104,36 @@ def _validate_candidate(task_dir: Path, status: str, step_ids: set[int]) -> dict
         if candidate.get("requirements") != []:
             raise ContractError("no_candidate records must set requirements to an empty list")
     return candidate
+
+
+def _check_candidate(args: argparse.Namespace) -> dict[str, Any]:
+    """Check authored metadata against its prepared evidence without changing it."""
+    task_dir = _ensure_task_dir(args.task_dir)
+    summary = _load_summary(task_dir)
+    source = summary["source"]
+    if source is None:
+        raise ContractError("prepare ATIF evidence before checking candidate metadata")
+    safe_path = task_dir / source["safe_path"]
+    if safe_path.is_symlink() or not safe_path.is_file():
+        raise ContractError("safe ATIF must be a retained regular file")
+    if safe_path.stat().st_size > MAX_CANONICAL_BYTES:
+        raise ContractError(f"safe ATIF exceeds the {MAX_CANONICAL_BYTES}-byte limit")
+    safe_bytes = safe_path.read_bytes()
+    if _sha256(safe_bytes) != source["safe_sha256"] or len(safe_bytes) != source["safe_size_bytes"]:
+        raise ContractError("safe ATIF digest or size changed")
+    safe_payload = _load_object(safe_path, label="safe ATIF")
+    _validate_trajectory(safe_payload)
+    status = _load_object(task_dir / "candidate.json", label="candidate").get("status")
+    if status not in ("candidate", "no_candidate"):
+        raise ContractError("candidate.status must be candidate or no_candidate")
+    _validate_candidate(task_dir, status, {step["step_id"] for step in safe_payload["steps"]})
+    return {
+        "task_dir": str(task_dir),
+        "valid": True,
+        "scope": "candidate_metadata",
+        "status": status,
+        "execution_verified": False,
+    }
 
 
 def _task_tree_info(root: Path) -> dict[str, Any]:
@@ -1125,8 +1187,23 @@ def _dockerfile_images(task_dir: Path) -> list[dict[str, Any]]:
         logical_line = ""
         first_line = 1
         escape = "\\"
+        parser_directives = True
+        frontend_seen = False
         for line_number, line in enumerate(lines, start=1):
             stripped = line.strip()
+            if parser_directives:
+                directive = re.fullmatch(r"#\s*(syntax|escape|check)\s*=\s*(.*?)\s*", stripped, re.IGNORECASE)
+                if directive is None:
+                    parser_directives = False
+                elif directive[1].casefold() == "syntax":
+                    if frontend_seen or not directive[2] or len(directive[2].split()) != 1:
+                        raise ContractError(
+                            f"{path.relative_to(task_dir)}:{line_number} has an invalid syntax directive"
+                        )
+                    frontend_seen = True
+                    frontend = _image_reference(path, task_dir, line_number, "frontend", directive[2], set())
+                    frontend["immutable"] = _IMAGE_DIGEST.fullmatch(directive[2]) is not None
+                    images.append(frontend)
             if stripped.lower().startswith("# escape="):
                 escape = stripped.split("=", 1)[1].strip()
             if not stripped or stripped.startswith("#"):
@@ -1484,6 +1561,116 @@ def _harbor_task_checksum(task_dir: Path) -> str:
         raise ContractError(f"Harbor could not validate the proof task: {error}") from error
 
 
+def _runtime_mode_roundtrip(model: Any) -> bool:
+    """Probe a declared provider field, without constructing a proof result."""
+    from pydantic import TypeAdapter
+
+    field = model.model_fields.get("verifier_environment_mode")
+    if field is None:
+        return False
+    adapter = TypeAdapter(field.annotation)
+    for mode in ("shared", "separate"):
+        value = adapter.validate_python(mode)
+        # Other required trial fields are deliberately absent: this is only a
+        # field serialization probe, never a validated or retained trial.
+        probe = model.model_construct(verifier_environment_mode=value)
+        if probe.model_dump(mode="json", exclude_unset=True).get("verifier_environment_mode") != mode:
+            return False
+    return True
+
+
+def _check_runtime(args: argparse.Namespace) -> dict[str, Any]:
+    """Read-only capability preflight; version labels are informational only."""
+    checks: list[dict[str, Any]] = []
+    report: dict[str, Any] = {
+        "schema": "nemo.eval_author.trace_environment_runtime_check.v1",
+        "valid": False,
+        "scope": "single_step_proof",
+        "harbor_version": None,
+        "python_executable": sys.executable,
+        "checks": checks,
+        "execution_verified": False,
+        "hint": "Use the same existing Harbor Python environment for this check, proof receipts and Harbor jobs. "
+        "Do not install or upgrade Harbor automatically. Actual trial results must still prove separate mode.",
+    }
+
+    def check(name: str, passed: bool, message: str) -> None:
+        checks.append({"name": name, "passed": passed, "message": message})
+
+    try:
+        report["harbor_version"] = importlib.metadata.version("harbor")
+    except importlib.metadata.PackageNotFoundError:
+        # Editable/source installations may have usable APIs without metadata.
+        pass
+    try:
+        config_model = importlib.import_module("harbor.models.task.config").TaskConfig
+        result_model = importlib.import_module("harbor.models.trial.result").TrialResult
+        task_model = importlib.import_module("harbor.models.task.task").Task
+    except Exception as error:
+        # Provider import/validation exception types can change between releases.
+        # Keep an incompatible installation a structured finding, not a traceback.
+        check("provider_imports", False, f"Required Harbor APIs are unavailable ({type(error).__name__}).")
+        return report
+    check("provider_imports", True, "Required Harbor model APIs imported in this interpreter.")
+    check("task_checksum_api", hasattr(task_model, "checksum"), "Proof receipts require Harbor's Task.checksum API.")
+    try:
+        config = config_model.model_validate(
+            {
+                "environment": {"network_mode": "no-network"},
+                "verifier": {
+                    "environment_mode": "separate",
+                    "network_mode": "no-network",
+                    "environment": {"network_mode": "no-network"},
+                },
+            }
+        )
+        for name, model, expected in (
+            ("agent_network_config", config.environment, {"network_mode": "no-network"}),
+            (
+                "separate_verifier_config",
+                config.verifier,
+                {"environment_mode": "separate", "network_mode": "no-network"},
+            ),
+            ("verifier_environment_config", config.verifier.environment, {"network_mode": "no-network"}),
+        ):
+            declared = model is not None and all(key in type(model).model_fields for key in expected)
+            dumped = model.model_dump(mode="json") if declared else {}
+            check(
+                name,
+                all(dumped.get(key) == value for key, value in expected.items()),
+                "Required isolation settings must be declared and retained by Harbor, not ignored extras.",
+            )
+    except Exception as error:
+        check(
+            "isolation_config", False, f"Harbor could not retain required isolation settings ({type(error).__name__})."
+        )
+    try:
+        mode_supported = _runtime_mode_roundtrip(result_model)
+        check(
+            "trial_verifier_mode", mode_supported, "TrialResult must declare and serialize verifier_environment_mode."
+        )
+    except Exception as error:
+        check("trial_verifier_mode", False, f"Verifier-mode serialization is incompatible ({type(error).__name__}).")
+    if args.task_dir is not None:
+        task_dir = _ensure_task_dir(args.task_dir)
+        try:
+            task = task_model(task_dir / "task")
+            single_step = not task.config.steps
+            check(
+                "task_proof_shape",
+                single_step,
+                "The current proof reader requires trial-level verifier mode; multi-step proof is not certified by this preflight.",
+            )
+            checksum = task.checksum
+            check(
+                "task_checksum", isinstance(checksum, str) and bool(checksum), "Harbor must compute the task checksum."
+            )
+        except Exception as error:
+            check("task_validation", False, f"Harbor could not validate this proof task ({type(error).__name__}).")
+    report["valid"] = all(item["passed"] for item in checks)
+    return report
+
+
 def _run_input_path(task_dir: Path, job_dir: Path) -> Path:
     relative = job_dir.relative_to(task_dir).as_posix()
     return task_dir / "private" / "run-inputs" / f"{hashlib.sha256(relative.encode()).hexdigest()}.json"
@@ -1658,10 +1845,11 @@ def _validation_from_jobs(
     if len(job_ids) != len(set(job_ids)):
         raise ContractError("validation Harbor config.job_id values must be distinct")
     checksums = {trial.get("task_checksum") for trial in trials}
+    retained_checksum = next(iter(checksums))
     if (
         len(checksums) != 1
-        or not isinstance(next(iter(checksums)), str)
-        or _TASK_CHECKSUM.fullmatch(next(iter(checksums))) is None
+        or not isinstance(retained_checksum, str)
+        or _TASK_CHECKSUM.fullmatch(retained_checksum) is None
     ):
         raise ContractError("all validation Harbor results must have one matching task checksum")
     modes = {trial.get("verifier_environment_mode") for trial in trials}
@@ -1679,7 +1867,7 @@ def _validation_from_jobs(
     return {
         "schema": VALIDATION_SCHEMA,
         "harbor_version": harbor_version,
-        "task_checksum": next(iter(checksums)),
+        "task_checksum": retained_checksum,
         "task_tree_sha256": reproducibility["task_tree_sha256"],
         "verifier_environment_mode": mode,
         "distinct_jobs": True,
@@ -1807,6 +1995,24 @@ def _summary_markdown(summary: dict[str, Any]) -> str:
     )
 
 
+def _environment_status(
+    candidate: dict[str, Any], technical_status: str, isolation_status: str, review_status: str
+) -> str:
+    if technical_status == "failed":
+        return "failed"
+    unknown_required = any(
+        item["required"] and item["availability"] == "unknown" for item in candidate["software_requirements"]
+    )
+    if (
+        technical_status == "passed"
+        and isolation_status == "isolated"
+        and review_status == "human_reviewed"
+        and not unknown_required
+    ):
+        return "ready"
+    return "unproven"
+
+
 def _finalize(args: argparse.Namespace) -> dict[str, Any]:
     task_dir = _ensure_task_dir(args.task_dir)
     summary = _load_summary(task_dir)
@@ -1847,12 +2053,7 @@ def _finalize(args: argparse.Namespace) -> dict[str, Any]:
             technical_status = "passed" if validation["passed"] else "failed"
         else:
             technical_status = "not_run"
-        if technical_status == "failed":
-            environment_status = "failed"
-        elif technical_status == "passed" and isolation_status == "isolated" and args.human_reviewed:
-            environment_status = "ready"
-        else:
-            environment_status = "unproven"
+        environment_status = _environment_status(candidate, technical_status, isolation_status, review_status)
 
     reasons = list(args.reason)
     if args.status == "no_candidate" and not reasons:
@@ -1908,7 +2109,7 @@ def _check(args: argparse.Namespace) -> dict[str, Any]:
     else:
         errors.append("source has not been prepared")
     privacy = summary.get("privacy")
-    if isinstance(privacy, dict):
+    if isinstance(privacy, dict) and isinstance(source, dict):
         try:
             privacy_payload = _load_object(task_dir / privacy["path"], label="privacy report")
             if privacy != {"path": privacy["path"], "audit_path": privacy["audit_path"], **privacy_payload}:
@@ -1939,7 +2140,9 @@ def _check(args: argparse.Namespace) -> dict[str, Any]:
                     or not privacy["contextual_review_complete"]
                     or privacy["blocking_reasons"]
                 ):
-                    errors.append("finalized candidate lacks a clear contextual privacy review")
+                    errors.append(
+                        "finalized candidate lacks a completed contextual privacy review with no blocking findings"
+                    )
                 task_contract = _validate_task(task_dir)
                 _validate_reproducibility(task_dir)
                 if environment.get("verifier_environment_mode") != task_contract["verifier_environment_mode"]:
@@ -1952,16 +2155,13 @@ def _check(args: argparse.Namespace) -> dict[str, Any]:
                     expected_technical = "passed" if validation["passed"] else "failed"
                     if environment.get("technical_status") != expected_technical:
                         errors.append("summary technical status does not match Harbor evidence")
-                    expected_status = "failed"
-                    if validation["passed"]:
-                        expected_status = (
-                            "ready"
-                            if task_contract["isolation_status"] == "isolated"
-                            and environment.get("review_status") == "human_reviewed"
-                            else "unproven"
-                        )
+                    expected_status = _environment_status(
+                        candidate, expected_technical, task_contract["isolation_status"], environment["review_status"]
+                    )
                     if environment.get("status") != expected_status:
-                        errors.append("summary environment status does not match proof, review, and isolation")
+                        errors.append(
+                            "summary environment status does not match proof, review, isolation, and software"
+                        )
                     if environment.get("validation") != "validation.json":
                         errors.append("summary omits retained Harbor validation")
                 elif environment.get("technical_status") != "not_run":
@@ -2095,26 +2295,47 @@ def _reject_symlinks(root: Path) -> None:
             raise ContractError(f"safe export refuses symlink: {path.relative_to(root.parent)}")
 
 
-def _export(args: argparse.Namespace) -> dict[str, Any]:
-    task_dir = _ensure_task_dir(args.task_dir)
+def _copy_publication_file(source: Path, destination: Path) -> None:
+    """Copy only file bytes and normalized executable bits, never source metadata."""
+
+    if source.is_symlink() or not source.is_file():
+        raise ContractError("publication source must be a regular file")
+    with source.open("rb") as incoming, destination.open("xb") as outgoing:
+        shutil.copyfileobj(incoming, outgoing)
+    destination.chmod(0o644 | (stat.S_IMODE(source.stat().st_mode) & 0o111))
+
+
+def _copy_publication_tree(source: Path, destination: Path) -> None:
+    """Keep the new root private while copying; do not propagate directory xattrs."""
+
+    _reject_symlinks(source)
+    destination.mkdir(mode=0o700, parents=True, exist_ok=False)
+    for path in sorted(source.iterdir()):
+        target = destination / path.name
+        if path.is_dir():
+            _copy_publication_tree(path, target)
+            target.chmod(0o755)
+        else:
+            _copy_publication_file(path, target)
+
+
+def _write_publication(task_dir: Path, output_dir: Path) -> None:
+    """Render the complete publication inside an owner-private staging directory."""
+
     summary = _load_summary(task_dir)
     if summary["status"] == "pending":
         raise ContractError("finalize the task workspace before export")
     checked = _check(argparse.Namespace(task_dir=task_dir))
     if not checked["valid"]:
         raise ContractError(f"task workspace check failed: {'; '.join(checked['errors'])}")
-    output_dir = args.output_dir.resolve()
-    if output_dir.is_relative_to(task_dir) or ".eval-author" in output_dir.parts:
-        raise ContractError("export directory must be outside every private .eval-author workspace")
-    if output_dir.exists():
-        raise ContractError(f"refusing to replace existing export directory: {output_dir}")
-    output_dir.mkdir(parents=True)
+    _reject_symlinks(task_dir / "candidate.json")
     candidate = _load_object(task_dir / "candidate.json", label="candidate")
-    shutil.copy2(task_dir / "candidate.json", output_dir / "candidate.json")
+    _copy_publication_file(task_dir / "candidate.json", output_dir / "candidate.json")
     if summary["status"] == "candidate":
         _reject_symlinks(task_dir / "task")
-        shutil.copytree(task_dir / "task", output_dir / "task")
-        shutil.copy2(task_dir / "reproducibility.json", output_dir / "reproducibility.json")
+        _reject_symlinks(task_dir / "reproducibility.json")
+        _copy_publication_tree(task_dir / "task", output_dir / "task")
+        _copy_publication_file(task_dir / "reproducibility.json", output_dir / "reproducibility.json")
     reproducibility_summary = None
     if summary["status"] == "candidate":
         reproducibility = _validate_reproducibility(task_dir)
@@ -2184,9 +2405,106 @@ def _export(args: argparse.Namespace) -> dict[str, Any]:
             path.chmod(0o644 | (stat.S_IMODE(path.stat().st_mode) & 0o111))
         elif path.is_dir():
             path.chmod(0o755)
+
+
+def _publication_inventory(root: Path) -> dict[str, Any]:
+    tree = _task_tree_info(root)
+    # The task digest tracks whether a file is executable; publication review
+    # additionally binds exact permission bits for every entry (except the root).
+    modes = {path.relative_to(root).as_posix(): stat.S_IMODE(path.stat().st_mode) for path in sorted(root.rglob("*"))}
+    digest = _sha256(json.dumps({"tree": tree, "modes": modes}, sort_keys=True).encode())
+    return {"sha256": digest, "file_count": tree["file_count"], "total_bytes": tree["total_bytes"]}
+
+
+def _prepare_publication(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    publications = task_dir / "private" / "publications"
+    if (task_dir / "private").is_symlink() or publications.is_symlink():
+        raise ContractError("publication staging directories must not be symlinks")
+    _mkdir_private(task_dir / "private")
+    _mkdir_private(publications)
+    # Keep each preview, including superseded ones, as private review evidence.
+    with tempfile.TemporaryDirectory(prefix="staging-", dir=publications) as temporary:
+        preview = Path(temporary) / "product"
+        _mkdir_private(preview)
+        _write_publication(task_dir, preview)
+        inventory = _publication_inventory(preview)
+        destination = publications / inventory["sha256"].removeprefix("sha256:")
+        if destination.exists():
+            if _publication_inventory(destination) != inventory:
+                raise ContractError("retained publication preview changed; preserve it and prepare a new workspace")
+        else:
+            preview.rename(destination)
+    return {"task_dir": str(task_dir), "preview_dir": str(destination), **inventory}
+
+
+def _review_publication(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    if not args.note.strip():
+        raise ContractError("publication review note must be nonempty")
+    if (task_dir / "private").is_symlink() or (task_dir / "private/publications").is_symlink():
+        raise ContractError("publication staging directories must not be symlinks")
+    preview = args.preview_dir
+    if not preview.is_absolute():
+        preview = task_dir / preview
+    if preview.is_symlink():
+        raise ContractError("publication preview must not be a symlink")
+    preview = preview.resolve()
+    if preview.parent != task_dir / "private/publications":
+        raise ContractError("review requires a retained private publication preview")
+    inventory = _publication_inventory(preview)
+    if inventory["sha256"] != args.sha256 or preview.name != args.sha256.removeprefix("sha256:"):
+        raise ContractError("publication preview does not match the reviewed digest")
+    with tempfile.TemporaryDirectory(dir=task_dir / "private") as temporary:
+        current = Path(temporary)
+        _write_publication(task_dir, current)
+        if _publication_inventory(current) != inventory:
+            raise ContractError("publication preview is stale; prepare and review the current product")
+    _write_json(
+        task_dir / "private/publication-review.json",
+        {
+            "schema": PUBLICATION_REVIEW_SCHEMA,
+            "publication": inventory,
+            "reviewer_kind": args.reviewer_kind,
+            "note": args.note.strip(),
+        },
+    )
+    return {"task_dir": str(task_dir), "reviewed": True, **inventory}
+
+
+def _export(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    if (task_dir / "private").is_symlink():
+        raise ContractError("publication staging directories must not be symlinks")
+    _mkdir_private(task_dir / "private")
+    output_dir = args.output_dir.resolve()
+    if output_dir.is_relative_to(task_dir) or ".eval-author" in output_dir.parts:
+        raise ContractError("export directory must be outside every private .eval-author workspace")
+    if output_dir.exists():
+        raise ContractError(f"refusing to replace existing export directory: {output_dir}")
+    review_path = task_dir / "private/publication-review.json"
+    if not review_path.is_file():
+        raise ContractError("export requires prepare-publication and review-publication for every product")
+    _reject_symlinks(review_path)
+    review = _load_object(review_path, label="publication review")
+    if (
+        set(review) != {"schema", "publication", "reviewer_kind", "note"}
+        or review.get("schema") != PUBLICATION_REVIEW_SCHEMA
+        or review.get("reviewer_kind") not in ("agent", "human")
+        or not isinstance(review.get("note"), str)
+        or not review["note"].strip()
+    ):
+        raise ContractError("publication review does not match the versioned contract")
+    with tempfile.TemporaryDirectory(dir=task_dir / "private") as temporary:
+        staged = Path(temporary)
+        _write_publication(task_dir, staged)
+        if _publication_inventory(staged) != review["publication"]:
+            raise ContractError("publication review is stale; prepare and review the current product")
+        # Publish the checked snapshot, never reread mutable source files after review.
+        _copy_publication_tree(staged, output_dir)
     output_dir.chmod(0o755)
     return {
-        "task_id": summary["task_id"],
+        "task_id": task_dir.name,
         "output_dir": str(output_dir),
         "files": sorted(str(path.relative_to(output_dir)) for path in output_dir.rglob("*") if path.is_file()),
     }
@@ -2195,6 +2513,10 @@ def _export(args: argparse.Namespace) -> dict[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    runtime = subparsers.add_parser("check-runtime", help="probe the installed Harbor proof APIs without running jobs")
+    runtime.add_argument("--task-dir", type=Path, help="also validate an authored task and its proof shape")
+    runtime.set_defaults(run=_check_runtime)
 
     init = subparsers.add_parser("init", help="create one private, gitignored task workspace")
     init.add_argument("--root", type=Path, default=Path(".eval-author/trace-environments"))
@@ -2212,6 +2534,13 @@ def _parser() -> argparse.ArgumentParser:
     review.add_argument("--reviewer-kind", choices=("agent", "human"), required=True)
     review.add_argument("--note", required=True)
     review.set_defaults(run=_review_privacy)
+
+    candidate_check = subparsers.add_parser(
+        "check-candidate",
+        help="read-only metadata and evidence-reference check; does not prove execution or privacy review",
+    )
+    candidate_check.add_argument("--task-dir", required=True, type=Path)
+    candidate_check.set_defaults(run=_check_candidate)
 
     reproducibility = subparsers.add_parser(
         "record-reproducibility", help="hash the task tree and record portability and contamination evidence"
@@ -2260,6 +2589,20 @@ def _parser() -> argparse.ArgumentParser:
     batch_status.add_argument("--root", type=Path, default=Path(".eval-author/trace-environments"))
     batch_status.add_argument("--manifest", required=True, type=Path)
     batch_status.set_defaults(run=_batch_status)
+
+    publication = subparsers.add_parser("prepare-publication", help="stage the exact public product for private review")
+    publication.add_argument("--task-dir", required=True, type=Path)
+    publication.set_defaults(run=_prepare_publication)
+
+    publication_review = subparsers.add_parser(
+        "review-publication", help="attest review of an exact publication preview"
+    )
+    publication_review.add_argument("--task-dir", required=True, type=Path)
+    publication_review.add_argument("--preview-dir", required=True, type=Path)
+    publication_review.add_argument("--sha256", required=True)
+    publication_review.add_argument("--reviewer-kind", choices=("agent", "human"), required=True)
+    publication_review.add_argument("--note", required=True)
+    publication_review.set_defaults(run=_review_publication)
 
     export = subparsers.add_parser("export", help="publish only the reviewed candidate, task, and result summary")
     export.add_argument("--task-dir", required=True, type=Path)

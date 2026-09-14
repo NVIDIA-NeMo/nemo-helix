@@ -9,15 +9,21 @@ import time
 
 import httpx
 import jwt
-from nemo_platform import (
-    APIConnectionError,
-    APIResponseValidationError,
-    APIStatusError,
-    APITimeoutError,
-    AsyncNeMoPlatform,
+from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.auth.client import AsyncAuthenticationClient
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.errors import (
     AuthenticationError,
+    NemoHTTPError,
+    NemoResponseValidationError,
+    NemoTransportError,
 )
 from nmp.common.config import AuthConfig
+from nmp.common.platform_endpoint import (
+    require_authorization_header_endpoint,
+    resolve_platform_endpoint,
+    resolve_service_endpoint,
+)
 
 from .token_claims import TokenClaims
 from .token_resolver import ResolvedBearerToken
@@ -38,7 +44,7 @@ class AccessKeyLifecycleUnavailableError(RuntimeError):
 
 
 class AccessKeyLifecycleAuthenticator:
-    """Validate access keys through the generated Auth SDK with fail-closed circuit breaking."""
+    """Validate access keys through the auth service with fail-closed circuit breaking."""
 
     def __init__(self, config: AuthConfig, http_client: httpx.AsyncClient | None = None) -> None:
         self._config = config
@@ -49,18 +55,24 @@ class AccessKeyLifecycleAuthenticator:
 
     def _get_sdk(self) -> AsyncNeMoPlatform:
         if self._sdk is None:
-            # Import lazily to avoid an auth -> SDK factory import cycle. The
-            # factory attaches PlatformRequestRouter, which owns service
-            # discovery and transport selection for /apis/auth requests.
-            from nmp.common.sdk_factory import get_async_platform_sdk, with_options_preserving_request_router
+            # Import lazily to avoid an auth -> SDK factory import cycle.
+            from nmp.common.sdk_factory import get_async_platform_sdk
 
-            sdk = get_async_platform_sdk(http_client=self._http_client)
-            self._sdk = with_options_preserving_request_router(
-                sdk,
+            http_client = self._http_client or resolve_platform_endpoint().async_sdk_http_client(follow_redirects=False)
+            sdk = get_async_platform_sdk(http_client=http_client)
+            self._sdk = sdk.with_options(
                 max_retries=0,
                 _extra_kwargs={"_strict_response_validation": True},
             )
         return self._sdk
+
+    def _validate_authorization_transport(self) -> None:
+        if self._http_client is not None and self._http_client.follow_redirects:
+            raise ValueError("Access-key lifecycle HTTP client must not follow redirects")
+        require_authorization_header_endpoint(
+            resolve_service_endpoint("auth"),
+            purpose="Access-key lifecycle validation",
+        )
 
     def _retry_after(self) -> int:
         return max(1, math.ceil(self._circuit_open_until - time.monotonic()))
@@ -100,21 +112,28 @@ class AccessKeyLifecycleAuthenticator:
             self._circuit_open_until = 0.0
 
         try:
-            result = await self._get_sdk().auth.authenticate_get(
-                extra_headers={"Authorization": f"Bearer {token}"},
-                timeout=self._config.policy_decision_point_request_timeout_seconds,
+            self._validate_authorization_transport()
+            auth_client = (
+                client_from_platform(self._get_sdk(), AsyncAuthenticationClient)
+                .with_headers({"Authorization": f"Bearer {token}"})
+                .with_options(timeout=self._config.policy_decision_point_request_timeout_seconds)
             )
+            result = (await auth_client.authenticate_bearer_token_get()).data()
+        except ValueError as exc:
+            logger.error("Access-key lifecycle validation is misconfigured: %s", exc)
+            raise self._unavailable(503, "Access-key lifecycle validation unavailable") from exc
         except AuthenticationError:
             self._record_success()
             return None
-        except APITimeoutError as exc:
-            logger.error("Access-key lifecycle validation timed out at %s: %s", exc.request.url, exc)
-            raise self._unavailable(504, "Access-key lifecycle validation timeout") from exc
-        except APIConnectionError as exc:
-            logger.error("Cannot connect to access-key lifecycle validator at %s: %s", exc.request.url, exc)
+        except NemoTransportError as exc:
+            request_url = exc.request.url if exc.request is not None else "<unknown>"
+            if isinstance(exc.error, httpx.TimeoutException):
+                logger.error("Access-key lifecycle validation timed out at %s: %s", request_url, exc)
+                raise self._unavailable(504, "Access-key lifecycle validation timeout") from exc
+            logger.error("Cannot connect to access-key lifecycle validator at %s: %s", request_url, exc)
             raise self._unavailable(503, "Access-key lifecycle validation unavailable") from exc
-        except (APIStatusError, APIResponseValidationError) as exc:
-            logger.error("Access-key lifecycle validation failed at %s: %s", exc.request.url, exc)
+        except (NemoHTTPError, NemoResponseValidationError) as exc:
+            logger.error("Access-key lifecycle validation failed at %s: %s", exc.http_response.request.url, exc)
             raise self._unavailable(503, "Access-key lifecycle validation unavailable") from exc
 
         if result.token_kind != "access_key":

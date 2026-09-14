@@ -38,6 +38,7 @@ from nemo_agents_plugin.runner.fabric_artifact_staging import (
     FabricArtifactStagingError,
     stage_fabric_ethos_config_files,
 )
+from nemo_agents_plugin.spec_revision import SpecRevision, stage_with_spec_revision
 from nemo_agents_plugin.telemetry.intake_export import (
     configure_intake_atif_export,
     supports_intake_atif_export,
@@ -68,6 +69,7 @@ from nemo_platform_plugin.config import LOOPBACK_ADDRESSES
 from nemo_platform_plugin.entities.base import parse_qualified_name
 from nemo_platform_plugin.entities.client import AsyncEntitiesClient
 from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_platform_plugin.files.client import AsyncFilesClient
 from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
 
 logger = logging.getLogger(__name__)
@@ -693,16 +695,23 @@ class DeploymentsRunnerBackend(RunnerBackend):
             deployment_labels["nemo.agents/runtime"] = "fabric"
 
         staged_config_files: list[ConfigFile] | None = None
+        staged_spec: SpecRevision | None = None
         if is_fabric and agent:
             agent_yaml_path = _fabric_config_mount_path(self._config.config_mount_path)
             try:
                 sdk = get_async_platform_sdk(as_service="agents", internal=True)
-                staged_config_files = await stage_fabric_ethos_config_files(
+                files_client = client_from_platform(sdk, AsyncFilesClient)
+                staged_config_files, staged_spec = await stage_with_spec_revision(
+                    files_client,
                     workspace=workspace,
                     agent_name=agent,
-                    rewritten_agent_config=config,
-                    agent_yaml_path=agent_yaml_path,
-                    sdk=sdk.files,
+                    stage=lambda: stage_fabric_ethos_config_files(
+                        workspace=workspace,
+                        agent_name=agent,
+                        rewritten_agent_config=config,
+                        agent_yaml_path=agent_yaml_path,
+                        files_client=files_client,
+                    ),
                 )
             except FabricArtifactStagingError as exc:
                 logger.error("Refusing to deploy Fabric agent %r: %s", name, exc)
@@ -766,7 +775,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
             resolved_image,
             deployment_mode,
         )
-        return DeploymentInfo(name=name, status="starting", endpoint="", endpoints=[])
+        return DeploymentInfo(name=name, status="starting", endpoint="", endpoints=[], staged_spec=staged_spec)
 
     async def get_deployment_status(self, workspace: str, name: str) -> DeploymentInfo | None:
         entities = self._entity_client()

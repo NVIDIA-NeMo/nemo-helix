@@ -10,7 +10,7 @@ from typing import ClassVar, List, Optional, Set
 import aiohttp
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
-from nmp.common.sdk_factory import get_async_platform_sdk
+from nemo_platform import AsyncNeMoPlatform
 from nmp.common.service import RouterConfig, Service
 from starlette import status
 from starlette.responses import JSONResponse
@@ -96,7 +96,10 @@ class InferenceGatewayService(Service):
         from nmp.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
         from nmp.core.inference_gateway.config import config as inference_gateway_config
 
-        sdk = get_async_platform_sdk(as_service="inference-gateway", internal=True)
+        sdk = self.dependency_provider.get_sdk_client(as_service="inference-gateway")
+
+        def plugin_sdk_factory(plugin_name: str) -> AsyncNeMoPlatform:
+            return self.dependency_provider.get_sdk_client(as_service=plugin_name)
 
         # Initialize caches
         model_cache = set_global_model_cache(ModelCache(secret_value_ttl=inference_gateway_config.secrets_ttl_sec))
@@ -104,7 +107,7 @@ class InferenceGatewayService(Service):
 
         # Discover and load inference middleware plugins
         middleware_registry = set_global_middleware_registry(
-            await load_middleware_plugins(model_cache, virtual_model_cache)
+            await load_middleware_plugins(model_cache, virtual_model_cache, plugin_sdk_factory=plugin_sdk_factory)
         )
         self._middleware_registry = middleware_registry
 

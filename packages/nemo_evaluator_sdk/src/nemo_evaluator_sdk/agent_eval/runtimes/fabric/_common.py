@@ -8,9 +8,9 @@
 (sandbox) map a Fabric ``RunResult`` to the *same* trial/evidence contract, so the pieces they share
 live here — one definition, so the two runtimes cannot drift apart.
 
-Trajectory capture is built from ``nemo_relay``'s own typed config objects (a hard dependency), so
-Relay owns its schema: a breaking Relay change fails construction here rather than silently producing
-a malformed profile.
+Trajectory capture is built from ``nemo_fabric``'s own typed config objects (a hard dependency), so
+Fabric owns the schema: a breaking Fabric change fails construction here rather than silently
+producing a block Fabric ignores.
 """
 
 from __future__ import annotations
@@ -20,22 +20,19 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.otlp_writer import otlp_endpoint_fields
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus
 from nemo_evaluator_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 
-# Trajectory profile identity + the file-exporter output names we choose (Relay accepts these as
-# inputs). Shared so both runtimes select/emit the trajectory under identical names.
-TRAJECTORY_PROFILE_NAME = "eval_trajectory"
+# The file-exporter output names we choose (Relay accepts these as inputs). Shared so both runtimes
+# emit the trajectory under identical names.
 ATIF_FILENAME_TEMPLATE = "trajectory-{session_id}.atif.json"
 ATOF_FILENAME = "events.atof.jsonl"
 #: ATIF ``agent.version``. Both runtimes report the agent *framework* here so a consumer can group
 #: host and container traces together; ``agent.name`` is what distinguishes them. Not a real version
 #: yet — reporting the resolved nemo-fabric version would be the better answer.
 FABRIC_AGENT_VERSION = "fabric"
-# Fabric telemetry-profile selectors (Relay file exporter, no OTLP endpoint).
-TELEMETRY_PROVIDER = "relay"
-TELEMETRY_MODE = "sdk"
 
 
 def safe_path_name(value: str) -> str:
@@ -109,50 +106,87 @@ def build_failed_trial(
     )
 
 
-def trajectory_telemetry(*, relay_dir: str, agent_name: str, agent_version: str) -> dict[str, Any]:
-    """The ``telemetry`` block of a Fabric trajectory profile: Relay's ATIF/ATOF file exporter (mode=sdk).
+def relay_observability(
+    *,
+    relay_dir: str,
+    agent_name: str,
+    agent_version: str,
+    extra: Mapping[str, Any] | None = None,
+    otlp_endpoint: str | None = None,
+) -> Any:
+    """Relay's ATIF/ATOF file-exporter observability config, as ``nemo_fabric.RelayObservabilityConfig``.
 
-    Built from ``nemo_relay``'s own typed config so Relay owns its schema — no hand-maintained dict to
-    silently drift when Relay changes it. Callers wrap this in a profile with their own name +
-    ``runtime``/``environment`` blocks; ``relay_dir`` is where the ``trajectory-*.atif.json`` lands.
+    Built from Fabric's own typed relay models rather than ``nemo_relay``'s: Fabric is what has to
+    accept the block, so a breaking change there fails construction here instead of being silently
+    dropped from a config Fabric no longer understands.
 
-    ``nemo_relay`` is imported here rather than at module scope: it is a native extension costing
-    ~120ms to load, and this module is reachable from the evaluator plugin's job imports, so an
-    eager import would charge every consumer for trajectory capture they may never use.
+    ``nemo_fabric`` is imported here rather than at module scope: it is a native extension, and this
+    module is reachable from the evaluator plugin's job imports, so an eager import would charge every
+    consumer for trajectory capture they may never use.
     """
-    from nemo_relay.observability import (
-        AtifConfig,
-        AtofConfig,
-        AtofFileSinkConfig,
-        ComponentSpec,
-        ObservabilityConfig,
+    from nemo_fabric import (  # ty: ignore[unresolved-import]
+        RelayAtifConfig,
+        RelayAtofConfig,
+        RelayAtofFileSinkConfig,
+        RelayObservabilityConfig,
+        RelayOpenTelemetryConfig,
+        RelayOpenTelemetryEndpointConfig,
     )
 
-    observability = ComponentSpec(
-        config=ObservabilityConfig(
-            atif=AtifConfig(
-                enabled=True,
-                output_directory=relay_dir,
-                filename_template=ATIF_FILENAME_TEMPLATE,
-                agent_name=agent_name,
-                agent_version=agent_version,
-            ),
-            atof=AtofConfig(
-                enabled=True,
-                sinks=[
-                    AtofFileSinkConfig(
-                        output_directory=relay_dir,
-                        filename=ATOF_FILENAME,
-                        mode="overwrite",
-                    )
-                ],
-            ),
-        )
+    opentelemetry = None
+    if otlp_endpoint is not None:
+        fields = otlp_endpoint_fields(endpoint=otlp_endpoint, service_name=agent_name)
+        opentelemetry = RelayOpenTelemetryConfig(enabled=True, endpoints=[RelayOpenTelemetryEndpointConfig(**fields)])
+    return RelayObservabilityConfig(
+        opentelemetry=opentelemetry,
+        atif=RelayAtifConfig(
+            enabled=True,
+            output_directory=relay_dir,
+            filename_template=ATIF_FILENAME_TEMPLATE,
+            agent_name=agent_name,
+            agent_version=agent_version,
+            extra=dict(extra) if extra else None,
+        ),
+        atof=RelayAtofConfig(
+            enabled=True,
+            sinks=[
+                RelayAtofFileSinkConfig(
+                    output_directory=relay_dir,
+                    filename=ATOF_FILENAME,
+                    mode="overwrite",
+                )
+            ],
+        ),
     )
-    return {
-        "enabled": True,
-        "provider": TELEMETRY_PROVIDER,
-        "mode": TELEMETRY_MODE,
-        "output_dir": relay_dir,
-        "config": {"version": 1, "components": [observability.to_dict()]},
-    }
+
+
+def relay_telemetry_fragment(
+    config: Mapping[str, Any],
+    *,
+    relay_dir: str,
+    agent_name: str,
+    agent_version: str,
+    otlp_endpoint: str | None = None,
+) -> dict[str, Any]:
+    """The Fabric config keys that enable Relay's file exporter, serialized by Fabric itself.
+
+    ``config`` supplies only the identity Fabric requires to validate (metadata + harness/workflow);
+    nothing else about it is carried over. Returning Fabric's own serialization of the keys, rather
+    than a hand-written envelope, is what keeps the block in whatever shape Fabric currently reads —
+    a config Fabric does not recognize is ignored rather than rejected, so a drifted envelope
+    produces a run with no trajectory at all and no error.
+    """
+    from nemo_fabric import FabricConfig  # ty: ignore[unresolved-import]
+
+    probe = FabricConfig.from_mapping(config)
+    probe.enable_relay(
+        output_dir=relay_dir,
+        observability=relay_observability(
+            relay_dir=relay_dir,
+            agent_name=agent_name,
+            agent_version=agent_version,
+            otlp_endpoint=otlp_endpoint,
+        ),
+    )
+    mapping = probe.to_mapping()
+    return {key: mapping[key] for key in ("telemetry", "relay")}

@@ -5,19 +5,28 @@
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from logging import getLogger
 from typing import Callable, TypedDict
 
 from nemo_platform import AsyncNeMoPlatform
-from nemo_platform._exceptions import APIStatusError, ConflictError, NotFoundError
-from nemo_platform.types.inference import ServedModelMapping
-from nemo_platform.types.inference.model_deployment import ModelDeployment
-from nemo_platform.types.inference.model_deployment_config import ModelDeploymentConfig
-from nemo_platform.types.inference.model_provider import ModelProvider
-from nemo_platform.types.inference.virtual_model import VirtualModel
-from nemo_platform_plugin.models.types import ModelEntity
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.errors import ConflictError, NemoHTTPError, NotFoundError
+from nemo_platform_plugin.inference_gateway.client import AsyncInferenceGatewayProviderClient
+from nemo_platform_plugin.models.client import AsyncModelsClient
+from nemo_platform_plugin.models.types import (
+    ModelDeployment,
+    ModelDeploymentConfig,
+    ModelEntity,
+    ModelProvider,
+    ModelProviderStatus,
+    ServedModelMapping,
+    UpdateModelProviderStatusRequest,
+)
+from nemo_platform_plugin.virtual_models.client import AsyncVirtualModelsClient
+from nemo_platform_plugin.virtual_models.types import CreateVirtualModelRequest, VirtualModel
 from nmp.common.datetime_utils import ensure_utc
 from nmp.common.entities.constants import NAME_PATTERN
 from nmp.common.entities.utils import parse_entity_ref
@@ -30,7 +39,7 @@ from nmp.core.models.app import (
 from nmp.core.models.config import ControllerConfig
 from nmp.core.models.controllers.context import ModelContext
 from nmp.core.models.controllers.entity_cache import ModelEntityCache
-from nmp.core.models.schemas import BackendFormat, ModelProviderStatus
+from nmp.core.models.schemas import BackendFormat
 
 logger = getLogger(__name__)
 
@@ -60,12 +69,12 @@ def _infer_backend_format(model_name: str) -> str:
 
 
 def _has_backend_format(model_entity: ModelEntity) -> bool:
-    value = getattr(model_entity, "backend_format", None)
+    value = model_entity.backend_format
     return isinstance(value, str) and bool(value)
 
 
-def _get_virtual_model_db_version(virtual_model: object) -> int | None:
-    db_version = getattr(virtual_model, "db_version", None)
+def _get_virtual_model_db_version(virtual_model: VirtualModel) -> int | None:
+    db_version = virtual_model.db_version
     if isinstance(db_version, bool):
         return None
     if isinstance(db_version, int):
@@ -73,15 +82,8 @@ def _get_virtual_model_db_version(virtual_model: object) -> int | None:
     return None
 
 
-def _get_datetime_attr(obj: object, attr_name: str) -> datetime | None:
-    value = getattr(obj, attr_name, None)
-    if isinstance(value, datetime):
-        return ensure_utc(value)
-    return None
-
-
-def _get_virtual_model_observed_at(virtual_model: object) -> datetime | None:
-    return _get_datetime_attr(virtual_model, "updated_at") or _get_datetime_attr(virtual_model, "created_at")
+def _get_virtual_model_observed_at(virtual_model: VirtualModel) -> datetime | None:
+    return ensure_utc(virtual_model.updated_at) or ensure_utc(virtual_model.created_at)
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +271,7 @@ def _resolve_base_backend_model_id(
     ``model_spec.model_namespace`` / ``model_name`` / ``model_revision`` (same as config
     create when ``model_entity_id`` is inferred from the entity store).
     """
-    if config and getattr(config, "model_entity_id", None):
+    if config and config.model_entity_id:
         model_workspace, model_name, _revision = parse_model_name_revision(model_name=config.model_entity_id)
         if model_workspace and model_name:
             return f"{model_workspace}/{model_name}"
@@ -278,12 +280,12 @@ def _resolve_base_backend_model_id(
     if base_model_entity is not None:
         return f"{base_model_entity.workspace}/{base_model_entity.name}"
 
-    model_spec = getattr(config, "model_spec", None) if config else None
+    model_spec = config.model_spec if config else None
     if model_spec is not None:
         model_workspace, model_name, _revision = parse_model_name_revision(
-            model_namespace=getattr(model_spec, "model_namespace", None),
-            model_name=getattr(model_spec, "model_name", None),
-            model_revision=getattr(model_spec, "model_revision", None),
+            model_namespace=model_spec.model_namespace,
+            model_name=model_spec.model_name,
+            model_revision=model_spec.model_revision,
         )
         if model_workspace and model_name:
             return f"{model_workspace}/{model_name}"
@@ -324,9 +326,12 @@ class ModelProviderReconciler:
         self._controller_config = controller_config
         self._entity_cache = entity_cache
         self._emit_heartbeat = emit_heartbeat
-        self._discovery_sdk = models_sdk.with_options(
+        self._models_client = client_from_platform(models_sdk, AsyncModelsClient)
+        self._virtual_models_client = client_from_platform(models_sdk, AsyncVirtualModelsClient)
+        discovery_sdk = models_sdk.with_options(
             max_retries=controller_config.provider_discovery_max_retries,
         )
+        self._gateway_provider_client = client_from_platform(discovery_sdk, AsyncInferenceGatewayProviderClient)
 
     # -------------------------------------------------------------------------
     # Public entry point
@@ -400,9 +405,11 @@ class ModelProviderReconciler:
         """
         vm_snapshot: list[VirtualModel] = []
         try:
-            async for virtual_model in self._models_sdk.inference.virtual_models.list(
-                workspace="-", page_size=_VIRTUAL_MODEL_PAGE_SIZE
-            ):
+            response = await self._virtual_models_client.list_virtual_models(
+                workspace="-",
+                query_params={"page_size": _VIRTUAL_MODEL_PAGE_SIZE},
+            )
+            async for virtual_model in response.items():
                 vm_snapshot.append(virtual_model)
                 self._emit_heartbeat()
         except Exception:
@@ -454,13 +461,17 @@ class ModelProviderReconciler:
                 )
                 ctx.served_models = []
                 try:
-                    ctx.model_provider = await self._models_sdk.inference.providers.update_status(
-                        name=provider.name,
-                        workspace=provider.workspace,
-                        served_models=[],
-                        status="READY",
-                        status_message="Non-OpenAI compliant endpoint, model entity routing disabled",
-                    )
+                    ctx.model_provider = (
+                        await self._models_client.update_provider_status(
+                            name=provider.name,
+                            workspace=provider.workspace,
+                            body=UpdateModelProviderStatusRequest(
+                                served_models=[],
+                                status=ModelProviderStatus.READY,
+                                status_message="Non-OpenAI compliant endpoint, model entity routing disabled",
+                            ),
+                        )
+                    ).data()
                 except Exception as e:
                     logger.error(f"Failed to update provider {provider_id} status: {e}")
                 return
@@ -507,12 +518,16 @@ class ModelProviderReconciler:
         logger.debug(f"Provider {provider_id}: serving {len(served_models)} model(s)")
 
         try:
-            ctx.model_provider = await self._models_sdk.inference.providers.update_status(
-                name=provider.name,
-                workspace=provider.workspace,
-                served_models=served_models,
-                status="READY",
-            )
+            ctx.model_provider = (
+                await self._models_client.update_provider_status(
+                    name=provider.name,
+                    workspace=provider.workspace,
+                    body=UpdateModelProviderStatusRequest(
+                        served_models=served_models,
+                        status=ModelProviderStatus.READY,
+                    ),
+                )
+            ).data()
             if served_models:
                 logger.debug(f"Updated provider {provider_id} with {len(served_models)} served model(s)")
             else:
@@ -575,12 +590,16 @@ class ModelProviderReconciler:
     async def _mark_lost(self, ctx: ModelContext, provider: ModelProvider, provider_id: str) -> None:
         """Write LOST status for a provider that has permanently failed discovery."""
         try:
-            ctx.model_provider = await self._models_sdk.inference.providers.update_status(
-                name=provider.name,
-                workspace=provider.workspace,
-                status="LOST",
-                status_message="Provider discovery permanently failed. Delete and recreate to retry.",
-            )
+            ctx.model_provider = (
+                await self._models_client.update_provider_status(
+                    name=provider.name,
+                    workspace=provider.workspace,
+                    body=UpdateModelProviderStatusRequest(
+                        status=ModelProviderStatus.LOST,
+                        status_message="Provider discovery permanently failed. Delete and recreate to retry.",
+                    ),
+                )
+            ).data()
         except Exception:
             logger.exception(
                 "Failed to transition provider to LOST",
@@ -611,13 +630,15 @@ class ModelProviderReconciler:
             updated_at = ensure_utc(provider.updated_at)
             if updated_at and (now - updated_at).total_seconds() > PROVIDER_ERROR_THRESHOLD_SECONDS:
                 try:
-                    await self._models_sdk.inference.providers.update_status(
+                    await self._models_client.update_provider_status(
                         name=provider.name,
                         workspace=provider.workspace,
-                        status="ERROR",
-                        status_message=f"Provider discovery failed: {err.message}"
-                        if err.message
-                        else "Provider discovery failed: unable to reach GET /v1/models",
+                        body=UpdateModelProviderStatusRequest(
+                            status=ModelProviderStatus.ERROR,
+                            status_message=f"Provider discovery failed: {err.message}"
+                            if err.message
+                            else "Provider discovery failed: unable to reach GET /v1/models",
+                        ),
                     )
                     logger.warning(
                         "Provider escalated to ERROR after persistent discovery failures",
@@ -639,13 +660,15 @@ class ModelProviderReconciler:
         elif provider.status == ModelProviderStatus.ERROR:
             # Bump updated_at to pace the next retry
             try:
-                await self._models_sdk.inference.providers.update_status(
+                await self._models_client.update_provider_status(
                     name=provider.name,
                     workspace=provider.workspace,
-                    status="ERROR",
-                    status_message=f"Discovery retry failed: {err.message}"
-                    if err.message
-                    else "Discovery retry failed: still unable to reach GET /v1/models",
+                    body=UpdateModelProviderStatusRequest(
+                        status=ModelProviderStatus.ERROR,
+                        status_message=f"Discovery retry failed: {err.message}"
+                        if err.message
+                        else "Discovery retry failed: still unable to reach GET /v1/models",
+                    ),
                 )
             except Exception:
                 logger.exception(
@@ -688,8 +711,7 @@ class ModelProviderReconciler:
             # This intentionally uses the controller's service principal to perform
             # infrastructure reconciliation. User-level secret access remains guarded
             # at provider create/upsert validation and by IGW when proxying requests.
-            models_response = await self._discovery_sdk.inference.gateway.provider.get(
-                "v1/models",
+            models_response = await self._gateway_provider_client.get_provider_models(
                 workspace=provider.workspace,
                 name=provider.name,
                 timeout=self._controller_config.provider_discovery_timeout_seconds,
@@ -704,39 +726,43 @@ class ModelProviderReconciler:
                     logger.warning(f"Non-OpenAI compliant response format from {provider_id}")
                     return DiscoveryNonCompliant()
 
-            if not isinstance(models_response, dict) or "data" not in models_response:
+            if not isinstance(models_response, Mapping) or "data" not in models_response:
                 logger.warning(f"Non-OpenAI compliant response format from {provider_id}")
                 return DiscoveryNonCompliant()
 
-            discovered_models = models_response["data"]
+            discovered_models = models_response.get("data")
             if not isinstance(discovered_models, list):
                 logger.warning(f"Non-OpenAI compliant data field from {provider_id}")
                 return DiscoveryNonCompliant()
 
-            models = []
+            models: list[DiscoveredModel] = []
             for model in discovered_models:
-                if not isinstance(model, dict) or not isinstance(model.get("id"), str):
+                if not isinstance(model, Mapping):
                     logger.warning(f"Skipping invalid model entry in {provider_id}: {model}")
                     continue
-                models.append(
-                    {
-                        "id": model["id"],
-                        "root": model.get("root"),
-                        "parent": model.get("parent"),
-                    }
-                )
+                model_id = model.get("id")
+                if not isinstance(model_id, str):
+                    logger.warning(f"Skipping invalid model entry in {provider_id}: {model}")
+                    continue
+                root = model.get("root")
+                parent = model.get("parent")
+                discovered_model: DiscoveredModel = {
+                    "id": model_id,
+                    "root": root if isinstance(root, str) else None,
+                    "parent": parent if isinstance(parent, str) else None,
+                }
+                models.append(discovered_model)
 
             return DiscoverySuccess(models)
 
-        except APIStatusError as e:
+        except NemoHTTPError as e:
             # 404 from the provider proxy is only returned when the provider is not in the gateway
             # cache yet (single code path in IGW). Preserve served_models.
             if e.status_code == 404:
                 logger.warning(f"Provider {provider_id} not yet in gateway cache (404), preserving served_models")
                 return DiscoveryTransientError("Provider not yet in gateway cache (404)")
             # IGW (FastAPI) returns 502 with body {"detail": "Backend returned 404: ..."} when backend has no /v1/models.
-            detail = str((e.body or {}).get("detail", "")) if isinstance(e.body, dict) else ""
-            if e.status_code == 502 and _GATEWAY_BACKEND_404_DETAIL in detail:
+            if e.status_code == 502 and _GATEWAY_BACKEND_404_DETAIL in e.detail:
                 # Backend (NIM) returned 404 — no GET /v1/models or similar. Mark non-compliant.
                 logger.info(
                     f"Backend for {provider_id} returned 404 for GET /v1/models, disabling model entity routing"
@@ -809,6 +835,7 @@ class ModelProviderReconciler:
             await self._ensure_model_entity_for_provider(
                 model_workspace=provider.workspace,
                 model_name=normalized,
+                provider=provider,
                 provider_id=provider_id,
                 ctx=ctx,
             )
@@ -981,7 +1008,12 @@ class ModelProviderReconciler:
     # -------------------------------------------------------------------------
 
     async def _ensure_model_entity_for_provider(
-        self, model_workspace: str, model_name: str, provider_id: str, ctx: ModelContext
+        self,
+        model_workspace: str,
+        model_name: str,
+        provider: ModelProvider,
+        provider_id: str,
+        ctx: ModelContext,
     ) -> None:
         """Ensure a Model Entity exists for an autodiscovered model and link it to the provider.
 
@@ -1007,7 +1039,7 @@ class ModelProviderReconciler:
         details = await self._build_artifact_details(
             model_name,
             provider_id,
-            ctx.model_provider,
+            provider,
             existing_model_entity,
             ctx.model_deployment,
             ctx.model_deployment_config,
@@ -1039,7 +1071,7 @@ class ModelProviderReconciler:
         # Only fill in what the entity is missing, so a value a user corrected is
         # never overwritten. ``backend_format`` treats None as missing so entities
         # registered before it existed get backfilled.
-        updates: dict = {}
+        updates: dict[str, object] = {}
         if fileset and not existing_model_entity.fileset:
             updates["fileset"] = fileset
         if details.api_endpoint and not existing_model_entity.api_endpoint:
@@ -1063,7 +1095,7 @@ class ModelProviderReconciler:
         updated on creation so the same name is not attempted twice in one pass.
         A name held by a user-managed VirtualModel is left as it is.
 
-        This is idempotent: a :class:`~nemo_platform.ConflictError` (409) means
+        This is idempotent: a :class:`~nemo_platform_plugin.client.errors.ConflictError` (409) means
         the VirtualModel already exists and is silently ignored.  Any other
         exception is logged as a warning and does not propagate — VirtualModel
         creation failures must not block provider reconciliation.
@@ -1088,11 +1120,13 @@ class ModelProviderReconciler:
             return
 
         try:
-            await self._models_sdk.inference.virtual_models.create(
+            await self._virtual_models_client.create_virtual_model(
                 workspace=workspace,
-                name=model_name,
-                default_model_entity=f"{workspace}/{model_name}",
-                autoprovisioned=True,
+                body=CreateVirtualModelRequest(
+                    name=model_name,
+                    default_model_entity=f"{workspace}/{model_name}",
+                    autoprovisioned=True,
+                ),
             )
             logger.info(
                 "Auto-created passthrough VirtualModel %s/%s",
@@ -1169,10 +1203,10 @@ class ModelProviderReconciler:
                 continue
 
             try:
-                await self._models_sdk.inference.virtual_models.delete(
+                await self._virtual_models_client.delete_virtual_model(
                     name=virtual_model.name,
                     workspace=virtual_model.workspace,
-                    expected_db_version=expected_db_version,
+                    query_params={"expected_db_version": expected_db_version},
                 )
                 logger.info(
                     "Deleted orphaned autoprovisioned VirtualModel %s/%s",
@@ -1237,7 +1271,7 @@ class ModelProviderReconciler:
                 logger.debug(f"Built api_endpoint for external provider: {provider.host_url}")
 
             elif weights_type == ModelWeightsType.HUGGINGFACE and config:
-                model_spec = getattr(config, "model_spec", None)
+                model_spec = config.model_spec
                 if model_spec is None:
                     logger.warning("Missing model_spec for HuggingFace weights; skipping fileset_url build")
                     return details
@@ -1259,7 +1293,7 @@ class ModelProviderReconciler:
             elif weights_type == ModelWeightsType.FILES_SERVICE and config:
                 # Files service models (including SFT) use hf:// prefix since Files service exposes
                 # models via HuggingFace-compatible API
-                model_spec = getattr(config, "model_spec", None)
+                model_spec = config.model_spec
                 if model_spec is None:
                     logger.warning("Missing model_spec for Files service weights; skipping fileset_url build")
                     return details

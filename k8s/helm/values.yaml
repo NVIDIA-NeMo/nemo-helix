@@ -629,6 +629,10 @@ basePlatformConfig: |
     # the sandbox can read the downloaded environment and dataset. Must match the claim the
     # Jobs controller mounts for job storage.
     job_storage_pvc_claim: {{ (include "nmp-core.persistentVolumeClaim" . ) }}
+    # Gym sandbox pod size.
+    sandbox_resources:
+      cpu: "2"
+      memory: 4Gi
 
   # -- safe_synthesizer is the configuration specific to the Safe Synthesizer service
   safe_synthesizer:

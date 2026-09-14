@@ -6,8 +6,6 @@
 import logging
 from typing import Any, Protocol
 
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.errors import NemoHTTPError
 from nemo_platform_plugin.jobs.client import JobsClient
 from nemo_platform_plugin.jobs.types import PlatformJobTaskUpdate
@@ -48,8 +46,8 @@ class NoOpProgressReporter:
 class JobsServiceProgressReporter:
     """Reports progress to the Jobs service via SDK."""
 
-    def __init__(self, sdk: NeMoPlatform, workspace: str, job_id: str, step_name: str, task_id: str):
-        self.sdk = sdk
+    def __init__(self, jobs: JobsClient, workspace: str, job_id: str, step_name: str, task_id: str):
+        self.jobs = jobs
         self.workspace = workspace
         self.job_id = job_id
         self.step_name = step_name
@@ -79,8 +77,7 @@ class JobsServiceProgressReporter:
                 if error_stack:
                     task_update["error_stack"] = error_stack
 
-                jobs = client_from_platform(self.sdk, JobsClient)
-                jobs.update_job_step_task(
+                self.jobs.update_job_step_task(
                     name=self.task_id,
                     workspace=self.workspace,
                     job=self.job_id,
@@ -94,12 +91,12 @@ class JobsServiceProgressReporter:
             )
 
     @staticmethod
-    def create_progress_reporter(sdk: NeMoPlatform, job_ctx: NMPJobContext) -> ProgressReporter:
+    def create_progress_reporter(jobs: JobsClient, job_ctx: NMPJobContext) -> ProgressReporter:
         """Build a JobsServiceProgressReporter when jobs_url is set, else NoOpProgressReporter."""
         if job_ctx.jobs_url:
             logger.info(f"Progress reporting enabled: {job_ctx.jobs_url}")
             return JobsServiceProgressReporter(
-                sdk, job_ctx.workspace, job_ctx.job_id, job_ctx.step, job_ctx.normalized_task
+                jobs, job_ctx.workspace, job_ctx.job_id, job_ctx.step, job_ctx.normalized_task
             )
         logger.info("Progress reporting disabled: jobs_url not configured")
         return NoOpProgressReporter()

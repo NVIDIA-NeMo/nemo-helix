@@ -313,7 +313,9 @@ def handle_exception(error: Exception, ctx: click.Context | None = None) -> None
         console.print(f"[bold red]API error:[/] {_format_api_error(error)}")
         _print_api_request_context(console, error)
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
-    elif isinstance(error, ValueError) and "Missing workspace argument" in str(error):
+    elif isinstance(error, ValueError) and (
+        "Missing workspace argument" in str(error) or "Missing path parameter 'workspace'" in str(error)
+    ):
         console.print("[bold red]Missing workspace:[/] No workspace configured for this command.")
         console.print(
             f"[yellow]Hint:[/] Run [cyan]{prog} config set --workspace <name>[/] or use the [cyan]--workspace[/] option."

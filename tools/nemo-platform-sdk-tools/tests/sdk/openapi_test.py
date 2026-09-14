@@ -79,6 +79,87 @@ def test_schema_usage_skips_auth_utility_routes():
     }
 
 
+def test_sdk_excluded_schema_names_include_nested_utility_route_refs() -> None:
+    spec = {
+        "paths": {
+            "/apis/auth/token": {
+                "post": {
+                    "responses": {
+                        "200": {
+                            "content": {
+                                "application/json": {"schema": {"$ref": "#/components/schemas/TokenExchangeResponse"}}
+                            }
+                        }
+                    }
+                }
+            },
+            "/apis/entities/v2/workspaces": {
+                "get": {
+                    "responses": {
+                        "200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Workspace"}}}}
+                    }
+                }
+            },
+        },
+        "components": {
+            "schemas": {
+                "TokenExchangeResponse": {
+                    "type": "object",
+                    "properties": {"subject": {"$ref": "#/components/schemas/TokenSubject"}},
+                },
+                "TokenSubject": {"type": "object"},
+                "Workspace": {"type": "object"},
+            }
+        },
+    }
+
+    schema_names = OpenAPI(spec).calculate_sdk_excluded_schema_names()
+
+    assert schema_names == {"TokenExchangeResponse", "TokenSubject"}
+
+
+def test_sdk_excluded_schema_names_preserve_schemas_used_by_generated_paths() -> None:
+    spec = {
+        "paths": {
+            "/apis/auth/token": {
+                "post": {
+                    "responses": {
+                        "200": {
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SharedResponse"}}}
+                        }
+                    },
+                    "requestBody": {
+                        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TokenOnlyRequest"}}}
+                    },
+                }
+            },
+            "/apis/entities/v2/workspaces": {
+                "get": {
+                    "responses": {
+                        "200": {
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SharedResponse"}}}
+                        }
+                    }
+                }
+            },
+        },
+        "components": {
+            "schemas": {
+                "SharedResponse": {
+                    "type": "object",
+                    "properties": {"principal": {"$ref": "#/components/schemas/SharedPrincipal"}},
+                },
+                "SharedPrincipal": {"type": "object"},
+                "TokenOnlyRequest": {"type": "object"},
+            }
+        },
+    }
+
+    schema_names = OpenAPI(spec).calculate_sdk_excluded_schema_names()
+
+    assert schema_names == {"TokenOnlyRequest"}
+
+
 def test_extract_schema_refs_with_cycle(caplog):
     """Test that _extract_schema_refs handles cycles correctly."""
     # Create a mock OpenAPI spec with circular references

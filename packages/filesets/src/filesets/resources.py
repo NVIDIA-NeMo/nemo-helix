@@ -34,6 +34,7 @@ from nemo_platform_plugin.files.types import (
 )
 
 from filesets.filesystem.filesystem import (
+    AsyncFilesetFileSystem,
     FilesetFileSystem,
     build_fileset_ref,
     parse_fileset_path,
@@ -151,13 +152,11 @@ class FilesResource:
         client,
         *,
         files_client: FilesClient | None = None,
-        async_files_client: AsyncFilesClient | None = None,
     ) -> None:
         # Retain the platform client so the generated fileset/otlp sub-resources
         # (which speak to the platform client, not the FilesClient) can be exposed.
         self._platform_client = client
         self._generated_files = GeneratedFilesResource(client)
-        self._async_client = async_files_client
         if files_client is not None:
             self._client = files_client
         else:
@@ -186,7 +185,7 @@ class FilesResource:
     @cached_property
     def fsspec(self) -> FilesetFileSystem:
         """Access the underlying fsspec filesystem."""
-        return FilesetFileSystem(client=self._client, async_client=self._async_client)
+        return FilesetFileSystem(client=self._client)
 
     def _ensure_fileset_exists(self, workspace: str, fileset: str) -> None:
         """Create fileset if it doesn't exist (idempotent)."""
@@ -285,10 +284,7 @@ class FilesResource:
             # Build list of (remote, local) path pairs preserving directory structure
             rpaths = [build_fileset_ref(p, workspace=ws, fileset=fileset) for p in remote_path]
             lpaths = [str(PurePath(local_path) / p) for p in remote_path]
-            kwargs: dict = {"rpath": rpaths, "lpath": lpaths, "batch_size": max_workers}
-            if callback is not None:
-                kwargs["callback"] = callback
-            self.fsspec.get(**kwargs)
+            self.fsspec.get(rpath=rpaths, lpath=lpaths, callback=callback or DEFAULT_CALLBACK)
             return
 
         ws, path_fileset, path = parse_fileset_path(
@@ -308,16 +304,15 @@ class FilesResource:
             # Build list of (remote, local) path pairs preserving directory structure
             rpaths = [build_fileset_ref(f.path, workspace=ws, fileset=fileset) for f in matching_files.data]
             lpaths = [str(PurePath(local_path) / f.path) for f in matching_files.data]
-            kwargs = {"rpath": rpaths, "lpath": lpaths, "batch_size": max_workers}
-            if callback is not None:
-                kwargs["callback"] = callback
-            self.fsspec.get(**kwargs)
+            self.fsspec.get(rpath=rpaths, lpath=lpaths, callback=callback or DEFAULT_CALLBACK)
         else:
             fileset_ref = build_fileset_ref(path, workspace=ws, fileset=fileset)
-            kwargs = {"rpath": fileset_ref, "lpath": local_path, "recursive": True, "batch_size": max_workers}
-            if callback is not None:
-                kwargs["callback"] = callback
-            self.fsspec.get(**kwargs)
+            self.fsspec.get(
+                rpath=fileset_ref,
+                lpath=local_path,
+                recursive=True,
+                callback=callback or DEFAULT_CALLBACK,
+            )
 
     def upload(
         self,
@@ -406,10 +401,12 @@ class FilesResource:
         if fileset_auto_create:
             self._ensure_fileset_exists(ws, fileset)
 
-        kwargs: dict = {"lpath": local_path, "rpath": fileset_ref, "recursive": True, "batch_size": max_workers}
-        if callback is not None:
-            kwargs["callback"] = callback
-        self.fsspec.put(**kwargs)
+        self.fsspec.put(
+            lpath=local_path,
+            rpath=fileset_ref,
+            recursive=True,
+            callback=callback or DEFAULT_CALLBACK,
+        )
 
         return self._client.get_fileset(name=fileset, workspace=ws).data()
 
@@ -730,9 +727,9 @@ class AsyncFilesResource:
         return AsyncOtlpResource(self._platform_client)
 
     @cached_property
-    def fsspec(self) -> FilesetFileSystem:
+    def fsspec(self) -> AsyncFilesetFileSystem:
         """Access the underlying fsspec filesystem."""
-        return FilesetFileSystem(client=self._client)
+        return AsyncFilesetFileSystem(client=self._client)
 
     async def _ensure_fileset_exists(self, workspace: str, fileset: str) -> None:
         """Create fileset if it doesn't exist (idempotent)."""

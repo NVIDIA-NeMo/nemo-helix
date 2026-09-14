@@ -166,7 +166,7 @@ def list_projects(
     page: Annotated[int | None, typer.Option("--page", help="Page number")] = None,
     page_size: Annotated[int | None, typer.Option("--page-size", help="Items per page")] = None,
     sort: Annotated[
-        Literal["name", "-name", "created_at", "-created_at", "updated_at", "-updated_at"] | None,
+        Literal["created_at", "-created_at", "updated_at", "-updated_at", "name", "-name"] | None,
         typer.Option("--sort", help="Sort field"),
     ] = None,
     output_format: ListOutputFormatOption = None,

@@ -136,3 +136,44 @@ class TestDeprecatedFormatField:
         )
 
         assert model.format == ModelFormat.NVIDIA_NIM
+
+
+class TestModelInferenceConfig:
+    def test_inference_discriminator_is_required_in_ranking_schema(self) -> None:
+        schema = Model.model_json_schema()
+        ranking_schema = schema["$defs"]["RankingInference"]
+        assert ranking_schema["properties"]["type"]["const"] == "ranking" or ranking_schema["properties"]["type"][
+            "enum"
+        ] == ["ranking"]
+        assert "type" in ranking_schema["required"]
+
+    def test_flat_ranking_fields_are_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            Model.model_validate(
+                {
+                    "url": "https://igw.example.test/v1",
+                    "name": "reranker",
+                    "ranking_contract": "hosted-rerank-v1",
+                    "ranking_path": "/rerank",
+                }
+            )
+
+    def test_unknown_ranking_keys_are_rejected_without_inference(self) -> None:
+        with pytest.raises(ValidationError):
+            Model.model_validate(
+                {
+                    "url": "https://igw.example.test/v1",
+                    "name": "reranker",
+                    "ranking_endpoint": "/v1/ranking",
+                }
+            )
+
+    def test_unknown_inference_type_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            Model.model_validate(
+                {
+                    "url": "https://igw.example.test/v1",
+                    "name": "embedder",
+                    "inference": {"type": "embeddings", "path": "/embeddings"},
+                }
+            )

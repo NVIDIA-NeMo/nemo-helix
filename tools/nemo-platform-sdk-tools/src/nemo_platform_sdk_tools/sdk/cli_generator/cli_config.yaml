@@ -51,9 +51,6 @@ top_level:
   intake:
     panel: Functional plugins
     help: Intake operations.
-  jobs:
-    panel: Core plugins
-    help: Manage jobs.
   models:
     panel: Core plugins
     help: Manage models.
@@ -73,6 +70,8 @@ config:
 - resource: [auth]
   skip: true
 - resource: [access_keys]
+  skip: true
+- resource: [iam]
   skip: true
 - resource: [models]
   methods:
@@ -169,31 +168,7 @@ config:
       - description
       - created_at
 - resource: [jobs]
-  additional_methods:
-    watch:
-      override: jobs/watch.py
-    tail:
-      override: jobs/tail.py
-  methods:
-    create:
-      wait:
-        type: platform_job
-        resource_label: job
-      watch:
-        type: platform_job
-        resource_label: job
-    list:
-      columns:
-      - name
-      - description
-      - status
-      - created_at
-    list_execution_profiles:
-      columns:
-      - profile
-      - backend
-      - provider
-      - config
+  skip: true
 - resource: [models]
   methods:
     list:
@@ -317,11 +292,7 @@ config:
   skip: true
 
 - resource: [secrets]
-  methods:
-    create:
-      override: secrets/create.py
-    update:
-      override: secrets/update.py
+  skip: true
 
 # Gateway proxy commands: `name` is a workspace query param, not a resource identifier
 - resource: [inference, gateway, model]

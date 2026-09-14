@@ -31,13 +31,14 @@ def _model_entity(**attrs):
 
 
 def _mock_models_client(models, providers=None):
-    """Build a mock ``AsyncModelsClient`` returned by ``client_from_platform``.
+    """Build a mock ``AsyncModelsClient`` for model resolution tests.
 
     ``models`` maps ``(workspace, name)`` to the Model Entity ``get_model`` should
     return. ``get_model`` is an AsyncMock; its awaited result must expose a
     ``.data()`` accessor mirroring ``NemoResponse``.
     """
     client = MagicMock()
+    client._auth = None
     client.default_headers = {}
     client.get_model_entity_route_openai_url.return_value = "http://platform/model/example/-/v1"
     providers = providers or {}
@@ -58,7 +59,7 @@ def _mock_models_client(models, providers=None):
 def _patch_models_client(models, providers=None):
     client = _mock_models_client(models, providers=providers)
     ctx = patch(
-        "nemo_platform_plugin.nooa_model_client.client_from_platform",
+        "nemo_platform_plugin.nooa_model_client.AsyncModelsClient.from_client",
         return_value=client,
     )
     return ctx, client
@@ -258,6 +259,64 @@ async def test_resolve_model_clients_uses_provider_served_name(monkeypatch):
         drop_params=True,
         _skip_responses_api_bridge=True,
     )
+
+
+async def test_resolve_model_clients_refreshes_auth_for_completion_calls(monkeypatch):
+    class _TokenProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def get_access_token(self) -> str:
+            self.calls += 1
+            return f"token-{self.calls}"
+
+    model_entity = _model_entity(
+        workspace="default",
+        name="gpt-4-1",
+        backend_format="OPENAI_CHAT",
+    )
+    ctx, client = _patch_models_client({("default", "gpt-4-1"): model_entity})
+    client.default_headers = {"authorization": "Bearer stale", "x-test": "value"}
+    token_provider = _TokenProvider()
+    client._auth = token_provider
+    captured_headers: list[dict[str, str]] = []
+
+    async def _recording_acall(
+        self,
+        messages: list[dict[str, object]],
+        tools=None,
+        output_model=None,
+        cache_control_injection_points=None,
+        **kwargs,
+    ):
+        captured_headers.append(kwargs["extra_headers"])
+        return MagicMock()
+
+    monkeypatch.setattr(nooa_model_client.CompletionClient, "acall", _recording_acall)
+
+    with ctx:
+        result = await resolve_model_clients(
+            MagicMock(),
+            ConfiguredModelRefs(default="default/gpt-4-1", fast="default/gpt-4-1"),
+        )
+
+    await result.default.acall([{"role": "user", "content": "hello"}], extra_headers={"x-call": "one"})
+    await result.default.acall([{"role": "user", "content": "again"}])
+
+    assert captured_headers == [
+        {
+            "x-test": "value",
+            "accept-encoding": "identity",
+            "x-call": "one",
+            "Authorization": "Bearer token-1",
+        },
+        {
+            "x-test": "value",
+            "accept-encoding": "identity",
+            "Authorization": "Bearer token-2",
+        },
+    ]
+    assert token_provider.calls == 2
 
 
 def test_active_model_clients_are_scoped():

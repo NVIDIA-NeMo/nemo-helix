@@ -8,12 +8,14 @@ unwrapping, pagination, binary, error mapping) without a network."""
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 from nemo_platform_plugin.client.errors import NotFoundError
 from nemo_platform_plugin.jobs.client import AsyncJobsClient, JobsClient
+from nemo_platform_plugin.jobs.spec import PlatformJobSpec
 from nemo_platform_plugin.jobs.types import CreatePlatformJobRequest
 
 BASE = "http://test:8000"
@@ -28,6 +30,17 @@ _JOB_JSON = {
     "platform_spec": {"steps": [{"name": "step-one", "executor": {"provider": "cpu", "container": {"image": "x"}}}]},
     "fileset": "fs-1",
     "status": "created",
+}
+
+_STATUS_JSON = {
+    "id": "job-1",
+    "name": "my-job",
+    "status": "created",
+    "status_details": {},
+    "error_details": None,
+    "steps": [],
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
 }
 
 
@@ -46,10 +59,13 @@ def test_create_job_serializes_body_and_unwraps() -> None:
         )
     )
     client = JobsClient(base_url=BASE, workspace="default", http_client=mock_http)
+    platform_spec = PlatformJobSpec.model_validate(
+        {"steps": [{"name": "step-one", "executor": {"provider": "cpu", "container": {"image": "x"}}}]}
+    )
     body = CreatePlatformJobRequest(
         spec={},
         source="test",
-        platform_spec={"steps": [{"name": "step-one", "executor": {"provider": "cpu", "container": {"image": "x"}}}]},
+        platform_spec=platform_spec,
     )
     resp = client.create_job(body=body)
 
@@ -96,6 +112,108 @@ def test_list_jobs_paginated_items() -> None:
 
     assert len(jobs) == 1
     assert jobs[0].name == "my-job"
+
+
+def test_legacy_list_alias_exposes_data_and_iteration() -> None:
+    mock_http = _mock_http(
+        httpx.Response(
+            200,
+            request=httpx.Request("GET", f"{BASE}/apis/jobs/v2/workspaces/default/jobs"),
+            json={
+                "data": [_JOB_JSON],
+                "pagination": {
+                    "page": 1,
+                    "page_size": 10,
+                    "current_page_size": 1,
+                    "total_pages": 1,
+                    "total_results": 1,
+                },
+            },
+        )
+    )
+    client = JobsClient(base_url=BASE, workspace="default", http_client=mock_http)
+
+    jobs = client.list(filter={"source": "customization"}, page=1, page_size=10)
+
+    assert jobs.data[0].name == "my-job"
+    assert [job.name for job in jobs] == ["my-job"]
+    _, kwargs = mock_http.request.call_args
+    assert json.loads(kwargs["params"]["filter"]) == {"source": "customization"}
+
+
+def test_legacy_list_alias_exposes_stainless_page_helpers_lazily() -> None:
+    next_job_json = {**_JOB_JSON, "id": "job-2", "name": "next-job"}
+    mock_http = MagicMock(spec=httpx.Client)
+    mock_http.request.side_effect = [
+        httpx.Response(
+            200,
+            request=httpx.Request("GET", f"{BASE}/apis/jobs/v2/workspaces/default/jobs"),
+            json={
+                "data": [_JOB_JSON],
+                "pagination": {
+                    "page": 1,
+                    "page_size": 1,
+                    "current_page_size": 1,
+                    "total_pages": 2,
+                    "total_results": 2,
+                },
+            },
+        ),
+        httpx.Response(
+            200,
+            request=httpx.Request("GET", f"{BASE}/apis/jobs/v2/workspaces/default/jobs"),
+            json={
+                "data": [next_job_json],
+                "pagination": {
+                    "page": 2,
+                    "page_size": 1,
+                    "current_page_size": 1,
+                    "total_pages": 2,
+                    "total_results": 2,
+                },
+            },
+        ),
+    ]
+    client = JobsClient(base_url=BASE, workspace="default", http_client=mock_http)
+
+    first_page = next(client.list(page_size=1).iter_pages())
+
+    assert first_page.has_next_page()
+    page_info = first_page.next_page_info()
+    assert page_info is not None
+    assert page_info.params == {"page": 2}
+    assert mock_http.request.call_count == 1
+    next_page = first_page.get_next_page()
+    assert next_page.data[0].name == "next-job"
+    assert mock_http.request.call_count == 2
+
+
+def test_legacy_get_status_alias_unwraps_response() -> None:
+    mock_http = _mock_http(
+        httpx.Response(
+            200,
+            request=httpx.Request("GET", f"{BASE}/apis/jobs/v2/workspaces/default/jobs/my-job/status"),
+            json=_STATUS_JSON,
+        )
+    )
+    client = JobsClient(base_url=BASE, workspace="default", http_client=mock_http)
+
+    status = client.get_status("my-job")
+
+    assert status.name == "my-job"
+    assert status.status == "created"
+
+
+def test_legacy_jobs_type_import_paths_resolve_to_source_owned_models() -> None:
+    from nemo_platform.types import PlatformJobStatusResponse as TopLevelStatusResponse
+    from nemo_platform.types.jobs import PlatformJobStep
+    from nemo_platform.types.shared import PlatformJobStatusResponse as SharedStatusResponse
+    from nemo_platform_plugin.jobs.schemas import PlatformJobStatusResponse
+    from nemo_platform_plugin.jobs.types import PlatformJobStepResponse
+
+    assert PlatformJobStep is PlatformJobStepResponse
+    assert SharedStatusResponse is PlatformJobStatusResponse
+    assert TopLevelStatusResponse is PlatformJobStatusResponse
 
 
 def test_delete_job_returns_none() -> None:
@@ -182,3 +300,80 @@ async def test_async_get_execution_profiles_parses_list_response() -> None:
 
     assert isinstance(profiles, list)
     assert {p.backend for p in profiles} == {"subprocess", "e2e"}
+
+
+@pytest.mark.asyncio
+async def test_async_legacy_list_alias_exposes_awaitable_page_and_iteration() -> None:
+    mock_http = MagicMock(spec=httpx.AsyncClient)
+    mock_http.request = AsyncMock(
+        return_value=httpx.Response(
+            200,
+            request=httpx.Request("GET", f"{BASE}/apis/jobs/v2/workspaces/default/jobs"),
+            json={
+                "data": [_JOB_JSON],
+                "pagination": {
+                    "page": 1,
+                    "page_size": 10,
+                    "current_page_size": 1,
+                    "total_pages": 1,
+                    "total_results": 1,
+                },
+            },
+        )
+    )
+    client = AsyncJobsClient(base_url=BASE, workspace="default", http_client=mock_http)
+
+    page = await client.list(filter={"source": "customization"})
+
+    assert page.data[0].name == "my-job"
+    assert [job.name async for job in client.list(filter={"source": "customization"})] == ["my-job"]
+
+
+@pytest.mark.asyncio
+async def test_async_legacy_list_alias_exposes_stainless_page_helpers_lazily() -> None:
+    next_job_json = {**_JOB_JSON, "id": "job-2", "name": "next-job"}
+    mock_http = MagicMock(spec=httpx.AsyncClient)
+    mock_http.request = AsyncMock(
+        side_effect=[
+            httpx.Response(
+                200,
+                request=httpx.Request("GET", f"{BASE}/apis/jobs/v2/workspaces/default/jobs"),
+                json={
+                    "data": [_JOB_JSON],
+                    "pagination": {
+                        "page": 1,
+                        "page_size": 1,
+                        "current_page_size": 1,
+                        "total_pages": 2,
+                        "total_results": 2,
+                    },
+                },
+            ),
+            httpx.Response(
+                200,
+                request=httpx.Request("GET", f"{BASE}/apis/jobs/v2/workspaces/default/jobs"),
+                json={
+                    "data": [next_job_json],
+                    "pagination": {
+                        "page": 2,
+                        "page_size": 1,
+                        "current_page_size": 1,
+                        "total_pages": 2,
+                        "total_results": 2,
+                    },
+                },
+            ),
+        ]
+    )
+    client = AsyncJobsClient(base_url=BASE, workspace="default", http_client=mock_http)
+
+    first_page = await client.list(page_size=1)
+
+    assert first_page.has_next_page()
+    page_info = first_page.next_page_info()
+    assert page_info is not None
+    assert page_info.params == {"page": 2}
+    assert mock_http.request.call_count == 1
+    next_page = await first_page.get_next_page()
+    assert next_page.data[0].name == "next-job"
+    assert mock_http.request.call_count == 2

@@ -405,7 +405,7 @@ class TestModels:
                     "like": "$like",
                     "nin": ["string"],
                 },
-                "fileset": "fileset",
+                "fileset": True,
                 "finetuning_type": "lora_merged",
                 "lora_enabled": True,
                 "name": {
@@ -890,7 +890,7 @@ class TestAsyncModels:
                     "like": "$like",
                     "nin": ["string"],
                 },
-                "fileset": "fileset",
+                "fileset": True,
                 "finetuning_type": "lora_merged",
                 "lora_enabled": True,
                 "name": {

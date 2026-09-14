@@ -6,14 +6,46 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import TypeVar
+from typing import TypeVar, overload
 
 import httpx
 from nemo_evaluator_sdk.execution.metric_execution import run_sync
-from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
 
 T = TypeVar("T")
 AsyncClientT = TypeVar("AsyncClientT", bound=AsyncNemoClient)
+
+
+@overload
+def as_nemo_client(sdk: NemoClient | NeMoPlatform) -> NemoClient: ...
+@overload
+def as_nemo_client(sdk: None) -> None: ...
+
+
+def as_nemo_client(sdk: NemoClient | NeMoPlatform | None) -> NemoClient | None:
+    """Return *sdk* as a typed :class:`NemoClient`, adapting a generated SDK handle if needed.
+
+    Task containers inject typed clients and the local CLI injects generated ``NeMoPlatform``
+    handles, so a job ``run`` receives either.
+    """
+    if isinstance(sdk, NeMoPlatform):
+        return client_from_platform(sdk, NemoClient)
+    return sdk
+
+
+@overload
+def as_async_nemo_client(async_sdk: AsyncNemoClient | AsyncNeMoPlatform) -> AsyncNemoClient: ...
+@overload
+def as_async_nemo_client(async_sdk: None) -> None: ...
+
+
+def as_async_nemo_client(async_sdk: AsyncNemoClient | AsyncNeMoPlatform | None) -> AsyncNemoClient | None:
+    """Async counterpart of :func:`as_nemo_client`."""
+    if isinstance(async_sdk, AsyncNeMoPlatform):
+        return client_from_platform(async_sdk, AsyncNemoClient)
+    return async_sdk
 
 
 def run_with_isolated_async_client(

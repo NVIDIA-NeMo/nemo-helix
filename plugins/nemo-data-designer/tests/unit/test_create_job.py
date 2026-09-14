@@ -305,7 +305,7 @@ async def test_to_spec_pure_internal_errors_raise_internal_error(monkeypatch: py
         return [NDDInternalError("simulated internal failure")]
 
     monkeypatch.setattr(
-        "data_designer_nemo.context.DataDesignerContext.validate",
+        "data_designer_nemo.context.DataDesignerValidationContext.validate",
         _internal_only,
     )
 

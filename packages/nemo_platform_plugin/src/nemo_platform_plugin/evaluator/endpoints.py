@@ -17,7 +17,7 @@ from __future__ import annotations
 from abc import abstractmethod
 
 from nemo_platform_plugin.client.endpoint import delete, get, post, put
-from nemo_platform_plugin.client.types import BinaryContent, Paginated
+from nemo_platform_plugin.client.types import BinaryContent, CursorPagination, Paginated
 from nemo_platform_plugin.evaluator.types import (
     AgentEvalJob,
     AgentEvalResult,
@@ -27,7 +27,9 @@ from nemo_platform_plugin.evaluator.types import (
     EvalResult,
     EvaluateJob,
     EvaluatorHealth,
+    EvaluatorJobLogsQueryParams,
     FlatQueryParams,
+    HelloResponse,
     ListAgentEvalResultsQueryParams,
     ListEvalResultsQueryParams,
     ListMetricsQueryParams,
@@ -38,19 +40,25 @@ from nemo_platform_plugin.evaluator.types import (
     ProjectQueryParams,
     ReplaceTaskRequest,
     ReplaceTasksetRequest,
+    RetrieveEvalJob,
     Revision,
     RevisionQueryParams,
     SubmitAgentEvalJobRequest,
     SubmitEvaluateJobRequest,
+    SubmitRetrieveEvalJobRequest,
     Task,
     Taskset,
 )
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatusResponse
-from nemo_platform_plugin.jobs.types import ListJobsQueryParams
+from nemo_platform_plugin.jobs.schemas import PlatformJobLog, PlatformJobResultResponse, PlatformJobStatusResponse
+from nemo_platform_plugin.jobs.types import (
+    ListJobsQueryParams,
+    PlatformJobListResultResponse,
+)
 
 _EVAL_BASE = "/apis/evaluator/v2/workspaces/{workspace}"
 _EVAL_JOBS = f"{_EVAL_BASE}/evaluate/jobs"
 _AGENT_EVAL_JOBS = f"{_EVAL_BASE}/agent-evaluate/jobs"
+_RETRIEVE_EVAL_JOBS = f"{_EVAL_BASE}/retrieve-eval/jobs"
 _EVAL_RESULTS = f"{_EVAL_BASE}/eval-results"
 _AGENT_EVAL_RESULTS = f"{_EVAL_BASE}/agent-eval-results"
 _METRICS = f"{_EVAL_BASE}/metrics"
@@ -66,6 +74,11 @@ _TASKSETS = f"{_EVAL_BASE}/tasksets"
 @get("/apis/evaluator/v1/healthz")
 @abstractmethod
 def get_health() -> EvaluatorHealth: ...
+
+
+@get("/apis/evaluator/v1/hello/{name}")
+@abstractmethod
+def hello(*, name: str) -> HelloResponse: ...
 
 
 # ---------------------------------------------------------------------------
@@ -95,19 +108,36 @@ def get_evaluate_job(*, workspace: str | None = None, name: str) -> EvaluateJob:
 def get_evaluate_job_status(*, workspace: str | None = None, name: str) -> PlatformJobStatusResponse: ...
 
 
-@get(f"{_EVAL_JOBS}/{{name}}/results/aggregate-scores/download")
+@delete(f"{_EVAL_JOBS}/{{name}}")
 @abstractmethod
-def download_evaluate_job_aggregate_scores(*, workspace: str | None = None, name: str) -> BinaryContent: ...
+def delete_evaluate_job(*, workspace: str | None = None, name: str) -> None: ...
 
 
-@get(f"{_EVAL_JOBS}/{{name}}/results/row-scores/download")
+@post(f"{_EVAL_JOBS}/{{name}}/cancel")
 @abstractmethod
-def download_evaluate_job_row_scores(*, workspace: str | None = None, name: str) -> BinaryContent: ...
+def cancel_evaluate_job(*, workspace: str | None = None, name: str) -> EvaluateJob: ...
 
 
-@get(f"{_EVAL_JOBS}/{{name}}/results/artifacts/download")
+@get(f"{_EVAL_JOBS}/{{name}}/logs")
 @abstractmethod
-def download_evaluate_job_artifacts(*, workspace: str | None = None, name: str) -> BinaryContent: ...
+def list_evaluate_job_logs(
+    *, workspace: str | None = None, name: str, query_params: EvaluatorJobLogsQueryParams | None = None
+) -> Paginated[PlatformJobLog, CursorPagination]: ...
+
+
+@get(f"{_EVAL_JOBS}/{{name}}/results")
+@abstractmethod
+def list_evaluate_job_results(*, workspace: str | None = None, name: str) -> PlatformJobListResultResponse: ...
+
+
+@get(f"{_EVAL_JOBS}/{{job}}/results/{{name}}")
+@abstractmethod
+def get_evaluate_job_result(*, workspace: str | None = None, job: str, name: str) -> PlatformJobResultResponse: ...
+
+
+@get(f"{_EVAL_JOBS}/{{job}}/results/{{name}}/download")
+@abstractmethod
+def download_evaluate_job_result(*, workspace: str | None = None, job: str, name: str) -> BinaryContent: ...
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +165,99 @@ def get_agent_eval_job(*, workspace: str | None = None, name: str) -> AgentEvalJ
 @get(f"{_AGENT_EVAL_JOBS}/{{name}}/status")
 @abstractmethod
 def get_agent_eval_job_status(*, workspace: str | None = None, name: str) -> PlatformJobStatusResponse: ...
+
+
+@delete(f"{_AGENT_EVAL_JOBS}/{{name}}")
+@abstractmethod
+def delete_agent_eval_job(*, workspace: str | None = None, name: str) -> None: ...
+
+
+@post(f"{_AGENT_EVAL_JOBS}/{{name}}/cancel")
+@abstractmethod
+def cancel_agent_eval_job(*, workspace: str | None = None, name: str) -> AgentEvalJob: ...
+
+
+@get(f"{_AGENT_EVAL_JOBS}/{{name}}/logs")
+@abstractmethod
+def list_agent_eval_job_logs(
+    *, workspace: str | None = None, name: str, query_params: EvaluatorJobLogsQueryParams | None = None
+) -> Paginated[PlatformJobLog, CursorPagination]: ...
+
+
+@get(f"{_AGENT_EVAL_JOBS}/{{name}}/results")
+@abstractmethod
+def list_agent_eval_job_results(*, workspace: str | None = None, name: str) -> PlatformJobListResultResponse: ...
+
+
+@get(f"{_AGENT_EVAL_JOBS}/{{job}}/results/{{name}}")
+@abstractmethod
+def get_agent_eval_job_result(*, workspace: str | None = None, job: str, name: str) -> PlatformJobResultResponse: ...
+
+
+@get(f"{_AGENT_EVAL_JOBS}/{{job}}/results/{{name}}/download")
+@abstractmethod
+def download_agent_eval_job_result(*, workspace: str | None = None, job: str, name: str) -> BinaryContent: ...
+
+
+# ---------------------------------------------------------------------------
+# Retrieve-eval jobs
+# ---------------------------------------------------------------------------
+
+
+@post(_RETRIEVE_EVAL_JOBS)
+@abstractmethod
+def submit_retrieve_eval_job(
+    *, workspace: str | None = None, body: SubmitRetrieveEvalJobRequest
+) -> RetrieveEvalJob: ...
+
+
+@get(_RETRIEVE_EVAL_JOBS)
+@abstractmethod
+def list_retrieve_eval_jobs(
+    *, workspace: str | None = None, query_params: ListJobsQueryParams | FlatQueryParams | None = None
+) -> Paginated[RetrieveEvalJob]: ...
+
+
+@get(f"{_RETRIEVE_EVAL_JOBS}/{{name}}")
+@abstractmethod
+def get_retrieve_eval_job(*, workspace: str | None = None, name: str) -> RetrieveEvalJob: ...
+
+
+@get(f"{_RETRIEVE_EVAL_JOBS}/{{name}}/status")
+@abstractmethod
+def get_retrieve_eval_job_status(*, workspace: str | None = None, name: str) -> PlatformJobStatusResponse: ...
+
+
+@delete(f"{_RETRIEVE_EVAL_JOBS}/{{name}}")
+@abstractmethod
+def delete_retrieve_eval_job(*, workspace: str | None = None, name: str) -> None: ...
+
+
+@post(f"{_RETRIEVE_EVAL_JOBS}/{{name}}/cancel")
+@abstractmethod
+def cancel_retrieve_eval_job(*, workspace: str | None = None, name: str) -> RetrieveEvalJob: ...
+
+
+@get(f"{_RETRIEVE_EVAL_JOBS}/{{name}}/logs")
+@abstractmethod
+def list_retrieve_eval_job_logs(
+    *, workspace: str | None = None, name: str, query_params: EvaluatorJobLogsQueryParams | None = None
+) -> Paginated[PlatformJobLog, CursorPagination]: ...
+
+
+@get(f"{_RETRIEVE_EVAL_JOBS}/{{name}}/results")
+@abstractmethod
+def list_retrieve_eval_job_results(*, workspace: str | None = None, name: str) -> PlatformJobListResultResponse: ...
+
+
+@get(f"{_RETRIEVE_EVAL_JOBS}/{{job}}/results/{{name}}")
+@abstractmethod
+def get_retrieve_eval_job_result(*, workspace: str | None = None, job: str, name: str) -> PlatformJobResultResponse: ...
+
+
+@get(f"{_RETRIEVE_EVAL_JOBS}/{{job}}/results/{{name}}/download")
+@abstractmethod
+def download_retrieve_eval_job_result(*, workspace: str | None = None, job: str, name: str) -> BinaryContent: ...
 
 
 # ---------------------------------------------------------------------------

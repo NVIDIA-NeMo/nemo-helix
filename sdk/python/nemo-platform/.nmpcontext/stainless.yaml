@@ -240,6 +240,7 @@ resources:
       fileset_file: FilesetFileOutput
       fileset_outputs_page: FilesetOutputsPage
       fileset_purpose: FilesetPurpose
+      github_storage_config: GithubStorageConfig
       huggingface_storage_config: HuggingfaceStorageConfig
       list_fileset_files_response: ListFilesetFilesResponse
       local_storage_config: LocalStorageConfig
@@ -263,6 +264,7 @@ resources:
           retrieve: get /apis/files/v2/workspaces/{workspace}/filesets/{name}
           delete: delete /apis/files/v2/workspaces/{workspace}/filesets/{name}
           update: patch /apis/files/v2/workspaces/{workspace}/filesets/{name}
+          refresh: post /apis/files/v2/workspaces/{workspace}/filesets/{name}/refresh
       otlp:
         subresources:
           logs:
@@ -518,96 +520,6 @@ resources:
               delete: delete /apis/inference-gateway/v2/workspaces/{workspace}/provider/{name}/-/{trailing_uri}
               patch: patch /apis/inference-gateway/v2/workspaces/{workspace}/provider/{name}/-/{trailing_uri}
               ready: get /apis/inference-gateway/v2/workspaces/{workspace}/provider/{name}/ready
-  jobs:
-    standalone_api: true
-    models:
-      compute_resource_spec: ComputeResourceSpec
-      compute_resources: ComputeResources
-      container_spec: ContainerSpec
-      cpu_execution_provider: CPUExecutionProvider
-      create_platform_job_request: CreatePlatformJobRequest
-      distributed_gpu_execution_provider: DistributedGPUExecutionProvider
-      docker_job_execution_profile: DockerJobExecutionProfile
-      docker_job_execution_profile_config: DockerJobExecutionProfileConfig
-      docker_job_network_config: DockerJobNetworkConfig
-      docker_job_storage_config: DockerJobStorageConfig
-      docker_volume_mount: DockerVolumeMount
-      e2e_job_execution_profile: E2EJobExecutionProfile
-      gpu_execution_provider: GPUExecutionProvider
-      image_pull_secret: ImagePullSecret
-      job_execution_profile_config: JobExecutionProfileConfig
-      kubernetes_config_map_volume: KubernetesConfigMapVolume
-      kubernetes_empty_dir_volume: KubernetesEmptyDirVolume
-      kubernetes_job_execution_profile: KubernetesJobExecutionProfile
-      kubernetes_job_execution_profile_config: KubernetesJobExecutionProfileConfig
-      kubernetes_job_storage_config: KubernetesJobStorageConfig
-      kubernetes_key_to_path: KubernetesKeyToPath
-      kubernetes_object_metadata: KubernetesObjectMetadata
-      kubernetes_persistent_volume_claim: KubernetesPersistentVolumeClaim
-      kubernetes_secret_volume: KubernetesSecretVolume
-      kubernetes_volume: KubernetesVolume
-      kubernetes_volume_mount: KubernetesVolumeMount
-      kubernetes_workload_identity_config: KubernetesWorkloadIdentityConfig
-      platform_job_environment_variable: PlatformJobEnvironmentVariable
-      platform_job_list_sort_field: PlatformJobListSortField
-      platform_job_response: PlatformJobResponse
-      platform_job_responses_page: PlatformJobResponsesPage
-      platform_job_secret: PlatformJobSecret
-      platform_job_secret_environment_variable_ref: PlatformJobSecretEnvironmentVariableRef
-      platform_job_sort_field: PlatformJobSortField
-      platform_job_spec: PlatformJobSpec
-      platform_job_step_spec: PlatformJobStepSpec
-      platform_jobs_list_filter: PlatformJobsListFilter
-      step_lifecycle: StepLifecycle
-      subprocess_execution_provider: SubprocessExecutionProvider
-      subprocess_job_execution_profile: SubprocessJobExecutionProfile
-      subprocess_job_execution_profile_config: SubprocessJobExecutionProfileConfig
-      volcano_job_execution_profile: VolcanoJobExecutionProfile
-      volcano_job_execution_profile_config: VolcanoJobExecutionProfileConfig
-    methods:
-      create: post /apis/jobs/v2/workspaces/{workspace}/jobs
-      list: get /apis/jobs/v2/workspaces/{workspace}/jobs
-      retrieve: get /apis/jobs/v2/workspaces/{workspace}/jobs/{name}
-      delete: delete /apis/jobs/v2/workspaces/{workspace}/jobs/{name}
-      cancel: post /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/cancel
-      pause: post /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/pause
-      resume: post /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/resume
-      get_logs:
-        endpoint: get /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/logs
-        paginated: true
-      get_status: get /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/status
-      list_execution_profiles: get /apis/jobs/v2/execution-profiles
-      update_status_details: patch /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/status-details
-    subresources:
-      results:
-        models:
-          platform_job_result_create_request: PlatformJobResultCreateRequest
-        methods:
-          list: get /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/results
-          retrieve: get /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}
-          create: post /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}
-          download: get /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/results/{name}/download
-      steps:
-        models:
-          platform_job_status_update_request: PlatformJobStatusUpdateRequest
-          platform_job_step: PlatformJobStep
-          platform_job_step_with_context: PlatformJobStepWithContext
-          platform_job_step_with_contexts_page: PlatformJobStepWithContextsPage
-          platform_job_steps_list_filter: PlatformJobStepsListFilter
-        methods:
-          list: get /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/steps
-          retrieve: get /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/steps/{name}
-          update_status: patch /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/steps/{name}/status
-      tasks:
-        models:
-          platform_job_list_task_response: PlatformJobListTaskResponse
-          platform_job_task: PlatformJobTask
-          platform_job_task_update: PlatformJobTaskUpdate
-        methods:
-          list: get /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/steps/{name}/tasks
-          retrieve: get /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/steps/{step}/tasks/{name}
-          create_or_update: put /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/steps/{step}/tasks/{name}
-
   models:
     standalone_api: true
     models:
@@ -672,27 +584,6 @@ resources:
           results:
             models: {}
             methods: {}
-  secrets:
-    standalone_api: true
-    models:
-      platform_secret_access_response: PlatformSecretAccessResponse
-      platform_secret_create_request: PlatformSecretCreateRequest
-      platform_secret_response: PlatformSecretResponse
-      platform_secret_responses_page: PlatformSecretResponsesPage
-      platform_secret_update_request: PlatformSecretUpdateRequest
-    methods:
-      create: post /apis/secrets/v2/workspaces/{workspace}/secrets
-      list: get /apis/secrets/v2/workspaces/{workspace}/secrets
-      retrieve: get /apis/secrets/v2/workspaces/{workspace}/secrets/{name}
-      update: patch /apis/secrets/v2/workspaces/{workspace}/secrets/{name}
-      delete: delete /apis/secrets/v2/workspaces/{workspace}/secrets/{name}
-      access: get /apis/secrets/v2/workspaces/{workspace}/secrets/{name}/access
-    subresources:
-      admin:
-        models:
-          platform_secret_admin_rotation_response: PlatformSecretAdminRotationResponse
-        methods:
-          rotate_encryption_keys: post /apis/secrets/v2/rotate-encryption-keys
   $shared:
     models:
       validation_error: ValidationError
@@ -712,10 +603,6 @@ resources:
       delete_response: DeleteResponse
       datetime_filter: DatetimeFilter
       string_filter: StringFilter
-      platform_job_status: PlatformJobStatus
-      file_storage_type: FileStorageType
-      platform_job_result_response: PlatformJobResultResponse
-      platform_job_list_result_response: PlatformJobListResultResponse
       linear_layer_spec: LinearLayerSpec
       mamba_config: MambaConfig
       mo_e_config: MoEConfig
@@ -723,11 +610,6 @@ resources:
       model_spec: ModelSpec
       platform_job_log: PlatformJobLog
       platform_job_log_page: PlatformJobLogPage
-      platform_job_step_status_response: PlatformJobStepStatusResponse
-      platform_job_task_status_response: PlatformJobTaskStatusResponse
-      platform_job_status_response: PlatformJobStatusResponse
-      oidc_discovery_response: OIDCDiscoveryResponse
-      auth_discovery_response: AuthDiscoveryResponse
       auth_context: AuthContext
       tool_call_config: ToolCallConfig
       model_metadata_content: ModelMetadataContent
@@ -744,26 +626,6 @@ resources:
       tool_calling_metadata_content: ToolCallingMetadataContent
       backend_format: BackendFormat
       finetuning_type: FinetuningType
-      workload_token_exchange_response: WorkloadTokenExchangeResponse
-      workload_token_exchange_error_response: WorkloadTokenExchangeErrorResponse
-      json_web_key: JsonWebKey
-      json_web_key_set_response: JsonWebKeySetResponse
-
-  iam:
-    standalone_api: true
-    subresources:
-      role_bindings:
-        models:
-          date_range_filter: DateRangeFilter
-          role_binding: RoleBinding
-          role_binding_filter: RoleBindingFilter
-          role_binding_param: RoleBindingInput
-          role_bindings_page: RoleBindingsPage
-        methods:
-          list: get /apis/auth/v2/iam/role-bindings
-          create: post /apis/auth/v2/iam/role-bindings
-          retrieve: get /apis/auth/v2/iam/role-bindings/{name}
-          delete: delete /apis/auth/v2/iam/role-bindings/{name}
 
   projects:
     standalone_api: true
@@ -967,31 +829,3 @@ resources:
       retrieve: get /apis/intake/v2/workspaces/{workspace}/experiments/{name}
       update: put /apis/intake/v2/workspaces/{workspace}/experiments/{name}
       delete: delete /apis/intake/v2/workspaces/{workspace}/experiments/{name}
-  auth:
-    standalone_api: true
-    models:
-      authenticate_error_response: AuthenticateErrorResponse
-      authenticate_response: AuthenticateResponse
-    methods:
-      authenticate_get: get /apis/auth/authenticate
-      authenticate: post /apis/auth/authenticate
-  access_keys:
-    standalone_api: true
-    models:
-      access_key_create_request: AccessKeyCreateRequest
-      access_key_create_response: AccessKeyCreateResponse
-      access_key_error_response: AccessKeyErrorResponse
-      access_key_list_response: AccessKeyListResponse
-      access_key_metadata_response: AccessKeyMetadataResponse
-      access_key_not_implemented_error_response: AccessKeyNotImplementedErrorResponse
-      access_key_revoke_response: AccessKeyRevokeResponse
-      access_key_rotate_request: AccessKeyRotateRequest
-      access_key_rotate_response: AccessKeyRotateResponse
-      access_key_status_change_response: AccessKeyStatusChangeResponse
-    methods:
-      list: get /apis/auth/v2/access-keys
-      create: post /apis/auth/v2/access-keys
-      delete: delete /apis/auth/v2/access-keys/{jti}
-      suspend: post /apis/auth/v2/access-keys/{jti}/suspend
-      unsuspend: post /apis/auth/v2/access-keys/{jti}/unsuspend
-      rotate: post /apis/auth/v2/access-keys/{jti}/rotate

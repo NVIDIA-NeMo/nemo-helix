@@ -6,15 +6,19 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from types import ModuleType
+from typing import Any, Iterator
 
+from nmp.customization_common.service.constants import SANDBOX_DATASET_PATH
 from nmp.rl.tasks.environment.allowlist import DEFAULT_ADAPTER_AGENT
 from nmp.rl.tasks.environment.package import (
     ConvertedPackage,
@@ -25,6 +29,8 @@ from nmp.rl.tasks.environment.package import (
     write_dataset_jsonl,
 )
 from nmp.rl.tasks.environment.validate import validate_dataset_rows
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name, parse_wheel_filename
 from packaging.version import InvalidVersion, Version
 
 logger = logging.getLogger(__name__)
@@ -32,14 +38,8 @@ logger = logging.getLogger(__name__)
 PRIME_HUB_SIMPLE_INDEX = "https://hub.primeintellect.ai/primeintellect/simple/"
 DEFAULT_VERIFIERS_SPEC = "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@v0.1.14"
 
-# The closure is consumed by the Gym server venvs inside the training image, NOT by the
-# host running this conversion. Resolving and downloading for the host is what ships an
-# arm64 macOS wheel to a linux/amd64 cluster, where it fails at install with
-# "cffi==2.1.1 has no wheels with a matching platform tag".
-#
-# pip needs the concrete wheel tags it should accept; several are listed because pip
-# matches them literally and projects build against different glibc floors. uv takes its
-# own platform vocabulary for the resolution step.
+# Training image is linux/amd64; resolve and download for that, not this host.
+# pip matches --platform tags literally, so several glibc floors are listed.
 TARGET_WHEEL_PLATFORMS = (
     "manylinux_2_39_x86_64",
     "manylinux_2_28_x86_64",
@@ -47,33 +47,31 @@ TARGET_WHEEL_PLATFORMS = (
     "manylinux2014_x86_64",
 )
 TARGET_UV_PLATFORM = "x86_64-unknown-linux-gnu"
-# Matches the interpreter the training image builds Gym server venvs with; Gym takes it
-# from platform.python_version() of the gym host (nemo_gym.global_config).
-TARGET_PYTHON_VERSION = "3.13"
-# A wheel is portable to the target if it is pure Python or built for linux x86_64.
+TARGET_PYTHON_VERSION = "3.13"  # Gym venv Python in the training image
 _TARGET_PLATFORM_TAG_RE = re.compile(r"^(any|linux_x86_64|manylinux[0-9_.]*_x86_64)$")
+
+# Snapshot of the hub env's HF dataset, mounted at SANDBOX_DATASET_PATH.
+HUB_ENV_DATASET_FILENAME = "hub_environment.parquet"
+DATASET_PATH_ARG = "dataset_path"
+# Isolated Hugging Face cache from convert, for loaders that ignore dataset_path.
+HUB_ENV_HF_CACHE_DIRNAME = ".huggingface"
 
 
 @dataclass(frozen=True)
 class ConvertEnvironmentSpec:
     hub_id: str
     out_dir: Path
-    # Exact hub release to vendor, e.g. "0.1.5". Unset takes whatever the index resolves
-    # to, which is a moving target: a hub package can publish a release that narrows
-    # Requires-Python and drop the interpreter the training image runs, breaking a
-    # conversion that worked yesterday with no local change.
-    hub_version: str | None = None
+    hub_version: str | None = None  # pin the hub release; unset follows the index
     dataset_dir: Path | None = None
     vf_env_id: str | None = None
-    vf_env_args: dict[str, Any] | None = None
+    vf_env_args: dict[str, Any] | None = None  # host-side load args; dataset_path is overwritten
     adapter_agent: str = DEFAULT_ADAPTER_AGENT
     dataset_size: int = -1
     dataset_seed: int | None = None
     validation_fraction: float = 0.0
     verifiers_spec: str = DEFAULT_VERIFIERS_SPEC
     extra_wheels: tuple[str, ...] = ()
-    # Pre-vendored wheels for air-gapped hosts; must contain at least one *.whl.
-    wheels_dir: Path | None = None
+    wheels_dir: Path | None = None  # pre-vendored *.whl; required non-empty if set
 
 
 def _compile_pinned_requirements(
@@ -82,19 +80,7 @@ def _compile_pinned_requirements(
     *,
     extra_index_url: str | None = None,
 ) -> Path:
-    """Resolve ``packages`` to a fully pinned requirements file.
-
-    Split out from the download because ``pip download`` resolves *while* fetching and
-    keeps every candidate it pulled, including versions its resolver later backtracked
-    away from. The result is a ``wheels/`` tree carrying two versions of the same
-    distribution, which the cluster-side installer then cannot satisfy:
-
-        Because you require xxhash==3.8.1 and xxhash==4.0.0, we can conclude
-        that your requirements are unsatisfiable.
-
-    Resolving first yields exactly one pin per distribution, and the download below runs
-    with ``--no-deps`` so nothing else can creep in.
-    """
+    """Pin ``packages`` before download so ``pip download --no-deps`` cannot vendor duplicates."""
     work_dir.mkdir(parents=True, exist_ok=True)
     requirements_in = work_dir / "requirements.in"
     requirements_in.write_text("\n".join(packages) + "\n", encoding="utf-8")
@@ -107,33 +93,16 @@ def _compile_pinned_requirements(
         "--output-file",
         str(pinned),
         "--no-header",
-        # Resolve in isolation from THIS repo. uv discovers the nearest pyproject.toml and
-        # applies its [tool.uv] policy, and nemo-platform's exists for the platform's own
-        # CVE posture -- e.g. an `openai>=2.26.0` override. An override REPLACES a
-        # dependency's declared requirement, so openai-agents' `openai>=2.45.0,<3` loses
-        # its upper bound here and the closure vendors openai 3.0.0. Nothing applies those
-        # overrides on the cluster, so the package is unsatisfiable the moment it lands:
-        # "Because openai-agents==0.20.0 depends on openai>=2.45.0,<3 and you require
-        # openai==3.0.0 ... your requirements are unsatisfiable".
-        "--no-config",
-        # Resolve for the TARGET, not this host. Markers are evaluated during resolution,
-        # so a host-targeted resolve can pull in a darwin-only dependency and omit a
-        # linux-only one -- a closure that is wrong before a single wheel is fetched.
+        "--no-config",  # ignore this repo's uv overrides; they are not applied on the cluster
         "--python-platform",
         TARGET_UV_PLATFORM,
         "--python-version",
         TARGET_PYTHON_VERSION,
     ]
     if extra_index_url:
-        # unsafe-best-match matches what `pip download --extra-index-url` already did:
-        # pip merges indexes, while uv's default first-index strategy would stop at the
-        # first index carrying a name. Changing that here would silently repin packages.
         cmd.extend(["--extra-index-url", extra_index_url, "--index-strategy", "unsafe-best-match"])
     logger.info("Running: %s", " ".join(cmd))
     subprocess.run(cmd, check=True)
-    # Echo the resolution. It is the record of exactly what got vendored, and when the
-    # download step then fails on one of these pins -- a hub release that narrowed its
-    # Requires-Python, most often -- this is what says which package and which version.
     logger.info("Resolved closure:\n%s", pinned.read_text(encoding="utf-8").strip())
     return pinned
 
@@ -144,15 +113,7 @@ def _run_pip_download(
     requirements_file: Path,
     extra_index_url: str | None = None,
 ) -> None:
-    """Vendor wheels via ``pip download`` using this process's interpreter.
-
-    ``pip`` is a declared ``nmp-rl`` dependency so the synced env can run
-    ``python -m pip`` without nested ``uv run`` bootstraps.
-
-    ``--no-deps`` is what keeps the output one-file-per-distribution: the requirements
-    file is already the complete resolved closure, so any dependency walk here could only
-    re-introduce the duplicates :func:`_compile_pinned_requirements` exists to avoid.
-    """
+    """Download the already-pinned closure with ``pip download --no-deps``."""
     dest.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable,
@@ -166,9 +127,6 @@ def _run_pip_download(
         "--python-version",
         TARGET_PYTHON_VERSION,
     ]
-    # Repeated --platform: pip matches these tags literally rather than expanding a
-    # compatibility range, so a project that only publishes against an older glibc floor
-    # is missed unless its tag is named here.
     for platform_tag in TARGET_WHEEL_PLATFORMS:
         cmd.extend(["--platform", platform_tag])
     cmd.extend(["-r", str(requirements_file)])
@@ -178,29 +136,78 @@ def _run_pip_download(
     subprocess.run(cmd, check=True)
 
 
-def _wheel_platform_tags(wheel: Path) -> list[str]:
-    """Platform tags a wheel declares, e.g. ``manylinux2014_x86_64.manylinux_2_17_x86_64``."""
-    return wheel.stem.rsplit("-", 1)[-1].split(".")
+def _build_downloaded_sdists(wheels_dir: Path) -> None:
+    """Build source artifacts with the training image's Python while the host has egress."""
+    sdists = sorted(path for path in wheels_dir.iterdir() if path.is_file() and path.suffix != ".whl")
+    for sdist in sdists:
+        cmd = [
+            "uv",
+            "run",
+            "--no-project",
+            "--python",
+            TARGET_PYTHON_VERSION,
+            "--with",
+            "pip",
+            "python",
+            "-m",
+            "pip",
+            "wheel",
+            "--wheel-dir",
+            str(wheels_dir),
+            "--no-deps",
+            str(sdist),
+        ]
+        logger.info("Building wheel from source artifact: %s", " ".join(cmd))
+        subprocess.run(cmd, check=True)
+        sdist.unlink()
+
+
+def _assert_complete_wheel_closure(wheels_dir: Path, requirements_file: Path) -> None:
+    """Ensure every pinned distribution has a wheel in the package."""
+    required = {
+        canonicalize_name(Requirement(line).name)
+        for raw_line in requirements_file.read_text(encoding="utf-8").splitlines()
+        if (line := raw_line.strip()) and not line.startswith(("#", "-"))
+    }
+    provided = {canonicalize_name(str(parse_wheel_filename(wheel.name)[0])) for wheel in wheels_dir.glob("*.whl")}
+    missing = sorted(required - provided)
+    if missing:
+        raise RuntimeError(
+            "adapter-wheels-v1 requires a complete offline wheel closure; "
+            f"no wheel was produced for: {', '.join(missing)}"
+        )
+
+
+def _tag_targets_training_image(interpreter: str, abi: str, platform: str) -> bool:
+    """Whether one wheel tag is compatible with the CPython 3.13 linux/amd64 runtime."""
+    if not _TARGET_PLATFORM_TAG_RE.fullmatch(platform):
+        return False
+
+    target_major, target_minor = (int(part) for part in TARGET_PYTHON_VERSION.split(".", 1))
+    target = f"{target_major}{target_minor}"
+    if abi == "none":
+        return interpreter in {f"cp{target}", f"py{target}", f"py{target_major}"}
+    if interpreter == f"cp{target}" and abi in {f"cp{target}", "abi3"}:
+        return True
+    if abi != "abi3":
+        return False
+
+    match = re.fullmatch(r"cp(\d)(\d+)", interpreter)
+    return bool(match and int(match.group(1)) == target_major and int(match.group(2)) <= target_minor)
 
 
 def assert_wheels_target_platform(wheels_dir: Path) -> None:
-    """Fail if anything in the closure cannot install on the training image.
-
-    The consumer is a linux/amd64 sandbox with no index and no compiler budget, so a
-    macOS or Windows wheel there is unusable. Checked locally because the alternative is
-    finding out from a cluster job several minutes in, as an opaque
-    ``no wheels with a matching platform tag`` from the resolver.
-    """
-    foreign: dict[str, list[str]] = {}
+    """Reject wheels whose Python, ABI, or platform tags miss the training image."""
+    incompatible: dict[str, list[str]] = {}
     for wheel in sorted(wheels_dir.glob("*.whl")):
-        tags = _wheel_platform_tags(wheel)
-        if not any(_TARGET_PLATFORM_TAG_RE.match(tag) for tag in tags):
-            foreign[wheel.name] = tags
-    if foreign:
-        listed = "\n  ".join(f"{name} -> {', '.join(tags)}" for name, tags in foreign.items())
+        tags = parse_wheel_filename(wheel.name)[3]
+        if not any(_tag_targets_training_image(tag.interpreter, tag.abi, tag.platform) for tag in tags):
+            incompatible[wheel.name] = sorted(str(tag) for tag in tags)
+    if incompatible:
+        listed = "\n  ".join(f"{name} -> {', '.join(tags)}" for name, tags in incompatible.items())
         raise RuntimeError(
-            f"{len(foreign)} vendored wheel(s) are not installable on the training image "
-            f"(expected pure-Python or linux x86_64):\n  {listed}"
+            f"{len(incompatible)} vendored wheel(s) are not installable on the training image "
+            f"(expected Python {TARGET_PYTHON_VERSION} linux/amd64):\n  {listed}"
         )
 
 
@@ -209,12 +216,7 @@ def download_hub_wheels(
     *,
     work_dir: Path,
 ) -> Path:
-    """Vendor transitive wheel closure for hub env + verifiers.
-
-    ``adapter-wheels-v1`` always requires a non-empty ``wheels/`` tree. Either
-    copy from ``spec.wheels_dir`` or download from the hub index — never emit
-    an empty/stub package.
-    """
+    """Copy ``spec.wheels_dir`` or download the hub env + verifiers closure."""
     wheels_dir = work_dir / "wheels"
     if spec.wheels_dir is not None:
         src_wheels = sorted(spec.wheels_dir.glob("*.whl"))
@@ -233,24 +235,13 @@ def download_hub_wheels(
     packages = [spec.verifiers_spec, hub_requirement, *spec.extra_wheels]
     pinned = _compile_pinned_requirements(work_dir, packages, extra_index_url=PRIME_HUB_SIMPLE_INDEX)
     _run_pip_download(wheels_dir, requirements_file=pinned, extra_index_url=PRIME_HUB_SIMPLE_INDEX)
+    _build_downloaded_sdists(wheels_dir)
     downloaded = sorted(wheels_dir.glob("*.whl"))
     if not downloaded:
         raise RuntimeError(
             f"pip download produced no wheels for {packages!r}; adapter-wheels-v1 requires a wheel closure"
         )
-    # Targeting a foreign platform stops pip building sdists, so anything without a wheel
-    # on the index -- and the git-sourced verifiers -- arrives as a source archive, which
-    # the wheels-only package format then drops. Say so: these have to come from the Gym
-    # server's own requirements.txt when it builds its venv, which is where verifiers
-    # already comes from today.
-    sdists = sorted(p.name for p in wheels_dir.iterdir() if p.is_file() and p.suffix != ".whl")
-    if sdists:
-        logger.warning(
-            "Not vendoring %d source-only artifact(s): %s. They are excluded from the "
-            "package and must be satisfied when the Gym server venv is built.",
-            len(sdists),
-            ", ".join(sdists),
-        )
+    _assert_complete_wheel_closure(wheels_dir, pinned)
     assert_wheels_target_platform(wheels_dir)
     return wheels_dir
 
@@ -264,36 +255,127 @@ def _wheel_version(path: Path) -> Version:
         return Version("0")
 
 
-def _install_hub_package_from_wheels(wheels_dir: Path, package_name: str) -> None:
-    """Install the hub env package so ``verifiers.load_environment`` can resolve it."""
+def _hub_package_wheel(wheels_dir: Path, package_name: str) -> Path:
+    """Pick the hub env wheel the cluster will install (highest parsed version)."""
     candidates = sorted(wheels_dir.glob(f"{package_name}-*.whl"))
     if not candidates:
         dashed = package_name.replace("_", "-")
         candidates = sorted(wheels_dir.glob(f"{dashed}-*.whl"))
     if not candidates:
         raise RuntimeError(f"No wheel for hub package {package_name!r} under {wheels_dir}; cannot load dataset")
-    # Filename order is lexicographic, which puts 0.9.0 after 0.10.0 — pick by parsed
-    # version so host-side dataset generation uses the same build the cluster installs.
-    whl = max(candidates, key=_wheel_version)
-    # Resolve dependencies from the vendored closure rather than skipping them: the hub
-    # package's own imports run during dataset generation, and --no-deps leaves them missing
-    # unless the caller's environment happens to already carry them. --no-index keeps the
-    # install offline and pinned to exactly what the cluster will get. --force-reinstall is
-    # deliberately absent -- with --find-links it would reinstall the whole dependency tree,
-    # and the wheel is already selected by exact parsed version.
+    return max(candidates, key=_wheel_version)
+
+
+def _sandbox_hub_dataset_path(filename: str = HUB_ENV_DATASET_FILENAME) -> str:
+    return f"{SANDBOX_DATASET_PATH.rstrip('/')}/{filename}"
+
+
+@contextmanager
+def _isolated_hf_home(hf_home: Path) -> Iterator[Path]:
+    """Point Hugging Face cache settings at ``hf_home`` for the duration of the block.
+
+    Conversion must not copy the developer's ``~/.cache/huggingface``; loaders
+    populate this temp home, which is then snapshotted into the dataset FileSet.
+    Hub and datasets libraries cache these settings at import, so update any
+    already-imported constants as well as the process environment.
+    """
+    hf_home.mkdir(parents=True, exist_ok=True)
+    cache_paths = {
+        "HF_HOME": hf_home,
+        "HF_HUB_CACHE": hf_home / "hub",
+        "HF_DATASETS_CACHE": hf_home / "datasets",
+    }
+    previous_env = {name: os.environ.get(name) for name in cache_paths}
+    for name, path in cache_paths.items():
+        os.environ[name] = str(path)
+
+    cached_constants: list[tuple[ModuleType, str, object]] = []
+    for module_name, names in (
+        ("huggingface_hub.constants", ("HF_HOME", "HF_HUB_CACHE")),
+        ("datasets.config", ("HF_DATASETS_CACHE",)),
+    ):
+        module = sys.modules.get(module_name)
+        if not isinstance(module, ModuleType):
+            continue
+        for name in names:
+            if not hasattr(module, name):
+                continue
+            previous = getattr(module, name)
+            cached_constants.append((module, name, previous))
+            path = cache_paths[name]
+            setattr(module, name, Path(path) if isinstance(previous, Path) else str(path))
+    try:
+        yield hf_home
+    finally:
+        for module, name, previous in reversed(cached_constants):
+            setattr(module, name, previous)
+        for name, previous in previous_env.items():
+            if previous is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = previous
+
+
+def snapshot_huggingface_home(hf_home: Path, dataset_dir: Path) -> Path | None:
+    """Copy the isolated Hugging Face home into ``dataset_dir/.huggingface``."""
+    if not hf_home.is_dir() or not any(hf_home.iterdir()):
+        logger.warning(
+            "isolated HF_HOME at %s is empty after load_environment; "
+            "not writing %s (parquet dataset_path remains the primary contract)",
+            hf_home,
+            HUB_ENV_HF_CACHE_DIRNAME,
+        )
+        return None
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    dest = dataset_dir / HUB_ENV_HF_CACHE_DIRNAME
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(hf_home, dest)
+    logger.info("Snapshotted isolated Hugging Face cache to %s", dest)
+    return dest
+
+
+def vendor_hub_environment_dataset(env: Any, dataset_dir: Path) -> Path:
+    """Write the hub env's Hugging Face dataset into the dataset FileSet as parquet."""
+    dataset = getattr(env, "dataset", None)
+    if dataset is None:
+        raise RuntimeError(
+            "hub environment has no .dataset to vendor into the dataset FileSet; "
+            "the Gym sandbox would otherwise call Hugging Face at load_environment()"
+        )
+    if not hasattr(dataset, "to_parquet"):
+        raise RuntimeError(f"hub environment dataset type {type(dataset)!r} cannot be written as parquet")
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    dest = dataset_dir / HUB_ENV_DATASET_FILENAME
+    dataset.to_parquet(str(dest))
+    if not dest.is_file() or dest.stat().st_size == 0:
+        raise RuntimeError(f"failed to vendor hub environment dataset to {dest}")
+    logger.info("Vendored hub environment dataset to %s (%d bytes)", dest, dest.stat().st_size)
+    return dest
+
+
+def _install_hub_package_from_wheels(wheels_dir: Path, package_name: str) -> None:
+    """Install only the hub env wheel so ``load_environment`` can import it.
+
+    ``--no-deps`` because ``verifiers`` comes from the conversion extra, and the
+    download dir can still contain sdists (e.g. ``verifiers-*.zip``) that pip would
+    otherwise try to build, needing hatchling and failing ``--no-index``.
+    """
+    whl = _hub_package_wheel(wheels_dir, package_name)
     cmd = [
         sys.executable,
         "-m",
         "pip",
         "install",
         "--no-index",
-        f"--find-links={wheels_dir}",
+        "--no-deps",
         str(whl),
     ]
     logger.warning(
         "Installing untrusted hub package %s into the active interpreter at %s. This "
         "mutates that environment (it will no longer match uv.lock) and the package stays "
-        "importable afterwards. Run pi-to-gym-conversion in a throwaway venv if that matters.",
+        "importable afterwards. Run pi-to-gym-conversion from a dedicated conversion "
+        "environment rather than the repo .venv if that matters.",
         whl.name,
         sys.executable,
     )
@@ -301,24 +383,28 @@ def _install_hub_package_from_wheels(wheels_dir: Path, package_name: str) -> Non
     subprocess.run(cmd, check=True)
 
 
-def _load_verifiers_dataset_rows(
+def _load_verifiers_environment(vf_env_id: str, vf_env_args: dict[str, Any]) -> Any:
+    try:
+        import verifiers as vf  # ty: ignore[unresolved-import]  # conversion extra, absent from uv.lock
+    except ImportError as exc:
+        raise RuntimeError(
+            "verifiers is required for pi-to-gym-conversion dataset generation; it lives in "
+            "the optional `conversion` extra. Sync it into a dedicated environment, not the "
+            "repo .venv, which every `flox activate` prunes back to uv.lock: "
+            "`UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nmp-rl "
+            "--extra conversion`, then run `.venv-conversion/bin/pi-to-gym-conversion`"
+        ) from exc
+
+    return vf.load_environment(vf_env_id, **vf_env_args)
+
+
+def _dataset_rows_from_env(
+    env: Any,
     vf_env_id: str,
-    vf_env_args: dict[str, Any],
     *,
     size: int,
     seed: int | None,
 ) -> list[dict[str, Any]]:
-    try:
-        # Optional `conversion` extra, so it is absent from the default environment.
-        import verifiers as vf  # ty: ignore[unresolved-import]
-    except ImportError as exc:
-        raise RuntimeError(
-            "verifiers is required for pi-to-gym-conversion dataset generation; it lives in "
-            "the optional `conversion` extra — run "
-            "`uv sync --package nmp-rl --extra conversion`"
-        ) from exc
-
-    env = vf.load_environment(vf_env_id, **vf_env_args)
     try:
         dataset = env.get_dataset(n=size, seed=seed)
     except ValueError:
@@ -327,8 +413,6 @@ def _load_verifiers_dataset_rows(
     rows: list[dict[str, Any]] = []
     for i in range(len(dataset)):
         prompt = dataset["prompt"][i]
-        # example_id is optional upstream just like answer/task/info; hub envs that omit
-        # it would otherwise raise KeyError partway through conversion.
         example_id = dataset["example_id"][i] if "example_id" in dataset.column_names else i
         answer = dataset["answer"][i] if "answer" in dataset.column_names else ""
         task = dataset["task"][i] if "task" in dataset.column_names else vf_env_id
@@ -347,17 +431,22 @@ def _load_verifiers_dataset_rows(
     return rows
 
 
+def _load_verifiers_dataset_rows(
+    vf_env_id: str,
+    vf_env_args: dict[str, Any],
+    *,
+    size: int,
+    seed: int | None,
+) -> list[dict[str, Any]]:
+    env = _load_verifiers_environment(vf_env_id, vf_env_args)
+    return _dataset_rows_from_env(env, vf_env_id, size=size, seed=seed)
+
+
 def split_train_validation(
     rows: list[dict[str, Any]],
     validation_fraction: float,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
-    """Split rows into (train, validation), refusing splits that leave no training rows.
-
-    Silently falling back to the full set for training would make the two files
-    identical, and GRPO ranks checkpoints on ``val:total_reward/mean`` — so the run
-    would select a best checkpoint against its own training data with nothing to
-    indicate it.
-    """
+    """Split rows into (train, validation). Raises if the split would empty training."""
     if not rows or validation_fraction <= 0:
         return rows, None
     split = max(1, int(len(rows) * validation_fraction))
@@ -373,38 +462,45 @@ def split_train_validation(
 def convert_prime_environment(spec: ConvertEnvironmentSpec) -> ConvertedPackage:
     """Convert a Prime Intellect hub environment to adapter-wheels-v1 + Gym JSONL."""
     vf_env_id = spec.vf_env_id or hub_id_to_vf_env_id(spec.hub_id)
-    vf_env_args = spec.vf_env_args or {}
+    host_vf_env_args = dict(spec.vf_env_args or {})
+    package_vf_env_args = dict(host_vf_env_args)
     env_out = spec.out_dir
     dataset_out = spec.dataset_dir or (spec.out_dir.parent / f"{env_out.name}-dataset")
     package_name = hub_id_to_package_name(spec.hub_id)
 
     with tempfile.TemporaryDirectory(prefix="nmp-rl-convert-") as tmp:
         wheels_dir = download_hub_wheels(spec, work_dir=Path(tmp))
+
+        if spec.dataset_size == 0:  # package layout only
+            all_rows: list[dict[str, Any]] = []
+        else:
+            hf_home = Path(tmp) / "hf-home"
+            with _isolated_hf_home(hf_home):
+                _install_hub_package_from_wheels(wheels_dir, package_name)
+                env = _load_verifiers_environment(vf_env_id, host_vf_env_args)
+                all_rows = _dataset_rows_from_env(
+                    env,
+                    vf_env_id,
+                    size=spec.dataset_size,
+                    seed=spec.dataset_seed,
+                )
+                if not all_rows:
+                    raise RuntimeError(
+                        f"Dataset generation for {spec.hub_id!r} (vf_env_id={vf_env_id!r}) "
+                        f"returned 0 rows (dataset_size={spec.dataset_size})"
+                    )
+                vendor_hub_environment_dataset(env, dataset_out)
+                snapshot_huggingface_home(hf_home, dataset_out)
+                package_vf_env_args[DATASET_PATH_ARG] = _sandbox_hub_dataset_path()
+
         manifest = write_adapter_wheels_package(
             out_dir=env_out,
             hub_id=spec.hub_id,
             vf_env_id=vf_env_id,
-            vf_env_args=vf_env_args,
+            vf_env_args=package_vf_env_args,
             adapter_agent=spec.adapter_agent,
             wheels_src=wheels_dir,
         )
-
-    # dataset_size == 0 skips JSONL generation (package layout only).
-    if spec.dataset_size == 0:
-        all_rows: list[dict[str, Any]] = []
-    else:
-        _install_hub_package_from_wheels(env_out / "wheels", package_name)
-        all_rows = _load_verifiers_dataset_rows(
-            vf_env_id,
-            vf_env_args,
-            size=spec.dataset_size,
-            seed=spec.dataset_seed,
-        )
-        if not all_rows:
-            raise RuntimeError(
-                f"Dataset generation for {spec.hub_id!r} (vf_env_id={vf_env_id!r}) "
-                f"returned 0 rows (dataset_size={spec.dataset_size})"
-            )
 
     train_rows, val_rows = split_train_validation(all_rows, spec.validation_fraction)
 

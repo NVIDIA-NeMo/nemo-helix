@@ -47,9 +47,9 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import ClassVar
 
+from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin._base import _NamedPlugin
 from nemo_platform_plugin.entity_client import NemoEntitiesClient
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform
 
 
 class NemoSeedJob(_NamedPlugin):

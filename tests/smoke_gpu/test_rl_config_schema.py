@@ -123,6 +123,7 @@ def _compile(root: Path, *, lora: bool, moe: bool = False) -> dict:
             sandbox_environment_path="/job/environment",
             sandbox_dataset_path="/job/dataset",
             sandboxed=True,
+            gym_runtime_image="nvcr.io/nvidia/nmp-rl-training:test",
         ),
         training=TrainingStepConfig.TrainingConfig(
             training_type=TrainingType.GRPO,

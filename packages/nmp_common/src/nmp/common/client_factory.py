@@ -8,8 +8,8 @@ This is the :class:`~nemo_platform_plugin.client.client.NemoClient` sibling of
 platform machinery the SDK factory uses:
 
 - base URL from :class:`~nmp.common.config.Configuration`;
-- per-service URL routing via :class:`~nmp.common.sdk_factory.PlatformRequestRouter`;
-- the shared sync/async HTTP clients (connection-pool + SSL-context reuse);
+- per-service URL routing via :class:`~nmp.common.platform_endpoint.PlatformEndpoint`;
+- endpoint-aware sync/async HTTP clients;
 - principal / auth + internal-request headers via ``_get_default_headers``;
 - OTEL trace-propagation headers captured on the current request.
 
@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -33,50 +32,32 @@ from nemo_platform_plugin.client.constants import (
     is_workload_identity_token_file_set,
 )
 from nmp.common.auth import Principal, principal_from_env
-from nmp.common.config import get_platform_config
-from nmp.common.http_clients import shared_async_http_client, shared_sync_http_client
 from nmp.common.observability import MARK_INTERNAL_REQUEST_HEADERS
 from nmp.common.observability.otel import get_otel_headers
 from nmp.common.platform_endpoint import PlatformEndpoint, resolve_platform_endpoint
-from nmp.common.sdk_factory import PlatformRequestRouter, _get_default_headers, _should_bootstrap_workload_identity
+from nmp.common.sdk_factory import _get_default_headers, _should_bootstrap_workload_identity
 
 logger = logging.getLogger(__name__)
-
-# Test-only: async HTTP client to use for NemoClient requests in test context.
-# Set by test fixtures to route requests through the in-process test transport,
-# mirroring ``nmp.common.sdk_factory._test_http_client``.
-_test_http_client: httpx.AsyncClient | None = None
 
 
 def _sync_http_client_for_endpoint(
     endpoint: PlatformEndpoint,
     http_client: httpx.Client | None,
 ) -> httpx.Client:
-    """Endpoint-aware sync client: honour an explicit client, else a UDS
-    transport for ``unix://`` endpoints, else the shared TCP client."""
+    """Endpoint-aware sync client, honoring explicit clients first."""
     if http_client is not None:
         return http_client
-    if endpoint.transport == "uds":
-        return endpoint.sync_http_client()
-    return shared_sync_http_client()
+    return endpoint.sync_sdk_http_client()
 
 
 def _async_http_client_for_endpoint(
     endpoint: PlatformEndpoint,
     http_client: httpx.AsyncClient | None,
 ) -> httpx.AsyncClient:
-    """Async counterpart of :func:`_sync_http_client_for_endpoint`.
-
-    Preserves the module-level ``_test_http_client`` fixture hook ahead of the
-    UDS / shared-client selection (mirrors ``sdk_factory``).
-    """
+    """Async counterpart of :func:`_sync_http_client_for_endpoint`."""
     if http_client is not None:
         return http_client
-    if _test_http_client is not None:
-        return _test_http_client
-    if endpoint.transport == "uds":
-        return endpoint.async_http_client()
-    return shared_async_http_client()
+    return endpoint.async_sdk_http_client()
 
 
 def _workload_identity_auth(base_url: str) -> TokenProvider:
@@ -92,25 +73,6 @@ def _workload_identity_auth(base_url: str) -> TokenProvider:
 
 def _workload_identity_headers(internal: bool) -> dict[str, str]:
     return MARK_INTERNAL_REQUEST_HEADERS.copy() if internal else {}
-
-
-def _absolute_url(url: str) -> httpx.URL:
-    """Default resolver for the request router.
-
-    :class:`NemoClient` hands its ``url_resolver`` the fully-qualified request
-    URL (``base_url`` + path), so — unlike the generated SDK's ``_prepare_url``,
-    which resolves a relative path — the router just needs to parse it.
-    """
-    return httpx.URL(url)
-
-
-def _platform_url_resolver() -> Callable[[str], httpx.URL]:
-    """Build a per-service URL router bound to the current platform config."""
-    router = PlatformRequestRouter(
-        platform_config=get_platform_config(),
-        default_resolver=_absolute_url,
-    )
-    return router.resolve
 
 
 def _platform_headers(
@@ -154,7 +116,7 @@ def get_nemo_client(
             :class:`~nemo_platform_plugin.client_provider.NemoClientProvider`
             protocol narrows ``on_behalf_of`` to ``str | None``.
         workspace: Default workspace used to fill ``{workspace}`` path params.
-        http_client: Optional sync HTTP client; defaults to the shared client.
+        http_client: Optional sync HTTP client; defaults to an endpoint-aware client.
 
     Note:
         OTEL trace-propagation headers are captured once, at construction, from
@@ -175,14 +137,15 @@ def get_nemo_client(
             auth=_workload_identity_auth(endpoint.connect_base_url),
             default_headers=_workload_identity_headers(internal) or None,
             http_client=_sync_http_client_for_endpoint(endpoint, http_client),
-            url_resolver=_platform_url_resolver(),
+            url_resolver=lambda url: endpoint.route_request_url(url).url,
         )
+    headers = _platform_headers(as_service, internal, on_behalf_of)
     return NemoClient(
         base_url=endpoint.connect_base_url,
         workspace=workspace,
-        default_headers=_platform_headers(as_service, internal, on_behalf_of) or None,
+        default_headers=headers or None,
         http_client=_sync_http_client_for_endpoint(endpoint, http_client),
-        url_resolver=_platform_url_resolver(),
+        url_resolver=lambda url: endpoint.route_request_url(url).url,
     )
 
 
@@ -196,9 +159,8 @@ def get_async_nemo_client(
 ) -> AsyncNemoClient:
     """Async counterpart of :func:`get_nemo_client`.
 
-    Uses the explicitly provided ``http_client`` (e.g. from a test fixture), then
-    the module-level ``_test_http_client`` fallback, then the shared async
-    client — mirroring ``nmp.common.sdk_factory.get_async_platform_sdk``.
+    Uses the explicitly provided ``http_client`` (e.g. from a test fixture), or
+    creates one from the resolved platform endpoint.
     """
     endpoint = resolve_platform_endpoint()
     if _should_bootstrap_workload_identity(
@@ -213,14 +175,15 @@ def get_async_nemo_client(
             auth=_workload_identity_auth(endpoint.connect_base_url),
             default_headers=_workload_identity_headers(internal) or None,
             http_client=_async_http_client_for_endpoint(endpoint, http_client),
-            url_resolver=_platform_url_resolver(),
+            url_resolver=lambda url: endpoint.route_request_url(url).url,
         )
+    headers = _platform_headers(as_service, internal, on_behalf_of)
     return AsyncNemoClient(
         base_url=endpoint.connect_base_url,
         workspace=workspace,
-        default_headers=_platform_headers(as_service, internal, on_behalf_of) or None,
+        default_headers=headers or None,
         http_client=_async_http_client_for_endpoint(endpoint, http_client),
-        url_resolver=_platform_url_resolver(),
+        url_resolver=lambda url: endpoint.route_request_url(url).url,
     )
 
 
@@ -291,7 +254,7 @@ def get_async_task_nemo_client(
 
 class PlatformNemoClientProvider:
     """Rich :class:`~nemo_platform_plugin.client_provider.NemoClientProvider`
-    that uses platform internals (shared HTTP clients, URL routing, OTEL
+    that uses platform internals (endpoint-aware HTTP clients, URL routing, OTEL
     headers, auth context).
 
     Registered as a ``nemo.client_provider`` entry-point so it is discovered

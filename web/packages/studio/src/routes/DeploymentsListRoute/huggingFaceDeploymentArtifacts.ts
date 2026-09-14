@@ -11,7 +11,7 @@
  */
 
 import { modelsCreateDeploymentBodyNameMax } from '@nemo/sdk/generated/platform/zod/model-deployments';
-import { WIZARD_DEPLOYMENT_NAME_SUFFIX } from '@studio/routes/DeploymentsListRoute/CreateDeploymentSidePanel/schema';
+import { WIZARD_DEPLOYMENT_NAME_SUFFIX } from '@studio/routes/NewDeploymentRoute/schema';
 
 /**
  * Hugging Face–source fileset name created in `createHuggingFaceDeployment` inside

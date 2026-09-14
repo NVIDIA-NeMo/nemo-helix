@@ -14,8 +14,7 @@ import re
 import time
 from pathlib import Path
 
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.client.errors import (
     ConflictError,
     InternalServerError,
@@ -46,7 +45,7 @@ from nemo_platform_plugin.models.types import (
 from nemo_platform_plugin.models.types import (
     FinetuningType as ModelsFinetuningType,
 )
-from nmp.common.sdk_factory import get_task_sdk
+from nmp.common.client_factory import get_task_nemo_client
 from nmp.customization_common.schemas.model_entity import (
     DeploymentParameters,
     ModelEntityCreationError,
@@ -88,9 +87,9 @@ def sanitize_name(prefix: str, name: str) -> str:
 class ModelEntityRunner:
     """Runner for creating (and optionally deploying) model entities."""
 
-    def __init__(self, sdk: NeMoPlatform, job_ctx: NMPJobContext):
-        self.sdk = sdk
-        self.models = client_from_platform(sdk, ModelsClient)
+    def __init__(self, models: ModelsClient, files: FilesClient, job_ctx: NMPJobContext):
+        self.models = models
+        self.files = files
         self.job_ctx = job_ctx
 
     def _wait_for_spec(self, workspace: str, name: str) -> ModelEntity:
@@ -161,9 +160,7 @@ class ModelEntityRunner:
 
         logger.info(f"Validating fileset exists: {fileset_workspace}/{config.fileset.name}")
         try:
-            client_from_platform(self.sdk, FilesClient).get_fileset(
-                workspace=fileset_workspace, name=config.fileset.name
-            )
+            self.files.get_fileset(workspace=fileset_workspace, name=config.fileset.name)
             logger.info(f"Fileset validation successful: {fileset_workspace}/{config.fileset.name}")
         except TRANSIENT_RETRYABLE_EXCEPTIONS:
             raise
@@ -432,7 +429,7 @@ class ModelEntityRunner:
 
 
 def run(
-    sdk: NeMoPlatform | None = None,
+    client: NemoClient | None = None,
     job_ctx: NMPJobContext | None = None,
     *,
     service_name: str,
@@ -440,10 +437,14 @@ def run(
     """Execute the model entity creation task."""
     job_ctx = job_ctx or NMPJobContext.from_env()
 
-    sdk_owned = sdk is None
+    client_owned = client is None
     try:
-        sdk = sdk or get_task_sdk(service_name).with_options(workspace=job_ctx.workspace)
-        runner = ModelEntityRunner(sdk=sdk, job_ctx=job_ctx)
+        client = client or get_task_nemo_client(service_name)
+        runner = ModelEntityRunner(
+            models=ModelsClient.from_client(client),
+            files=FilesClient.from_client(client),
+            job_ctx=job_ctx,
+        )
 
         config = get_config(job_ctx.config_path)
 
@@ -456,7 +457,7 @@ def run(
             config.fileset.name,
             config.deployment_config is not None,
         )
-        logger.info(f"NeMo Platform service URL: {sdk.base_url}")
+        logger.info(f"NeMo Platform service URL: {client.base_url}")
 
         result, deploy_target = runner.create_model_entity(config)
         logger.info(f"Model entity creation complete: {result}")
@@ -471,5 +472,5 @@ def run(
         logger.exception(f"Model entity task failed: {e}")
         return 1
     finally:
-        if sdk_owned and sdk is not None:
-            sdk.close()
+        if client_owned and client is not None:
+            client.close()

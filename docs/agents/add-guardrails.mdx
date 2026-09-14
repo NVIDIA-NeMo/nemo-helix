@@ -1,0 +1,161 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Add Guardrails to an Agent"
+description: ""
+---
+<a id="agents-add-guardrails"></a>
+
+Guardrails attach to an agent through a **guarded virtual model**: a VirtualModel
+entity that uses a guardrail configuration to run input and output rails on every
+call to the main model. Pointing the agent at the guarded VirtualModel secures the
+agent's model path without changing its workflow logic.
+
+There are two steps: create the guarded VirtualModel, then update the agent's
+`llms` block to reference it.
+
+<Note>
+
+Routing model traffic through rails covers the agent's model path. It does not
+cover tool misuse or instructions injected through tool output. To test an agent
+against those and generate fixes, see Agent Governance.
+
+</Note>
+
+## Prerequisites
+
+Before adding guardrails, make sure you have:
+
+1. Local services running (`nemo services run`).
+1. At least one deployed platform-managed agent.
+1. A model provider and model entities registered in the workspace.
+1. A guardrail configuration. See
+   [Guardrail Models](/documentation/guardrail-models).
+
+Common catalog models to use as the guardrail backend (verify availability with
+`nemo models list`):
+
+- `nvidia-llama-3-1-nemoguard-8b-content-safety`
+- `nvidia-llama-3-1-nemoguard-8b-topic-control`
+- `nvidia-llama-3-1-nemotron-safety-guard-8b-v3`
+
+## 1. Create a Guarded VirtualModel
+
+<Tabs>
+
+<Tab title="CLI">
+
+```bash
+nemo inference virtual-models create guarded-agent-model \
+  --workspace default \
+  --models '[{"model":"default/<main-model-entity>","backend_format":"OPENAI_CHAT"}]' \
+  --request-middleware '[{
+    "name":"nemo-guardrails",
+    "config_type":"guardrail_config",
+    "config_id":"default/<guardrail-config>"
+  }]' \
+  --response-middleware '[{
+    "name":"nemo-guardrails",
+    "config_type":"guardrail_config",
+    "config_id":"default/<guardrail-config>"
+  }]'
+```
+
+Wire the same `<guardrail-config>` on both `--request-middleware` (for input
+rails) and `--response-middleware` (for output rails). Omit a side if the
+config defines no flows for it. For the full middleware schema, entity-backed
+versus inline configs, and caching behavior, refer to
+[Guardrails Architecture](/documentation/guardrail-models/core-concepts/architecture).
+
+</Tab>
+<Tab title="Skill">
+
+Ask your coding agent:
+
+> Check guardrail coverage on my deployed agent.
+
+The `agents-secure` skill lists deployed agents, inspects each LLM's
+`model_name`, and suggests creating a guarded virtual model where one is
+missing. Verify the skill is installed:
+
+```bash
+nemo skills show agents-secure
+```
+
+What it does under the hood:
+
+- Lists deployed agents and prompts you to choose one.
+- Inspects each LLM's `model_name`. If it does not reference a guarded
+  virtual model (one with a content-safety, topic-control, or safety-guard
+  backend), suggests creating one.
+- Names the recommended guardrails catalog model and walks you through
+  creating the guarded virtual model.
+- Persists suggestions to the `nemo-agent-security` fileset.
+
+The skill reports whether a guardrail is present. It does not test whether
+that guardrail stops a given attack.
+
+</Tab>
+<Tab title="Python SDK">
+
+```python
+import os
+from nemo_platform import NeMoPlatform
+
+client = NeMoPlatform(
+    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+    workspace="default",
+)
+
+guardrail_mw = {
+    "name": "nemo-guardrails",
+    "config_type": "guardrail_config",
+    "config_id": "default/<guardrail-config>",
+}
+
+client.inference.virtual_models.create(
+    name="guarded-agent-model",
+    workspace="default",
+    models=[{"model": "default/<main-model-entity>", "backend_format": "OPENAI_CHAT"}],
+    request_middleware=[guardrail_mw],
+    response_middleware=[guardrail_mw],
+)
+```
+
+</Tab>
+
+</Tabs>
+
+## 2. Point the Agent at the Guarded VirtualModel
+
+In the agent's workflow YAML, set `model_name` on the relevant `llms` entry to
+the guarded VirtualModel's entity reference, with slashes converted to hyphens
+(per the [agent configuration conventions](/documentation/agents#agent-definition)):
+
+```yaml
+llms:
+  llm:
+    _type: openai
+    model_name: default-guarded-agent-model
+```
+
+Leave `base_url` and `api_key` unset. Once redeployed, every model call from the
+agent flows through the guarded VirtualModel. The agent itself is unchanged and
+unaware of the rails.
+
+For the end-to-end request flow, streaming behavior, header forwarding, and the
+`guardrails` request options, refer to
+[Running Inference with Guardrails](/documentation/guardrail-models/core-concepts/running-inference).
+
+Redeploy the agent, re-run evaluation, and compare quality, cost, latency and
+safety signals against the baseline before promoting.
+
+## Troubleshooting
+
+**Virtual model creation fails with an unknown model.** Confirm the backend model entity exists with `nemo models list`. The `<main-model-entity>` and `<guardrail-config>` placeholders must reference entities the workspace can resolve.
+
+**The agent still calls the unguarded model.** Entity references in `model_name` use hyphens, not slashes. Confirm the agent was redeployed after the config change.
+
+**The `agents-secure` skill is not available.** Run `nemo skills list` to confirm the skill is installed. If it is missing, install it with `nemo skills install --agent <claude|codex|cursor|opencode>`.
+

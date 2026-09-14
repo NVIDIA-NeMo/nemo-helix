@@ -24,6 +24,7 @@ from .fileset_purpose import FilesetPurpose
 from .s3_storage_config_param import S3StorageConfigParam
 from .ngc_storage_config_param import NGCStorageConfigParam
 from .local_storage_config_param import LocalStorageConfigParam
+from .github_storage_config_param import GitHubStorageConfigParam
 from ..shared_params.fileset_metadata import FilesetMetadata
 from .huggingface_storage_config_param import HuggingfaceStorageConfigParam
 
@@ -71,5 +72,9 @@ class FilesetCreateParams(TypedDict, total=False):
 
 
 Storage: TypeAlias = Union[
-    LocalStorageConfigParam, NGCStorageConfigParam, HuggingfaceStorageConfigParam, S3StorageConfigParam
+    LocalStorageConfigParam,
+    NGCStorageConfigParam,
+    HuggingfaceStorageConfigParam,
+    S3StorageConfigParam,
+    GitHubStorageConfigParam,
 ]

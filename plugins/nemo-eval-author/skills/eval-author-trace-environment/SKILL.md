@@ -50,7 +50,8 @@ workspaces in Git.
 
 ## Artifact contract
 
-Use one workspace per task:
+Use one workspace per task. Paths below are generated workspace artifacts, not
+bundled skill files; `extra.*` names elsewhere are ATIF fields, not file paths.
 
 ```text
 .eval-author/trace-environments/
@@ -59,6 +60,8 @@ Use one workspace per task:
     private/source.atif.json
     private/canonical.atif.json
     private/privacy-audit.json
+    private/publications/<digest>/
+    private/publication-review.json
     private/ground-truth/
     safe/trace.atif.json
     safe/privacy.json
@@ -143,7 +146,7 @@ and safe files of at most 25 MiB. It may make only two bounded normalizations:
 - insert a missing JSON escape when the parser-implicated quote immediately
   follows a provider-redaction placeholder; and
 - convert string-encoded ATIF image objects into image parts while omitting
-  encoded binary data and oversized image metadata.
+  encoded binary data, including image metadata embedded in text fields.
 
 Every operation, offset, count, and loss is recorded in the canonical ATIF and
 summary. Exact source bytes remain unchanged and hashed. Reject unrelated JSON
@@ -168,8 +171,14 @@ and user home paths.
 The helper also writes `private/privacy-audit.json`: a complete string-field and
 character denominator, URL hosts, and candidate name, organization, and street
 address findings. These are contextual leads, not automatic claims. Review every
-text field in `safe/trace.atif.json`, every audit finding and host, and the
-generalized task files, then record who performed the review:
+text field in `safe/trace.atif.json`, every audit finding and host, then record
+who performed this trace review. Generated task files do not exist yet; review
+the complete publication separately after finalization.
+
+Use the audit's field and character denominator to plan bounded reads. If a tool
+truncates output, continue through the omitted fields or character ranges; a
+truncated display does not establish missing trace evidence. If review cannot
+finish, retain that limitation without issuing a complete review attestation.
 
 ```bash
 python <skill_dir>/scripts/trace_environment.py review-privacy \
@@ -228,63 +237,11 @@ binaries into the task.
 ## Step 5: decide candidate or no_candidate
 
 Read only `safe/trace.atif.json`. Later user corrections outrank earlier turns.
-Every decision must cite real ATIF `step_id` values. Write `candidate.json` with
-this shape:
-
-```json
-{
-  "schema": "nemo.eval_author.trace_environment_candidate.v2",
-  "status": "candidate",
-  "decision_basis": "safe_atif_only",
-  "instruction": "Observable task instruction without private values",
-  "requirements": [
-    {"description": "Objectively testable requirement", "evidence_steps": [1, 2]}
-  ],
-  "verification_mode": "execution",
-  "evidence_steps": [1, 2],
-  "uncertainties": [],
-  "reason_codes": [],
-  "ground_truth": {
-    "availability": "available",
-    "use": "comparison_only",
-    "artifacts": [
-      {
-        "kind": "expected_output",
-        "path": "private/ground-truth/expected.json",
-        "sha256": "sha256:<64-hex-digest>",
-        "provenance": {
-          "kind": "external",
-          "step_ids": [],
-          "uri": "https://example.test/fixture.json",
-          "revision": "<immutable-revision>",
-          "source_id": null
-        },
-        "notes": "Expected output attached to the recorded task."
-      }
-    ],
-    "absence_reason": null
-  },
-  "software_requirements": [
-    {
-      "name": "ExampleCAD",
-      "category": "desktop_application",
-      "required": true,
-      "version": "2026",
-      "license": "proprietary",
-      "availability": "unknown",
-      "redistributable": false,
-      "provenance": {
-        "kind": "atif_step",
-        "step_ids": [1, 2],
-        "uri": null,
-        "revision": null,
-        "source_id": null
-      },
-      "notes": "The requested edit and verifier depend on native CAD behavior."
-    }
-  ]
-}
-```
+Every decision must cite real ATIF `step_id` values. Read
+[references/candidate-record.md](references/candidate-record.md) for the
+`candidate.json` shape before writing the decision.
+Run its read-only `check-candidate` command before construction; it checks
+metadata, not execution, privacy review or readiness.
 
 Use `candidate` only when the request and expected outcome are complete,
 reproducible without private or live external state, and objectively testable.
@@ -309,7 +266,8 @@ folding them into `insufficient_trace_evidence`: use `malformed_atif`,
 `source_too_large`, `build_dependency_unavailable`,
 `verifier_dependency_unavailable`, `network_dependency_required`, and
 `verifier_not_isolated` where applicable. Record the concrete failed command or
-contract check in `did_not_work`; keep `reason_codes` stable and aggregateable.
+contract check in the summary using Step 7's `finalize --did-not-work`, not as an
+extra field in `candidate.json`; keep `reason_codes` stable and aggregateable.
 
 ## Step 6: author and prove a candidate environment
 
@@ -344,51 +302,9 @@ workspace wholesale.
 Read and follow `references/environment-integrity.md` for agent-network,
 contamination, portability, repeat-run, and negative-control requirements.
 
-```toml
-[verifier]
-environment_mode = "separate"
-network_mode = "no-network"
-
-[verifier.environment]
-network_mode = "no-network"
-
-[environment]
-network_mode = "no-network"
-```
-
-Add a step-local environment only when that step needs a different verifier
-image or resource configuration:
-
-```toml
-[[steps]]
-name = "grade"
-
-[steps.verifier]
-environment_mode = "separate"
-
-[steps.verifier.environment]
-network_mode = "no-network"
-```
-
-The task README is not passed to the agent. Give it a level-one task title and
-these substantive level-two sections:
-
-- `Difficulty explanation`: why the task is difficult for agents and humans;
-- `Environment and software requirements`: runtimes, services, hardware,
-  versions, licensing, and availability constraints;
-- `Ground-truth provenance`: what establishes correctness and where that
-  evidence came from, without exposing private values;
-- `Solution explanation`: the high-level reference approach without duplicating
-  `solution/solve.sh`;
-- `Verification explanation`: the observable outcomes and how the verifier
-  distinguishes success from failure; and
-- `Relevant experience`: human-supplied experience relevant to authoring or
-  reviewing the task.
-
-Keep each section concise and evidence-backed. Do not repeat `instruction.md`,
-reveal verifier internals to the agent, or invent author experience. If a human
-cannot supply and review `Relevant experience`, keep the environment `unproven`
-rather than claiming it is ready.
+Write the reviewer-only task README using the integrity reference's required
+sections. Human-supplied or reviewed `Relevant experience` is necessary for
+readiness; never invent it.
 
 Do not copy private trace payloads into the task. Include only the minimal files
 needed to reproduce the starting state. Pin external source to an exact public
@@ -401,9 +317,8 @@ python <skill_dir>/scripts/trace_environment.py record-reproducibility \
   --task-dir <task-dir>
 ```
 
-Run at least two independent NOP jobs, two Oracle jobs, and one task-specific
-negative-control job. Record each run's inputs before Harbor creates its job
-directory. Each invocation must create fresh task containers. For example:
+Execute the repeat-run protocol in `references/environment-integrity.md`.
+For example, record the first NOP job's inputs and then run it:
 
 ```bash
 python <skill_dir>/scripts/trace_environment.py record-run-inputs \
@@ -419,13 +334,9 @@ command. Never hand-write rewards, job IDs, exceptions, or checksums. Do not
 weaken the verifier to make Oracle pass. Failed proof remains technical evidence.
 
 If Harbor or Docker is missing, technical status is `not_run` and the environment
-is `unproven`; do not describe it as ready. Two NOP=0 runs, two Oracle=1 runs,
-and a task-specific negative-control=0 run without exceptions establish technical
-status `passed` only when their recorded agents and task snapshots match. They
-do not establish human review or container freshness. Reports distinguish
-verified distinct job IDs/paths from `container_freshness: "unverified"`. The
-helper independently requires the task configuration and every retained Harbor
-result to report separate verification.
+is `unproven`; do not describe it as ready. The integrity reference defines the
+conditions for technical status `passed` and the limits of that claim; passing
+proof does not establish human review.
 
 ## Step 7: finalize and verify the summary
 
@@ -461,7 +372,8 @@ python <skill_dir>/scripts/trace_environment.py check \
 
 The helper derives environment status rather than accepting a claimed status:
 failed technical proof becomes `failed`; passed proof with the required separate
-no-network verification and `--human-reviewed` becomes `ready`; every other
+no-network verification, `--human-reviewed`, and no required software whose
+availability is `unknown` becomes `ready`; every other
 candidate is `unproven`. A shared verifier is a contract error rather than an
 unproven candidate. The human-review flag means a human supplied or reviewed
 Relevant experience and the generalized task. It is distinct from the earlier
@@ -494,22 +406,13 @@ python <skill_dir>/scripts/trace_environment.py batch-status \
 `denominator` must equal the selected source set. Never report only candidates
 or successes. A malformed workspace remains in the `batch-status` report with
 status `invalid` and makes the report invalid without hiding other member rows.
-For publication, export each finalized workspace to a new,
-nonexistent destination:
 
-```bash
-python <skill_dir>/scripts/trace_environment.py export \
-  --task-dir <task-dir> \
-  --output-dir <dataset-product-dir>
-```
-
-The command runs `check` and copies only `candidate.json`, the generalized
-`task/` and `reproducibility.json` when present, and a declassified `result.json`.
-It never copies source, canonical, safe, privacy-audit, ground-truth, validation,
-or Harbor job files. It preserves task-file executable bits while making the
-export readable, so the published task matches its task-tree digest.
-Public results report image pinning separately from unverified dependency
-closure and distinguish distinct jobs from unverified container freshness.
+Before any export, including `no_candidate`, read and follow
+`references/publication-review.md`. Prepare the complete private publication
+preview, review every exported file and path, and attest its exact digest before
+exporting. Trace privacy review and `--human-reviewed` do not replace this gate.
+Any change to the public product requires a new publication review; a successful
+`check` alone is not publication approval.
 
 Report the task ID, `candidate` or `no_candidate`, ground-truth availability and
 artifact count, required software and licensing constraints, environment

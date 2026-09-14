@@ -336,14 +336,14 @@ class ListJobsQueryParams(TypedDict, total=False):
     page: NotRequired[int]
     page_size: NotRequired[int]
     sort: NotRequired[str]
-    filter: NotRequired[str]
+    filter: NotRequired[str | dict[str, Any]]
 
 
 class ListStepsQueryParams(TypedDict, total=False):
     page: NotRequired[int]
     page_size: NotRequired[int]
     sort: NotRequired[str]
-    filter: NotRequired[str]
+    filter: NotRequired[str | dict[str, Any]]
 
 
 class ListJobResultsQueryParams(TypedDict, total=False):

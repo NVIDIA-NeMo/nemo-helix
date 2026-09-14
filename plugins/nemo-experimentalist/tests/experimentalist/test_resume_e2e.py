@@ -15,11 +15,12 @@ candidate store, a run stranded in ``status="running"`` when finalizing threw, a
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from doubles import FakeEvaluator
+from doubles import FakeEvaluator, fake_client
 from nemo_experimentalist_plugin.config import CandidateStorageConfig, EvolutionaryOptimizerConfig
 from nemo_experimentalist_plugin.entities import Candidate, Dataset, DatasetRef, RewardRecord, Task
 from nemo_experimentalist_plugin.experimentalist import runner as runner_module
@@ -96,7 +97,7 @@ def _make_runner(tmp_path: Path, strategy: Any, monkeypatch: pytest.MonkeyPatch)
 
     config = EvolutionaryOptimizerConfig(storage=CandidateStorageConfig(archive_candidates=False, publish_winner=False))
     return ExperimentRunner(
-        backend=LocalExperimentalistBackend(path=experiment_dir),
+        backend=LocalExperimentalistBackend(client=fake_client(), path=experiment_dir),
         strategy=strategy,
         config=config,
         workspace="default",
@@ -205,7 +206,10 @@ async def test_run_json_appears_by_rename_not_by_truncating_in_place(tmp_path, m
     renamed: list[str] = []
     real_replace = backend_module.os.replace
 
-    def _recording_replace(src: object, dst: object) -> None:
+    def _recording_replace(
+        src: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        dst: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+    ) -> None:
         renamed.append(Path(str(dst)).name)
         real_replace(src, dst)
 

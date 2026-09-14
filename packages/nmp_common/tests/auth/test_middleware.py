@@ -82,7 +82,7 @@ def access_key_lifecycle_middleware(auth_config_oidc_disabled, monkeypatch: pyte
     monkeypatch.delenv("NMP_AUTH_URL", raising=False)
 
     @asynccontextmanager
-    async def make(handler, base_url: str = "http://platform.example.com"):
+    async def make(handler, base_url: str = "https://platform.example.com"):
         config = auth_config_oidc_disabled.model_copy(
             update={"access_keys": auth_config_oidc_disabled.access_keys.model_copy(update={"enabled": True})}
         )
@@ -582,8 +582,8 @@ class TestBearerTokenAuth:
         monkeypatch.delenv("NMP_AUTH_URL", raising=False)
         Configuration.set_override(auth_config_oidc_disabled)
         platform_config = PlatformConfig(
-            base_url="http://platform.example.com",
-            service_discovery={"auth": "http://auth.internal:8080"},
+            base_url="https://platform.example.com",
+            service_discovery={"auth": "https://auth.internal:8080"},
             services="",
         )
         requests: list[httpx.Request] = []
@@ -611,7 +611,7 @@ class TestBearerTokenAuth:
                 response = await middleware._authenticate_access_key_lifecycle("scoped-access-key")
 
         assert isinstance(response, ResolvedBearerToken)
-        assert requests[0].url == httpx.URL("http://auth.internal:8080/apis/auth/authenticate")
+        assert requests[0].url == httpx.URL("https://auth.internal:8080/apis/auth/authenticate")
 
     @pytest.mark.asyncio
     async def test_access_key_lifecycle_callout_allows_active_token(self, access_key_lifecycle_middleware):
@@ -636,7 +636,7 @@ class TestBearerTokenAuth:
 
         assert isinstance(response, ResolvedBearerToken)
         assert response.claims.subject == "alice@example.com"
-        assert requests[0].url == httpx.URL("http://platform.example.com/apis/auth/authenticate")
+        assert requests[0].url == httpx.URL("https://platform.example.com/apis/auth/authenticate")
         assert requests[0].headers["authorization"] == "Bearer scoped-access-key"
 
     @pytest.mark.asyncio
@@ -881,7 +881,7 @@ class TestBearerTokenAuth:
             with (
                 patch(
                     "nmp.common.sdk_factory.Configuration.get_platform_config",
-                    return_value=PlatformConfig(base_url="http://platform.example.com", services=""),
+                    return_value=PlatformConfig(base_url="https://platform.example.com", services=""),
                 ),
                 patch("nmp.common.auth.middleware.resolve_bearer_token", new=AsyncMock()) as resolver,
                 patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize,
@@ -895,7 +895,7 @@ class TestBearerTokenAuth:
                 "email": "alice@example.com",
                 "groups": ["team-ml"],
             }
-            assert requests[0].url == httpx.URL("http://platform.example.com/apis/auth/authenticate")
+            assert requests[0].url == httpx.URL("https://platform.example.com/apis/auth/authenticate")
             assert requests[0].headers["authorization"] == f"Bearer {token}"
             resolver.assert_not_awaited()
             mock_authorize.assert_called_once()

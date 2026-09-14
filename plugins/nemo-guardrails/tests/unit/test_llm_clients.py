@@ -4,7 +4,6 @@
 """Unit tests for request-scoped LLM client header plumbing."""
 
 from typing import Any, Protocol, cast
-from unittest.mock import MagicMock
 
 from nemo_guardrails_plugin import llm_clients
 from nemo_guardrails_plugin.llm_clients import (
@@ -13,7 +12,8 @@ from nemo_guardrails_plugin.llm_clients import (
     platform_headers_context,
     register_header_aware_nim_provider,
 )
-from nemo_platform_plugin.sdk_provider import get_forwarding_headers
+from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_platform_plugin.client_provider import get_forwarding_headers
 from nemoguardrails.integrations.langchain.llm_adapter import LangChainLLMAdapter
 from nemoguardrails.llm.models.initializer import init_llm_model
 
@@ -45,29 +45,26 @@ def assert_and_get_header_aware_client(client: object) -> HeaderAwareClientForTe
     return cast(HeaderAwareClientForTest, client)
 
 
-def _make_fake_sdk(**custom_headers: str) -> MagicMock:
-    """Build a mock SDK with the given ``_custom_headers``."""
-    sdk = MagicMock()
-    sdk._custom_headers = custom_headers
-    return sdk
+def _make_client(**custom_headers: str) -> AsyncNemoClient:
+    return AsyncNemoClient(base_url="http://test:8000", default_headers=custom_headers)
 
 
 class TestGetForwardingHeaders:
     def test_returns_custom_headers_from_sdk(self) -> None:
-        sdk = _make_fake_sdk(
+        client = _make_client(
             **{
                 "X-NMP-Principal-Id": "service:guardrails-test",
                 "traceparent": "00-platform",
             }
         )
-        assert get_forwarding_headers(sdk) == {
+        assert get_forwarding_headers(client) == {
             "X-NMP-Principal-Id": "service:guardrails-test",
             "traceparent": "00-platform",
         }
 
     def test_returns_empty_for_sdk_with_no_custom_headers(self) -> None:
-        sdk = _make_fake_sdk()
-        assert get_forwarding_headers(sdk) == {}
+        client = _make_client()
+        assert get_forwarding_headers(client) == {}
 
 
 class TestRequestHeadersContext:
@@ -75,7 +72,7 @@ class TestRequestHeadersContext:
         assert get_request_headers() == {}
 
     def test_sets_platform_headers_and_resets_after_exit(self) -> None:
-        sdk = _make_fake_sdk(
+        client = _make_client(
             **{
                 "X-NMP-Principal-Id": "service:guardrails-test",
                 "traceparent": "00-platform",
@@ -84,7 +81,7 @@ class TestRequestHeadersContext:
 
         assert get_request_headers() == {}
 
-        with platform_headers_context(sdk):
+        with platform_headers_context(client):
             assert get_request_headers() == {
                 "traceparent": "00-platform",
                 "X-NMP-Principal-Id": "service:guardrails-test",
@@ -93,13 +90,13 @@ class TestRequestHeadersContext:
         assert get_request_headers() == {}
 
     def test_nested_contexts_restore_previous_headers(self) -> None:
-        outer_sdk = _make_fake_sdk(traceparent="outer")
-        inner_sdk = _make_fake_sdk(traceparent="inner")
+        outer_client = _make_client(traceparent="outer")
+        inner_client = _make_client(traceparent="inner")
 
-        with platform_headers_context(outer_sdk):
+        with platform_headers_context(outer_client):
             assert get_request_headers() == {"traceparent": "outer"}
 
-            with platform_headers_context(inner_sdk):
+            with platform_headers_context(inner_client):
                 assert get_request_headers() == {"traceparent": "inner"}
 
             assert get_request_headers() == {"traceparent": "outer"}
@@ -129,13 +126,13 @@ class TestHeaderAwareChatNVIDIA:
         assert client.model == "default/safety"
         assert client.default_headers == {"X-Static": "yes"}
 
-        sdk = _make_fake_sdk(
+        client_context = _make_client(
             **{
                 "X-NMP-Principal-Id": "service:guardrails-test",
                 "traceparent": "00-platform",
             }
         )
-        with platform_headers_context(sdk):
+        with platform_headers_context(client_context):
             _inputs, _payload, headers = client._prepare_inputs_and_payload([])
             assert headers == {
                 "X-Static": "yes",
@@ -164,8 +161,8 @@ class TestHeaderAwareChatNVIDIA:
             )
         )
 
-        sdk = _make_fake_sdk(**{"X-NMP-Principal-Id": "service:guardrails-test"})
-        with platform_headers_context(sdk):
+        client_context = _make_client(**{"X-NMP-Principal-Id": "service:guardrails-test"})
+        with platform_headers_context(client_context):
             _inputs, _payload, headers = client._prepare_inputs_and_payload([])
 
         assert headers == {
@@ -205,8 +202,8 @@ class TestRegisterHeaderAwareNimProvider:
         assert client.model == "default/safety"
         assert client.default_headers == {"X-Static": "yes"}
 
-        sdk = _make_fake_sdk(traceparent="00-platform")
-        with platform_headers_context(sdk):
+        client_context = _make_client(traceparent="00-platform")
+        with platform_headers_context(client_context):
             # The registered client must keep static config headers and merge
             # request-scoped platform headers at call time.
             _inputs, _payload, headers = client._prepare_inputs_and_payload([])

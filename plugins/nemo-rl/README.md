@@ -84,9 +84,13 @@ rollouts) and a **dataset** (the Gym JSONL rows fed through it). See
    It is a convenience for that one source, not a required step — environments authored
    any other way are packaged the same way and treated identically:
 
+   The `conversion` extra (verifiers + pip) is not in the training image, and it goes in
+   its own environment: the converter installs the untrusted hub wheel into whatever
+   interpreter runs it, and a `uv sync` of the repo `.venv` prunes both back out.
+
    ```bash
-   uv sync --package nmp-rl --extra conversion   # verifiers + pip; not in the training image
-   pi-to-gym-conversion --hub-id primeintellect/ascii-tree --out-dir ./ascii-tree-pkg
+   UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nmp-rl --extra conversion
+   .venv-conversion/bin/pi-to-gym-conversion --hub-id primeintellect/ascii-tree --out-dir ./ascii-tree-pkg
    ```
 
 2. **Submit** GRPO with `environment` + Gym JSONL `dataset`:

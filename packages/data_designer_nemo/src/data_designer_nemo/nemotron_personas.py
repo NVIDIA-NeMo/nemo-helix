@@ -6,12 +6,11 @@ from dataclasses import dataclass
 from typing import Literal
 
 from data_designer.config.utils.constants import NEMOTRON_PERSONAS_DATASET_SIZES
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.errors import ConflictError
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.files.storage_config import NGCStorageConfig
-from nemo_platform_plugin.files.types import CreateFilesetRequest
+from nemo_platform_plugin.files.types import CreateFilesetRequest, FilesetPurpose
+from nemo_platform_plugin.schema import SecretRef
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +66,7 @@ def get_locale_fileset_file_ref(locale: str) -> str:
 
 def sync_nemotron_personas_fileset(
     *,
-    sdk: NeMoPlatform,
+    files: FilesClient,
     locale: str,
     api_key_secret: str,
 ) -> NemotronPersonasFilesetSyncResult:
@@ -75,7 +74,7 @@ def sync_nemotron_personas_fileset(
     Sync the NGC-backed fileset for a single Nemotron personas locale.
 
     Args:
-        sdk: NeMoPlatform client.
+        files: Files typed client.
         locale: Locale identifier (e.g. 'en_US').
         api_key_secret: Fully qualified secret reference for the NGC API key.
 
@@ -85,7 +84,7 @@ def sync_nemotron_personas_fileset(
     logger.info("Syncing Nemotron personas fileset", extra={"locale": locale})
 
     try:
-        _create_fileset(sdk, locale, api_key_secret)
+        _create_fileset(files, locale, api_key_secret)
         logger.info("Successfully created Nemotron personas fileset", extra={"locale": locale})
         return _CREATED
     except ConflictError:
@@ -93,14 +92,13 @@ def sync_nemotron_personas_fileset(
         return _EXISTS
 
 
-def _create_fileset(sdk: NeMoPlatform, locale: str, api_key_secret: str) -> None:
-    files = client_from_platform(sdk, FilesClient)
+def _create_fileset(files: FilesClient, locale: str, api_key_secret: str) -> None:
     files.create_fileset(
         workspace=WORKSPACE,
         body=CreateFilesetRequest(
             name=get_resource_name_for_locale(locale),
             description=f"Nemotron Personas dataset for locale: {locale!r}",
-            purpose="dataset",
+            purpose=FilesetPurpose.DATASET,
             storage=_get_storage_config_for_locale(locale, api_key_secret),
             cache=True,
         ),
@@ -111,7 +109,7 @@ def _get_storage_config_for_locale(locale: str, api_key_secret: str) -> NGCStora
     resource_name = get_resource_name_for_locale(locale)
 
     return NGCStorageConfig(
-        api_key_secret=api_key_secret,
+        api_key_secret=SecretRef(api_key_secret),
         org=NGC_ORG,
         team=NGC_TEAM,
         target=resource_name,

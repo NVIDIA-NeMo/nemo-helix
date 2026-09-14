@@ -38,24 +38,31 @@ caller (the CLI), so the backend never closes it.
 
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
 
 import httpx
 import yaml
 from nemo_insights_plugin.analyst.result import AnalystResult
 from nemo_insights_plugin.entities import Insight, InsightStatus
 from nemo_insights_plugin.schema import InsightListItem, InsightPage
-from nemo_platform import AsyncNeMoPlatform, omit
+from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.errors import NotFoundError
+from nemo_platform_plugin.intake.client import AsyncIntakeClient
+from nemo_platform_plugin.intake.types import SpanMode
 from nemo_platform_plugin.schema import PaginationData
+from pydantic import BaseModel, JsonValue
+
+FilterParam = dict[str, JsonValue]
 
 
 class InsightNotFoundError(Exception):
     """No insight with the given id exists in the workspace."""
 
 
-def _dump(item) -> dict:
+def _dump(item: BaseModel) -> dict[str, object]:
     """Serialize one SDK model to a plain JSON-able dict (drop null fields)."""
     return item.model_dump(mode="json", exclude_none=True)
 
@@ -71,14 +78,14 @@ def _union_refs(existing: list[str] | None, new: list[str] | None) -> list[str]:
     return merged
 
 
-async def _drain(paginator, *, limit: int) -> tuple[list, bool]:
+async def _drain(paginator: AsyncIterable[BaseModel], *, limit: int) -> tuple[list[BaseModel], bool]:
     """Pull up to *limit* items across pages; return ``(items, truncated)``.
 
     ``truncated`` is True when the stream still had more items than *limit*,
     so the model knows it is looking at a capped view and can narrow its
     filter or raise the limit.
     """
-    items: list = []
+    items: list[BaseModel] = []
     truncated = False
     async for item in paginator:
         if len(items) >= limit:
@@ -93,21 +100,23 @@ def _page_size_for(limit: int) -> int:
     return max(1, min(limit, 100))
 
 
-def _merge_since_filter(filter_obj: dict | None, *, since: datetime | None) -> dict | None:
+def _merge_since_filter(filter_obj: FilterParam | None, *, since: datetime | None) -> FilterParam | None:
     """Return *filter_obj* with an enforced ``started_at >= since`` lower bound."""
     return _merge_datetime_lower_bound(filter_obj, key="started_at", since=since)
 
 
-def _merge_created_since_filter(filter_obj: dict | None, *, since: datetime | None) -> dict | None:
+def _merge_created_since_filter(filter_obj: FilterParam | None, *, since: datetime | None) -> FilterParam | None:
     """Return *filter_obj* with an enforced ``created_at >= since`` lower bound."""
     return _merge_datetime_lower_bound(filter_obj, key="created_at", since=since)
 
 
-def _merge_datetime_lower_bound(filter_obj: dict | None, *, key: str, since: datetime | None) -> dict | None:
+def _merge_datetime_lower_bound(
+    filter_obj: FilterParam | None, *, key: str, since: datetime | None
+) -> FilterParam | None:
     if since is None:
         return filter_obj
 
-    merged: dict = dict(filter_obj or {})
+    merged: FilterParam = dict(filter_obj or {})
     existing = merged.get(key)
     lower_bound = since.isoformat()
     if isinstance(existing, dict):
@@ -139,7 +148,7 @@ def _parse_datetime(value: object) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _merge_eval_filter(filter_obj: dict | None, *, evaluation_id: str | None) -> dict | None:
+def _merge_eval_filter(filter_obj: FilterParam | None, *, evaluation_id: str | None) -> FilterParam | None:
     """AND-pin the run scope onto a span filter.
 
     Mirrors ``_merge_since_filter``: a set ``evaluation_id`` is forced onto every
@@ -148,7 +157,7 @@ def _merge_eval_filter(filter_obj: dict | None, *, evaluation_id: str | None) ->
     """
     if evaluation_id is None:
         return filter_obj
-    merged: dict = dict(filter_obj or {})
+    merged: FilterParam = dict(filter_obj or {})
     merged["evaluation_id"] = evaluation_id
     return merged
 
@@ -166,6 +175,7 @@ class AnalystBackend(ABC):
 
     def __init__(self, client: AsyncNeMoPlatform) -> None:
         self.client = client
+        self.intake = client_from_platform(client, AsyncIntakeClient)
 
     # -- reads: always against the live platform -------------------------- #
 
@@ -198,22 +208,22 @@ class AnalystBackend(ABC):
         self,
         *,
         workspace: str,
-        filter: dict | None,
+        filter: FilterParam | None,
         sort: str,
-        mode: str,
+        mode: SpanMode,
         limit: int,
         since: datetime | None = None,
         evaluation_id: str | None = None,
     ) -> dict:
         effective_filter = _merge_eval_filter(_merge_since_filter(filter, since=since), evaluation_id=evaluation_id)
-        paginator = self.client.intake.spans.list(
+        paginator = await self.intake.spans.list(
             workspace=workspace,
             page_size=_page_size_for(limit),
-            sort=cast(Any, sort),
-            filter=cast(Any, effective_filter) or omit,
-            mode=cast(Any, mode),
+            sort=sort,
+            filter=effective_filter,
+            mode=mode,
         )
-        items, truncated = await _drain(paginator, limit=limit)
+        items, truncated = await _drain(paginator.items(), limit=limit)
         return {
             "spans": [_dump(s) for s in items],
             "count": len(items),
@@ -224,7 +234,7 @@ class AnalystBackend(ABC):
         self,
         *,
         workspace: str,
-        filter: dict | None,
+        filter: FilterParam | None,
         group_by: str = "session_id",
         sort: str = "-span_count",
         limit: int,
@@ -242,13 +252,13 @@ class AnalystBackend(ABC):
         """
         effective_filter = _merge_eval_filter(_merge_since_filter(filter, since=since), evaluation_id=evaluation_id)
         page_size = max(1, min(limit, 1000))
-        page = await self.client.intake.spans.groups.list(
+        page = await self.intake.spans.groups.list(
             workspace=workspace,
             by=group_by,
             page=1,
             page_size=page_size,
-            filter=cast(Any, effective_filter or omit),
-            sort=cast(Any, sort),
+            filter=effective_filter,
+            sort=sort,
         )
         groups = [_dump(g) for g in page.data]
         total = page.pagination.total_results if page.pagination is not None else len(groups)
@@ -264,19 +274,19 @@ class AnalystBackend(ABC):
         self,
         *,
         workspace: str,
-        filter: dict | None,
+        filter: FilterParam | None,
         sort: str,
         limit: int,
         since: datetime | None = None,
     ) -> dict:
         effective_filter = _merge_created_since_filter(filter, since=since)
-        paginator = self.client.intake.annotations.list(
+        paginator = await self.intake.annotations.list(
             workspace=workspace,
             page_size=_page_size_for(limit),
-            sort=cast(Any, sort),
-            filter=cast(Any, effective_filter) or omit,
+            sort=sort,
+            filter=effective_filter,
         )
-        items, truncated = await _drain(paginator, limit=limit)
+        items, truncated = await _drain(paginator.items(), limit=limit)
         return {
             "annotations": [_dump(a) for a in items],
             "count": len(items),
@@ -284,15 +294,15 @@ class AnalystBackend(ABC):
         }
 
     async def get_span(self, *, workspace: str, span_id: str) -> dict:
-        span = await self.client.intake.spans.retrieve(span_id, workspace=workspace)
+        span = await self.intake.spans.retrieve(span_id, workspace=workspace)
         return _dump(span)
 
     async def get_annotation(self, *, workspace: str, annotation_id: str) -> dict:
-        annotation = await self.client.intake.annotations.retrieve(annotation_id, workspace=workspace)
+        annotation = await self.intake.annotations.retrieve(annotation_id, workspace=workspace)
         return _dump(annotation)
 
     async def list_scores(self, *, workspace: str, span_id: str) -> dict:
-        results = await self.client.intake.spans.evaluator_results.list(span_id, workspace=workspace)
+        results = await self.intake.spans.evaluator_results.list(span_id, workspace=workspace)
         return {
             "evaluator_results": [_dump(r) for r in results],
             "count": len(results),
@@ -544,18 +554,24 @@ class RemoteAnalystBackend(AnalystBackend):
                 insight_id=insight_id,
                 trace_refs=_union_refs(current.trace_refs, trace_refs),
             )
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 404:
+        except (httpx.HTTPStatusError, NotFoundError) as exc:
+            if _is_not_found(exc):
                 raise InsightNotFoundError(insight_id) from exc
             raise
 
     async def _get(self, *, workspace: str, insight_id: str) -> Insight:
         try:
             return await self._insights.get(workspace=workspace, insight_id=insight_id)
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 404:
+        except (httpx.HTTPStatusError, NotFoundError) as exc:
+            if _is_not_found(exc):
                 raise InsightNotFoundError(insight_id) from exc
             raise
+
+
+def _is_not_found(error: httpx.HTTPStatusError | NotFoundError) -> bool:
+    if isinstance(error, NotFoundError):
+        return True
+    return error.response.status_code == 404
 
 
 class LocalAnalystBackend(AnalystBackend):

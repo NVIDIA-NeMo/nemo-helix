@@ -22,6 +22,8 @@ from nemo_insights_plugin.analyst.observability import (
 )
 from nemo_insights_plugin.analyst.result import AnalystResult
 from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.models.client import AsyncModelsClient
 from nemo_platform_plugin.nooa_model_client import (
     ConfiguredModelClients,
     ConfiguredModelRefs,
@@ -134,7 +136,8 @@ async def run_analyst_change_set(
     model_clients: ConfiguredModelClients | None = None
     insights_output_path = str(insights_output) if insights_output else None
     try:
-        model_clients = await resolve_model_clients(client, model_refs)
+        models_client = client_from_platform(client, AsyncModelsClient)
+        model_clients = await resolve_model_clients(models_client, model_refs)
         backend = make_analyst_backend(
             client=client,
             insights_output=insights_output_path,

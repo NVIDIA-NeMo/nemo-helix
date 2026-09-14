@@ -106,8 +106,8 @@ dev = [
   "mlflow-skinny>=3.15.0,<3.16.0", # Optional dep for fine-tuning (shipped in training images); skinny variant to test API surface without bloating uv.lock
   "nemo-platform-plugin",          # Optional runtime dep; included here for type checking
   # Needed so the plugin's unit tests can import it. Safe to install: the plugin never imports
-  # iron-swarm itself, which stays in its own venv (garak pulls litellm/torch, incompatible pins).
-  "nemo-iron-swarm-plugin",
+  # agent-hardener itself, which stays in its own venv (garak pulls litellm/torch, incompatible pins).
+  "nemo-agent-hardener-plugin",
   "nvidia-nat-atif>=1.9.0a20260811,<1.10", # ATIF schema models for agentic-use trajectory validation
   "nemo-platform-sdk-tools",               # Include SDK/license tool migration target for testing
   "nmp-build-tools",                       # Build hook helpers imported by package-local hatch_build.py files
@@ -388,7 +388,7 @@ explicit = true
 data-designer-retrieval-sdg = { index = "data-designer-plugins" }
 nmp-auth = { workspace = true }
 nemo-anonymizer-plugin = { workspace = true }
-nemo-iron-swarm-plugin = { workspace = true }
+nemo-agent-hardener-plugin = { workspace = true }
 nemo-data-designer-plugin = { workspace = true }
 data-designer-nemo = { workspace = true }
 nemo-evaluator-sdk = { workspace = true }
@@ -466,7 +466,7 @@ members = [
   "services/guardrails",
   "services/intake",
   "plugins/nemo-anonymizer",
-  "plugins/nemo-iron-swarm",
+  "plugins/nemo-agent-hardener",
   "plugins/nemo-data-designer",
   "services/core/auth",
   "services/platform-seed",
@@ -624,8 +624,8 @@ extra-paths = [
   "plugins/nemo-guardrails/src",
   # So ``integration.*`` and ``from .utils import`` resolve in plugin tests (PEP 420).
   "plugins/nemo-guardrails/tests",
-  # So ``_doubles`` (the iron-swarm plugin's shared test stand-ins) resolves in its tests.
-  "plugins/nemo-iron-swarm/tests/unit",
+  # So ``_doubles`` (the agent-hardener plugin's shared test stand-ins) resolves in its tests.
+  "plugins/nemo-agent-hardener/tests/unit",
   # nemo-evaluator plugin is not a workspace member; add its src so ty can
   # resolve nemo_evaluator imports when checking plugin test files.
   "plugins/nemo-evaluator/src",
@@ -752,3 +752,31 @@ include = [
 [tool.ty.overrides.rules]
 missing-argument = "ignore"
 unknown-argument = "ignore"
+
+# ty cannot see that a TypedDict satisfies langgraph 1.2's `StateT` bound
+# (`TypedDictLikeV1 | DataclassLike`), so any real `StateGraph(SomeTypedDict)` construction —
+# and the `CompiledStateGraph` it returns — fails these two rules. Every other StateGraph in
+# the repo lives inside a docstring, so this example victim is the only live construction.
+# Scoped to the one file and the two rules the limitation produces.
+[[tool.ty.overrides]]
+include = [
+  "plugins/nemo-agent-hardener/examples/langgraph-victim/agent.py",
+]
+
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+invalid-return-type = "ignore"
+
+# The platform venv pins nemo-relay 0.7.3 (the Fabric adapters cap it at <0.8), but this BYO
+# example image installs nemo-relay >= 0.8, whose typed API is incompatible with 0.7.3's
+# (`ToolExecutionResult` wrapper, `tool_call_id`). ty type-checks the example against the venv's
+# 0.7.3 and reports the 0.8 surface as missing. Scoped to the one file and the two rules the
+# version skew produces; expires when the Fabric cap lifts and the venv moves to >= 0.8.
+[[tool.ty.overrides]]
+include = [
+  "plugins/nemo-agent-hardener/examples/other-victim/agent.py",
+]
+
+[tool.ty.overrides.rules]
+unresolved-attribute = "ignore"
+no-matching-overload = "ignore"

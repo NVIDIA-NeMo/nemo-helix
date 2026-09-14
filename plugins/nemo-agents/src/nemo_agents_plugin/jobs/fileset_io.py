@@ -23,8 +23,12 @@ import tempfile
 from pathlib import Path
 from typing import Iterator
 
+from filesets import FilesetFileSystem
 from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.job_context import JobContext
+from nemo_platform_plugin.jobs.file_manager import FilesetFileManager
 from nemo_platform_plugin.refs import (
     FilesetRef,
     LocalDir,
@@ -41,6 +45,21 @@ def split_fileset_ref(ref: str, default_workspace: str) -> tuple[str, str]:
     """Split a ``workspace/name`` (or bare ``name``) fileset ref into ``(ws, name)``."""
     parsed = parse_entity_ref(ref, default_workspace=default_workspace)
     return parsed.workspace, parsed.name
+
+
+def _fileset_manager(
+    files_client: FilesClient,
+    *,
+    workspace: str,
+    fileset: str,
+    ensure_fileset_exists: bool,
+) -> FilesetFileManager:
+    return FilesetFileManager(
+        workspace=workspace,
+        fileset_name=fileset,
+        filesystem=FilesetFileSystem(client=files_client),
+        ensure_fileset_exists=ensure_fileset_exists,
+    )
 
 
 @contextlib.contextmanager
@@ -78,7 +97,9 @@ def resolve_staged_config(
     with tempfile.TemporaryDirectory(prefix=f".{kind}-{name}-", dir=str(ctx.storage.ephemeral)) as tmp:
         tmp_path = Path(tmp)
         logger.info("Downloading fileset %s/%s into %s for %s.", ws, name, tmp_path, kind)
-        sdk.files.download(local_path=str(tmp_path), fileset=name, workspace=ws)
+        files_client = client_from_platform(sdk, FilesClient)
+        manager = _fileset_manager(files_client, workspace=ws, fileset=name, ensure_fileset_exists=False)
+        manager.download_from_url(f"{ws}/{name}", local_dir=tmp_path)
         # ``config_rel_path`` is caller-controlled — confirm it stays inside the
         # downloaded fileset so an absolute path or ``..`` segment can't make the
         # subprocess read arbitrary files from the task host.
@@ -154,11 +175,8 @@ def resolve_output(
 
 def upload_to_fileset(local_dir: Path, *, fileset: str, workspace: str, sdk: NeMoPlatform) -> None:
     """Upload *local_dir*'s contents recursively to the named fileset (auto-created)."""
-    # Trailing slash uploads contents, not the dir itself.
-    result = sdk.files.upload(
-        local_path=str(local_dir) + "/",
-        fileset=fileset,
-        workspace=workspace,
-        fileset_auto_create=True,
-    )
-    logger.info("Uploaded outputs from %s to fileset %s/%s.", local_dir, workspace, result.name)
+    files_client = client_from_platform(sdk, FilesClient)
+    manager = _fileset_manager(files_client, workspace=workspace, fileset=fileset, ensure_fileset_exists=True)
+    manager.validate_storage()
+    manager.upload(local_path=local_dir, remote_path="")
+    logger.info("Uploaded outputs from %s to fileset %s/%s.", local_dir, workspace, fileset)

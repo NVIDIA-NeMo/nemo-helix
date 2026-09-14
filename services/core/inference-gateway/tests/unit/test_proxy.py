@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, Mock
 
 import aiohttp
 import anthropic.types as anthropic_types
+import httpx
 import openai.types.chat as openai_chat_types
 import pytest
 import pytest_asyncio
@@ -22,6 +23,7 @@ from fastapi.responses import StreamingResponse
 from multidict import CIMultiDict, CIMultiDictProxy
 from nemo_platform.types.inference import ModelProvider, ServedModelMapping
 from nemo_platform.types.inference.virtual_model import VirtualModel as SDKVirtualModel
+from nemo_platform_plugin.client.client import AsyncNemoClient
 from nemo_platform_plugin.inference_middleware import (
     BackendFormat,
     ImmediateResponse,
@@ -367,6 +369,68 @@ async def test_virtual_model_proxy_typed_context_defaults_unset_backend_format_t
 
     assert response.status_code == 200
     assert seen_backend_formats == [BackendFormat.OPENAI_CHAT]
+
+
+@pytest.mark.asyncio
+async def test_virtual_model_proxy_adds_request_nemo_client_to_middleware_context(mock_proxy_client):
+    seen_clients: list[AsyncNemoClient | None] = []
+
+    class _ContextPlugin(NemoInferenceMiddleware):
+        async def process_request(
+            self,
+            ctx: InferenceMiddlewareContext,
+            request: InferenceRequest,
+            middleware_config: object,
+        ) -> ImmediateResponse:
+            seen_clients.append(ctx.request_nemo_client)
+            return ImmediateResponse(data={"ok": True})
+
+    workspace = "e2e-test"
+    vm_name = "my-router"
+    registry = MiddlewareRegistry(plugins={"test-plugin": _ContextPlugin()})
+    registry.request_middleware_calls[(workspace, vm_name)] = [
+        ResolvedMiddlewareCall(plugin_name="test-plugin", config_type="t", resolved_config={})
+    ]
+
+    request = Mock(spec=Request)
+    request.method = "POST"
+    request.headers = {"content-type": "application/json"}
+    request.query_params = {}
+
+    async with httpx.AsyncClient() as http_client:
+        request_nemo_client = AsyncNemoClient(
+            base_url="http://platform.test",
+            default_headers={"traceparent": "00-request"},
+            http_client=http_client,
+        )
+
+        response = await virtual_model_proxy(
+            request=request,
+            workspace=workspace,
+            vm_name=vm_name,
+            virtual_model=SDKVirtualModel(
+                id=f"{workspace}/{vm_name}",
+                entity_id=f"{workspace}/{vm_name}",
+                name=vm_name,
+                workspace=workspace,
+                parent=workspace,
+                db_version=1,
+                created_at="2026-01-01T00:00:00Z",
+                updated_at="2026-01-01T00:00:00Z",
+            ),
+            trailing_uri="v1/chat/completions",
+            json_body={"model": vm_name, "messages": [{"role": "user", "content": "hi"}]},
+            http_client=mock_proxy_client,
+            model_cache=ModelCache(),
+            registry=registry,
+            request_nemo_client=request_nemo_client,
+        )
+
+    assert isinstance(response, StreamingResponse)
+    body = json.loads(await _read_streaming_response(response))
+    assert body == {"ok": True}
+    assert seen_clients == [request_nemo_client]
+    mock_proxy_client.request.assert_not_called()
 
 
 @pytest.mark.asyncio

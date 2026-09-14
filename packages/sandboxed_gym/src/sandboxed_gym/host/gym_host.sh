@@ -16,12 +16,7 @@ gym_rw=${3:-/tmp/gym-src/Gym}
 runtime=${4:-}
 
 if [ -z "$runtime" ]; then
-    # Prefer an explicitly packaged module path if present in PYTHONPATH layout.
-    if [ -f "$root/packages/sandboxed_gym/src/sandboxed_gym/runtime/gym_host_runtime.py" ]; then
-        runtime=$root/packages/sandboxed_gym/src/sandboxed_gym/runtime/gym_host_runtime.py
-    else
-        runtime=$root/nemo_rl/environments/sandbox/gym_host_runtime.py
-    fi
+    runtime=$root/packages/sandboxed_gym/src/sandboxed_gym/runtime/gym_host_runtime.py
 fi
 
 gym_tree=${SANDBOXED_GYM_TREE:-$root/3rdparty/Gym-workspace/Gym}

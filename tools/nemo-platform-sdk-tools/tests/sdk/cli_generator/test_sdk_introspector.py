@@ -3,48 +3,68 @@
 
 from __future__ import annotations
 
+from typing import Union
+
 from nemo_platform_sdk_tools.sdk.cli_generator.sdk_introspector import (
     ParsedDocstring,
     SDKIntrospector,
     introspect_typed_dict,
 )
+from typing_extensions import Literal, TypedDict
 
 
-def test_introspect_jobs_resource():
-    """Test introspecting the current jobs resource."""
+class _StringFilter(TypedDict, total=False):
+    like: str
+
+
+class _DatetimeFilter(TypedDict, total=False):
+    gte: str
+    lte: str
+
+
+class _ResourceFilterParam(TypedDict, total=False):
+    workspace: str
+    project: str
+    name: Union[_StringFilter, str]
+    source: Union[_StringFilter, str]
+    status: Union[Literal["active", "completed"], list[Literal["active", "completed"]]]
+    created_at: _DatetimeFilter
+    updated_at: _DatetimeFilter
+
+
+def test_introspect_models_resource():
+    """Test introspecting a generated SDK resource."""
     introspector = SDKIntrospector()
-    methods = introspector.introspect_resource(["jobs"])
+    methods = introspector.introspect_resource(["models"])
 
     # Should have found the standard CRUD methods
     assert "list" in methods
     assert "create" in methods
     assert "retrieve" in methods
     assert "delete" in methods
-    assert "cancel" in methods
 
     # Check the create method
     create_method = methods["create"]
     assert create_method.name == "create"
 
     required_names = {p.name for p in create_method.parameters if p.is_required}
-    assert required_names == {"platform_spec", "source", "spec"}
-    source_param = next(p for p in create_method.parameters if p.name == "source")
-    assert source_param.python_type_name == "str"
+    assert required_names == {"name"}
+    name_param = next(p for p in create_method.parameters if p.name == "name")
+    assert name_param.python_type_name == "str"
 
     # Should have optional parameters
     optional_params = [p for p in create_method.parameters if not p.is_path_param and not p.is_required]
     assert len(optional_params) > 0
 
 
-def test_introspect_jobs_pagination():
-    """Test introspecting pagination on the jobs resource."""
+def test_introspect_models_pagination():
+    """Test introspecting pagination on a generated resource."""
     introspector = SDKIntrospector()
-    methods = introspector.introspect_resource(["jobs"])
+    methods = introspector.introspect_resource(["models"])
 
     assert "list" in methods
     assert "create" in methods
     assert "retrieve" in methods
-    assert "cancel" in methods
 
     # Check the list method
     list_method = methods["list"]
@@ -115,14 +135,15 @@ def test_parse_docstring_no_args():
 def test_sdk_method_docstring_parsing():
     """Test that SDKMethod correctly parses docstrings from SDK."""
     introspector = SDKIntrospector()
-    methods = introspector.introspect_resource(["jobs"])
+    methods = introspector.introspect_resource(["models"])
 
     list_method = methods["list"]
 
     # Should have parsed docstring
-    assert list_method.description == "List platform jobs with filtering and pagination."
+    assert list_method.description.startswith("List Models endpoint with filtering, pagination, and sorting.")
     assert list_method.get_param_description("filter") == (
-        "Filter jobs by workspace, project, name, status, source, created_at, and updated_at."
+        "Filter models by name, project, workspace, base_model, adapters, finetuning_type, "
+        "prompt, lora_enabled, description, created_at, and updated_at."
     )
     assert "field to sort by" in (list_method.get_param_description("sort") or "")
 
@@ -132,18 +153,14 @@ class TestTypedDictFieldIsListType:
 
     def test_union_with_list_is_a_list_type(self):
         """A filter accepting either one status or a list should be a list type."""
-        from nemo_platform.types.jobs.platform_jobs_list_filter_param import PlatformJobsListFilterParam
-
-        fields = introspect_typed_dict(PlatformJobsListFilterParam)
+        fields = introspect_typed_dict(_ResourceFilterParam)
         field_map = {f.name: f for f in fields}
 
         assert field_map["status"].is_list_type is True
 
     def test_filter_fields_without_sequence_are_not_list_types(self):
         """Filter fields with simple str type should not be list types."""
-        from nemo_platform.types.jobs.platform_jobs_list_filter_param import PlatformJobsListFilterParam
-
-        fields = introspect_typed_dict(PlatformJobsListFilterParam)
+        fields = introspect_typed_dict(_ResourceFilterParam)
         field_map = {f.name: f for f in fields}
 
         # These should NOT be list types (just str)
@@ -152,9 +169,7 @@ class TestTypedDictFieldIsListType:
 
     def test_string_filter_union_is_not_a_list_type(self):
         """A nested string-filter union is not itself a repeatable scalar option."""
-        from nemo_platform.types.jobs.platform_jobs_list_filter_param import PlatformJobsListFilterParam
-
-        fields = introspect_typed_dict(PlatformJobsListFilterParam)
+        fields = introspect_typed_dict(_ResourceFilterParam)
         field_map = {f.name: f for f in fields}
 
         assert field_map["name"].is_list_type is False
@@ -166,9 +181,7 @@ class TestTypedDictFieldIsSimpleCliType:
 
     def test_str_fields_are_simple(self):
         """String fields should be detected as simple CLI types."""
-        from nemo_platform.types.jobs.platform_jobs_list_filter_param import PlatformJobsListFilterParam
-
-        fields = introspect_typed_dict(PlatformJobsListFilterParam)
+        fields = introspect_typed_dict(_ResourceFilterParam)
         field_map = {f.name: f for f in fields}
 
         assert field_map["workspace"].is_simple_cli_type is True
@@ -186,20 +199,14 @@ class TestTypedDictFieldIsSimpleCliType:
 
     def test_literal_types_are_simple(self):
         """Literal status values should be detected as simple CLI types."""
-        from nemo_platform.types.jobs.platform_jobs_list_filter_param import (
-            PlatformJobsListFilterParam,
-        )
-
-        fields = introspect_typed_dict(PlatformJobsListFilterParam)
+        fields = introspect_typed_dict(_ResourceFilterParam)
         field_map = {f.name: f for f in fields}
 
         assert field_map["status"].is_simple_cli_type is True
 
     def test_complex_types_are_not_simple(self):
         """Complex nested types should NOT be detected as simple CLI types."""
-        from nemo_platform.types.jobs.platform_jobs_list_filter_param import PlatformJobsListFilterParam
-
-        fields = introspect_typed_dict(PlatformJobsListFilterParam)
+        fields = introspect_typed_dict(_ResourceFilterParam)
         field_map = {f.name: f for f in fields}
 
         assert field_map["created_at"].is_simple_cli_type is False
@@ -212,25 +219,25 @@ class TestExplodableTypedDict:
     def test_filter_param_is_explodable(self):
         """Filter params should be detected as explodable TypedDicts."""
         introspector = SDKIntrospector()
-        methods = introspector.introspect_resource(["jobs"])
+        methods = introspector.introspect_resource(["models"])
         list_method = methods["list"]
 
         filter_param = next(p for p in list_method.optional_parameters if p.name == "filter")
         assert filter_param.is_explodable_typed_dict is True
 
-    def test_create_platform_spec_param_is_explodable(self):
+    def test_create_nested_config_param_is_explodable(self):
         """Required TypedDict request parameters should also be explodable."""
         introspector = SDKIntrospector()
-        methods = introspector.introspect_resource(["jobs"])
+        methods = introspector.introspect_resource(["inference", "deployment_configs"])
         create_method = methods["create"]
 
-        platform_spec_param = next(p for p in create_method.parameters if p.name == "platform_spec")
-        assert platform_spec_param.is_explodable_typed_dict is True
+        executor_config_param = next(p for p in create_method.parameters if p.name == "executor_config")
+        assert executor_config_param.is_explodable_typed_dict is True
 
     def test_sort_param_is_not_explodable(self):
         """Sort params (simple enums) should NOT be detected as explodable."""
         introspector = SDKIntrospector()
-        methods = introspector.introspect_resource(["jobs"])
+        methods = introspector.introspect_resource(["models"])
         list_method = methods["list"]
 
         sort_param = next(p for p in list_method.optional_parameters if p.name == "sort")
@@ -239,7 +246,7 @@ class TestExplodableTypedDict:
     def test_page_param_is_not_explodable(self):
         """Simple params like page should NOT be explodable."""
         introspector = SDKIntrospector()
-        methods = introspector.introspect_resource(["jobs"])
+        methods = introspector.introspect_resource(["models"])
         list_method = methods["list"]
 
         page_param = next(p for p in list_method.optional_parameters if p.name == "page")
@@ -251,28 +258,22 @@ class TestTypedDictFieldExtraction:
 
     def test_extract_filter_fields(self):
         """Should correctly extract fields from filter TypedDict."""
-        from nemo_platform.types.jobs.platform_jobs_list_filter_param import PlatformJobsListFilterParam
-
-        fields = introspect_typed_dict(PlatformJobsListFilterParam)
+        fields = introspect_typed_dict(_ResourceFilterParam)
         field_names = {f.name for f in fields}
 
         assert "workspace" in field_names
         assert "project" in field_names
 
     def test_extract_all_job_filter_fields(self):
-        """Should correctly extract the current jobs filter fields."""
-        from nemo_platform.types.jobs.platform_jobs_list_filter_param import PlatformJobsListFilterParam
-
-        fields = introspect_typed_dict(PlatformJobsListFilterParam)
+        """Should correctly extract all resource filter fields."""
+        fields = introspect_typed_dict(_ResourceFilterParam)
         field_names = {f.name for f in fields}
 
         assert field_names == {"created_at", "name", "project", "source", "status", "updated_at", "workspace"}
 
     def test_all_job_filter_fields_have_evaluated_type(self):
         """All fields should have evaluated_type set for proper type detection."""
-        from nemo_platform.types.jobs.platform_jobs_list_filter_param import PlatformJobsListFilterParam
-
-        fields = introspect_typed_dict(PlatformJobsListFilterParam)
+        fields = introspect_typed_dict(_ResourceFilterParam)
 
         for field in fields:
             assert field.evaluated_type is not None, f"Field {field.name} should have evaluated_type"

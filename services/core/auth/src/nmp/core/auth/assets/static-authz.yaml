@@ -701,6 +701,15 @@ authz:
         scopes:
         - files:read
         - platform:read
+    # Refresh re-points an existing fileset at a new revision, so it takes the same
+    # permission as PATCH rather than the create permission a POST would default to.
+    /apis/files/v2/workspaces/{workspace}/filesets/{name}/refresh:
+      post:
+        permissions:
+        - filesets.update
+        scopes:
+        - files:write
+        - platform:write
     /apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs:
       post:
         permissions:

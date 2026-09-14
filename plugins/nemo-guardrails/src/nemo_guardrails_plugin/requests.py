@@ -4,7 +4,7 @@
 from typing import Any
 
 from nemo_guardrails_plugin.schemas import GuardrailsRequest
-from nemo_platform.types.guardrail import GenerationLogOptionsParam
+from nemo_platform_plugin.guardrail.types import GenerationLogOptionsParam
 from nemo_platform_plugin.inference_middleware import InferenceMiddlewareError
 from pydantic import ValidationError
 

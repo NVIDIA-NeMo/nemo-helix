@@ -14,13 +14,11 @@ It returns an :class:`APIRouter` carrying a single ``POST`` route that:
   header.
 - Resolves keyword-only DI parameters on
   :meth:`~nemo_platform_plugin.function.NemoFunction.run` by parameter name —
-  ``ctx`` (FunctionContext), ``async_sdk``
+  ``ctx`` (FunctionContext), ``sdk`` (``NeMoPlatform``), ``async_sdk``
   (``AsyncNeMoPlatform``, resolved from
-  :func:`~nemo_platform_plugin.dependencies.get_sdk_client`), and ``is_local=False``. Functions
-  intentionally do **not** receive a sync ``sdk`` here: the API
-  process is async; sync work belongs inside
-  :func:`anyio.to_thread.run_sync` and bridges back to the loop via
-  :func:`anyio.from_thread.run`.
+  :func:`~nemo_platform_plugin.dependencies.get_sdk_client`), and ``is_local=False``.
+  Functions that need sync-only libraries may request ``sdk`` and run that
+  work inside :func:`anyio.to_thread.run_sync` / :func:`asyncio.to_thread`.
 - Awaits ``run(spec, **resolved)``.
 - If the result is an async iterator/generator, wraps it in a
   :class:`StreamingResponse` with media type
@@ -60,19 +58,17 @@ import json
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse, StreamingResponse
+from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.authz import AuthzScope, CallerKind, path_rule
-from nemo_platform_plugin.dependencies import get_sdk_client
+from nemo_platform_plugin.dependencies import get_sdk_client, get_sync_sdk_client
 from nemo_platform_plugin.function import NemoFunction, returns_async_iterator
 from nemo_platform_plugin.function_context import FunctionContext
 from nemo_platform_plugin.functions.frames import Heartbeat
 from pydantic import BaseModel
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +164,7 @@ def add_function_routes(
     instance = function_cls()
     run_params = function_cls.run_signature().parameters
     wants_ctx = "ctx" in run_params
+    wants_sdk = "sdk" in run_params
     wants_async_sdk = "async_sdk" in run_params
     wants_is_local = "is_local" in run_params
 
@@ -184,6 +181,7 @@ def add_function_routes(
         instance=instance,
         spec_schema=spec_schema,
         wants_ctx=wants_ctx,
+        wants_sdk=wants_sdk,
         wants_async_sdk=wants_async_sdk,
         wants_is_local=wants_is_local,
         send_headers_before_first_frame=function_cls.send_headers_before_first_frame,
@@ -234,6 +232,7 @@ def _build_route_handler(
     instance: NemoFunction,
     spec_schema: type[BaseModel],
     wants_ctx: bool,
+    wants_sdk: bool,
     wants_async_sdk: bool,
     wants_is_local: bool,
     send_headers_before_first_frame: bool,
@@ -243,17 +242,24 @@ def _build_route_handler(
 
     FastAPI inspects the handler's signature at registration time;
     every parameter with a ``Depends`` is resolved on every request.
-    Declaring ``Depends(get_sdk_client)`` on a function that doesn't
-    want ``async_sdk`` would force a runtime error on every request
-    until the platform installs ``app.dependency_overrides`` for the
-    SDK. Building the closure body's call-shape from booleans keeps
-    each function's surface as narrow as the function declared.
+    Declaring SDK dependencies on a function that doesn't want them
+    would force a runtime error on every request until the platform
+    installs ``app.dependency_overrides`` for the SDKs. Building the
+    closure body's call-shape from booleans keeps each function's
+    surface as narrow as the function declared.
     """
 
-    async def _invoke(spec_obj: BaseModel, ctx: FunctionContext | None, async_sdk: Any) -> Any:
+    async def _invoke(
+        spec_obj: BaseModel,
+        ctx: FunctionContext | None,
+        sdk: NeMoPlatform | None,
+        async_sdk: AsyncNeMoPlatform | None,
+    ) -> Any:
         kwargs: dict[str, Any] = {}
         if ctx is not None:
             kwargs["ctx"] = ctx
+        if wants_sdk:
+            kwargs["sdk"] = sdk
         if wants_async_sdk:
             kwargs["async_sdk"] = async_sdk
         if wants_is_local:
@@ -267,16 +273,39 @@ def _build_route_handler(
             return StreamingResponse(_to_ndjson(stream), media_type=NDJSON_MEDIA_TYPE)
         return await result
 
-    if wants_ctx and wants_async_sdk:
+    if wants_ctx and wants_sdk and wants_async_sdk:
 
         async def handler(
             workspace: str,
             request_body,
             x_request_id: str | None = Header(default=None, alias="X-Request-ID"),
-            async_sdk: Any = Depends(get_sdk_client),
+            sdk: NeMoPlatform = Depends(get_sync_sdk_client),
+            async_sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
         ) -> Any:
             ctx = FunctionContext(workspace=workspace, request_id=x_request_id)
-            return await _invoke(request_body, ctx, async_sdk)
+            return await _invoke(request_body, ctx, sdk, async_sdk)
+
+    elif wants_ctx and wants_sdk:
+
+        async def handler(
+            workspace: str,
+            request_body,
+            x_request_id: str | None = Header(default=None, alias="X-Request-ID"),
+            sdk: NeMoPlatform = Depends(get_sync_sdk_client),
+        ) -> Any:
+            ctx = FunctionContext(workspace=workspace, request_id=x_request_id)
+            return await _invoke(request_body, ctx, sdk, None)
+
+    elif wants_ctx and wants_async_sdk:
+
+        async def handler(
+            workspace: str,
+            request_body,
+            x_request_id: str | None = Header(default=None, alias="X-Request-ID"),
+            async_sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+        ) -> Any:
+            ctx = FunctionContext(workspace=workspace, request_id=x_request_id)
+            return await _invoke(request_body, ctx, None, async_sdk)
 
     elif wants_ctx:
 
@@ -286,16 +315,35 @@ def _build_route_handler(
             x_request_id: str | None = Header(default=None, alias="X-Request-ID"),
         ) -> Any:
             ctx = FunctionContext(workspace=workspace, request_id=x_request_id)
-            return await _invoke(request_body, ctx, None)
+            return await _invoke(request_body, ctx, None, None)
+
+    elif wants_sdk and wants_async_sdk:
+
+        async def handler(
+            workspace: str,
+            request_body,
+            sdk: NeMoPlatform = Depends(get_sync_sdk_client),
+            async_sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+        ) -> Any:
+            return await _invoke(request_body, None, sdk, async_sdk)
+
+    elif wants_sdk:
+
+        async def handler(
+            workspace: str,
+            request_body,
+            sdk: NeMoPlatform = Depends(get_sync_sdk_client),
+        ) -> Any:
+            return await _invoke(request_body, None, sdk, None)
 
     elif wants_async_sdk:
 
         async def handler(
             workspace: str,
             request_body,
-            async_sdk: Any = Depends(get_sdk_client),
+            async_sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
         ) -> Any:
-            return await _invoke(request_body, None, async_sdk)
+            return await _invoke(request_body, None, None, async_sdk)
 
     else:
 
@@ -303,7 +351,7 @@ def _build_route_handler(
             workspace: str,
             request_body,
         ) -> Any:
-            return await _invoke(request_body, None, None)
+            return await _invoke(request_body, None, None, None)
 
     # FastAPI inspects ``__annotations__`` (via ``get_type_hints``)
     # rather than the literal source annotation, and a closure-captured

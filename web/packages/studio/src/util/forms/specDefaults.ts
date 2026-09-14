@@ -30,24 +30,32 @@ import { CustomizationCreateUnslothJobBody } from '@nemo/sdk/generated/customize
  * (`model`, `dataset`) get an empty string: the form overwrites them, and Zod refuses to
  * parse without them.
  */
+/** Present so Zod fills the defaults nested inside; without the container it skips them. */
+const integrationsSeed = () => ({ wandb: {}, mlflow: {} });
+
+/** Same reason as {@link integrationsSeed}. */
+const progressReportingSeed = () => ({ progress_reporting: {} });
+
 export const AUTOMODEL_SEED = {
   model: '',
   dataset: { training: '' },
   training: { lora: {} },
-  schedule: {},
+  schedule: progressReportingSeed(),
   batch: {},
   optimizer: {},
   parallelism: {},
+  integrations: integrationsSeed(),
 };
 
 export const UNSLOTH_SEED = {
   model: { name: '' },
   dataset: { path: '' },
   training: { lora: {} },
-  schedule: {},
+  schedule: progressReportingSeed(),
   batch: {},
   optimizer: {},
   hardware: {},
+  integrations: integrationsSeed(),
 };
 
 /**
@@ -58,10 +66,13 @@ export const UNSLOTH_SEED = {
 export const rlSeed = (type: 'dpo' | 'grpo') => ({
   model: '',
   dataset: '',
-  training: { type, parallelism: {}, ...(type === 'grpo' ? { lora: {} } : {}) },
-  // Bound by RlIntegrationsSection. Present so Zod fills any default the spec declares
-  // inside them; without the container, nested defaults are skipped silently.
-  integrations: { wandb: {}, mlflow: {} },
+  training: {
+    type,
+    parallelism: {},
+    ...progressReportingSeed(),
+    ...(type === 'grpo' ? { lora: {} } : {}),
+  },
+  integrations: integrationsSeed(),
 });
 
 const specOf = <T>(schema: { parse: (input: unknown) => { spec: T } }, seed: unknown): T =>

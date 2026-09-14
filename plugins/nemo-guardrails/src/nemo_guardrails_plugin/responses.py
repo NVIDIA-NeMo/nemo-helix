@@ -10,7 +10,7 @@ from typing import Any
 
 from nemo_guardrails_plugin.constants import GUARDRAILS_DATA_MESSAGE_ROLE
 from nemo_guardrails_plugin.rails import build_guardrails_data
-from nemo_platform.types.guardrail import GenerationLogOptionsParam
+from nemo_platform_plugin.guardrail.types import GenerationLogOptionsParam
 from nemo_platform_plugin.inference_middleware import (
     ImmediateResponse,
     InferenceMiddlewareError,
@@ -366,7 +366,8 @@ def build_output_response_body(
     # Output rails validate choices[0].message, so return only the choice that was checked.
     if generation_response is not None and choices:
         choice = {**choices[0], "index": 0}
-        message = dict(choice.get("message") or {}) if isinstance(choice.get("message"), dict) else {}
+        raw_message = choice.get("message")
+        message: dict[str, Any] = dict(raw_message) if isinstance(raw_message, dict) else {}
         original_content = message.get("content")
 
         # If the output rail modified the message content, write it back onto the choice.

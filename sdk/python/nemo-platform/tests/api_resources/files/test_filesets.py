@@ -394,6 +394,58 @@ class TestFilesets:
                 workspace="workspace",
             )
 
+    @pytest.mark.skip(reason="Mock server tests are disabled")
+    @parametrize
+    def test_method_refresh(self, client: NeMoPlatform) -> None:
+        fileset = client.files.filesets.refresh(
+            name="name",
+            workspace="workspace",
+        )
+        assert_matches_type(Fileset, fileset, path=["response"])
+
+    @pytest.mark.skip(reason="Mock server tests are disabled")
+    @parametrize
+    def test_raw_response_refresh(self, client: NeMoPlatform) -> None:
+        response = client.files.filesets.with_raw_response.refresh(
+            name="name",
+            workspace="workspace",
+        )
+
+        assert response.is_closed is True
+        assert response.http_request.headers.get("X-Stainless-Lang") == "python"
+        fileset = response.parse()
+        assert_matches_type(Fileset, fileset, path=["response"])
+
+    @pytest.mark.skip(reason="Mock server tests are disabled")
+    @parametrize
+    def test_streaming_response_refresh(self, client: NeMoPlatform) -> None:
+        with client.files.filesets.with_streaming_response.refresh(
+            name="name",
+            workspace="workspace",
+        ) as response:
+            assert not response.is_closed
+            assert response.http_request.headers.get("X-Stainless-Lang") == "python"
+
+            fileset = response.parse()
+            assert_matches_type(Fileset, fileset, path=["response"])
+
+        assert cast(Any, response.is_closed) is True
+
+    @pytest.mark.skip(reason="Mock server tests are disabled")
+    @parametrize
+    def test_path_params_refresh(self, client: NeMoPlatform) -> None:
+        with pytest.raises(ValueError, match=r"Expected a non-empty value for `workspace` but received ''"):
+            client.files.filesets.with_raw_response.refresh(
+                name="name",
+                workspace="",
+            )
+
+        with pytest.raises(ValueError, match=r"Expected a non-empty value for `name` but received ''"):
+            client.files.filesets.with_raw_response.refresh(
+                name="",
+                workspace="workspace",
+            )
+
 
 class TestAsyncFilesets:
     parametrize = pytest.mark.parametrize(
@@ -754,6 +806,58 @@ class TestAsyncFilesets:
 
         with pytest.raises(ValueError, match=r"Expected a non-empty value for `name` but received ''"):
             await async_client.files.filesets.with_raw_response.delete(
+                name="",
+                workspace="workspace",
+            )
+
+    @pytest.mark.skip(reason="Mock server tests are disabled")
+    @parametrize
+    async def test_method_refresh(self, async_client: AsyncNeMoPlatform) -> None:
+        fileset = await async_client.files.filesets.refresh(
+            name="name",
+            workspace="workspace",
+        )
+        assert_matches_type(Fileset, fileset, path=["response"])
+
+    @pytest.mark.skip(reason="Mock server tests are disabled")
+    @parametrize
+    async def test_raw_response_refresh(self, async_client: AsyncNeMoPlatform) -> None:
+        response = await async_client.files.filesets.with_raw_response.refresh(
+            name="name",
+            workspace="workspace",
+        )
+
+        assert response.is_closed is True
+        assert response.http_request.headers.get("X-Stainless-Lang") == "python"
+        fileset = await response.parse()
+        assert_matches_type(Fileset, fileset, path=["response"])
+
+    @pytest.mark.skip(reason="Mock server tests are disabled")
+    @parametrize
+    async def test_streaming_response_refresh(self, async_client: AsyncNeMoPlatform) -> None:
+        async with async_client.files.filesets.with_streaming_response.refresh(
+            name="name",
+            workspace="workspace",
+        ) as response:
+            assert not response.is_closed
+            assert response.http_request.headers.get("X-Stainless-Lang") == "python"
+
+            fileset = await response.parse()
+            assert_matches_type(Fileset, fileset, path=["response"])
+
+        assert cast(Any, response.is_closed) is True
+
+    @pytest.mark.skip(reason="Mock server tests are disabled")
+    @parametrize
+    async def test_path_params_refresh(self, async_client: AsyncNeMoPlatform) -> None:
+        with pytest.raises(ValueError, match=r"Expected a non-empty value for `workspace` but received ''"):
+            await async_client.files.filesets.with_raw_response.refresh(
+                name="name",
+                workspace="",
+            )
+
+        with pytest.raises(ValueError, match=r"Expected a non-empty value for `name` but received ''"):
+            await async_client.files.filesets.with_raw_response.refresh(
                 name="",
                 workspace="workspace",
             )

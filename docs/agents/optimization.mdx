@@ -32,8 +32,9 @@ Optimizer state is stored in the `nemo-agent-optimizer` fileset:
 - `optimizer_suggestions.jsonl`: one suggestion per line, including applied state.
 - `optimizer_snapshot.json`: model and agent names from the latest run.
 
-Security-oriented suggestions such as missing guardrails, PII exposure, or
-leaked secrets are covered in [Secure Agents](/documentation/agents/secure-agents).
+Suggestions about missing guardrails are covered in
+[Add Guardrails to an Agent](/documentation/agents/add-guardrails). PII exposure and
+leaked secrets are covered in [Scan Trace Data](/documentation/agents/scan-trace-data).
 
 ## Prerequisites
 
@@ -534,7 +535,7 @@ registered under the profile, compile fails and lists what is available.
 
 **Data safety suggestions do not appear.** Telemetry is optional. The optimizer only scans `nemo-agent-telemetry` when that fileset exists and contains JSONL trace files.
 
-## Next steps
+## Next Steps
 
 - [Agent overview](/documentation/agents): review how platform-managed agents are registered, deployed, invoked, evaluated, and optimized.
 - [Agent evaluation](/documentation/evaluate-models/metrics/agent-configuration): configure agents as online evaluation targets and choose the right agent response mapping.

@@ -42,10 +42,15 @@ navigation:
         contents:
           - page: Deploy Agents
             path: ../../agents/deploy-agents.mdx
+          - page: Add Guardrails
+            path: ../../agents/add-guardrails.mdx
+            slug: add-guardrails
           - page: Execute Agents as Jobs
             path: ../../agents/execute-agent-jobs.mdx
           - page: Observe Agents
             path: ../../agents/observability.mdx
+          - page: Scan Trace Data
+            path: ../../agents/scan-trace-data.mdx
           - section: Optimize Agents
             contents:
               - page: ETHOS.md
@@ -55,8 +60,6 @@ navigation:
                 path: ../../agents/optimization.mdx
               - page: Insight-Driven Optimization
                 path: ../../agents/insight-driven-optimization.mdx
-          - page: Secure Agents
-            path: ../../agents/security.mdx
           - page: Plugins and Skills
             path: ../../agents/plugins.mdx
       - section: Evaluate Agents & Models

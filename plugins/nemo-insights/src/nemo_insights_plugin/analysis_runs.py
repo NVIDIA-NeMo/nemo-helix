@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
+from collections.abc import Awaitable, Mapping
+from typing import Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_insights_plugin._perms import AnalysisRunPerms
@@ -30,11 +31,19 @@ from nemo_insights_plugin.analyst.agent_config import AGENT_CONFIG_FORMAT, build
 from nemo_insights_plugin.authz import scope
 from nemo_insights_plugin.entities import AnalysisRun
 from nemo_insights_plugin.schema import AnalysisRunPage, AnalysisRunResponse, CreateAnalysisRunRequest
-from nemo_platform import APIConnectionError, APIStatusError, AsyncNeMoPlatform
+from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.agents.client import AsyncAgentsClient
+from nemo_platform_plugin.agents.types import CreateExecuteJobRequest, JsonObject
 from nemo_platform_plugin.authz import CallerKind, path_rule
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
+from nemo_platform_plugin.client.response import NemoResponse
 from nemo_platform_plugin.dependencies import get_sdk_client
 from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError, get_entity_client
+from nemo_platform_plugin.models.client import AsyncModelsClient
+from nemo_platform_plugin.models.types import ModelEntity
 from nemo_platform_plugin.schema import PaginationData
+from pydantic import TypeAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +51,23 @@ INSIGHTS_ANALYSIS_EXTENSION_KIND = "insights.analysis"
 ANALYSIS_RUN_NAME_PREFIX = "insights-run-"
 
 router = APIRouter(tags=["Insights Analysis Runs"])
+_JSON_OBJECT_ADAPTER = TypeAdapter(JsonObject)
+
+
+class ModelLookupClient(Protocol):
+    def get_model(self, *, name: str, workspace: str | None = None) -> Awaitable[NemoResponse[ModelEntity]]: ...
+
+
+class ExecuteJobClient(Protocol):
+    def create_execute_job(
+        self, *, body: CreateExecuteJobRequest, workspace: str | None = None
+    ) -> Awaitable[NemoResponse[JsonObject]]: ...
+
+    def get_execute_job(self, *, name: str, workspace: str | None = None) -> Awaitable[NemoResponse[JsonObject]]: ...
+
+
+def _json_object(value: object) -> JsonObject:
+    return _JSON_OBJECT_ADAPTER.validate_python(value)
 
 
 def mint_analysis_run_name() -> str:
@@ -65,10 +91,12 @@ async def create_analysis_run(
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AnalysisRunResponse:
     """Create an Insights analysis run backed by the generic ``agents.execute`` job."""
+    agents_client = client_from_platform(sdk, AsyncAgentsClient)
+    models_client = client_from_platform(sdk, AsyncModelsClient)
     # Resolve before recording anything: a bogus ref would otherwise persist a
     # run and submit a job that cannot start, and the request carries the only
     # copy of the operator's intent.
-    request = await _resolve_model_refs(sdk, request, workspace=workspace)
+    request = await _resolve_model_refs(models_client, request, workspace=workspace)
     run = AnalysisRun(
         name=mint_analysis_run_name(),
         workspace=workspace,
@@ -87,8 +115,13 @@ async def create_analysis_run(
 
     spec = build_execute_agent_job_config(request, workspace=workspace, run_name=saved.name)
     try:
-        job = await sdk.agents.jobs.execute.create(spec=spec, name=saved.name, workspace=workspace)
-    except APIStatusError as exc:
+        job = (
+            await agents_client.create_execute_job(
+                workspace=workspace,
+                body=CreateExecuteJobRequest(spec=spec, name=saved.name),
+            )
+        ).data()
+    except NemoHTTPError as exc:
         # The run record is deliberately left in place. Deleting it here could
         # remove the only pointer to a job that was in fact created (a create
         # that timed out client-side still lands), which is the untracked-job
@@ -103,9 +136,9 @@ async def create_analysis_run(
             # while ``run`` names the record this call stranded.
             detail={"error": _error_detail(exc), "run": saved.name},
         ) from exc
-    except APIConnectionError as exc:
-        # Same stranded run, but a sibling of APIStatusError rather than a
-        # subclass, so it needs its own arm — and it is the case most likely to
+    except NemoTransportError as exc:
+        # Same stranded run, but a transport error rather than an HTTP status
+        # error, so it needs its own arm — and it is the case most likely to
         # be worth retrying, since the request may never have reached Jobs.
         # Log the run name: without it the orphan cannot be found afterwards.
         logger.warning("Analysis run %r recorded but the Jobs service was unreachable: %s", saved.name, exc)
@@ -119,7 +152,7 @@ async def create_analysis_run(
                 "run": saved.name,
             },
         ) from exc
-    return AnalysisRunResponse(run=saved, job=job)
+    return AnalysisRunResponse(run=saved, job=dict(job))
 
 
 @router.get("/analysis-runs", response_model=AnalysisRunPage)
@@ -164,27 +197,28 @@ async def get_analysis_run(
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AnalysisRunResponse:
     """Get one analysis run, joined with the live state of its backing job."""
+    agents_client = client_from_platform(sdk, AsyncAgentsClient)
     try:
         run = await entity_client.get(AnalysisRun, name=name, workspace=workspace)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404, detail=f"Analysis run '{name}' not found in workspace '{workspace}'."
         ) from exc
-    return AnalysisRunResponse(run=run, job=await _backing_job(sdk, workspace=workspace, name=name))
+    return AnalysisRunResponse(run=run, job=await _backing_job(agents_client, workspace=workspace, name=name))
 
 
-async def _backing_job(sdk: AsyncNeMoPlatform, *, workspace: str, name: str) -> dict[str, Any] | None:
+async def _backing_job(client: ExecuteJobClient, *, workspace: str, name: str) -> JsonObject | None:
     """Read the job sharing this run's name, or None when submission never landed."""
     try:
-        return await sdk.agents.jobs.execute.get(name, workspace=workspace)
-    except APIStatusError as exc:
-        if exc.status_code == 404:
-            return None
+        return (await client.get_execute_job(name=name, workspace=workspace)).data()
+    except NotFoundError:
+        return None
+    except NemoHTTPError:
         raise
 
 
 async def _resolve_model_refs(
-    sdk: AsyncNeMoPlatform,
+    client: ModelLookupClient,
     request: CreateAnalysisRunRequest,
     *,
     workspace: str,
@@ -198,14 +232,22 @@ async def _resolve_model_refs(
     is what gets stored and put in the job spec, because the Analyst only accepts
     qualified refs.
     """
-    resolved = {
-        field: await _resolve_model_ref(sdk, getattr(request, field), field=field, workspace=workspace)
-        for field in ("default_model", "fast_model")
-    }
-    return request.model_copy(update=resolved)
+    default_model = await _resolve_model_ref(
+        client,
+        request.default_model,
+        field="default_model",
+        workspace=workspace,
+    )
+    fast_model = await _resolve_model_ref(
+        client,
+        request.fast_model,
+        field="fast_model",
+        workspace=workspace,
+    )
+    return request.model_copy(update={"default_model": default_model, "fast_model": fast_model})
 
 
-async def _resolve_model_ref(sdk: AsyncNeMoPlatform, ref: str, *, field: str, workspace: str) -> str:
+async def _resolve_model_ref(client: ModelLookupClient, ref: str, *, field: str, workspace: str) -> str:
     """Return ``<workspace>/<name>`` for an existing Model Entity, or raise 422."""
     match ref.split("/"):
         case [name]:
@@ -219,15 +261,15 @@ async def _resolve_model_ref(sdk: AsyncNeMoPlatform, ref: str, *, field: str, wo
             )
 
     try:
-        await sdk.models.retrieve(name, workspace=model_workspace)
-    except APIStatusError as exc:
-        if exc.status_code == 404:
-            raise HTTPException(
-                status_code=422,
-                detail=f"{field} '{model_workspace}/{name}' is not a known Model Entity.",
-            ) from exc
+        await client.get_model(name=name, workspace=model_workspace)
+    except NotFoundError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{field} '{model_workspace}/{name}' is not a known Model Entity.",
+        ) from exc
+    except NemoHTTPError as exc:
         raise HTTPException(status_code=exc.status_code, detail=_error_detail(exc)) from exc
-    except APIConnectionError as exc:
+    except NemoTransportError as exc:
         # Same reasoning as the submit path: an unreachable dependency is not
         # the caller's bad request, and nothing has been recorded yet.
         logger.warning("Could not reach the Models service to validate %s %r: %s", field, ref, exc)
@@ -237,29 +279,29 @@ async def _resolve_model_ref(sdk: AsyncNeMoPlatform, ref: str, *, field: str, wo
     return f"{model_workspace}/{name}"
 
 
-def build_execute_agent_job_config(
-    request: CreateAnalysisRunRequest, *, workspace: str, run_name: str
-) -> dict[str, Any]:
+def build_execute_agent_job_config(request: CreateAnalysisRunRequest, *, workspace: str, run_name: str) -> JsonObject:
     """Translate a high-level Insights request into a generic execute-agent job config."""
-    extension_config: dict[str, Any] = {
+    extension_config: JsonObject = {
         "agent": request.agent,
         "workspace": workspace,
     }
-    payload: dict[str, Any] = {
-        "agent": _inline_analyst(request, workspace=workspace),
-        "input": _analysis_prompt(request.agent),
-        "extension": {
-            "kind": INSIGHTS_ANALYSIS_EXTENSION_KIND,
-            "config": extension_config,
-        },
-    }
+    payload = _json_object(
+        {
+            "agent": _inline_analyst(request, workspace=workspace),
+            "input": _analysis_prompt(request.agent),
+            "extension": {
+                "kind": INSIGHTS_ANALYSIS_EXTENSION_KIND,
+                "config": extension_config,
+            },
+        }
+    )
     if request.timeout_seconds is not None:
         payload["timeout_seconds"] = request.timeout_seconds
 
     return payload
 
 
-def _inline_analyst(request: CreateAnalysisRunRequest, *, workspace: str) -> dict[str, Any]:
+def _inline_analyst(request: CreateAnalysisRunRequest, *, workspace: str) -> JsonObject:
     """Build the ``agent`` arm of the execute job as an inline definition.
 
     The Analyst has no Agent entity: its config is composed here from the
@@ -267,35 +309,39 @@ def _inline_analyst(request: CreateAnalysisRunRequest, *, workspace: str) -> dic
     accepts an entity ref, so pointing a run at a stored Analyst is a small
     change if a use case appears.
     """
-    return {
-        # AgentInline defaults to the legacy NAT format, matching the Agent
-        # entity; the Analyst is a Fabric spec agent, so say so explicitly.
-        "config_format": AGENT_CONFIG_FORMAT,
-        "config": build_analyst_agent_config(
-            agent=request.agent,
-            workspace=workspace,
-            default_model=request.default_model,
-            fast_model=request.fast_model,
-            ethos=request.ethos,
-            since=request.since,
-            evaluation_id=request.evaluation_id,
-            # The Analyst's self-observability builds its own OTLP exporter from
-            # the operator's local CLI config, which does not exist in a task
-            # pod, so on a cluster it exports unauthenticated at best. Telemetry
-            # for these runs belongs in the agent config's relay endpoints,
-            # where the agents layer already carries auth; until that is wired,
-            # a run must not depend on it.
-            enable_observability=False,
-        ),
-    }
+    return _json_object(
+        {
+            # AgentInline defaults to the legacy NAT format, matching the Agent
+            # entity; the Analyst is a Fabric spec agent, so say so explicitly.
+            "config_format": AGENT_CONFIG_FORMAT,
+            "config": build_analyst_agent_config(
+                agent=request.agent,
+                workspace=workspace,
+                default_model=request.default_model,
+                fast_model=request.fast_model,
+                ethos=request.ethos,
+                since=request.since,
+                evaluation_id=request.evaluation_id,
+                # The Analyst's self-observability builds its own OTLP exporter from
+                # the operator's local CLI config, which does not exist in a task
+                # pod, so on a cluster it exports unauthenticated at best. Telemetry
+                # for these runs belongs in the agent config's relay endpoints,
+                # where the agents layer already carries auth; until that is wired,
+                # a run must not depend on it.
+                enable_observability=False,
+            ),
+        }
+    )
 
 
-def _error_detail(error: APIStatusError) -> Any:
+def _error_detail(error: NemoHTTPError) -> object:
     """Unwrap the Agents service's ``detail`` from a failed job-create call."""
-    body: Any = error.body
-    if isinstance(body, dict) and "detail" in body:
-        return body["detail"]
-    return body if body is not None else error.message
+    body = error.body
+    if isinstance(body, Mapping):
+        detail = body.get("detail")
+        if detail is not None:
+            return detail
+    return body if body is not None else error.detail
 
 
 def _analysis_prompt(agent: str) -> str:

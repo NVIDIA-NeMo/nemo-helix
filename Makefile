@@ -417,11 +417,11 @@ PYTEST_CI_OPTS := --cov=src --cov=packages \
 	--cov-report xml:coverage.xml \
 	--durations=25
 
-# Global wall-clock timeout for CI test runs to prevent infinite hangs when
-# a pytest-xdist worker crashes (e.g. SIGABRT from wasmtime) and doesn't exit.
-# timeout sends SIGTERM after PYTEST_CI_TIMEOUT seconds, then SIGKILL after 60s.
+# CI-only wall-clock timeout. Send SIGINT first so pytest can flush junit,
+# coverage, and crash artifacts; if cleanup hangs, SIGKILL follows later.
 PYTEST_CI_TIMEOUT ?= 1800
-PYTEST_CI_CMD = timeout --kill-after=60s $(PYTEST_CI_TIMEOUT)s $(PYTEST_CMD)
+PYTEST_CI_KILL_AFTER ?= 600
+PYTEST_CI_CMD = timeout --signal=INT --kill-after=$(PYTEST_CI_KILL_AFTER)s $(PYTEST_CI_TIMEOUT)s $(PYTEST_CMD)
 
 # Unit/default runs keep ``loadscope`` so tests from the same module/class stay
 # on one worker and reuse normal pytest fixtures efficiently. The integration

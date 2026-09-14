@@ -4,9 +4,9 @@
 """Typed endpoint definitions for the Data Designer service.
 
 The Data Designer plugin exposes:
-- ``POST /preview`` — streaming NDJSON preview of a config
-- ``/jobs/create`` collection — standard job CRUD (create, list, get, delete,
-  status, logs) rebased from the generic ``/jobs`` collection
+- ``POST /preview`` and ``POST /retrieval-preview`` streaming NDJSON functions
+- four job collections under ``/jobs/{job_collection}``: ``create``,
+  ``retrieval-generate``, ``retrieval-prepare``, and ``retrieval-run``
 
 The service prefix is ``/apis/data-designer/v2/workspaces/{workspace}``.
 """
@@ -16,16 +16,25 @@ from __future__ import annotations
 from abc import abstractmethod
 
 from nemo_platform_plugin.client.endpoint import delete, get, post
-from nemo_platform_plugin.client.types import Paginated, Stream
+from nemo_platform_plugin.client.types import BinaryContent, Paginated, Stream
 from nemo_platform_plugin.data_designer.types import (
+    DataDesignerJobCollection,
     DataDesignerJobLogsQueryParams,
     DataDesignerJobRequest,
     DataDesignerJobResponse,
     ListDataDesignerJobsQueryParams,
     PreviewFrameData,
     PreviewRequest,
+    RetrievalPreviewRequest,
 )
-from nemo_platform_plugin.jobs.schemas import PlatformJobLogPage, PlatformJobStatusResponse
+from nemo_platform_plugin.jobs.schemas import (
+    PlatformJobListResultResponse,
+    PlatformJobLogPage,
+    PlatformJobResultResponse,
+    PlatformJobStatusResponse,
+)
+
+_DATA_DESIGNER = "/apis/data-designer/v2/workspaces/{workspace}"
 
 # ---------------------------------------------------------------------------
 # Preview (streaming NDJSON)
@@ -37,40 +46,91 @@ from nemo_platform_plugin.jobs.schemas import PlatformJobLogPage, PlatformJobSta
 def preview(*, workspace: str | None = None, body: PreviewRequest) -> Stream[PreviewFrameData]: ...
 
 
-# ---------------------------------------------------------------------------
-# Job CRUD (collection: /jobs/create)
-# ---------------------------------------------------------------------------
-
-
-@post("/apis/data-designer/v2/workspaces/{workspace}/jobs/create")
+@post("/apis/data-designer/v2/workspaces/{workspace}/retrieval-preview")
 @abstractmethod
-def create_job(*, workspace: str | None = None, body: DataDesignerJobRequest) -> DataDesignerJobResponse: ...
+def retrieval_preview(*, workspace: str | None = None, body: RetrievalPreviewRequest) -> Stream[PreviewFrameData]: ...
 
 
-@get("/apis/data-designer/v2/workspaces/{workspace}/jobs/create")
+# ---------------------------------------------------------------------------
+# Job CRUD (collections: /jobs/{job_collection})
+# ---------------------------------------------------------------------------
+
+
+@post(_DATA_DESIGNER + "/jobs/{job_collection}")
+@abstractmethod
+def create_job(
+    *,
+    workspace: str | None = None,
+    job_collection: DataDesignerJobCollection = "create",
+    body: DataDesignerJobRequest,
+) -> DataDesignerJobResponse: ...
+
+
+@get(_DATA_DESIGNER + "/jobs/{job_collection}")
 @abstractmethod
 def list_jobs(
-    *, workspace: str | None = None, query_params: ListDataDesignerJobsQueryParams | None = None
+    *,
+    workspace: str | None = None,
+    job_collection: DataDesignerJobCollection = "create",
+    query_params: ListDataDesignerJobsQueryParams | None = None,
 ) -> Paginated[DataDesignerJobResponse]: ...
 
 
-@get("/apis/data-designer/v2/workspaces/{workspace}/jobs/create/{name}")
+@get(_DATA_DESIGNER + "/jobs/{job_collection}/{name}")
 @abstractmethod
-def get_job(*, workspace: str | None = None, name: str) -> DataDesignerJobResponse: ...
+def get_job(
+    *, workspace: str | None = None, job_collection: DataDesignerJobCollection = "create", name: str
+) -> DataDesignerJobResponse: ...
 
 
-@delete("/apis/data-designer/v2/workspaces/{workspace}/jobs/create/{name}")
+@delete(_DATA_DESIGNER + "/jobs/{job_collection}/{name}")
 @abstractmethod
-def delete_job(*, workspace: str | None = None, name: str) -> None: ...
+def delete_job(
+    *, workspace: str | None = None, job_collection: DataDesignerJobCollection = "create", name: str
+) -> None: ...
 
 
-@get("/apis/data-designer/v2/workspaces/{workspace}/jobs/create/{name}/status")
+@post(_DATA_DESIGNER + "/jobs/{job_collection}/{name}/cancel")
 @abstractmethod
-def get_job_status(*, workspace: str | None = None, name: str) -> PlatformJobStatusResponse: ...
+def cancel_job(
+    *, workspace: str | None = None, job_collection: DataDesignerJobCollection = "create", name: str
+) -> DataDesignerJobResponse: ...
 
 
-@get("/apis/data-designer/v2/workspaces/{workspace}/jobs/create/{name}/logs")
+@get(_DATA_DESIGNER + "/jobs/{job_collection}/{name}/status")
+@abstractmethod
+def get_job_status(
+    *, workspace: str | None = None, job_collection: DataDesignerJobCollection = "create", name: str
+) -> PlatformJobStatusResponse: ...
+
+
+@get(_DATA_DESIGNER + "/jobs/{job_collection}/{name}/logs")
 @abstractmethod
 def get_job_logs(
-    *, workspace: str | None = None, name: str, query_params: DataDesignerJobLogsQueryParams | None = None
+    *,
+    workspace: str | None = None,
+    job_collection: DataDesignerJobCollection = "create",
+    name: str,
+    query_params: DataDesignerJobLogsQueryParams | None = None,
 ) -> PlatformJobLogPage: ...
+
+
+@get(_DATA_DESIGNER + "/jobs/{job_collection}/{name}/results")
+@abstractmethod
+def list_job_results(
+    *, workspace: str | None = None, job_collection: DataDesignerJobCollection = "create", name: str
+) -> PlatformJobListResultResponse: ...
+
+
+@get(_DATA_DESIGNER + "/jobs/{job_collection}/{job}/results/{name}")
+@abstractmethod
+def get_job_result(
+    *, workspace: str | None = None, job_collection: DataDesignerJobCollection = "create", job: str, name: str
+) -> PlatformJobResultResponse: ...
+
+
+@get(_DATA_DESIGNER + "/jobs/{job_collection}/{job}/results/{name}/download")
+@abstractmethod
+def download_job_result(
+    *, workspace: str | None = None, job_collection: DataDesignerJobCollection = "create", job: str, name: str
+) -> BinaryContent: ...

@@ -34,6 +34,7 @@ from sandboxed_gym.host.models import (
 )
 from sandboxed_gym.host.provider import SandboxedGymHostProvider, get_host_provider
 from sandboxed_gym.runtime.gym_host_runtime import (
+    ENVIRONMENT_OFFLINE_ENV_KEY,
     ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY,
     GYM_GLOBAL_CONFIG_ENV_KEY,
 )
@@ -276,6 +277,8 @@ def build_gym_host_spec(
         # The mount path is ``/job/environment`` with or without a FileSet. This flag is how the
         # host distinguishes a required package from an image-bundled tree at the same path.
         bootstrap_extra[ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY] = "true"
+    if cfg.environment_offline:
+        bootstrap_extra[ENVIRONMENT_OFFLINE_ENV_KEY] = "true"
     bootstrap_env = build_bootstrap_env(
         cfg.job_id,
         cfg.environment_path or sandbox.env_mount_path,

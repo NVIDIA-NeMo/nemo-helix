@@ -10,8 +10,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_insights_plugin import cli
-from nemo_insights_plugin.entities import AnalysisConfig
-from nemo_insights_plugin.sdk_resources.analysis_configs import _build_enable_body
+from nemo_insights_plugin.entities import AnalysisConfig, AnalysisConfigStatus
+from nemo_insights_plugin.sdk_resources.analysis_configs import (
+    _build_enable_body,
+    _build_status_update_body,
+    _build_update_body,
+)
 from nemo_insights_plugin.service import InsightsService
 from nemo_platform_plugin.entity_client import NemoEntityNotFoundError, get_entity_client
 
@@ -77,9 +81,40 @@ def test_enable_sdk_body_contains_both_model_refs() -> None:
     assert _build_enable_body(
         default_model="default/gpt-5",
         fast_model="default/gpt-5-mini",
-    ) == {
+    ).model_dump(mode="json") == {
         "default_model": "default/gpt-5",
         "fast_model": "default/gpt-5-mini",
+    }
+
+
+def test_update_config_sdk_body_omits_none_enabled() -> None:
+    assert _build_update_body(enabled=None).model_dump(mode="json", exclude_unset=True) == {}
+    assert _build_update_body(enabled=False).model_dump(mode="json", exclude_unset=True) == {"enabled": False}
+
+
+def test_update_run_status_sdk_body_omits_unset_fields_and_keeps_explicit_null_timestamps() -> None:
+    empty = _build_status_update_body()
+    partial = _build_status_update_body(
+        status=AnalysisConfigStatus.RUNNING,
+        last_submitted_job="job-123",
+        last_error="",
+    )
+    clear_timestamps = _build_status_update_body(
+        last_successful_run_at=None,
+        last_attempted_at=None,
+        last_completed_at=None,
+    )
+
+    assert empty.model_dump(mode="json", exclude_unset=True) == {}
+    assert partial.model_dump(mode="json", exclude_unset=True) == {
+        "status": "running",
+        "last_submitted_job": "job-123",
+        "last_error": "",
+    }
+    assert clear_timestamps.model_dump(mode="json", exclude_unset=True) == {
+        "last_successful_run_at": None,
+        "last_attempted_at": None,
+        "last_completed_at": None,
     }
 
 

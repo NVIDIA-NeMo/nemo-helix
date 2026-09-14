@@ -10,7 +10,6 @@ from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.models.types import ModelEntity
 from nmp.automodel.adapter import automodel_spec_to_compiler_output
 from nmp.automodel.api.v2.jobs.schemas import (
@@ -27,6 +26,7 @@ from nmp.automodel.entities.values import OutputNameType
 from nmp.automodel.images import get_tasks_image, get_training_image
 from nmp.common.entities.utils import get_random_id
 from nmp.common.jobs.exceptions import PlatformJobCompilationError
+from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
 
 
 def _make_mock_model_entity(
@@ -47,8 +47,8 @@ def _make_mock_model_entity(
 
 
 @pytest.fixture
-def mock_sdk():
-    return Mock(spec=AsyncNeMoPlatform)
+def platform_clients() -> AsyncCustomizationPlatformClients:
+    return AsyncCustomizationPlatformClients(files=AsyncMock(), models=AsyncMock())
 
 
 def _output(*, output_type: OutputNameType = OutputNameType.ADAPTER) -> OutputResponse:
@@ -266,7 +266,10 @@ def test_compile_training_step_auto_defaults_keep_explicit_lr() -> None:
 
 
 @pytest.mark.asyncio
-async def test_platform_job_config_compiler_rejects_unmerged_lora_for_encoders(mock_sdk, monkeypatch):
+async def test_platform_job_config_compiler_rejects_unmerged_lora_for_encoders(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         "nmp.automodel.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_mock_model_entity()),
@@ -283,7 +286,7 @@ async def test_platform_job_config_compiler_rejects_unmerged_lora_for_encoders(m
         output=_output(),
     )
     with pytest.raises(PlatformJobCompilationError, match="unmerged LoRA"):
-        await platform_job_config_compiler(job, "default", mock_sdk)
+        await platform_job_config_compiler(job, "default", platform_clients)
 
 
 def test_the_reporting_budget_reaches_the_training_step_config() -> None:
@@ -370,7 +373,10 @@ def test_a_plugin_spec_without_a_schedule_block_still_compiles() -> None:
 
 
 @pytest.mark.asyncio
-async def test_platform_job_config_compiler_sft_lora(mock_sdk, monkeypatch):
+async def test_platform_job_config_compiler_sft_lora(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         "nmp.automodel.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_mock_model_entity()),
@@ -411,7 +417,7 @@ async def test_platform_job_config_compiler_sft_lora(mock_sdk, monkeypatch):
         "output": {"name": "test-out", "type": "adapter", "fileset": "test-out-fs"},
     }
     compiler_spec = automodel_spec_to_compiler_output(plugin_shape)
-    spec = await platform_job_config_compiler(compiler_spec, "default", mock_sdk)
+    spec = await platform_job_config_compiler(compiler_spec, "default", platform_clients)
 
     steps = spec.steps if hasattr(spec, "steps") else spec["steps"]
     assert len(steps) == 4
@@ -445,3 +451,18 @@ async def test_platform_job_config_compiler_sft_lora(mock_sdk, monkeypatch):
     assert _step_image(steps[1]) == get_training_image()
     assert _step_image(steps[2]) == get_tasks_image()
     assert _step_image(steps[3]) == get_tasks_image()
+
+
+@pytest.mark.asyncio
+async def test_platform_job_config_compiler_applies_profile_to_task_steps(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+
+    spec = await platform_job_config_compiler(_make_job_output(), "default", platform_clients, profile="custom-gpu")
+
+    assert [step.executor.profile for step in spec.steps] == ["custom-gpu"] * 4

@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Generic, TypeVar
 from unittest.mock import MagicMock
 
 import pytest
@@ -22,22 +24,65 @@ from nemo_guardrails_plugin.benchmarks.seeding import (
     build_guardrail_config_data,
     seed_benchmark,
 )
+from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.guardrail.client import GuardrailClient
+from nemo_platform_plugin.guardrail.types import CreateGuardrailConfigRequest
+from nemo_platform_plugin.inference_middleware import BackendFormat
+from nemo_platform_plugin.models.client import ModelsClient
+from nemo_platform_plugin.models.types import CreateModelProviderRequest, ModelProvider, ServedModelMapping
+from nemo_platform_plugin.virtual_models.client import VirtualModelsClient
+from nemo_platform_plugin.virtual_models.types import (
+    CreateVirtualModelRequest,
+    MiddlewareCall,
+    VirtualModel,
+    VirtualModelInferenceConfig,
+)
+from nemo_platform_plugin.workspaces.client import WorkspacesClient
 from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
+ResponseT = TypeVar("ResponseT")
+_TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 
-def _make_provider(*, provider_name: str, served_model_name: str, entity_suffix: str = "entity") -> SimpleNamespace:
-    return SimpleNamespace(
+
+class _ClientResponse(Generic[ResponseT]):
+    def __init__(self, value: ResponseT) -> None:
+        self._value = value
+
+    def data(self) -> ResponseT:
+        return self._value
+
+
+def _make_provider(*, provider_name: str, served_model_name: str, entity_suffix: str = "entity") -> ModelProvider:
+    return ModelProvider(
+        id=f"provider-{provider_name}",
         name=provider_name,
+        workspace=WORKSPACE,
+        host_url="http://test-provider:8000",
         served_models=[
-            SimpleNamespace(
+            ServedModelMapping(
                 served_model_name=served_model_name,
                 model_entity_id=f"{WORKSPACE}/{served_model_name.replace('/', '-')}-{entity_suffix}",
             )
         ],
+        created_at=_TIMESTAMP,
+        updated_at=_TIMESTAMP,
+    )
+
+
+def _make_virtual_model(*, workspace: str, body: CreateVirtualModelRequest) -> VirtualModel:
+    return VirtualModel(
+        name=body.name,
+        workspace=workspace,
+        default_model_entity=body.default_model_entity,
+        models=body.models,
+        request_middleware=body.request_middleware,
+        response_middleware=body.response_middleware,
+        post_response_middleware=body.post_response_middleware,
+        override_proxy=body.override_proxy,
     )
 
 
@@ -67,40 +112,41 @@ def _write_upstream_configs(ng_root: Path) -> Path:
     return cs_dir
 
 
-@pytest.fixture
-def stub_workspaces(monkeypatch) -> MagicMock:
-    """Point seed_benchmark's client_from_platform at a recording WorkspacesClient stub.
-
-    seed_benchmark creates the benchmark workspace through the typed
-    WorkspacesClient (client_from_platform), which a MagicMock platform cannot
-    drive (client_from_platform reads real SDK internals such as max_retries
-    to build its transport). The stub records create_workspace calls instead.
-    """
-    stub = MagicMock()
-    stub.create_workspace.return_value = SimpleNamespace(data=lambda: SimpleNamespace(name=WORKSPACE))
-    monkeypatch.setattr(
-        "nemo_guardrails_plugin.benchmarks.seeding.client_from_platform",
-        lambda platform, client_cls: stub,
-    )
-    return stub
+def _response(data: ResponseT) -> _ClientResponse[ResponseT]:
+    return _ClientResponse(data)
 
 
 @pytest.fixture
-def fake_client() -> MagicMock:
-    client = MagicMock()
-    client.inference.providers.create = MagicMock()
-    client.inference.providers.retrieve = MagicMock(
-        side_effect=lambda name, workspace=None: _make_provider(
-            provider_name=name,
-            served_model_name=APP_MODEL_NAME if name == APP_PROVIDER else CS_MODEL_NAME,
-        )
+def sdk() -> NeMoPlatform:
+    return NeMoPlatform(base_url="http://test:8000")
+
+
+@pytest.fixture
+def typed_client_mocks(monkeypatch) -> SimpleNamespace:
+    mocks = SimpleNamespace(
+        create_workspace=MagicMock(return_value=_response(SimpleNamespace(name=WORKSPACE))),
+        create_provider=MagicMock(),
+        get_provider=MagicMock(
+            side_effect=lambda *, name, workspace=None: _response(
+                _make_provider(
+                    provider_name=name,
+                    served_model_name=APP_MODEL_NAME if name == APP_PROVIDER else CS_MODEL_NAME,
+                )
+            )
+        ),
+        create_guardrail_config=MagicMock(return_value=_response(SimpleNamespace(name=GUARDRAIL_CONFIG))),
+        create_virtual_model=MagicMock(
+            side_effect=lambda *, workspace, body: _response(_make_virtual_model(workspace=workspace, body=body))
+        ),
+        get_virtual_model=MagicMock(),
     )
-    client.inference.virtual_models.create = MagicMock(
-        return_value=SimpleNamespace(name=VM_NAME, default_model_entity=f"{WORKSPACE}/app")
-    )
-    client.guardrail.configs.create = MagicMock(return_value=SimpleNamespace(name=GUARDRAIL_CONFIG))
-    client.workspaces.create = MagicMock(return_value=SimpleNamespace(name=WORKSPACE))
-    return client
+    monkeypatch.setattr(WorkspacesClient, "create_workspace", mocks.create_workspace)
+    monkeypatch.setattr(ModelsClient, "create_provider", mocks.create_provider)
+    monkeypatch.setattr(ModelsClient, "get_provider", mocks.get_provider)
+    monkeypatch.setattr(GuardrailClient, "create_guardrail_config", mocks.create_guardrail_config)
+    monkeypatch.setattr(VirtualModelsClient, "create_virtual_model", mocks.create_virtual_model)
+    monkeypatch.setattr(VirtualModelsClient, "get_virtual_model", mocks.get_virtual_model)
+    return mocks
 
 
 # ---------------------------------------------------------------------------
@@ -137,20 +183,20 @@ class TestBuildGuardrailConfigData:
 
 class TestSeedBenchmark:
     def test_calls_sdk_with_expected_payloads(
-        self, fake_client: MagicMock, stub_workspaces: MagicMock, tmp_path: Path
+        self, sdk: NeMoPlatform, typed_client_mocks: SimpleNamespace, tmp_path: Path
     ) -> None:
         ng_root = tmp_path / "NeMo-Guardrails"
         _write_upstream_configs(ng_root)
         generated_dir = tmp_path / "generated"
 
         seeded = seed_benchmark(
-            fake_client,
+            sdk,
             nemoguardrails_repo_root=ng_root,
             generated_dir=generated_dir,
             provider_wait_timeout=1.0,
         )
 
-        stub_workspaces.create_workspace.assert_called_once_with(
+        typed_client_mocks.create_workspace.assert_called_once_with(
             exist_ok=True,
             body=CreateWorkspaceRequest(
                 name=WORKSPACE,
@@ -158,54 +204,62 @@ class TestSeedBenchmark:
             ),
         )
         # Both providers registered.
-        provider_create_names = [c.kwargs["name"] for c in fake_client.inference.providers.create.call_args_list]
+        provider_create_names = [c.kwargs["body"].name for c in typed_client_mocks.create_provider.call_args_list]
         assert sorted(provider_create_names) == sorted([APP_PROVIDER, CS_PROVIDER])
+        for call in typed_client_mocks.create_provider.call_args_list:
+            assert call.kwargs["workspace"] == WORKSPACE
+            assert isinstance(call.kwargs["body"], CreateModelProviderRequest)
+            assert call.kwargs["exist_ok"] is True
 
         # Guardrail config payload uses the discovered content-safety entity.
-        gc_call = fake_client.guardrail.configs.create.call_args
-        assert gc_call.kwargs["name"] == GUARDRAIL_CONFIG
+        gc_call = typed_client_mocks.create_guardrail_config.call_args
         assert gc_call.kwargs["workspace"] == WORKSPACE
+        assert isinstance(gc_call.kwargs["body"], CreateGuardrailConfigRequest)
+        assert gc_call.kwargs["body"].name == GUARDRAIL_CONFIG
         assert gc_call.kwargs["exist_ok"] is True
         cs_entity = seeded.cs_model_entity
-        assert gc_call.kwargs["data"]["models"][0]["model"] == cs_entity
+        assert gc_call.kwargs["body"].data.models[0].model == cs_entity
 
         # Two VirtualModels are created: the guardrails VM (with middleware) and
         # a control VM (no middleware) used by the without-guardrails benchmark
         # variant.
-        vm_calls = fake_client.inference.virtual_models.create.call_args_list
+        vm_calls = typed_client_mocks.create_virtual_model.call_args_list
         assert len(vm_calls) == 2
 
         guardrails_vm_call = vm_calls[0]
-        assert guardrails_vm_call.kwargs["name"] == VM_NAME
-        assert guardrails_vm_call.kwargs["default_model_entity"] == seeded.app_model_entity
-        assert guardrails_vm_call.kwargs["models"] == [
-            {"model": seeded.app_model_entity, "backend_format": "OPENAI_CHAT"}
+        guardrails_body = guardrails_vm_call.kwargs["body"]
+        assert isinstance(guardrails_body, CreateVirtualModelRequest)
+        assert guardrails_body.name == VM_NAME
+        assert guardrails_body.default_model_entity == seeded.app_model_entity
+        assert guardrails_body.models == [
+            VirtualModelInferenceConfig(model=seeded.app_model_entity, backend_format=BackendFormat.OPENAI_CHAT)
         ]
         expected_middleware = [
-            {
-                "name": "nemo-guardrails",
-                "config_type": "guardrail_config",
-                "config_id": f"{WORKSPACE}/{GUARDRAIL_CONFIG}",
-            }
+            MiddlewareCall(
+                name="nemo-guardrails",
+                config_type="guardrail_config",
+                config_id=f"{WORKSPACE}/{GUARDRAIL_CONFIG}",
+            )
         ]
-        assert guardrails_vm_call.kwargs["request_middleware"] == expected_middleware
-        assert guardrails_vm_call.kwargs["response_middleware"] == expected_middleware
+        assert guardrails_body.request_middleware == expected_middleware
+        assert guardrails_body.response_middleware == expected_middleware
 
         control_vm_call = vm_calls[1]
-        assert control_vm_call.kwargs["name"] == NO_GUARDRAILS_VM_NAME
-        assert control_vm_call.kwargs["default_model_entity"] == seeded.app_model_entity
-        assert control_vm_call.kwargs["request_middleware"] == []
-        assert control_vm_call.kwargs["response_middleware"] == []
+        control_body = control_vm_call.kwargs["body"]
+        assert control_body.name == NO_GUARDRAILS_VM_NAME
+        assert control_body.default_model_entity == seeded.app_model_entity
+        assert control_body.request_middleware == []
+        assert control_body.response_middleware == []
 
     def test_generated_dir_contains_artifacts(
-        self, fake_client: MagicMock, stub_workspaces: MagicMock, tmp_path: Path
+        self, sdk: NeMoPlatform, typed_client_mocks: SimpleNamespace, tmp_path: Path
     ) -> None:
         ng_root = tmp_path / "NeMo-Guardrails"
         _write_upstream_configs(ng_root)
         generated_dir = tmp_path / "generated"
 
         seed_benchmark(
-            fake_client,
+            sdk,
             nemoguardrails_repo_root=ng_root,
             generated_dir=generated_dir,
             provider_wait_timeout=1.0,
@@ -223,12 +277,14 @@ class TestSeedBenchmark:
         assert request_payload["exist_ok"] is True
         assert request_payload["data"]["models"][0]["type"] == "content_safety"
 
-    def test_returns_seeded_resources(self, fake_client: MagicMock, stub_workspaces: MagicMock, tmp_path: Path) -> None:
+    def test_returns_seeded_resources(
+        self, sdk: NeMoPlatform, typed_client_mocks: SimpleNamespace, tmp_path: Path
+    ) -> None:
         ng_root = tmp_path / "NeMo-Guardrails"
         _write_upstream_configs(ng_root)
 
         seeded = seed_benchmark(
-            fake_client,
+            sdk,
             nemoguardrails_repo_root=ng_root,
             generated_dir=tmp_path / "generated",
             provider_wait_timeout=1.0,
@@ -239,18 +295,28 @@ class TestSeedBenchmark:
         assert seeded.no_guardrails_vm_name == NO_GUARDRAILS_VM_NAME
         assert seeded.guardrail_config_ref == f"{WORKSPACE}/{GUARDRAIL_CONFIG}"
 
-    def test_raises_if_served_models_never_populated(self, stub_workspaces: MagicMock, tmp_path: Path) -> None:
+    def test_raises_if_served_models_never_populated(
+        self, sdk: NeMoPlatform, typed_client_mocks: SimpleNamespace, tmp_path: Path
+    ) -> None:
         ng_root = tmp_path / "NeMo-Guardrails"
         _write_upstream_configs(ng_root)
 
-        client = MagicMock()
-        client.workspaces.create = MagicMock()
-        client.inference.providers.create = MagicMock()
-        client.inference.providers.retrieve = MagicMock(return_value=SimpleNamespace(served_models=[]))
+        typed_client_mocks.get_provider.return_value = _response(
+            ModelProvider(
+                id="provider-empty",
+                name=APP_PROVIDER,
+                workspace=WORKSPACE,
+                host_url="http://test-provider:8000",
+                served_models=[],
+                created_at=_TIMESTAMP,
+                updated_at=_TIMESTAMP,
+            )
+        )
+        typed_client_mocks.get_provider.side_effect = None
 
         with pytest.raises(TimeoutError, match="served model"):
             seed_benchmark(
-                client,
+                sdk,
                 nemoguardrails_repo_root=ng_root,
                 generated_dir=tmp_path / "generated",
                 provider_wait_timeout=0.1,

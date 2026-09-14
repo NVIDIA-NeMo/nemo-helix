@@ -67,9 +67,9 @@ RUN --mount=type=bind,source=docker/scripts/remove-listed-apt-packages.sh,target
     --mount=type=bind,source=docker/removals/apt/nmp-rl-base.txt,target=/tmp/apt-package-removals.txt,readonly \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        jq curl git rsync wget less vim ccache gnupg \
-        build-essential ca-certificates \
-        libibverbs-dev libsqlite3-0 && \
+    jq curl git rsync wget less vim ccache gnupg \
+    build-essential ca-certificates \
+    libibverbs-dev libsqlite3-0 && \
     apt-get install -y --only-upgrade openssl libssl3t64 && \
     bash /tmp/remove-listed-apt-packages.sh /tmp/apt-package-removals.txt && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -79,7 +79,7 @@ ARG CMAKE_VERSION
 RUN ARCH="$(uname -m)" && \
     F="cmake-${CMAKE_VERSION}-linux-${ARCH}" && \
     curl --retry 3 --retry-delay 2 -fsSL -o "${F}.tar.gz" \
-        "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/${F}.tar.gz" && \
+    "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/${F}.tar.gz" && \
     tar -xzf "${F}.tar.gz" && \
     cp -r "${F}/bin/"* /usr/local/bin/ && \
     cp -r "${F}/share/"* /usr/local/share/ && \
@@ -117,10 +117,10 @@ COPY docker/scripts/collect-apt-sources.sh \
 # umask 022, but cannot rewrite the shared uv cache that the symlinked venvs execute from.
 RUN groupadd --gid "${BUILD_GID}" nmp-build && \
     useradd --uid "${BUILD_UID}" --gid "${BUILD_GID}" --home-dir /home/nmp-build \
-        --create-home --shell /bin/bash nmp-build && \
+    --create-home --shell /bin/bash nmp-build && \
     mkdir -p /opt/nemo-rl /opt/nemo_rl_venv /opt/uv_cache /opt/ray_venvs /opt/gym_venvs && \
     chown -R "${BUILD_UID}:${BUILD_GID}" \
-        /home/nmp-build /opt/nemo-rl /opt/nemo_rl_venv /opt/uv_cache /opt/ray_venvs /opt/gym_venvs
+    /home/nmp-build /opt/nemo-rl /opt/nemo_rl_venv /opt/uv_cache /opt/ray_venvs /opt/gym_venvs
 
 # Ray / NeMo-RL runtime behavior (affects the running container, not the build):
 #   RAY_USAGE_STATS_ENABLED=0        - no telemetry phone-home.
@@ -207,7 +207,7 @@ ENV NVTE_BUILD_MAX_JOBS=${NVTE_BUILD_MAX_JOBS} \
 COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} pyproject.toml uv.lock ./
 COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} nemo_rl/__init__.py nemo_rl/package_info.py ./nemo_rl/
 COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} --exclude=TensorRT-LLM-workspace --exclude=TensorRT-LLM-workspace/** \
-     --exclude=**/.git 3rdparty/ ./3rdparty/
+    --exclude=**/.git 3rdparty/ ./3rdparty/
 COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} research/ ./research/
 COPY docker/rl/cherry-picks /opt/cherry-picks
 
@@ -326,20 +326,22 @@ EOF
 # Excluding here keeps them out of this layer - removing them later would leave them extractable.
 COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} --exclude=**/.git . /opt/nemo-rl
 
-# TEMPORARY: NemotronH on DTensor v2 dies in Automodel's parallelizer, which reaches for
-# model.backbone.layers while both the stock-HF and Automodel NemotronH name the trunk
-# `model` (only the HF checkpoint KEYS use a backbone. prefix). Fixed on Automodel main
-# (parallelizer.py: `inner = model.backbone if hasattr(model, "backbone") else model.model`)
-# but NVIDIA-NeMo/RL main still pins 24b47e8, which predates it. Drop this once the
-# submodule is bumped past that fix.
+# TEMPORARY source patches on the pinned NeMo-RL / Automodel / Gym trees. Bind-mounted rather
+# than COPY-ed: this stage already runs as ${BUILD_UID}, so a COPY would land root-owned and
+# could not be cleaned up afterwards, and anything left behind ships in the layer.
 #
-# Bind-mounted rather than COPY-ed: this stage already runs as ${BUILD_UID}, so a COPY would
-# land root-owned and could not be cleaned up afterwards, and anything left behind ships in
-# the layer. The mount keeps the patch out of the image entirely.
-RUN --mount=type=bind,source=docker/rl/patches/automodel-nemotronh-trunk.patch,target=/patches/nemotronh.patch \
+# nemo-rl-pinned-source.patch covers: NemotronH trunk layout, Automodel torch 2.11 version
+# compare, transformers dtype alias, v4_compatible checkpoint plumbing, DTensor async
+# checkpoint finalization, Gym setuptools<81 for pkg_resources, and quoting those PEP 508
+# specs in Gym's bash uv-pip command.
+# nemo-rl-gym-host-hf-cache.patch copies a vendored .huggingface snapshot into writable
+# work and points HF_HOME at it before RunHelper.start(); Hub/datasets offline flags
+# follow NMP_ENVIRONMENT_OFFLINE from the compiled job.
+# Drop hunks (or the file) once the corresponding pin contains the fix.
+RUN --mount=type=bind,source=docker/rl/patches,target=/patches \
     cd /opt/nemo-rl && \
-    git apply --check -p1 /patches/nemotronh.patch && \
-    git apply -p1 --verbose /patches/nemotronh.patch
+    git apply -p1 --verbose /patches/nemo-rl-pinned-source.patch && \
+    git apply -p1 --verbose /patches/nemo-rl-gym-host-hf-cache.patch
 
 # Install the workspace ROOT (nemo-rl) editable. --no-install-project above installed every
 # DEPENDENCY and workspace MEMBER (incl. nemo-gym) but skipped the root; this adds it with --no-deps
@@ -476,7 +478,13 @@ for py in /opt/nemo_rl_venv/bin/python /opt/ray_venvs/*/bin/python /opt/gym_venv
     if "${py}" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("wandb") else 1)'; then
         uv pip install --python "${py}" --upgrade-package wandb "wandb>=0.29.0"
     fi
-    uv pip uninstall --python "${py}" mooncake-transfer-engine-cuda13 || true
+    # Full mlflow needs cryptography<50 and an exact-version skinny; this image uses skinny
+    # plus cryptography>=50. pynvml is a deprecated shim; nvidia-ml-py still provides the
+    # import Torch uses. Mooncake is an optional KV-transfer connector with a CVE in its
+    # vendored etcd wrapper.
+    for pkg in mlflow pynvml mooncake-transfer-engine-cuda13; do
+        uv pip uninstall --python "${py}" "${pkg}" || true
+    done
 done
 
 # Mooncake is an optional vLLM KV-transfer connector. The latest CUDA 13 wheel still embeds a
@@ -514,7 +522,7 @@ USER root
 # Uses the venv interpreter explicitly: this stage has no `python` on PATH (cuda-dl-base ships no
 # system Python, and the venv's bin dir only joins PATH in the publish stage below).
 RUN /opt/nemo_rl_venv/bin/python tools/generate_fingerprint.py \
-        > /opt/nemo_rl_container_fingerprint
+    > /opt/nemo_rl_container_fingerprint
 
 # ---- publish base (inherits builder FS; keeps copied CPython valid - see header NOTE) ----
 FROM builder AS nmp-rl-base
@@ -552,13 +560,13 @@ EOF
 RUN apt-get purge -y ccache vim vim-common less >/dev/null 2>&1 || true; \
     apt-get autoremove -y >/dev/null 2>&1 || true; \
     rm -rf \
-        /usr/local/bin/cmake /usr/local/bin/cpack /usr/local/bin/ctest /usr/local/bin/ccmake \
-        /usr/local/share/cmake-* \
-        /root/.cache/ccache \
-        /var/lib/apt/lists/* \
-        /usr/local/cuda*/NsightSystems-cli-* /usr/local/cuda*/nsight-compute-* \
-        /opt/nvidia/nsight-systems-cli /opt/nvidia/nsight-compute \
-        /usr/local/bin/nsys /usr/local/bin/nsys-ui /usr/local/bin/ncu /usr/local/bin/ncu-ui \
+    /usr/local/bin/cmake /usr/local/bin/cpack /usr/local/bin/ctest /usr/local/bin/ccmake \
+    /usr/local/share/cmake-* \
+    /root/.cache/ccache \
+    /var/lib/apt/lists/* \
+    /usr/local/cuda*/NsightSystems-cli-* /usr/local/cuda*/nsight-compute-* \
+    /opt/nvidia/nsight-systems-cli /opt/nvidia/nsight-compute \
+    /usr/local/bin/nsys /usr/local/bin/nsys-ui /usr/local/bin/ncu /usr/local/bin/ncu-ui \
     || true
 # UV_FIND_LINKS below is additive: it adds nemo-gym as a local candidate, and everything else
 # still resolves from the index. Copied here rather than in `base` so the build's own uv steps
@@ -652,11 +660,16 @@ for python_path in /opt/ray_venvs/*/bin/python /opt/gym_venvs/*/bin/python; do
 done
 EOF
 
-# Gym falls back to this in-tree cache when a process does not inherit NRL_CONTAINER / UV_CACHE_DIR
-# (the sandboxed Gym host's per-app servers), and fails with EACCES on the build-owned tree. Keeping
-# the fallback writable is the safety net; the real fix is env propagation, which lives in NeMo-RL.
-RUN mkdir -p /opt/nemo-rl/3rdparty/Gym-workspace/Gym/cache && \
-    chown ${RUNTIME_UID}:${RUNTIME_GID} /opt/nemo-rl/3rdparty/Gym-workspace/Gym/cache
+# Gym creates setuptools metadata while building server venvs at runtime. The root package writes
+# cache/nemo_gym.egg-info, while editable server packages write sibling *.egg-info directories under
+# their server-type parent. Keep only those build-output locations writable by the runtime user.
+RUN GYM_ROOT=/opt/nemo-rl/3rdparty/Gym-workspace/Gym && \
+    mkdir -p "${GYM_ROOT}/cache" && \
+    chown -R ${RUNTIME_UID}:${RUNTIME_GID} \
+    "${GYM_ROOT}/cache" \
+    "${GYM_ROOT}/resources_servers" \
+    "${GYM_ROOT}/responses_api_agents" \
+    "${GYM_ROOT}/responses_api_models"
 
 WORKDIR /opt/nemo-rl
 

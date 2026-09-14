@@ -32,7 +32,5 @@ class NemoPluginSDKResources(Generic[SyncResourceT, AsyncResourceT]):
 
 
 __all__ = [
-    "AsyncNeMoPlatform",
-    "NeMoPlatform",
     "NemoPluginSDKResources",
 ]

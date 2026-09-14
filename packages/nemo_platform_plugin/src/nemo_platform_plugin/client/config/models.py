@@ -140,6 +140,7 @@ class ContextDefinition(BaseModel):
     user: str = Field(..., min_length=1, description="Reference to user name")
     workspace: str | None = Field(default=None, description="Default workspace")
     default_model: str | None = Field(default=None, description="Default model entity ID for inference")
+    fast_model: str | None = Field(default=None, description="Low-latency model entity ID for agent workloads")
     preferences: Preferences = Field(default_factory=Preferences, description="Context-specific preferences")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional context metadata")
 
@@ -160,6 +161,7 @@ class ConfigParams(TypedDict, total=False):
     refresh_token: str | None
     workspace: str
     default_model: str
+    fast_model: str
     output_format: OutputFormat
     timestamp_format: TimestampFormat
     truncate: bool
@@ -204,7 +206,7 @@ class ConfigFile(BaseModel):
             cluster.base_url = HttpUrl(params["base_url"])
 
         # Find existing or create user
-        user: User = next((u for u in self.users if u.name == user_name), None)  # type: ignore[assignment]
+        user = next((u for u in self.users if u.name == user_name), None)
         access_token_provided = "access_token" in params
         refresh_token_provided = "refresh_token" in params
         access_token = params.get("access_token")
@@ -257,6 +259,8 @@ class ConfigFile(BaseModel):
             context.workspace = params["workspace"]
         if "default_model" in params:
             context.default_model = params["default_model"]
+        if "fast_model" in params:
+            context.fast_model = params["fast_model"]
         if "output_format" in params:
             context.preferences.output_format = params["output_format"]
         if "timestamp_format" in params:
@@ -314,4 +318,5 @@ class Context(BaseModel):
     user: User | None = Field(default=None, description="Resolved user with authentication credentials")
     workspace: str = Field(..., description="Active workspace")
     default_model: str | None = Field(default=None, description="Default model entity ID for inference")
+    fast_model: str | None = Field(default=None, description="Low-latency model entity ID for agent workloads")
     preferences: Preferences = Field(..., description="Effective preferences")

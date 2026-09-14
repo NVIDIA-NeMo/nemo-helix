@@ -11,13 +11,10 @@ checked here instead, so the submitter gets it back from the API call.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_platform_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
-from nemo_platform_plugin.files.client import AsyncFilesClient
 from nmp.customization_common.schemas.file_io import FileSetRef
+from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
 from nmp.rl.tasks.environment.validate import (
     MANIFEST_FILENAME,
     EnvironmentPackageValidationError,
@@ -25,12 +22,9 @@ from nmp.rl.tasks.environment.validate import (
     validate_manifest_against_listing,
 )
 
-if TYPE_CHECKING:
-    from nemo_platform import AsyncNeMoPlatform
-
 
 async def check_environment_package(
-    sdk: "AsyncNeMoPlatform",
+    platform: AsyncCustomizationPlatformClients,
     environment_uri: str,
     default_workspace: str,
 ) -> None:
@@ -43,10 +37,9 @@ async def check_environment_package(
     """
     ref = FileSetRef.model_validate(environment_uri)
     workspace = ref.workspace or default_workspace
-    files = client_from_platform(sdk, AsyncFilesClient)
 
     try:
-        listing = (await files.list_files(workspace=workspace, name=ref.name)).data()
+        listing = (await platform.files.list_files(workspace=workspace, name=ref.name)).data()
     except ClientPermissionDeniedError:
         raise PermissionError(f"Access denied to environment fileset '{workspace}/{ref.name}'") from None
     except ClientNotFoundError:
@@ -62,7 +55,9 @@ async def check_environment_package(
         )
 
     try:
-        raw = await (await files.download_file(workspace=workspace, name=ref.name, path=MANIFEST_FILENAME)).read()
+        raw = await (
+            await platform.files.download_file(workspace=workspace, name=ref.name, path=MANIFEST_FILENAME)
+        ).read()
     except ClientPermissionDeniedError:
         raise PermissionError(f"Access denied to environment fileset '{workspace}/{ref.name}'") from None
 

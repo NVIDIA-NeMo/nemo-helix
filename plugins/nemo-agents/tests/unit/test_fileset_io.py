@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from nemo_agents_plugin.jobs.fileset_io import resolve_output, resolve_staged_config, split_fileset_ref
@@ -28,28 +28,34 @@ def test_split_fileset_ref_rejects_invalid_refs(ref: str) -> None:
 
 def test_resolve_staged_config_fileset_downloads_via_sdk(tmp_path: Path, ctx: JobContext) -> None:
     sdk = MagicMock()
+    manager = MagicMock()
 
-    def _fake_download(local_path: str, fileset: str, workspace: str) -> None:
-        Path(local_path, "optimize.yml").write_text("optimizer: {}")
+    def _fake_download(_ref: str, *, local_dir: Path) -> None:
+        Path(local_dir, "optimize.yml").write_text("optimizer: {}")
 
-    sdk.files.download.side_effect = _fake_download
+    manager.download_from_url.side_effect = _fake_download
 
-    with resolve_staged_config(
-        "optimize.yml",
-        FilesetRef("nemo-agent-optimize-calc"),
-        workspace="default",
-        ctx=ctx,
-        sdk=sdk,
-        kind="optimize-config",
-    ) as resolved:
-        assert resolved.is_file()
-        assert resolved.name == "optimize.yml"
-        assert resolved.read_text() == "optimizer: {}"
+    with (
+        patch("nemo_agents_plugin.jobs.fileset_io.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", return_value=manager) as manager_factory,
+    ):
+        with resolve_staged_config(
+            "optimize.yml",
+            FilesetRef("nemo-agent-optimize-calc"),
+            workspace="default",
+            ctx=ctx,
+            sdk=sdk,
+            kind="optimize-config",
+        ) as resolved:
+            assert resolved.is_file()
+            assert resolved.name == "optimize.yml"
+            assert resolved.read_text() == "optimizer: {}"
 
-    sdk.files.download.assert_called_once()
-    kwargs = sdk.files.download.call_args.kwargs
-    assert kwargs["fileset"] == "nemo-agent-optimize-calc"
-    assert kwargs["workspace"] == "default"
+    manager_factory.assert_called_once()
+    assert manager_factory.call_args.kwargs["fileset"] == "nemo-agent-optimize-calc"
+    assert manager_factory.call_args.kwargs["workspace"] == "default"
+    manager.download_from_url.assert_called_once()
+    assert manager.download_from_url.call_args.args == ("default/nemo-agent-optimize-calc",)
 
 
 def test_resolve_staged_config_fileset_without_sdk_raises(ctx: JobContext) -> None:
@@ -81,8 +87,12 @@ def test_resolve_staged_config_empty_fileset_ref_is_invalid(ctx: JobContext) -> 
 
 def test_resolve_staged_config_rejects_path_escape(ctx: JobContext) -> None:
     sdk = MagicMock()
-    sdk.files.download.side_effect = lambda local_path, fileset, workspace: None
-    with pytest.raises(ValueError, match="outside the downloaded fileset"):
+    manager = MagicMock()
+    with (
+        patch("nemo_agents_plugin.jobs.fileset_io.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", return_value=manager),
+        pytest.raises(ValueError, match="outside the downloaded fileset"),
+    ):
         with resolve_staged_config(
             "../evil.yml",
             FilesetRef("fs"),
@@ -102,25 +112,35 @@ def test_resolve_output_none_uses_persistent_results(ctx: JobContext) -> None:
 
 def test_resolve_output_fileset_uploads_on_clean_exit(ctx: JobContext) -> None:
     sdk = MagicMock()
-    sdk.files.upload.return_value = MagicMock(name="fake-fileset")
+    manager = MagicMock()
 
-    with resolve_output(FilesetRef("optimize-out"), workspace="default", ctx=ctx, sdk=sdk, kind="optimize"):
-        pass
+    with (
+        patch("nemo_agents_plugin.jobs.fileset_io.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", return_value=manager) as manager_factory,
+    ):
+        with resolve_output(FilesetRef("optimize-out"), workspace="default", ctx=ctx, sdk=sdk, kind="optimize"):
+            pass
 
-    sdk.files.upload.assert_called_once()
-    kwargs = sdk.files.upload.call_args.kwargs
-    assert kwargs["fileset"] == "optimize-out"
-    assert kwargs["workspace"] == "default"
-    assert kwargs["fileset_auto_create"] is True
-    assert kwargs["local_path"].endswith("/")
+    manager_factory.assert_called_once()
+    assert manager_factory.call_args.kwargs["fileset"] == "optimize-out"
+    assert manager_factory.call_args.kwargs["workspace"] == "default"
+    assert manager_factory.call_args.kwargs["ensure_fileset_exists"] is True
+    manager.validate_storage.assert_called_once_with()
+    manager.upload.assert_called_once()
+    assert manager.upload.call_args.kwargs["remote_path"] == ""
 
 
 def test_resolve_output_fileset_skips_upload_when_body_raises(ctx: JobContext) -> None:
     sdk = MagicMock()
+    manager = MagicMock()
     with pytest.raises(RuntimeError, match="boom"):
-        with resolve_output(FilesetRef("optimize-out"), workspace="default", ctx=ctx, sdk=sdk, kind="optimize"):
-            raise RuntimeError("boom")
-    sdk.files.upload.assert_not_called()
+        with (
+            patch("nemo_agents_plugin.jobs.fileset_io.client_from_platform", return_value=MagicMock()),
+            patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", return_value=manager),
+        ):
+            with resolve_output(FilesetRef("optimize-out"), workspace="default", ctx=ctx, sdk=sdk, kind="optimize"):
+                raise RuntimeError("boom")
+    manager.upload.assert_not_called()
 
 
 def test_resolve_output_empty_fileset_ref_is_invalid(ctx: JobContext) -> None:
@@ -128,4 +148,3 @@ def test_resolve_output_empty_fileset_ref_is_invalid(ctx: JobContext) -> None:
     with pytest.raises(ValueError, match="invalid entity reference"):
         with resolve_output(FilesetRef(""), workspace="default", ctx=ctx, sdk=sdk, kind="optimize"):
             pass
-    sdk.files.upload.assert_not_called()

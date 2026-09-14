@@ -13,6 +13,7 @@ from nemo_platform.types.files import (
     FilesetFile,
     FilesetOutputsPage,
     FilesetPurpose,
+    GitHubStorageConfig,
     HuggingfaceStorageConfig,
     ListFilesetFilesResponse,
     LocalStorageConfig,
@@ -46,6 +47,7 @@ Methods:
 - <code title="patch /apis/files/v2/workspaces/{workspace}/filesets/{name}">client.files.filesets.<a href="./src/nemo_platform/resources/files/filesets.py">update</a>(name, \*, workspace, \*\*<a href="src/nemo_platform/types/files/fileset_update_params.py">params</a>) -> <a href="./src/nemo_platform/types/files/fileset.py">Fileset</a></code>
 - <code title="get /apis/files/v2/workspaces/{workspace}/filesets">client.files.filesets.<a href="./src/nemo_platform/resources/files/filesets.py">list</a>(\*, workspace, \*\*<a href="src/nemo_platform/types/files/fileset_list_params.py">params</a>) -> <a href="./src/nemo_platform/types/files/fileset.py">SyncDefaultPagination[Fileset]</a></code>
 - <code title="delete /apis/files/v2/workspaces/{workspace}/filesets/{name}">client.files.filesets.<a href="./src/nemo_platform/resources/files/filesets.py">delete</a>(name, \*, workspace) -> <a href="./src/nemo_platform/types/files/fileset.py">Fileset</a></code>
+- <code title="post /apis/files/v2/workspaces/{workspace}/filesets/{name}/refresh">client.files.filesets.<a href="./src/nemo_platform/resources/files/filesets.py">refresh</a>(name, \*, workspace) -> <a href="./src/nemo_platform/types/files/fileset.py">Fileset</a></code>
 
 ## Otlp
 

@@ -66,23 +66,16 @@ def _build_app_context(
 ) -> Generator[ClientContext, None, None]:
     """Yield an IGW + Models + extras :class:`ClientContext` (module-lived).
 
-    Two module-scope hazards are neutralised here:
+    One module-scope hazard is neutralised here:
 
-    1. The 3-second background ``refresh_model_cache_task``. ``on_startup``
-       reads ``refresh_model_cache_interval_sec`` from the module-level
-       config snapshot (captured at first import), so a ``service_configs``
-       override is too late. Patch the snapshot field to 0 *before*
-       entering ``create_test_client`` and ``on_startup`` never schedules
-       the loop.
-    2. The shared SDK HTTP client's ``aclose``. Plugins like
-       ``nemo-guardrails`` call ``await sdk.close()`` in ``on_shutdown``,
-       which would close the shared client for every later test in the
-       module. Patch ``aclose`` to a no-op for the module's lifetime;
-       ``ASGITransport`` is in-process so nothing actually leaks.
+    The 3-second background ``refresh_model_cache_task`` reads
+    ``refresh_model_cache_interval_sec`` from the module-level config snapshot
+    (captured at first import), so a ``service_configs`` override is too late.
+    Patch the snapshot field to 0 *before* entering ``create_test_client`` and
+    ``on_startup`` never schedules the loop.
     """
     from unittest.mock import patch
 
-    from nmp.common import sdk_factory as sdk_factory_module
     from nmp.core.inference_gateway import config as igw_config_module
     from nmp.core.inference_gateway.service import InferenceGatewayService
     from nmp.core.models.service import ModelsService
@@ -95,21 +88,7 @@ def _build_app_context(
             client_type=ClientContext,
             igw_mock_provider_mode=False,
         ) as client_context:
-            shared_async_client = sdk_factory_module._test_http_client
-            if shared_async_client is None:
-                yield client_context
-                return
-
-            original_aclose = shared_async_client.aclose
-
-            async def _noop_aclose() -> None:
-                return None
-
-            shared_async_client.aclose = _noop_aclose  # type: ignore[method-assign]
-            try:
-                yield client_context
-            finally:
-                shared_async_client.aclose = original_aclose  # type: ignore[method-assign]
+            yield client_context
 
 
 @pytest.fixture(scope="module")

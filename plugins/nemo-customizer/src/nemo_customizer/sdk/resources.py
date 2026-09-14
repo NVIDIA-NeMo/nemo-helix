@@ -75,17 +75,17 @@ def _mount_contributor_sdk_resources(
     return resources
 
 
-def _missing_resource_attribute(owner: object, name: str) -> AttributeError:
-    return AttributeError(f"'{type(owner).__name__}' object has no attribute {name!r}")
+def _missing_resource_attribute(owner_type_name: str, name: str) -> AttributeError:
+    return AttributeError(f"'{owner_type_name}' object has no attribute {name!r}")
 
 
 def _require_resource_attribute(
-    owner: object,
+    owner_type_name: str,
     name: str,
     resource: ResourceT | None,
 ) -> ResourceT:
     if resource is None:
-        raise _missing_resource_attribute(owner, name)
+        raise _missing_resource_attribute(owner_type_name, name)
     return resource
 
 
@@ -116,15 +116,15 @@ class Customization:
 
     @property
     def automodel(self) -> CustomizationBackendResource:
-        return _require_resource_attribute(self, "automodel", self._automodel)
+        return _require_resource_attribute(type(self).__name__, "automodel", self._automodel)
 
     @property
     def rl(self) -> CustomizationBackendResource:
-        return _require_resource_attribute(self, "rl", self._rl)
+        return _require_resource_attribute(type(self).__name__, "rl", self._rl)
 
     @property
     def unsloth(self) -> CustomizationBackendResource:
-        return _require_resource_attribute(self, "unsloth", self._unsloth)
+        return _require_resource_attribute(type(self).__name__, "unsloth", self._unsloth)
 
     def plugin_status(self) -> dict[str, object]:
         """Return customization router health, including the registered contributors."""
@@ -162,15 +162,15 @@ class AsyncCustomization:
 
     @property
     def automodel(self) -> AsyncCustomizationBackendResource:
-        return _require_resource_attribute(self, "automodel", self._automodel)
+        return _require_resource_attribute(type(self).__name__, "automodel", self._automodel)
 
     @property
     def rl(self) -> AsyncCustomizationBackendResource:
-        return _require_resource_attribute(self, "rl", self._rl)
+        return _require_resource_attribute(type(self).__name__, "rl", self._rl)
 
     @property
     def unsloth(self) -> AsyncCustomizationBackendResource:
-        return _require_resource_attribute(self, "unsloth", self._unsloth)
+        return _require_resource_attribute(type(self).__name__, "unsloth", self._unsloth)
 
     async def plugin_status(self) -> dict[str, object]:
         """Return customization router health, including the registered contributors."""

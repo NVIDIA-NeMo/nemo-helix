@@ -10,15 +10,16 @@ import os
 from collections.abc import AsyncIterator, Coroutine, Iterator, Sequence
 from datetime import datetime, timezone
 from glob import has_magic
+from pathlib import Path
 from typing import Any, Literal, TypedDict, TypeVar, overload
 
 import anyio
-import fsspec.asyn
+import httpx
 from anyio import to_thread
 from fsspec.asyn import AbstractAsyncStreamedFile, AsyncFileSystem, _get_batch_size
 from fsspec.callbacks import DEFAULT_CALLBACK, Callback
 from fsspec.implementations.local import LocalFileSystem, make_path_posix, trailing_sep
-from fsspec.spec import AbstractBufferedFile
+from fsspec.spec import AbstractBufferedFile, AbstractFileSystem
 from fsspec.utils import other_paths
 from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_platform_plugin.files.types import FilesetFileOutput, ListFilesQueryParams
@@ -286,27 +287,15 @@ def build_fileset_ref(
     return f"{ws}/{fs}"
 
 
-class FilesetFileSystem(AsyncFileSystem):
+class FilesetFileSystem(AbstractFileSystem):
     """
-    fsspec filesystem for NeMo Platform fileset storage.
+    Synchronous fsspec filesystem for NeMo Platform fileset storage.
 
     URL format: fileset://[workspace/]fileset_name[#path]
-
-    The optional `#` separator distinguishes the fileset name from the file path.
-    If omitted, assumes root of fileset. Workspace is optional - if omitted,
-    uses the client's default workspace.
-
-    Examples:
-        >>> from nemo_platform_plugin.files.client import AsyncFilesClient
-        >>> client = AsyncFilesClient(base_url="http://localhost:8000", workspace="default")
-        >>> fs = FilesetFileSystem(client=client)
-        >>> fs.ls("my-fileset")  # root of fileset, workspace from client default
-        >>> fs.ls("my-fileset#data/")  # specific path within fileset
-        >>> fs.ls("default/my-fileset#data/")  # explicit workspace
     """
 
     protocol = "fileset"
-    _client: AsyncFilesClient
+    _client: FilesClient
 
     @classmethod
     def register_fsspec(cls) -> None:
@@ -317,6 +306,510 @@ class FilesetFileSystem(AsyncFileSystem):
         from fsspec import register_implementation
 
         register_implementation(cls.protocol, cls, clobber=True)
+
+    default_batch_size = 4
+    blocksize = 16 * 1024 * 1024
+    _fallback_timestamp = datetime.fromtimestamp(0, tz=timezone.utc)
+
+    def __init__(
+        self,
+        *,
+        client: FilesClient,
+        batch_size: int | None = None,
+        blocksize: int | None = None,
+        **kwargs,
+    ) -> None:
+        if batch_size is None:
+            batch_size = self.default_batch_size
+
+        if blocksize is None:
+            blocksize = self.blocksize
+
+        super().__init__(**kwargs)
+        self._client = client
+        self.batch_size = batch_size
+        self.blocksize = blocksize
+
+    @property
+    def _workspace(self) -> str | None:
+        return self._client.workspace
+
+    def to_fileset_files(self, results: dict[str, Any]) -> list[FilesetFileOutput]:
+        """Convert fsspec find results to FilesetFileOutput objects."""
+        files = []
+        for name, info in results.items():
+            if info.get("type") == "directory":
+                continue
+            workspace, fileset, file_path = parse_fileset_ref(name, workspace_fallback=None)
+            files.append(
+                FilesetFileOutput(
+                    file_ref=f"{workspace}/{fileset}#{file_path}",
+                    file_url=f"/apis/files/v2/workspaces/{workspace}/filesets/{fileset}/-/{file_path}",
+                    path=file_path,
+                    size=info.get("size", 0),
+                )
+            )
+        return files
+
+    def invalidate_cache(self, path: str | None = None) -> None:
+        """Discard cached directory information."""
+        if path is None:
+            self.dircache.clear()
+        else:
+            self.dircache.pop(path.rstrip("/"), None)
+        super().invalidate_cache(path)
+
+    def created(self, path: str) -> datetime:
+        self.info(path)
+        return self._fallback_timestamp
+
+    def modified(self, path: str) -> datetime:
+        self.info(path)
+        return self._fallback_timestamp
+
+    def _populate_dircache_from_response(
+        self,
+        response,
+        workspace: str,
+        fileset: str,
+        prefix: str,
+    ) -> dict[str, list[FileInfo]]:
+        """Parse recursive API response and populate dircache for all directory levels."""
+        base_path = f"{workspace}/{fileset}"
+        root = f"{base_path}#{prefix}" if prefix else base_path
+
+        dir_contents: dict[str, list[FileInfo]] = {root: []}
+        seen_subdirs: dict[str, set[str]] = {root: set()}
+
+        for file_info in response.data:
+            file_path = file_info.path.lstrip("/")
+            full_path = f"{base_path}#{file_path}"
+
+            parent = self._parent(full_path)
+            if parent not in dir_contents:
+                dir_contents[parent] = []
+                seen_subdirs[parent] = set()
+            dir_contents[parent].append({"name": full_path, "size": file_info.size, "type": "file"})
+
+            current = parent
+            while current != root and len(current) > len(root):
+                parent_of_current = self._parent(current)
+                if parent_of_current not in dir_contents:
+                    dir_contents[parent_of_current] = []
+                    seen_subdirs[parent_of_current] = set()
+                subdir_name = current.split("#", 1)[1].rsplit("/", 1)[-1]
+                if subdir_name not in seen_subdirs[parent_of_current]:
+                    seen_subdirs[parent_of_current].add(subdir_name)
+                    dir_contents[parent_of_current].append({"name": current, "size": 0, "type": "directory"})
+                current = parent_of_current
+
+        if self.dircache.use_listings_cache:
+            for path, contents in dir_contents.items():
+                self.dircache[path] = contents
+
+        return dir_contents
+
+    def info(self, path: str, **kwargs) -> FileInfo:
+        """Get file info, using dircache when available."""
+        _, _, file_path = parse_fileset_ref(path, workspace_fallback=self._workspace)
+        path_key = build_fileset_ref(path)
+        parent_path = self._parent(path_key)
+
+        if path_key in self.dircache:
+            return {"name": path_key, "size": 0, "type": "directory"}
+
+        if parent_path != path_key and parent_path in self.dircache:
+            for entry in self.dircache[parent_path]:
+                if entry["name"].rstrip("/") == path_key:
+                    return entry
+            raise FileNotFoundError(path)
+
+        if not file_path:
+            try:
+                self.ls(path_key, detail=True)
+                return {"name": path_key, "size": 0, "type": "directory"}
+            except Exception as e:
+                raise FileNotFoundError(path) from e
+
+        try:
+            self.ls(parent_path, detail=True)
+        except Exception as e:
+            raise FileNotFoundError(path) from e
+
+        if parent_path in self.dircache:
+            for entry in self.dircache[parent_path]:
+                if entry["name"].rstrip("/") == path_key:
+                    return entry
+
+        raise FileNotFoundError(path)
+
+    def cat_file(self, path: str, start: int | None = None, end: int | None = None, **kwargs) -> bytes:
+        """Fetch file content with optional byte range."""
+        workspace, fileset, file_path = parse_fileset_ref(path, workspace_fallback=self._workspace)
+        if not file_path:
+            raise IsADirectoryError(path)
+
+        client = self._client
+        if start is not None or end is not None:
+            client = client.with_headers({"Range": f"bytes={start or 0}-{(end - 1) if end else ''}"})
+
+        response = client.download_file(workspace=workspace, name=fileset, path=file_path)
+        return response.read()
+
+    @classmethod
+    def _parent(cls, path: str) -> str:
+        """Get the parent directory path, handling the # separator correctly."""
+        workspace, fileset, file_path = parse_fileset_ref(path.rstrip("/"), workspace_fallback=None)
+
+        fileset_root = f"{workspace}/{fileset}"
+        if not file_path:
+            return fileset_root
+        if "/" in file_path:
+            return f"{fileset_root}#{file_path.rsplit('/', 1)[0]}"
+        return fileset_root
+
+    def ls(self, path: str, detail: bool = True, refresh: bool = False, **kwargs) -> list[FileInfo] | list[str]:
+        """List files in a fileset or directory."""
+        workspace, fileset, prefix = parse_fileset_ref(path, workspace_fallback=self._workspace)
+        prefix = prefix.rstrip("/")
+        path_key = build_fileset_ref(prefix, workspace=workspace, fileset=fileset)
+
+        if self.dircache.use_listings_cache and not refresh:
+            try:
+                out = self.dircache[path_key]
+                return out if detail else [f["name"] for f in out]
+            except KeyError:
+                pass
+
+        query_params: ListFilesQueryParams | None = {"path": prefix} if prefix else None
+        response = self._client.list_files(
+            workspace=workspace,
+            name=fileset,
+            query_params=query_params,
+        ).data()
+        dir_contents = self._populate_dircache_from_response(response, workspace, fileset, prefix)
+
+        result = dir_contents.get(path_key, [])
+        return result if detail else [f["name"] for f in result]
+
+    def rm_file(self, path: str, **kwargs) -> None:
+        """Delete a single file."""
+        workspace, fileset, file_path = parse_fileset_ref(path, workspace_fallback=self._workspace)
+        if not file_path:
+            raise ValueError("Cannot delete fileset root via rm")
+        self._client.delete_file(workspace=workspace, name=fileset, path=file_path)
+        self.invalidate_cache(self._parent(build_fileset_ref(path)))
+
+    def pipe_file(self, path: str, value: bytes, mode: str = "overwrite", **kwargs) -> None:
+        """Write bytes to a file."""
+        workspace, fileset, file_path = parse_fileset_ref(path, workspace_fallback=self._workspace)
+        if not file_path:
+            raise ValueError("File path required for upload")
+        self._client.upload_file(workspace=workspace, name=fileset, path=file_path, content=value)
+        self.invalidate_cache(self._parent(build_fileset_ref(path)))
+
+    def pipe_stream(
+        self,
+        path: str,
+        stream: Iterator[bytes],
+        content_length: int | None = None,
+    ) -> None:
+        """Write a sync byte stream to a file."""
+        if hasattr(stream, "__anext__"):
+            raise TypeError("FilesetFileSystem.pipe_stream requires a sync iterator")
+
+        workspace, fileset, file_path = parse_fileset_ref(path, workspace_fallback=self._workspace)
+        if not file_path:
+            raise ValueError("File path required for upload")
+
+        client = self._client
+        if content_length is not None:
+            client = client.with_headers({"Content-Length": str(content_length)})
+
+        client.upload_file(workspace=workspace, name=fileset, path=file_path, content=stream)
+        self.invalidate_cache(self._parent(build_fileset_ref(path)))
+
+    def put(
+        self,
+        lpath,
+        rpath,
+        recursive=False,
+        callback=DEFAULT_CALLBACK,
+        maxdepth=None,
+        **kwargs,
+    ) -> None:
+        """Copy local file(s) into the fileset."""
+        kwargs.pop("batch_size", None)
+        if isinstance(lpath, list) and isinstance(rpath, list):
+            rpaths = rpath
+            lpaths = lpath
+        else:
+            source_is_str = isinstance(lpath, str)
+            if source_is_str:
+                lpath = make_path_posix(lpath)
+            fs = LocalFileSystem()
+            lpaths = fs.expand_path(lpath, recursive=recursive, maxdepth=maxdepth)
+            if source_is_str and (not recursive or maxdepth is not None):
+                lpaths = [path for path in lpaths if not (trailing_sep(path) or fs.isdir(path))]
+                if not lpaths:
+                    return
+
+            source_is_file = len(lpaths) == 1
+            dest_is_dir = isinstance(rpath, str) and (trailing_sep(rpath) or self.isdir(rpath))
+
+            rpath = self._strip_protocol(rpath)
+            exists = source_is_str and (
+                (has_magic(lpath) and source_is_file)
+                or (not has_magic(lpath) and dest_is_dir and not trailing_sep(lpath))
+            )
+            rpaths = other_paths(
+                lpaths,
+                rpath,
+                exists=exists,
+                flatten=not source_is_str,
+            )
+
+        file_pairs = [(local, remote) for local, remote in zip(lpaths, rpaths) if not os.path.isdir(local)]
+
+        callback.set_size(len(file_pairs))
+        for local, remote in file_pairs:
+            with callback.branched(local, remote) as child:
+                self.put_file(local, remote, callback=child, **kwargs)
+            callback.relative_update(1)
+
+    def put_file(
+        self,
+        lpath: str,
+        rpath: str,
+        callback: Callback = DEFAULT_CALLBACK,
+        mode: str = "overwrite",
+        **kwargs,
+    ) -> None:
+        """Upload a local file to a fileset."""
+        workspace, fileset, file_path = parse_fileset_ref(rpath, workspace_fallback=self._workspace)
+        if not file_path:
+            raise ValueError("File path required for upload")
+
+        file_size = os.path.getsize(lpath)
+        callback.set_size(file_size)
+
+        def stream_file() -> Iterator[bytes]:
+            with open(lpath, "rb") as f:
+                while chunk := f.read(self.blocksize):
+                    callback.relative_update(len(chunk))
+                    yield chunk
+
+        self._client.with_headers({"Content-Length": str(file_size)}).upload_file(
+            workspace=workspace,
+            name=fileset,
+            path=file_path,
+            content=stream_file(),
+        )
+        self.invalidate_cache(self._parent(build_fileset_ref(rpath)))
+
+    @overload
+    def find(
+        self, path: str, maxdepth: int | None = None, withdirs: bool = False, detail: Literal[False] = ..., **kwargs
+    ) -> list[str]: ...
+
+    @overload
+    def find(
+        self, path: str, maxdepth: int | None = None, withdirs: bool = False, detail: Literal[True] = ..., **kwargs
+    ) -> dict[str, FileInfo]: ...
+
+    def find(
+        self, path: str, maxdepth: int | None = None, withdirs: bool = False, detail: bool = False, **kwargs
+    ) -> dict[str, FileInfo] | list[str]:
+        """Find all files under path using a single recursive listing."""
+        workspace, fileset, prefix = parse_fileset_ref(path, workspace_fallback=self._workspace)
+        prefix = prefix.rstrip("/")
+        query_params: ListFilesQueryParams | None = {"path": prefix} if prefix else None
+        response = self._client.list_files(
+            workspace=workspace,
+            name=fileset,
+            query_params=query_params,
+        ).data()
+
+        self._populate_dircache_from_response(response, workspace, fileset, prefix)
+
+        out: dict[str, FileInfo] = {}
+        seen_dirs: set[str] = set()
+
+        if withdirs:
+            root_path = build_fileset_ref(path, workspace=self._workspace)
+            out[root_path] = {"name": root_path, "size": 0, "type": "directory"}
+
+        for file_info in response.data:
+            file_path = file_info.path.lstrip("/")
+            full_path = f"{workspace}/{fileset}#{file_path}"
+            out[full_path] = {"name": full_path, "size": file_info.size, "type": "file"}
+
+            if withdirs:
+                parts = file_path.split("/")
+                for i in range(1, len(parts)):
+                    dir_path = "/".join(parts[:i])
+                    full_dir_path = f"{workspace}/{fileset}#{dir_path}"
+                    if full_dir_path not in seen_dirs:
+                        seen_dirs.add(full_dir_path)
+                        out[full_dir_path] = {
+                            "name": full_dir_path,
+                            "size": 0,
+                            "type": "directory",
+                        }
+
+        names = sorted(out)
+        if detail:
+            return {name: out[name] for name in names}
+        return names
+
+    def get_file(self, rpath: str, lpath: str, callback: Callback = DEFAULT_CALLBACK, outfile=None, **kwargs) -> None:
+        """Download a file to local path."""
+        workspace, fileset, file_path = parse_fileset_ref(rpath, workspace_fallback=self._workspace)
+
+        if not file_path:
+            return
+
+        response = self._client.download_file(
+            workspace=workspace,
+            name=fileset,
+            path=file_path,
+        )
+
+        with response.stream() as chunks:
+            content_length = response.http_response.headers.get("content-length")
+            if content_length:
+                callback.set_size(int(content_length))
+            close_file = outfile is None
+            if outfile is None:
+                Path(lpath).parent.mkdir(parents=True, exist_ok=True)
+                f = open(lpath, "wb")
+            else:
+                f = outfile
+            try:
+                try:
+                    for chunk in chunks:
+                        f.write(chunk)
+                        callback.relative_update(len(chunk))
+                except httpx.StreamConsumed:
+                    content = response.http_response.content
+                    f.write(content)
+                    callback.relative_update(len(content))
+            finally:
+                if close_file:
+                    f.close()
+
+    def get(
+        self,
+        rpath: str | list[str],
+        lpath: str | list[str],
+        recursive: bool = True,
+        callback: Callback = DEFAULT_CALLBACK,
+        maxdepth: int | None = None,
+        **kwargs,
+    ) -> None:
+        """Download files using a single find call for efficiency."""
+        kwargs.pop("batch_size", None)
+        if isinstance(rpath, list) and isinstance(lpath, list):
+            if not rpath:
+                return
+            callback.set_size(len(rpath))
+            for remote, local in zip(rpath, lpath, strict=True):
+                with callback.branched(remote, local) as child:
+                    self.get_file(remote, local, callback=child, **kwargs)
+                callback.relative_update(1)
+            return
+
+        if not isinstance(rpath, str) or not isinstance(lpath, str):
+            raise TypeError("rpath and lpath must both be strings or both be lists")
+
+        source_files = self.find(rpath, maxdepth=maxdepth, withdirs=False)
+        if not source_files:
+            return
+
+        rpath_normalized = build_fileset_ref(rpath, workspace=self._workspace).rstrip("/")
+        lpath_stripped = lpath.rstrip("/")
+        source_is_file = len(source_files) == 1 and self._strip_protocol(source_files[0]) == rpath_normalized
+
+        if source_is_file:
+            source = source_files[0]
+            dest_is_dir = lpath.endswith("/") or os.path.isdir(lpath)
+            if dest_is_dir:
+                _, _, source_file_path = parse_fileset_ref(source, workspace_fallback=None)
+                filename = source_file_path.rsplit("/", 1)[-1]
+                dest = f"{lpath_stripped}/{filename}"
+            else:
+                dest = lpath_stripped
+
+            callback.set_size(1)
+            with callback.branched(source, dest) as child:
+                self.get_file(source, dest, callback=child, **kwargs)
+            callback.relative_update(1)
+            return
+
+        _, _, file_path = parse_fileset_ref(rpath, workspace_fallback=self._workspace)
+        copy_contents_directly = rpath.endswith("/") or not file_path
+        source_name = file_path.rsplit("/", 1)[-1] if file_path else ""
+
+        file_pairs = []
+        for source in source_files:
+            source_stripped = self._strip_protocol(source)
+            relative = source_stripped[len(rpath_normalized) :].lstrip("#/")
+
+            if copy_contents_directly:
+                dest = f"{lpath_stripped}/{relative}"
+            else:
+                dest = f"{lpath_stripped}/{source_name}/{relative}"
+
+            file_pairs.append((source, dest))
+
+        callback.set_size(len(file_pairs))
+        for source, dest in file_pairs:
+            with callback.branched(source, dest) as child:
+                self.get_file(source, dest, callback=child, **kwargs)
+            callback.relative_update(1)
+
+    def _open(
+        self,
+        path: str,
+        mode: str = "rb",
+        block_size: int | None = None,
+        autocommit: bool = True,
+        cache_options: dict | None = None,
+        **kwargs,
+    ) -> FilesetFile:
+        """Open a file for reading or writing."""
+        return FilesetFile(
+            self,
+            path,
+            mode=mode,
+            block_size=block_size or self.blocksize,
+            autocommit=autocommit,
+            cache_options=cache_options,
+            **kwargs,
+        )
+
+
+class AsyncFilesetFileSystem(AsyncFileSystem):
+    """
+    Asynchronous fsspec filesystem for NeMo Platform fileset storage.
+
+    URL format: fileset://[workspace/]fileset_name[#path]
+
+    The optional `#` separator distinguishes the fileset name from the file path.
+    If omitted, assumes root of fileset. Workspace is optional - if omitted,
+    uses the client's default workspace.
+
+    Examples:
+        >>> from nemo_platform_plugin.files.client import AsyncFilesClient
+        >>> client = AsyncFilesClient(base_url="http://localhost:8000", workspace="default")
+        >>> fs = AsyncFilesetFileSystem(client=client)
+        >>> await fs._ls("my-fileset")  # root of fileset, workspace from client default
+        >>> await fs._ls("my-fileset#data/")  # specific path within fileset
+        >>> await fs._ls("default/my-fileset#data/")  # explicit workspace
+    """
+
+    protocol = "fileset"
+    _client: AsyncFilesClient
 
     # Default concurrency for file transfers
     default_batch_size = 4
@@ -332,54 +825,19 @@ class FilesetFileSystem(AsyncFileSystem):
     def __init__(
         self,
         *,
-        client: FilesClient | AsyncFilesClient,
-        async_client: AsyncFilesClient | None = None,
+        client: AsyncFilesClient,
         batch_size: int | None = None,
         blocksize: int | None = None,
         **kwargs,
-    ):
-        async_client = async_client or self._ensure_async(client)
-        is_async = isinstance(client, AsyncFilesClient)
-
+    ) -> None:
         if batch_size is None:
             batch_size = self.default_batch_size
 
         if blocksize is None:
             blocksize = self.blocksize
 
-        super().__init__(asynchronous=is_async, batch_size=batch_size, blocksize=blocksize, **kwargs)
-        self._client = async_client
-
-    @staticmethod
-    def _ensure_async(client: FilesClient | AsyncFilesClient) -> AsyncFilesClient:
-        """Ensure we have an AsyncFilesClient, converting from sync if needed."""
-        if isinstance(client, AsyncFilesClient):
-            return client
-
-        import httpx
-
-        # A timeout lives in two layers, so mirror each from its own source: the
-        # transport carries the client-level default, and ``_timeout`` the
-        # per-request override that ``send`` puts on every request. Leave the
-        # transport's unset and httpx falls back to its own 5s, which a multi-GB
-        # upload blows through waiting for the server to commit the body to storage.
-        asgi_app = getattr(client._http, "asgi_app", None)
-        http_client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=asgi_app) if asgi_app is not None else None,
-            base_url=client.base_url,
-            headers=dict(client._default_headers) if client._default_headers else None,
-            timeout=client._http.timeout,
-        )
-        return AsyncFilesClient(
-            base_url=client.base_url,
-            workspace=client.workspace,
-            auth=client._auth,
-            default_headers=client._default_headers or None,
-            timeout=client._timeout,
-            retry=client._retry,
-            http_client=http_client,
-            url_resolver=client._url_resolver,
-        )
+        super().__init__(asynchronous=True, batch_size=batch_size, blocksize=blocksize, **kwargs)
+        self._client = client
 
     @property
     def _workspace(self) -> str | None:
@@ -646,14 +1104,14 @@ class FilesetFileSystem(AsyncFileSystem):
         # Invalidate parent directory's cache since file info is stored there
         self.invalidate_cache(self._parent(build_fileset_ref(path)))
 
-    def pipe_stream(
+    async def pipe_stream(
         self,
         path: str,
         stream: AsyncIterator[bytes] | Iterator[bytes],
         content_length: int | None = None,
     ) -> None:
-        """Sync wrapper for _pipe_stream. See _pipe_stream for details."""
-        return fsspec.asyn.sync(self.loop, self._pipe_stream, path, stream, content_length)
+        """Write a byte stream to a file."""
+        await self._pipe_stream(path, stream, content_length)
 
     async def _put(
         self,

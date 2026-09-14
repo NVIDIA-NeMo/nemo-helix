@@ -249,6 +249,14 @@ def test_local_config_owns_storage_data(storage_path: Path):
     assert config.owns_storage_data is True
 
 
+def test_local_tracks_no_revision(storage_impl: LocalStorageImpl):
+    """Uploaded files have no upstream ref, so there is nothing to refresh them against."""
+    assert storage_impl.tracked_revision is None
+
+    with pytest.raises(NotImplementedError):
+        storage_impl.config_at_tracked_revision()
+
+
 async def test_delete_all_removes_directory_and_contents(storage_impl: LocalStorageImpl, storage_path: Path):
     """Test delete_all removes the entire storage directory and all contents."""
     # Create some files and nested directories

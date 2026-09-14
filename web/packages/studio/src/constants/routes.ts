@@ -99,6 +99,14 @@ export const ROUTES = {
     virtualModelChat: `/workspaces/:${P.workspace}/virtual-models/:${P.virtualModelName}/chat`,
     deploymentConfigs: `/workspaces/:${P.workspace}/deployment-configs`,
     deployments: `/workspaces/:${P.workspace}/deployments`,
+    /**
+     * Dedicated Create Deployment wizard page.
+     *
+     * `~new`, not `new`: `~` is outside the entity-name charset (see
+     * `resourceRefRegExp`), so this segment can never collide with a deployment
+     * name — including if deployments ever get a single-segment detail route.
+     */
+    deploymentsNew: `/workspaces/:${P.workspace}/deployments/~new`,
     /** Deployments list with details side panel (deployment name + panel segment, e.g. `details`). */
     deploymentsDeployment: `/workspaces/:${P.workspace}/deployments/:${P.deploymentName}/:${P.deploymentPanelView}`,
     intake: `/workspaces/:${P.workspace}/intake`,

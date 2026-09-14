@@ -456,8 +456,9 @@ class VolcanoJobBackend(
                     job.get("metadata", {}).get("labels", {}).get(JOB_USES_PERSISTENT_STORAGE_LABEL) == "true"
                 )
                 if uses_persistent_storage and self._execution_profile_config.storage:
-                    # Verify the job is in a terminal state before cleaning up persistent storage
-                    if self.check_job_is_terminal(job=job_id, workspace=workspace_id):
+                    if self.check_job_persistent_storage_cleanup_allowed(
+                        job=job_id, step_name=step_name, workspace=workspace_id
+                    ):
                         logger.info(
                             "Cleaning up persistent storage for successful job",
                             extra={"workspace_id": workspace_id, "job_id": job_id},
@@ -478,8 +479,8 @@ class VolcanoJobBackend(
                         )
                     else:
                         logger.debug(
-                            "Skipping persistent storage cleanup for job as job is not in terminal state yet",
-                            extra={"workspace_id": workspace_id, "job_id": job_id},
+                            "Skipping persistent storage cleanup for job",
+                            extra={"workspace_id": workspace_id, "job_id": job_id, "step_name": step_name},
                         )
 
                 logger.debug(
@@ -504,8 +505,9 @@ class VolcanoJobBackend(
                             job.get("metadata", {}).get("labels", {}).get(JOB_USES_PERSISTENT_STORAGE_LABEL) == "true"
                         )
                         if uses_persistent_storage and self._execution_profile_config.storage:
-                            # Verify the job is in a terminal state before cleaning up persistent storage
-                            if self.check_job_is_terminal(job=job_id, workspace=workspace_id):
+                            if self.check_job_persistent_storage_cleanup_allowed(
+                                job=job_id, step_name=step_name, workspace=workspace_id
+                            ):
                                 logger.info(
                                     "Cleaning up persistent storage for successful volcano job",
                                     extra={"workspace_id": workspace_id, "job_id": job_id},
@@ -526,8 +528,8 @@ class VolcanoJobBackend(
                                 )
                             else:
                                 logger.debug(
-                                    "Skipping persistent storage cleanup for volcano job as job is not in terminal state yet",
-                                    extra={"workspace_id": workspace_id, "job_id": job_id},
+                                    "Skipping persistent storage cleanup for volcano job",
+                                    extra={"workspace_id": workspace_id, "job_id": job_id, "step_name": step_name},
                                 )
 
                     logger.debug(

@@ -6,11 +6,13 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from nemo_platform.types.inference import ServedModelMapping
-from nemo_platform.types.inference.model_deployment import ModelDeployment
-from nemo_platform.types.inference.model_deployment_config import ModelDeploymentConfig
-from nemo_platform.types.inference.model_provider import ModelProvider
-from nemo_platform_plugin.models.types import ModelEntity
+from nemo_platform_plugin.models.types import (
+    ModelDeployment,
+    ModelDeploymentConfig,
+    ModelEntity,
+    ModelProvider,
+    ServedModelMapping,
+)
 
 
 @dataclass

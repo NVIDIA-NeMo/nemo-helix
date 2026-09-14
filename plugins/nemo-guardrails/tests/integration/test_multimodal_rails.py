@@ -11,16 +11,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
-import nemo_platform
 import pytest
 from nemo_guardrails_plugin.constants import GUARDRAILS_PLUGIN_CONFIG_TYPE
-from nemo_platform.types.inference.middleware_call_param import MiddlewareCallParam
 from nmp.core.inference_gateway.testing.harness import IGWLoopbackHarness
 from nmp.testing.mock_chat_completions import ChatCompletion, chat_completion
 
 from .utils import (
     GUARDRAILS_PLUGIN_NAME,
-    detach_guardrail_config,
+    EntityGuardrailsMiddlewareCall,
+    create_guardrail_config,
+    delete_guardrail_config_if_present,
     make_guardrails_test_data_names,
     make_served_model,
 )
@@ -109,7 +109,7 @@ class TestMultimodalContentSafety:
     }
 
     @staticmethod
-    def _middleware_call(workspace: str, config_name: str) -> MiddlewareCallParam:
+    def _middleware_call(workspace: str, config_name: str) -> EntityGuardrailsMiddlewareCall:
         return {
             "name": GUARDRAILS_PLUGIN_NAME,
             "config_type": GUARDRAILS_PLUGIN_CONFIG_TYPE,
@@ -120,11 +120,7 @@ class TestMultimodalContentSafety:
     def _delete_config_if_present(harness: IGWLoopbackHarness, config_name: str) -> None:
         # The service refuses to delete a config a VirtualModel still applies; harness
         # cleanup removes those routes, but it runs after this teardown.
-        detach_guardrail_config(harness, config_name)
-        try:
-            harness.sdk.guardrail.configs.delete(name=config_name, workspace=harness.workspace)
-        except nemo_platform.NotFoundError:
-            pass
+        delete_guardrail_config_if_present(harness, config_name)
 
     @classmethod
     def _config_data(cls, *, vision_model_entity_ref: str, vision_base_url: str) -> dict[str, Any]:
@@ -166,8 +162,8 @@ class TestMultimodalContentSafety:
                 test_data_names.vision_model_served_name: test_data_names.vision_model_served_name,
             },
         )
-        harness.sdk.guardrail.configs.create(
-            workspace=harness.workspace,
+        create_guardrail_config(
+            harness,
             name=test_data_names.guardrail_config_name,
             description="Entity-backed multimodal input rail config for integration tests",
             data=self._config_data(

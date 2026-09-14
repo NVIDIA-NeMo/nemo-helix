@@ -153,8 +153,8 @@ describe('agentNameFromConfig', () => {
 });
 
 describe('agentSpecFilesetName', () => {
-  it('matches the platform convention', () => {
-    expect(agentSpecFilesetName('calc')).toBe('calc-spec');
+  it('matches the fileset name deployments stage from', () => {
+    expect(agentSpecFilesetName('calc')).toBe('calc-ethos');
   });
 });
 

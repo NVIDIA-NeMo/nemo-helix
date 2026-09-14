@@ -240,6 +240,27 @@ export const getWorkspaceDeploymentsRoute = (workspace: string) => {
   return generatePath(ROUTES.workspace.deployments, { workspace });
 };
 
+/**
+ * Create Deployment wizard page.
+ *
+ * `model` and `fileset` prefill the Workspace source; `model` wins when both are
+ * given, matching the wizard's own precedence.
+ */
+export const getWorkspaceNewDeploymentRoute = (
+  workspace: string,
+  options?: { model?: string; fileset?: string }
+) => {
+  const path = generatePath(ROUTES.workspace.deploymentsNew, { workspace });
+  const searchParams = new URLSearchParams();
+  if (options?.model) {
+    searchParams.set(QUERY_PARAMETERS.model, options.model);
+  } else if (options?.fileset) {
+    searchParams.set(QUERY_PARAMETERS.fileset, options.fileset);
+  }
+  const query = searchParams.toString();
+  return query ? `${path}?${query}` : path;
+};
+
 /** Default segment for the deployment details side panel URL. */
 export const DEPLOYMENT_DETAILS_PANEL_VIEW_DETAILS = 'details' as const;
 

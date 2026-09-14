@@ -14,7 +14,7 @@ from nemo_data_designer_plugin.jobs.retrieval_common import (
     work_dir,
 )
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPrepareJobConfig, RetrievalPrepareStepConfig
-from nemo_data_designer_plugin.retrieval.corpus import materialize_corpus
+from nemo_data_designer_plugin.retrieval.corpus import hf_token_from_env, materialize_corpus
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
@@ -82,6 +82,7 @@ class RetrievalPrepareJob(NemoJob):
                 spec,
                 profile=profile,
                 async_sdk=async_sdk,
+                hf_token_secret=spec.job_config.hf_token_secret,
             )
         ]
         if spec.job_config.enable_mining:
@@ -115,15 +116,16 @@ class RetrievalPrepareJob(NemoJob):
 
 
 def _materialize_input(ref: str, dest: Path, ctx: JobContext, sdk: NeMoPlatform) -> Path:
+    hf_token = hf_token_from_env()
     if Path(ref).is_absolute():
-        return materialize_corpus(ref, dest=dest, sdk=sdk, workspace=ctx.workspace)
+        return materialize_corpus(ref, dest=dest, sdk=sdk, workspace=ctx.workspace, hf_token=hf_token)
     storage_root = (ctx.storage.persistent or ctx.storage.ephemeral).resolve()
     staged = (storage_root / ref).resolve()
     if not staged.is_relative_to(storage_root):
         raise ValueError(f"Staged input path escapes job storage: {ref}")
     if staged.exists():
         return staged
-    return materialize_corpus(ref, dest=dest, sdk=sdk, workspace=ctx.workspace)
+    return materialize_corpus(ref, dest=dest, sdk=sdk, workspace=ctx.workspace, hf_token=hf_token)
 
 
 def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobContext, sdk: NeMoPlatform) -> dict:

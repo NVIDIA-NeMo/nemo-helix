@@ -21,11 +21,11 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
-import nemo_platform
 import openai
 import pytest
 import pytest_asyncio
 from nemo_guardrails_plugin.constants import GUARDRAILS_PLUGIN_CONFIG_TYPE
+from nemo_guardrails_plugin.llm_clients import get_request_headers
 from nemo_guardrails_plugin.llmrails_cache import (
     EntityGuardrailConfigSource,
     InlineGuardrailConfigSource,
@@ -43,8 +43,11 @@ from nemo_guardrails_plugin.middleware import (
 )
 from nemo_guardrails_plugin.requests import parse_guardrails_request
 from nemo_guardrails_plugin.streaming import close_async_iterator
-from nemo_platform.types.guardrail import GuardrailConfig
-from nemo_platform.types.guardrail import RailsConfig as SDKRailsConfig
+from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_platform_plugin.client.errors import NotFoundError
+from nemo_platform_plugin.guardrail.client import AsyncGuardrailClient
+from nemo_platform_plugin.guardrail.types import GuardrailConfig
+from nemo_platform_plugin.guardrail.types import RailsConfig as SDKRailsConfig
 from nemo_platform_plugin.inference_middleware import (
     ImmediateResponse,
     InferenceMiddlewareContext,
@@ -164,6 +167,45 @@ def _make_entity(
     )
 
 
+def _client_response(data: Any) -> MagicMock:
+    response = MagicMock()
+    response.data.return_value = data
+    return response
+
+
+def _patch_get_guardrail_config(
+    *,
+    return_value: Any = None,
+    side_effect: Any = None,
+) -> Any:
+    if return_value is not None:
+        mock = AsyncMock(return_value=_client_response(return_value))
+    elif callable(side_effect):
+
+        async def _wrapped_side_effect(*args: Any, **kwargs: Any) -> MagicMock:
+            result = side_effect(*args, **kwargs)
+            if hasattr(result, "__await__"):
+                result = await result
+            return _client_response(result)
+
+        mock = AsyncMock(side_effect=_wrapped_side_effect)
+    elif side_effect is not None:
+        mock = AsyncMock(side_effect=side_effect)
+    else:
+        mock = AsyncMock()
+    return patch.object(AsyncGuardrailClient, "get_guardrail_config", new=mock)
+
+
+def _not_found_error() -> NotFoundError:
+    return NotFoundError(
+        httpx.Response(
+            404,
+            request=httpx.Request("GET", "http://test:8000/apis/guardrails/v2/workspaces/ws/configs/missing"),
+            json={"detail": "not found"},
+        )
+    )
+
+
 def _make_generation_response(
     *,
     is_blocked: bool = False,
@@ -202,6 +244,12 @@ def _make_ctx(
         workspace="test-ws",
         original_request=_make_request(original_body or {}, original_headers),
     )
+
+
+def _request_scoped_client(mw: GuardrailsMiddleware, headers: dict[str, str]) -> AsyncNemoClient:
+    client = mw._client
+    assert client is not None
+    return client.with_options(headers=headers)
 
 
 async def _process_request(
@@ -290,22 +338,23 @@ def _patch_prepare_lease(rails: Any | None = None):
 
 @pytest_asyncio.fixture
 async def middleware() -> AsyncIterator[GuardrailsMiddleware]:
-    """A started middleware with a mocked SDK and a real cache.
+    """A started middleware with a mocked platform client and a real cache.
 
     Owns startup AND shutdown so any pool-owned resources are released
-    between tests. The platform SDK is an :class:`AsyncMock` so
-    ``await self._sdk.close()`` succeeds in shutdown.
+    between tests.
     """
     instance = GuardrailsMiddleware()
     instance._inject_cache(MagicMock())
-    mock_sdk = AsyncMock()
-    mock_sdk._custom_headers = {}
-    with patch("nemo_guardrails_plugin.middleware.get_async_platform_sdk", return_value=mock_sdk):
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request))
+    ) as http_client:
+        client = AsyncNemoClient(base_url="http://test:8000", http_client=http_client)
+        instance._inject_platform_client(client)
         await instance.on_startup()
-    try:
-        yield instance
-    finally:
-        await instance.on_shutdown()
+        try:
+            yield instance
+        finally:
+            await instance.on_shutdown()
 
 
 # ---------------------------------------------------------------------------
@@ -321,10 +370,10 @@ class TestGetMiddlewareConfig:
     async def test_returns_entity_source(self, middleware: GuardrailsMiddleware) -> None:
         """The resolver sets the discriminator: returns :class:`EntityGuardrailConfigSource`
         carrying provenance fields plus the SDK rails payload."""
-        assert middleware._sdk is not None
+        assert middleware._client is not None
         entity = _make_entity()
 
-        with patch.object(middleware._sdk.guardrail.configs, "retrieve", new=AsyncMock(return_value=entity)):
+        with _patch_get_guardrail_config(return_value=entity):
             result = await middleware.get_middleware_config(GUARDRAILS_PLUGIN_CONFIG_TYPE, "my-workspace/my-config")
 
         assert isinstance(result, EntityGuardrailConfigSource)
@@ -334,10 +383,9 @@ class TestGetMiddlewareConfig:
         assert result.rails is entity.data
 
     async def test_splits_config_id_correctly(self, middleware: GuardrailsMiddleware) -> None:
-        assert middleware._sdk is not None
-        retrieve_mock = AsyncMock(return_value=_make_entity())
-
-        with patch.object(middleware._sdk.guardrail.configs, "retrieve", new=retrieve_mock):
+        assert middleware._client is not None
+        entity = _make_entity()
+        with _patch_get_guardrail_config(return_value=entity) as retrieve_mock:
             await middleware.get_middleware_config(GUARDRAILS_PLUGIN_CONFIG_TYPE, "my-workspace/my-config")
 
         retrieve_mock.assert_awaited_once_with(name="my-config", workspace="my-workspace")
@@ -351,11 +399,10 @@ class TestGetMiddlewareConfig:
         """
         from nemo_platform_plugin.inference_middleware import MiddlewareConfigNotFoundError
 
-        assert middleware._sdk is not None
-        not_found = nemo_platform.NotFoundError("not found", response=MagicMock(), body=None)
-        retrieve_mock = AsyncMock(side_effect=not_found)
+        assert middleware._client is not None
+        not_found = _not_found_error()
 
-        with patch.object(middleware._sdk.guardrail.configs, "retrieve", new=retrieve_mock):
+        with _patch_get_guardrail_config(side_effect=not_found):
             with pytest.raises(MiddlewareConfigNotFoundError) as exc_info:
                 await middleware.get_middleware_config(GUARDRAILS_PLUGIN_CONFIG_TYPE, "ws/missing")
 
@@ -385,10 +432,9 @@ class TestGetMiddlewareConfig:
         name). ``parse_entity_ref`` rejects all of them with a clear
         ValueError → 400 at the plugin boundary. Pinning so a future
         "let's just split here, it's simpler" regression can't ship."""
-        assert middleware._sdk is not None
-        retrieve_mock = AsyncMock()
+        assert middleware._client is not None
 
-        with patch.object(middleware._sdk.guardrail.configs, "retrieve", new=retrieve_mock):
+        with _patch_get_guardrail_config() as retrieve_mock:
             with pytest.raises(ValueError):
                 await middleware.get_middleware_config(GUARDRAILS_PLUGIN_CONFIG_TYPE, config_id)
 
@@ -398,11 +444,13 @@ class TestGetMiddlewareConfig:
         """An entity whose ``data`` is ``None`` cannot be turned into a source —
         the structural check moves up here so the per-request path never has
         to defend against it."""
-        assert middleware._sdk is not None
+        assert middleware._client is not None
         entity = _make_entity()
-        entity.data = None
+        # Deliberately violates the model's non-null data contract to exercise
+        # the resolver guard against a malformed SDK/entity-store response.
+        object.__setattr__(entity, "data", None)
 
-        with patch.object(middleware._sdk.guardrail.configs, "retrieve", new=AsyncMock(return_value=entity)):
+        with _patch_get_guardrail_config(return_value=entity):
             with pytest.raises(ValueError, match="no data"):
                 await middleware.get_middleware_config(GUARDRAILS_PLUGIN_CONFIG_TYPE, "ws/my-config")
 
@@ -410,22 +458,22 @@ class TestGetMiddlewareConfig:
         """An entity carrying ``""`` for ``updated_at`` would seed a
         :class:`StabilizedRailsConfigCache` slot that can never collide cleanly
         with a real entity revision; reject at the resolver boundary."""
-        assert middleware._sdk is not None
+        assert middleware._client is not None
         entity = _make_entity()
         # Deliberately violates the model's ``datetime`` type to exercise the
         # "empty updated_at" guard against a malformed entity.
-        cast(Any, entity).updated_at = ""
+        object.__setattr__(entity, "updated_at", "")
 
-        with patch.object(middleware._sdk.guardrail.configs, "retrieve", new=AsyncMock(return_value=entity)):
+        with _patch_get_guardrail_config(return_value=entity):
             with pytest.raises(ValueError, match="empty updated_at"):
                 await middleware.get_middleware_config(GUARDRAILS_PLUGIN_CONFIG_TYPE, "ws/my-config")
 
     async def test_empty_name_raises_value_error(self, middleware: GuardrailsMiddleware) -> None:
-        assert middleware._sdk is not None
+        assert middleware._client is not None
         entity = _make_entity()
         entity.name = ""
 
-        with patch.object(middleware._sdk.guardrail.configs, "retrieve", new=AsyncMock(return_value=entity)):
+        with _patch_get_guardrail_config(return_value=entity):
             with pytest.raises(ValueError, match="no name"):
                 await middleware.get_middleware_config(GUARDRAILS_PLUGIN_CONFIG_TYPE, "ws/my-config")
 
@@ -434,11 +482,11 @@ class TestGetMiddlewareConfig:
         (different workspaces, same name + ``updated_at``) share a
         :class:`StabilizedRailsConfigCache` slot. Fail closed at the
         resolver boundary so the upstream never observes the collision."""
-        assert middleware._sdk is not None
+        assert middleware._client is not None
         entity = _make_entity()
         entity.workspace = ""
 
-        with patch.object(middleware._sdk.guardrail.configs, "retrieve", new=AsyncMock(return_value=entity)):
+        with _patch_get_guardrail_config(return_value=entity):
             with pytest.raises(ValueError, match="empty workspace"):
                 await middleware.get_middleware_config(GUARDRAILS_PLUGIN_CONFIG_TYPE, "ws/my-config")
 
@@ -1880,6 +1928,43 @@ class TestStreamingLeaseLifecycle:
         assert observed_active == [True, True]
         assert active is False
 
+    async def test_streaming_uses_request_scoped_client_headers(self, middleware: GuardrailsMiddleware) -> None:
+        request_body = self._streaming_request()
+        request_headers = {
+            "traceparent": "00-stream-request-trace",
+            "X-NMP-Principal-On-Behalf-Of": "user:bob",
+        }
+        ctx = _make_ctx(request_body)
+        ctx.request_nemo_client = _request_scoped_client(middleware, request_headers)
+        observed_headers: list[dict[str, str]] = []
+
+        def _handle_streaming_output_check(*_args: Any, **_kwargs: Any) -> AsyncIterator[dict[str, Any]]:
+            async def _inner() -> AsyncIterator[dict[str, Any]]:
+                observed_headers.append(dict(get_request_headers()))
+                yield {"choices": [{"delta": {"content": "checked"}}]}
+
+            return _inner()
+
+        with patch.object(middleware, "_prepare_lease", new=_patch_prepare_lease()):
+            with patch(
+                "nemo_guardrails_plugin.middleware.handle_streaming_output_check",
+                new=_handle_streaming_output_check,
+            ):
+                result = await _process_response(
+                    middleware,
+                    self._stream_one_chunk(),
+                    request_body,
+                    {},
+                    {},
+                    _entity_source(output_flows=["self check output"]),
+                    ctx=ctx,
+                )
+                assert is_streaming_response_result(result)
+                chunks = [chunk async for chunk in result]
+
+        assert chunks == [{"choices": [{"delta": {"content": "checked"}}]}]
+        assert observed_headers == [request_headers]
+
     async def test_natural_completion_returns_rails_to_pool(self, middleware: GuardrailsMiddleware) -> None:
         async def stream_async_impl(generator: Any, messages: Any) -> AsyncIterator[str]:
             async for token in generator:
@@ -2123,11 +2208,10 @@ class TestLifecycle:
         original_level = library_logger.level
         instance = GuardrailsMiddleware()
 
-        mock_sdk = AsyncMock()
-        mock_sdk._custom_headers = {}
+        mock_client = AsyncMock(spec=AsyncNemoClient)
         try:
+            instance._inject_platform_client(mock_client)
             with (
-                patch("nemo_guardrails_plugin.middleware.get_async_platform_sdk", return_value=mock_sdk),
                 patch(
                     "nemo_guardrails_plugin.middleware.get_common_service_config",
                     return_value=SimpleNamespace(log_level=log_level),
@@ -2138,40 +2222,39 @@ class TestLifecycle:
             assert library_logger.level == expected_library_level
         finally:
             library_logger.setLevel(original_level)
-            if instance._sdk is not None:
+            if instance._client is not None:
                 await instance.on_shutdown()
 
-    async def test_on_shutdown_closes_sdk_and_cache(self) -> None:
+    async def test_on_shutdown_clears_client_and_closes_cache(self) -> None:
         instance = GuardrailsMiddleware()
         instance._inject_cache(MagicMock())
 
-        mock_sdk = AsyncMock()
-        with patch("nemo_guardrails_plugin.middleware.get_async_platform_sdk", return_value=mock_sdk):
-            await instance.on_startup()
+        mock_client = AsyncMock(spec=AsyncNemoClient)
+        instance._inject_platform_client(mock_client)
+        await instance.on_startup()
 
         assert instance._rails_cache is not None
         assert instance._stable_cache is not None
         await instance.on_shutdown()
 
-        mock_sdk.close.assert_awaited_once()
+        assert instance._client is None
         assert instance._rails_cache is None
         assert instance._stable_cache is None
 
-    async def test_on_shutdown_closes_sdk_even_when_cache_close_raises(self) -> None:
+    async def test_on_shutdown_clears_client_when_cache_close_raises(self) -> None:
         instance = GuardrailsMiddleware()
         instance._inject_cache(MagicMock())
 
-        mock_sdk = AsyncMock()
-        with patch("nemo_guardrails_plugin.middleware.get_async_platform_sdk", return_value=mock_sdk):
-            await instance.on_startup()
+        mock_client = AsyncMock(spec=AsyncNemoClient)
+        instance._inject_platform_client(mock_client)
+        await instance.on_startup()
 
         assert instance._rails_cache is not None
         with patch.object(instance._rails_cache, "close", new=AsyncMock(side_effect=RuntimeError("cache boom"))):
             with pytest.raises(RuntimeError, match="cache boom"):
                 await instance.on_shutdown()
 
-        mock_sdk.close.assert_awaited_once()
-        assert instance._sdk is None
+        assert instance._client is None
         assert instance._rails_cache is None
         assert instance._stable_cache is None
 
@@ -2254,10 +2337,10 @@ class TestVirtualModelLifecycle:
     async def test_upsert_warms_cache_for_each_unique_config(
         self, middleware: GuardrailsMiddleware, lifecycle_cache: Any
     ) -> None:
-        assert middleware._sdk is not None
+        assert middleware._client is not None
         entity = _make_entity(workspace="ws", name="guard-A")
 
-        with patch.object(middleware._sdk.guardrail.configs, "retrieve", new=AsyncMock(return_value=entity)):
+        with _patch_get_guardrail_config(return_value=entity):
             vm = _make_virtual_model(request_calls=[_guardrail_call("ws/guard-A")])
             await middleware.on_virtual_model_upserted(vm)
             await lifecycle_cache.await_warms()
@@ -2277,10 +2360,10 @@ class TestVirtualModelLifecycle:
         is by :attr:`StableRailsConfig.content_hash` at the warming layer,
         which catches both same-entity-twice (this test) and inline-vs-
         entity collisions where the rails happen to be identical."""
-        assert middleware._sdk is not None
+        assert middleware._client is not None
         entity = _make_entity(workspace="ws", name="guard-A")
 
-        with patch.object(middleware._sdk.guardrail.configs, "retrieve", new=AsyncMock(return_value=entity)):
+        with _patch_get_guardrail_config(return_value=entity):
             vm = _make_virtual_model(
                 request_calls=[_guardrail_call("ws/guard-A")],
                 response_calls=[_guardrail_call("ws/guard-A")],
@@ -2300,14 +2383,14 @@ class TestVirtualModelLifecycle:
         them to one warm (covered by
         :meth:`test_upsert_dedupes_inline_against_entity_with_same_content`).
         """
-        assert middleware._sdk is not None
+        assert middleware._client is not None
         entity_a = _make_entity(workspace="ws", name="guard-A", input_flows=["check-a"])
         entity_b = _make_entity(workspace="ws", name="guard-B", input_flows=["check-b"])
 
         async def _resolve(*, name: str, workspace: str) -> GuardrailConfig:
             return entity_a if name == "guard-A" else entity_b
 
-        with patch.object(middleware._sdk.guardrail.configs, "retrieve", new=AsyncMock(side_effect=_resolve)):
+        with _patch_get_guardrail_config(side_effect=_resolve):
             vm = _make_virtual_model(
                 request_calls=[
                     _guardrail_call("ws/guard-A"),
@@ -2324,8 +2407,8 @@ class TestVirtualModelLifecycle:
         }
 
     async def test_upsert_ignores_other_plugins(self, middleware: GuardrailsMiddleware, lifecycle_cache: Any) -> None:
-        assert middleware._sdk is not None
-        with patch.object(middleware._sdk.guardrail.configs, "retrieve", new=AsyncMock()) as mock_get:
+        assert middleware._client is not None
+        with _patch_get_guardrail_config() as mock_get:
             vm = _make_virtual_model(
                 request_calls=[
                     {
@@ -2345,12 +2428,8 @@ class TestVirtualModelLifecycle:
         self, middleware: GuardrailsMiddleware, lifecycle_cache: Any
     ) -> None:
         """A failing resolution must not break the IGW polling cycle."""
-        assert middleware._sdk is not None
-        with patch.object(
-            middleware._sdk.guardrail.configs,
-            "retrieve",
-            new=AsyncMock(side_effect=RuntimeError("sdk down")),
-        ):
+        assert middleware._client is not None
+        with _patch_get_guardrail_config(side_effect=RuntimeError("client down")):
             vm = _make_virtual_model(request_calls=[_guardrail_call("ws/guard-X")])
             # Must not raise; the next polling cycle retries.
             await middleware.on_virtual_model_upserted(vm)
@@ -2361,18 +2440,14 @@ class TestVirtualModelLifecycle:
     async def test_upsert_skips_when_config_id_has_been_deleted(
         self, middleware: GuardrailsMiddleware, lifecycle_cache: Any
     ) -> None:
-        """A 404 from the SDK during warming must not raise — the same
+        """A 404 from the client during warming must not raise — the same
         :class:`MiddlewareConfigNotFoundError` that IGW uses as the eviction
         signal would otherwise bubble up and stall the upsert hook for any
         other configs the VM references. ``_resolve_call`` swallows it the
         same way it swallows :class:`ValueError`."""
-        assert middleware._sdk is not None
-        not_found = nemo_platform.NotFoundError("not found", response=MagicMock(), body=None)
-        with patch.object(
-            middleware._sdk.guardrail.configs,
-            "retrieve",
-            new=AsyncMock(side_effect=not_found),
-        ):
+        assert middleware._client is not None
+        not_found = _not_found_error()
+        with _patch_get_guardrail_config(side_effect=not_found):
             vm = _make_virtual_model(request_calls=[_guardrail_call("ws/guard-deleted")])
             await middleware.on_virtual_model_upserted(vm)
             await lifecycle_cache.await_warms()
@@ -2419,14 +2494,14 @@ class TestVirtualModelLifecycle:
         this so the dedup-by-hash can't silently regress to dedup-by-(entity-
         identity OR inline-label) (which wouldn't catch the cross-arm
         collision and would warm two pool slots that share an LLMRails)."""
-        assert middleware._sdk is not None
+        assert middleware._client is not None
         rails_payload: dict[str, Any] = {"rails": {"input": {"flows": ["custom check"]}}}
         entity = _make_entity(workspace="ws", name="guard-A")
         # Make the entity's rails identical to the inline payload so they
         # produce the same ``content_hash``.
         entity.data = SDKRailsConfig.model_validate(rails_payload)
 
-        with patch.object(middleware._sdk.guardrail.configs, "retrieve", new=AsyncMock(return_value=entity)):
+        with _patch_get_guardrail_config(return_value=entity):
             vm = _make_virtual_model(
                 request_calls=[
                     _guardrail_call("ws/guard-A"),
@@ -2582,6 +2657,29 @@ class TestProcessRequestErrorSurfacing:
         assert observed_active == [True]
         assert active is False
 
+    async def test_run_rails_uses_request_scoped_client_headers(self, middleware: GuardrailsMiddleware) -> None:
+        request_body = {
+            "messages": [{"role": "user", "content": "Hi"}],
+            "model": "ws/llama",
+        }
+        request_headers = {
+            "traceparent": "00-request-trace",
+            "X-NMP-Principal-On-Behalf-Of": "user:alice",
+        }
+        ctx = _make_ctx(request_body)
+        ctx.request_nemo_client = _request_scoped_client(middleware, request_headers)
+        observed_headers: list[dict[str, str]] = []
+
+        def _generate(*_args: Any, **_kwargs: Any) -> GenerationResponse:
+            observed_headers.append(dict(get_request_headers()))
+            return _make_generation_response(is_blocked=False)
+
+        with patch.object(middleware, "_prepare_lease", new=_patch_prepare_lease()):
+            with patch("nemo_guardrails_plugin.middleware.run_generate_in_new_loop", side_effect=_generate):
+                await _process_request(middleware, request_body, {}, _entity_source(), ctx=ctx)
+
+        assert observed_headers == [request_headers]
+
     async def test_runtime_error_from_prepare_lease_wraps_to_503(self, middleware: GuardrailsMiddleware) -> None:
         """A non-caller-shape failure during eager lease setup (here: a
         ``RuntimeError`` simulating "cache not initialized" or a
@@ -2607,13 +2705,13 @@ class TestProcessRequestErrorSurfacing:
         assert isinstance(exc_info.value.__cause__, RuntimeError)
         assert "cache exploded" in str(exc_info.value.__cause__)
 
-    async def test_sdk_not_initialized_wraps_to_503(self, middleware: GuardrailsMiddleware) -> None:
-        """SDK detached after ``on_shutdown`` must map to 503, not a raw
+    async def test_client_not_initialized_wraps_to_503(self, middleware: GuardrailsMiddleware) -> None:
+        """Client detached after ``on_shutdown`` must map to 503, not a raw
         ``RuntimeError``, on both the non-streaming and streaming paths.
 
-        ``_ensure_sdk`` lives inside :meth:`_prepare_lease_with_503` so the
+        ``_ensure_client`` lives inside :meth:`_prepare_lease_with_503` so the
         same lifecycle boundary that wraps cache/stabilize failures also
-        covers SDK validation — without this, a shutdown race escaped as
+        covers client validation — without this, a shutdown race escaped as
         IGW 500.
         """
         request_body = {
@@ -2621,14 +2719,14 @@ class TestProcessRequestErrorSurfacing:
             "model": "ws/llama",
         }
 
-        middleware._sdk = None
+        middleware._client = None
 
         with patch.object(middleware, "_prepare_lease", new=_patch_prepare_lease()):
             with pytest.raises(InferenceMiddlewareUnavailableError) as exc_info:
                 await _process_request(middleware, request_body, {}, _entity_source())
 
         assert isinstance(exc_info.value.__cause__, RuntimeError)
-        assert "SDK is not initialized" in str(exc_info.value.__cause__)
+        assert "client is not initialized" in str(exc_info.value.__cause__)
 
         async def _stream() -> AsyncIterator[dict[str, Any]]:
             yield {"choices": []}
@@ -2645,7 +2743,7 @@ class TestProcessRequestErrorSurfacing:
                 )
 
         assert isinstance(stream_exc.value.__cause__, RuntimeError)
-        assert "SDK is not initialized" in str(stream_exc.value.__cause__)
+        assert "client is not initialized" in str(stream_exc.value.__cause__)
 
     async def test_bracketed_upstream_400_from_rail_task_llm_preserved(self, middleware: GuardrailsMiddleware) -> None:
         """A rail-task LLM call (e.g. a vision-safety judge, via

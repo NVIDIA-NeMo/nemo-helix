@@ -13,6 +13,7 @@ import os
 
 from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.iam.client import IAMClient
 from nemo_platform_plugin.workspaces.client import WorkspacesClient
 
 
@@ -63,10 +64,10 @@ def test_role_binding_history() -> None:
     giving us an audit trail of every grant and revocation.
     """
     client = _get_client()
-    response = client.iam.role_bindings.list(page_size=100)
+    response = client_from_platform(client, IAMClient).list_role_bindings(query_params={"page_size": 100})
 
     # Filter to our workspace
-    bindings = [b for b in response.data if b.workspace == "harbor-auth-test"]
+    bindings = [b for b in response.items() if b.workspace == "harbor-auth-test"]
 
     # Build a lookup: {principal: [(role, is_revoked), ...]}
     history: dict[str, list[tuple[str, bool]]] = {}

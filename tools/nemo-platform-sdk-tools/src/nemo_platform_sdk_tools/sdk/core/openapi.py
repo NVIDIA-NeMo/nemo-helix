@@ -157,6 +157,25 @@ class OpenAPI:
 
         return dict(schema_usage)
 
+    def calculate_sdk_excluded_schema_names(self) -> set[str]:
+        """Return schemas used only by endpoint paths omitted from the generated SDK."""
+        schemas = set(self.schemas())
+        if not schemas:
+            raise ValueError("No schemas found in OpenAPI spec")
+
+        excluded_schema_names: set[str] = set()
+        for path, path_item in self._spec.get("paths", {}).items():
+            if not _should_skip_sdk_endpoint(path):
+                continue
+
+            for method, spec in path_item.items():
+                if method.lower() not in SUPPORTED_HTTP_METHODS:
+                    continue
+                excluded_schema_names.update(schema for schema in self._extract_schema_refs(spec) if schema in schemas)
+
+        generated_schema_names = set(self.calculate_schema_to_endpoints())
+        return excluded_schema_names - generated_schema_names
+
     def _extract_schema_refs(self, obj: object) -> set[str]:
         """
         Iteratively extract all '$ref' references to schemas from an object.

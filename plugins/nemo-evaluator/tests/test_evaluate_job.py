@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import nemo_evaluator.cli as evaluator_cli
 import pytest
-from models import AsyncModelsResource, ResolvedModelReference
+from models import ResolvedModelReference
 from nemo_evaluator.cli import EvaluatorPluginCLI
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.evaluate import (
@@ -56,14 +56,15 @@ from nemo_evaluator_sdk.values import (
 )
 from nemo_evaluator_sdk.values.models import ModelRef
 from nemo_evaluator_sdk.values.scores import JSONScoreParser, RangeScore
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_platform_plugin.commands import add_job_commands
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
 from nemo_platform_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_platform_plugin.jobs.spec import PlatformJobSpec
+from nemo_platform_plugin.models.client import AsyncModelsClient
 from nemo_platform_plugin.scheduler import NemoJobScheduler
+from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
 from pydantic import BaseModel, ConfigDict
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
@@ -232,7 +233,7 @@ def _generated_async_sdk() -> AsyncNeMoPlatform:
 
 
 def _patch_async_model_reference_resolution(mocker: MockerFixture) -> None:
-    async def resolve_model_reference(self: AsyncModelsResource, ref: str) -> ResolvedModelReference:
+    async def resolve_model_reference(self: AsyncModelsClient, ref: str) -> ResolvedModelReference:
         del self
         assert ref == "default/judge"
         return ResolvedModelReference(
@@ -242,7 +243,7 @@ def _patch_async_model_reference_resolution(mocker: MockerFixture) -> None:
         )
 
     mocker.patch(
-        "nemo_evaluator.jobs.metric_resolution.AsyncModelsResource.resolve_model_reference",
+        "nemo_evaluator.jobs.metric_resolution.AsyncModelsClient.resolve_model_reference",
         resolve_model_reference,
     )
 
@@ -1257,6 +1258,24 @@ class TestEvaluateJobRun:
         assert call_kwargs["config"] == EvaluateSpec.model_validate(config).params
         assert call_kwargs["target"] is None
         assert call_kwargs["prompt_template"] is None
+
+    def test_run_adapts_the_generated_sdk_the_local_cli_injects(self, tmp_path: Path, mocker: MockerFixture) -> None:
+        """``nemo evaluator evaluate run`` injects a generated ``NeMoPlatform``, but resolving a
+        ``FilesetRef`` dataset only accepts a typed client."""
+        evaluator = mocker.Mock()
+        evaluator.run_sync.return_value = _empty_evaluation_result()
+        mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=evaluator)
+        download_dataset_sync = mocker.patch(
+            "nemo_evaluator.jobs.evaluate.download_dataset_sync",
+            return_value=tmp_path / "persistent" / "dataset" / "default" / "helpsteer2" / "validation.jsonl",
+            create=True,
+        )
+        platform = NeMoPlatform(base_url="http://platform.test", workspace="dev", http_client=httpx.Client())
+        config = {**_exact_match_spec(), "dataset": FilesetRef(root="default/helpsteer2#validation.jsonl")}
+
+        EvaluateJob().run(config, ctx=_make_job_context(tmp_path), sdk=platform)
+
+        assert isinstance(download_dataset_sync.call_args.kwargs["client"], NemoClient)
 
     def test_prefers_sync_sdk_for_fileset_ref_when_both_sdks_injected(
         self, tmp_path: Path, mocker: MockerFixture

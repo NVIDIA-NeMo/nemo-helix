@@ -12,6 +12,20 @@
 # desired position, then re-link the inbound references that were delinked to plain text
 # (search the docs for the feature name). Run `npm run check` and `fern docs broken-links`.
 
+- section: Agent Governance
+  slug: governance
+  path: ../../agents/governance/index.mdx
+  contents:
+  - page: Run a War-Game
+    path: ../../agents/governance/run-a-war-game.mdx
+  - page: Review and Apply Mitigations
+    path: ../../agents/governance/apply-mitigations.mdx
+    slug: apply-mitigations
+  - page: Agent Hardener CLI Reference
+    path: ../../agents/governance/cli-reference.mdx
+    slug: cli-reference
+  - page: Troubleshooting
+    path: ../../agents/governance/troubleshooting.mdx
 - section: Access Control
   contents:
   - page: Overview

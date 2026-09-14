@@ -4,6 +4,8 @@
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import type { Trace } from '@nemo/sdk/generated/platform/schema';
+import { getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { InsightTracesTable } from '@studio/routes/optimizer/InsightTracesTable';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
@@ -30,7 +32,7 @@ const installTraceHandler = ({
   const tracesById = new Map(traces.map((trace) => [trace.id, trace]));
 
   server.use(
-    http.get('*/apis/intake/v2/workspaces/:workspace/traces', ({ request }) => {
+    http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), ({ request }) => {
       const url = new URL(request.url);
       requests.push(url);
       const requestedIds = url.searchParams.getAll('filter[id][$in]');
@@ -86,7 +88,7 @@ describe('InsightTracesTable', () => {
 
   it('shows an error instead of an empty state when the list request fails', async () => {
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces', () =>
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () =>
         HttpResponse.json({ detail: 'Could not load traces' }, { status: 500 })
       )
     );

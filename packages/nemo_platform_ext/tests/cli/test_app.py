@@ -11,6 +11,7 @@ import pytest
 import typer
 from click.testing import CliRunner as ClickCliRunner
 from nemo_platform_ext.cli.app import app
+from nemo_platform_ext.cli.commands.api import API_TOP_LEVEL_ENTRIES
 from nemo_platform_ext.cli.commands.manifest_registry import TOP_LEVEL_ENTRIES
 from nemo_platform_ext.cli.core.lazy_load import (
     ManifestBackedNmpGroup,
@@ -87,6 +88,12 @@ def test_generated_list_validates_stream_output_before_client_setup():
     assert result.exit_code == 2
     assert "--stream requires --output json or --output raw" in result.stderr
     mock_get_client.assert_not_called()
+
+
+def test_generated_api_manifest_excludes_source_owned_auth_commands():
+    entry_names = {entry.name for entry in API_TOP_LEVEL_ENTRIES}
+
+    assert {"auth", "access-keys", "iam"}.isdisjoint(entry_names)
 
 
 @pytest.mark.parametrize(

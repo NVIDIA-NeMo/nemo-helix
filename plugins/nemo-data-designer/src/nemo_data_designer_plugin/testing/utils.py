@@ -30,6 +30,7 @@ from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 from nemo_data_designer_plugin.service import DataDesignerService
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.commands import add_function_commands, add_job_commands
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.files.types import CreateFilesetRequest
@@ -435,7 +436,11 @@ async def task_context(
             job_ctx = JobContext(
                 workspace="default",
                 storage=StoragePaths(ephemeral=ephemeral, persistent=persistent),
-                results=PlatformJobResults(job_name=job_name, workspace="default", sdk=client_context.sdk),
+                results=PlatformJobResults(
+                    job_name=job_name,
+                    workspace="default",
+                    client=client_from_platform(client_context.sdk, NemoClient),
+                ),
                 job_id=job.id,
             )
             yield CreateJobTestContext(

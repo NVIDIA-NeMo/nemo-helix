@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from enum import StrEnum
@@ -78,6 +79,10 @@ from nemo_platform_ext.ui.prompts import (
 
 logger = logging.getLogger(__name__)
 console = Console(stderr=True)
+
+# Supported Python versions (inclusive).
+_SUPPORTED_PYTHON_MIN = (3, 12)
+_SUPPORTED_PYTHON_MAX = (3, 13)
 
 CHECK = "[green]✓[/green]"
 CROSS = "[red]✗[/red]"
@@ -200,21 +205,10 @@ class ProbeConfig:
     body: dict | None = None
 
 
-# NVIDIA's gateway routes by model name before checking auth, so a fake model
-# returns 404 without ever validating the key. We use a supported model so the
-# gateway reaches the auth layer and returns 401/403 for bad credentials.
-_NVIDIA_BUILD_PROBE_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
-
+# nvidia-build lists the catalog, then POSTs chat to a live candidate. Listing
+# alone is unauthenticated; chat is what rejects a bad key.
 _PROBE_CONFIGS: dict[str, ProbeConfig] = {
-    "nvidia-build": ProbeConfig(
-        "POST",
-        "v1/chat/completions",
-        {
-            "model": _NVIDIA_BUILD_PROBE_MODEL,
-            "messages": [{"role": "user", "content": "Respond with 'OK'"}],
-            "max_tokens": 1,
-        },
-    ),
+    "nvidia-build": ProbeConfig("GET", "v1/models"),
     "openai": ProbeConfig("GET", "models"),
     "anthropic": ProbeConfig("GET", "v1/models"),
     "google-gemini": ProbeConfig("GET", "models"),
@@ -248,8 +242,8 @@ _AUTO_ENV_VARS: tuple[tuple[str, str], ...] = (
 
 _KEY_VALIDATION_TIMEOUT = 10.0
 _KEY_REJECTED_STATUS_CODES = (401, 403)
-_TERMINAL_PROBE_STATUS_CODES = (404, 405, 410)
 _KEY_REJECTED_MESSAGE = "API key validation failed. The provider rejected the credentials."
+_PROBE_DETAIL_MAX_CHARS = 200
 
 # Catalog listing is not entitlement-scoped; only a successful chat request counts.
 _MODEL_PROBE_TIMEOUT = 20.0
@@ -2093,6 +2087,98 @@ def _register_provider_interactive(
         console.print(f"  {CHECK} Registered provider '{provider_name}' ({host_url})")
 
 
+def _probe_response_detail(resp: httpx.Response) -> str:
+    """Return a short upstream error string from a probe response, if present."""
+    try:
+        parsed = resp.json()
+    except Exception:
+        parsed = None
+    if isinstance(parsed, dict):
+        for key in ("detail", "title", "message"):
+            value = parsed.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()[:_PROBE_DETAIL_MAX_CHARS]
+    text = getattr(resp, "text", None)
+    if isinstance(text, str) and text.strip():
+        return text.strip()[:_PROBE_DETAIL_MAX_CHARS]
+    return ""
+
+
+def _with_probe_detail(message: str, resp: httpx.Response) -> str:
+    detail = _probe_response_detail(resp)
+    if not detail or detail in message:
+        return message
+    return f"{message} {detail}"
+
+
+def _catalog_model_ids(resp: httpx.Response) -> list[str]:
+    """Return model ids from an OpenAI-shaped ``GET /v1/models`` body."""
+    try:
+        ids: list[str] = []
+        for item in resp.json()["data"]:
+            model_id = item["id"]
+            if isinstance(model_id, str) and model_id.strip():
+                ids.append(model_id.strip())
+        return ids
+    except Exception:
+        return []
+
+
+def _nvidia_build_chat_candidates(model_ids: list[str]) -> list[str]:
+    chat_ids = [model_id for model_id in model_ids if _is_usable_chat_model_entity(model_id)]
+    ordered = _order_candidates_by_size(chat_ids, largest_first=True)
+    return ordered[:_MODEL_PROBE_MAX_ATTEMPTS]
+
+
+def _probe_status_result(resp: httpx.Response) -> KeyValidationResult:
+    if resp.status_code in _KEY_REJECTED_STATUS_CODES:
+        return KeyValidationResult(passed=False, message=_with_probe_detail(_KEY_REJECTED_MESSAGE, resp))
+    if resp.is_success:
+        return KeyValidationResult(passed=True, message="")
+    return KeyValidationResult(
+        passed=True,
+        message=_with_probe_detail(f"Provider probe received HTTP {resp.status_code}.", resp),
+    )
+
+
+def _nvidia_build_chat_probe(
+    host_url: str,
+    headers: dict[str, str],
+    catalog_resp: httpx.Response,
+    *,
+    timeout: float,
+) -> KeyValidationResult:
+    """POST chat completions to catalog candidates until auth is proven or exhausted."""
+    candidates = _nvidia_build_chat_candidates(_catalog_model_ids(catalog_resp))
+    if not candidates:
+        return KeyValidationResult(passed=True, message="Provider catalog listed no usable chat models.")
+
+    chat_url = f"{host_url.rstrip('/')}/v1/chat/completions"
+    last_warning = "Provider probe did not find a callable chat model."
+    for model_id in candidates:
+        body = {
+            "model": model_id,
+            "messages": [{"role": "user", "content": "Respond with 'OK'"}],
+            "max_tokens": 1,
+        }
+        try:
+            chat_resp = httpx.request("POST", chat_url, headers=headers, json=body, timeout=timeout)
+        except httpx.TimeoutException:
+            logger.debug("NVIDIA Build chat probe timed out for '%s'", model_id)
+            last_warning = "Provider probe timed out."
+            continue
+        except Exception as exc:
+            logger.debug("NVIDIA Build chat probe failed for '%s': %s", model_id, exc)
+            last_warning = f"Provider probe failed ({exc})."
+            continue
+        if chat_resp.status_code in _KEY_REJECTED_STATUS_CODES:
+            return _probe_status_result(chat_resp)
+        if chat_resp.is_success:
+            return KeyValidationResult(passed=True, message="")
+        last_warning = _probe_status_result(chat_resp).message
+    return KeyValidationResult(passed=True, message=last_warning)
+
+
 def _validate_api_key(
     provider_name: str,
     host_url: str,
@@ -2104,11 +2190,11 @@ def _validate_api_key(
 ) -> KeyValidationResult:
     """Probe the provider with the API key to detect auth failures early.
 
-    Makes a single lightweight request to an auth-required endpoint.
-    Returns ``passed=False`` on a definitive credential rejection or when the
-    configured probe target is unavailable. Network errors and unknown
-    providers are treated as *passed* to avoid blocking setup during transient
-    failures.
+    Makes a lightweight request to an auth-required endpoint.
+    Returns ``passed=False`` only on a definitive 401/403 credential rejection.
+    Unavailable probe targets, other HTTP statuses, network errors, and unknown
+    providers are treated as *passed* (with a warning message) so setup can
+    still register the provider.
     """
     if not api_key:
         return KeyValidationResult(passed=True, message="")
@@ -2141,27 +2227,18 @@ def _validate_api_key(
             timeout=timeout,
         )
         if resp.status_code in _KEY_REJECTED_STATUS_CODES:
-            return KeyValidationResult(passed=False, message=_KEY_REJECTED_MESSAGE)
-        if resp.status_code in _TERMINAL_PROBE_STATUS_CODES:
-            return KeyValidationResult(
-                passed=False,
-                message=(
-                    f"Provider validation failed (HTTP {resp.status_code}). "
-                    "The configured probe endpoint or model is unavailable."
-                ),
-            )
-        if 200 <= resp.status_code < 300:
+            return _probe_status_result(resp)
+        if resp.is_success:
+            if provider_name == "nvidia-build":
+                return _nvidia_build_chat_probe(host_url, headers, resp, timeout=timeout)
             return KeyValidationResult(passed=True, message="")
-        return KeyValidationResult(
-            passed=True,
-            message=f"Could not validate API key (received HTTP {resp.status_code}).",
-        )
+        return _probe_status_result(resp)
     except httpx.TimeoutException:
         logger.debug("API key validation timed out for '%s'", provider_name)
-        return KeyValidationResult(passed=True, message="Could not validate API key (request timed out).")
+        return KeyValidationResult(passed=True, message="Provider probe timed out.")
     except Exception as exc:
         logger.debug("API key validation failed for '%s': %s", provider_name, exc)
-        return KeyValidationResult(passed=True, message=f"Could not validate API key ({exc}).")
+        return KeyValidationResult(passed=True, message=f"Provider probe failed ({exc}).")
 
 
 def _select_model_pair(
@@ -2261,11 +2338,11 @@ def _auto_setup(client: NeMoPlatform, workspace: str) -> str | None:
             default_extra_headers=default_extra_headers,
         )
         if not key_result.passed:
-            console.print(f"  {CROSS} {key_result.message}")
+            console.print(f"  {CROSS} {escape(key_result.message)}")
             console.print(f"  Check the value of ${key_var} and try again.")
             raise typer.Exit(1)
         if key_result.message:
-            console.print(f"  {WARN} {key_result.message}")
+            console.print(f"  {WARN} {escape(key_result.message)}")
 
         secret_name = f"{provider_name}-api-key"
         if _secret_exists(client, secret_name, workspace):
@@ -2301,6 +2378,21 @@ def _auto_setup(client: NeMoPlatform, workspace: str) -> str | None:
         return provider_name
 
     return None
+
+
+def _require_supported_python() -> None:
+    """Exit if this interpreter is outside the supported Python versions."""
+    v = sys.version_info[:2]
+    v_min, v_max = _SUPPORTED_PYTHON_MIN, _SUPPORTED_PYTHON_MAX
+    if v_min <= v <= v_max:
+        return
+
+    running = ".".join(str(part) for part in sys.version_info[:3])
+    console.print(f"\n{CROSS} Unsupported Python {running}.")
+    console.print(f"  NeMo Platform requires Python {v_min[0]}.{v_min[1]}-{v_max[0]}.{v_max[1]}.")
+    console.print("  Reinstall the CLI against a supported interpreter:")
+    console.print(f'    [cyan]uv tool install --python {v_max[0]}.{v_max[1]} --reinstall "nemo-platform[all]"[/cyan]')
+    raise typer.Exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -2416,6 +2508,8 @@ def setup_command(
     """
     cli_context: CLIContext = ctx.obj
     base_url = cli_context.get_base_url() or DEFAULT_BASE_URL
+
+    _require_supported_python()
 
     console.print("\n[bold cyan]NeMo Platform Setup[/bold cyan]\n")
     if resume:
@@ -2668,11 +2762,11 @@ def _run_interactive_mode(
                 default_extra_headers=default_extra_headers,
             )
             if not key_result.passed:
-                console.print(f"  {CROSS} {key_result.message}")
+                console.print(f"  {CROSS} {escape(key_result.message)}")
                 console.print("  Please check your API key and run [cyan]nemo setup[/cyan] again.")
                 raise typer.Exit(1)
             if key_result.message:
-                console.print(f"  {WARN} {key_result.message}")
+                console.print(f"  {WARN} {escape(key_result.message)}")
             else:
                 console.print(f"  {CHECK} API key validated")
 

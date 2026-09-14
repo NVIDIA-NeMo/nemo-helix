@@ -2,19 +2,24 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-import logging
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from unittest.mock import patch
 
 import httpx
 import pytest
+from nemo_platform import AsyncNeMoPlatform, NeMoPlatform, omit
 from nemo_platform_ext.auth.helpers import NMPOIDCConfig
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_platform_plugin.jobs.client import JobsClient
 from nmp.common.config import Configuration, PlatformConfig
 from nmp.common.http_clients import shared_async_http_client, shared_sync_http_client
+from nmp.common.platform_endpoint import (
+    _AsyncPlatformEndpointRoutingTransport,
+    _SyncPlatformEndpointRoutingTransport,
+)
 from nmp.common.sdk_factory import (
-    PlatformRequestRouter,
     get_async_platform_sdk,
     get_async_task_sdk,
     get_entity_parts,
@@ -22,7 +27,6 @@ from nmp.common.sdk_factory import (
     get_request_scoped_sdk,
     get_sdk_on_behalf_of,
     get_task_sdk,
-    resolve_platform_request_url,
 )
 
 
@@ -37,24 +41,25 @@ def _workload_oidc_config() -> NMPOIDCConfig:
     )
 
 
+@contextmanager
+def _platform_sdk_for_test(*, base_url: str = "http://platform:8080") -> Iterator[NeMoPlatform]:
+    with get_platform_sdk(base_url=base_url) as sdk:
+        yield sdk
+
+
+@asynccontextmanager
+async def _async_platform_sdk_for_test(*, base_url: str = "http://platform:8080") -> AsyncIterator[AsyncNeMoPlatform]:
+    async with get_async_platform_sdk(base_url=base_url) as sdk:
+        yield sdk
+
+
 @pytest.fixture(autouse=True)
-def _clear_sdk_factory_test_client():
-    """Clear SDK factory state before each test so config-based SDK behavior is asserted.
-
-    When _test_http_client is set (e.g. by another test's create_test_client), the SDK
-    is created with base_url='http://testserver' and no request router, which breaks tests
-    that assert on base_url or service routing. Clearing it keeps tests order-independent
-    and ensures sdk_factory tests always exercise the config path.
-    """
-    import nmp.common.sdk_factory as sdk_factory_module
-
-    old = sdk_factory_module._test_http_client
-    sdk_factory_module._test_http_client = None
+def _clear_configuration_cache():
+    """Keep SDK factory tests order-independent."""
     Configuration.clear_cache()
     try:
         yield
     finally:
-        sdk_factory_module._test_http_client = old
         Configuration.clear_cache()
 
 
@@ -119,25 +124,22 @@ def test_get_platform_sdk_preserves_api_base_url_for_controller_only_pods(monkey
     assert str(captured_requests[0].url) == "http://nemo-platform-api:8080/apis/jobs/v2/workspaces/default/jobs"
 
 
-def test_get_platform_sdk_routes_local_service_path_to_process_listener(monkeypatch: pytest.MonkeyPatch):
-    """Requests for APIs hosted in this process bypass the platform entrypoint."""
+def test_get_platform_sdk_uses_routing_transport_for_local_services(monkeypatch: pytest.MonkeyPatch):
+    """APIs hosted in this process are routed by the SDK-owned HTTP client."""
     monkeypatch.setenv("NMP_BASE_URL", "https://nemo-gateway:8080")
     monkeypatch.setenv("NMP_SERVICES", "auth")
     monkeypatch.setenv("NMP_SERVICE_HOST", "127.0.0.1")
     monkeypatch.setenv("NMP_SERVICE_PORT", "8080")
     Configuration.clear_cache()
 
-    sdk = get_platform_sdk()
-    prepared = sdk._prepare_url("https://nemo-gateway:8080/apis/auth/v2/authz/allow")
+    with get_platform_sdk() as sdk:
+        transport = sdk._client._transport
 
-    assert prepared.scheme == "http"
-    assert prepared.host == "127.0.0.1"
-    assert prepared.port == 8080
-    assert prepared.path == "/apis/auth/v2/authz/allow"
+    assert isinstance(transport, _SyncPlatformEndpointRoutingTransport)
 
 
 def test_get_platform_sdk_uses_uds_endpoint_from_base_url():
-    config = PlatformConfig(base_url="unix:///tmp/nemo-platform.sock")  # type: ignore[abstract]
+    config = PlatformConfig.model_construct(base_url="unix:///tmp/nemo-platform.sock")
 
     with patch("nmp.common.sdk_factory.Configuration.get_platform_config", return_value=config):
         sdk = get_platform_sdk()
@@ -221,7 +223,7 @@ def test_get_async_platform_sdk():
 
 
 def test_get_async_platform_sdk_uses_uds_endpoint_from_base_url():
-    config = PlatformConfig(base_url="unix:///tmp/nemo-platform.sock")  # type: ignore[abstract]
+    config = PlatformConfig.model_construct(base_url="unix:///tmp/nemo-platform.sock")
 
     with patch("nmp.common.sdk_factory.Configuration.get_platform_config", return_value=config):
         sdk = get_async_platform_sdk()
@@ -230,26 +232,13 @@ def test_get_async_platform_sdk_uses_uds_endpoint_from_base_url():
 
 
 @pytest.mark.asyncio
-async def test_get_async_platform_sdk_workload_identity_reuses_test_http_client(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-):
-    import nmp.common.sdk_factory as sdk_factory_module
-
-    subject_token_file = tmp_path / "workload-token"
-    subject_token_file.write_text("subject-token-from-file\n", encoding="utf-8")
-    monkeypatch.setenv("NMP_BASE_URL", "http://nmp.example.test")
-    monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(subject_token_file))
-
+async def test_get_async_platform_sdk_uses_explicit_http_client() -> None:
     transport = httpx.MockTransport(lambda _request: httpx.Response(200, json={}))
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as http_client:
-        sdk_factory_module._test_http_client = http_client
-        try:
-            sdk = get_async_platform_sdk()
+        sdk = get_async_platform_sdk(base_url="http://nmp.example.test", http_client=http_client)
 
-            assert sdk._client is http_client
-            assert str(sdk.base_url).rstrip("/") == "http://nmp.example.test"
-        finally:
-            sdk_factory_module._test_http_client = None
+        assert sdk._client is http_client
+        assert str(sdk.base_url).rstrip("/") == "http://nmp.example.test"
 
 
 def test_get_async_platform_sdk_with_service_principal():
@@ -423,6 +412,23 @@ def test_get_task_sdk_uses_explicit_sync_http_client(monkeypatch: pytest.MonkeyP
         assert sdk._client is client
 
 
+def test_platform_sdk_test_context_closes_factory_client() -> None:
+    with _platform_sdk_for_test() as sdk:
+        http_client = sdk._client
+        assert not http_client.is_closed
+
+    assert http_client.is_closed
+
+
+@pytest.mark.asyncio
+async def test_async_platform_sdk_test_context_closes_factory_client() -> None:
+    async with _async_platform_sdk_for_test() as sdk:
+        http_client = sdk._client
+        assert not http_client.is_closed
+
+    assert http_client.is_closed
+
+
 def test_get_request_scoped_sdk_merges_otel_and_auth_headers():
     """Test that get_request_scoped_sdk merges OTEL and auth headers."""
     base_sdk = get_async_platform_sdk()
@@ -450,8 +456,8 @@ def test_get_request_scoped_sdk_merges_otel_and_auth_headers():
     assert scoped_sdk.default_headers["X-NMP-Principal-Groups"] == "group1,group2"
 
 
-def test_get_request_scoped_sdk_preserves_request_router(monkeypatch: pytest.MonkeyPatch):
-    """Derived request SDKs must keep the base SDK's path-aware platform request router."""
+def test_get_request_scoped_sdk_reuses_base_sdk_http_client(monkeypatch: pytest.MonkeyPatch):
+    """Derived request SDKs keep the base SDK's routed HTTP client."""
     monkeypatch.setenv("NMP_BASE_URL", "https://nemo-gateway:8080")
     monkeypatch.setenv("NMP_SERVICES", "entities")
     monkeypatch.setenv("NMP_SERVICE_HOST", "127.0.0.1")
@@ -468,18 +474,16 @@ def test_get_request_scoped_sdk_preserves_request_router(monkeypatch: pytest.Mon
             ):
                 scoped_sdk = get_request_scoped_sdk(base_sdk)
 
-        prepared = scoped_sdk._prepare_url("https://nemo-gateway:8080/apis/entities/v2/workspaces")
+        transport = base_sdk._client._transport
 
-        assert prepared.scheme == "http"
-        assert prepared.host == "127.0.0.1"
-        assert prepared.port == 8080
-        assert prepared.path == "/apis/entities/v2/workspaces"
+        assert isinstance(transport, _AsyncPlatformEndpointRoutingTransport)
+        assert scoped_sdk._client is base_sdk._client
     finally:
         Configuration.clear_cache()
 
 
-def test_get_sdk_on_behalf_of_preserves_request_router(monkeypatch: pytest.MonkeyPatch):
-    """SDKs derived with on-behalf-of headers must still keep platform request routing."""
+def test_get_sdk_on_behalf_of_reuses_base_sdk_http_client(monkeypatch: pytest.MonkeyPatch):
+    """SDKs derived with on-behalf-of headers keep the base SDK's routed HTTP client."""
     monkeypatch.setenv("NMP_BASE_URL", "https://nemo-gateway:8080")
     monkeypatch.setenv("NMP_SERVICES", "entities")
     monkeypatch.setenv("NMP_SERVICE_HOST", "127.0.0.1")
@@ -490,12 +494,10 @@ def test_get_sdk_on_behalf_of_preserves_request_router(monkeypatch: pytest.Monke
         base_sdk = get_async_platform_sdk(as_service="models", internal=True)
         scoped_sdk = get_sdk_on_behalf_of(base_sdk, "user@example.com")
 
-        prepared = scoped_sdk._prepare_url("https://nemo-gateway:8080/apis/entities/v2/workspaces")
+        transport = base_sdk._client._transport
 
-        assert prepared.scheme == "http"
-        assert prepared.host == "127.0.0.1"
-        assert prepared.port == 8080
-        assert prepared.path == "/apis/entities/v2/workspaces"
+        assert isinstance(transport, _AsyncPlatformEndpointRoutingTransport)
+        assert scoped_sdk._client is base_sdk._client
     finally:
         Configuration.clear_cache()
 
@@ -585,6 +587,23 @@ def test_get_request_scoped_sdk_auth_headers_override_otel_headers():
     assert scoped_sdk.default_headers["X-Custom-Header"] == "auth-value"
 
 
+def test_get_request_scoped_sdk_preserves_base_default_headers_with_scoped_headers():
+    """Request-scoped SDKs keep base service headers while adding request headers."""
+    base_sdk = get_async_platform_sdk(as_service="jobs", internal=True)
+
+    mock_otel_headers = {"traceparent": "00-trace-id-span-id-01"}
+    mock_auth_headers = {"X-NMP-Principal-On-Behalf-Of": "user@example.com"}
+
+    with patch("nmp.common.sdk_factory.get_otel_headers", return_value=mock_otel_headers):
+        with patch("nmp.common.sdk_factory.get_principal_auth_headers", return_value=mock_auth_headers):
+            scoped_sdk = get_request_scoped_sdk(base_sdk)
+
+    assert scoped_sdk.default_headers["X-NMP-Internal"] == "true"
+    assert scoped_sdk.default_headers["X-NMP-Principal-Id"] == "service:jobs"
+    assert scoped_sdk.default_headers["X-NMP-Principal-On-Behalf-Of"] == "user@example.com"
+    assert scoped_sdk.default_headers["traceparent"] == "00-trace-id-span-id-01"
+
+
 def test_get_request_scoped_sdk_preserves_base_sdk_http_client():
     """Test that get_request_scoped_sdk reuses the base SDK's HTTP client."""
     import httpx
@@ -664,7 +683,19 @@ def test_get_request_scoped_sdk_service_principal_with_on_behalf_of():
     assert scoped_sdk.default_headers["X-NMP-Principal-On-Behalf-Of"] == "user@example.com"
 
 
-# --- Dynamic routing (service discovery map) tests ---
+def test_get_sdk_on_behalf_of_preserves_omitted_default_headers() -> None:
+    with NeMoPlatform(
+        base_url="http://nmp.example.test",
+        default_headers={"Content-Type": omit, "X-Base": "base"},
+    ) as base_sdk:
+        delegated_sdk = get_sdk_on_behalf_of(base_sdk, "user@example.com")
+
+    assert delegated_sdk.default_headers["Content-Type"] is omit
+    assert delegated_sdk.default_headers["X-Base"] == "base"
+    assert delegated_sdk.default_headers["X-NMP-Principal-On-Behalf-Of"] == "user@example.com"
+
+
+# --- SDK routing client tests ---
 
 
 @pytest.fixture
@@ -679,204 +710,146 @@ def platform_config_with_service_discovery():
     )
 
 
-def test_resolve_platform_request_url_routes_api_path_to_service_url(platform_config_with_service_discovery):
-    """The named request router policy owns per-service routing."""
-
-    def default_resolver(url: str) -> httpx.URL:
-        if url.startswith("/"):
-            return httpx.URL(f"http://platform:8080{url}")
-        return httpx.URL(url)
-
-    prepared = resolve_platform_request_url(
-        "/apis/entities/v2/workspaces?limit=10",
-        platform_config=platform_config_with_service_discovery,
-        default_resolver=default_resolver,
+@pytest.fixture
+def platform_config_with_uds_service_route() -> PlatformConfig:
+    return PlatformConfig(  # type: ignore[abstract]
+        base_url="https://platform:8443",
+        service_discovery={"entities": "unix:///tmp/entities.sock"},
     )
 
-    assert prepared.scheme == "http"
-    assert prepared.host == "entities-service"
-    assert prepared.port == 8080
-    assert prepared.path == "/apis/entities/v2/workspaces"
-    assert prepared.query == b"limit=10"
 
-
-def test_resolve_platform_request_url_logs_path_without_raw_url(
-    caplog: pytest.LogCaptureFixture,
+def test_get_platform_sdk_uses_routing_transport_for_service_discovery(
     platform_config_with_service_discovery,
 ):
-    """Routing logs expose the resolved path without query parameters."""
-
-    def default_resolver(url: str) -> httpx.URL:
-        if url.startswith("/"):
-            return httpx.URL(f"http://platform:8080{url}")
-        return httpx.URL(url)
-
-    caplog.set_level(logging.DEBUG, logger="nmp.common.sdk_factory")
-
-    resolve_platform_request_url(
-        "/health/ready?token=secret",
-        platform_config=platform_config_with_service_discovery,
-        default_resolver=default_resolver,
-    )
-    resolve_platform_request_url(
-        "/apis/entities/v2/workspaces?token=secret",
-        platform_config=platform_config_with_service_discovery,
-        default_resolver=default_resolver,
-    )
-
-    original_record = next(record for record in caplog.records if record.message == "Routing URL to original URL")
-    service_record = next(record for record in caplog.records if record.message == "Routing URL to service URL")
-
-    assert not hasattr(original_record, "url")
-    assert original_record.service == "unknown"
-    assert original_record.path == "/health/ready"
-    assert original_record.host == "platform"
-    assert original_record.port == 8080
-
-    assert not hasattr(service_record, "url")
-    assert service_record.service == "entities"
-    assert service_record.path == "/apis/entities/v2/workspaces"
-    assert service_record.host == "entities-service"
-    assert service_record.port == 8080
-
-    for record in (original_record, service_record):
-        assert "token=secret" not in str(record.__dict__)
-
-
-def test_platform_request_router_uses_default_resolver_for_non_api_paths(platform_config_with_service_discovery):
-    """Non-API paths follow the SDK's normal URL preparation."""
-    router = PlatformRequestRouter(
-        platform_config=platform_config_with_service_discovery,
-        default_resolver=lambda url: httpx.URL(f"http://platform:8080{url}"),
-    )
-
-    prepared = router.resolve("/health/ready")
-
-    assert str(prepared) == "http://platform:8080/health/ready"
-
-
-def test_get_platform_sdk_routes_entities_path_to_entities_service(
-    platform_config_with_service_discovery,
-):
-    """Routes /apis/entities/v2/workspaces to the entities service URL."""
+    """Service discovery routing belongs to the SDK-owned HTTP client."""
     with patch(
         "nmp.common.sdk_factory.Configuration.get_platform_config",
         return_value=platform_config_with_service_discovery,
     ):
-        sdk = get_platform_sdk()
-        request_url = "http://platform:8080/apis/entities/v2/workspaces"
-        prepared = sdk._prepare_url(request_url)
+        with get_platform_sdk() as sdk:
+            transport = sdk._client._transport
 
-    assert prepared.host == "entities-service"
-    assert prepared.port == 8080
-    assert prepared.scheme == "http"
-    assert "/apis/entities/v2/workspaces" in str(prepared.path)
+    assert isinstance(transport, _SyncPlatformEndpointRoutingTransport)
 
 
-def test_get_platform_sdk_routes_service_path_to_env_override(
+def test_platform_sdk_copy_reuses_routing_transport(
+    platform_config_with_service_discovery,
+):
+    """SDK clones remain routed by reusing the base HTTP client."""
+    with patch(
+        "nmp.common.sdk_factory.Configuration.get_platform_config",
+        return_value=platform_config_with_service_discovery,
+    ):
+        with get_platform_sdk() as sdk:
+            copied_sdk = sdk.copy(workspace="copy-workspace")
+
+            assert copied_sdk._client is sdk._client
+
+
+def test_get_platform_sdk_base_url_preserves_routing_transport_for_uds_service(
+    platform_config_with_uds_service_route: PlatformConfig,
+) -> None:
+    with patch(
+        "nmp.common.sdk_factory.Configuration.get_platform_config",
+        return_value=platform_config_with_uds_service_route,
+    ):
+        with get_platform_sdk(base_url="https://override.example.test") as sdk:
+            transport = sdk._client._transport
+
+    assert isinstance(transport, _SyncPlatformEndpointRoutingTransport)
+
+
+def test_get_platform_sdk_workload_identity_uses_routing_transport_for_uds_service(
     monkeypatch: pytest.MonkeyPatch,
+    platform_config_with_uds_service_route: PlatformConfig,
+    tmp_path,
+) -> None:
+    subject_token_file = tmp_path / "workload-token"
+    subject_token_file.write_text("subject-token-from-file\n", encoding="utf-8")
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setenv("NMP_CONFIG_FILE", str(config_file))
+    monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(subject_token_file))
+    monkeypatch.delenv("NMP_ACCESS_TOKEN", raising=False)
+
+    with patch(
+        "nmp.common.sdk_factory.Configuration.get_platform_config",
+        return_value=platform_config_with_uds_service_route,
+    ):
+        with get_platform_sdk() as sdk:
+            transport = sdk._client._transport
+
+    assert isinstance(transport, _SyncPlatformEndpointRoutingTransport)
+
+
+@pytest.mark.asyncio
+async def test_get_async_platform_sdk_uses_routing_transport_for_service_discovery(
     platform_config_with_service_discovery,
-):
-    monkeypatch.setenv("NMP_ENTITIES_URL", "http://entities-env:9090")
+) -> None:
+    """Async service discovery routing belongs to the SDK-owned HTTP client."""
     with patch(
         "nmp.common.sdk_factory.Configuration.get_platform_config",
         return_value=platform_config_with_service_discovery,
     ):
-        sdk = get_platform_sdk()
-        request_url = "http://platform:8080/apis/entities/v2/workspaces"
-        prepared = sdk._prepare_url(request_url)
+        async with get_async_platform_sdk() as sdk:
+            transport = sdk._client._transport
 
-    assert prepared.host == "entities-env"
-    assert prepared.port == 9090
-    assert prepared.scheme == "http"
+    assert isinstance(transport, _AsyncPlatformEndpointRoutingTransport)
 
 
-def test_get_platform_sdk_routes_jobs_path_to_jobs_service(
+@pytest.mark.asyncio
+async def test_get_async_platform_sdk_workload_identity_uses_routing_transport_for_uds_service(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_config_with_uds_service_route: PlatformConfig,
+    tmp_path,
+) -> None:
+    subject_token_file = tmp_path / "workload-token"
+    subject_token_file.write_text("subject-token-from-file\n", encoding="utf-8")
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setenv("NMP_CONFIG_FILE", str(config_file))
+    monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(subject_token_file))
+    monkeypatch.delenv("NMP_ACCESS_TOKEN", raising=False)
+
+    with patch(
+        "nmp.common.sdk_factory.Configuration.get_platform_config",
+        return_value=platform_config_with_uds_service_route,
+    ):
+        async with get_async_platform_sdk() as sdk:
+            transport = sdk._client._transport
+
+    assert isinstance(transport, _AsyncPlatformEndpointRoutingTransport)
+
+
+@pytest.mark.asyncio
+async def test_async_platform_sdk_copy_reuses_routing_transport(
     platform_config_with_service_discovery,
-):
-    """Routes /apis/jobs/v2/workspaces/jobs to the jobs service URL."""
+) -> None:
+    """Async SDK clones remain routed by reusing the base HTTP client."""
     with patch(
         "nmp.common.sdk_factory.Configuration.get_platform_config",
         return_value=platform_config_with_service_discovery,
     ):
-        sdk = get_platform_sdk()
-        request_url = "http://platform:8080/apis/jobs/v2/workspaces/jobs"
-        prepared = sdk._prepare_url(request_url)
+        async with get_async_platform_sdk() as sdk:
+            copied_sdk = sdk.copy(workspace="copy-workspace")
 
-    assert prepared.host == "jobs-service"
-    assert prepared.port == 8080
-    assert prepared.scheme == "http"
-    assert "/apis/jobs/v2/workspaces/jobs" in str(prepared.path)
+            assert copied_sdk._client is sdk._client
 
 
-def test_get_platform_sdk_routing_fallback_to_base_url_when_no_match(
-    platform_config_with_service_discovery,
-):
-    """When the path does not match /apis/{service-name}/ (lowercase+dashes), use the original URL (base)."""
+@pytest.mark.asyncio
+async def test_get_async_platform_sdk_base_url_preserves_routing_transport_for_uds_service(
+    platform_config_with_uds_service_route: PlatformConfig,
+) -> None:
     with patch(
         "nmp.common.sdk_factory.Configuration.get_platform_config",
-        return_value=platform_config_with_service_discovery,
+        return_value=platform_config_with_uds_service_route,
     ):
-        sdk = get_platform_sdk()
-        # Path that does not match /apis/{service-name}/ (e.g. /api/ singular, or no such prefix)
-        request_url = "http://platform:8080/api/other/v1/thing"
-        prepared = sdk._prepare_url(request_url)
+        async with get_async_platform_sdk(base_url="https://override.example.test") as sdk:
+            transport = sdk._client._transport
 
-    # Should pass through to original behavior: same host as request
-    assert prepared.host == "platform"
-    assert prepared.port == 8080
-
-
-def test_get_async_platform_sdk_routes_entities_path_to_entities_service(
-    platform_config_with_service_discovery,
-):
-    """Routes /apis/entities/v2/workspaces to the entities service URL (async SDK)."""
-    with patch(
-        "nmp.common.sdk_factory.Configuration.get_platform_config",
-        return_value=platform_config_with_service_discovery,
-    ):
-        sdk = get_async_platform_sdk()
-        request_url = "http://platform:8080/apis/entities/v2/workspaces"
-        prepared = sdk._prepare_url(request_url)
-
-    assert prepared.host == "entities-service"
-    assert prepared.port == 8080
-    assert prepared.scheme == "http"
-    assert "/apis/entities/v2/workspaces" in str(prepared.path)
-
-
-def test_get_async_platform_sdk_routes_jobs_path_to_jobs_service(
-    platform_config_with_service_discovery,
-):
-    """Routes /apis/jobs/v2/workspaces/jobs to the jobs service URL (async SDK)."""
-    with patch(
-        "nmp.common.sdk_factory.Configuration.get_platform_config",
-        return_value=platform_config_with_service_discovery,
-    ):
-        sdk = get_async_platform_sdk()
-        request_url = "http://platform:8080/apis/jobs/v2/workspaces/jobs"
-        prepared = sdk._prepare_url(request_url)
-
-    assert prepared.host == "jobs-service"
-    assert prepared.port == 8080
-    assert prepared.scheme == "http"
-    assert "/apis/jobs/v2/workspaces/jobs" in str(prepared.path)
-
-
-def test_get_async_platform_sdk_routing_fallback_to_base_url_when_no_match(
-    platform_config_with_service_discovery,
-):
-    """When the path does not match /apis/{service-name}/, use the original URL (async SDK)."""
-    with patch(
-        "nmp.common.sdk_factory.Configuration.get_platform_config",
-        return_value=platform_config_with_service_discovery,
-    ):
-        sdk = get_async_platform_sdk()
-        request_url = "http://platform:8080/api/other/v1/thing"
-        prepared = sdk._prepare_url(request_url)
-
-    assert prepared.host == "platform"
-    assert prepared.port == 8080
+    assert isinstance(transport, _AsyncPlatformEndpointRoutingTransport)
 
 
 # --- get_entity_parts tests ---

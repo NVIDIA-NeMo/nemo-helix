@@ -12,7 +12,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.client import AsyncNemoClient
 from nmp.intake.config import ClickHouseConfig, IntakeConfig
 from nmp.intake.service import IntakeService
 from nmp.intake.spans.clickhouse_client import ClickHouseSettings, ClickHouseSpanClient, bootstrap_schema
@@ -68,7 +68,7 @@ def clickhouse_settings() -> Iterator[ClickHouseSettings]:
 
 
 @pytest.fixture
-def platform(clickhouse_settings: ClickHouseSettings) -> Iterator[AsyncNeMoPlatform]:
+def platform(clickhouse_settings: ClickHouseSettings) -> Iterator[AsyncNemoClient]:
     config = IntakeConfig(
         clickhouse_config=ClickHouseConfig(
             url=clickhouse_settings.url,
@@ -78,6 +78,6 @@ def platform(clickhouse_settings: ClickHouseSettings) -> Iterator[AsyncNeMoPlatf
         )
     )
     with create_test_client(
-        IntakeService, client_type=AsyncNeMoPlatform, service_configs={IntakeService: config}
+        IntakeService, client_type=AsyncNemoClient, service_configs={IntakeService: config}
     ) as client:
         yield client

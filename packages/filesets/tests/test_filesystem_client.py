@@ -1,19 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Client construction inside FilesetFileSystem.
-
-Uploads and downloads run on the async client built by ``_ensure_async``, not on
-the sync client the caller configured. Anything that client fails to carry over
-is silently dropped from every transfer.
-"""
+"""Client construction inside Fileset filesystem classes."""
 
 from __future__ import annotations
 
 import httpx
-from filesets.filesystem.filesystem import FilesetFileSystem
+from filesets.filesystem.filesystem import AsyncFilesetFileSystem, FilesetFileSystem
 from nemo_platform_plugin.client.types import RetryPolicy
-from nemo_platform_plugin.files.client import FilesClient
+from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
 
 BASE = "http://test:8000"
 UPLOAD_TIMEOUT = httpx.Timeout(30.0, write=10 * 60, read=5 * 60)
@@ -32,41 +27,77 @@ def _sync_client(*, timeout: httpx.Timeout) -> FilesClient:
     )
 
 
-def test_ensure_async_carries_transport_timeout() -> None:
-    """With no override to carry, the transport's own timeout is what governs.
-
-    Without this the new AsyncClient falls back to httpx's 5s default.
-    """
-    async_client = FilesetFileSystem._ensure_async(_sync_client(timeout=httpx.Timeout(60.0)))
-
-    assert async_client._timeout is None
-    assert async_client._http.timeout == httpx.Timeout(60.0)
-    assert async_client._http.timeout != httpx.Timeout(5.0)
-
-
-def test_ensure_async_carries_per_request_timeout_override() -> None:
-    """An override goes out on every request, so it governs regardless of the transport."""
-    client = _sync_client(timeout=httpx.Timeout(60.0)).with_options(timeout=UPLOAD_TIMEOUT)
-
-    async_client = FilesetFileSystem._ensure_async(client)
-
-    assert async_client._timeout == UPLOAD_TIMEOUT
-    # Each layer is copied from its own counterpart, so the transport keeps the
-    # client-level default it had on the sync side rather than the override.
-    assert async_client._http.timeout == httpx.Timeout(60.0)
+def _async_client() -> AsyncFilesClient:
+    http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
+        timeout=httpx.Timeout(60.0),
+    )
+    return AsyncFilesClient(
+        base_url=BASE,
+        workspace="default",
+        http_client=http_client,
+        retry=RetryPolicy(max_retries=2),
+    )
 
 
-def test_ensure_async_preserves_workspace_and_retry() -> None:
+def test_sync_filesystem_uses_sync_client() -> None:
     client = _sync_client(timeout=httpx.Timeout(60.0))
 
-    async_client = FilesetFileSystem._ensure_async(client)
+    fs = FilesetFileSystem(client=client)
 
-    assert async_client.workspace == "default"
-    assert async_client.retry == RetryPolicy(max_retries=2)
+    assert fs._client is client
+    assert fs._client.workspace == "default"
+    assert fs._client.retry == RetryPolicy(max_retries=2)
+
+
+async def test_async_filesystem_uses_async_client() -> None:
+    async_client = _async_client()
+
+    try:
+        fs = AsyncFilesetFileSystem(client=async_client)
+
+        assert fs._client is async_client
+        assert fs._client.workspace == "default"
+        assert fs._client.retry == RetryPolicy(max_retries=2)
+    finally:
+        await async_client._http.aclose()
+
+
+def test_platform_files_resource_returns_sync_filesystem() -> None:
+    from nemo_platform import NeMoPlatform
+
+    http_client = httpx.Client(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
+        timeout=httpx.Timeout(60.0),
+    )
+    platform = NeMoPlatform(base_url=BASE, workspace="default", http_client=http_client)
+
+    fs = platform.files.fsspec
+
+    assert isinstance(fs, FilesetFileSystem)
+    assert fs._client._http is http_client
+
+
+async def test_async_platform_files_resource_returns_async_filesystem() -> None:
+    from nemo_platform import AsyncNeMoPlatform
+
+    http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)),
+        timeout=httpx.Timeout(60.0),
+    )
+    platform = AsyncNeMoPlatform(base_url=BASE, workspace="default", http_client=http_client)
+
+    try:
+        fs = platform.files.fsspec
+
+        assert isinstance(fs, AsyncFilesetFileSystem)
+        assert fs._client._http is http_client
+    finally:
+        await http_client.aclose()
 
 
 def test_upload_timeout_survives_the_whole_client_chain() -> None:
-    """End to end: an SDK-level timeout override reaches the client that transfers."""
+    """End to end: an SDK-level timeout override reaches the sync transfer client."""
     from nemo_platform import NeMoPlatform
 
     http_client = httpx.Client(
@@ -78,3 +109,4 @@ def test_upload_timeout_survives_the_whole_client_chain() -> None:
     fs = platform.with_options(timeout=UPLOAD_TIMEOUT).files.fsspec
 
     assert fs._client._timeout == UPLOAD_TIMEOUT
+    assert fs._client._http is http_client

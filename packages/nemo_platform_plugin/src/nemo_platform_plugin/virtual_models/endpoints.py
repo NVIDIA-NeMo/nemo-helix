@@ -11,6 +11,7 @@ from nemo_platform_plugin.client.endpoint import delete, get, patch, post
 from nemo_platform_plugin.client.types import Paginated
 from nemo_platform_plugin.virtual_models.types import (
     CreateVirtualModelRequest,
+    DeleteVirtualModelQueryParams,
     ListVirtualModelsQueryParams,
     UpdateVirtualModelRequest,
     VirtualModel,
@@ -45,4 +46,6 @@ def update_virtual_model(
 
 @delete(_VIRTUAL_MODELS + "/{name}")
 @abstractmethod
-def delete_virtual_model(*, workspace: str | None = None, name: str) -> None: ...
+def delete_virtual_model(
+    *, workspace: str | None = None, name: str, query_params: DeleteVirtualModelQueryParams | None = None
+) -> None: ...

@@ -142,6 +142,33 @@ describe('customizationFormSchema', () => {
   });
 });
 
+describe('integrations across backends', () => {
+  it('drops an untouched integrations block on every backend', () => {
+    const automodel = formToAutomodelCreate(validAutomodel());
+    expect(automodel.spec.integrations).toBeUndefined();
+
+    const unsloth = formToUnslothCreate(validUnsloth());
+    expect(unsloth.spec.integrations).toBeUndefined();
+  });
+
+  it('keeps a configured provider and drops the empty one', () => {
+    const data = validAutomodel();
+    data.automodel.integrations = { wandb: { project: 'my-project' }, mlflow: {} };
+
+    const { integrations } = formToAutomodelCreate(data).spec;
+    expect(integrations?.wandb).toEqual({ project: 'my-project' });
+    expect(integrations?.mlflow).toBeUndefined();
+  });
+
+  it('treats a blank string as no value rather than an empty name', () => {
+    const data = validUnsloth();
+    data.unsloth.integrations = { wandb: { project: '   ', entity: 'acme' } };
+
+    const { integrations } = formToUnslothCreate(data).spec;
+    expect(integrations?.wandb).toEqual({ entity: 'acme' });
+  });
+});
+
 describe('formToAutomodelCreate', () => {
   it('maps output name and description onto the job and spec.output', () => {
     const data = validAutomodel();
@@ -163,6 +190,34 @@ describe('formToAutomodelCreate', () => {
     expect(result.name).toBeUndefined();
     expect(result.description).toBeUndefined();
     expect(result.spec.output).toEqual({ name: '', description: undefined });
+  });
+
+  it('drops the whole distillation block for an sft job', () => {
+    const data = validAutomodel();
+    data.automodel.training.training_type = 'sft';
+    const { training } = formToAutomodelCreate(data).spec;
+    expect(training.teacher_model).toBeUndefined();
+    expect(training.teacher_precision).toBeUndefined();
+    expect(training.distillation_ratio).toBeUndefined();
+    expect(training.distillation_temperature).toBeUndefined();
+    expect(training.offload_teacher).toBeUndefined();
+  });
+
+  it('sends the distillation block for a distillation job', () => {
+    const data = validAutomodel();
+    data.automodel.training.training_type = 'distillation';
+    data.automodel.training.teacher_model = 'default/teacher';
+    data.automodel.training.distillation_ratio = 0.7;
+    data.automodel.training.distillation_temperature = 2;
+    data.automodel.training.teacher_precision = 'fp16';
+    data.automodel.training.offload_teacher = true;
+
+    const { training } = formToAutomodelCreate(data).spec;
+    expect(training.teacher_model).toBe('default/teacher');
+    expect(training.distillation_ratio).toBe(0.7);
+    expect(training.distillation_temperature).toBe(2);
+    expect(training.teacher_precision).toBe('fp16');
+    expect(training.offload_teacher).toBe(true);
   });
 
   it('keeps lora params for lora finetuning', () => {

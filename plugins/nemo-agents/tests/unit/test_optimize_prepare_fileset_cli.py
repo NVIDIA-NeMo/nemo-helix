@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 import json
+from contextlib import ExitStack
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -55,23 +55,36 @@ def app() -> typer.Typer:
     return group
 
 
-def uploads(record: dict[str, Any]) -> Any:
-    class _StubFiles:
-        def upload(self, *, local_path: str, fileset: str, workspace: str, fileset_auto_create: bool) -> Any:
-            record.update(
-                local_path=local_path,
-                fileset=fileset,
-                workspace=workspace,
-                auto_create=fileset_auto_create,
-            )
-            return SimpleNamespace(name=fileset)
+class _StubSDK:
+    pass
 
-    return SimpleNamespace(files=_StubFiles())
+
+def _patch_upload(record: dict[str, Any]) -> ExitStack:
+    class _StubManager:
+        def validate_storage(self) -> None:
+            record["validated"] = True
+
+        def upload(self, *, local_path: Path, remote_path: str) -> None:
+            record.update(local_path=local_path, remote_path=remote_path)
+
+    def manager(_files_client: object, *, workspace: str, fileset: str, ensure_fileset_exists: bool) -> _StubManager:
+        record.update(
+            fileset=fileset,
+            workspace=workspace,
+            auto_create=ensure_fileset_exists,
+        )
+        return _StubManager()
+
+    stack = ExitStack()
+    stack.enter_context(patch("nemo_agents_plugin.jobs.optimize_cli._platform_sdk", return_value=_StubSDK()))
+    stack.enter_context(patch("nemo_agents_plugin.jobs.fileset_io.client_from_platform", return_value=object()))
+    stack.enter_context(patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", side_effect=manager))
+    return stack
 
 
 def test_uploads_the_bundle_and_prints_the_submit_command(app: typer.Typer, bundle: Path) -> None:
     record: dict[str, Any] = {}
-    with patch("nemo_agents_plugin.jobs.optimize_cli._platform_sdk", return_value=uploads(record)):
+    with _patch_upload(record):
         result = CliRunner().invoke(
             app,
             [
@@ -90,15 +103,16 @@ def test_uploads_the_bundle_and_prints_the_submit_command(app: typer.Typer, bund
     assert record["fileset"] == "my-opt-fs"
     assert record["workspace"] == "default"
     assert record["auto_create"] is True
-    # Trailing slash uploads the directory's contents, not the directory itself.
-    assert record["local_path"].endswith("/")
+    assert record["validated"] is True
+    assert record["local_path"] == bundle
+    assert record["remote_path"] == ""
     assert "--optimize-config-fileset default/my-opt-fs" in result.output
     assert "--optimize-config optimize.yml" in result.output
 
 
 def test_honours_a_workspace_qualified_fileset_ref(app: typer.Typer, bundle: Path) -> None:
     record: dict[str, Any] = {}
-    with patch("nemo_agents_plugin.jobs.optimize_cli._platform_sdk", return_value=uploads(record)):
+    with _patch_upload(record):
         result = CliRunner().invoke(
             app,
             [

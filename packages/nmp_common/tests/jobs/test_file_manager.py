@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 from nemo_platform_plugin.jobs.file_manager import _filter_files_by_patterns
 from nmp.common.jobs.file_manager import FilesetFileManager, FileStorageType
@@ -126,14 +126,13 @@ def test_fileset_storage_type():
 def test_fileset_validate_storage_exists(fileset_manager, mock_fileset_fs):
     """Test validate_storage when fileset already exists."""
     fileset_manager.validate_storage()
-    mock_fileset_fs._info.assert_called()
+    mock_fileset_fs.info.assert_called()
 
 
 def test_fileset_validate_storage_creates(fileset_manager, mock_fileset_fs):
     """Test validate_storage creates fileset when missing."""
     mock_fileset_fs._client = MagicMock()
-    mock_fileset_fs._client.create_fileset = AsyncMock()
-    mock_fileset_fs._info.side_effect = FileNotFoundError("not found")
+    mock_fileset_fs.info.side_effect = FileNotFoundError("not found")
     fileset_manager.validate_storage()
     mock_fileset_fs._client.create_fileset.assert_called_once()
 
@@ -145,7 +144,7 @@ def test_fileset_upload_file(tmp_path, fileset_manager, mock_fileset_fs):
 
     result = fileset_manager.upload(test_file, "remote/test.txt")
 
-    mock_fileset_fs._put_file.assert_called()
+    mock_fileset_fs.put_file.assert_called()
     assert result == "default/job-results-jobid-123#remote/test.txt"
 
 
@@ -157,47 +156,47 @@ def test_fileset_upload_directory(tmp_path, fileset_manager, mock_fileset_fs):
 
     result = fileset_manager.upload(test_dir, "remote/mydir")
 
-    mock_fileset_fs._put_file.assert_called()
+    mock_fileset_fs.put_file.assert_called()
     assert result == "default/job-results-jobid-123#remote/mydir"
 
 
 def test_fileset_download_from_url_file(tmp_path, fileset_manager, mock_fileset_fs):
     """Test downloading a single file from URL."""
-    mock_fileset_fs._info.return_value = {"name": "test", "size": 100, "type": "file"}
+    mock_fileset_fs.info.return_value = {"name": "test", "size": 100, "type": "file"}
 
     result = fileset_manager.download_from_url(
         url="default/job-results-jobid-123#remote/test.txt",
         local_dir=tmp_path,
     )
 
-    mock_fileset_fs._get_file.assert_called()
+    mock_fileset_fs.get_file.assert_called()
     assert result.tmp_dir == tmp_path
 
 
 def test_fileset_download_from_url_directory(tmp_path, fileset_manager, mock_fileset_fs):
     """Test downloading a directory from URL."""
-    mock_fileset_fs._info.return_value = {"name": "test", "size": 0, "type": "directory"}
+    mock_fileset_fs.info.return_value = {"name": "test", "size": 0, "type": "directory"}
 
     result = fileset_manager.download_from_url(
         url="default/job-results-jobid-123#remote/mydir",
         local_dir=tmp_path,
     )
 
-    mock_fileset_fs._get.assert_called()
+    mock_fileset_fs.get.assert_called()
     assert result.tmp_dir == tmp_path
 
 
 def test_fileset_download_from_legacy_url_normalizes_to_hash_file_ref(tmp_path, fileset_manager, mock_fileset_fs):
     """Legacy workspace/fileset/path URLs should be normalized to workspace/fileset#path."""
-    mock_fileset_fs._info.return_value = {"name": "test", "size": 100, "type": "file"}
+    mock_fileset_fs.info.return_value = {"name": "test", "size": 100, "type": "file"}
 
     fileset_manager.download_from_url(
         url="fileset://default/job-results-jobid-123/legacy/path/test.txt",
         local_dir=tmp_path,
     )
 
-    mock_fileset_fs._info.assert_called_once_with("default/job-results-jobid-123#legacy/path/test.txt")
-    mock_fileset_fs._get_file.assert_called_once_with(
+    mock_fileset_fs.info.assert_called_once_with("default/job-results-jobid-123#legacy/path/test.txt")
+    mock_fileset_fs.get_file.assert_called_once_with(
         "default/job-results-jobid-123#legacy/path/test.txt",
         str(tmp_path / "test.txt"),
     )
@@ -205,15 +204,15 @@ def test_fileset_download_from_legacy_url_normalizes_to_hash_file_ref(tmp_path, 
 
 def test_fileset_download_from_legacy_url_normalizes_to_hash_directory_ref(tmp_path, fileset_manager, mock_fileset_fs):
     """Legacy workspace/fileset/path directory URLs should still download correctly."""
-    mock_fileset_fs._info.return_value = {"name": "test", "size": 0, "type": "directory"}
+    mock_fileset_fs.info.return_value = {"name": "test", "size": 0, "type": "directory"}
 
     fileset_manager.download_from_url(
         url="fileset://default/job-results-jobid-123/legacy/path/mydir",
         local_dir=tmp_path,
     )
 
-    mock_fileset_fs._info.assert_called_once_with("default/job-results-jobid-123#legacy/path/mydir")
-    mock_fileset_fs._get.assert_called_once_with(
+    mock_fileset_fs.info.assert_called_once_with("default/job-results-jobid-123#legacy/path/mydir")
+    mock_fileset_fs.get.assert_called_once_with(
         "default/job-results-jobid-123#legacy/path/mydir",
         str(tmp_path),
         recursive=True,
@@ -223,15 +222,11 @@ def test_fileset_download_from_legacy_url_normalizes_to_hash_directory_ref(tmp_p
 def test_fileset_file_manager_multiple_sequential_operations(tmp_path, fileset_manager, mock_fileset_fs):
     """Test that FilesetFileManager can perform multiple sequential operations.
 
-    This exercises the blocking portal implementation which maintains a persistent
-    event loop for the lifetime of the FilesetFileManager instance. Without a
-    persistent portal, the event loop would be closed after the first operation,
-    causing "Event loop is closed" errors on subsequent operations.
+    This exercises the sync filesystem surface used by the sync file manager.
     """
-    mock_fileset_fs._info.return_value = {"name": "test", "size": 0, "type": "file"}
+    mock_fileset_fs.info.return_value = {"name": "test", "size": 0, "type": "file"}
 
-    # Multiple operations in sequence - this pattern would fail without the
-    # persistent blocking portal
+    # Multiple operations in sequence should stay on the sync filesystem surface.
     fileset_manager.validate_storage()
 
     test_file = tmp_path / "test.txt"
@@ -241,9 +236,9 @@ def test_fileset_file_manager_multiple_sequential_operations(tmp_path, fileset_m
     fileset_manager.download_from_url("default/job-results-jobid-123#remote/file.txt", tmp_path)
 
     # Verify all operations were called
-    assert mock_fileset_fs._info.call_count >= 1
-    assert mock_fileset_fs._put_file.called
-    assert mock_fileset_fs._get_file.called
+    assert mock_fileset_fs.info.call_count >= 1
+    assert mock_fileset_fs.put_file.called
+    assert mock_fileset_fs.get_file.called
 
 
 async def test_fileset_upload_directory_with_ignore_patterns(tmp_path, mock_fileset_fs):

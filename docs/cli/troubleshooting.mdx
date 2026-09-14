@@ -35,14 +35,14 @@ source /path/to/venv/bin/activate
 
 **Cause:**
 
-NeMo Platform supports Python 3.12 and 3.13, but uv [picks the interpreter itself](https://docs.astral.sh/uv/concepts/tools/#python-versions), so an install can land on Python 3.14.
+NeMo Platform supports Python 3.12 and 3.13, but uv [picks the interpreter itself](https://docs.astral.sh/uv/concepts/tools/#python-versions), so an install can land on Python 3.14. `nemo setup` exits immediately on an unsupported interpreter instead of starting services.
 
 **Solution:**
 
 Name a supported interpreter. uv downloads one if you do not have it:
 
 ```bash
-uv tool install --python 3.13 "nemo-platform[all]"
+uv tool install --python 3.13 --reinstall "nemo-platform[all]"
 ```
 
 ## Connection Issues

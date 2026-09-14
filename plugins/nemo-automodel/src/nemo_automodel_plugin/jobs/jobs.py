@@ -12,7 +12,7 @@ schema (automodel-specific).
 from __future__ import annotations
 
 import asyncio
-from typing import ClassVar, cast
+from typing import ClassVar
 
 from nemo_automodel_plugin.config import get_config
 from nemo_automodel_plugin.schema import AutomodelJobInput, AutomodelJobOutput, ValidationError
@@ -23,22 +23,35 @@ from nemo_platform_plugin.jobs.docker import validate_gpu_available_for_docker
 from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
 from nmp.automodel.compile import platform_job_config_compiler
 from nmp.customization_common.contributor.jobs import BaseSubmitJob, require_container_runtime
+from nmp.customization_common.service.platform_client import (
+    AsyncCustomizationPlatformClients,
+    async_customization_platform_clients_from_platform,
+)
 from pydantic import BaseModel
 
 
-class AutomodelJob(BaseSubmitJob):
+class AutomodelJob(BaseSubmitJob[AutomodelJobInput, AutomodelJobOutput]):
     """GPU Automodel fine-tuning job under the customization router."""
 
     name: ClassVar[str] = "automodel.jobs"
     description: ClassVar[str] = "Automodel SFT, retrieval, and knowledge-distillation training jobs."
     job_collection_path: ClassVar[str | None] = "/automodel/jobs"
-    input_spec_schema: ClassVar[type[BaseModel] | None] = AutomodelJobInput
-    spec_schema: ClassVar[type[BaseModel] | None] = AutomodelJobOutput
+    input_spec_schema: ClassVar[type[AutomodelJobInput] | None] = AutomodelJobInput
+    spec_schema: ClassVar[type[AutomodelJobOutput] | None] = AutomodelJobOutput
     runtime_label: ClassVar[str] = "Automodel"
 
     @classmethod
-    async def _transform(cls, job_input: BaseModel, workspace: str, async_sdk: AsyncNeMoPlatform) -> AutomodelJobOutput:
-        return await transform_input_to_output(cast(AutomodelJobInput, job_input), workspace, async_sdk)
+    def _job_input_schema(cls) -> type[AutomodelJobInput]:
+        return AutomodelJobInput
+
+    @classmethod
+    async def _transform(
+        cls,
+        job_input: AutomodelJobInput,
+        workspace: str,
+        platform: AsyncCustomizationPlatformClients,
+    ) -> AutomodelJobOutput:
+        return await transform_input_to_output(job_input, workspace, platform)
 
     @classmethod
     async def compile(
@@ -47,13 +60,12 @@ class AutomodelJob(BaseSubmitJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: object,
+        async_sdk: AsyncNeMoPlatform,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
         del entity_client, options
-        if not isinstance(async_sdk, AsyncNeMoPlatform):
-            raise TypeError(f"async_sdk must be AsyncNeMoPlatform, got {type(async_sdk).__name__}")
+        platform = async_customization_platform_clients_from_platform(async_sdk)
         canonical = (
             spec if isinstance(spec, AutomodelJobOutput) else AutomodelJobOutput.model_validate(spec.model_dump())
         )
@@ -78,7 +90,7 @@ class AutomodelJob(BaseSubmitJob):
         platform_spec = await platform_job_config_compiler(
             canonical,
             workspace,
-            async_sdk,
+            platform,
             job_name=job_name,
             profile=execution_profile,
         )

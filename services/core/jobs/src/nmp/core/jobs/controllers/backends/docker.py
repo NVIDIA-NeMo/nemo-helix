@@ -2185,16 +2185,16 @@ chmod -R 777 {job_vol}/{storage_subpath}
                 self.get_label_from_container(container, JOB_USES_PERSISTENT_STORAGE_LABEL) == "true"
             )
             if uses_persistent_storage and exit_code == 0:
-                # Verify the job is in a terminal state before cleaning up persistent storage
-                if self.check_job_is_terminal(job=job, workspace=workspace):
+                step_name = self.get_label_from_container(container, JOB_STEP_NAME_LABEL)
+                if self.check_job_persistent_storage_cleanup_allowed(job=job, step_name=step_name, workspace=workspace):
                     logger.debug(
                         "Cleaning up persistent storage for successful job", extra={"workspace": workspace, "job": job}
                     )
                     self.cleanup_job_persistent_storage(workspace, job)
                 else:
                     logger.debug(
-                        "Skipping persistent storage cleanup for job because it is not in terminal state yet",
-                        extra={"workspace": workspace, "job": job},
+                        "Skipping persistent storage cleanup for job",
+                        extra={"workspace": workspace, "job": job, "step": step_name},
                     )
 
     @abstractmethod

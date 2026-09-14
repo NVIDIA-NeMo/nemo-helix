@@ -41,9 +41,9 @@ All three run on the same Gym runtime: the training image starts a package's ser
 
 Use `pi-to-gym-conversion` to produce `adapter-wheels-v1`. Set `adapter.agent` to `verifiers_agent`.
 
-<Warning>
-`adapter-wheels-v1` requires network access when the job starts. The package `wheels/` directory covers the hub environment; `verifiers_agent` also installs `verifiers` from GitHub. Enable `NMP_RL_SANDBOX_ALLOW_INTERNET` (or equivalent egress) for these jobs.
-</Warning>
+The converter emits a complete wheel closure, including `verifiers_agent` dependencies
+that are source-only upstream, so `adapter-wheels-v1` does not require network access
+when the job starts. Conversion itself still runs on an internet-connected host.
 
 ## How Gym YAML names servers
 

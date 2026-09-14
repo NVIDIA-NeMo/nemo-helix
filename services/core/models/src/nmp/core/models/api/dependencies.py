@@ -17,16 +17,18 @@ from nmp.core.models.api.service.prompt_service import PromptService
 
 def get_model_entity_service(
     entity_client: EntityClient = Depends(get_entity_client),
+    nmp_sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
 ) -> ModelEntityService:
     """Dependency to get ModelEntityService instance."""
-    return ModelEntityService(entity_client)
+    return ModelEntityService(entity_client, sdk=nmp_sdk)
 
 
 def get_adapter_entity_service(
     entity_client: EntityClient = Depends(get_entity_client),
+    nmp_sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
 ) -> AdapterEntityService:
     """Dependency to get AdapterEntityService instance."""
-    return AdapterEntityService(entity_client)
+    return AdapterEntityService(entity_client, sdk=nmp_sdk)
 
 
 def get_model_provider_service(

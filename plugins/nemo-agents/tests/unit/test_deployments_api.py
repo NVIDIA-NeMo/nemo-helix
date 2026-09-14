@@ -6,16 +6,19 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_agents_plugin.api.v2 import deployments as deployments_router_module
-from nemo_agents_plugin.api.v2.dependencies import get_entity_client
+from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
 from nemo_agents_plugin.config import AgentsConfig
 from nemo_agents_plugin.entities import (
+    NAT_WORKFLOW_CONFIG_FORMAT,
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
     Agent,
     AgentComputeSpec,
@@ -26,7 +29,9 @@ from nemo_agents_plugin.entities import (
     DeploymentStatus,
 )
 from nemo_platform_plugin.auth import AuthContext
+from nemo_platform_plugin.client.errors import NotFoundError as PluginClientNotFoundError
 from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_platform_plugin.files.storage_config import GithubStorageConfig, LocalStorageConfig, StorageConfig
 
 NOW = datetime.now(timezone.utc)
 
@@ -82,14 +87,102 @@ def _make_deployment(
     return deployment
 
 
-def _test_client(mock_entity_client: AsyncMock) -> TestClient:
+def _files_client(storage: StorageConfig | None = None) -> AsyncMock:
+    """A files client whose Ethos fileset is absent unless *storage* is given."""
+    client = AsyncMock()
+    if storage is None:
+        client.get_fileset = AsyncMock(
+            side_effect=PluginClientNotFoundError(httpx.Response(404, json={"detail": "not found"}))
+        )
+        return client
+
+    response = AsyncMock()
+    response.data = lambda: SimpleNamespace(storage=storage)
+    client.get_fileset = AsyncMock(return_value=response)
+    return client
+
+
+def _github_storage(revision: str, original_revision: str) -> GithubStorageConfig:
+    return GithubStorageConfig(owner="acme", repo="agents", revision=revision, original_revision=original_revision)
+
+
+def _test_client(mock_entity_client: AsyncMock, mock_files_client: AsyncMock | None = None) -> TestClient:
     app = FastAPI()
     app.include_router(
         deployments_router_module.router,
         prefix="/apis/agents/v2/workspaces/{workspace}",
     )
     app.dependency_overrides[get_entity_client] = lambda: mock_entity_client
+    app.dependency_overrides[get_files_client] = lambda: mock_files_client or _files_client()
     return TestClient(app, raise_server_exceptions=False)
+
+
+class TestSpecRevisionSnapshot:
+    @staticmethod
+    def _create(files_client: AsyncMock, *, agent: Agent | None = None) -> AgentDeployment:
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(return_value=agent or _make_agent())
+        mock_entity_client.create = AsyncMock(side_effect=lambda deployment: deployment)
+        client = _test_client(mock_entity_client, files_client)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/deployments",
+            json={"agent": "fabric-agent", "name": "fabric-dep"},
+        )
+
+        assert resp.status_code == 201
+        return mock_entity_client.create.call_args[0][0]
+
+    def test_records_the_revision_the_deployment_stages(self) -> None:
+        files_client = _files_client(_github_storage(revision="abc123", original_revision="main"))
+
+        deployment = self._create(files_client)
+
+        assert deployment.spec_revision == "abc123"
+        assert deployment.spec_tracked_revision == "main"
+        assert files_client.get_fileset.call_args.kwargs["name"] == "fabric-agent-ethos"
+
+    def test_a_fileset_pinned_to_a_commit_tracks_nothing(self) -> None:
+        sha = "1" * 40
+        deployment = self._create(_files_client(_github_storage(revision=sha, original_revision=sha)))
+
+        assert deployment.spec_revision == sha
+        assert deployment.spec_tracked_revision == ""
+
+    def test_reads_no_fileset_for_an_agent_that_does_not_stage_one(self) -> None:
+        files_client = _files_client(_github_storage(revision="abc123", original_revision="main"))
+        nat_agent = _make_agent(
+            name="nat-agent",
+            config={"workflow": {"_type": "chat_completion"}},
+            config_format=NAT_WORKFLOW_CONFIG_FORMAT,
+        )
+
+        deployment = self._create(files_client, agent=nat_agent)
+
+        assert deployment.spec_revision == ""
+        assert deployment.spec_tracked_revision == ""
+        files_client.get_fileset.assert_not_awaited()
+
+    def test_records_nothing_for_an_agent_with_no_fileset(self) -> None:
+        deployment = self._create(_files_client())
+
+        assert deployment.spec_revision == ""
+        assert deployment.spec_tracked_revision == ""
+
+    def test_records_nothing_for_a_backend_that_pins_no_revision(self) -> None:
+        deployment = self._create(_files_client(LocalStorageConfig(path="/data")))
+
+        assert deployment.spec_revision == ""
+        assert deployment.spec_tracked_revision == ""
+
+    def test_an_unreadable_fileset_does_not_fail_the_deployment(self) -> None:
+        files_client = AsyncMock()
+        files_client.get_fileset = AsyncMock(side_effect=RuntimeError("files service down"))
+
+        deployment = self._create(files_client)
+
+        assert deployment.spec_revision == ""
+        assert deployment.status == "pending"
 
 
 class TestCreateDeployment:

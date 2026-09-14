@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { CreateAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/CreateAgentRequestConfig';
 import {
   AGENT_CONFIG_FILENAME,
   AGENT_SPEC_FILENAME,
@@ -18,8 +19,11 @@ import type {
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
 import YAML from 'yaml';
 
-/** Convention only — the Agent entity stores no reference to it. */
-export const agentSpecFilesetName = (agentName: string): string => `${agentName}-spec`;
+/**
+ * Convention only — the Agent entity stores no reference to it. Must match
+ * `ethos_fileset_name` in the agents plugin, which is what deployments stage from.
+ */
+export const agentSpecFilesetName = (agentName: string): string => `${agentName}-ethos`;
 
 export const tooManyPickedFiles = (pickedCount: number): string | undefined =>
   pickedCount > MAX_PICKED_FILES
@@ -164,7 +168,7 @@ export const findNonUtf8Path = async (entries: UploadAgentEntry[]): Promise<stri
 
 export class AgentConfigParseError extends Error {}
 
-export const parseAgentConfig = (text: string): Record<string, unknown> => {
+export const parseAgentConfig = (text: string): CreateAgentRequestConfig => {
   let parsed: unknown;
   try {
     parsed = YAML.parse(text);
@@ -178,7 +182,7 @@ export const parseAgentConfig = (text: string): Record<string, unknown> => {
     throw new AgentConfigParseError(`${AGENT_CONFIG_FILENAME} must contain a YAML mapping.`);
   }
 
-  const config = parsed as Record<string, unknown>;
+  const config = parsed as CreateAgentRequestConfig;
   const configFormat = config.config_format;
   if (configFormat !== FABRIC_CONFIG_FORMAT) {
     throw new AgentConfigParseError(
