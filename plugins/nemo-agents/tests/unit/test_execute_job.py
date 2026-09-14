@@ -52,7 +52,7 @@ from nemo_agents_plugin.tasks.execute.workdir import (
     validate_agent_workdir,
 )
 from nemo_agents_plugin.telemetry import intake_export
-from nemo_agents_plugin.telemetry.intake_export import supports_intake_atif_export
+from nemo_agents_plugin.telemetry.intake_export import supports_intake_atif_export, wants_intake_atif_export
 from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.dependencies import get_entity_client, get_sdk_client
 from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
@@ -2059,3 +2059,58 @@ def test_an_atif_block_turned_on_without_a_destination_is_filled(
     storage = config["telemetry"]["atif"]["storage"][0]
     assert storage["endpoint"] == "http://nemo-platform-api:8080/apis/intake/v2/workspaces/team-a/ingest/atif"
     assert config["telemetry"]["opentelemetry"] == mine, "the collector the agent chose is untouched"
+
+
+# ---------------------------------------------------------------------------
+# wants_intake_atif_export: the cheap half of the wiring decision
+#
+# Separated from supports_intake_atif_export so a caller can answer "does this
+# config even want a destination?" without resolving a Fabric plan. It reads
+# the same tri-state telemetry section the wiring itself does, so these pin
+# that the two cannot drift apart.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("telemetry", "wanted"),
+    [
+        pytest.param(None, True, id="no-telemetry-section"),
+        pytest.param({}, True, id="empty-telemetry-section"),
+        pytest.param({"enabled": True}, True, id="enabled-without-destination"),
+        pytest.param({"enabled": False}, False, id="explicit-opt-out"),
+        pytest.param({"atif": {"enabled": False}}, False, id="atif-declined"),
+        pytest.param(
+            {"atif": {"storage": [{"type": "http", "endpoint": "https://mine/atif"}]}},
+            False,
+            id="destination-already-declared",
+        ),
+        pytest.param(
+            {"opentelemetry": {"endpoints": [{"type": "gen_ai", "endpoint": "https://mine"}]}},
+            True,
+            id="otel-only-is-no-opinion-about-atif",
+        ),
+    ],
+)
+def test_wants_intake_atif_export_reads_the_telemetry_tri_state(telemetry: dict[str, Any] | None, wanted: bool) -> None:
+    config = _fabric_agent_config()
+    if telemetry is not None:
+        config["telemetry"] = telemetry
+
+    assert wants_intake_atif_export(config) is wanted
+
+
+def test_wants_intake_atif_export_declines_an_unreadable_telemetry_section() -> None:
+    """Same answer the wiring gives: leave a section we cannot parse alone."""
+    config = _fabric_agent_config()
+    config["telemetry"] = {"enabled": "yes-please"}
+
+    assert wants_intake_atif_export(config) is False
+
+
+def test_wants_intake_atif_export_agrees_with_the_wiring_it_guards() -> None:
+    """The predicate must not say no to a config the wiring would have wired."""
+    for telemetry in ({}, {"enabled": True}, {"enabled": False}, {"atif": {"enabled": False}}):
+        config = _fabric_agent_config()
+        config["telemetry"] = telemetry
+        wired = intake_export.configure_intake_atif_export(config, workspace="default", base_url="http://platform:8080")
+        assert wants_intake_atif_export({**config, "telemetry": telemetry}) is wired

@@ -516,6 +516,12 @@ navigation:
             contents:
               - page: Current Release
                 path: ../../about/release-notes/current-release.mdx
+              - page: v0.5.1
+                slug: release-0-5-1
+                path: ../../about/release-notes/release-0-5-1.mdx
+              - page: v0.5.0
+                slug: release-0-5-0
+                path: ../../about/release-notes/release-0-5-0.mdx
               - page: v0.4.0
                 slug: release-0-4-0
                 path: ../../about/release-notes/release-0-4-0.mdx
