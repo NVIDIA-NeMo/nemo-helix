@@ -836,3 +836,36 @@ async def test_fabric_deployment_starts_when_adapter_cannot_export_atif(tmp_path
 
     assert info.status == "starting"
     assert "telemetry" not in staged
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_skips_adapter_probe_when_telemetry_is_opted_out(tmp_path: Path) -> None:
+    """The opt-out is answered before the probe resolves a Fabric plan.
+
+    Ordering, not behavior: the staged config is the same either way. Pinned
+    because the wasted plan is invisible from the output -- only the call count
+    shows it.
+    """
+    backend = _backend(tmp_path)
+    probe = MagicMock(return_value=True)
+
+    with patch("nemo_agents_plugin.telemetry.intake_export.supports_intake_atif_export", probe):
+        _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config({"enabled": False}))
+
+    probe.assert_not_called()
+    assert staged["telemetry"] == {"enabled": False}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_probes_adapter_when_config_is_silent(tmp_path: Path) -> None:
+    """The counterpart: a config that wants wiring does reach the probe."""
+    backend = _backend(tmp_path)
+    probe = MagicMock(return_value=True)
+
+    with patch("nemo_agents_plugin.telemetry.intake_export.supports_intake_atif_export", probe):
+        _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config())
+
+    probe.assert_called_once()
+    assert staged["telemetry"]["atif"]["storage"] == [{"type": "http", "endpoint": _INTAKE_ENDPOINT}]

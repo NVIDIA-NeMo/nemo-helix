@@ -107,9 +107,8 @@ async def validate_platform_agent_config(config: dict[str, Any], *, base_dir: Pa
 def configure_intake_telemetry(config: dict[str, Any], *, workspace: str, base_dir: Path) -> dict[str, Any]:
     """Return *config* with its ATIF trajectory export wired to *workspace*'s Intake.
 
-    Returns the config unchanged when the agent's adapter cannot export ATIF, or
-    when the config already made its own choice -- ``configure_intake_atif_export``
-    owns that reading of ``telemetry``.
+    Returns the config unchanged when the config already made its own choice, or
+    when the agent's adapter cannot export ATIF.
 
     Unlike container deployments, a subprocess child runs on the platform host,
     so the platform's own base URL reaches it as-is: there is no container
@@ -131,8 +130,11 @@ def configure_intake_telemetry(config: dict[str, Any], *, workspace: str, base_d
     from nemo_agents_plugin.telemetry.intake_export import (
         configure_intake_atif_export,
         supports_intake_atif_export,
+        wants_intake_atif_export,
     )
 
+    if not wants_intake_atif_export(config):
+        return config
     if not supports_intake_atif_export(config, base_dir=base_dir):
         return config
 
