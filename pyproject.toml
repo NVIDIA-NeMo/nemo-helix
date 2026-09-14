@@ -251,6 +251,7 @@ functional-services = [
 cpu-tasks = [
   { include-group = "nmp-base" },
   { include-group = "nmp-task-runtime" },
+  "nemo-agent-optimization-plugin",
   "nemo-anonymizer-plugin",
   "nemo-data-designer-plugin[retrieval-sdg]",
   "nemo-optimization-plugin",

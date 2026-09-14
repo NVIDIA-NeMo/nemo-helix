@@ -32,14 +32,20 @@ class OptimizationStrategy(Protocol):
     def run(
         self,
         *,
-        agent_config: dict[str, Any],
+        agent_config: dict[str, Any] | None,
         source_agent_config: dict[str, Any] | None,
         config: dict[str, Any],
         ctx: JobContext,
         workspace: str,
         sdk: NeMoPlatform | None = None,
     ) -> dict[str, Any]:
-        """Execute the strategy against a resolved agent and return a result dict."""
+        """Execute the strategy against a resolved agent and return a result dict.
+
+        ``agent_config`` is ``None`` when the run named no agent, which ``OptimizeSpec`` permits
+        for the ``nat`` strategy (its agent package may be inline in ``config``).  A strategy that
+        needs a resolved agent rejects the omission from ``validate_config``, which sees the
+        original ``agent`` value.
+        """
 
 
 @cache
