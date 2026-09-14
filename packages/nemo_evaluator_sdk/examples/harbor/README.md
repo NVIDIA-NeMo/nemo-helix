@@ -114,6 +114,8 @@ config = HarborRuntimeConfig(
 config = HarborRuntimeConfig(
     jobs_dir=jobs_dir,
     agent_import_path="mypkg.agent:WrappedAgent",
+    # Constructor arguments for the agent — Harbor's `--ak key=value`.
+    agent_kwargs={"max_turns": 20},
 )
 
 result = await run_harbor_eval(config, "hello_world_dataset")

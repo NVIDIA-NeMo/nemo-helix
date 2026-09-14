@@ -585,6 +585,7 @@ class AgentEvalJob(NemoJob):
                     agent_name=target.agent_name,
                     agent_import_path=target.agent_import_path,
                     agent_model_name=target.agent_model_name,
+                    agent_kwargs=target.agent_kwargs,
                     n_attempts=target.n_attempts,
                     n_concurrent_trials=target.n_concurrent_trials,
                     max_retries=target.max_retries,

@@ -61,12 +61,13 @@ from nemo_evaluator_sdk.agent_eval.runtimes.harbor_trial_adapter import (
     _iter_harbor_trial_results,
     _trial_from_harbor_result,
 )
+from nemo_evaluator_sdk.agent_eval.runtimes.provenance import redact_credentials
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask, AgentEvalTaskset
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, RunnerInfo
 from nemo_evaluator_sdk.enums import MetricType
 from nemo_evaluator_sdk.metrics.protocol import Metric
 from nemo_evaluator_sdk.metrics.utils import metric_type_name
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ _IMPORT_DIGEST_CHARS = 12
 # a stale one. A file, not a directory: Harbor rmtree's stray directories in a job dir.
 CACHE_STAMP_FILENAME = ".nemo-eval-harbor-cache.json"
 # Public so downstreams can assert the SDK is new enough to own cache staleness.
-CACHE_STAMP_VERSION = 1
+CACHE_STAMP_VERSION = 2
 # Excluded from the cache fingerprint — see :func:`_cache_stamp` for why each one.
 _CACHE_IRRELEVANT_OPTIONS = frozenset(
     {"jobs_dir", "job_name", "force_rerun", "quiet", "n_concurrent_trials", "agent_dir", "reward_key"}
@@ -149,6 +150,14 @@ class HarborRuntimeConfig(BaseModel):
         ),
     )
     agent_model_name: str | None = Field(default=None, description="Optional model slug passed to the Harbor agent.")
+    agent_kwargs: dict[str, JsonValue] = Field(
+        default_factory=dict,
+        description=(
+            "Keyword arguments forwarded to the Harbor agent's constructor, the equivalent of Harbor's "
+            "``--ak key=value``. Not for secrets: Harbor persists them unredacted in the job dir's "
+            "``config.json``; inject secrets through the environment instead."
+        ),
+    )
     n_attempts: int = Field(default=1, ge=1, description="Number of attempts Harbor runs per task.")
     n_concurrent_trials: int = Field(default=4, ge=1, description="Maximum concurrent Harbor trials.")
     quiet: bool = Field(default=True, description="Suppress Harbor's trial progress displays.")
@@ -247,6 +256,7 @@ class HarborAgentTaskRunner:
                 "agent_name": config.agent_name if config is not None else None,
                 "agent_import_path": config.agent_import_path if config is not None else None,
                 "agent_model_name": config.agent_model_name if config is not None else None,
+                "agent_kwargs": redact_credentials(config.agent_kwargs) if config is not None else None,
                 "effective_agent": _effective_harbor_agent(config),
                 "n_attempts": config.n_attempts if config is not None else None,
                 # Native mode resolves the concrete job directory inside run_tasks (the name defaults
@@ -917,8 +927,11 @@ def _build_native_job(
                 shutil.rmtree(job_dir)
                 await _attempt()
 
+        agent_kwargs = dict(config.agent_kwargs)
         if config.agent_import_path is None:
-            await _create_and_run(AgentConfig(name=config.agent_name or "oracle", model_name=config.agent_model_name))
+            await _create_and_run(
+                AgentConfig(name=config.agent_name or "oracle", model_name=config.agent_model_name, kwargs=agent_kwargs)
+            )
         elif config.agent_dir is not None:
             # Loose wrapper file: make its directory importable for the run. The
             # jobs_dir exclusion must match _cache_stamp's, or a jobs_dir nested under
@@ -928,10 +941,16 @@ def _build_native_job(
             with scoped_harbor_agent_import(
                 agent_dir, config.agent_import_path, exclude=excluded_roots
             ) as scoped_import:
-                await _create_and_run(AgentConfig(import_path=scoped_import, model_name=config.agent_model_name))
+                await _create_and_run(
+                    AgentConfig(import_path=scoped_import, model_name=config.agent_model_name, kwargs=agent_kwargs)
+                )
         else:
             # Already-importable module (installed package): let Harbor import it directly.
-            await _create_and_run(AgentConfig(import_path=config.agent_import_path, model_name=config.agent_model_name))
+            await _create_and_run(
+                AgentConfig(
+                    import_path=config.agent_import_path, model_name=config.agent_model_name, kwargs=agent_kwargs
+                )
+            )
 
     return job_dir, run_job
 
