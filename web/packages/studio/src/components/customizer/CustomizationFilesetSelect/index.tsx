@@ -112,6 +112,22 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
     });
   }, [backend, detectedVariant, setValue]);
 
+  /**
+   * Automodel and unsloth take a second fileset reference for validation, pointed at the
+   * same fileset as training. Cleared when the fileset holds no validation files, so the
+   * backend applies the auto-split this picker already announces. RL takes one reference
+   * and finds both files inside it.
+   */
+  const { hasValidation } = validation;
+  useEffect(() => {
+    if (backend === 'rl') return;
+    const field =
+      backend === 'automodel' ? 'automodel.dataset.validation' : 'unsloth.dataset.validation_path';
+    setValue(field, hasValidation ? ((selectedRef as string) ?? undefined) : undefined, {
+      shouldValidate: false,
+    });
+  }, [backend, hasValidation, selectedRef, setValue]);
+
   const onCreate = (createdFileset: Fileset) => {
     setSelectedRef(getEntityReference(createdFileset));
     setOpenModal(undefined);
