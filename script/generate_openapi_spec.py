@@ -562,6 +562,8 @@ def extract_plugin_spec_batch(plugin_batch: list[PluginConfig]) -> list[tuple[st
                             )
                         break
             process.join()
+        except Exception as e:
+            error = f"Plugin worker failed during collection {e}"
         finally:
             result_queue.close()
             result_queue.join_thread()
