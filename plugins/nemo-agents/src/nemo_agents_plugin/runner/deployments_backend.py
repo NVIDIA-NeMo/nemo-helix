@@ -55,7 +55,6 @@ from nemo_deployments_plugin.entities import (
     DeploymentConfig,
     EnvVar,
     HTTPGetAction,
-    OpenShellDeploymentConfig,
     Probe,
     ResourceRequirements,
     SecretRef,
@@ -74,7 +73,7 @@ from nemo_platform_plugin.entities.client import AsyncEntitiesClient
 from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_platform_plugin.files.client import AsyncFilesClient
 from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
-from pydantic import BaseModel
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -418,38 +417,38 @@ def _info_from_deployment(deployment: Deployment) -> DeploymentInfo:
     return info
 
 
-_SANDBOX_PROVIDER_BACKEND_CONFIG_MODELS: dict[str, type[BaseModel]] = {
-    "openshell": OpenShellDeploymentConfig,
-}
+class SandboxSpecError(ValueError):
+    """A sandbox spec names a provider the substrate lacks, or its config is invalid."""
 
 
-def _build_sandbox_backend_config(sandbox: SandboxSpecInline | None) -> DeploymentBackendConfig:
+def sandbox_providers() -> tuple[str, ...]:
+    """Provider names the deployments substrate accepts in ``backend_config``."""
+    return tuple(DeploymentBackendConfig.model_fields)
+
+
+def build_sandbox_backend_config(sandbox: SandboxSpecInline | None) -> DeploymentBackendConfig:
     """Compile a sandbox spec into the DeploymentConfig's backend_config.
 
-    Maps the sandbox ``provider`` name to the corresponding key in
-    ``DeploymentBackendConfig`` and validates ``provider_config`` against
-    the provider-specific model. Unknown providers are silently ignored
-    (the sandbox config is advisory; a missing backend does not block the
-    deployment).
+    The sandbox ``provider`` is a key of the substrate's ``DeploymentBackendConfig``
+    and ``provider_config`` is validated by that backend's own model; the agents
+    plugin does not interpret it. A provider the substrate does not know, or a
+    config the backend rejects, raises :class:`SandboxSpecError`: a deployment
+    that asked for isolation must not proceed without it.
     """
     if sandbox is None:
         return DeploymentBackendConfig()
-    provider = sandbox.provider
-    model_cls = _SANDBOX_PROVIDER_BACKEND_CONFIG_MODELS.get(provider)
-    if model_cls is None:
-        logger.debug("Sandbox provider %r has no matching backend config model; skipping.", provider)
-        return DeploymentBackendConfig()
-    try:
-        validated = model_cls.model_validate(sandbox.provider_config)
-    except Exception:
-        logger.warning(
-            "Sandbox provider_config for %r failed validation against %s; skipping.",
-            provider,
-            model_cls.__name__,
-            exc_info=True,
+    providers = sandbox_providers()
+    if sandbox.provider not in providers:
+        raise SandboxSpecError(
+            f"Unknown sandbox provider {sandbox.provider!r}. The deployments substrate accepts: {', '.join(providers)}."
         )
-        return DeploymentBackendConfig()
-    return DeploymentBackendConfig.model_validate({provider: validated})
+    try:
+        return DeploymentBackendConfig.model_validate({sandbox.provider: sandbox.provider_config})
+    except ValidationError as exc:
+        raise SandboxSpecError(
+            f"Sandbox provider {sandbox.provider!r} rejected provider_config: {exc.error_count()} validation error(s).\n"
+            f"{exc}"
+        ) from exc
 
 
 def build_deployment_config(
@@ -613,7 +612,7 @@ def build_deployment_config(
             "auth_proxy_sidecar_identity": auth_proxy_identity,
             "auth_proxy_sidecar_on_behalf_of": auth_proxy_on_behalf_of,
             "workload_identity": workload_identity,
-            "backend_config": _build_sandbox_backend_config(sandbox),
+            "backend_config": build_sandbox_backend_config(sandbox),
         }
     )
 
@@ -779,7 +778,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
                 workload_identity_enabled=auth_context is not None and is_workload_identity_token_exchange_enabled(),
                 sandbox=sandbox,
             )
-        except ReservedSecretEnvVarError as exc:
+        except (ReservedSecretEnvVarError, SandboxSpecError) as exc:
             logger.error("Refusing to deploy agent %r: %s", name, exc)
             return DeploymentInfo(name=name, status="failed", error=str(exc))
         await entities.create(deployment_config)

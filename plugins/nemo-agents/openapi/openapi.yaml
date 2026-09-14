@@ -4555,13 +4555,13 @@ components:
         provider:
           type: string
           title: Provider
-          description: Sandbox provider name (e.g. 'openshell', 'opensandbox').
+          description: Deployments-substrate backend that isolates the run (e.g. 'openshell').
         provider_config:
           additionalProperties: true
           type: object
           title: Provider Config
-          description: Provider-specific sandbox configuration; the platform does
-            not interpret these fields.
+          description: Backend-specific sandbox configuration, validated by the named
+            backend.
         name:
           type: string
           title: Name
@@ -5250,13 +5250,13 @@ components:
         provider:
           type: string
           title: Provider
-          description: Sandbox provider name (e.g. 'openshell', 'opensandbox').
+          description: Deployments-substrate backend that isolates the run (e.g. 'openshell').
         provider_config:
           additionalProperties: true
           type: object
           title: Provider Config
-          description: Provider-specific sandbox configuration; the platform does
-            not interpret these fields.
+          description: Backend-specific sandbox configuration, validated by the named
+            backend.
         name:
           type: string
           title: Name
@@ -7601,13 +7601,13 @@ components:
         provider:
           type: string
           title: Provider
-          description: Sandbox provider name (e.g. 'openshell', 'opensandbox').
+          description: Deployments-substrate backend that isolates the run (e.g. 'openshell').
         provider_config:
           additionalProperties: true
           type: object
           title: Provider Config
-          description: Provider-specific sandbox configuration; the platform does
-            not interpret these fields.
+          description: Backend-specific sandbox configuration, validated by the named
+            backend.
       type: object
       required:
       - provider
@@ -7615,11 +7615,11 @@ components:
       description: 'Inline sandbox spec - the isolation posture around an agent run.
 
 
-        Provider-specific in its extension fields. ``provider`` names a registered
+        ``provider`` names a deployments-substrate backend; the accepted set is
 
-        sandbox provider (open set, discovered via entry points); ``provider_config``
+        whatever that substrate declares. ``provider_config`` is validated by the
 
-        carries provider-specific fields the platform does not interpret.'
+        named backend, not interpreted by the agents plugin.'
     SessionFilter:
       additionalProperties: false
       description: Query filter for ``GET /v2/workspaces/{workspace}/sessions``.

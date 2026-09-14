@@ -42,6 +42,8 @@ from nemo_agents_plugin.environment_resolution import (
     resolve_environment,
 )
 from nemo_agents_plugin.runner.deployments_backend import (
+    SandboxSpecError,
+    build_sandbox_backend_config,
     executor_for_mode,
     require_executor_matches_mode,
 )
@@ -139,6 +141,13 @@ async def create_deployment(
         body.environment, workspace=workspace, entity_client=entity_client
     )
     merged = _merge_environment(resolved_config, resolved_environment.environment_spec)
+
+    # The runner fails the deployment for an unknown provider or a config the
+    # backend rejects; the answer is already available here.
+    try:
+        build_sandbox_backend_config(resolved_environment.sandbox_spec)
+    except SandboxSpecError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # 5. Only a Fabric agent stages a spec fileset; a same-named one would mislead.
     spec = SpecRevision()

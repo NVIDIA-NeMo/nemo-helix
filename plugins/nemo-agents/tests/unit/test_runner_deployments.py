@@ -16,6 +16,7 @@ from nemo_agents_plugin.fabric.gateway_credentials import PLATFORM_IGW_API_KEY_E
 from nemo_agents_plugin.runner.deployments_backend import (
     DeploymentsRunnerBackend,
     ReservedSecretEnvVarError,
+    SandboxSpecError,
     UnreachableGatewayURLError,
     build_container_resources,
     build_deployment_config,
@@ -25,6 +26,7 @@ from nemo_agents_plugin.runner.deployments_backend import (
     resolve_agent_gateway_url,
     rewrite_config_base_urls,
     rewrite_fabric_config_base_urls,
+    sandbox_providers,
 )
 from nemo_agents_plugin.runner.fabric_artifact_staging import FabricArtifactStagingError
 from nemo_deployments_plugin.entities import ConfigFile, Deployment, DeploymentBackendConfig, DeploymentConfig
@@ -485,15 +487,24 @@ def test_build_deployment_config_no_sandbox_leaves_backend_config_empty() -> Non
     assert cfg.backend_config.k8s is None
 
 
-def test_build_deployment_config_unknown_sandbox_provider_is_skipped() -> None:
-    cfg = _build_k8s_config(sandbox=SandboxSpecInline(provider="not-a-provider", provider_config={"x": 1}))
-    assert cfg.backend_config == DeploymentBackendConfig()
+def test_sandbox_providers_are_the_substrate_backend_config_keys() -> None:
+    # No agents-side registry: the accepted set is whatever the substrate declares.
+    assert set(sandbox_providers()) == set(DeploymentBackendConfig.model_fields)
+    assert "openshell" in sandbox_providers()
 
 
-def test_build_deployment_config_invalid_sandbox_provider_config_is_skipped() -> None:
+def test_build_deployment_config_rejects_unknown_sandbox_provider() -> None:
+    with pytest.raises(SandboxSpecError, match="Unknown sandbox provider 'not-a-provider'") as excinfo:
+        _build_k8s_config(sandbox=SandboxSpecInline(provider="not-a-provider", provider_config={"x": 1}))
+    # The error names what the substrate would have accepted.
+    assert "openshell" in str(excinfo.value)
+
+
+def test_build_deployment_config_rejects_invalid_sandbox_provider_config() -> None:
     # policy_path must be a string; a mapping fails OpenShellDeploymentConfig validation.
-    cfg = _build_k8s_config(sandbox=SandboxSpecInline(provider="openshell", provider_config={"policy_path": {"a": 1}}))
-    assert cfg.backend_config.openshell is None
+    with pytest.raises(SandboxSpecError, match="'openshell' rejected provider_config") as excinfo:
+        _build_k8s_config(sandbox=SandboxSpecInline(provider="openshell", provider_config={"policy_path": {"a": 1}}))
+    assert "policy_path" in str(excinfo.value)
 
 
 def test_build_deployment_config_adds_workload_identity_when_requested() -> None:
@@ -1241,6 +1252,25 @@ async def test_create_deployment_missing_image_fails() -> None:
     )
     assert info.status == "failed"
     assert "image" in info.error.lower()
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_unknown_sandbox_provider_fails_without_creating_entities() -> None:
+    backend = _backend(default_image="nat:latest")
+    entities = AsyncMock()
+    backend._entities = entities
+    with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"):
+        info = await backend.create_deployment(
+            workspace="default",
+            name="hello-dep",
+            config={},
+            port=0,
+            deployment_mode="docker",
+            sandbox=SandboxSpecInline(provider="not-a-provider"),
+        )
+    assert info.status == "failed"
+    assert "Unknown sandbox provider 'not-a-provider'" in info.error
+    entities.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio

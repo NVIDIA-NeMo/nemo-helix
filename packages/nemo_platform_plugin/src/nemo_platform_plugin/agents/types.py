@@ -188,16 +188,16 @@ class EnvironmentSpecInline(BaseModel):
 class SandboxSpecInline(BaseModel):
     """Inline sandbox spec - the isolation posture around an agent run.
 
-    Provider-specific in its extension fields. ``provider`` names a registered
-    sandbox provider (open set, discovered via entry points); ``provider_config``
-    carries provider-specific fields the platform does not interpret.
+    ``provider`` names a deployments-substrate backend; the accepted set is
+    whatever that substrate declares. ``provider_config`` is validated by the
+    named backend, not interpreted by the agents plugin.
     """
 
     description: str = Field(default="", description="Human-readable description.")
-    provider: str = Field(description="Sandbox provider name (e.g. 'openshell', 'opensandbox').")
+    provider: str = Field(description="Deployments-substrate backend that isolates the run (e.g. 'openshell').")
     provider_config: JsonMap = Field(
         default_factory=dict,
-        description="Provider-specific sandbox configuration; the platform does not interpret these fields.",
+        description="Backend-specific sandbox configuration, validated by the named backend.",
     )
 
 
