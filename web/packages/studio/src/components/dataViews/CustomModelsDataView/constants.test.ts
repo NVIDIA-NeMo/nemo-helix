@@ -4,9 +4,6 @@
 import { FINETUNING_TYPE_FILTER_OPTIONS } from '@studio/components/dataViews/CustomModelsDataView/constants';
 
 describe('FINETUNING_TYPE_FILTER_OPTIONS', () => {
-  // ASTD-488: the filter must offer only the finetuning types a completed
-  // customization can actually produce — the union of the customizer backends'
-  // supported values — not the broad platform `FinetuningType` enum.
   it('lists only product-supported finetuning types, deduped, with display labels', () => {
     expect(FINETUNING_TYPE_FILTER_OPTIONS).toEqual([
       { value: 'lora', label: 'LoRA' },
