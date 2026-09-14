@@ -139,6 +139,46 @@ Swap `agent_name` (or `agent_import_path`) for your own agent to get a real scor
 - **`agent_import_path`** — your own Harbor agent, e.g. `"my_agent_module:MyAgent"`. Set `agent_dir`
   as well when it's a loose file rather than an installed package. Overrides `agent_name`.
 - **`agent_model_name`** — the model slug handed to the agent.
+- **`agent_kwargs`** — keyword arguments forwarded to the agent's constructor, the equivalent of
+  Harbor's `--ak key=value` flags. Values must be JSON (strings, numbers, booleans, lists, mappings).
+  Do not put secrets here: Harbor persists the kwargs unredacted in the job directory's
+  `config.json`, and the run's provenance records them with only credential-looking keys
+  (`api_key`, `token`, `secret`, ...) redacted. Inject secrets into the job environment instead.
+
+The three agent fields map one-to-one onto Harbor's `AgentConfig`, which Harbor's agent factory
+unpacks into the agent's constructor:
+
+```text
+HarborRunnerTarget / HarborRuntimeConfig
+        │
+        ├─ agent_import_path  → Harbor AgentConfig.import_path
+        ├─ agent_model_name   → Harbor AgentConfig.model_name
+        └─ agent_kwargs       → Harbor AgentConfig.kwargs
+                                       │
+                                       ▼
+                     Harbor AgentFactory constructs
+                     FabricAgent(model_name=..., **kwargs)
+```
+
+For example, NeMo Fabric's
+[`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.3.0-beta.2/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
+is one of Harbor's [existing agents](https://www.harborframework.com/docs/agents#existing-agents);
+its constructor requires `fabric_adapter_id` and accepts `fabric_package` and `fabric_telemetry`:
+
+```python
+config = HarborRuntimeConfig(
+    jobs_dir=Path("./harbor-jobs"),
+    agent_import_path="nemo_fabric.integrations.harbor:FabricAgent",
+    agent_kwargs={
+        "fabric_adapter_id": "nvidia.fabric.codex",
+        "fabric_package": "nemo-fabric[codex]==0.3.0b1",
+        "fabric_telemetry": "relay",
+    },
+)
+```
+
+The same fields appear on the platform job's `HarborRunnerTarget`, so a spec submitted as a job carries
+them as `runner.agent_kwargs`.
 
 ## How scoring works
 
@@ -270,7 +310,8 @@ On a repeated SDK call:
 The SDK stores the cache stamp in `jobs_dir/<job_name>/.nemo-eval-harbor-cache.json`:
 
 - **`version`** — stamp schema; must match exactly.
-- **`options`** — SHA-256 of result-affecting `HarborRuntimeConfig` fields; must match exactly.
+- **`options`** — SHA-256 of result-affecting `HarborRuntimeConfig` fields, including `agent_kwargs`;
+  must match exactly.
 - **`agent`** — digest of `agent_dir` contents, or `"<none>"` when unset; must match exactly.
 - **`tasks`** — every requested task digest must match; extra cached tasks are ignored. Cached A, B, C
   can serve A, but cached A cannot serve A and B.

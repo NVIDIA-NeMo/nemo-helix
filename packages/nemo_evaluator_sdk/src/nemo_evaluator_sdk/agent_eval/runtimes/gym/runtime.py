@@ -24,7 +24,6 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym.config import (
     GymRuntimeConfig,
     hydra_scalar,
     model_call_capture_dir,
-    redact_hydra_params,
     selection_args,
 )
 from nemo_evaluator_sdk.agent_eval.runtimes.gym.dataset import materialize_dataset, source_datasets
@@ -46,6 +45,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym.results import (
     require_full_coverage,
     trials_from_rollouts,
 )
+from nemo_evaluator_sdk.agent_eval.runtimes.provenance import redact_credentials
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, RunnerInfo
 from nemo_evaluator_sdk.values.results import AggregateScore
@@ -96,7 +96,7 @@ class GymAgentTaskRunner:
 
         Credentials normally live in the Gym checkout's gitignored ``env.yaml`` and never reach this
         object — but ``hydra_params`` and ``env_vars`` are free-form escape hatches, so their values
-        are redacted by key (see :func:`redact_hydra_params`) rather than trusted. ``env_vars``
+        are redacted by key (see :func:`redact_credentials`) rather than trusted. ``env_vars``
         needs it at least as much: environment variables are the conventional way to pass an API
         key, so a caller doing the obvious thing would otherwise write one into the run bundle.
         """
@@ -112,8 +112,8 @@ class GymAgentTaskRunner:
                 "num_repeats": cfg.num_repeats,
                 "concurrency": cfg.concurrency,
                 "bind_resources_server": cfg.bind_resources_server,
-                "hydra_params": redact_hydra_params(cfg.hydra_params),
-                "env_vars": redact_hydra_params(cfg.env_vars),
+                "hydra_params": redact_credentials(cfg.hydra_params),
+                "env_vars": redact_credentials(cfg.env_vars),
                 "reward_key": cfg.reward_key,
             },
         )

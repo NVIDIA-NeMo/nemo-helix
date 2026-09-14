@@ -319,6 +319,7 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(tmp_path: Path)
     harbor_target = HarborRunnerTarget(
         agent_name="oracle",
         agent_model_name="openai/gpt-5.4",
+        agent_kwargs={"fabric_adapter_id": "nvidia.fabric.codex", "fabric_harness_settings": {"max_turns": 3}},
         n_attempts=2,
         n_concurrent_trials=8,
         max_retries=1,
@@ -331,6 +332,10 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(tmp_path: Path)
     assert target._config.jobs_dir == ctx.storage.persistent / "harbor"
     # Spec knobs are forwarded onto the Harbor runtime config.
     assert target._config.agent_model_name == "openai/gpt-5.4"
+    assert target._config.agent_kwargs == {
+        "fabric_adapter_id": "nvidia.fabric.codex",
+        "fabric_harness_settings": {"max_turns": 3},
+    }
     assert target._config.n_attempts == 2
     assert target._config.reward_key == "score"
     # A runner shapes its own request, so it contributes no prompt template or inference params.
@@ -448,6 +453,27 @@ def test_runner_target_is_accepted(tmp_path: Path) -> None:
 def test_harbor_runner_target_is_accepted() -> None:
     spec = AgentEvalSpec(tasks=[_task_spec()], target=HarborRunnerTarget(agent_name="oracle"))
     assert isinstance(spec.target, HarborRunnerTarget)
+
+
+def test_harbor_agent_kwargs_round_trip_the_wire_unchanged() -> None:
+    """Nested kwargs survive JSON serialization, so what the submitter wrote is what the agent's ``__init__`` gets."""
+    agent_kwargs = {
+        "fabric_adapter_id": "nvidia.fabric.codex",
+        "fabric_package": "nemo-fabric[codex]==0.3.0b1",
+        "fabric_harness_settings": {"max_turns": 3, "tools": ["shell", None], "strict": True},
+    }
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=HarborRunnerTarget(
+            agent_import_path="nemo_fabric.integrations.harbor:FabricAgent", agent_kwargs=agent_kwargs
+        ),
+    )
+
+    restored = AgentEvalSpec.model_validate(json.loads(spec.model_dump_json()))
+
+    assert isinstance(restored.target, HarborRunnerTarget)
+    assert restored.target.agent_kwargs == agent_kwargs
+    assert HarborRunnerTarget().agent_kwargs == {}
 
 
 def test_agent_eval_job_source_is_distinct_from_evaluate_job() -> None:
