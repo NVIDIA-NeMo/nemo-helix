@@ -7,6 +7,7 @@ description = "NeMo optimization library — Optuna numeric HPO and Agents optim
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
 dependencies = [
+    "nemo-agent-optimization-plugin",
     "nemo-platform-plugin",
     "nemo-platform",
     "nemo-evaluator-sdk",
@@ -24,6 +25,9 @@ version = "0.0.0"
 optuna = "nemo_optimization.backends.optuna.backend:OptunaBackend"
 ga = "nemo_optimization.backends.ga.backend:GaBackend"
 
+[project.entry-points."nemo.optimization-strategy"]
+nat = "nemo_optimization.optimization_strategy:NatOptimizationStrategy"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -32,6 +36,7 @@ build-backend = "hatchling.build"
 packages = ["src/nemo_optimization"]
 
 [tool.uv.sources]
+nemo-agent-optimization-plugin = { workspace = true }
 nemo-platform-plugin = { workspace = true }
 nemo-platform = { workspace = true }
 nemo-evaluator-sdk = { workspace = true }
