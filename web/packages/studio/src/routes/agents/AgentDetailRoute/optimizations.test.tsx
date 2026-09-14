@@ -11,6 +11,7 @@ import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import { getAgentDetailRoute } from '@studio/routes/utils';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import userEvent from '@testing-library/user-event';
 
 const agentName = 'react-agent';
 const workspace = workspace1.workspace;
@@ -55,5 +56,65 @@ describe('AgentDetailRoute optimizations tab', () => {
     } finally {
       server.events.removeListener('request:start', capture);
     }
+  });
+
+  it('promotes Optimize to the primary action and opens the form in the tab', async () => {
+    const user = userEvent.setup();
+    renderDetail();
+
+    await screen.findByText('brevity-sweep-3');
+    await user.click(await screen.findByRole('button', { name: 'Optimize' }));
+
+    expect(await screen.findByText('New optimization')).toBeInTheDocument();
+    expect(screen.queryByText('brevity-sweep-3')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Optimize' })).toBeDisabled();
+  });
+
+  it('returns to the table from the form breadcrumb', async () => {
+    const user = userEvent.setup();
+    renderDetail('?tab=optimizations&view=new');
+
+    await user.click(await screen.findByRole('button', { name: 'Optimizations' }));
+
+    expect(await screen.findByText('brevity-sweep-3')).toBeInTheDocument();
+    expect(screen.queryByText('New optimization')).not.toBeInTheDocument();
+  });
+
+  it('regenerates the name when the intent changes, until the user types one', async () => {
+    const user = userEvent.setup();
+    renderDetail('?tab=optimizations&view=new');
+
+    await screen.findByDisplayValue(new RegExp(`^${agentName}-accuracy-`));
+
+    await user.click(await screen.findByRole('radio', { name: /Brevity/ }));
+    const nameField = await screen.findByDisplayValue(new RegExp(`^${agentName}-brevity-`));
+
+    await user.clear(nameField);
+    await user.type(nameField, 'my-own-name');
+    await user.click(await screen.findByRole('radio', { name: /Cost/ }));
+
+    expect(nameField).toHaveValue('my-own-name');
+  });
+
+  it('reshapes the search space when the intent changes', async () => {
+    const user = userEvent.setup();
+    renderDetail('?tab=optimizations&view=new');
+
+    // Accuracy is the default intent.
+    expect(await screen.findByText(/temperature 0\.0–0\.6 · 1 parameter/)).toBeInTheDocument();
+
+    await user.click(await screen.findByRole('radio', { name: /Creativity/ }));
+
+    expect(await screen.findByText(/temperature 0\.3–1\.5 · 1 parameter/)).toBeInTheDocument();
+  });
+
+  it('holds the run closed while the form is unanswered', async () => {
+    renderDetail('?tab=optimizations&view=new');
+
+    // This agent has no published evaluations, so picking one is the first unanswered question.
+    expect(
+      await screen.findByText('Pick an evaluation to score trials against.')
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run optimization' })).toBeDisabled();
   });
 });

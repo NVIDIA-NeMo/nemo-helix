@@ -80,11 +80,11 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
     },
   ];
 
-  if (tab === 'optimizations' && canOptimize) {
+  if (tab === 'optimizations') {
     actions.push({
       id: 'optimize',
       label: 'Optimize',
-      disabled: !agentName || !onOptimize,
+      disabled: !agentName || !onOptimize || !canOptimize,
       onClick: onOptimize,
     });
   }
