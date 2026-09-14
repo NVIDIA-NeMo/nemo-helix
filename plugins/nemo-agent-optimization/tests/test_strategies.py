@@ -31,7 +31,7 @@ class _Mismatched(_FakeStrategy):
 
 
 def test_discover_optimization_strategies_loads_entry_points(monkeypatch: pytest.MonkeyPatch) -> None:
-    entry = EntryPoint(name="fake", value="tests.test_strategies:_FakeStrategy", group=OPTIMIZATION_STRATEGY_GROUP)
+    entry = EntryPoint(name="fake", value="test_strategies:_FakeStrategy", group=OPTIMIZATION_STRATEGY_GROUP)
     monkeypatch.setattr(
         "nemo_agent_optimization_plugin.strategies.importlib.metadata.entry_points",
         lambda group: [entry] if group == OPTIMIZATION_STRATEGY_GROUP else [],
@@ -43,7 +43,7 @@ def test_discover_optimization_strategies_loads_entry_points(monkeypatch: pytest
 
 
 def test_discover_optimization_strategies_rejects_name_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
-    entry = EntryPoint(name="fake", value="tests.test_strategies:_Mismatched", group=OPTIMIZATION_STRATEGY_GROUP)
+    entry = EntryPoint(name="fake", value="test_strategies:_Mismatched", group=OPTIMIZATION_STRATEGY_GROUP)
     monkeypatch.setattr(
         "nemo_agent_optimization_plugin.strategies.importlib.metadata.entry_points",
         lambda group: [entry] if group == OPTIMIZATION_STRATEGY_GROUP else [],

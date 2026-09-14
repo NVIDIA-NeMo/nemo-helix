@@ -26,5 +26,5 @@ nemo-platform = { workspace = true }
 nemo-platform-plugin = { workspace = true }
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "tests"]
+pythonpath = ["src"]
 testpaths = ["tests"]
