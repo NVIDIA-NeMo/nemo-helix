@@ -41,6 +41,28 @@ from nmp.core.jobs.entities import (
     PlatformJobTask,
 )
 
+# These tests perform real EntityStore I/O before reaching the synchronization
+# point. Give loaded CI workers a bounded budget, rather than a one-second race.
+_MUTATION_PROGRESS_TIMEOUT = 30.0
+
+
+@pytest.fixture
+def mutation_lock_contended(monkeypatch: pytest.MonkeyPatch) -> asyncio.Event:
+    """Signal when a second dispatcher actually attempts an already-held lock."""
+    from nmp.core.jobs.app import dispatcher as dispatcher_module
+
+    contended = asyncio.Event()
+    original_get_lock = dispatcher_module._get_job_mutation_lock
+
+    def observe_lock(job_name: str, workspace: str) -> asyncio.Lock:
+        lock = original_get_lock(job_name, workspace)
+        if lock.locked():
+            contended.set()
+        return lock
+
+    monkeypatch.setattr(dispatcher_module, "_get_job_mutation_lock", observe_lock)
+    return contended
+
 
 async def create_job_with_attempt(
     dispatcher: JobDispatcher, job_request: CreatePlatformJobRequest
@@ -294,6 +316,7 @@ async def test_delete_job_serializes_with_rerun_job(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
     mock_nmp_client,
+    mutation_lock_contended: asyncio.Event,
 ):
     """A rerun request cannot create a new attempt while deletion is cleaning up."""
     _, job_name, _, _, _, _ = await create_test_job_data(mock_store, "delete-rerun-lock-test-job")
@@ -313,10 +336,10 @@ async def test_delete_job_serializes_with_rerun_job(
         delete_task = asyncio.create_task(mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE))
         rerun_task = None
         try:
-            await asyncio.wait_for(delete_started.wait(), timeout=1.0)
+            await asyncio.wait_for(delete_started.wait(), timeout=_MUTATION_PROGRESS_TIMEOUT)
 
             rerun_task = asyncio.create_task(other_dispatcher.rerun_job(job_name, DEFAULT_WORKSPACE))
-            await asyncio.sleep(0.05)
+            await asyncio.wait_for(mutation_lock_contended.wait(), timeout=_MUTATION_PROGRESS_TIMEOUT)
             assert not rerun_task.done()
 
             allow_delete.set()
@@ -336,6 +359,7 @@ async def test_delete_job_serializes_with_same_name_create(
     mock_store: EntityClient,
     mock_nmp_client,
     sample_platform_job_request: CreatePlatformJobRequest,
+    mutation_lock_contended: asyncio.Event,
 ):
     """A same-name create waits until delete finishes all cleanup for the old job."""
     job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "delete-create-lock-test-job")
@@ -356,10 +380,10 @@ async def test_delete_job_serializes_with_same_name_create(
         delete_task = asyncio.create_task(mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE))
         create_task = None
         try:
-            await asyncio.wait_for(delete_started.wait(), timeout=1.0)
+            await asyncio.wait_for(delete_started.wait(), timeout=_MUTATION_PROGRESS_TIMEOUT)
 
             create_task = asyncio.create_task(other_dispatcher.create_job(create_request, DEFAULT_WORKSPACE))
-            await asyncio.sleep(0.05)
+            await asyncio.wait_for(mutation_lock_contended.wait(), timeout=_MUTATION_PROGRESS_TIMEOUT)
             assert not create_task.done()
 
             allow_delete.set()
@@ -382,6 +406,7 @@ async def test_delete_job_serializes_with_task_creation(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
     mock_nmp_client,
+    mutation_lock_contended: asyncio.Event,
 ):
     """A task update cannot create a late child row after delete cleanup starts."""
     job_id, job_name, _, step_id, _, _ = await create_test_job_data(mock_store, "delete-task-lock-test-job")
@@ -402,7 +427,7 @@ async def test_delete_job_serializes_with_task_creation(
         delete_task = asyncio.create_task(mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE))
         task_create_task = None
         try:
-            await asyncio.wait_for(delete_started.wait(), timeout=1.0)
+            await asyncio.wait_for(delete_started.wait(), timeout=_MUTATION_PROGRESS_TIMEOUT)
 
             task_create_task = asyncio.create_task(
                 other_dispatcher.create_or_update_task(
@@ -413,7 +438,7 @@ async def test_delete_job_serializes_with_task_creation(
                     step,
                 )
             )
-            await asyncio.sleep(0.05)
+            await asyncio.wait_for(mutation_lock_contended.wait(), timeout=_MUTATION_PROGRESS_TIMEOUT)
             assert not task_create_task.done()
 
             allow_delete.set()
@@ -436,6 +461,7 @@ async def test_delete_job_serializes_with_result_creation(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
     mock_nmp_client,
+    mutation_lock_contended: asyncio.Event,
 ):
     """A result create cannot recreate associated data after delete cleanup starts."""
     job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "delete-result-lock-test-job")
@@ -455,7 +481,7 @@ async def test_delete_job_serializes_with_result_creation(
         delete_task = asyncio.create_task(mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE))
         result_create_task = None
         try:
-            await asyncio.wait_for(delete_started.wait(), timeout=1.0)
+            await asyncio.wait_for(delete_started.wait(), timeout=_MUTATION_PROGRESS_TIMEOUT)
 
             result_create_task = asyncio.create_task(
                 other_dispatcher.create_result(
@@ -467,7 +493,7 @@ async def test_delete_job_serializes_with_result_creation(
                     workspace=DEFAULT_WORKSPACE,
                 )
             )
-            await asyncio.sleep(0.05)
+            await asyncio.wait_for(mutation_lock_contended.wait(), timeout=_MUTATION_PROGRESS_TIMEOUT)
             assert not result_create_task.done()
 
             allow_delete.set()
