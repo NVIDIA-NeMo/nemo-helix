@@ -119,7 +119,8 @@ class OIDCConfig(BaseSettings):
         default=False,
         description="Fall back to RFC 7662 token introspection when a bearer token is not a JWT "
         "(some IdPs issue opaque access tokens). Requires introspection_endpoint to be set or "
-        "discoverable, and typically introspection_client_secret.",
+        "discoverable, and typically introspection_client_secret_env_var pointing at a secret-backed "
+        "environment variable.",
     )
 
     introspection_endpoint: str | None = Field(
@@ -128,11 +129,28 @@ class OIDCConfig(BaseSettings):
         "Only used when introspect_opaque_tokens is enabled.",
     )
 
-    introspection_client_secret: str | None = Field(
+    introspection_client_id: str | None = Field(
         default=None,
-        description="Client secret used to authenticate RFC 7662 introspection requests as client_id. "
-        "Required by most IdPs when introspect_opaque_tokens is enabled.",
+        description="Client ID used to authenticate RFC 7662 introspection requests. Defaults to client_id when unset.",
     )
+
+    introspection_client_secret_env_var: str | None = Field(
+        default=None,
+        description="Environment variable containing the client secret used to authenticate "
+        "RFC 7662 introspection requests. Required by most IdPs when introspect_opaque_tokens "
+        "is enabled. Store only the environment variable name here; the secret value must come "
+        "from the process environment.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_inline_introspection_client_secret(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "introspection_client_secret" in data:
+            raise ValueError(
+                "auth.oidc.introspection_client_secret is not supported; set "
+                "auth.oidc.introspection_client_secret_env_var to the name of an environment variable instead"
+            )
+        return data
 
     resolve_opaque_tokens_via_userinfo: bool = Field(
         default=False,

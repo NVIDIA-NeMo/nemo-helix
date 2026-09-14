@@ -35,11 +35,13 @@ class TokenClaims:
 
 
 def groups_from_claim(value: object) -> list[str]:
-    """Parse a groups JWT claim that may be a comma-separated string or a list."""
+    """Parse a groups JWT claim that may be a comma-separated string, list, or role map."""
     if isinstance(value, str):
         return [g.strip() for g in value.split(",") if g.strip()]
     if isinstance(value, list):
         return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+    if isinstance(value, dict):
+        return [key.strip() for key in value if isinstance(key, str) and key.strip()]
     return []
 
 
@@ -83,7 +85,7 @@ class TokenClaimsExtractor:
         )
 
     def groups_from_claims(self, claims: JsonObject) -> list[str]:
-        """Extract normalized groups from configured or provider-specific claims."""
+        """Extract normalized groups from configured or legacy fallback claims."""
         for claim_name in [self.config.oidc.groups_claim, "cognito:groups"]:
             if claim_name not in claims:
                 continue

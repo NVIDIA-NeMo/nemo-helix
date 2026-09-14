@@ -4,6 +4,7 @@
 """Unit tests for JWT validation."""
 
 import json
+import os
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -113,6 +114,7 @@ class TestTokenClaims:
     [
         (" admins, developers ,, ", ["admins", "developers"]),
         ([" admins ", "", 42, "developers"], ["admins", "developers"]),
+        ({" admins ": {"project": "NeMo"}, "developers": {}, 42: "ignored"}, ["admins", "developers"]),
         (None, []),
     ],
 )
@@ -851,6 +853,11 @@ class TestOpaqueTokenIntrospection:
         )
         return JWTValidator(auth_cfg)
 
+    def test_oidc_config_rejects_inline_introspection_secret(self):
+        """The config schema accepts an env var name, not the introspection secret value."""
+        with pytest.raises(ValueError, match="introspection_client_secret is not supported"):
+            self._validator(introspection_client_secret="s3cret")
+
     @pytest.mark.asyncio
     async def test_opaque_token_without_introspection_enabled_returns_none(self):
         """Default behavior is unchanged: an opaque token is rejected, no introspection call is made."""
@@ -916,7 +923,83 @@ class TestOpaqueTokenIntrospection:
         with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
             result = await validator.validate_token("revoked-token")
 
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_invalid_audience_does_not_fall_back_to_introspection(self):
+        """Signed JWT audience failures stay invalid even when opaque introspection is enabled."""
+        validator = self._validator(
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+            audience="expected-audience",
+        )
+
+        with patch.object(validator, "_get_jwks_client") as mock_get_jwks:
+            mock_jwks = MagicMock()
+            mock_signing_key = MagicMock()
+            mock_signing_key.key = "test-key"
+            mock_jwks.get_signing_key_from_jwt = AsyncMock(return_value=mock_signing_key)
+            mock_get_jwks.return_value = mock_jwks
+
+            with (
+                patch("jwt.get_unverified_header", return_value={"alg": "RS256"}),
+                patch("jwt.decode", side_effect=jwt.InvalidAudienceError("Invalid audience")),
+                patch.object(http_clients, "shared_async_http_client") as mock_shared_client,
+            ):
+                result = await validator.validate_token("invalid.audience.token")
+
         assert result is None
+        mock_shared_client.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_jwt_shaped_opaque_token_introspects_after_jwks_failure(self):
+        """Opaque tokens that parse as JWT-like strings still fall back to introspection."""
+        validator = self._validator(
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+        )
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps({"active": True, "sub": "user123"}).encode("utf-8")
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+
+        with (
+            patch.object(validator, "_get_jwks_client", side_effect=httpx.HTTPError("Connection failed")),
+            patch.object(http_clients, "shared_async_http_client", return_value=mock_client),
+        ):
+            result = await validator.validate_token("opaque.token.value")
+
+        assert result is not None
+        assert result.subject == "user123"
+        mock_client.post.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_introspection_can_use_separate_client_id(self):
+        """A dedicated introspection client id takes precedence over the public OIDC client id."""
+        validator = self._validator(
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+            introspection_client_id="api-client",
+            introspection_client_secret_env_var="OIDC_INTROSPECTION_SECRET",
+        )
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps({"active": True, "sub": "user123"}).encode("utf-8")
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+
+        with (
+            patch.dict(os.environ, {"OIDC_INTROSPECTION_SECRET": "s3cret"}),
+            patch.object(http_clients, "shared_async_http_client", return_value=mock_client),
+        ):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is not None
+        call_args = mock_client.post.call_args
+        assert call_args[1]["auth"] == ("api-client", "s3cret")
 
     @pytest.mark.asyncio
     async def test_opaque_token_introspection_rejects_mismatched_audience(self):
@@ -1003,12 +1086,12 @@ class TestOpaqueTokenIntrospection:
         assert result.subject == "user123"
 
     @pytest.mark.asyncio
-    async def test_opaque_token_introspection_sends_client_secret_as_basic_auth(self):
-        """A configured introspection client secret authenticates the request as client_id."""
+    async def test_opaque_token_introspection_sends_env_secret_as_basic_auth(self):
+        """A configured introspection secret env var authenticates the request as client_id."""
         validator = self._validator(
             introspect_opaque_tokens=True,
             introspection_endpoint="https://sso.example.com/introspect",
-            introspection_client_secret="s3cret",
+            introspection_client_secret_env_var="OIDC_INTROSPECTION_SECRET",
         )
 
         mock_response = MagicMock()
@@ -1017,12 +1100,41 @@ class TestOpaqueTokenIntrospection:
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
 
-        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
+        with (
+            patch.dict(os.environ, {"OIDC_INTROSPECTION_SECRET": "s3cret"}),
+            patch.object(http_clients, "shared_async_http_client", return_value=mock_client),
+        ):
             result = await validator.validate_token("opaque-access-token")
 
         assert result is not None
         call_args = mock_client.post.call_args
         assert call_args[1]["auth"] == ("test-client", "s3cret")
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_introspection_missing_secret_env_var_fails_closed(self, caplog):
+        """A configured introspection secret env var must exist before introspection runs."""
+        validator = self._validator(
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+            introspection_client_secret_env_var="OIDC_INTROSPECTION_SECRET",
+        )
+
+        mock_client = AsyncMock()
+
+        with (
+            caplog.at_level("WARNING"),
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(http_clients, "shared_async_http_client", return_value=mock_client) as mock_shared_client,
+        ):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is None
+        mock_shared_client.assert_not_called()
+        mock_client.post.assert_not_called()
+        assert any(
+            "configured introspection client secret env var is not set or empty" in r.message for r in caplog.records
+        )
+        assert all("OIDC_INTROSPECTION_SECRET" not in r.message for r in caplog.records)
 
     @pytest.mark.asyncio
     async def test_opaque_token_introspection_falls_back_to_discovery(self):

@@ -29,7 +29,9 @@ def test_provider_e2e_setup_token_is_real(auth_idp_case, auth_idp_runtime):
 
     assert token.access_token
     assert token.claims
-    assert token.claims["sub"] == grant["username"]
+    expected_subject = grant.get("expected_subject") or grant.get("username")
+    if expected_subject is not None:
+        assert token.claims["sub"] == expected_subject
 
 
 def test_provider_workload_provider_token_is_real(auth_idp_case, auth_idp_runtime):
@@ -45,7 +47,7 @@ def test_provider_workload_provider_token_claims_match_manifest(auth_idp_case, a
     require_capability(auth_idp_case, "workload_provider_token")
 
     token = auth_idp_runtime.workload_provider_token()
-    provider = auth_idp_case.provider
+    provider = auth_idp_runtime.provider
     grant = provider.workload_provider_password_grant
     assert grant is not None
 
@@ -53,7 +55,7 @@ def test_provider_workload_provider_token_claims_match_manifest(auth_idp_case, a
     assert set(provider.workload_expected_groups).issubset(
         _claim_values(token.claims.get(provider.workload_groups_claim))
     )
-    assert grant["client_id"] in _claim_values(token.claims.get("aud"))
+    assert grant.get("expected_audience", grant["client_id"]) in _claim_values(token.claims.get("aud"))
 
 
 def test_provider_workload_subject_token_exchanges_for_access_token(auth_idp_case, auth_idp_runtime):

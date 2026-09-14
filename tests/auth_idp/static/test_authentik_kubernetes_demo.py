@@ -1187,24 +1187,27 @@ def test_authentik_kubernetes_runner_uses_helm_not_kustomize() -> None:
     assert "NMP_AUTHENTIK_K8S_NGC_EXISTING_SECRET: ngc-api" in ci_workflow
     assert 'K8S_IMAGE_PULL_SECRET="${NMP_AUTHENTIK_K8S_IMAGE_PULL_SECRET:-}"' in run_sh
     assert "NMP_AUTHENTIK_K8S_IMAGE_PULL_SECRET=${K8S_IMAGE_PULL_SECRET}" in run_sh
-    assert "NMP_AUTHENTIK_K8S_IMAGE_PULL_SECRET" in runtime_impl
+    assert 'env_prefix="NMP_AUTHENTIK_K8S"' in runtime_impl
+    assert "IMAGE_PULL_SECRET" in runtime_impl
     assert "nemo-platform.imagePullSecrets[0].name=" in runtime_impl
-    assert "NMP_AUTHENTIK_K8S_NGC_EXISTING_SECRET" in runtime_impl
+    assert "NGC_EXISTING_SECRET" in runtime_impl
     assert "nemo-platform.existingSecret=" in runtime_impl
     assert 'DEFAULT_K8S_GATEWAY_PORT="18082"' in run_sh
     assert 'K8S_GATEWAY_PORT="${NMP_AUTHENTIK_K8S_GATEWAY_PORT:-}"' in run_sh
     assert "choose_free_tcp_port" in run_sh
     assert "NMP_AUTHENTIK_K8S_GATEWAY_PORT=${K8S_GATEWAY_PORT}" in run_sh
-    assert "NMP_AUTHENTIK_K8S_GATEWAY_PORT" in runtime_impl
-    assert "nemo-platform.authentikPublicGateway.port=" in runtime_impl
+    assert "GATEWAY_PORT" in runtime_impl
+    assert 'gateway_port_value_key="nemo-platform.authentikPublicGateway.port"' in runtime_impl
+    assert "settings.gateway_port_value_key" in runtime_impl
     assert "_port_forward_log_file" in runtime_impl
     assert "nemo-platform.platformConfig.auth.access_keys.enabled=true" in runtime_impl
     assert "GITHUB_TOKEN: ${{ inputs['kind-image-pull-token'] }}" in setup_kind_action
     assert "CERT_MANAGER_CHART" not in runtime_impl
     assert "_install_cert_manager" not in runtime_impl
     assert ("helm", "repo", "add", "nvidia", "https://helm.ngc.nvidia.com/nvidia", "--force-update") in run_commands
-    assert ("helm", "repo", "add", "authentik", "https://charts.goauthentik.io", "--force-update") in run_commands
-    assert 'os.environ.get("NMP_AUTHENTIK_K8S_RUNTIME", "kind")' in runtime_impl
+    assert 'helm_repo_name="authentik"' in runtime_impl
+    assert 'helm_repo_url="https://charts.goauthentik.io"' in runtime_impl
+    assert '"RUNTIME", "kind"' in runtime_impl
     assert '"--no-hooks"' not in runtime_impl
     assert "HELM_UPGRADE_COMMAND_GRACE_SECONDS = 300" in runtime_impl
     assert "_helm_wait_seconds = _duration_seconds(HELM_WAIT_TIMEOUT)" in runtime_impl
@@ -1614,7 +1617,7 @@ def test_authentik_runners_capture_ci_and_local_diagnostics() -> None:
     assert "Auth-idp Compose diagnostics:" in run_sh
     assert "Auth-idp Kubernetes diagnostics:" in run_sh
 
-    assert 'configured_dir = os.environ.get("NMP_AUTHENTIK_K8S_LOG_DIR")' in runtime_impl
+    assert 'configured_dir = os.environ.get(f"NMP_{PROVIDER_NAME.upper()}_K8S_LOG_DIR")' in runtime_impl
     assert '"helm-status.txt"' in runtime_impl
     assert '"helm-list.txt"' in runtime_impl
     assert '"get-nodes.txt"' in runtime_impl
@@ -1622,7 +1625,8 @@ def test_authentik_runners_capture_ci_and_local_diagnostics() -> None:
     assert "self._diagnostics_collected = False" in runtime_impl
     assert "def _collect_diagnostics_best_effort" in runtime_impl
     assert "with contextlib.suppress(Exception):" in runtime_impl
-    assert "Collected Authentik Kubernetes diagnostics:" in runtime_impl
+    assert "_display_provider_name(PROVIDER_NAME)" in runtime_impl
+    assert "Kubernetes diagnostics:" in runtime_impl
 
 
 def test_authentik_compose_runner_uses_nemo_scoped_ca_bundle() -> None:

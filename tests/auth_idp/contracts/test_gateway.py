@@ -88,12 +88,11 @@ def test_provider_gateway_rejects_spoofed_principal_headers(auth_idp_case, auth_
     require_capability(auth_idp_case, "spoofed_header_rejection")
     require_capability(auth_idp_case, "workload_provider_token")
 
-    workload_provider_token = auth_idp_runtime.workload_provider_token().access_token
+    workload_provider_token = auth_idp_runtime.workload_provider_token()
     workspace_name = f"spoof-check-{uuid.uuid4().hex[:8]}"
-    claims = jwt_claims(workload_provider_token)
-    authenticated_principal_id = str(claims["sub"])
+    authenticated_principal_id = str(workload_provider_token.claims["sub"])
     headers = {
-        "Authorization": f"Bearer {workload_provider_token}",
+        "Authorization": f"Bearer {workload_provider_token.access_token}",
         "X-NMP-Principal-Id": "service:bootstrap",
         "X-NMP-Principal-Email": "attacker@example.com",
     }
