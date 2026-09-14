@@ -7,6 +7,7 @@ import {
   findEvalConfigFile,
 } from '@studio/components/evaluation/experimentEvalConfig';
 import {
+  bareName,
   isDatasetEvalSpec,
   type EvalSpec,
   type EvalSpecTask,
@@ -97,7 +98,14 @@ export const studyRowsFromEvalSpec = (spec: EvalSpec): StudyDatasetRow[] => {
 };
 
 const parseEvalConfig = (path: string, text: string): EvalSpec => {
-  const parsed = path.endsWith('.json') ? JSON.parse(text) : parseYaml(text);
+  let parsed: unknown;
+  try {
+    parsed = path.endsWith('.json') ? JSON.parse(text) : parseYaml(text);
+  } catch (error) {
+    throw new StudyDatasetError(
+      `Eval config "${path}" could not be parsed: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
   if (!asRecord(parsed)) {
     throw new StudyDatasetError(`Eval config "${path}" is not an object.`);
   }
@@ -117,7 +125,7 @@ export const loadStudyDataset = async (
   evaluation: AgentEvaluationRow,
   signal?: AbortSignal
 ): Promise<StudyDatasetRow[]> => {
-  const fileset = evaluationFilesetName(evaluation) ?? evaluation.dataset_name;
+  const fileset = evaluationFilesetName(evaluation) ?? bareName(evaluation.dataset_name ?? '');
   if (!fileset) {
     throw new StudyDatasetError(
       `Evaluation "${evaluation.name}" names no fileset, so its dataset cannot be read. Pick another evaluation.`

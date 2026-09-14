@@ -145,16 +145,16 @@ export const agentOptimizeJobsHandlers = [
 
   http.post(OPTIMIZE_JOBS_URL, async ({ request, params }) => {
     const body = (await request.json()) as OptimizeJobRequest;
-    return HttpResponse.json(
-      {
-        id: `opt-${body.name}`,
-        name: body.name ?? 'unnamed-study',
-        workspace: String(params.workspace),
-        status: 'pending',
-        created_at: new Date().toISOString(),
-        spec: body.spec,
-      } satisfies OptimizeJob,
-      { status: 201 }
-    );
+    const name = body.name ?? 'unnamed-study';
+    const job: OptimizeJob = {
+      id: `opt-${name}`,
+      name,
+      workspace: String(params.workspace),
+      status: 'pending',
+      created_at: new Date().toISOString(),
+      spec: body.spec,
+    };
+    mockOptimizeJobs.push(job);
+    return HttpResponse.json(job, { status: 201 });
   }),
 ];

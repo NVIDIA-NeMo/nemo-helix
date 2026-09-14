@@ -21,13 +21,23 @@ const nameSchema = z
   })
   .transform((value) => toValidEntityName(value, value));
 
+/** A bound as the form holds it. Blank input becomes ``undefined`` rather than coercing to 0,
+ *  which would silently pass validation as a real bound. */
+const boundSchema = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.coerce.number({
+    required_error: 'Enter a number.',
+    invalid_type_error: 'Enter a number.',
+  })
+);
+
 const searchParameterSchema = z
   .object({
     path: z.string().min(1),
     label: z.string().min(1),
     type: z.enum(['int', 'float']),
-    low: z.coerce.number({ invalid_type_error: 'Enter a number.' }),
-    high: z.coerce.number({ invalid_type_error: 'Enter a number.' }),
+    low: boundSchema,
+    high: boundSchema,
   })
   .superRefine((parameter, ctx) => {
     if (parameter.high <= parameter.low) {
