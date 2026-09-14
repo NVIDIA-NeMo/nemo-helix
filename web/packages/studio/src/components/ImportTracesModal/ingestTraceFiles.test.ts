@@ -156,6 +156,35 @@ describe('ingestTraceFile', () => {
     expect(outcome.agents).toEqual(['pinned']);
   });
 
+  it('rejects malformed span entries without crashing, and still imports the valid ones', async () => {
+    const outcome = await ingestTraceFile(
+      selected('spans.json', [span('s1'), null, 'not-a-span', 42]),
+      { workspace, agent: 'pinned' }
+    );
+
+    expect(spansMock).toHaveBeenCalledTimes(1);
+    expect(spansMock.mock.calls[0][1].spans).toHaveLength(1);
+    expect(outcome.results.some((result) => result.status === 'success')).toBe(true);
+    expect(outcome.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: 'error', message: expect.stringContaining('Span 2') }),
+      ])
+    );
+  });
+
+  it('reports all-malformed spans as errors instead of crashing', async () => {
+    const outcome = await ingestTraceFile(
+      selected('spans.json', { source: 'mlflow', spans: [null, 'nope'] }),
+      { workspace, agent: 'pinned' }
+    );
+
+    expect(spansMock).not.toHaveBeenCalled();
+    expect(outcome.results).toEqual([
+      { label: 'spans.json', status: 'error', message: 'Span 1: not a valid span object.' },
+      { label: 'spans.json', status: 'error', message: 'Span 2: not a valid span object.' },
+    ]);
+  });
+
   it('posts one chat completion per call and claims no agent for them', async () => {
     const call = {
       request: { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] },

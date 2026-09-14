@@ -154,11 +154,23 @@ const ingestSpansFile = async (
 ): Promise<IngestOutcome> => {
   const document = 'document' in detection ? detection.document : undefined;
   const body = isRecord(document) ? document : { spans: document };
-  const spans = Array.isArray(body.spans) ? (body.spans as DirectSpanInput[]) : [];
+  const rawSpans = Array.isArray(body.spans) ? body.spans : [];
   const batchSource =
     (typeof body.source === 'string' && body.source) || source || DEFAULT_SPANS_SOURCE;
 
-  if (spans.length === 0) return { results: cap(label, ['No spans found.']), agents: [] };
+  const errors: string[] = [];
+  const spans: DirectSpanInput[] = [];
+  rawSpans.forEach((entry, index) => {
+    if (isRecord(entry)) {
+      spans.push(entry as DirectSpanInput);
+    } else {
+      errors.push(`Span ${index + 1}: not a valid span object.`);
+    }
+  });
+
+  if (spans.length === 0) {
+    return { results: cap(label, errors.length > 0 ? errors : ['No spans found.']), agents: [] };
+  }
 
   const attributed = agent
     ? spans.map((span) => ({
@@ -167,7 +179,6 @@ const ingestSpansFile = async (
       }))
     : spans;
 
-  const errors: string[] = [];
   const agents = new Set<string>();
   let imported = 0;
 
