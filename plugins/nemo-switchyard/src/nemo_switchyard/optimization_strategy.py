@@ -119,7 +119,13 @@ class SwitchyardOptimizationStrategy:
         # name is canonical either way.
         routed_model = f"{workspace}/{virtual_model.name or parsed.virtual_model}"
         optimized_config = copy.deepcopy(source_agent_config or agent_config)
-        _rewrite_model(optimized_config, routed_model)
+        if not _rewrite_model(optimized_config, routed_model):
+            raise LocalRunError(
+                f"The switchyard strategy found no model parameter to rewrite in the agent config: "
+                f"neither 'models.default.model' nor any 'harnesses.<name>.model' block is present. "
+                f"VirtualModel {routed_model!r} was created before this check, so fixing the agent "
+                f"config and re-running is safe — the VirtualModel is reused, not duplicated."
+            )
 
         output_dir = ctx.storage.persistent / "results" / RESULT_NAME
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -174,13 +180,21 @@ def _virtual_model_entries(parsed: SwitchyardConfig) -> list[VirtualModelInferen
     return entries
 
 
-def _rewrite_model(agent_config: dict[str, Any], routed_model: str) -> None:
-    """Point every model parameter the agent actually reads at *routed_model*."""
+def _rewrite_model(agent_config: dict[str, Any], routed_model: str) -> bool:
+    """Point every model parameter the agent actually reads at *routed_model*.
+
+    Returns whether anything was rewritten, so a config shape this strategy does not
+    understand fails loudly instead of yielding an unchanged "optimized" config.
+    """
+    rewritten = False
     models = agent_config.get("models")
     if isinstance(models, dict) and isinstance(models.get("default"), dict):
         models["default"]["model"] = routed_model
+        rewritten = True
     harnesses = agent_config.get("harnesses")
     if isinstance(harnesses, dict):
         for harness in harnesses.values():
             if isinstance(harness, dict) and isinstance(harness.get("model"), dict):
                 harness["model"]["model"] = routed_model
+                rewritten = True
+    return rewritten

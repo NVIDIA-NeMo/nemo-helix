@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 from nemo_optimization.optimization_strategy import NatOptimizationStrategy
+from nemo_platform_plugin.job_context import JobContext
 
 
 def test_name_is_nat() -> None:
@@ -64,7 +67,8 @@ def test_run_dispatches_to_optimize_router(monkeypatch: pytest.MonkeyPatch) -> N
         agent_config={"schema_version": "fabric.agent/v1alpha1"},
         source_agent_config=None,
         config={"optimizer": {"numeric": {"enabled": True}}},
-        ctx=object(),
+        # The fake dispatch never touches ctx, so a bare object stands in for the real JobContext.
+        ctx=cast(JobContext, object()),
         workspace="default",
         sdk=None,
     )

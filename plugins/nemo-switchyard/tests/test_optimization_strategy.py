@@ -7,14 +7,18 @@ from __future__ import annotations
 
 from importlib.metadata import entry_points
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 import yaml
 from nemo_agent_optimization_plugin.strategies import PRIMARY_ARTIFACT_KEY, OptimizationStrategy
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_switchyard.optimization_strategy import SwitchyardOptimizationStrategy
+from nemo_switchyard.optimization_strategy import (
+    _PLATFORM_TO_SWITCHYARD_FORMAT,
+    PlatformBackendFormat,
+    SwitchyardOptimizationStrategy,
+)
 
 
 class _FakeVirtualModel:
@@ -237,6 +241,45 @@ def test_run_rewrites_the_source_config_including_its_harness_model(ctx: JobCont
     # The caller's mappings are inputs, not scratch space.
     assert source_agent_config["models"]["default"]["model"] == "my-ws/llama-strong"
     assert agent_config["models"]["default"]["model"] == "my-ws/llama-strong"
+
+
+def test_run_rewrites_a_harness_only_config(ctx: JobContext) -> None:
+    """A harness model block alone is a rewrite target; no ``models.default`` is fine."""
+    source_agent_config = {
+        "config_format": "nemo-agents-spec-v1",
+        "name": "my-agent",
+        "default_harness": "deepagents",
+        "harnesses": {"deepagents": {"kind": "deepagents", "model": {"model": "my-ws/llama-strong"}}},
+    }
+    result = SwitchyardOptimizationStrategy().run(
+        agent_config=_agent_config(),
+        source_agent_config=source_agent_config,
+        config=_config(),
+        ctx=ctx,
+        workspace="my-ws",
+        sdk=_FakeSdk(),
+    )
+
+    written = yaml.safe_load(Path(result[PRIMARY_ARTIFACT_KEY]).read_text(encoding="utf-8"))
+    assert written["harnesses"]["deepagents"]["model"]["model"] == "my-ws/my-agent-router"
+
+
+def test_run_refuses_to_report_success_when_no_model_parameter_was_rewritten(ctx: JobContext) -> None:
+    """Returning the input unchanged as a "completed" optimization would be a silent failure."""
+    unrecognized = {"config_format": "nemo-agents-spec-v1", "name": "my-agent", "models": {"judge": {"model": "x"}}}
+    with pytest.raises(Exception, match=r"models\.default\.model"):
+        SwitchyardOptimizationStrategy().run(
+            agent_config=unrecognized,
+            source_agent_config=None,
+            config=_config(),
+            ctx=ctx,
+            workspace="my-ws",
+            sdk=_FakeSdk(),
+        )
+
+
+def test_every_platform_backend_format_has_a_switchyard_mapping() -> None:
+    assert set(_PLATFORM_TO_SWITCHYARD_FORMAT) == set(get_args(PlatformBackendFormat))
 
 
 def test_run_falls_back_to_the_requested_name_when_the_sdk_returns_none(ctx: JobContext) -> None:
