@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
 from nemo_platform import NeMoPlatform
@@ -25,23 +24,13 @@ def resolve_agent_config(
     workspace: str,
     sdk: NeMoPlatform | None,
 ) -> dict[str, Any] | None:
-    """Load a local or platform-managed agent config as a Fabric package.
+    """Fetch a platform-managed agent's config and return a Fabric agent package.
 
-    Local ``agent.yaml`` files and stored agents use ``nemo-agents-spec-v1``;
-    optimize strategies consume ``fabric.agent/v1alpha1``.
+    Stored agents use ``nemo-agents-spec-v1``; optimize requires
+    ``fabric.agent/v1alpha1``. Platform specs are translated here.
     """
     if agent is None:
         return None
-
-    local_path = Path(agent).expanduser()
-    if local_path.is_file():
-        try:
-            from nemo_agents_plugin.agent_config import load_agent_config
-        except ImportError as exc:  # pragma: no cover - agents plugin always present for CLI path
-            raise LocalRunError("Loading a local agent.yaml requires nemo-agents-plugin.") from exc
-        local_config = load_agent_config(local_path).model_dump(mode="json", exclude_none=True)
-        logger.info("Resolved agent %r from local config %s", agent, local_path)
-        return _to_fabric_agent_package(local_config, label=str(local_path))
 
     if "://" in agent:
         raise LocalRunError(

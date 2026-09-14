@@ -6,13 +6,13 @@
 from __future__ import annotations
 
 from fastapi.routing import APIRoute
+from nemo_agent_optimization_plugin.jobs.optimize import OptimizeJob
 from nemo_agents_plugin.jobs.analyze_batch import AnalyzeBatchJob
 from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob
 from nemo_agents_plugin.jobs.evaluate_suite import EvaluateSuiteJob
 from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
 from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
 from nemo_agents_plugin.service import AgentsService
-from nemo_optimization.jobs.optimize import OptimizeJob
 from nemo_platform_plugin.scheduler import submit_path_for
 
 

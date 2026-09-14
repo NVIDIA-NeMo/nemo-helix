@@ -324,8 +324,6 @@ def _replace_flat_job_command_with_group(
     def submit(typer_ctx: typer.Context, **kwargs: object) -> None:
         if typer_ctx.invoked_subcommand is not None:
             return
-        if _run_local_prompt_master(job_cls, kwargs):
-            return
         original(typer_ctx, **kwargs)
 
     submit.__doc__ = getattr(original, "__doc__", None)
@@ -336,59 +334,6 @@ def _replace_flat_job_command_with_group(
 
     register_subcommands(job_group)
     app.add_typer(job_group, name=job_cls.name, rich_help_panel="Jobs")
-
-
-def _run_local_prompt_master(job_cls: type[NemoJob], kwargs: dict[str, object]) -> bool:
-    """Run Prompt Master in-process when ``--agent`` names a local YAML file."""
-    if kwargs.get("strategy") != "prompt-master":
-        return False
-
-    agent = kwargs.get("agent")
-    if not isinstance(agent, str):
-        return False
-    agent_path = Path(agent).expanduser()
-    if not agent_path.is_file():
-        if agent_path.suffix.lower() in {".yaml", ".yml"}:
-            typer.echo(f"Error: local agent config does not exist: {agent_path}", err=True)
-            raise typer.Exit(code=2)
-        return False
-
-    optimize_config = kwargs.get("optimize_config")
-    output = kwargs.get("output")
-    if not isinstance(optimize_config, str):
-        typer.echo("Error: local prompt-master requires --optimize-config.", err=True)
-        raise typer.Exit(code=2)
-    if not Path(optimize_config).expanduser().is_file():
-        typer.echo(f"Error: prompt-master config does not exist: {optimize_config}", err=True)
-        raise typer.Exit(code=2)
-    if not isinstance(output, str) or Path(output).suffix.lower() not in {".yaml", ".yml"}:
-        typer.echo("Error: local prompt-master requires --output ending in .yaml or .yml.", err=True)
-        raise typer.Exit(code=2)
-    if kwargs.get("optimize_config_fileset") is not None:
-        typer.echo("Error: local prompt-master cannot use --optimize-config-fileset.", err=True)
-        raise typer.Exit(code=2)
-
-    from nemo_platform_plugin.scheduler import NemoJobScheduler
-
-    workspace = kwargs.get("workspace")
-    local_spec = {
-        "strategy": "prompt-master",
-        "agent": str(agent_path),
-        "optimize_config": str(Path(optimize_config).expanduser()),
-        "output": output,
-        "workspace": workspace if isinstance(workspace, str) else "default",
-    }
-    try:
-        result = NemoJobScheduler().run_local(
-            job_cls,
-            local_spec,
-            workspace=local_spec["workspace"],
-        )
-    except (OSError, RuntimeError, ValueError) as exc:
-        typer.echo(f"Error: local prompt-master failed: {exc}", err=True)
-        raise typer.Exit(code=2) from exc
-    typer.echo(json.dumps(result, indent=2))
-    return True
 
 
 # ---------------------------------------------------------------------------

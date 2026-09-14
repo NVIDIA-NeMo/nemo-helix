@@ -193,7 +193,7 @@ def test_optimize_targets_agents_route() -> None:
     from nemo_platform_plugin.commands import add_job_commands
     from nemo_platform_plugin.scheduler import submit_path_for
 
-    OptimizeJob = import_module("nemo_optimization.jobs.optimize").OptimizeJob
+    OptimizeJob = import_module("nemo_agent_optimization_plugin.jobs.optimize").OptimizeJob
     assert submit_path_for(OptimizeJob, workspace="default") == "/apis/agents/v2/workspaces/default/jobs/optimize"
 
     def _submit_remote(_self, job_cls, spec, **kwargs):
@@ -212,7 +212,7 @@ def test_optimize_targets_agents_route() -> None:
             [
                 "optimize",
                 "--strategy",
-                "hpo",
+                "nat",
                 "--optimize-config",
                 "/tmp/optimize.yml",
                 "--agent",
@@ -226,7 +226,6 @@ def test_optimize_targets_agents_route() -> None:
     assert captured["job_cls"] is OptimizeJob
     assert captured["base_url"] == "http://test"
     assert captured["workspace"] == "default"
-    assert captured["spec"]["strategy"] == "hpo"
     assert captured["spec"]["agent"] == "react-agent"
     assert captured["spec"]["optimize_config"] == "/tmp/optimize.yml"
 
@@ -238,7 +237,7 @@ def test_optimize_targets_agents_route() -> None:
 def test_optimize_prepare_fileset_stays_under_optimize_command() -> None:
     from nemo_platform_plugin.commands import add_job_commands
 
-    OptimizeJob = import_module("nemo_optimization.jobs.optimize").OptimizeJob
+    OptimizeJob = import_module("nemo_agent_optimization_plugin.jobs.optimize").OptimizeJob
 
     agents_cli = AgentsCLI()
     app = agents_cli.get_cli()
@@ -254,113 +253,6 @@ def test_optimize_prepare_fileset_stays_under_optimize_command() -> None:
     assert top_level_result.exit_code != 0
 
 
-def test_optimize_requires_strategy_and_has_no_prompt_master_subcommand() -> None:
-    from nemo_platform_plugin.commands import add_job_commands
-
-    OptimizeJob = import_module("nemo_optimization.jobs.optimize").OptimizeJob
-    agents_cli = AgentsCLI()
-    app = agents_cli.get_cli()
-    add_job_commands(app, {"agents.optimize": OptimizeJob}, cli=agents_cli)
-
-    help_result = CliRunner().invoke(app, ["optimize", "--help"])
-    assert help_result.exit_code == 0
-    assert "--strategy <hpo | prompt-master>" in help_result.output
-    assert "[required] Optimization strategy." in help_result.output
-
-    removed = CliRunner().invoke(app, ["optimize", "prompt-master", "--help"])
-    assert removed.exit_code == 2
-    assert "No such command 'prompt-master'" in removed.output
-
-
-def test_prompt_master_strategy_uses_shared_agent_and_output_flags() -> None:
-    from nemo_platform_plugin.commands import add_job_commands
-
-    captured: dict[str, Any] = {}
-    OptimizeJob = import_module("nemo_optimization.jobs.optimize").OptimizeJob
-    agents_cli = AgentsCLI()
-    app = agents_cli.get_cli()
-    add_job_commands(app, {"agents.optimize": OptimizeJob}, cli=agents_cli)
-
-    def _submit_remote(_self, _job_cls, spec, **_kwargs):
-        captured.update(spec)
-        return {"name": "prompt-master-123"}
-
-    with patch("nemo_platform_plugin.scheduler.NemoJobScheduler.submit_remote", _submit_remote):
-        result = CliRunner().invoke(
-            app,
-            [
-                "optimize",
-                "--strategy",
-                "prompt-master",
-                "--agent",
-                "calculator-agent",
-                "--optimize-config-fileset",
-                "default/calculator-prompt-master",
-                "--optimize-config",
-                "calculator-agent.yaml",
-                "--output",
-                "calculator-prompt-master-results",
-            ],
-        )
-
-    assert result.exit_code == 0, result.output
-    assert captured["strategy"] == "prompt-master"
-    assert captured["agent"] == "calculator-agent"
-    assert captured["output"] == "calculator-prompt-master-results"
-
-
-def test_prompt_master_strategy_runs_locally_for_an_agent_config_file(tmp_path: Path) -> None:
-    from nemo_platform_plugin.commands import add_job_commands
-
-    agent_config = tmp_path / "agent.yaml"
-    optimizer_config = tmp_path / "prompt-master.yaml"
-    output = tmp_path / "new-agent.yaml"
-    agent_config.write_text("config_format: nemo-agents-spec-v1\n", encoding="utf-8")
-    optimizer_config.write_text("model: {}\n", encoding="utf-8")
-
-    captured: dict[str, Any] = {}
-    OptimizeJob = import_module("nemo_optimization.jobs.optimize").OptimizeJob
-    agents_cli = AgentsCLI()
-    app = agents_cli.get_cli()
-    add_job_commands(app, {"agents.optimize": OptimizeJob}, cli=agents_cli)
-
-    def _run_local(_self, job_cls, spec, **kwargs):
-        captured.update(job_cls=job_cls, spec=spec, kwargs=kwargs)
-        return {"status": "completed", "output": {"type": "local_file", "path": str(output)}}
-
-    with (
-        patch("nemo_platform_plugin.scheduler.NemoJobScheduler.run_local", _run_local),
-        patch(
-            "nemo_platform_plugin.scheduler.NemoJobScheduler.submit_remote",
-            side_effect=AssertionError("local Prompt Master must not submit a remote job"),
-        ),
-    ):
-        result = CliRunner().invoke(
-            app,
-            [
-                "optimize",
-                "--strategy",
-                "prompt-master",
-                "--agent",
-                str(agent_config),
-                "--optimize-config",
-                str(optimizer_config),
-                "--output",
-                str(output),
-            ],
-        )
-
-    assert result.exit_code == 0, result.output
-    assert captured["job_cls"] is OptimizeJob
-    assert captured["spec"] == {
-        "strategy": "prompt-master",
-        "agent": str(agent_config),
-        "optimize_config": str(optimizer_config),
-        "output": str(output),
-        "workspace": "default",
-    }
-
-
 def test_agent_jobs_do_not_register_legacy_run_submit_verbs() -> None:
     import click
     from nemo_agents_plugin.jobs.analyze_batch import AnalyzeBatchJob
@@ -373,7 +265,7 @@ def test_agent_jobs_do_not_register_legacy_run_submit_verbs() -> None:
     from nemo_platform_plugin.job import NemoJob
     from typer.main import get_command
 
-    OptimizeJob = import_module("nemo_optimization.jobs.optimize").OptimizeJob
+    OptimizeJob = import_module("nemo_agent_optimization_plugin.jobs.optimize").OptimizeJob
     jobs: dict[str, type[NemoJob]] = {
         "agents.analyze": AnalyzeBatchJob,
         "agents.evaluate": EvaluateAgentJob,
@@ -386,8 +278,7 @@ def test_agent_jobs_do_not_register_legacy_run_submit_verbs() -> None:
 
     agents_cli = AgentsCLI()
     app = agents_cli.get_cli()
-    with patch("nemo_agents_plugin.cli.discover_entry_points", return_value={}):
-        add_job_commands(app, jobs, cli=agents_cli)
+    add_job_commands(app, jobs, cli=agents_cli)
     command = get_command(app)
 
     assert isinstance(command, click.Group)

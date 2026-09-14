@@ -3,9 +3,9 @@
 
 # --optimize-config: chat-only Hermes package (proven CLI smoke).
 # Stage this bundle with:
-#   nemo agents optimize prepare-fileset --strategy hpo --source examples/hermes-optimize --optimize-config optimize-chatonly.yaml --fileset hermes-optimize-chatonly --workspace default
+#   nemo agents optimize prepare-fileset --source examples/hermes-optimize --optimize-config optimize-chatonly.yaml --fileset hermes-optimize-chatonly --workspace default
 # Then launch it with:
-#   nemo agents optimize --strategy hpo --optimize-config-fileset default/hermes-optimize-chatonly --optimize-config optimize-chatonly.yaml --workspace default
+#   nemo agents optimize --strategy nat --optimize-config-fileset default/hermes-optimize-chatonly --optimize-config optimize-chatonly.yaml --workspace default
 #
 # See README.md in this directory for install + run steps.
 schema_version: fabric.agent/v1alpha1

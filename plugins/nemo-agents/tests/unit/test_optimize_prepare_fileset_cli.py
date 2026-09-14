@@ -14,9 +14,9 @@ from unittest.mock import patch
 import pytest
 import typer
 import yaml
+from nemo_agent_optimization_plugin.jobs.optimize import OptimizeJob
 from nemo_agents_plugin.cli import AgentsCLI
 from nemo_agents_plugin.jobs.optimize_cli import register_prepare_fileset_command
-from nemo_optimization.jobs.optimize import OptimizeJob
 from typer.testing import CliRunner
 
 CONFIG: dict[str, Any] = {
@@ -76,8 +76,6 @@ def test_uploads_the_bundle_and_prints_the_submit_command(app: typer.Typer, bund
             app,
             [
                 "prepare-fileset",
-                "--strategy",
-                "hpo",
                 "--source",
                 str(bundle),
                 "--optimize-config",
@@ -96,7 +94,6 @@ def test_uploads_the_bundle_and_prints_the_submit_command(app: typer.Typer, bund
     assert record["local_path"].endswith("/")
     assert "--optimize-config-fileset default/my-opt-fs" in result.output
     assert "--optimize-config optimize.yml" in result.output
-    assert "--strategy hpo" in result.output
 
 
 def test_honours_a_workspace_qualified_fileset_ref(app: typer.Typer, bundle: Path) -> None:
@@ -106,8 +103,6 @@ def test_honours_a_workspace_qualified_fileset_ref(app: typer.Typer, bundle: Pat
             app,
             [
                 "prepare-fileset",
-                "--strategy",
-                "hpo",
                 "--source",
                 str(bundle),
                 "--optimize-config",
@@ -137,8 +132,6 @@ def test_refuses_to_upload_a_bundle_that_fails_preflight(app: typer.Typer, bundl
             app,
             [
                 "prepare-fileset",
-                "--strategy",
-                "hpo",
                 "--source",
                 str(bundle),
                 "--optimize-config",
@@ -162,8 +155,6 @@ def test_dry_run_validates_without_uploading(app: typer.Typer, bundle: Path) -> 
             app,
             [
                 "prepare-fileset",
-                "--strategy",
-                "hpo",
                 "--source",
                 str(bundle),
                 "--optimize-config",
@@ -190,35 +181,3 @@ def test_the_hook_attaches_prepare_fileset_to_the_optimize_group_only() -> None:
     evaluate_group = typer.Typer(name="evaluate")
     AgentsCLI().update_job_cli(EvaluateAgentJob, evaluate_group)
     assert evaluate_group.registered_commands == []
-
-
-def test_prepare_fileset_validates_prompt_master_strategy(app: typer.Typer, tmp_path: Path) -> None:
-    config = tmp_path / "prompt-master.yml"
-    config.write_text("model:\n  provider: nvidia\n  model: optimizer-model\n", encoding="utf-8")
-    strategy = SimpleNamespace(validate_config=lambda payload, agent: None)
-
-    with patch(
-        "nemo_optimization.bundle.discover_optimization_strategies",
-        return_value={"prompt-master": strategy},
-    ):
-        result = CliRunner().invoke(
-            app,
-            [
-                "prepare-fileset",
-                "--strategy",
-                "prompt-master",
-                "--source",
-                str(tmp_path),
-                "--optimize-config",
-                "prompt-master.yml",
-                "--fileset",
-                "calculator-prompt-master",
-                "--agent",
-                "calculator-agent",
-                "--no-check-models",
-                "--dry-run",
-            ],
-        )
-
-    assert result.exit_code == 0, result.output
-    assert "Would upload" in result.output

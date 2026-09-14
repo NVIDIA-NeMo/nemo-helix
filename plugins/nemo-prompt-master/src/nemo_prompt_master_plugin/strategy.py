@@ -10,7 +10,7 @@ import json
 from typing import Any, ClassVar
 
 import yaml
-from nemo_optimization.strategies import PRIMARY_ARTIFACT_KEY
+from nemo_agent_optimization_plugin.strategies import PRIMARY_ARTIFACT_KEY
 from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.job_context import JobContext
 from nemo_prompt_master_plugin.config import PromptMasterConfig

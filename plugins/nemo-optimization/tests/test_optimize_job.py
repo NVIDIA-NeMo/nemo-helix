@@ -74,12 +74,7 @@ async def compile_spec(spec: OptimizeSpec, *, workspace: str = "default", profil
 
 def staged_spec(**overrides: Any) -> OptimizeSpec:
     return OptimizeSpec.model_validate(
-        {
-            "strategy": "hpo",
-            "optimize_config": "optimize.yml",
-            "optimize_config_fileset": "default/opt-bundle",
-            **overrides,
-        }
+        {"optimize_config": "optimize.yml", "optimize_config_fileset": "default/opt-bundle", **overrides}
     )
 
 
@@ -95,7 +90,6 @@ async def test_compile_stamps_the_fileset_ref_into_the_step_config() -> None:
 
     step = next(iter(platform_spec["steps"]))
     assert step["name"] == "optimize"
-    assert step["config"]["strategy"] == "hpo"
     assert step["config"]["workspace"] == "staging"
     assert step["config"]["optimize_config_fileset"] == "default/opt-bundle"
     assert step["config"]["optimize_config"] == "optimize.yml"
@@ -103,85 +97,44 @@ async def test_compile_stamps_the_fileset_ref_into_the_step_config() -> None:
 
 @pytest.mark.asyncio
 async def test_compile_requires_a_staged_fileset() -> None:
-    spec = OptimizeSpec(strategy="hpo", optimize_config="/abs/optimize.yml")
+    spec = OptimizeSpec(optimize_config="/abs/optimize.yml")
     with pytest.raises(PlatformJobCompilationError, match="prepare-fileset"):
         await compile_spec(spec)
 
 
 def test_spec_rejects_absolute_config_alongside_a_fileset() -> None:
     with pytest.raises(ValidationError, match="relative to the fileset root"):
-        OptimizeSpec(
-            strategy="hpo",
-            optimize_config="/abs/optimize.yml",
-            optimize_config_fileset=FilesetRef("opt-bundle"),
-        )
+        OptimizeSpec(optimize_config="/abs/optimize.yml", optimize_config_fileset=FilesetRef("opt-bundle"))
 
 
 @pytest.mark.parametrize("config_path", ["../escape.yml", "~/optimize.yml", "C:\\bundle\\optimize.yml"])
 def test_spec_rejects_config_paths_that_escape_the_fileset(config_path: str) -> None:
     with pytest.raises(ValidationError, match="relative to the fileset root"):
-        OptimizeSpec(strategy="hpo", optimize_config=config_path, optimize_config_fileset=FilesetRef("opt-bundle"))
+        OptimizeSpec(optimize_config=config_path, optimize_config_fileset=FilesetRef("opt-bundle"))
 
 
 def test_spec_rejects_a_malformed_fileset_ref() -> None:
     with pytest.raises(ValidationError, match="'name' or 'workspace/name'"):
-        OptimizeSpec(
-            strategy="hpo",
-            optimize_config="optimize.yml",
-            optimize_config_fileset=FilesetRef("ws/fs/extra"),
-        )
+        OptimizeSpec(optimize_config="optimize.yml", optimize_config_fileset=FilesetRef("ws/fs/extra"))
 
 
 def test_spec_requires_a_config_location() -> None:
     with pytest.raises(ValidationError):
-        OptimizeSpec.model_validate({"strategy": "hpo"})
-
-
-def test_spec_requires_an_explicit_strategy() -> None:
-    with pytest.raises(ValidationError, match="strategy"):
-        OptimizeSpec.model_validate({"optimize_config": "/abs/optimize.yml"})
-
-
-@pytest.mark.parametrize("strategy", ["hpo", "prompt-master"])
-def test_spec_accepts_supported_strategies(strategy: str) -> None:
-    spec = OptimizeSpec.model_validate(
-        {
-            "strategy": strategy,
-            "agent": "calculator-agent" if strategy == "prompt-master" else None,
-            "optimize_config": "/abs/optimize.yml",
-        }
-    )
-
-    assert spec.strategy == strategy
-
-
-def test_prompt_master_strategy_requires_an_agent() -> None:
-    with pytest.raises(ValidationError, match="agent is required"):
-        OptimizeSpec.model_validate(
-            {
-                "strategy": "prompt-master",
-                "optimize_config": "/abs/prompt-master.yml",
-            }
-        )
+        OptimizeSpec.model_validate({})
 
 
 def test_submit_spec_requires_fileset_for_remote_requests() -> None:
     with pytest.raises(ValidationError, match="prepare-fileset") as missing:
-        OptimizeSubmitSpec.model_validate({"strategy": "hpo", "optimize_config": "optimize.yml"})
+        OptimizeSubmitSpec.model_validate({"optimize_config": "optimize.yml"})
     assert FILESET_REQUIRED in str(missing.value)
 
     with pytest.raises(ValidationError, match="prepare-fileset") as explicit_none:
-        OptimizeSubmitSpec.model_validate(
-            {"strategy": "hpo", "optimize_config": "optimize.yml", "optimize_config_fileset": None}
-        )
+        OptimizeSubmitSpec.model_validate({"optimize_config": "optimize.yml", "optimize_config_fileset": None})
     assert FILESET_REQUIRED in str(explicit_none.value)
 
 
 def test_submit_spec_allows_missing_fileset_for_local_scheduler() -> None:
-    spec = OptimizeSubmitSpec.model_validate(
-        {"strategy": "hpo", "optimize_config": "/abs/optimize.yml"},
-        context={"is_local": True},
-    )
+    spec = OptimizeSubmitSpec.model_validate({"optimize_config": "/abs/optimize.yml"}, context={"is_local": True})
 
     assert spec.optimize_config == "/abs/optimize.yml"
     assert spec.optimize_config_fileset is None
@@ -275,57 +228,12 @@ def test_run_dispatches_a_local_fabric_config(tmp_path: Path, ctx: JobContext) -
     with patch(
         "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}
     ) as dispatch:
-        result = OptimizeJob().run(
-            {"strategy": "hpo", "optimize_config": optimize_config, "workspace": "default"},
-            ctx=ctx,
-        )
+        result = OptimizeJob().run({"optimize_config": optimize_config, "workspace": "default"}, ctx=ctx)
 
     assert result["status"] == "completed"
     kwargs = dispatch.call_args.kwargs
     assert kwargs["agent_config"] is None
     assert kwargs["optimize_config"]["optimizer"]["numeric"]["enabled"] is True
-
-
-def test_run_dispatches_prompt_master_strategy_with_the_resolved_agent(tmp_path: Path, ctx: JobContext) -> None:
-    prompt_master_config = write_config(
-        tmp_path,
-        {"model": {"provider": "nvidia", "model": "optimizer-model"}},
-        name="prompt-master.yml",
-    )
-    agent_config = {
-        "schema_version": "fabric.agent/v1alpha1",
-        "metadata": {"name": "calculator-agent"},
-        "instructions": {"system": {"content": "Return only the answer."}},
-    }
-    strategy = MagicMock()
-    strategy.run.return_value = {"status": "completed", "strategy": "prompt-master"}
-
-    with (
-        patch("nemo_optimization.jobs.optimize.resolve_agent_config", return_value=agent_config),
-        patch(
-            "nemo_optimization.jobs.optimize.discover_optimization_strategies",
-            return_value={"prompt-master": strategy},
-        ),
-    ):
-        result = OptimizeJob().run(
-            {
-                "strategy": "prompt-master",
-                "optimize_config": prompt_master_config,
-                "workspace": "default",
-                "agent": "calculator-agent",
-            },
-            ctx=ctx,
-        )
-
-    assert result == {"status": "completed", "strategy": "prompt-master"}
-    strategy.validate_config.assert_called_once()
-    strategy.run.assert_called_once_with(
-        agent_config=agent_config,
-        source_agent_config=None,
-        config={"model": {"provider": "nvidia", "model": "optimizer-model"}},
-        ctx=ctx,
-        sdk=None,
-    )
 
 
 def test_scheduler_run_local_preserves_workspace_for_absolute_config_without_fileset(tmp_path: Path) -> None:
@@ -342,7 +250,7 @@ def test_scheduler_run_local_preserves_workspace_for_absolute_config_without_fil
     ):
         result = NemoJobScheduler().run_local(
             OptimizeJob,
-            {"strategy": "hpo", "optimize_config": optimize_config},
+            {"optimize_config": optimize_config},
             workspace="research",
         )
 
@@ -360,10 +268,7 @@ def test_run_leaves_the_working_directory_alone_in_local_mode(tmp_path: Path, ct
         return {"status": "completed"}
 
     with patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch):
-        OptimizeJob().run(
-            {"strategy": "hpo", "optimize_config": optimize_config, "workspace": "default"},
-            ctx=ctx,
-        )
+        OptimizeJob().run({"optimize_config": optimize_config, "workspace": "default"}, ctx=ctx)
 
     assert observed["cwd"] == cwd
 
@@ -375,10 +280,7 @@ def test_run_expands_env_vars_in_the_config(tmp_path: Path, ctx: JobContext, mon
     with patch(
         "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}
     ) as dispatch:
-        OptimizeJob().run(
-            {"strategy": "hpo", "optimize_config": optimize_config, "workspace": "default"},
-            ctx=ctx,
-        )
+        OptimizeJob().run({"optimize_config": optimize_config, "workspace": "default"}, ctx=ctx)
 
     assert dispatch.call_args.kwargs["optimize_config"]["models"]["default"]["model"] == "demo-model"
 
@@ -427,12 +329,7 @@ def test_run_resolves_platform_agent_before_dispatch(tmp_path: Path, ctx: JobCon
         "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}
     ) as dispatch:
         OptimizeJob().run(
-            {
-                "strategy": "hpo",
-                "optimize_config": optimize_config,
-                "workspace": "default",
-                "agent": "react-agent",
-            },
+            {"optimize_config": optimize_config, "workspace": "default", "agent": "react-agent"},
             ctx=ctx,
             sdk=cast(NeMoPlatform, _StubSDK()),
         )
@@ -444,53 +341,12 @@ def test_run_resolves_platform_agent_before_dispatch(tmp_path: Path, ctx: JobCon
     assert agent_config["models"]["judge"]["model"] == "demo-model"
 
 
-def test_run_resolves_a_local_agent_yaml_before_dispatch(tmp_path: Path, ctx: JobContext) -> None:
-    optimize_config = write_config(tmp_path, MINIMAL_CONFIG)
-    agent_path = tmp_path / "agent.yaml"
-    agent_path.write_text(
-        yaml.safe_dump(
-            {
-                "config_format": "nemo-agents-spec-v1",
-                "name": "calculator-agent",
-                "default_harness": "deepagents",
-                "harnesses": {"deepagents": {"kind": "deepagents", "settings": {"deepagents": {}}}},
-                "models": {"default": {"provider": "nvidia", "model": "calculator-model"}},
-                "instructions": {"system": {"content": "Return only the answer."}},
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    with patch(
-        "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch",
-        return_value={"status": "completed"},
-    ) as dispatch:
-        OptimizeJob().run(
-            {
-                "strategy": "hpo",
-                "optimize_config": optimize_config,
-                "workspace": "default",
-                "agent": str(agent_path),
-            },
-            ctx=ctx,
-        )
-
-    resolved = dispatch.call_args.kwargs["agent_config"]
-    assert resolved["metadata"]["name"] == "calculator-agent"
-    assert resolved["instructions"]["system"]["content"] == "Return only the answer."
-
-
 def test_run_rejects_endpoint_agent(tmp_path: Path, ctx: JobContext) -> None:
     optimize_config = write_config(tmp_path, MINIMAL_CONFIG)
 
     with pytest.raises(LocalRunError, match="Endpoint URL / URI optimize mode has been removed"):
         OptimizeJob().run(
-            {
-                "strategy": "hpo",
-                "optimize_config": optimize_config,
-                "workspace": "default",
-                "agent": "http://localhost:8080",
-            },
+            {"optimize_config": optimize_config, "workspace": "default", "agent": "http://localhost:8080"},
             ctx=ctx,
         )
 
@@ -527,7 +383,6 @@ def test_run_stages_the_config_from_the_fileset(ctx: JobContext) -> None:
     ) as dispatch:
         result = OptimizeJob().run(
             {
-                "strategy": "hpo",
                 "optimize_config": "configs/optimize.yml",
                 "optimize_config_fileset": "default/opt-bundle",
                 "workspace": "default",
@@ -568,7 +423,6 @@ def test_run_resolves_relative_assets_against_the_staged_bundle(ctx: JobContext)
     with patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch):
         OptimizeJob().run(
             {
-                "strategy": "hpo",
                 "optimize_config": "optimize.yml",
                 "optimize_config_fileset": "opt-bundle",
                 "workspace": "default",
@@ -593,7 +447,6 @@ def test_run_restores_the_working_directory_when_the_study_raises(ctx: JobContex
     ):
         OptimizeJob().run(
             {
-                "strategy": "hpo",
                 "optimize_config": "optimize.yml",
                 "optimize_config_fileset": "opt-bundle",
                 "workspace": "default",
@@ -611,7 +464,6 @@ def test_run_rejects_a_staged_config_missing_from_the_fileset(ctx: JobContext) -
     with pytest.raises(FileNotFoundError, match="was not found in fileset"):
         OptimizeJob().run(
             {
-                "strategy": "hpo",
                 "optimize_config": "optimize.yml",
                 "optimize_config_fileset": "opt-bundle",
                 "workspace": "default",
@@ -625,7 +477,6 @@ def test_run_rejects_a_staged_config_without_an_sdk(ctx: JobContext) -> None:
     with pytest.raises(LocalRunError, match="requires a 'sdk: NeMoPlatform'"):
         OptimizeJob().run(
             {
-                "strategy": "hpo",
                 "optimize_config": "optimize.yml",
                 "optimize_config_fileset": "opt-bundle",
                 "workspace": "default",
@@ -663,7 +514,7 @@ def test_run_stages_dataset_from_fileset_ref(tmp_path: Path, ctx: JobContext) ->
         "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}
     ) as dispatch:
         OptimizeJob().run(
-            {"strategy": "hpo", "optimize_config": optimize_config, "workspace": "default"},
+            {"optimize_config": optimize_config, "workspace": "default"},
             ctx=ctx,
             sdk=cast(NeMoPlatform, _StubSDK()),
         )
@@ -682,10 +533,7 @@ def test_run_leaves_plain_dataset_path_untouched(tmp_path: Path, ctx: JobContext
     with patch(
         "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}
     ) as dispatch:
-        OptimizeJob().run(
-            {"strategy": "hpo", "optimize_config": optimize_config, "workspace": "default"},
-            ctx=ctx,
-        )
+        OptimizeJob().run({"optimize_config": optimize_config, "workspace": "default"}, ctx=ctx)
 
     dataset = dispatch.call_args.kwargs["optimize_config"]["eval"]["general"]["dataset"]
     assert dataset == {"file_path": "/data/rows.json"}
@@ -730,12 +578,7 @@ def test_run_publishes_results_to_fileset(tmp_path: Path, ctx: JobContext) -> No
 
     with patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch):
         result = OptimizeJob().run(
-            {
-                "strategy": "hpo",
-                "optimize_config": optimize_config,
-                "workspace": "default",
-                "output": "tuned-results",
-            },
+            {"optimize_config": optimize_config, "workspace": "default", "output": "tuned-results"},
             ctx=ctx,
             sdk=cast(NeMoPlatform, _StubSDK()),
         )
@@ -761,68 +604,12 @@ def test_run_publishes_results_to_local_dir(tmp_path: Path, ctx: JobContext) -> 
 
     with patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch):
         result = OptimizeJob().run(
-            {
-                "strategy": "hpo",
-                "optimize_config": optimize_config,
-                "workspace": "default",
-                "output": str(dest),
-            },
+            {"optimize_config": optimize_config, "workspace": "default", "output": str(dest)},
             ctx=ctx,
         )
 
     assert (dest / "optimizer_results" / "study_summary.json").is_file()
     assert result["output"] == {"type": "local_dir", "path": str(dest.resolve())}
-
-
-def test_prompt_master_writes_the_optimized_config_to_an_exact_yaml_path(
-    tmp_path: Path,
-    ctx: JobContext,
-) -> None:
-    prompt_master_config = write_config(
-        tmp_path,
-        {"model": {"provider": "nvidia", "model": "optimizer-model"}},
-        name="prompt-master.yml",
-    )
-    output = tmp_path / "new-agent.yaml"
-    agent_config = {
-        "schema_version": "fabric.agent/v1alpha1",
-        "metadata": {"name": "calculator-agent"},
-        "instructions": {"system": {"content": "Return only the answer."}},
-    }
-    strategy = MagicMock()
-
-    def _run_strategy(**_kwargs: Any) -> dict[str, Any]:
-        artifact = ctx.storage.persistent / "results" / "prompt_master_results" / "optimized_config.yml"
-        artifact.parent.mkdir(parents=True)
-        artifact.write_text("instructions:\n  system:\n    content: Optimized.\n", encoding="utf-8")
-        return {
-            "status": "completed",
-            "strategy": "prompt-master",
-            "_primary_artifact": str(artifact),
-        }
-
-    strategy.run.side_effect = _run_strategy
-    with (
-        patch("nemo_optimization.jobs.optimize.resolve_agent_config", return_value=agent_config),
-        patch(
-            "nemo_optimization.jobs.optimize.discover_optimization_strategies",
-            return_value={"prompt-master": strategy},
-        ),
-    ):
-        result = OptimizeJob().run(
-            {
-                "strategy": "prompt-master",
-                "optimize_config": prompt_master_config,
-                "workspace": "default",
-                "agent": "calculator-agent",
-                "output": str(output),
-            },
-            ctx=ctx,
-        )
-
-    assert output.read_text(encoding="utf-8") == "instructions:\n  system:\n    content: Optimized.\n"
-    assert result["output"] == {"type": "local_file", "path": str(output.resolve())}
-    assert "_primary_artifact" not in result
 
 
 def test_run_publishes_staged_results_after_leaving_the_bundle(ctx: JobContext, tmp_path: Path) -> None:
@@ -837,7 +624,6 @@ def test_run_publishes_staged_results_after_leaving_the_bundle(ctx: JobContext, 
     with patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch):
         result = OptimizeJob().run(
             {
-                "strategy": "hpo",
                 "optimize_config": "optimize.yml",
                 "optimize_config_fileset": "opt-bundle",
                 "workspace": "default",
@@ -859,10 +645,7 @@ def test_run_without_output_publishes_nothing(tmp_path: Path, ctx: JobContext) -
         return {"status": "completed"}
 
     with patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch):
-        result = OptimizeJob().run(
-            {"strategy": "hpo", "optimize_config": optimize_config, "workspace": "default"},
-            ctx=ctx,
-        )
+        result = OptimizeJob().run({"optimize_config": optimize_config, "workspace": "default"}, ctx=ctx)
 
     assert result == {"status": "completed"}
 
@@ -884,12 +667,7 @@ def test_run_does_not_publish_when_study_fails(tmp_path: Path, ctx: JobContext) 
         pytest.raises(RuntimeError, match="study blew up"),
     ):
         OptimizeJob().run(
-            {
-                "strategy": "hpo",
-                "optimize_config": optimize_config,
-                "workspace": "default",
-                "output": "tuned-results",
-            },
+            {"optimize_config": optimize_config, "workspace": "default", "output": "tuned-results"},
             ctx=ctx,
             sdk=cast(NeMoPlatform, _StubSDK()),
         )
@@ -907,12 +685,7 @@ def test_run_rejects_fileset_output_without_sdk(tmp_path: Path, ctx: JobContext)
         pytest.raises(LocalRunError, match="requires a 'sdk: NeMoPlatform'"),
     ):
         OptimizeJob().run(
-            {
-                "strategy": "hpo",
-                "optimize_config": optimize_config,
-                "workspace": "default",
-                "output": "tuned-results",
-            },
+            {"optimize_config": optimize_config, "workspace": "default", "output": "tuned-results"},
             ctx=ctx,
         )
 
@@ -927,7 +700,6 @@ def test_run_reports_missing_artifacts_on_publish(tmp_path: Path, ctx: JobContex
     ):
         OptimizeJob().run(
             {
-                "strategy": "hpo",
                 "optimize_config": optimize_config,
                 "workspace": "default",
                 "output": str(tmp_path / "published"),

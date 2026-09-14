@@ -177,13 +177,12 @@ nemo agents evaluate \
 ```bash
 BUNDLE="$(pwd)/plugins/nemo-agents/examples/calculator-agent/src/calculator_agent"
 nemo agents optimize prepare-fileset \
-  --strategy hpo \
   --source "$BUNDLE" \
   --optimize-config calculator-optimize.yml \
   --fileset calculator-optimize \
   --agent calculator-agent
 nemo agents optimize \
-  --strategy hpo \
+  --strategy nat \
   --optimize-config-fileset default/calculator-optimize \
   --optimize-config calculator-optimize.yml \
   --agent calculator-agent

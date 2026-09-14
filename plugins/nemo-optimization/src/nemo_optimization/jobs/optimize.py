@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""OptimizeJob — strategy-based Fabric agent optimization (``nemo agents optimize``).
+"""OptimizeJob — Agents numeric HPO (``nemo agents optimize``).
 
 Implementation lives in ``nemo_optimization``; registration and HTTP mounting
 are owned by the agents plugin (``agents.optimize``).
@@ -51,8 +51,7 @@ from pydantic import BaseModel
 from nemo_optimization.agents import resolve_agent_config
 from nemo_optimization.preflight import preflight_validate_llm_models
 from nemo_optimization.router import OptimizeRouter
-from nemo_optimization.schemas.optimize import FILESET_REQUIRED, OptimizeSpec, OptimizeStrategy, OptimizeSubmitSpec
-from nemo_optimization.strategies import PRIMARY_ARTIFACT_KEY, discover_optimization_strategies
+from nemo_optimization.schemas.optimize import FILESET_REQUIRED, OptimizeSpec, OptimizeSubmitSpec
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +67,10 @@ OPTIMIZE_TASK_IMAGE = "nmp-cpu-tasks"
 
 
 class OptimizeJob(NemoJob):
-    """Run the selected Fabric agent optimization strategy."""
+    """Run a Fabric-native numeric optimize study via the Agents optimize job."""
 
     name: ClassVar[str] = "optimize"
-    description: ClassVar[str] = "Optimize a Fabric agent with HPO or Prompt Master."
+    description: ClassVar[str] = "Optimize a Fabric agent workflow (numeric HPO)."
     container: ClassVar[str] = "cpu-tasks"
     job_collection_path: ClassVar[str | None] = None
     generate_legacy_verbs: ClassVar[bool] = False
@@ -142,73 +141,32 @@ class OptimizeJob(NemoJob):
         spec = OptimizeSpec.model_validate(config)
         with _staged_bundle(spec, ctx=ctx, sdk=sdk) as (config_path, bundle_root):
             optimize_config = _load_yaml(config_path)
-            source_agent_config = (
-                _load_local_source_agent_config(spec.agent) if spec.strategy == OptimizeStrategy.PROMPT_MASTER else None
-            )
             agent_config = resolve_agent_config(spec.agent, workspace=spec.workspace, sdk=sdk)
-            with _bundle_workdir(bundle_root):
-                if spec.strategy == OptimizeStrategy.HPO:
-                    preflight_validate_llm_models(
-                        optimize_config,
-                        workspace=spec.workspace,
-                        sdk=sdk,
-                        agent_config=agent_config,
-                    )
-                    with _staged_dataset(
-                        optimize_config,
-                        workspace=spec.workspace,
-                        ctx=ctx,
-                        sdk=sdk,
-                    ) as staged_config:
-                        logger.info("Dispatching agents optimize HPO strategy via OptimizeRouter")
-                        result = OptimizeRouter.dispatch(
-                            agent_config=agent_config,
-                            optimize_config=staged_config,
-                            ctx=ctx,
-                            sdk=sdk,
-                        )
-                else:
-                    if agent_config is None:
-                        raise LocalRunError("The prompt-master strategy requires a resolved platform agent.")
-                    strategies = discover_optimization_strategies()
-                    strategy = strategies.get(spec.strategy)
-                    if strategy is None:
-                        raise LocalRunError(
-                            f"Optimization strategy {spec.strategy!r} is not installed. "
-                            f"Available plugin strategies: {sorted(strategies)}"
-                        )
-                    strategy.validate_config(optimize_config, agent=spec.agent)
-                    logger.info("Dispatching agents optimize strategy %s", spec.strategy)
-                    result = strategy.run(
-                        agent_config=agent_config,
-                        source_agent_config=source_agent_config,
-                        config=optimize_config,
-                        ctx=ctx,
-                        sdk=sdk,
-                    )
+            preflight_validate_llm_models(
+                optimize_config,
+                workspace=spec.workspace,
+                sdk=sdk,
+                agent_config=agent_config,
+            )
+            with (
+                _bundle_workdir(bundle_root),
+                _staged_dataset(
+                    optimize_config,
+                    workspace=spec.workspace,
+                    ctx=ctx,
+                    sdk=sdk,
+                ) as staged_config,
+            ):
+                logger.info("Dispatching agents optimize study via OptimizeRouter")
+                result = OptimizeRouter.dispatch(
+                    agent_config=agent_config,
+                    optimize_config=staged_config,
+                    ctx=ctx,
+                    sdk=sdk,
+                )
 
-        primary_artifact_value = result.pop(PRIMARY_ARTIFACT_KEY, None)
-        primary_artifact = Path(primary_artifact_value) if isinstance(primary_artifact_value, str) else None
-        published = _publish_results(
-            spec.output,
-            workspace=spec.workspace,
-            ctx=ctx,
-            sdk=sdk,
-            primary_artifact=primary_artifact,
-        )
+        published = _publish_results(spec.output, workspace=spec.workspace, ctx=ctx, sdk=sdk)
         return result if published is None else {**result, "output": published}
-
-
-def _load_local_source_agent_config(agent: str | None) -> dict[str, Any] | None:
-    """Load the original Platform agent mapping so local output preserves its schema."""
-    if agent is None:
-        return None
-    agent_path = Path(agent).expanduser()
-    if not agent_path.is_file():
-        return None
-    from nemo_agents_plugin.agent_config import load_agent_config
-
-    return load_agent_config(agent_path).model_dump(mode="json", exclude_none=True)
 
 
 def _profiles_unavailable(profile: str) -> PlatformJobDependencyUnavailableError:
@@ -409,7 +367,6 @@ def _publish_results(
     workspace: str,
     ctx: JobContext,
     sdk: NeMoPlatform | None,
-    primary_artifact: Path | None = None,
 ) -> dict[str, str] | None:
     """Copy the study's artifacts to *output*, returning a pointer for the job result.
 
@@ -426,15 +383,6 @@ def _publish_results(
     """
     if output is None:
         return None
-
-    if primary_artifact is not None and Path(output).suffix.lower() in {".yaml", ".yml"}:
-        if not primary_artifact.is_file():
-            raise FileNotFoundError(f"Optimization strategy did not write its primary artifact: {primary_artifact}")
-        local_file = Path(output).expanduser().resolve()
-        local_file.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(primary_artifact, local_file)
-        logger.info("Published optimized config from %s to local file %s", primary_artifact, local_file)
-        return {"type": "local_file", "path": str(local_file)}
 
     # Soft dependency, mirroring nemo_optimization.agents' lazy imports.
     from nemo_agents_plugin.jobs.fileset_io import split_fileset_ref, upload_to_fileset

@@ -20,14 +20,13 @@ import re
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import yaml
 from nemo_platform_plugin.refs import FILESET_REF_PATTERN
 
 from nemo_optimization.fabric import FABRIC_AGENT_SCHEMA_VERSION, is_fabric_agent_config, looks_like_nat_config
 from nemo_optimization.schemas.optimize import is_fileset_relative
-from nemo_optimization.strategies import OptimizationStrategyDiscoveryError, discover_optimization_strategies
 
 
 class BundlePreflightError(ValueError):
@@ -54,7 +53,6 @@ def preflight_bundle(
     source: Path,
     optimize_config: str,
     *,
-    strategy: Literal["hpo", "prompt-master"] = "hpo",
     agent: str | None = None,
 ) -> dict[str, Any]:
     """Validate the bundle rooted at *source* and return its parsed optimize config.
@@ -62,39 +60,20 @@ def preflight_bundle(
     Args:
         source: Directory that will be uploaded as the fileset.
         optimize_config: Path to the optimize YAML, relative to *source*.
-        strategy: Optimization strategy that will consume the config.
-        agent: Optional platform agent ref supplying the Agent under Test. Required for
-            ``prompt-master`` and optional for ``hpo`` when the config embeds an agent.
+        agent: Optional platform agent ref supplying the Agent under Test, for configs that
+            carry only the optimizer/eval overlay.
 
     Raises:
         BundlePreflightError: with every problem found, one per line, so a bundle with several
             bad paths is fixed in one pass rather than one round trip per path.
     """
     config = _load_config(source, optimize_config)
-    if strategy == "hpo":
-        problems = [
-            *_agent_problems(config, agent=agent),
-            *_optimizer_problems(config),
-            *_path_problems(source, config),
-            *_symlink_problems(source),
-        ]
-    else:
-        problems = [*_symlink_problems(source)]
-        discovery_failed = False
-        try:
-            strategy_plugin = discover_optimization_strategies().get(strategy)
-        except OptimizationStrategyDiscoveryError as exc:
-            problems.append(str(exc))
-            strategy_plugin = None
-            discovery_failed = True
-        if strategy_plugin is None:
-            if not discovery_failed:
-                problems.append(f"optimization strategy {strategy!r} is not installed")
-        else:
-            try:
-                strategy_plugin.validate_config(config, agent=agent)
-            except ValueError as exc:
-                problems.append(str(exc))
+    problems = [
+        *_agent_problems(config, agent=agent),
+        *_optimizer_problems(config),
+        *_path_problems(source, config),
+        *_symlink_problems(source),
+    ]
     if problems:
         raise BundlePreflightError(
             f"{len(problems)} problem(s) in optimize bundle {str(source)!r}:\n"

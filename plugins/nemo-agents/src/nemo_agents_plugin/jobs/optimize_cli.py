@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Annotated, Any, Literal, Optional
+from typing import Annotated, Any, Optional
 
 import typer
 from nemo_agents_plugin.cli_context import BaseUrlOption, resolve_base_url, resolve_context_headers
@@ -37,13 +37,6 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
         help="Validate an optimize bundle and upload it to a fileset for `optimize`.",
     )
     def prepare_fileset(
-        strategy: Annotated[
-            Literal["hpo", "prompt-master"],
-            typer.Option(
-                "--strategy",
-                help="Optimization strategy that will consume this bundle.",
-            ),
-        ],
         source: Annotated[
             Path,
             typer.Option(
@@ -74,8 +67,8 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
             Optional[str],
             typer.Option(
                 "--agent",
-                help="Platform agent supplying the target prompt for prompt-master, or the "
-                "Agent under Test for hpo configs that carry only an optimizer/eval overlay.",
+                help="Platform agent supplying the Agent under Test, for configs that carry only "
+                "the optimizer and eval overlay.",
             ),
         ] = None,
         check_models: Annotated[
@@ -94,19 +87,18 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
         from nemo_optimization.bundle import BundlePreflightError, preflight_bundle
 
         try:
-            config = preflight_bundle(source, optimize_config, strategy=strategy, agent=agent)
+            config = preflight_bundle(source, optimize_config, agent=agent)
         except BundlePreflightError as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=1)
 
         ws, name = split_fileset_ref(fileset, workspace)
-        should_check_models = check_models and strategy == "hpo"
-        if dry_run and not should_check_models:
+        if dry_run and not check_models:
             typer.echo(f"Preflight passed. Would upload {source}/ to fileset {ws}/{name}.")
             return
 
         sdk = _platform_sdk(resolve_base_url(base_url))
-        if should_check_models:
+        if check_models:
             _preflight_models(config, workspace=workspace, agent=agent, sdk=sdk)
         if dry_run:
             typer.echo(f"Preflight passed. Would upload {source}/ to fileset {ws}/{name}.")
@@ -122,7 +114,6 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
         typer.echo("Submit the study with:\n")
         typer.echo(
             f"  nemo agents optimize \\\n"
-            f"    --strategy {strategy} \\\n"
             f"    --optimize-config-fileset {ws}/{name} \\\n"
             f"    --optimize-config {optimize_config} \\\n"
             + (f"    --agent {agent} \\\n" if agent else "")

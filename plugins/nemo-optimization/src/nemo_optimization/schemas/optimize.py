@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import re
-from enum import StrEnum
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
@@ -16,33 +15,18 @@ from pydantic import BaseModel, Field, ValidationInfo, model_validator
 FILESET_REQUIRED = (
     "optimize_config_fileset is required when submitting an optimize study: the job runs on the "
     "platform and cannot read the submitting client's filesystem.  Stage the bundle first with "
-    "`nemo agents optimize prepare-fileset --strategy <hpo|prompt-master> --source <dir> "
-    "--optimize-config <file> --fileset <name>`, "
+    "`nemo agents optimize prepare-fileset --source <dir> --optimize-config <file> --fileset <name>`, "
     "then launch with the fileset ref it prints.  (Absolute-path configs remain available for "
     "co-located programmatic local runs.)"
 )
 
 
-class OptimizeStrategy(StrEnum):
-    """Supported top-level optimization strategies."""
-
-    __cli_metavar__ = "hpo | prompt-master"
-
-    HPO = "hpo"
-    PROMPT_MASTER = "prompt-master"
-
-
 class OptimizeSpec(BaseModel):
-    """Spec for an Agents optimization run (``nemo agents optimize``)."""
-
-    strategy: OptimizeStrategy = Field(
-        description="Optimization strategy. Use 'hpo' for the existing numeric/categorical study "
-        "or 'prompt-master' to optimize a platform agent's system instructions.",
-    )
+    """Spec for an Agents optimize study (``nemo agents optimize``)."""
 
     optimize_config: str = Field(
         min_length=1,
-        description="Location of the strategy configuration YAML. With optimize_config_fileset "
+        description="Location of the Fabric-native optimization YAML.  With optimize_config_fileset "
         "set — required for remote submission — this is a path relative to the fileset root.  Without it "
         "(programmatic local runs only) it is an absolute path on the host running the job.",
     )
@@ -60,26 +44,21 @@ class OptimizeSpec(BaseModel):
     agent: str | None = Field(
         default=None,
         min_length=1,
-        description="Agent source: a platform reference ('name' or 'workspace/name') or a local "
-        "nemo-agents-spec-v1 agent.yaml path. Required by prompt-master; optional for hpo when "
-        "the optimization config includes an inline Fabric agent package.",
+        description="Optional platform agent reference ('name' or 'workspace/name'). "
+        "When omitted, the optimization config must include an inline Fabric agent package.",
     )
     output: OutputTarget | None = Field(
         default=None,
-        description="Where to publish the optimization artifacts (including the optimized config, "
-        "plus strategy-specific summaries and evidence) once the run succeeds — either a local directory "
+        description="Where to publish the study artifacts (optimized config, trials dataframe, "
+        "pareto plots, ATIF evidence) once the study succeeds — either a local directory "
         "(path-shaped: starts with '/', './', '../', '~/') or a NeMo Platform fileset "
         "reference ('name' or 'workspace/name').  Filesets are created on demand if missing.  "
-        "For a local prompt-master run, a .yaml or .yml path writes the optimized agent config "
-        "directly to that file. "
         "This is in addition to the per-job artifacts that ``ctx.results.save`` always "
         "registers; it gives remote clients a stable, addressable location to read from.",
     )
 
     @model_validator(mode="after")
     def _validate_config_location(self) -> "OptimizeSpec":
-        if self.strategy == "prompt-master" and self.agent is None:
-            raise ValueError("agent is required when strategy is 'prompt-master'.")
         if self.optimize_config_fileset is None:
             return self
         if not re.match(ENTITY_REF_PATTERN, self.optimize_config_fileset):

@@ -10,6 +10,7 @@ dependencies = [
     "nemo-platform-plugin",
     "nemo-deployments-plugin",
     "nemo-optimization-plugin",
+    "nemo-agent-optimization-plugin",
     "nemo-agents-example-calculator",
     "nemo-agents-example-email-phishing",
     "nemo-agents-example-email-security",
@@ -69,7 +70,7 @@ agents = "nemo_agents_plugin.skills:skills_dir"
 # POC: agent-improvement workflow
 "agents.evaluate-suite" = "nemo_agents_plugin.jobs.evaluate_suite:EvaluateSuiteJob"
 "agents.analyze" = "nemo_agents_plugin.jobs.analyze_batch:AnalyzeBatchJob"
-"agents.optimize" = "nemo_optimization.jobs.optimize:OptimizeJob"
+"agents.optimize" = "nemo_agent_optimization_plugin.jobs.optimize:OptimizeJob"
 "agents.optimize-skills" = "nemo_agents_plugin.jobs.optimize_skills:OptimizeSkillsJob"
 "agents.package-agent" = "nemo_agents_plugin.jobs.package_agent:PackageAgentJob"
 
@@ -120,6 +121,7 @@ nemo-deployments-plugin = { workspace = true }
 nemo-platform = { workspace = true }
 nemo-platform-plugin = { workspace = true }
 nemo-optimization-plugin = { workspace = true }
+nemo-agent-optimization-plugin = { workspace = true }
 nemo-agents-example-calculator = { workspace = true }
 nemo-agents-example-email-phishing = { workspace = true }
 nemo-agents-example-email-security = { workspace = true }
