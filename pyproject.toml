@@ -448,6 +448,7 @@ nemo-agents-example-email-security = { workspace = true }
 nemo-customizer-plugin = { workspace = true }
 nemo-automodel-plugin = { workspace = true }
 nemo-optimization-plugin = { workspace = true }
+nemo-agent-optimization-plugin = { workspace = true }
 nemo-unsloth-plugin = { workspace = true }
 nemo-rl-plugin = { workspace = true }
 nmp-automodel = { workspace = true }
@@ -518,6 +519,7 @@ members = [
   "plugins/nemo-customizer",
   "plugins/nemo-automodel",
   "plugins/nemo-optimization",
+  "plugins/nemo-agent-optimization",
   "plugins/nemo-unsloth",
   "plugins/nemo-rl",
   "services/automodel",

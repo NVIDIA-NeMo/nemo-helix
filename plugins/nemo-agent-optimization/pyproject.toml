@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "nemo-agent-optimization-plugin"
+version = "0.1.0"
+description = "Entry point for `nemo agents optimize` — discovers and dispatches nemo.optimization-strategy plugins."
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "nemo-platform",
+  "nemo-platform-plugin",
+  "pydantic>=2.12.0",
+  "pyyaml>=6.0.3",
+  "typer>=0.20.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nemo_agent_optimization_plugin"]
+
+[tool.uv.sources]
+nemo-platform = { workspace = true }
+nemo-platform-plugin = { workspace = true }
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
