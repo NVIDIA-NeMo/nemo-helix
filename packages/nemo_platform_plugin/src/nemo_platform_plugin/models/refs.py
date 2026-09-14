@@ -23,6 +23,7 @@ class ResolvedModelReference:
     url: str
     name: str
     host_url: str | None
+    served_model_name: str | None = None
 
 
 def parse_workspace_name_ref(ref: str, *, label: str, expected_format: str = "workspace/name") -> tuple[str, str]:
@@ -59,12 +60,14 @@ def resolved_model_reference(
     route_workspace: str,
     route_model_name: str,
     host_url: str | None,
+    served_model_name: str | None = None,
 ) -> ResolvedModelReference:
     """Build route details for a resolved model entity."""
     return ResolvedModelReference(
         url=model_entity_route_openai_url(base_url=base_url, workspace=route_workspace, name=route_model_name),
         name=name,
         host_url=host_url,
+        served_model_name=served_model_name,
     )
 
 

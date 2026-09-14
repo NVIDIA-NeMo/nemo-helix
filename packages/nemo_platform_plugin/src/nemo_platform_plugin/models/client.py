@@ -49,7 +49,7 @@ from nemo_platform_plugin.models.refs import (
     resolved_model_reference,
     warn_provider_host_url_resolution_failure,
 )
-from nemo_platform_plugin.models.types import ModelDeployment, ModelEntity
+from nemo_platform_plugin.models.types import ModelDeployment, ModelEntity, ModelProvider
 
 _INFERENCE_GATEWAY_PREFIX = "/apis/inference-gateway/v2/workspaces"
 
@@ -106,6 +106,15 @@ def _split_provider_id(deployment: DeploymentLike) -> tuple[str, str]:
         )
     workspace, name = provider_id.split("/", 1)
     return workspace, name
+
+
+def _served_model_name(provider: ModelProvider, model_entity: ModelEntity) -> str | None:
+    """Return the provider model id mapped to this Model Entity."""
+    entity_ref = f"{model_entity.workspace}/{model_entity.name}"
+    for mapping in provider.served_models or ():
+        if mapping.model_entity_id == entity_ref:
+            return mapping.served_model_name
+    return None
 
 
 def _seconds_since_creation(entry_timestamp: datetime | str | None, created_at: datetime | None) -> int | None:
@@ -263,16 +272,18 @@ class ModelsClient(_ModelsMethods, _ModelsUrlMixin, NemoClient):
         """Resolve ``workspace/model`` to inference-gateway route details."""
         workspace, name = parse_workspace_name_ref(ref, label="Model reference", expected_format="workspace/model_name")
         model_entity = self.get_model(name=name, workspace=workspace).data()
+        provider = self._try_resolve_model_provider_with_warning(model_entity)
         return resolved_model_reference(
             base_url=self.base_url,
             name=name,
             route_workspace=model_entity.workspace,
             route_model_name=model_entity.name,
-            host_url=self._try_resolve_model_provider_host_url_with_warning(model_entity),
+            host_url=provider.host_url if provider is not None else None,
+            served_model_name=_served_model_name(provider, model_entity) if provider is not None else None,
         )
 
-    def _try_resolve_model_provider_host_url_with_warning(self, model_entity: ModelEntity) -> str | None:
-        """Resolve the model entity's first provider host URL, if available."""
+    def _try_resolve_model_provider_with_warning(self, model_entity: ModelEntity) -> ModelProvider | None:
+        """Resolve the Model Entity's first provider, if available."""
         provider_parts = first_provider_ref(model_entity.model_providers)
         if provider_parts is None:
             return None
@@ -282,7 +293,7 @@ class ModelsClient(_ModelsMethods, _ModelsUrlMixin, NemoClient):
         except Exception as exc:
             warn_provider_host_url_resolution_failure(provider_ref, exc, not_found_error_type=NotFoundError)
             return None
-        return provider.host_url
+        return provider
 
     def get_provider_route_openai_url_for_deployment(self, deployment: DeploymentLike) -> str:
         """Fetch a deployment's ModelProvider and return its OpenAI route URL."""
@@ -383,16 +394,18 @@ class AsyncModelsClient(_ModelsMethods, _ModelsUrlMixin, AsyncNemoClient):
         """Resolve ``workspace/model`` to inference-gateway route details."""
         workspace, name = parse_workspace_name_ref(ref, label="Model reference", expected_format="workspace/model_name")
         model_entity = (await self.get_model(name=name, workspace=workspace)).data()
+        provider = await self._try_resolve_model_provider_with_warning(model_entity)
         return resolved_model_reference(
             base_url=self.base_url,
             name=name,
             route_workspace=model_entity.workspace,
             route_model_name=model_entity.name,
-            host_url=await self._try_resolve_model_provider_host_url_with_warning(model_entity),
+            host_url=provider.host_url if provider is not None else None,
+            served_model_name=_served_model_name(provider, model_entity) if provider is not None else None,
         )
 
-    async def _try_resolve_model_provider_host_url_with_warning(self, model_entity: ModelEntity) -> str | None:
-        """Resolve the model entity's first provider host URL, if available."""
+    async def _try_resolve_model_provider_with_warning(self, model_entity: ModelEntity) -> ModelProvider | None:
+        """Resolve the Model Entity's first provider, if available."""
         provider_parts = first_provider_ref(model_entity.model_providers)
         if provider_parts is None:
             return None
@@ -402,7 +415,7 @@ class AsyncModelsClient(_ModelsMethods, _ModelsUrlMixin, AsyncNemoClient):
         except Exception as exc:
             warn_provider_host_url_resolution_failure(provider_ref, exc, not_found_error_type=NotFoundError)
             return None
-        return provider.host_url
+        return provider
 
     async def get_provider_route_openai_url_for_deployment(self, deployment: DeploymentLike) -> str:
         """Fetch a deployment's ModelProvider and return its OpenAI route URL."""

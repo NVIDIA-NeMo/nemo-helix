@@ -20,7 +20,8 @@ from nemo_evaluator.jobs.retrieve_eval import (
 )
 from nemo_evaluator_sdk.metrics.retrieval import RetrievalNDCGMetric, RetrievalRecallMetric
 from nemo_evaluator_sdk.retrieval.beir import BeirDataset
-from nemo_evaluator_sdk.values.models import Model
+from nemo_evaluator_sdk.retrieval.nim_ranking import NimRankingError
+from nemo_evaluator_sdk.values.models import Model, ModelRef, RankingInference
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult, AggregateRangeScore
 from nemo_evaluator_sdk.values.retrieval import Retrieval
@@ -28,7 +29,8 @@ from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
 from nemo_platform_plugin.jobs.api_factory import CPUExecutionProviderSpec
-from nemo_platform_plugin.sdk import NeMoPlatform
+from nemo_platform_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
 from pydantic import ValidationError
 from pytest_mock import MockerFixture
 
@@ -120,6 +122,69 @@ async def test_to_spec_forwards_retrieval_pipeline_fields() -> None:
     assert canonical.target.embedding_dimensions == 1024
 
 
+async def test_to_spec_preflights_and_stamps_reranker_model_ref(mocker: MockerFixture) -> None:
+    resolved = Model(
+        url="https://igw.example.test/model/reranker/-/v1",
+        name="reranker",
+        served_model_name="publisher/reranker",
+    )
+    stamped = resolved.model_copy(update={"inference": RankingInference(contract="hosted-rerank-v1", path="/rerank")})
+    resolve = mocker.patch(
+        "nemo_evaluator.jobs.retrieve_eval.PlatformMetricModelResolver.resolve_model",
+        new=mocker.AsyncMock(return_value=resolved),
+    )
+    ranker = mocker.patch("nemo_evaluator.jobs.retrieve_eval.NimRankingClient")
+    ranker.return_value.preflight = mocker.AsyncMock(return_value=stamped)
+    submit = RetrieveEvalInputSpec(
+        dataset=FilesetRef("default/data"),
+        target=RetrievalInputSpec(
+            embeddings=_spec().target.embeddings,
+            reranker=ModelRef("default/reranker"),
+        ),
+    )
+
+    async with AsyncNeMoPlatform(base_url="https://platform.example.test", workspace="default") as async_sdk:
+        canonical = await RetrieveEvalJob.to_spec(
+            submit,
+            workspace="default",
+            entity_client=object(),
+            async_sdk=async_sdk,
+            is_local=False,
+        )
+
+    resolve.assert_awaited_once()
+    ranker.return_value.preflight.assert_awaited_once()
+    assert isinstance(canonical, RetrieveEvalSpec)
+    assert canonical.target.reranker == stamped
+
+
+async def test_to_spec_rejects_incompatible_reranker_model_ref(mocker: MockerFixture) -> None:
+    resolved = Model(url="https://igw.example.test/v1", name="reranker")
+    mocker.patch(
+        "nemo_evaluator.jobs.retrieve_eval.PlatformMetricModelResolver.resolve_model",
+        new=mocker.AsyncMock(return_value=resolved),
+    )
+    ranker = mocker.patch("nemo_evaluator.jobs.retrieve_eval.NimRankingClient")
+    ranker.return_value.preflight = mocker.AsyncMock(side_effect=NimRankingError("no compatible ranking contract"))
+    submit = RetrieveEvalInputSpec(
+        dataset=FilesetRef("default/data"),
+        target=RetrievalInputSpec(
+            embeddings=_spec().target.embeddings,
+            reranker=ModelRef("default/reranker"),
+        ),
+    )
+
+    async with AsyncNeMoPlatform(base_url="https://platform.example.test", workspace="default") as async_sdk:
+        with pytest.raises(ValueError, match="Reranker ModelRef 'default/reranker'.*no compatible"):
+            await RetrieveEvalJob.to_spec(
+                submit,
+                workspace="default",
+                entity_client=object(),
+                async_sdk=async_sdk,
+                is_local=False,
+            )
+
+
 def test_truncation_json_schema_marks_null_as_allowed() -> None:
     schema = RetrievalInputSpec.model_json_schema()["properties"]["truncate_long_documents"]
     assert schema.get("nullable") is True
@@ -141,6 +206,9 @@ async def test_compile_builds_cpu_retrieve_eval_task() -> None:
     assert step.name == "retrieve-eval"
     assert isinstance(step.executor, CPUExecutionProviderSpec)
     assert step.executor.container.command == ["nemo_evaluator.tasks.retrieve_eval"]
+    environment = step.environment
+    assert environment is not None
+    assert any(variable.name == PERSISTENT_JOB_STORAGE_PATH_ENVVAR for variable in environment)
 
 
 def test_run_validates_fileset_and_persists_nemotron_keys(tmp_path: Path, mocker: MockerFixture) -> None:
