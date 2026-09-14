@@ -34,7 +34,15 @@ describe('buildOptimizeConfig', () => {
 
   it('keeps float bounds float in the YAML so they are not sampled as integers', () => {
     const yaml = buildOptimizeConfig({
-      parameters: [{ path: 'models.default.temperature', label: 'temperature', type: 'float', low: 0, high: 1 }],
+      parameters: [
+        {
+          path: 'models.default.temperature',
+          label: 'temperature',
+          type: 'float',
+          low: 0,
+          high: 1,
+        },
+      ],
       trials: 8,
     });
 
