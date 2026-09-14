@@ -117,16 +117,22 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
    * same fileset as training. Cleared when the fileset holds no validation files, so the
    * backend applies the auto-split this picker already announces. RL takes one reference
    * and finds both files inside it.
+   *
+   * File discovery is the only thing that can tell us whether the fileset carries
+   * validation rows, and it reports none both while it is still running and when it has
+   * failed. Writing in those states would assert an absence nobody established, and would
+   * wipe a reference the user entered by hand on the field itself.
    */
-  const { hasValidation } = validation;
+  const { hasValidation, isPending: isDiscovering, discoveryError } = validation;
   useEffect(() => {
     if (backend === 'rl') return;
     const field =
       backend === 'automodel' ? 'automodel.dataset.validation' : 'unsloth.dataset.validation_path';
-    setValue(field, hasValidation ? ((selectedRef as string) ?? undefined) : undefined, {
-      shouldValidate: false,
-    });
-  }, [backend, hasValidation, selectedRef, setValue]);
+    const ref = (selectedRef as string) || undefined;
+    if (!ref || isDiscovering || discoveryError) return;
+
+    setValue(field, hasValidation ? ref : undefined, { shouldValidate: false });
+  }, [backend, hasValidation, isDiscovering, discoveryError, selectedRef, setValue]);
 
   const onCreate = (createdFileset: Fileset) => {
     setSelectedRef(getEntityReference(createdFileset));
