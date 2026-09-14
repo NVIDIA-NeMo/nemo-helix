@@ -11,15 +11,18 @@ import socket
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from datetime import datetime
 from typing import Any
 
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.errors import ConflictError, NotFoundError
 from nemo_platform_plugin.controller import NemoController
+from nemo_platform_plugin.entities.base import SyncEntityClient
+from nemo_platform_plugin.entities.client import EntitiesClient
 from nemo_platform_plugin.jobs.client import AsyncJobsClient
 from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
 from nemo_platform_plugin.jobs.types import CreatePlatformJobRequest
-from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
+from nemo_platform_plugin.sdk_provider import get_async_platform_sdk, get_platform_sdk
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
 from nemo_scaled_evals_plugin.jobs.naming import (
     evaluation_execution_job_name,
@@ -27,6 +30,7 @@ from nemo_scaled_evals_plugin.jobs.naming import (
 )
 from nemo_scaled_evals_plugin.jobs.specs import EvaluationExecutionSpec, TaskImageBuildSpec
 from nemo_scaled_evals_plugin.jobs.task_image_build import TaskImageBuildJob
+from nemo_scaled_evals_plugin.projection import EvaluationProjectionWriter
 from scaled_evals.api.build.queue_worker import TaskBuildWorker
 from scaled_evals.api.db import pooled_connection
 from scaled_evals.api.repositories.build_repository import TaskBuildJob, TaskBuildRepository
@@ -62,6 +66,9 @@ class ScaledEvalsJobsController(NemoController):
         self._jobs: AsyncJobsClient | None = None
         self._worker_id = f"scaled-evals-jobs:{socket.gethostname()}:{time.time_ns()}"
         self._healthy = True
+        self._projection: EvaluationProjectionWriter | None = None
+        self._projection_watermark: datetime | None = None
+        self._projection_resumed = False
 
     @property
     def jobs(self) -> AsyncJobsClient:
@@ -82,6 +89,15 @@ class ScaledEvalsJobsController(NemoController):
             and not settings.platform_jobs_image
         ):
             raise RuntimeError("SCALED_EVALS_PLATFORM_JOBS_IMAGE is required when Platform Jobs are enabled")
+        if settings.entity_store_projection_enabled:
+            entities = client_from_platform(
+                get_platform_sdk(as_service="scaled-evals", internal=True),
+                EntitiesClient,
+            )
+            self._projection = EvaluationProjectionWriter(
+                SyncEntityClient(entities),
+                workspace=settings.entity_store_workspace,
+            )
 
     async def list_objects(self) -> list:
         """Return no objects because reconciliation is queue-oriented."""
@@ -123,7 +139,32 @@ class ScaledEvalsJobsController(NemoController):
                 ("reconcile_evaluation", self._reconcile_one_evaluation),
                 ("cancel_evaluations", self._cancel_evaluation_jobs),
             ]
+        if self._projection is not None:
+            phases.append(("project_evaluations", self._project_evaluations))
         return phases
+
+    async def _project_evaluations(self) -> None:
+        """Project one bounded batch of changed evaluation rows into entities."""
+        writer = self._projection
+        if writer is None:
+            return
+        if not self._projection_resumed:
+            self._projection_watermark = await asyncio.to_thread(writer.watermark)
+            self._projection_resumed = True
+        rows = await asyncio.to_thread(
+            self._changed_evaluations,
+            self._projection_watermark,
+            settings.entity_store_projection_batch_size,
+        )
+        for row in rows:
+            await asyncio.to_thread(writer.project, row)
+            # Advance only past rows that were actually written, so a failure
+            # mid-batch resumes at the first unprojected row on the next pass.
+            self._projection_watermark = row["updated_at"]
+
+    def _changed_evaluations(self, updated_after: datetime | None, limit: int) -> list[dict[str, Any]]:
+        with pooled_connection() as conn:
+            return EvaluationRepository(conn).list_changed_since(updated_after, limit=limit)
 
     async def _submit_one_build(self) -> None:
         job = await asyncio.to_thread(self._claim_build)

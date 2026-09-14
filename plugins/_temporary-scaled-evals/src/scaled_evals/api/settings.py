@@ -212,6 +212,27 @@ class Settings(BaseSettings):
         default="",
         validation_alias="SCALED_EVALS_PLATFORM_JOBS_REGISTRY_AUTH_SECRET",
     )
+    # Entity Store migration flags. Projection writes a derived read model while
+    # Postgres stays authoritative; reads only flip once parity is established,
+    # so the two are deliberately separate switches.
+    entity_store_projection_enabled: bool = Field(
+        default=False,
+        validation_alias="SCALED_EVALS_ENTITY_STORE_PROJECTION_ENABLED",
+    )
+    entity_store_reads_enabled: bool = Field(
+        default=False,
+        validation_alias="SCALED_EVALS_ENTITY_STORE_READS_ENABLED",
+    )
+    entity_store_workspace: str = Field(
+        default="default",
+        validation_alias="SCALED_EVALS_ENTITY_STORE_WORKSPACE",
+    )
+    entity_store_projection_batch_size: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        validation_alias="SCALED_EVALS_ENTITY_STORE_PROJECTION_BATCH_SIZE",
+    )
     # Registry the finalized sandbox images are pushed to and pulled from.
     # Local compose: the in-stack `registry:2` service. Remote: NGC. Everything
     # that differs local-vs-remote lives here — the build logic has no hardcoded
