@@ -626,6 +626,31 @@ async def test_same_skill_from_both_injection_and_task_files_fails_task(
     assert "also injected as the runtime skill 'code-review'" in error["error"]
 
 
+async def test_same_skill_via_a_dotdot_seed_path_is_still_a_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # seed_workspace normalizes keys before writing, so a path that only reaches the injected bundle
+    # after normalization must be caught too.
+    from nemo_evaluator_sdk.agent_eval.runtimes.fabric.skills import AgentSkill
+
+    _install_fake_fabric(monkeypatch)
+    skill = AgentSkill.from_directory(_skill_bundle(tmp_path / "src"))
+    provider = _FakeProvider()
+    runtime = FabricAgentRuntime(_CODEX_CONFIG, sandbox=provider, skills=[skill])  # type: ignore[arg-type]
+    task = AgentEvalTask(
+        id="collision-normalized",
+        intent="...",
+        inputs={
+            "instruction": "Do something.",
+            "files": {".agents/skills/other/../code-review/SKILL.md": "# override"},
+        },
+    )
+    (trial,) = await runtime.run_tasks([task], AgentEvalRunConfig(work_dir=tmp_path))
+
+    assert trial.status == AgentEvalTrialStatus.FAILED
+    assert trial.metadata["error_type"] == "SkillInjectionError"
+
+
 async def test_task_seeded_skill_coexists_with_a_different_injected_skill(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

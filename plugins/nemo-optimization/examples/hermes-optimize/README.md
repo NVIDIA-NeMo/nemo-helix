@@ -290,6 +290,12 @@ To add an email to the eval set, run a real analyzer on it once and store its
 result as the row's `analysis` (the fixture reads `PHISHING_ANALYZER_DATASET` if
 you keep the dataset elsewhere).
 
+**Platform submission caveat:** the `nmp-cpu-tasks` job image installs only the
+`cpu-tasks` dependency group, which does not include this fixture (or the
+calculator example's server), so a CPU-profile job cannot spawn
+`phishing-analyzer-mcp`. Run this example locally, or add
+`nemo-optimization-example-phishing-analyzer` to the image you submit against.
+
 Two evaluators score each trial: the judge compares the final classification with
 the dataset label (`average_score`), and `tool_call_count` reads the ATIF
 trajectory to check the analyzer was called exactly once

@@ -364,3 +364,13 @@ def test_build_metrics_rejects_a_negative_tool_call_count_expectation() -> None:
         _build_metrics(
             {}, {"evaluators": {"once": {"_type": "tool_call_count", "tool_name": "t", "expected_calls": -1}}}
         )
+
+
+@pytest.mark.parametrize("value", [1.9, "1", True])
+def test_build_metrics_rejects_a_non_integer_tool_call_count_expectation(value: object) -> None:
+    from nemo_optimization.backends.optuna.fabric_trial import _build_metrics
+
+    with pytest.raises(StudyDriverError, match="non-negative integer"):
+        _build_metrics(
+            {}, {"evaluators": {"once": {"_type": "tool_call_count", "tool_name": "t", "expected_calls": value}}}
+        )

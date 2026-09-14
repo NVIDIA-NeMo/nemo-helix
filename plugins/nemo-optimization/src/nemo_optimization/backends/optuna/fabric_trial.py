@@ -250,9 +250,15 @@ def _build_tool_call_count_metric(evaluator: Mapping[str, Any]) -> ToolCallCount
     tool_name = evaluator.get("tool_name")
     if not isinstance(tool_name, str) or not tool_name.strip():
         raise StudyDriverError("tool_call_count evaluator requires a non-empty tool_name.")
+    expected_calls = evaluator.get("expected_calls", 1)
+    # A bool is an int in Python and a float would silently truncate, so both are rejected.
+    if isinstance(expected_calls, bool) or not isinstance(expected_calls, int):
+        raise StudyDriverError(
+            f"tool_call_count evaluator expected_calls must be a non-negative integer, got {expected_calls!r}."
+        )
     try:
-        return ToolCallCountMetric(tool_name=tool_name.strip(), expected_calls=int(evaluator.get("expected_calls", 1)))
-    except (TypeError, ValueError, ValidationError) as exc:
+        return ToolCallCountMetric(tool_name=tool_name.strip(), expected_calls=expected_calls)
+    except ValidationError as exc:
         raise StudyDriverError(
             f"tool_call_count evaluator expected_calls must be a non-negative integer: {exc}"
         ) from exc

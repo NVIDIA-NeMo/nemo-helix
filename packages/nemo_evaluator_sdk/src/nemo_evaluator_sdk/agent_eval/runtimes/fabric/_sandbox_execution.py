@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import posixpath
 import shlex
 import tempfile
 from collections.abc import Mapping, Sequence
@@ -281,14 +282,23 @@ class SandboxExecution:
 
 
 def _downloaded_path(sandbox_path: str, evidence_dir: Path) -> str | None:
-    """Where an artifact written under ``/out`` landed after the download, or None if it was not under it."""
+    """Where an artifact written under ``/out`` landed after the download, or None if it was not under it.
+
+    The downloaded tree is sandbox output, so a symlink in it may point anywhere on the host; the
+    candidate is resolved and must still sit inside the evidence dir before it becomes an evidence ref.
+    """
     try:
         relative = PurePosixPath(sandbox_path).relative_to(_OUT_DIR)
     except ValueError:
         return None
     if ".." in relative.parts:
         return None
-    return str(evidence_dir.joinpath(*relative.parts))
+    root = evidence_dir.resolve()
+    candidate = evidence_dir.joinpath(*relative.parts)
+    resolved = candidate.resolve()
+    if resolved != root and root not in resolved.parents:
+        return None
+    return str(candidate)
 
 
 def _receiver_source() -> str:
@@ -310,7 +320,8 @@ def _check_codex_skill_collision(skills: Sequence[AgentSkill], task_files: Mappi
     for skill in skills:
         injected_bundle = PurePosixPath(CODEX_SKILLS_DIR) / skill.name
         for rel_path in task_files:
-            seed = PurePosixPath(rel_path)
+            # ``seed_workspace`` normalizes the key before writing, so compare the same canonical form.
+            seed = PurePosixPath(posixpath.normpath(str(rel_path)))
             if seed == injected_bundle or injected_bundle in seed.parents:
                 raise SkillInjectionError(
                     f"task seed file {str(rel_path)!r} writes into {str(injected_bundle)!r}, which is "

@@ -192,8 +192,9 @@ class ToolCallCountMetric(MetricBase):
       names with their server (Hermes records ``mcp__<server>__<tool>``).
     * ``tool_call_count_matches`` — ``True`` when that count equals ``expected_calls``.
 
-    Reads the ATIF view of the trace. Without a readable trajectory the count is ``0`` and the match
-    is ``False``, so an agent that never produced a trace scores like one that never called the tool.
+    Reads the ATIF view of the trace. Without a readable trajectory the count is ``0``, so an agent
+    that never produced a trace scores exactly like one that never called the tool: the match is
+    ``False`` unless ``expected_calls`` is itself ``0``.
     """
 
     type: Literal[MetricType.TOOL_CALL_COUNT] = MetricType.TOOL_CALL_COUNT

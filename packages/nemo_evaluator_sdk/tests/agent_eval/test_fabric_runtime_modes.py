@@ -177,12 +177,14 @@ async def test_sandbox_artifacts_under_out_are_remapped_to_the_downloaded_tree(t
             await super().download_dir(handle, source_dir, target_dir)
             (target_dir / "artifacts").mkdir()
             (target_dir / "artifacts" / "stdout.txt").write_text("hi", encoding="utf-8")
+            (target_dir / "artifacts" / "escape-link").symlink_to("/etc")
             envelope = json.loads((target_dir / "fabric_result.json").read_text(encoding="utf-8"))
             envelope["artifacts"] = {
                 "artifacts": [
                     {"name": "stdout", "kind": "log", "path": "/out/artifacts/stdout.txt", "media_type": "text/plain"},
                     {"name": "elsewhere", "kind": "log", "path": "/tmp/not-downloaded.txt"},
                     {"name": "escape", "kind": "log", "path": "/out/../../etc/passwd"},
+                    {"name": "symlinked", "kind": "log", "path": "/out/artifacts/escape-link/hosts"},
                 ]
             }
             (target_dir / "fabric_result.json").write_text(json.dumps(envelope), encoding="utf-8")
@@ -196,6 +198,7 @@ async def test_sandbox_artifacts_under_out_are_remapped_to_the_downloaded_tree(t
     assert Path(str(stdout.ref)).read_text(encoding="utf-8") == "hi"
     assert "elsewhere" not in trial.evidence.descriptors
     assert "escape" not in trial.evidence.descriptors  # a manifest path must not point outside the evidence dir
+    assert "symlinked" not in trial.evidence.descriptors  # nor resolve outside it through a symlink in /out
 
 
 def test_container_runtime_alias_warns_and_forwards_to_sandbox_mode() -> None:
