@@ -15,7 +15,7 @@ import sys
 import time
 from pathlib import Path
 
-from nemo_evaluator_sdk.agent_eval.runtimes.fabric import _sandbox_execution as container_runtime
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric import _sandbox_execution as sandbox_execution
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric import otlp_receiver
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.otlp_receiver import EXPORT_SUFFIX, READY_FILENAME
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.otlp_writer import fold_exports, otlp_trace_path
@@ -28,8 +28,8 @@ RECEIVER = Path(otlp_receiver.__file__)
 _TASK = AgentEvalTask(id="t", intent="i", inputs={"instruction": "do it"})
 
 
-def _runtime() -> container_runtime.SandboxExecution:
-    return container_runtime.SandboxExecution(
+def _runtime() -> sandbox_execution.SandboxExecution:
+    return sandbox_execution.SandboxExecution(
         config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
         provider=object(),  # type: ignore[arg-type]
         image="img",
@@ -65,7 +65,7 @@ def test_the_receiver_runs_as_a_seeded_script_and_its_exports_fold(tmp_path: Pat
 def test_the_seeded_receiver_needs_nothing_the_sandbox_image_lacks() -> None:
     # The image ships Fabric and its harnesses, not this package or its dependencies, so a single
     # non-stdlib import would make the receiver unrunnable there.
-    seeded = _runtime()._seed_files(_TASK, None)[0][container_runtime._RECEIVER_PATH]
+    seeded = _runtime()._seed_files(_TASK, None)[0][sandbox_execution._RECEIVER_PATH]
     assert seeded == RECEIVER.read_text(encoding="utf-8")
 
     imported = set()
@@ -85,7 +85,7 @@ def test_the_sandbox_command_waits_for_the_receiver_and_keeps_fabric_s_exit_stat
 
     assert READY_FILENAME in command
     # Anchored on the seeded paths, so renaming either one cannot leave the ordering unchecked.
-    assert command.index(container_runtime._RECEIVER_PATH) < command.index(container_runtime._DRIVER_PATH)
+    assert command.index(sandbox_execution._RECEIVER_PATH) < command.index(sandbox_execution._DRIVER_PATH)
     assert "STATUS=$?" in command
     assert command.rstrip().endswith("exit $STATUS")
 
@@ -94,8 +94,8 @@ def test_the_receiver_writes_where_the_sandbox_download_will_find_it() -> None:
     # /out is what the runtime downloads; a capture written anywhere else never leaves the sandbox.
     command = _runtime()._fabric_command()
 
-    assert container_runtime._TRACES_DIR.startswith(f"{container_runtime._OUT_DIR}/")
-    assert container_runtime._TRACES_DIR in command
+    assert sandbox_execution._TRACES_DIR.startswith(f"{sandbox_execution._OUT_DIR}/")
+    assert sandbox_execution._TRACES_DIR in command
 
 
 def test_a_stored_export_that_will_not_decode_costs_the_flush_not_the_trial(tmp_path: Path) -> None:

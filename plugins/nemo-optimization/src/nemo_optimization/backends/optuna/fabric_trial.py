@@ -24,6 +24,7 @@ from nemo_evaluator_sdk.metrics.tunable_rag_evaluator import TunableRagEvaluator
 from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.evidence import EVIDENCE_TRACE
 from nemo_evaluator_sdk.values.models import Model
+from pydantic import ValidationError
 
 from nemo_optimization.backends.optuna.atif_metadata import build_atif_trial_tags
 from nemo_optimization.backends.optuna.config_overlay import apply_suggestions
@@ -250,10 +251,11 @@ def _build_tool_call_count_metric(evaluator: Mapping[str, Any]) -> ToolCallCount
     if not isinstance(tool_name, str) or not tool_name.strip():
         raise StudyDriverError("tool_call_count evaluator requires a non-empty tool_name.")
     try:
-        expected_calls = int(evaluator.get("expected_calls", 1))
-    except (TypeError, ValueError) as exc:
-        raise StudyDriverError("tool_call_count evaluator expected_calls must be an integer.") from exc
-    return ToolCallCountMetric(tool_name=tool_name.strip(), expected_calls=expected_calls)
+        return ToolCallCountMetric(tool_name=tool_name.strip(), expected_calls=int(evaluator.get("expected_calls", 1)))
+    except (TypeError, ValueError, ValidationError) as exc:
+        raise StudyDriverError(
+            f"tool_call_count evaluator expected_calls must be a non-negative integer: {exc}"
+        ) from exc
 
 
 def _build_tunable_rag_metric(payload: Mapping[str, Any], evaluator: Mapping[str, Any]) -> TunableRagEvaluatorMetric:

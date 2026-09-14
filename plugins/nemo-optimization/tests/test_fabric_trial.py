@@ -355,3 +355,12 @@ def test_build_metrics_rejects_a_tool_call_count_evaluator_without_a_tool_name()
 
     with pytest.raises(StudyDriverError, match="requires a non-empty tool_name"):
         _build_metrics({}, {"evaluators": {"once": {"_type": "tool_call_count", "expected_calls": 1}}})
+
+
+def test_build_metrics_rejects_a_negative_tool_call_count_expectation() -> None:
+    from nemo_optimization.backends.optuna.fabric_trial import _build_metrics
+
+    with pytest.raises(StudyDriverError, match="non-negative integer"):
+        _build_metrics(
+            {}, {"evaluators": {"once": {"_type": "tool_call_count", "tool_name": "t", "expected_calls": -1}}}
+        )

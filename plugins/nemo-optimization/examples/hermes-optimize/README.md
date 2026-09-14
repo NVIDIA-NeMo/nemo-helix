@@ -375,9 +375,10 @@ print(
 | `delete` hangs / `Aborted!` | Pass `-y` (`nemo agents delete NAME -y`) |
 | Create `409 Conflict` / stale models | Delete with `-y`, then create again; optimize always uses the **stored** agent config |
 | Optional `--agent ...` rejected for `http://` / `file://` | Pass a workspace agent name (e.g. `hermes-optimize-chatonly`), or omit `--agent` and use `--optimize-config` only |
-| MCP: many samples `trial_status: failed` / `no completed trials` | Inspect `artifacts/.fabric/hermes/runtimes/*/logs/`; empty finals / multi-call should recover via MCP audit — if not, confirm `max_turns` ≥ 4 and `nemo-evaluator-sdk` has the binding-recovery fix |
+| MCP: many samples `trial_status: failed` / `no completed trials` | Inspect `artifacts/.fabric/hermes/runtimes/*/logs/`. Empty finals or repeat tool calls do not fail a trial, they score low on `average_score` / `tool_call_count_matches`; a hard failure usually means `phishing-analyzer-mcp` was not on `PATH` or `max_turns` < 4 |
 | Judge / best scores look like `4.5` not `~1.0` | `tunable_rag_evaluator` with `default_scoring` can sum component scores; compare trials relative to each other |
 
-Trajectory capture (`capture_trajectory`) is off in these YAMLs so you do not
-need the Relay gateway for a first smoke. Turn it on only if you need ATIF
-traces.
+Trajectory capture (`capture_trajectory`) is off in the chat-only YAMLs so you
+do not need the Relay gateway for a first smoke. `optimize-mcp.yaml` turns it on
+because `tool_call_count` reads the ATIF trajectory, so that example needs the
+`nemo-relay` gateway on `PATH` (`script/dev-install-fabric.sh`).
