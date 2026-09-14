@@ -38,9 +38,11 @@ def test_the_mock_analyzer_replays_each_row_s_canned_analysis() -> None:
         verbatim = analyze(_email(row), responses)
         assert verbatim["label"] == row["label"] == row["analysis"]["label"], row["id"]
         assert verbatim["matched"] == "exact"
-        # Framing around the email is tolerated as long as the body is intact...
-        framed = analyze(f"Please analyze this:\n{row['body']}\nThanks", responses)
-        assert (framed["label"], framed["matched"]) == (row["label"], "body")
+        # Framing around the email is tolerated as long as the body is intact, whether the agent
+        # wrapped the body alone or the full subject + body (which matches both of the row's keys)...
+        for wrapped in (row["body"], _email(row)):
+            framed = analyze(f"Please analyze this:\n{wrapped}\nThanks", responses)
+            assert (framed["label"], framed["matched"]) == (row["label"], "body"), row["id"]
     # ...but an edited body is not analyzed: the fixture is the input-binding check.
     edited = analyze(_DATASET[0]["body"].replace("iPhone", "laptop"), responses)
     assert (edited["label"], edited["matched"]) == ("unknown", "none")

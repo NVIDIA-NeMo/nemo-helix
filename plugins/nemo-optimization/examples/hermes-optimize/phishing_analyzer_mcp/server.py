@@ -44,8 +44,11 @@ def load_responses(dataset: Path | None = None) -> dict[str, dict[str, object]]:
             raise ValueError(f"dataset row {row.get('id')!r} has no analysis to replay")
         body = str(row.get("body") or "")
         subject = str(row.get("subject") or "")
+        # One object per row: ``analyze`` collapses matches by identity, and a framed full email
+        # matches both of the row's keys.
+        canned = dict(analysis)
         for key in (f"{subject}\n\n{body}" if subject else body, body):
-            responses[_normalize(key)] = dict(analysis)
+            responses[_normalize(key)] = canned
     return responses
 
 
