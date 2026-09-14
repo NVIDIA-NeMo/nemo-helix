@@ -271,7 +271,7 @@ async def _send_job_run_event(event: JobRunTelemetry) -> None:
             response = await client.post(endpoint, json=build_payload(event))
             response.raise_for_status()
     except Exception:
-        logger.debug("Failed to emit job_run telemetry to %s", _redact_endpoint(endpoint), exc_info=True)
+        logger.debug("Failed to emit job_run telemetry to %s", _redact_endpoint(endpoint))
 
 
 def emit_job_run_event(event: JobRunTelemetry | None) -> None:

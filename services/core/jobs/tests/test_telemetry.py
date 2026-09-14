@@ -93,3 +93,25 @@ async def test_send_job_run_event_skips_non_https_endpoint(monkeypatch: pytest.M
         await _send_job_run_event(event)
 
     async_client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_job_run_event_logs_only_redacted_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    event = build_job_run_telemetry(
+        source="job",
+        status="completed",
+        status_details={},
+        custom_fields=build_job_telemetry_custom_fields("session-123"),
+        created_at=None,
+        updated_at=None,
+    )
+    assert event is not None
+    monkeypatch.setenv("NEMO_TELEMETRY_ENDPOINT", "https://marker" + "@example.test/events?debug=value")
+
+    with (
+        patch("nmp.core.jobs.telemetry.httpx.AsyncClient", side_effect=RuntimeError("send failed")),
+        patch("nmp.core.jobs.telemetry.logger.debug") as debug,
+    ):
+        await _send_job_run_event(event)
+
+    debug.assert_called_once_with("Failed to emit job_run telemetry to %s", "https://example.test/events?<redacted>")
