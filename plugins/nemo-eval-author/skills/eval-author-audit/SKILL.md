@@ -411,16 +411,21 @@ includes the original audit item plus generation-oriented context: a stable
 Use `reason: not_measured_by_any_method` to distinguish gaps that no included
 measurement method could close from `reason: not_covered_by_any_input_report`,
 which means the item kind was measured but no input report covered that item.
-Treat that list as the input for a later task-generation step.
+Treat that list as evidence for the proposal step in `eval-author-task-create`.
+The aggregate report unions coverage; it does not establish why an item is
+uncovered or whether an existing task already exposes an agent failure.
 
 ## Next Steps
 
 - For audit-generation inputs and reconciliation modes, return to
   [Step 2: Generate Or Reconcile Audit.md](#step-2-generate-or-reconcile-auditmd).
-- When aggregate `uncovered_items` includes actionable items
-  (`reason: not_covered_by_any_input_report`), hand off to
-  [`eval-author-task-create`](../eval-author-task-create/SKILL.md) to scaffold
-  and prove one gap at a time. Items with
-  `reason: not_measured_by_any_method`, such as failure-case items and
-  capability items measured without the `capabilities` method, stay audit
-  findings only in v1.
+- Report coverage by kind, observed findings, measurement limits, and artifact
+  links. Dataset recommendations belong to the proposal step in
+  [`eval-author-task-create`](../eval-author-task-create/SKILL.md). Hand off there
+  when the user requests proposals or continuation through the full workflow;
+  an audit-only request ends with the findings.
+- The proposal step considers tools, capabilities, and failure cases. Automatic
+  task creation still accepts only uncovered tool items with
+  `reason: not_covered_by_any_input_report`. Items with
+  `reason: not_measured_by_any_method` remain unmeasured, even when the proposal
+  step suggests a candidate scenario for them.
