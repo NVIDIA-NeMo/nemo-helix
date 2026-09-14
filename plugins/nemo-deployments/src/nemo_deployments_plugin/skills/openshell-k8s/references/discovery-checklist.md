@@ -92,7 +92,7 @@ command -v nemo && nemo --version
 command -v openshell && openshell --version
 ```
 
-Decisions: any missing tool goes to Step 3 with a gate. `docker` must reach a daemon, otherwise the agent image cannot be built here. `openshell` must report `0.0.116` to match the chart; a different version is a finding to raise, not silently replace.
+Decisions: any missing tool goes to Step 3 with a gate, after a second look through the user's login shell (`bash -lc 'command -v kubectl helm docker uv'`): tool managers such as mise, asdf, and brew often put binaries on PATH only for interactive shells, and a tool that exists there should be used, not reinstalled. `docker` must reach a daemon, otherwise the agent image cannot be built here. `openshell` must report `0.0.116` to match the chart; a different version is a finding to raise, not silently replace.
 
 ## Registry access
 

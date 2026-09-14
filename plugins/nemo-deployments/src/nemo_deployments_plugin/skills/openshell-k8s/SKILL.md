@@ -30,7 +30,7 @@ not-for:
   - nemo-status (use for a read-only health dashboard)
   - production hardening of OpenShell (this skill installs an evaluation posture)
 compatibility: >-
-  Operator machine on Linux or macOS with kubectl, helm 3, and Docker (to build the
+  Operator machine on Linux or macOS with kubectl, helm 3 or 4, and Docker (to build the
   agent image). Any Kubernetes 1.29+ cluster with RBAC: local (k3d, kind, minikube,
   Docker Desktop, OrbStack) or remote (EKS, GKE, AKS, on-prem). OpenShell pinned to
   release 0.0.116 (Helm chart and CLI). NeMo Platform installed in the same cluster
@@ -114,7 +114,7 @@ Ask before each of these. Wait for the answer.
 
 Install only what discovery marked missing. For each, show the command, get the gate, run it, verify.
 
-kubectl and helm: use the user's package manager (`brew install kubectl helm` on macOS, distro packages on Linux). Verify with `kubectl version --client` and `helm version --short` (needs 3.x).
+kubectl and helm: use the user's package manager (`brew install kubectl helm` on macOS, distro packages on Linux). Verify with `kubectl version --client` and `helm version --short` (3.x or 4.x both work). Before installing either, check whether the user's shell has them and yours does not: run `bash -lc 'command -v kubectl helm'`, and if that finds them, use those paths rather than installing a second copy.
 
 nemo CLI (needs `uv`):
 
@@ -337,7 +337,7 @@ nemo agents package \
   --tag "$IMAGE_TAG"
 ```
 
-Add `--platform linux/amd64` (or `linux/arm64`) to match the nodes. Cross-architecture builds need Docker buildx emulation and are slow. [UNVERIFIED] A native build takes about three minutes.
+Add `--platform linux/amd64` (or `linux/arm64`) to match the nodes. Cross-architecture builds need Docker buildx emulation and are slow. [UNVERIFIED] A native build takes three to five minutes and produces an image of a few gigabytes; a long pause on a `userdel` or `rm` step while the base image's default user is replaced is normal.
 
 Verify the image has what the sandbox needs:
 
@@ -387,7 +387,7 @@ Expected: the command prints `pending`, then `starting`, then `running` within a
 
 ```bash
 kubectl -n "$OPENSHELL_NS" get sandboxes.agents.x-k8s.io
-kubectl -n "$OPENSHELL_NS" get pods -l openshell.ai/managed-by=openshell
+kubectl -n "$OPENSHELL_NS" get pods -l managed-by=nemo-deployments
 openshell sandbox list
 ```
 
@@ -424,7 +424,7 @@ openshell sandbox exec --name "$SBX" -- cat /tmp/nemo-serve.log
 
 ## Step 9: Prove zero egress
 
-Run both checks from inside the platform-created sandbox. Judge them by their output, not by exit code: `openshell sandbox exec` exits 0 whenever it managed to run the command, whatever the command itself returned.
+Run both checks from inside the platform-created sandbox. Judge them by their output. `openshell sandbox exec` may or may not pass the inner command's exit status through depending on the release, so the printed `403` line is the evidence, not the shell's `$?`.
 
 ```bash
 openshell sandbox exec --name "$SBX" -- curl -sS -m 5 https://example.com
