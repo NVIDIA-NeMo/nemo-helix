@@ -4541,6 +4541,16 @@ dev = [
 name = "nemo-eval-author-plugin"
 version = "0.1.0"
 source = { virtual = "plugins/nemo-eval-author" }
+dependencies = [
+    { name = "jsonschema", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "referencing", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "jsonschema", specifier = ">=4.23" },
+    { name = "referencing", specifier = ">=0.28.4" },
+]
 
 [[package]]
 name = "nemo-evaluator-plugin"

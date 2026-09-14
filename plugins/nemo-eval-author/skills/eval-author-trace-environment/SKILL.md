@@ -16,30 +16,28 @@ not-for:
   - eval-author-task-create (use to close an actionable audit coverage gap)
   - eval-author-inspect-trace (use to explain an Intake trace without creating an environment)
 compatibility: >-
-  Python 3.11+; mlflow-to-atif for MLflow; nemo CLI for Intake; Harbor and
-  Docker for proof. Run proof commands in Harbor's Python environment. No model
-  or provider configuration is required.
+  Python 3.11+, jsonschema 4.23+, referencing 0.28.4+; mlflow-to-atif for MLflow; nemo CLI for Intake; Harbor and
+  Docker for proof. Use Harbor's Python environment. NOP/Oracle need no model;
+  native-agent checks use the agent's configured provider.
 metadata:
-  author: NVIDIA NeMo Platform
+  author: Andrew Suter-Morris <asutermorris@nvidia.com>
   tags: [evaluation, harbor, traces]
 maturity: alpha
 license: Apache-2.0
 user-invocable: true
-allowed-tools: [Bash, Read, Write, Grep, Glob]
+allowed-tools: Bash Read Write Grep Glob
 ---
 
 # Eval Author: trace to environment
 
 ## Requirements
 
-Use the dependencies declared above. Harbor and Docker are needed only to prove
-a candidate environment.
+Harbor and Docker are needed only for candidate proof.
 
 ## Purpose
 
-Read `eval-author` for the shared evidence standard and boundaries. This flow
-turns one recorded interaction into a small, reproducible Harbor task without
-requiring a particular coding agent or framework.
+Read `eval-author` for the shared evidence standard and boundaries. Turn one
+recorded interaction into a reproducible Harbor task.
 
 ## Limitations
 
@@ -215,9 +213,12 @@ python <skill_dir>/scripts/trace_environment.py resolve-tool-call-access \
 python <skill_dir>/scripts/trace_environment.py generate-mock-tool-calls --task-dir <task-dir>
 ```
 
-Select `real`, `mock`, or `none` for every function; never substitute silently.
+Select `real`, `mock`, or `none` for every scoped tool; candidate finalization
+requires complete decisions. Never substitute silently. The fixture reference
+defines reviewed schema overrides for traces that record calls without schemas.
 Copy generated fixtures into the task image and merge `integration.toml` into
-`task.toml`; finalization checks the wiring. The stdio MCP adapter performs
+`task.toml`; finalization checks the wiring. Preserve the user's harness and model;
+check registration and prove discovery/calls as the fixture reference specifies. The MCP adapter performs
 exact-match replay. Fixtures are agent-visible and cannot hold verifier truth.
 
 ## Step 4: inventory ground truth and software requirements
@@ -391,14 +392,14 @@ python <skill_dir>/scripts/trace_environment.py check \
   --task-dir <task-dir>
 ```
 
-The helper derives environment status rather than accepting a claimed status:
+Derived environment status:
 failed technical proof becomes `failed`; passed proof with the required separate
 no-network verification, `--human-reviewed`, and no required software whose
 availability is `unknown` becomes `ready`; every other
 candidate is `unproven`. A shared verifier is a contract error rather than an
 unproven candidate. The human-review flag means a human supplied or reviewed
 Relevant experience and the generalized task. It is distinct from the earlier
-contextual privacy review, which records either an agent or human reviewer.
+contextual privacy review by an agent or human.
 
 ## Batch and publication
 

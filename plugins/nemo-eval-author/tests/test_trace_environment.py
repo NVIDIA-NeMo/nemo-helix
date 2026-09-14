@@ -155,13 +155,13 @@ def _fixture_atif() -> dict[str, Any]:
     }
 
 
-def _fixture_workspace(tmp_path: Path) -> Path:
+def _fixture_workspace(tmp_path: Path, *, trace: dict[str, Any] | None = None) -> Path:
     root = tmp_path / ".eval-author" / "trace-environments"
     code, result = _run("init", "--root", str(root), "--task-id", "fixture-tools")
     assert code == 0, result
     task_dir = Path(result["task_dir"])
     source = tmp_path / "fixture.atif.json"
-    _write_json(source, _fixture_atif())
+    _write_json(source, trace if trace is not None else _fixture_atif())
     code, result = _run(
         "prepare",
         "--task-dir",
@@ -416,13 +416,8 @@ def test_generate_mock_tool_calls_requires_privacy_review_and_serves_strict_mcp(
                     {
                         "name": "trace-tool-call-replay",
                         "transport": "stdio",
-                        "command": "/opt/tool-call-fixtures/mcp_replay.py",
-                        "args": [
-                            "--scenario",
-                            "/opt/tool-call-fixtures/mcp-scenario.json",
-                            "--audit-log",
-                            "/tmp/tool-call-fixture-audit.jsonl",
-                        ],
+                        "command": "/opt/tool-call-fixtures/launch-replay.sh",
+                        "args": [],
                     }
                 ],
             }
@@ -528,6 +523,11 @@ def _candidate(
     if software_requirements is None:
         software_requirements = []
     if status == "candidate":
+        if (task_dir / "safe/trace.atif.json").exists() and not (task_dir / "private/tool-access.json").exists():
+            _plan_tool_calls(task_dir)
+            inventory = json.loads((task_dir / "private/tool-call-inventory.json").read_text())
+            code, result = _resolve_tool_access(task_dir, {tool["name"]: "none" for tool in inventory["tools"]})
+            assert code == 0, result
         payload = {
             "schema": _CANDIDATE_SCHEMA,
             "status": "candidate",

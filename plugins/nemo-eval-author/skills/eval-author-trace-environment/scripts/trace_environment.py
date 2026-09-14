@@ -35,6 +35,7 @@ from fixture_compiler import (  # noqa: E402
     derive_tool_call_plan,
     resolve_tool_access,
 )
+from mock_registration import probe_registration  # noqa: E402
 
 SCHEMA = "nemo.eval_author.trace_environment_summary.v2"
 CANDIDATE_SCHEMA = "nemo.eval_author.trace_environment_candidate.v2"
@@ -933,11 +934,23 @@ def _tool_call_source(task_dir: Path) -> tuple[dict[str, Any], dict[str, Any], s
     if not isinstance(source, dict):
         raise ContractError("prepare safe ATIF evidence before inventorying interactions")
     safe_path = task_dir / source["safe_path"]
-    safe_bytes = safe_path.read_bytes()
+    if safe_path.is_symlink() or not safe_path.is_file():
+        raise ContractError("safe ATIF must be a retained regular file")
+    if safe_path.stat().st_size > MAX_CANONICAL_BYTES:
+        raise ContractError(f"safe ATIF exceeds the {MAX_CANONICAL_BYTES}-byte limit")
+    with safe_path.open("rb") as stream:
+        safe_bytes = stream.read(MAX_CANONICAL_BYTES + 1)
+    if len(safe_bytes) > MAX_CANONICAL_BYTES:
+        raise ContractError(f"safe ATIF exceeds the {MAX_CANONICAL_BYTES}-byte limit")
     safe_sha256 = _sha256(safe_bytes)
     if safe_sha256 != source["safe_sha256"]:
         raise ContractError("safe ATIF digest does not match the task summary")
-    safe = _load_object(safe_path, label="safe ATIF")
+    try:
+        safe = json.loads(safe_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ContractError("could not read safe ATIF as UTF-8 JSON") from error
+    if not isinstance(safe, dict):
+        raise ContractError("safe ATIF must contain one JSON object")
     _validate_trajectory(safe)
     return summary, safe, safe_sha256
 
@@ -975,7 +988,20 @@ def _plan_tool_call_access(args: argparse.Namespace) -> dict[str, Any]:
     if output.exists():
         raise ContractError("refusing to replace existing tool-call-plan.json")
     inventory = _current_tool_call_inventory_file(task_dir)
-    plan = derive_tool_call_plan(inventory)
+    overrides_path = task_dir / "private/tool-schema-overrides.json"
+    if overrides_path.exists():
+        raise ContractError("refusing to replace existing tool-schema-overrides.json")
+    overrides = (
+        _load_object(args.schema_overrides, label="reviewed schema overrides") if args.schema_overrides else None
+    )
+    try:
+        plan = derive_tool_call_plan(inventory, overrides)
+    except ValueError as error:
+        raise ContractError(str(error)) from error
+    if overrides is not None:
+        _write_bytes_once(
+            overrides_path, (json.dumps(overrides, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
+        )
     _write_bytes_once(output, (json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode())
     return {
         "task_dir": str(task_dir),
@@ -988,7 +1014,13 @@ def _plan_tool_call_access(args: argparse.Namespace) -> dict[str, Any]:
 def _current_tool_call_plan(task_dir: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     inventory = _current_tool_call_inventory_file(task_dir)
     plan = _load_object(task_dir / "private/tool-call-plan.json", label="tool-call plan")
-    if plan != derive_tool_call_plan(inventory):
+    overrides_path = task_dir / "private/tool-schema-overrides.json"
+    overrides = _load_object(overrides_path, label="reviewed schema overrides") if overrides_path.exists() else None
+    try:
+        expected = derive_tool_call_plan(inventory, overrides)
+    except ValueError as error:
+        raise ContractError(str(error)) from error
+    if plan != expected:
         raise ContractError("tool-call-plan.json differs from the current tool-call inventory")
     return inventory, plan
 
@@ -1016,7 +1048,7 @@ def _current_tool_access(task_dir: Path) -> tuple[dict[str, Any], dict[str, Any]
     inventory, plan = _current_tool_call_plan(task_dir)
     access = _load_object(task_dir / "private/tool-access.json", label="tool access")
     decisions = [
-        {key: decision.get(key) for key in ("name", "access", "adapter", "note")}
+        {key: decision.get(key) for key in ("tool_id", "name", "access", "adapter", "note")}
         for decision in access.get("decisions", [])
         if isinstance(decision, dict)
     ]
@@ -1060,11 +1092,19 @@ def _fixture_integration() -> str:
         "[[environment.mcp_servers]]\n"
         'name = "trace-tool-call-replay"\n'
         'transport = "stdio"\n'
-        'command = "/opt/tool-call-fixtures/mcp_replay.py"\n'
-        "args = [\n"
-        '  "--scenario", "/opt/tool-call-fixtures/mcp-scenario.json",\n'
-        f'  "--audit-log", "{TOOL_CALL_AUDIT_LOG}",\n'
-        "]\n"
+        'command = "/opt/tool-call-fixtures/launch-replay.sh"\n'
+        "args = []\n"
+    )
+
+
+def _fixture_launcher() -> str:
+    # An argument-free executable also works with Harbor adapters that serialize
+    # command + args as one executable name (notably Codex in Harbor 0.20.0).
+    return (
+        "#!/bin/sh\n"
+        'exec python3 "$(dirname "$0")/mcp_replay.py" '
+        '--scenario "$(dirname "$0")/mcp-scenario.json" '
+        f'--audit-log "${{TRACE_TOOL_CALL_AUDIT_LOG:-{TOOL_CALL_AUDIT_LOG}}}"\n'
     )
 
 
@@ -1091,6 +1131,8 @@ def _generate_mock_tool_calls(args: argparse.Namespace) -> dict[str, Any]:
     privacy = summary.get("privacy")
     if not isinstance(privacy, dict) or not privacy.get("contextual_review_complete"):
         raise ContractError("mock tool-call generation requires the review-privacy command")
+    if privacy.get("blocking_reasons"):
+        raise ContractError("mock tool-call generation is blocked by unresolved privacy evidence")
     inventory, _, access = _current_tool_access(task_dir)
     call_fixtures = build_call_fixtures(inventory, access)
     scenario = build_mcp_scenario(call_fixtures)
@@ -1115,10 +1157,12 @@ def _generate_mock_tool_calls(args: argparse.Namespace) -> dict[str, Any]:
             (json.dumps(scenario, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(),
         )
         _write_bytes_once(staged / "mcp_replay.py", runtime_source.read_bytes())
+        _write_bytes_once(staged / "launch-replay.sh", _fixture_launcher().encode())
         _write_bytes_once(staged / "integration.toml", _fixture_integration().encode())
         _write_bytes_once(staged / "README.md", _fixture_readme().encode())
         if os.name == "posix":
             (staged / "mcp_replay.py").chmod(0o755)
+            (staged / "launch-replay.sh").chmod(0o755)
             for name in ("call-fixtures.json", "mcp-scenario.json", "integration.toml", "README.md"):
                 (staged / name).chmod(0o644)
         staged.rename(fixture_dir)
@@ -1145,19 +1189,28 @@ def _generate_mock_tool_calls(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def _validate_tool_call_pipeline(task_dir: Path) -> None:
+def _validate_tool_call_pipeline(task_dir: Path, *, require_decisions: bool = False) -> None:
     inventory_path = task_dir / "private/tool-call-inventory.json"
     plan_path = task_dir / "private/tool-call-plan.json"
     access_path = task_dir / "private/tool-access.json"
     receipt_path = task_dir / "private/tool-call-generation.json"
     fixture_dir = task_dir / "task/environment/tool-call-fixtures"
-    if not any(path.exists() for path in (inventory_path, plan_path, access_path, receipt_path, fixture_dir)):
+    overrides_path = task_dir / "private/tool-schema-overrides.json"
+    if require_decisions:
+        current = _current_tool_call_inventory(task_dir)
+        if current["unresolved_call_count"]:
+            raise ContractError("candidate contains unresolved tool calls; correct source evidence or use no_candidate")
+        if current["call_count"] and not all(path.is_file() for path in (inventory_path, plan_path, access_path)):
+            raise ContractError("candidate tool calls require complete reviewed real/mock/none access decisions")
+    if not any(
+        path.exists() for path in (inventory_path, plan_path, access_path, receipt_path, fixture_dir, overrides_path)
+    ):
         return
     if not inventory_path.is_file():
         raise ContractError("tool-call artifacts require private/tool-call-inventory.json")
     inventory = _current_tool_call_inventory_file(task_dir)
     if not plan_path.exists():
-        if access_path.exists() or receipt_path.exists() or fixture_dir.exists():
+        if access_path.exists() or receipt_path.exists() or fixture_dir.exists() or overrides_path.exists():
             raise ContractError("tool access artifacts require private/tool-call-plan.json")
         return
     _current_tool_call_plan(task_dir)
@@ -1224,16 +1277,10 @@ def _validate_mock_tool_call_integration(task_dir: Path, config: dict[str, Any])
     if len(matching) != 1:
         raise ContractError("mock tool-call access requires exactly one trace-tool-call-replay MCP server")
     server = matching[0]
-    expected_args = [
-        "--scenario",
-        "/opt/tool-call-fixtures/mcp-scenario.json",
-        "--audit-log",
-        TOOL_CALL_AUDIT_LOG,
-    ]
     if (
         server.get("transport") != "stdio"
-        or server.get("command") != "/opt/tool-call-fixtures/mcp_replay.py"
-        or server.get("args") != expected_args
+        or server.get("command") != "/opt/tool-call-fixtures/launch-replay.sh"
+        or server.get("args") != []
     ):
         raise ContractError("trace-tool-call-replay MCP server differs from the generated integration contract")
 
@@ -1911,7 +1958,7 @@ def _check_runtime(args: argparse.Namespace) -> dict[str, Any]:
     """Read-only capability preflight; version labels are informational only."""
     checks: list[dict[str, Any]] = []
     report: dict[str, Any] = {
-        "schema": "nemo.eval_author.trace_environment_runtime_check.v1",
+        "schema": "nemo.eval_author.trace_environment_runtime_check.v2",
         "valid": False,
         "scope": "single_step_proof",
         "harbor_version": None,
@@ -1983,6 +2030,30 @@ def _check_runtime(args: argparse.Namespace) -> dict[str, Any]:
         task_dir = _ensure_task_dir(args.task_dir)
         try:
             task = task_model(task_dir / "task")
+            access_path = task_dir / "private/tool-access.json"
+            if access_path.exists():
+                _, _, access = _current_tool_access(task_dir)
+                if any(item["access"] == "mock" for item in access["decisions"]):
+                    _validate_mock_tool_call_integration(task_dir, task.config.model_dump(mode="json"))
+                    agent = getattr(args, "mock_agent", None)
+                    servers = [
+                        server
+                        for server in task.config.environment.mcp_servers
+                        if server.name == "trace-tool-call-replay"
+                    ]
+                    registration = probe_registration(agent, servers)
+                    report["mock_integration"] = {
+                        "adapter": "mcp",
+                        "registration": registration,
+                        "execution": {"status": "unverified", "reason": "native_agent_run_required"},
+                    }
+                    check(
+                        "mock_agent_registration",
+                        registration["status"] != "unsupported",
+                        f"Registration: {registration['status']} ({registration['reason']}). "
+                        "Only a demonstrated mismatch blocks this preflight. Unverified registration needs "
+                        "harness-specific evidence; valid does not prove native-agent mock access.",
+                    )
             single_step = not task.config.steps
             check(
                 "task_proof_shape",
@@ -1995,6 +2066,8 @@ def _check_runtime(args: argparse.Namespace) -> dict[str, Any]:
             )
         except Exception as error:
             check("task_validation", False, f"Harbor could not validate this proof task ({type(error).__name__}).")
+    if getattr(args, "mock_agent", None) and "mock_integration" not in report:
+        check("mock_agent_scope", False, "--mock-agent requires --task-dir with resolved mock tool-call access.")
     report["valid"] = all(item["passed"] for item in checks)
     return report
 
@@ -2352,7 +2425,7 @@ def _finalize(args: argparse.Namespace) -> dict[str, Any]:
     safe_path = task_dir / summary["source"]["safe_path"]
     safe_payload = _load_object(safe_path, label="safe ATIF")
     _validate_trajectory(safe_payload)
-    _validate_tool_call_pipeline(task_dir)
+    _validate_tool_call_pipeline(task_dir, require_decisions=args.status == "candidate")
     step_ids = {step["step_id"] for step in safe_payload["steps"]}
     candidate = _validate_candidate(task_dir, args.status, step_ids)
 
@@ -2513,7 +2586,7 @@ def _check(args: argparse.Namespace) -> dict[str, Any]:
         except ContractError as error:
             errors.append(str(error))
     try:
-        _validate_tool_call_pipeline(task_dir)
+        _validate_tool_call_pipeline(task_dir, require_decisions=summary["status"] == "candidate")
     except ContractError as error:
         errors.append(str(error))
     return {"task_dir": str(task_dir), "valid": not errors, "errors": errors}
@@ -2848,6 +2921,9 @@ def _parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     runtime = subparsers.add_parser("check-runtime", help="probe the installed Harbor proof APIs without running jobs")
+    runtime.add_argument(
+        "--mock-agent", help="Harbor agent name or trusted module:Class to probe for mock registration"
+    )
     runtime.add_argument("--task-dir", type=Path, help="also validate an authored task and its proof shape")
     runtime.set_defaults(run=_check_runtime)
 
@@ -2878,6 +2954,9 @@ def _parser() -> argparse.ArgumentParser:
         "plan-tool-call-access", help="report which observed tool calls support deterministic mock replay"
     )
     access_plan.add_argument("--task-dir", required=True, type=Path)
+    access_plan.add_argument(
+        "--schema-overrides", type=Path, help="reviewed, inventory-bound input schemas; source ATIF stays unchanged"
+    )
     access_plan.set_defaults(run=_plan_tool_call_access)
 
     access = subparsers.add_parser(
