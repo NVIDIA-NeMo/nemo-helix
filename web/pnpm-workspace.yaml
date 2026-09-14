@@ -13,10 +13,13 @@ overrides:
   'brace-expansion@<1.1.18': 1.1.18
   'brace-expansion@>=4.0.0 <5.0.9': 5.0.9
   'fast-uri@<3.1.4': ^3.1.4
+  'fflate@<0.8.3': ^0.8.3
   'js-yaml@>=4.0.0 <4.3.0': ^4.3.0
   'linkify-it@<5.0.2': ^5.0.2
+  'nanoid@<3.3.19': ^3.3.19
   'postcss@<8.5.18': ^8.5.18
   'shell-quote@1.8.4': 1.9.0
+  'smol-toml@<1.8.0': ^1.8.0
   'undici@>=7.0.0 <7.29.0': ^7.29.0
 
 # https://pnpm.io/catalogs
@@ -60,7 +63,7 @@ catalog:
   prettier: ^3.5.3
   oidc-client-ts: ^3.3.0
   openai: ^4.67.3
-  orval: ^8.18.0
+  orval: ^8.31.0
   qs: ^6.15.2
   react: ^19.2.7
   react-dom: ^19.2.7
