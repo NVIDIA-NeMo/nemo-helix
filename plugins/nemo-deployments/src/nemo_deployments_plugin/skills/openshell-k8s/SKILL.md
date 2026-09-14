@@ -123,7 +123,7 @@ nemo --version
 nemo agents --help >/dev/null && echo NEMO_AGENTS_OK
 ```
 
-`[all]` includes the agents and deployments plugins, which `nemo agents package --sandbox-runtime openshell` needs. Fabric packaging pins the installed `nemo-platform` version inside the image, so the CLI must be a released version from PyPI, not a source checkout. [UNVERIFIED]
+`[all]` includes the agents and deployments plugins, which `nemo agents package --sandbox-runtime openshell` needs. Fabric packaging pins the installed `nemo-platform` version inside the image, so a released version from PyPI works as is. If `nemo` comes from a source checkout instead, `nemo agents package` refuses the unpublished version; build a wheel first with `uv build --package nemo-platform --wheel --out-dir dist` in that checkout and export `NEMO_AGENTS_WHEEL=<path to the wheel>` before packaging.
 
 openshell CLI, pinned. The PyPI `openshell` package at this release is the Python SDK only and does not install the CLI, and the `install.sh` installer installs a system package with sudo and on macOS also starts a local Docker gateway you do not need. Use the release tarball:
 
@@ -142,7 +142,7 @@ install -m 0755 "$WORKDIR/openshell" ~/.local/bin/openshell
 openshell --version
 ```
 
-Expected: `openshell 0.0.116`. If the tarball nests the binary in a directory, adjust the `install` source path. [UNVERIFIED] Intel macOS has no prebuilt CLI at this release; tell the user and use `OPENSHELL_VERSION=v0.0.116 sh install.sh` only if they accept its side effects.
+Expected: `openshell 0.0.116`. The tarball holds the bare `openshell` binary at its root. Intel macOS has no prebuilt CLI at this release; tell the user and use `OPENSHELL_VERSION=v0.0.116 sh install.sh` only if they accept its side effects.
 
 ## Step 4: Agent Sandbox controller and OpenShell gateway
 
@@ -151,12 +151,13 @@ Expected: `openshell 0.0.116`. If the tarball nests the binary in a directory, a
 Skip if discovery found the CRD `sandboxes.agents.x-k8s.io` and a running controller. Otherwise, after the gate:
 
 ```bash
-kubectl apply -f https://github.com/kubernetes-sigs/agent-sandbox/releases/latest/download/manifest.yaml
+export AGENT_SANDBOX_VERSION=v1.0.1
+kubectl apply -f "https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${AGENT_SANDBOX_VERSION}/sandbox.yaml"
 kubectl -n agent-sandbox-system rollout status deployment --timeout=120s
 kubectl get crd sandboxes.agents.x-k8s.io
 ```
 
-Expected: the rollout completes and the CRD is listed. Record "installed agent-sandbox" for cleanup.
+Expected: the rollout completes and the CRD is listed. The release asset is named `sandbox.yaml`; OpenShell's own docs still point at a `manifest.yaml` that no longer exists. Pin the version rather than using `latest`: v1.0.1 serves the `v1beta1` API that OpenShell 0.0.116 expects. Record "installed agent-sandbox" for cleanup.
 
 ### 4b. OpenShell gateway
 
@@ -183,11 +184,11 @@ echo $! > "$WORKDIR/pf-openshell.pid"
 sleep 2
 openshell gateway add http://127.0.0.1:18080 --local --name nemo-k8s
 openshell gateway select nemo-k8s
-openshell status
+openshell gateway list
 openshell sandbox list
 ```
 
-Expected: `openshell status` reports the gateway healthy and `sandbox list` prints an empty list or `No sandboxes found`. An `UNAUTHENTICATED` here means the values file was not applied; see the recovery table. [UNVERIFIED]
+Expected: `sandbox list` prints `No sandboxes found.` and `gateway list` marks `nemo-k8s` active with auth `plaintext`. An `UNAUTHENTICATED` here means the values file was not applied; see the recovery table. If the port is already bound on the operator machine, pick another local port for both the port-forward and `gateway add`.
 
 Note for the user: sandbox pods are created in the `openshell` namespace, and sandboxes with a workspace volume need a default StorageClass. If discovery found no default StorageClass, set `server.workspaceStorageClass` in the values file before installing.
 
@@ -195,7 +196,7 @@ Note for the user: sandbox pods are created in the `openshell` namespace, and sa
 
 Skip to the "existing platform" branch at the end of this step if discovery found a release.
 
-Pick the chart source at the gate. The nightly GHCR chart carries this week's fixes for the k8s sandbox deploy path; stable NGC `0.5.0` predates them and needs the fallback in [references/raw-deployments-api.md](references/raw-deployments-api.md). Ask the user for the nightly version string (it looks like `0.5.0-nightly-YYYYMMDDHHMMSS`), then check access:
+Pick the chart source at the gate. The nightly GHCR chart carries the fixes for the k8s sandbox deploy path; stable releases through `0.5.1` predate them and need the fallback in [references/raw-deployments-api.md](references/raw-deployments-api.md). A third source is a chart directory and image the user already has (a checkout of the platform repo, or an internal mirror): set `NMP_CHART_REF` to the chart path, and add `api.image` and `core.image` overrides to the values file pointing at their image, with `pullPolicy: Never` when the image was loaded into a local cluster rather than pulled. Ask the user which applies. For the nightly, ask for the version string (it looks like `0.5.1-nightly-YYYYMMDDHHMMSS`), then check access:
 
 ```bash
 export NMP_CHART_VERSION=<nightly version>
@@ -284,6 +285,28 @@ nemo models list --all-pages
 
 Expected: setup registers the provider, discovers models, and picks a default and a fast model; `nemo models list` prints them. `--auto` reads the provider key from the environment and works without a TTY. If the user prefers the interactive wizard, they run `nemo setup --no-start-services --no-install-skills --no-deploy-agent` themselves in a terminal and tell you when it finishes.
 
+If the user's models come from an OpenAI-compatible server without a key (an internal vLLM or llama.cpp endpoint, for example), register it directly instead of running setup. The URL must be reachable from inside the cluster, not just from the operator machine; on k3d that is `host.k3d.internal`, on kind and minikube `host.docker.internal` or `host.minikube.internal`, on a remote cluster the server's Service or LAN address:
+
+```bash
+export NMP_BASE_URL=http://localhost:8080
+nemo config set --base-url "$NMP_BASE_URL"
+nemo inference providers create local-models --host-url http://<host reachable from pods>:<port>/v1
+nemo wait inference provider local-models
+nemo models list --all-pages
+```
+
+Then choose a model for the agent and export it as `NEMO_DEFAULT_MODEL=default/<model name>` so `nemo agents create` can resolve the placeholder in Step 7. Prefer a plain instruction-tuned chat model. A reasoning model can spend its whole token budget on hidden reasoning and return an empty answer, which looks like a broken deployment when it is not.
+
+Whichever route you took, confirm inference works through the in-cluster gateway before building anything:
+
+```bash
+curl -s -X POST "$NMP_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions" \
+  -H 'content-type: application/json' \
+  -d '{"model":"default/<model name>","messages":[{"role":"user","content":"Say exactly: inference ok"}],"max_tokens":20}'
+```
+
+Expected: a completion whose `content` is `inference ok`. An error here is a provider problem, not a sandbox problem; fix it before Step 7.
+
 ## Step 7: Author, package, and register the agent
 
 Create a minimal agent directory holding only `agent.yaml` (the register step uploads the directory, and the package step uses it as the Docker build context):
@@ -303,7 +326,7 @@ nemo agents package \
   --tag "$IMAGE_TAG"
 ```
 
-Add `--platform linux/amd64` (or `linux/arm64`) to match the nodes. Cross-architecture builds need Docker buildx emulation and are slow. [UNVERIFIED]
+Add `--platform linux/amd64` (or `linux/arm64`) to match the nodes. Cross-architecture builds need Docker buildx emulation and are slow. [UNVERIFIED] A native build takes about three minutes.
 
 Verify the image has what the sandbox needs:
 
@@ -312,7 +335,7 @@ docker image inspect "$IMAGE_TAG" --format '{{.Architecture}}'
 docker run --rm --entrypoint sh "$IMAGE_TAG" -c 'id sandbox; ls -l /workspace/.venv/bin/python /workspace/.venv/bin/python3.13; command -v curl'
 ```
 
-Expected: the architecture matches the nodes, a `sandbox` user exists, both interpreter paths are listed, and `/usr/bin/curl` is present. These three paths are the `platform_egress.binaries` in the platform values; if the python paths differ, update the values and `helm upgrade` before deploying. [UNVERIFIED]
+Expected: the architecture matches the nodes, `uid=999(sandbox)`, both interpreter paths are listed (they are symlinks into `/opt/uv/python`, which is fine: OpenShell resolves the real path), and `/usr/bin/curl` is present. These three paths are the `platform_egress.binaries` in the platform values; if the python paths differ, update the values and `helm upgrade` before deploying.
 
 Get the image into the cluster. Pick the branch discovery chose:
 
@@ -349,7 +372,7 @@ nemo agents deploy \
   --timeout 600
 ```
 
-Expected: the command blocks and exits 0 with status `running`. While it waits, watch the sandbox appear:
+Expected: the command prints `pending`, then `starting`, then `running` within about a minute and ends with `Deployment '<name>' is running at http://default--nmp-<hash>--http.openshell.localhost:8080/`. That URL is the gateway's internal name for the service and does not resolve from the operator machine; the platform reaches it for you. While the command waits, watch the sandbox appear:
 
 ```bash
 kubectl -n "$OPENSHELL_NS" get sandboxes.agents.x-k8s.io
@@ -360,11 +383,9 @@ openshell sandbox list
 Expected: one Sandbox named `default--nmp-<hash>`, its pod `Running`, and `openshell sandbox list` showing `nmp-<hash>` as ready. Save the name:
 
 ```bash
-export SBX=$(openshell sandbox list --names | grep '^nmp-' | head -1)
+export SBX=$(openshell sandbox list | grep -o 'nmp-[0-9a-f]*' | head -1)
 echo "$SBX"
 ```
-
-[UNVERIFIED] `--names` output shape; fall back to reading the name from `nemo agents deployments get "$AGENT_NAME-sandbox"` (`endpoints[0].url` is `http://default--<sandbox>--http.openshell.localhost:8080/`).
 
 Invoke:
 
@@ -374,7 +395,7 @@ nemo agents invoke --agent-deployment "$AGENT_NAME-sandbox" \
   --input "In one sentence, where are you running?"
 ```
 
-Expected: a non-empty answer from the model. The platform proxies the request to the sandbox through the OpenShell gateway. Exit code 0 with an empty body is not success.
+Expected: a chat completion whose `content` is a real sentence, in about ten seconds. The platform proxies the request to the sandbox through the OpenShell gateway. Exit code 0 with an empty `content` is not success; if `content` is empty and the model is a reasoning model, switch to a plain chat model.
 
 If the deploy fails or `invoke` cannot reach the endpoint, read `nemo agents deployments get` for the status message, then the serve log inside the sandbox:
 
@@ -384,17 +405,15 @@ openshell sandbox exec --name "$SBX" -- cat /tmp/nemo-serve.log
 
 ## Step 9: Prove zero egress
 
-Run both checks from inside the platform-created sandbox. The first must fail, the second must succeed:
+Run both checks from inside the platform-created sandbox. Judge them by their output, not by exit code: `openshell sandbox exec` exits 0 whenever it managed to run the command, whatever the command itself returned.
 
 ```bash
 openshell sandbox exec --name "$SBX" -- curl -sS -m 5 https://example.com
-echo "exit=$?  (non-zero is the PASS)"
 openshell sandbox exec --name "$SBX" -- curl -sS -m 5 \
   "http://${NMP_RELEASE}-api.${NMP_NS}.svc.cluster.local:8080/health/ready"
-echo "exit=$?  (zero is the PASS)"
 ```
 
-Expected: the first `curl` is refused by the sandbox proxy and exits non-zero; the second prints `{"status":"ready"}`. Then invoke the agent once more to show it still answers while general egress is blocked. Show the user all three outputs together. [UNVERIFIED] on the Kubernetes driver; the same proof is verified on the Docker driver.
+Expected: the first prints `curl: (56) CONNECT tunnel failed, response 403`, the sandbox proxy refusing the connection. The second prints `{"status":"ready"}`. Then invoke the agent once more to show it still answers while general egress is blocked. Show the user all three outputs together.
 
 ## Step 10: Cleanup
 
@@ -415,7 +434,7 @@ helm uninstall "$NMP_RELEASE" -n "$NMP_NS"
 kubectl delete namespace "$NMP_NS"
 helm uninstall openshell -n "$OPENSHELL_NS"
 kubectl delete namespace "$OPENSHELL_NS"
-kubectl delete -f https://github.com/kubernetes-sigs/agent-sandbox/releases/latest/download/manifest.yaml
+kubectl delete -f "https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${AGENT_SANDBOX_VERSION}/sandbox.yaml"
 openshell gateway remove nemo-k8s
 docker image rm "$IMAGE_TAG"
 ```
