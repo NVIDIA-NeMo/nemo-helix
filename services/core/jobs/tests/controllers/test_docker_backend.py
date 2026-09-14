@@ -87,7 +87,7 @@ from nmp.core.jobs.controllers.backends.exceptions import (
 from nmp.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
 from pydantic import ValidationError
 
-from services.core.jobs.tests.controllers.client_mocks import data_response
+from services.core.jobs.tests.controllers.client_mocks import data_response, paginated_response
 
 TEST_JOBS_CONTROLLER_INSTANCE_ID = "test-owner"
 
@@ -3252,6 +3252,71 @@ def test_cleanup_single_container_without_persistent_storage_label(docker_job, d
 
     # Verify persistent storage cleanup was NOT called
     docker_job.cleanup_job_persistent_storage.assert_not_called()
+
+
+def test_check_job_is_terminal_requires_all_declared_steps_terminal(docker_job):
+    docker_job._jobs.get_job.return_value = data_response(
+        SimpleNamespace(
+            status=PlatformJobStatus.COMPLETED,
+            platform_spec=SimpleNamespace(
+                steps=[
+                    SimpleNamespace(name="download"),
+                    SimpleNamespace(name="training"),
+                ]
+            ),
+        )
+    )
+    docker_job._jobs.list_steps.return_value = paginated_response(
+        [
+            SimpleNamespace(name="download", status=PlatformJobStatus.COMPLETED),
+            SimpleNamespace(name="training", status=PlatformJobStatus.PENDING),
+        ]
+    )
+
+    assert docker_job.check_job_is_terminal(job="multi-step-job", workspace="default") is False
+
+
+def test_check_job_is_terminal_waits_for_declared_steps_to_exist(docker_job):
+    docker_job._jobs.get_job.return_value = data_response(
+        SimpleNamespace(
+            status=PlatformJobStatus.COMPLETED,
+            platform_spec=SimpleNamespace(
+                steps=[
+                    SimpleNamespace(name="download"),
+                    SimpleNamespace(name="training"),
+                ]
+            ),
+        )
+    )
+    docker_job._jobs.list_steps.return_value = paginated_response(
+        [
+            SimpleNamespace(name="download", status=PlatformJobStatus.COMPLETED),
+        ]
+    )
+
+    assert docker_job.check_job_is_terminal(job="multi-step-job", workspace="default") is False
+
+
+def test_check_job_is_terminal_when_all_declared_steps_terminal(docker_job):
+    docker_job._jobs.get_job.return_value = data_response(
+        SimpleNamespace(
+            status=PlatformJobStatus.COMPLETED,
+            platform_spec=SimpleNamespace(
+                steps=[
+                    SimpleNamespace(name="download"),
+                    SimpleNamespace(name="training"),
+                ]
+            ),
+        )
+    )
+    docker_job._jobs.list_steps.return_value = paginated_response(
+        [
+            SimpleNamespace(name="download", status=PlatformJobStatus.COMPLETED),
+            SimpleNamespace(name="training", status=PlatformJobStatus.COMPLETED),
+        ]
+    )
+
+    assert docker_job.check_job_is_terminal(job="multi-step-job", workspace="default") is True
 
 
 def test_cleanup_single_container_revokes_workload_delegation_from_labels(docker_job, docker_client_mock):
