@@ -44,16 +44,15 @@ vi.mock('@studio/hooks/useCustomizationDatasetValidation', async (importOriginal
 });
 
 const mockReadiness = vi.hoisted(() => vi.fn());
-const mockCreateWorkspaceDeployment = vi.hoisted(() => vi.fn());
+const mockCreateDeploymentConfig = vi.hoisted(() => vi.fn());
 
 vi.mock('@studio/hooks/useBaseModelDeploymentReadiness', () => ({
   useBaseModelDeploymentReadiness: mockReadiness,
 }));
 
-vi.mock(
-  '@studio/routes/DeploymentsListRoute/CreateDeploymentSidePanel/useCreateDeploymentBySource',
-  () => ({ createWorkspaceDeployment: mockCreateWorkspaceDeployment })
-);
+vi.mock('@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource', () => ({
+  createWorkspaceDeploymentConfig: mockCreateDeploymentConfig,
+}));
 
 /** Minimum automodel payload that clears `customizationFormSchema`. */
 const validAutomodelValues = (): CustomizationFormFields => ({
@@ -91,8 +90,8 @@ describe('NewCustomizationForm', () => {
     mutateAutomodel.mockReset().mockResolvedValue({ name: 'job-1' });
     mutateUnsloth.mockReset().mockResolvedValue({ name: 'job-1' });
     mutateRl.mockReset().mockResolvedValue({ name: 'job-1' });
-    mockCreateWorkspaceDeployment.mockReset();
-    mockCreateWorkspaceDeployment.mockResolvedValue(undefined);
+    mockCreateDeploymentConfig.mockReset();
+    mockCreateDeploymentConfig.mockResolvedValue(undefined);
     mockReadiness.mockReset();
     mockReadiness.mockReturnValue({
       state: 'none',
@@ -272,7 +271,9 @@ describe('NewCustomizationForm', () => {
       expect(screen.queryByText('Engine')).not.toBeInTheDocument();
     });
 
-    it('creates the base deployment before the job', async () => {
+    // The config, and only the config. Studio creating the deployment too would
+    // reach the same end state hours early and idle a serving GPU for the run.
+    it('creates the deployment config before the job and hands the job its name', async () => {
       const user = userEvent.setup();
       renderRoute(
         <NewCustomizationForm workspace="default" initialValues={validAutomodelValues()} />
@@ -281,15 +282,28 @@ describe('NewCustomizationForm', () => {
       await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
 
       await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
-      expect(mockCreateWorkspaceDeployment).toHaveBeenCalled();
-      // Ordering is the point: a deployment that fails must not cost a training run.
-      expect(mockCreateWorkspaceDeployment.mock.invocationCallOrder[0]).toBeLessThan(
+      // `base-model` derived from the base model ref, plus the wizard's `-config`.
+      expect(mockCreateDeploymentConfig).toHaveBeenCalledWith(
+        'default',
+        expect.anything(),
+        'base-model-config',
+        expect.any(Function)
+      );
+      expect(mutateAutomodel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            spec: expect.objectContaining({ deployment_config: 'base-model-config' }),
+          }),
+        })
+      );
+      // Ordering is the point: a config that fails must not cost a training run.
+      expect(mockCreateDeploymentConfig.mock.invocationCallOrder[0]).toBeLessThan(
         mutateAutomodel.mock.invocationCallOrder[0]
       );
     });
 
-    it('does not start the job when the deployment fails', async () => {
-      mockCreateWorkspaceDeployment.mockRejectedValue(new Error('image pull denied'));
+    it('does not start the job when the config is rejected', async () => {
+      mockCreateDeploymentConfig.mockRejectedValue(new Error('image pull denied'));
       const user = userEvent.setup();
       renderRoute(
         <NewCustomizationForm workspace="default" initialValues={validAutomodelValues()} />
@@ -310,14 +324,16 @@ describe('NewCustomizationForm', () => {
         <NewCustomizationForm workspace="default" initialValues={validAutomodelValues()} />
       );
 
-      await user.click(await screen.findByRole('radio', { name: /Don't deploy/ }));
+      await user.click(await screen.findByRole('switch', { name: /Deploy the base model/ }));
       await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
 
       await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
-      expect(mockCreateWorkspaceDeployment).not.toHaveBeenCalled();
+      expect(mockCreateDeploymentConfig).not.toHaveBeenCalled();
+      // No config to point at, so the job must not carry a dangling reference.
+      expect(mutateAutomodel.mock.calls[0][0].data.spec.deployment_config).toBeUndefined();
     });
 
-    it('skips the deployment call when the base already serves LoRA', async () => {
+    it('skips the config call when the base already serves LoRA', async () => {
       mockReadiness.mockReturnValue({
         state: 'serving-lora',
         deploymentName: 'base-deployment',
@@ -332,7 +348,7 @@ describe('NewCustomizationForm', () => {
       await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
 
       await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
-      expect(mockCreateWorkspaceDeployment).not.toHaveBeenCalled();
+      expect(mockCreateDeploymentConfig).not.toHaveBeenCalled();
     });
   });
 });

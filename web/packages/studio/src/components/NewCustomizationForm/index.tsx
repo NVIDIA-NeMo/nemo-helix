@@ -22,11 +22,9 @@ import {
 import { CustomizationFilesetSelect } from '@studio/components/customizer/CustomizationFilesetSelect';
 import { BackendSelectionSection } from '@studio/components/NewCustomizationForm/BackendSelectionSection';
 import {
-  BASE_DEPLOYMENT_DEPLOY,
   baseDeploymentDefaults,
   baseDeploymentName,
-  DEFAULT_BASE_DEPLOYMENT_CHOICE,
-  type BaseDeploymentChoice,
+  DEFAULT_DEPLOY_BASE_MODEL,
 } from '@studio/components/NewCustomizationForm/baseDeploymentForm';
 import { ComputeResourcesSection } from '@studio/components/NewCustomizationForm/ComputeResourcesSection';
 import { DeploymentSection } from '@studio/components/NewCustomizationForm/DeploymentSection';
@@ -42,10 +40,9 @@ import { useBaseModelDeploymentReadiness } from '@studio/hooks/useBaseModelDeplo
 import {
   configNameFromWizardBaseName,
   createDeploymentWizardSchema,
-  deploymentNameFromWizardBaseName,
   type WizardFormValues,
-} from '@studio/routes/DeploymentsListRoute/CreateDeploymentSidePanel/schema';
-import { createWorkspaceDeployment } from '@studio/routes/DeploymentsListRoute/CreateDeploymentSidePanel/useCreateDeploymentBySource';
+} from '@studio/routes/NewDeploymentRoute/schema';
+import { createWorkspaceDeploymentConfig } from '@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource';
 import { getWorkspaceCustomizationJobDetailsRoute } from '@studio/routes/utils';
 import {
   FORM_DEFAULTS,
@@ -77,9 +74,7 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   const errorBannerRef = useRef<HTMLDivElement>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [deployStage, setDeployStage] = useState<string | null>(null);
-  const [deploymentChoice, setDeploymentChoice] = useState<BaseDeploymentChoice>(
-    DEFAULT_BASE_DEPLOYMENT_CHOICE
-  );
+  const [deployBaseModel, setDeployBaseModel] = useState(DEFAULT_DEPLOY_BASE_MODEL);
 
   const defaultValues = useMemo<CustomizationFormFields>(() => {
     if (initialValues) return initialValues;
@@ -200,16 +195,22 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   const onSubmit = async (fields: CustomizationFormFields) => {
     setValidationErrors([]);
 
-    // Deployment first. `_validate_engine_config` runs synchronously inside
-    // create_deployment_config, so a missing image fails here in milliseconds
-    // rather than after the job has burned GPU hours. Deliberately does NOT wait
-    // for READY: that takes minutes against hours of training, and READY now says
-    // nothing about READY when the job finishes.
+    // The config first, and only the config. The job carries its name as
+    // `deployment_config` and creates the deployment itself once training finishes
+    // — deploying up front reaches the same end state hours earlier and idles a
+    // serving GPU for the whole run to get there.
+    //
+    // Creating it here rather than passing inline parameters is what buys the early
+    // failure: `_validate_engine_config` runs synchronously inside
+    // create_deployment_config, so a bad engine or missing image surfaces in
+    // milliseconds and the job is never submitted. Inline params are validated by
+    // the job, after training.
     //
     // Skipping is allowed: the user may already have a serving plan of their own.
     // The section warns that the adapter will not be servable until the base model
     // is deployed, and the Deployments page can do that at any time afterwards.
-    if (needsBaseDeployment && deploymentChoice === BASE_DEPLOYMENT_DEPLOY) {
+    let deploymentConfig: string | undefined;
+    if (needsBaseDeployment && deployBaseModel) {
       const valid = await deployForm.trigger();
       if (!valid) {
         const messages = Object.values(deployForm.formState.errors)
@@ -221,33 +222,39 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
         return;
       }
       const values = deployForm.getValues();
-      const baseName = values.name.trim();
+      const configName = configNameFromWizardBaseName(values.name.trim());
       try {
-        await createWorkspaceDeployment(
-          workspace,
-          values,
-          deploymentNameFromWizardBaseName(baseName),
-          configNameFromWizardBaseName(baseName),
-          (message) => setDeployStage(message)
+        await createWorkspaceDeploymentConfig(workspace, values, configName, (message) =>
+          setDeployStage(message)
         );
       } catch (e) {
         setDeployStage(null);
         setValidationErrors([
-          getErrorMessage(e as Error, 'Failed to deploy the base model. The job was not started.'),
+          getErrorMessage(
+            e as Error,
+            'Failed to create the base model deployment configuration. The job was not started.'
+          ),
         ]);
         return;
       }
       setDeployStage(null);
+      deploymentConfig = configName;
     }
 
     if (fields.backend === 'automodel') {
-      await createAutomodel({ workspace, data: formToAutomodelCreate(fields) }).catch(
+      await createAutomodel({
+        workspace,
+        data: formToAutomodelCreate(fields, deploymentConfig),
+      }).catch(() => undefined);
+    } else if (fields.backend === 'rl') {
+      await createRl({ workspace, data: formToRlCreate(fields, deploymentConfig) }).catch(
         () => undefined
       );
-    } else if (fields.backend === 'rl') {
-      await createRl({ workspace, data: formToRlCreate(fields) }).catch(() => undefined);
     } else {
-      await createUnsloth({ workspace, data: formToUnslothCreate(fields) }).catch(() => undefined);
+      await createUnsloth({
+        workspace,
+        data: formToUnslothCreate(fields, deploymentConfig),
+      }).catch(() => undefined);
     }
   };
 
@@ -346,8 +353,8 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
                           control={deployForm.control}
                           errors={deployForm.formState.errors}
                           baseModelRef={baseModelRef ?? ''}
-                          choice={deploymentChoice}
-                          onChoiceChange={setDeploymentChoice}
+                          deployBaseModel={deployBaseModel}
+                          onDeployBaseModelChange={setDeployBaseModel}
                         />
                       </>
                     )}

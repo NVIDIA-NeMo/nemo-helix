@@ -298,28 +298,49 @@ export const customizationFormSchema = z
     }
   });
 
-export const formToAutomodelCreate = (f: CustomizationFormFields): AutomodelJobsJobRequest => {
+/**
+ * A job spec carrying `deployment_config`: the name of a `ModelDeploymentConfig`
+ * the job's model_entity task resolves and deploys from once training finishes.
+ *
+ * Stated as an intersection because the field is only on `UnslothJobInput` in the
+ * generated SDK today — `AutomodelJobInput` and `RlJobInput` do not declare it yet,
+ * though the task that consumes it (`launch_model`) is backend-agnostic and already
+ * handles all three. Delete the intersection once the automodel and RL job inputs
+ * carry the field and the SDK is regenerated; nothing else here has to change.
+ */
+type WithDeploymentConfig<T> = T & { deployment_config?: string };
+
+/** Omitted rather than sent as `undefined`: the job schemas are `extra="forbid"`. */
+const deploymentConfigField = (name: string | undefined) =>
+  name ? { deployment_config: name } : {};
+
+export const formToAutomodelCreate = (
+  f: CustomizationFormFields,
+  deploymentConfig?: string
+): AutomodelJobsJobRequest => {
   const { training } = f.automodel;
   const usesLora =
     training.finetuning_type === 'lora' || training.finetuning_type === 'lora_merged';
   const isDistillation = training.training_type === 'distillation';
+  const spec: WithDeploymentConfig<AutomodelJobInput> = {
+    ...f.automodel,
+    integrations: cleanIntegrations(f.automodel.integrations),
+    training: {
+      ...training,
+      lora: usesLora ? training.lora : undefined,
+      teacher_model: isDistillation ? training.teacher_model || undefined : undefined,
+      teacher_precision: isDistillation ? training.teacher_precision : undefined,
+      distillation_ratio: isDistillation ? training.distillation_ratio : undefined,
+      distillation_temperature: isDistillation ? training.distillation_temperature : undefined,
+      offload_teacher: isDistillation ? training.offload_teacher : undefined,
+    },
+    output: { name: f.outputName, description: f.description || undefined },
+    ...deploymentConfigField(deploymentConfig),
+  };
   return {
     name: f.outputName || undefined,
     description: f.description || undefined,
-    spec: {
-      ...f.automodel,
-      integrations: cleanIntegrations(f.automodel.integrations),
-      training: {
-        ...training,
-        lora: usesLora ? training.lora : undefined,
-        teacher_model: isDistillation ? training.teacher_model || undefined : undefined,
-        teacher_precision: isDistillation ? training.teacher_precision : undefined,
-        distillation_ratio: isDistillation ? training.distillation_ratio : undefined,
-        distillation_temperature: isDistillation ? training.distillation_temperature : undefined,
-        offload_teacher: isDistillation ? training.offload_teacher : undefined,
-      },
-      output: { name: f.outputName, description: f.description || undefined },
-    },
+    spec,
   };
 };
 
@@ -359,91 +380,96 @@ const omitIfEmpty = <T extends object>(group: T | undefined | null): T | undefin
 /** An empty list is not a filter — send nothing so the backend keeps its own default. */
 const emptyToUndefined = (v: string[] | undefined | null) => (v && v.length > 0 ? v : undefined);
 
-export const formToRlCreate = (f: CustomizationFormFields): RlJobsJobRequest => {
+export const formToRlCreate = (
+  f: CustomizationFormFields,
+  deploymentConfig?: string
+): RlJobsJobRequest => {
   if (f.grpo.trainingType === 'grpo') {
     const t = f.rl.training;
     const isLora = f.grpo.finetuning_type === RlGRPOTrainingFinetuningType.lora;
+    const spec: WithDeploymentConfig<RlJobInput> = {
+      model: f.rl.model,
+      dataset: f.rl.dataset,
+      environment: f.grpo.environmentFileset || undefined,
+      integrations: cleanIntegrations(f.rl.integrations),
+      training: {
+        type: 'grpo',
+        optimizer_type: t.optimizer_type,
+        learning_rate: t.learning_rate,
+        min_learning_rate: t.min_learning_rate,
+        weight_decay: t.weight_decay,
+        adam_beta1: t.adam_beta1,
+        adam_beta2: t.adam_beta2,
+        adam_eps: t.adam_eps,
+        warmup_steps: t.warmup_steps,
+        max_steps: t.max_steps,
+        val_check_interval: t.val_check_interval,
+        val_at_end: t.val_at_end,
+        keep_top_k: t.keep_top_k,
+        batch_size: t.batch_size,
+        micro_batch_size: t.micro_batch_size,
+        activation_checkpointing: t.activation_checkpointing,
+        max_seq_length: t.max_seq_length,
+        seed: t.seed,
+        parallelism: t.parallelism,
+        max_grad_norm: t.max_grad_norm,
+        finetuning_type: f.grpo.finetuning_type,
+        lora: isLora
+          ? {
+              ...f.grpo.lora,
+              target_modules: emptyToUndefined(f.grpo.lora?.target_modules),
+              exclude_modules: emptyToUndefined(f.grpo.lora?.exclude_modules),
+            }
+          : undefined,
+        num_generations_per_prompt: f.grpo.num_generations_per_prompt,
+        num_prompts_per_step: f.grpo.num_prompts_per_step,
+        overlong_filtering: f.grpo.overlong_filtering,
+        temperature: f.grpo.temperature,
+        max_new_tokens: f.grpo.max_new_tokens,
+        val_at_start: f.grpo.val_at_start,
+        normalize_rewards: f.grpo.normalize_rewards,
+        max_rollout_turns: f.grpo.max_rollout_turns,
+        ref_policy_kl_penalty: t.ref_policy_kl_penalty,
+        ratio_clip_min: f.grpo.ratio_clip_min,
+        ratio_clip_max: f.grpo.ratio_clip_max,
+        epochs: t.epochs,
+        execution_profile: t.execution_profile || undefined,
+        ratio_clip_c: f.grpo.ratio_clip_c,
+        advantage_clip_low: f.grpo.advantage_clip_low,
+        advantage_clip_high: f.grpo.advantage_clip_high,
+        use_dynamic_sampling: f.grpo.use_dynamic_sampling,
+        // The backend rejects a multiplier other than 1.0 unless dynamic sampling is on,
+        // so the two always travel together.
+        batch_multiplier: f.grpo.use_dynamic_sampling ? f.grpo.batch_multiplier : undefined,
+        dynamic_sampling_max_gen_batches: f.grpo.use_dynamic_sampling
+          ? f.grpo.dynamic_sampling_max_gen_batches
+          : undefined,
+        use_leave_one_out_baseline: f.grpo.use_leave_one_out_baseline,
+        use_importance_sampling_correction: f.grpo.use_importance_sampling_correction,
+        use_on_policy_kl_approximation: f.grpo.use_on_policy_kl_approximation,
+        truncated_importance_sampling_type: f.grpo.truncated_importance_sampling_type,
+        truncated_importance_sampling_ratio: f.grpo.truncated_importance_sampling_ratio,
+        truncated_importance_sampling_ratio_min: f.grpo.truncated_importance_sampling_ratio_min,
+        reward_scaling: omitIfEmpty(f.grpo.reward_scaling),
+        reward_shaping: omitIfEmpty(f.grpo.reward_shaping),
+        policy_backend: f.grpo.policy_backend,
+        batching_strategy: f.grpo.batching_strategy,
+        sequence_length_round: f.grpo.sequence_length_round,
+        top_k: f.grpo.top_k,
+        train_mb_tokens: f.grpo.train_mb_tokens,
+        router_aux_loss_coef: f.grpo.router_aux_loss_coef,
+        vllm_tensor_parallel_size: f.grpo.vllm_tensor_parallel_size,
+        vllm_gpu_memory_utilization: f.grpo.vllm_gpu_memory_utilization,
+        hf_config_overrides: f.grpo.hf_config_overrides,
+        automodel_kwargs: f.grpo.automodel_kwargs,
+      },
+      output: { name: f.outputName || undefined },
+      ...deploymentConfigField(deploymentConfig),
+    };
     return {
       name: f.outputName || undefined,
       description: f.description || undefined,
-      spec: {
-        model: f.rl.model,
-        dataset: f.rl.dataset,
-        environment: f.grpo.environmentFileset || undefined,
-        integrations: cleanIntegrations(f.rl.integrations),
-        training: {
-          type: 'grpo',
-          optimizer_type: t.optimizer_type,
-          learning_rate: t.learning_rate,
-          min_learning_rate: t.min_learning_rate,
-          weight_decay: t.weight_decay,
-          adam_beta1: t.adam_beta1,
-          adam_beta2: t.adam_beta2,
-          adam_eps: t.adam_eps,
-          warmup_steps: t.warmup_steps,
-          max_steps: t.max_steps,
-          val_check_interval: t.val_check_interval,
-          val_at_end: t.val_at_end,
-          keep_top_k: t.keep_top_k,
-          batch_size: t.batch_size,
-          micro_batch_size: t.micro_batch_size,
-          activation_checkpointing: t.activation_checkpointing,
-          max_seq_length: t.max_seq_length,
-          seed: t.seed,
-          parallelism: t.parallelism,
-          max_grad_norm: t.max_grad_norm,
-          finetuning_type: f.grpo.finetuning_type,
-          lora: isLora
-            ? {
-                ...f.grpo.lora,
-                target_modules: emptyToUndefined(f.grpo.lora?.target_modules),
-                exclude_modules: emptyToUndefined(f.grpo.lora?.exclude_modules),
-              }
-            : undefined,
-          num_generations_per_prompt: f.grpo.num_generations_per_prompt,
-          num_prompts_per_step: f.grpo.num_prompts_per_step,
-          overlong_filtering: f.grpo.overlong_filtering,
-          temperature: f.grpo.temperature,
-          max_new_tokens: f.grpo.max_new_tokens,
-          val_at_start: f.grpo.val_at_start,
-          normalize_rewards: f.grpo.normalize_rewards,
-          max_rollout_turns: f.grpo.max_rollout_turns,
-          ref_policy_kl_penalty: t.ref_policy_kl_penalty,
-          ratio_clip_min: f.grpo.ratio_clip_min,
-          ratio_clip_max: f.grpo.ratio_clip_max,
-          epochs: t.epochs,
-          execution_profile: t.execution_profile || undefined,
-          ratio_clip_c: f.grpo.ratio_clip_c,
-          advantage_clip_low: f.grpo.advantage_clip_low,
-          advantage_clip_high: f.grpo.advantage_clip_high,
-          use_dynamic_sampling: f.grpo.use_dynamic_sampling,
-          // The backend rejects a multiplier other than 1.0 unless dynamic sampling is on,
-          // so the two always travel together.
-          batch_multiplier: f.grpo.use_dynamic_sampling ? f.grpo.batch_multiplier : undefined,
-          dynamic_sampling_max_gen_batches: f.grpo.use_dynamic_sampling
-            ? f.grpo.dynamic_sampling_max_gen_batches
-            : undefined,
-          use_leave_one_out_baseline: f.grpo.use_leave_one_out_baseline,
-          use_importance_sampling_correction: f.grpo.use_importance_sampling_correction,
-          use_on_policy_kl_approximation: f.grpo.use_on_policy_kl_approximation,
-          truncated_importance_sampling_type: f.grpo.truncated_importance_sampling_type,
-          truncated_importance_sampling_ratio: f.grpo.truncated_importance_sampling_ratio,
-          truncated_importance_sampling_ratio_min: f.grpo.truncated_importance_sampling_ratio_min,
-          reward_scaling: omitIfEmpty(f.grpo.reward_scaling),
-          reward_shaping: omitIfEmpty(f.grpo.reward_shaping),
-          policy_backend: f.grpo.policy_backend,
-          batching_strategy: f.grpo.batching_strategy,
-          sequence_length_round: f.grpo.sequence_length_round,
-          top_k: f.grpo.top_k,
-          train_mb_tokens: f.grpo.train_mb_tokens,
-          router_aux_loss_coef: f.grpo.router_aux_loss_coef,
-          vllm_tensor_parallel_size: f.grpo.vllm_tensor_parallel_size,
-          vllm_gpu_memory_utilization: f.grpo.vllm_gpu_memory_utilization,
-          hf_config_overrides: f.grpo.hf_config_overrides,
-          automodel_kwargs: f.grpo.automodel_kwargs,
-        },
-        output: { name: f.outputName || undefined },
-      },
+      spec,
     };
   }
 
@@ -493,7 +519,10 @@ export const formToRlCreate = (f: CustomizationFormFields): RlJobsJobRequest => 
   };
 };
 
-export const formToUnslothCreate = (f: CustomizationFormFields): UnslothJobsJobRequest => {
+export const formToUnslothCreate = (
+  f: CustomizationFormFields,
+  deploymentConfig?: string
+): UnslothJobsJobRequest => {
   const { training } = f.unsloth;
   const usesLora = training?.finetuning_type === 'lora';
   return {
@@ -508,6 +537,11 @@ export const formToUnslothCreate = (f: CustomizationFormFields): UnslothJobsJobR
       hardware: { ...f.unsloth.hardware, gpus: f.unsloth.hardware?.gpus || undefined },
       training: training && { ...training, lora: usesLora ? training.lora : undefined },
       output: { name: f.outputName || undefined, description: f.description || undefined },
+      // Native field here — `UnslothJobInput` already declares it, so no intersection is
+      // needed. Set unconditionally rather than via `deploymentConfigField`: the spread of
+      // `f.unsloth` above can carry an inline config from a cloned job, and that would
+      // otherwise survive a run the user asked not to deploy.
+      deployment_config: deploymentConfig,
     },
   };
 };

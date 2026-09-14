@@ -7,29 +7,24 @@ import {
   SOURCE_WORKSPACE,
   WORKSPACE_PICKER_MODEL,
   type WizardFormValues,
-} from '@studio/routes/DeploymentsListRoute/CreateDeploymentSidePanel/schema';
+} from '@studio/routes/NewDeploymentRoute/schema';
 
 /**
- * Whether Studio deploys the base model as part of starting this job.
+ * Deploying is the default: without it the run produces nothing servable.
  *
- * - `deploy` — create the ModelDeploymentConfig **and** the ModelDeployment
- *   before submitting the job. The deployment converges while training runs.
- * - `skip` — start the job only. The adapter will not be servable until someone
- *   deploys the base model, which they can do from the Deployments page at any
- *   time, including after the job finishes.
+ * On submit Studio creates the ModelDeploymentConfig and passes its name to the
+ * job as `deployment_config`. The job's own model_entity task resolves that name
+ * once training finishes and creates the ModelDeployment then — see
+ * `launch_model` in `nmp.customization_common.tasks.model_entity.run`.
  *
- * There is deliberately no "deploy when the job finishes" option. That is the
- * GPU-correct point in time, but it needs `deployment_config` on the job, which
- * exists only on `UnslothJobInput` — `AutomodelJobInput` and `RlJobInput` have
- * no such field and their compilers hardcode it to `None`. Offering it before
- * the backend carries it would promise something the API cannot honour.
+ * Studio deliberately does not create the deployment itself. That is the same
+ * end state reached hours earlier, with a serving GPU idling through the entire
+ * training run for nothing. Handing the job a config name costs nothing while it
+ * trains and still fails fast: `_validate_engine_config` runs synchronously
+ * inside `create_deployment_config`, so a bad engine or missing image is
+ * rejected before the job is submitted.
  */
-export const BASE_DEPLOYMENT_DEPLOY = 'deploy' as const;
-export const BASE_DEPLOYMENT_SKIP = 'skip' as const;
-export type BaseDeploymentChoice = typeof BASE_DEPLOYMENT_DEPLOY | typeof BASE_DEPLOYMENT_SKIP;
-
-/** Deploying is the default: without it the run produces nothing servable. */
-export const DEFAULT_BASE_DEPLOYMENT_CHOICE: BaseDeploymentChoice = BASE_DEPLOYMENT_DEPLOY;
+export const DEFAULT_DEPLOY_BASE_MODEL = true;
 
 /**
  * The deployment form nested inside the fine-tuning form reuses `WizardFormValues`

@@ -199,16 +199,23 @@ async function createHuggingFaceDeployment(
 }
 
 /**
- * Create a config + deployment for a model that already exists in the workspace.
+ * Create the `ModelDeploymentConfig` for a model that already exists in the workspace.
  *
- * Exported because the fine-tuning form deploys a **base model** by the same two
- * calls before submitting an adapter job. Callers outside the wizard own their own
- * error surface and query invalidation.
+ * Split out from `createWorkspaceDeployment` because a config is useful on its own:
+ * the fine-tuning form creates one for the adapter's **base model** and hands its
+ * name to the job as `deployment_config`, letting the job create the deployment
+ * once training finishes rather than idling a GPU for the whole run.
+ *
+ * Validation is the reason this is worth doing up front. `_validate_engine_config`
+ * runs synchronously inside `create_deployment_config`, so a missing image for the
+ * NIM engine fails here in milliseconds — before the caller commits to anything
+ * expensive.
+ *
+ * Callers outside the wizard own their own error surface and query invalidation.
  */
-export async function createWorkspaceDeployment(
+export async function createWorkspaceDeploymentConfig(
   workspace: string,
   values: WizardFormValues,
-  deploymentName: string,
   configName: string,
   reportStage: ReportStage
 ) {
@@ -253,6 +260,17 @@ export async function createWorkspaceDeployment(
     },
     model_entity_id: `${modelNamespace}/${modelName}`,
   });
+}
+
+/** Create a config + deployment for a model that already exists in the workspace. */
+export async function createWorkspaceDeployment(
+  workspace: string,
+  values: WizardFormValues,
+  deploymentName: string,
+  configName: string,
+  reportStage: ReportStage
+) {
+  await createWorkspaceDeploymentConfig(workspace, values, configName, reportStage);
 
   reportStage('Creating deployment…');
   await modelsCreateDeployment(workspace, {

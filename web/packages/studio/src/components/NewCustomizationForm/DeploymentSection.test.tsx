@@ -3,17 +3,15 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
-  BASE_DEPLOYMENT_DEPLOY,
-  BASE_DEPLOYMENT_SKIP,
   baseDeploymentDefaults,
-  type BaseDeploymentChoice,
+  DEFAULT_DEPLOY_BASE_MODEL,
 } from '@studio/components/NewCustomizationForm/baseDeploymentForm';
 import { DeploymentSection } from '@studio/components/NewCustomizationForm/DeploymentSection';
 import type { BaseModelDeploymentReadiness } from '@studio/hooks/useBaseModelDeploymentReadiness';
 import {
   createDeploymentWizardSchema,
   type WizardFormValues,
-} from '@studio/routes/DeploymentsListRoute/CreateDeploymentSidePanel/schema';
+} from '@studio/routes/NewDeploymentRoute/schema';
 import { render, screen } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import type { FC } from 'react';
@@ -32,9 +30,9 @@ const readiness = (
 const Harness: FC<{
   r: BaseModelDeploymentReadiness;
   modelRef?: string;
-  choice?: BaseDeploymentChoice;
-  onChoiceChange?: (c: BaseDeploymentChoice) => void;
-}> = ({ r, modelRef = 'ws/base', choice = BASE_DEPLOYMENT_DEPLOY, onChoiceChange = () => {} }) => {
+  deploy?: boolean;
+  onDeployChange?: (deploy: boolean) => void;
+}> = ({ r, modelRef = 'ws/base', deploy = true, onDeployChange = () => {} }) => {
   const f = useForm<WizardFormValues>({
     resolver: zodResolver(createDeploymentWizardSchema),
     defaultValues: baseDeploymentDefaults(modelRef),
@@ -45,8 +43,8 @@ const Harness: FC<{
       control={f.control}
       errors={f.formState.errors}
       baseModelRef={modelRef}
-      choice={choice}
-      onChoiceChange={onChoiceChange}
+      deployBaseModel={deploy}
+      onDeployBaseModelChange={onDeployChange}
     />
   );
 };
@@ -56,8 +54,8 @@ describe('DeploymentSection', () => {
     render(<Harness r={readiness({ state: 'serving-lora', deploymentName: 'base-deployment' })} />);
     expect(screen.getByText(/base-deployment/)).toBeInTheDocument();
     expect(screen.queryByText('Engine')).not.toBeInTheDocument();
-    // Nothing to create, so the timing question does not arise.
-    expect(screen.queryByRole('radio', { name: /Now/ })).not.toBeInTheDocument();
+    // Nothing to create, so there is no toggle to offer.
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
   });
 
   it('offers the deployment fields when the base is not deployed', () => {
@@ -98,15 +96,23 @@ describe('DeploymentSection', () => {
     expect(screen.getByText(/Checking whether/)).toBeInTheDocument();
   });
 
+  // The timing is the whole reason the copy changed: the job creates the deployment
+  // after training rather than Studio creating it up front and idling a GPU.
+  it('says the deployment is created when training finishes', () => {
+    render(<Harness r={readiness({ state: 'none' })} />);
+    expect(screen.getByRole('switch', { name: /when training finishes/ })).toBeInTheDocument();
+    expect(screen.getByText(/once training\s+completes/)).toBeInTheDocument();
+  });
+
   describe('opting out', () => {
     it('defaults to deploying', () => {
+      expect(DEFAULT_DEPLOY_BASE_MODEL).toBe(true);
       render(<Harness r={readiness({ state: 'none' })} />);
-      expect(screen.getByRole('radio', { name: /Deploy the base model/ })).toBeChecked();
-      expect(screen.getByRole('radio', { name: /Don't deploy/ })).not.toBeChecked();
+      expect(screen.getByRole('switch')).toBeChecked();
     });
 
     it('replaces the fields with a warning when the user opts out', () => {
-      render(<Harness r={readiness({ state: 'none' })} choice={BASE_DEPLOYMENT_SKIP} />);
+      render(<Harness r={readiness({ state: 'none' })} deploy={false} />);
       expect(screen.getByText(/will not be servable until/)).toBeInTheDocument();
       // Nothing to configure once there is no deployment to create.
       expect(screen.queryByText('Engine')).not.toBeInTheDocument();
@@ -114,12 +120,12 @@ describe('DeploymentSection', () => {
     });
 
     it('reports the choice back to the caller', async () => {
-      const onChoiceChange = vi.fn();
+      const onDeployChange = vi.fn();
       const user = userEvent.setup();
-      render(<Harness r={readiness({ state: 'none' })} onChoiceChange={onChoiceChange} />);
+      render(<Harness r={readiness({ state: 'none' })} onDeployChange={onDeployChange} />);
 
-      await user.click(screen.getByRole('radio', { name: /Don't deploy/ }));
-      expect(onChoiceChange).toHaveBeenCalledWith(BASE_DEPLOYMENT_SKIP);
+      await user.click(screen.getByRole('switch'));
+      expect(onDeployChange).toHaveBeenCalledWith(false);
     });
   });
 });
