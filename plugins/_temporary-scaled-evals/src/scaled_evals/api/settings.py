@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     task_pack_max_members: int = 100_000
     # Guardrails for server-side results.tar.gz creation. These are source
     # object limits; TODO: add tenant/account quotas and compressed-size caps.
+    benchmark_archive_cleanup_interval_seconds: float = Field(default=300.0, gt=0)
     benchmark_archive_max_files: int = 100_000
     benchmark_archive_max_source_bytes: int = 10_000_000_000
     evaluation_archive_max_files: int = 10_000

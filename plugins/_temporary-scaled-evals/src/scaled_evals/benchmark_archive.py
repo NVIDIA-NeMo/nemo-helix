@@ -10,6 +10,7 @@ custom metrics and pass@k are left to downstream Harbor analysis.
 
 import hashlib
 import json
+import logging
 import shutil
 import tarfile
 import tempfile
@@ -19,9 +20,11 @@ from pathlib import Path, PurePosixPath
 from pydantic import BaseModel
 
 from scaled_evals.api import s3
+from scaled_evals.api.redaction import redact_secret_text
 from scaled_evals.api.settings import settings
 from scaled_evals.archive_validation import (
     BenchmarkArchiveError,
+    benchmark_archive_object_key,
     file_sha256,
     harbor_job_uuid,
     validate_archive_id,
@@ -38,6 +41,8 @@ from scaled_evals.models.benchmark_archives import (
     BenchmarkArchiveManifest,
     BenchmarkEvidenceCheck,
 )
+
+LOG = logging.getLogger(__name__)
 
 
 def _local_task_labels(source: Path, member: dict) -> dict[str, str]:
@@ -385,8 +390,18 @@ def build_benchmark_archive(
         check_claim()
         with tarfile.open(archive_path, "w:gz") as archive:
             archive.add(output, arcname=run_id)
-        key = f"benchmark-runs/{run_id}/archives/{job['generation']}/{job['claim_token']}.tar.gz"
+        key = benchmark_archive_object_key(run_id, job["generation"], job["claim_token"])
         sha256 = file_sha256(archive_path)
         check_claim()
-        size = s3.upload_file(archive_path, key, content_type="application/gzip")
+        try:
+            size = s3.upload_file(archive_path, key, content_type="application/gzip")
+            check_claim()
+        except Exception:
+            # Publication has not been attempted yet, so this claim's object is
+            # safe to remove even if the upload succeeded but its response failed.
+            try:
+                s3.delete_object(key)
+            except Exception as exc:  # noqa: BLE001 - a later reconciliation sweep retries deletion
+                LOG.warning("benchmark archive upload cleanup deferred for %s: %s", key, redact_secret_text(str(exc)))
+            raise
         return {"object_key": key, "size_bytes": size, "sha256": sha256, "partial": manifest.partial}

@@ -509,6 +509,7 @@ def test_mounted_openapi_includes_benchmark_archive_contract():
 def test_idle_dispatcher_processes_benchmark_archive_queue(monkeypatch, status):
     repo = MagicMock(spec=BenchmarkArchiveRepository)
     repo.claim.return_value = job(status=status) if status else None
+    repo.claim_cleanup.return_value = None
     monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveRepository", lambda conn: repo)
     monkeypatch.setattr(settings, "dispatch_kubernetes_jobs_enabled", False)
 

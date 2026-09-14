@@ -114,6 +114,37 @@ class BenchmarkArchiveRepository:
             )
             return cur.fetchone()
 
+    def claim_cleanup(self, *, interval_seconds: float) -> str | None:
+        """Schedule another bounded sweep, including failed or soft-deleted runs.
+
+        The timestamp is a throttle, not a completion marker: crashes, transient
+        delete failures and uploads completing late are retried on later sweeps.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                WITH candidate AS (
+                    SELECT benchmark_run_id FROM benchmark_run_archives
+                    WHERE cleanup_checked_at IS NULL OR
+                        cleanup_checked_at < NOW() - (%s * INTERVAL '1 second')
+                    ORDER BY cleanup_checked_at NULLS FIRST, requested_at, benchmark_run_id
+                    FOR UPDATE SKIP LOCKED LIMIT 1
+                )
+                UPDATE benchmark_run_archives a SET cleanup_checked_at = NOW()
+                FROM candidate c WHERE a.benchmark_run_id = c.benchmark_run_id
+                RETURNING a.benchmark_run_id
+                """,
+                (interval_seconds,),
+            )
+            row = cur.fetchone()
+            return None if row is None else row["benchmark_run_id"]
+
+    def lock_for_cleanup(self, run_id: str) -> dict | None:
+        """Read authoritative references; caller holds the transaction through deletion."""
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT * FROM benchmark_run_archives WHERE benchmark_run_id = %s FOR UPDATE", (run_id,))
+            return cur.fetchone()
+
     def heartbeat(self, run_id: str, token: str) -> bool:
         with self.conn.cursor() as cur:
             cur.execute(
@@ -149,7 +180,8 @@ class BenchmarkArchiveRepository:
         size_bytes: int,
         sha256: str | None = None,
         partial: bool = False,
-    ) -> None:
+    ) -> bool:
+        """Return whether this claim published; a commit error remains uncertain."""
         with self.conn.transaction(), self.conn.cursor() as cur:
             self.validate_members(job["benchmark_run_id"], job["members"])
             cur.execute(
@@ -160,6 +192,7 @@ class BenchmarkArchiveRepository:
                 """,
                 (object_key, size_bytes, sha256, partial, job["benchmark_run_id"], job["claim_token"]),
             )
+            return cur.rowcount == 1
 
     def fail(self, job: dict, error: str) -> None:
         with self.conn.cursor() as cur:

@@ -63,12 +63,17 @@ def test_archive_upgrade_replay_and_queue(tmp_path: Path, monkeypatch: pytest.Mo
         # An early preview may have applied 042 before checksum storage existed.
         with psycopg.connect(dsn, autocommit=True) as preview:
             preview.execute("ALTER TABLE benchmark_run_archives DROP COLUMN sha256")
+            preview.execute("ALTER TABLE benchmark_run_archives DROP COLUMN cleanup_checked_at")
         migrations.apply_sql(dsn, schema="scaled_evals")
         with psycopg.Connection[dict[str, Any]].connect(dsn, autocommit=True, row_factory=dict_row) as conn:
             repo = BenchmarkArchiveRepository(conn)
             queued = repo.request("bmr_1")
             assert queued["status"] == "queued"
             assert len(queued["members"]) == 1
+            assert repo.claim_cleanup(interval_seconds=300) == "bmr_1"
+            assert repo.claim_cleanup(interval_seconds=300) is None
+            conn.execute("UPDATE benchmark_run_archives SET cleanup_checked_at = NOW() - INTERVAL '1 hour'")
+            assert repo.claim_cleanup(interval_seconds=300) == "bmr_1"
             public_table = conn.execute("SELECT to_regclass('public.benchmark_run_archives') AS name").fetchone()
             assert public_table is not None and public_table["name"] is None
             # A boot replay preserves durable queued work.
@@ -81,9 +86,17 @@ def test_archive_upgrade_replay_and_queue(tmp_path: Path, monkeypatch: pytest.Mo
             stale = {**claim, "claim_token": "stale"}
             assert not repo.heartbeat("bmr_1", "stale")
             repo.fail(stale, "must not overwrite")
-            repo.finish(stale, object_key="stale", size_bytes=1)
+            assert repo.finish(stale, object_key="stale", size_bytes=1) is False
             assert _archive(repo)["status"] == "building"
-            repo.finish(claim, object_key="combined", size_bytes=100, sha256="c" * 64)
+            # Deletion holds this same row lock: a publisher cannot install a
+            # reference between the cleanup read and object-store deletion.
+            with conn.transaction():
+                assert repo.lock_for_cleanup("bmr_1") is not None
+                with psycopg.Connection[dict[str, Any]].connect(dsn, autocommit=True, row_factory=dict_row) as other:
+                    other.execute("SET lock_timeout = '100ms'")
+                    with pytest.raises(psycopg.errors.LockNotAvailable):
+                        BenchmarkArchiveRepository(other).finish(claim, object_key="blocked", size_bytes=1)
+            assert repo.finish(claim, object_key="combined", size_bytes=100, sha256="c" * 64) is True
             migrations.apply_sql(dsn, schema="scaled_evals")
             assert _archive(repo)["object_key"] == "combined"
             assert _archive(repo)["sha256"] == "c" * 64

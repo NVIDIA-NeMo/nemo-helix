@@ -80,6 +80,7 @@ from scaled_evals.api.repositories.switchyard_campaign_repository import (
 )
 from scaled_evals.api.settings import settings
 from scaled_evals.benchmark_archive import build_benchmark_archive
+from scaled_evals.benchmark_archive_cleanup import cleanup_benchmark_archives as cleanup_archive_objects
 from scaled_evals.dispatch.credentials import materialize_credential_envs
 from scaled_evals.dispatch.harbor_dataset_images import (
     dataset_configs,
@@ -551,7 +552,21 @@ class Dispatcher:
             if benchmark_archive["status"] == "building":
                 self.build_benchmark_archive(benchmark_archive)
             return True
+        with self.connect() as conn:
+            cleanup_run_id = BenchmarkArchiveRepository(conn).claim_cleanup(
+                interval_seconds=settings.benchmark_archive_cleanup_interval_seconds,
+            )
+        if cleanup_run_id is not None:
+            self.cleanup_benchmark_archives(cleanup_run_id)
+            return True
         return did_work
+
+    def cleanup_benchmark_archives(self, run_id: str, *, object_keys: list[str] | None = None) -> None:
+        """Best-effort immediate cleanup; durable periodic sweeps retry failures."""
+        try:
+            cleanup_archive_objects(self.connect, run_id, object_keys=object_keys)
+        except Exception as exc:  # noqa: BLE001 - retain objects when database/store state is uncertain
+            LOG.warning("benchmark archive cleanup deferred for %s: %s", run_id, redact_secret_text(str(exc)))
 
     def build_benchmark_archive(self, job: dict) -> None:
         stop = threading.Event()
@@ -574,13 +589,17 @@ class Dispatcher:
 
         keeper = threading.Thread(target=keep_claim, daemon=True)
         keeper.start()
+        archive: dict | None = None
+        published = False
         try:
             with self.connect() as conn:
                 BenchmarkArchiveRepository(conn).validate_members(job["benchmark_run_id"], job["members"])
             archive = build_benchmark_archive(job, check_claim=check_claim, evidence_checks=(check_campaign_evidence,))
             check_claim()
             with self.connect() as conn:
-                BenchmarkArchiveRepository(conn).finish(job, **archive)
+                published = BenchmarkArchiveRepository(conn).finish(job, **archive)
+            if not published:
+                raise RuntimeError("benchmark archive claim lost before publication")
         except Exception as exc:  # noqa: BLE001 — record a retryable export failure
             # Object-store errors may contain URLs; expose only a redacted message.
             detail = redact_secret_text(str(exc))[:2000]
@@ -590,6 +609,10 @@ class Dispatcher:
         finally:
             stop.set()
             keeper.join(timeout=5)
+            if archive is not None and not published:
+                # A commit acknowledgement can fail after the row became ready.
+                # Recheck authoritative references under lock before deleting.
+                self.cleanup_benchmark_archives(job["benchmark_run_id"], object_keys=[archive["object_key"]])
 
     def claim_next_execution_cleanup(self) -> dict | None:
         with self.connect() as conn:

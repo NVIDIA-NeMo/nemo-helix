@@ -23,7 +23,7 @@ class OperationsRepository:
         self.conn.execute(f"SELECT {EVALUATION_COLUMNS} FROM evaluations WHERE false")
         self.conn.execute("SELECT id FROM evaluation_execution_cleanups WHERE false")
         self.conn.execute(
-            "SELECT benchmark_run_id, generation, status, claim_token, sha256 FROM benchmark_run_archives WHERE false"
+            "SELECT benchmark_run_id, generation, status, claim_token, sha256, cleanup_checked_at FROM benchmark_run_archives WHERE false"
         )
 
     def has_fresh_service_heartbeat(self, service: str, *, stale_seconds: float) -> bool:

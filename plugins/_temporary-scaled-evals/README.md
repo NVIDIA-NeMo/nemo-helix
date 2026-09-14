@@ -152,7 +152,21 @@ building, or ready work; `force` replaces a ready/failed export, not an active b
 The separate **dispatch worker must be running**. It processes benchmark archives
 after higher-priority lifecycle, evaluation, evidence, and per-evaluation archive
 work. Leases survive worker restarts, and changed member executions/archives
-prevent publication of the in-progress export. The API records the completed
+prevent publication of the in-progress export. Upload failures and lease loss
+trigger cleanup of unpublished claim-token objects. Cleanup rechecks the archive
+row under a lock before deleting: a lost commit acknowledgement must not delete
+a successfully published archive. If the database or object store is unavailable,
+cleanup defers rather than guessing.
+
+Idle dispatch workers also reconcile archive prefixes periodically, retaining the
+published object and the current building claim's object. This recovers objects
+left by process crashes, failed deletions, superseded generations, or an upload
+that completed after a revoked worker exited. The per-run throttle is persisted
+in Postgres (`BENCHMARK_ARCHIVE_CLEANUP_INTERVAL_SECONDS`, default 300 seconds);
+sweeps repeat, rather than treating an initially empty prefix as permanently clean.
+The dispatcher handles evaluation/archive work before these maintenance sweeps.
+
+The API records the completed
 tarball's SHA-256, and the CLI verifies its size and digest **before** extracting
 or keeping it. Old exports without a recorded checksum still download with an
 explicit warning; rebuild them with `benchmark-run archive <run-id> --force` to

@@ -55,6 +55,14 @@ def validate_archive_id(value: str) -> str:
     return value
 
 
+def benchmark_archive_object_key(run_id: str, generation: str, claim_token: str) -> str:
+    """One object per claim; revoked workers cannot overwrite a retry's upload."""
+    return (
+        f"benchmark-runs/{validate_archive_id(run_id)}/archives/"
+        f"{validate_archive_id(generation)}/{validate_archive_id(claim_token)}.tar.gz"
+    )
+
+
 def harbor_job_uuid(run_id: str, generation: str) -> UUID:
     """Give Harbor a UUID stable across retries of one export generation.
 
