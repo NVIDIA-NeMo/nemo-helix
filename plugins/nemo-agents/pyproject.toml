@@ -39,15 +39,15 @@ dependencies = [
     # improvement/ subpackage — agent-improvement workflow (POC).
     "anthropic>=0.88.0",
     "rich>=13.7.1",
-    "nemo-fabric[claude,codex,relay]==0.3.0b1",
-    "nemo-fabric-adapters-deepagents==0.3.0b1",
+    "nemo-fabric[claude,codex,relay]==0.3.0rc2",
+    "nemo-fabric-adapters-deepagents==0.3.0rc2",
     # Platform owns the security-required DeepAgents harness version instead of
     # inheriting Fabric's optional harness extra, which is capped below 0.7.
     "deepagents>=0.7.8,<0.8",
     # TODO(AIRCORE-952): Switch to the metapackage's `hermes-agent` extra once hermes-agent
     # relaxes its vulnerable exact dependency pins — that extra applies [harness], which
     # pins requests==2.33.0.
-    "nemo-fabric-adapters-hermes==0.3.0b1; python_version < '3.14'",
+    "nemo-fabric-adapters-hermes==0.3.0rc2; python_version < '3.14'",
 ]
 version = "0.0.0"
 

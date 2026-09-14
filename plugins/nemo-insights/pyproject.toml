@@ -9,8 +9,8 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
   "fastapi>=0.115",
   "httpx",
-  "nemo-fabric-adapter-contract==0.3.0b1",
-  "nemo-fabric-adapters-common==0.3.0b1",
+  "nemo-fabric-adapter-contract==0.3.0rc2",
+  "nemo-fabric-adapters-common==0.3.0rc2",
   "nemo-platform",
   "nemo-platform-plugin",
   "nemo-relay>=0.7,<0.8",
