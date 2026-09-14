@@ -38,6 +38,29 @@ def unique_name(prefix: str) -> str:
     return f"e2e-{prefix}-{uuid.uuid4().hex[:8]}"
 
 
+def wait_for_agent_spans(
+    sdk: NeMoPlatform,
+    *,
+    workspace: str,
+    agent_name: str,
+    timeout: float = 120.0,
+    poll_interval: float = 2.0,
+) -> list[Any]:
+    """Poll Intake for the agent's trajectory.
+
+    Ingest is asynchronous: Relay posts the trajectory as the run finishes, and
+    Intake writes it behind the API, so an invocation that has already returned
+    does not mean the spans are queryable yet.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        page = sdk.intake.spans.list(workspace=workspace, filter={"agent_name": agent_name}, page_size=50)
+        spans = list(page.data or [])
+        if spans or time.monotonic() >= deadline:
+            return spans
+        time.sleep(poll_interval)
+
+
 def _chat_completion_response(content: str, model: str) -> dict[str, Any]:
     return {
         "id": "chatcmpl-agents-container-e2e",
@@ -199,6 +222,7 @@ def run_agent_deploy_and_invoke(
     image: str | None = None,
     running_timeout_seconds: float = 300,
     reap_backend_resources: Callable[[str], None] | None = None,
+    after_invoke: Callable[[str], None] | None = None,
 ) -> None:
     """Deploy a mock-backed agent and invoke it through the gateway.
 
@@ -210,6 +234,10 @@ def run_agent_deploy_and_invoke(
     3. Wait for ``running`` and assert the mode-specific endpoint shape.
     4. Invoke through the gateway and assert the mocked completion round-trips.
     5. Clean up the deployment and agent (best-effort, isolated steps).
+
+    ``after_invoke``, if given, is called with the agent name once the response
+    has been asserted and while the deployment is still up, for checks a caller
+    wants to make against a live deployment.
 
     ``reap_backend_resources``, if given, is called with the deployment name
     during teardown (after the deployment is deleted) so a backend module can
@@ -283,6 +311,9 @@ def run_agent_deploy_and_invoke(
         )
         content = response["choices"][0]["message"]["content"]
         assert TEST_AGENT_RESPONSE in content, response
+
+        if after_invoke is not None:
+            after_invoke(agent_name)
     finally:
         # Each step is isolated so a failure (e.g. a deployment-delete timeout)
         # doesn't skip the remaining cleanup and leak resources.

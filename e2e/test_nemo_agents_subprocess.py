@@ -23,7 +23,7 @@ import pytest
 from nemo_agents_plugin.entities import NAT_WORKFLOW_CONFIG_FORMAT, NEMO_AGENTS_SPEC_CONFIG_FORMAT
 from nemo_platform import NeMoPlatform
 
-from e2e.agents_deploy_helpers import run_agent_deploy_and_invoke
+from e2e.agents_deploy_helpers import run_agent_deploy_and_invoke, wait_for_agent_spans
 
 pytestmark = [
     pytest.mark.subprocess_only,
@@ -45,10 +45,26 @@ def test_nat_agent_deploys_and_invokes_through_gateway(sdk: NeMoPlatform, worksp
 
 
 def test_fabric_agent_deploys_and_invokes_through_gateway(sdk: NeMoPlatform, workspace: str) -> None:
-    """Deploy a Fabric-backed agent as a subprocess and invoke it through the gateway."""
+    """Deploy a Fabric-backed agent as a subprocess and invoke it through the gateway.
+
+    The agent config names no export destination, so reaching Intake proves the
+    backend wired one: a subprocess deployment auto-wires its trajectory the
+    same way execute jobs and container deployments do.
+
+    Asserting while the deployment is still up is sound because a sessionless
+    invoke runs on an ephemeral Fabric runtime that is started and stopped
+    within the request, and Relay exports when that runtime stops -- not when
+    the deployment process exits.
+    """
+
+    def assert_trajectory_reached_intake(agent_name: str) -> None:
+        spans = wait_for_agent_spans(sdk, workspace=workspace, agent_name=agent_name)
+        assert spans, "the agent ran but no trajectory reached Intake"
+
     run_agent_deploy_and_invoke(
         sdk,
         workspace=workspace,
         deployment_mode="subprocess",
         config_format=NEMO_AGENTS_SPEC_CONFIG_FORMAT,
+        after_invoke=assert_trajectory_reached_intake,
     )
