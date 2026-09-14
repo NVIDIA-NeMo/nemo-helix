@@ -61,6 +61,7 @@ from scaled_evals.api import s3
 from scaled_evals.api.build.task_image_identity import verify_stored_task_image
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.api.redaction import redact_secret_text
+from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
 from scaled_evals.api.repositories.benchmark_run_repository import BenchmarkRunRepository
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
 from scaled_evals.api.repositories.execution_cleanup_repository import (
@@ -78,6 +79,7 @@ from scaled_evals.api.repositories.switchyard_campaign_repository import (
     SwitchyardCampaignRepository,
 )
 from scaled_evals.api.settings import settings
+from scaled_evals.benchmark_archive import build_benchmark_archive
 from scaled_evals.dispatch.credentials import materialize_credential_envs
 from scaled_evals.dispatch.harbor_dataset_images import (
     dataset_configs,
@@ -542,7 +544,53 @@ class Dispatcher:
         if archive_evaluation_id is not None:
             self.build_archive(archive_evaluation_id)
             return True
+        with self.connect() as conn:
+            benchmark_archive = BenchmarkArchiveRepository(conn).claim(claim_timeout=self.claim_timeout)
+        if benchmark_archive is not None:
+            if benchmark_archive["status"] == "building":
+                self.build_benchmark_archive(benchmark_archive)
+            return True
         return did_work
+
+    def build_benchmark_archive(self, job: dict) -> None:
+        stop = threading.Event()
+        lost = threading.Event()
+
+        def keep_claim() -> None:
+            while not stop.wait(max(0.1, min(30.0, self.claim_timeout / 3))):
+                try:
+                    with self.connect() as conn:
+                        owned = BenchmarkArchiveRepository(conn).heartbeat(job["benchmark_run_id"], job["claim_token"])
+                    if not owned:
+                        lost.set()
+                        return
+                except Exception:
+                    lost.set()
+                    LOG.exception("benchmark archive heartbeat failed")
+                    return
+
+        def check_claim() -> None:
+            if lost.is_set():
+                raise RuntimeError("benchmark archive worker lease lost")
+
+        keeper = threading.Thread(target=keep_claim, daemon=True)
+        keeper.start()
+        try:
+            with self.connect() as conn:
+                BenchmarkArchiveRepository(conn).validate_members(job["benchmark_run_id"], job["members"])
+            archive = build_benchmark_archive(job, check_claim=check_claim)
+            check_claim()
+            with self.connect() as conn:
+                BenchmarkArchiveRepository(conn).finish(job, **archive)
+        except Exception as exc:  # noqa: BLE001 — record a retryable export failure
+            # Object-store errors may contain URLs; expose only a redacted message.
+            detail = redact_secret_text(str(exc))[:2000]
+            LOG.warning("benchmark archive failed for %s: %s", job["benchmark_run_id"], detail)
+            with self.connect() as conn:
+                BenchmarkArchiveRepository(conn).fail(job, detail)
+        finally:
+            stop.set()
+            keeper.join(timeout=5)
 
     def claim_next_execution_cleanup(self) -> dict | None:
         with self.connect() as conn:
@@ -1659,10 +1707,14 @@ class Dispatcher:
             if not isinstance(runner_artifact, Mapping):
                 runner_artifact = {}
             agent_floor = snapshot_agent_timeout_floor(row)
+            task_slug = snapshot["task"].get("slug") if snapshot else row.get("task_slug")
+            if task_slug is not None and not isinstance(task_slug, str):
+                raise ValueError("task slug must be a string")
             spec = LaunchSpec(
                 evaluation_id=execution_id,
                 benchmark_run_id=row.get("benchmark_run_id"),
                 name=row["name"],
+                task_slug=task_slug,
                 framework=row["framework"],
                 framework_version=snapshot_evaluation.get("framework_version"),
                 runner_image_ref=snapshot_evaluation.get("runner_image_ref"),

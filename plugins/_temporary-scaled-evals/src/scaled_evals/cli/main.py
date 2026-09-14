@@ -2817,6 +2817,86 @@ def benchmark_run() -> None:
     """Run a benchmark by aggregating member task evaluations."""
 
 
+@benchmark_run.command("archive")
+@click.argument("run_id")
+@click.option("--build", is_flag=True, help="Queue archive generation.")
+@click.option("--force", is_flag=True, help="Build a fresh snapshot of member executions.")
+@click.pass_context
+def benchmark_run_archive(ctx: click.Context, run_id: str, build: bool, force: bool) -> None:
+    """Show or build a combined Harbor experiment archive."""
+    method = "POST" if build or force else "GET"
+    kwargs = {"json": {"force": force}} if method == "POST" else {}
+    data = request(ctx.obj["client"], method, f"/benchmark-runs/{run_id}/archive", **kwargs)
+    emit(data, ctx.obj["json"], [f"{run_id}: {data['status']}", data.get("error") or ""])
+
+
+@benchmark_run.command("download")
+@click.argument("run_id")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Destination directory (or tar.gz file with --archive-only). Must not exist.",
+)
+@click.option("--archive-only", is_flag=True, help="Save the tarball without extracting it.")
+@click.option("--wait", is_flag=True, help="Wait for archive generation, then download.")
+@click.option(
+    "--timeout",
+    type=click.FloatRange(min=0.1),
+    default=600.0,
+    show_default=True,
+    help="Maximum seconds to wait for archive generation.",
+)
+@click.pass_context
+def benchmark_run_download(
+    ctx: click.Context,
+    run_id: str,
+    output: Path | None,
+    archive_only: bool,
+    wait: bool,
+    timeout: float,
+) -> None:
+    """Download all member trials into one Harbor experiment directory.
+
+    Queues a missing archive. Use --wait to download when the build completes,
+    or rerun this command once the archive is ready.
+    """
+    from scaled_evals.cli.benchmark_archive import save_benchmark_archive
+
+    dest = output or Path(f"{run_id}-results.tar.gz" if archive_only else run_id)
+    if dest.exists():
+        raise click.ClickException(f"destination already exists: {dest}")
+    path = f"/benchmark-runs/{run_id}/archive"
+    data = request(ctx.obj["client"], "GET", path)
+    if data["status"] == "missing":
+        data = request(ctx.obj["client"], "POST", path, json={"force": False})
+    deadline = time.monotonic() + timeout
+    while data["status"] in {"queued", "building"}:
+        if not wait:
+            emit(
+                data,
+                ctx.obj["json"],
+                [f"{run_id}: archive {data['status']}; rerun download when ready, or use --wait."],
+            )
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise click.ClickException("timed out waiting for archive; the server build continues")
+        time.sleep(min(5.0, remaining))
+        data = request(ctx.obj["client"], "GET", path)
+    if data["status"] != "ready":
+        raise click.ClickException(
+            f"archive {data['status']}: {data.get('error') or 'not ready'}; "
+            f"retry with benchmark-run archive {run_id} --build"
+        )
+    save_benchmark_archive(ctx.obj["client"], data["download"], dest, archive_only=archive_only)
+    summary = [f"downloaded Harbor experiment -> {dest}"]
+    if data.get("partial"):
+        summary.append("Some member trial data is missing; see scaled-evals-benchmark-archive.json.")
+    emit({**data, "path": str(dest)}, ctx.obj["json"], summary)
+
+
 @benchmark_run.command("preflight")
 @click.option(
     "--request",

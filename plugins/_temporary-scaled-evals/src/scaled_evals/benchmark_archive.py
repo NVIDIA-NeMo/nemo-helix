@@ -1,0 +1,389 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Reconstruct one Harbor job from already-redacted evaluation archives.
+
+No Harbor installation is required in the control plane. The export preserves
+source job metadata separately and computes only additive trial statistics;
+custom metrics and pass@k are left to downstream Harbor analysis.
+"""
+
+import hashlib
+import json
+import shutil
+import tarfile
+import tempfile
+from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path, PurePosixPath
+from uuid import NAMESPACE_URL, uuid5
+
+from scaled_evals.api import s3
+from scaled_evals.api.settings import settings
+
+
+class BenchmarkArchiveError(ValueError):
+    pass
+
+
+def _read_json(path: Path) -> dict:
+    if path.stat().st_size > 64 * 1024 * 1024:
+        raise BenchmarkArchiveError(f"JSON metadata exceeds 64 MiB: {path.name}")
+    value = json.loads(path.read_text())
+    if not isinstance(value, dict):
+        raise BenchmarkArchiveError(f"expected JSON object: {path.name}")
+    return value
+
+
+def _local_task_labels(source: Path, member: dict) -> dict[str, str]:
+    """Scope local task identities to their member without collapsing datasets."""
+    paths = set()
+    for trial_dir in source.iterdir():
+        if not trial_dir.is_dir():
+            continue
+        for filename in ("config.json", "result.json"):
+            path = trial_dir / filename
+            if not path.is_file():
+                continue
+            data = _read_json(path)
+            config = data if filename == "config.json" else data.get("config", {})
+            task = config.get("task", {})
+            if task.get("path") and not task.get("git_url") and not task.get("name"):
+                paths.add(task["path"])
+    slug = member.get("task_slug") or member["task_id"]
+    return {
+        path: (
+            slug
+            if len(paths) == 1
+            else (f"{slug}__{PurePosixPath(path).name}__{hashlib.sha256(path.encode()).hexdigest()[:8]}")
+        )
+        for path in paths
+    }
+
+
+def _rename_local_task(config: dict, labels: dict[str, str]) -> str | None:
+    task = config.get("task", {})
+    path = task.get("path")
+    if path not in labels or task.get("git_url") or task.get("name"):
+        return None
+    label = labels[path]
+    task["path"] = str(PurePosixPath(path).with_name(label))
+    return label
+
+
+def _write_json(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, indent=2) + "\n")
+
+
+def _unpack(archive: Path, root: Path, budget: list[int]) -> None:
+    """Extract regular files only, with aggregate limits across the whole run."""
+    seen: set[str] = set()
+    with tarfile.open(archive, mode="r|gz") as source:
+        for member in source:
+            name = PurePosixPath(member.name)
+            if name.is_absolute() or ".." in name.parts or "\\" in member.name or not name.parts:
+                raise BenchmarkArchiveError("unsafe member archive path")
+            if member.isdir():
+                continue
+            if len(name.parts) < 2 or name.parts[0] != "artifacts":
+                raise BenchmarkArchiveError("expected an evaluation archive with artifacts/ root")
+            name = PurePosixPath(*name.parts[1:])
+            if not member.isfile() or name.as_posix() in seen:
+                raise BenchmarkArchiveError("member archives must contain unique regular files")
+            seen.add(name.as_posix())
+            budget[0] += 1
+            budget[1] += member.size
+            if (
+                budget[0] > settings.benchmark_archive_max_files
+                or budget[1] > settings.benchmark_archive_max_source_bytes
+            ):
+                raise BenchmarkArchiveError("benchmark archive exceeds configured file/byte limits")
+            target = root.joinpath(*name.parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            body = source.extractfile(member)
+            if body is None:
+                raise BenchmarkArchiveError("could not read member archive file")
+            with body, target.open("wb") as output:
+                shutil.copyfileobj(body, output)
+
+
+def _benchmark_artifacts(run_id: str, output: Path, budget: list[int], check_claim: Callable[[], None]) -> list[dict]:
+    prefix = f"benchmark-runs/{run_id}/artifacts/"
+    objects = sorted(s3.list_objects(prefix), key=lambda item: item["key"])
+    entries = []
+    seen = set()
+    for item in objects:
+        check_claim()
+        key = item["key"]
+        if not key.startswith(prefix):
+            raise BenchmarkArchiveError("benchmark artifact is outside the run prefix")
+        relative = key[len(prefix) :]
+        if relative.endswith("/") and item["size_bytes"] == 0:
+            continue
+        path = PurePosixPath(relative)
+        if (
+            not relative
+            or not path.parts
+            or path.is_absolute()
+            or ".." in path.parts
+            or "\\" in relative
+            or path.as_posix() != relative
+            or relative in seen
+        ):
+            raise BenchmarkArchiveError("unsafe or duplicate benchmark artifact path")
+        seen.add(relative)
+        budget[0] += 1
+        if (
+            budget[0] > settings.benchmark_archive_max_files
+            or budget[1] + item["size_bytes"] > settings.benchmark_archive_max_source_bytes
+        ):
+            raise BenchmarkArchiveError("benchmark archive exceeds configured file/byte limits")
+        target = output / "_scaled_evals" / "benchmark" / "artifacts" / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256()
+        size = 0
+        with target.open("xb") as destination:
+            for chunk in s3.stream_object(key):
+                check_claim()
+                size += len(chunk)
+                budget[1] += len(chunk)
+                if size > item["size_bytes"] or budget[1] > settings.benchmark_archive_max_source_bytes:
+                    raise BenchmarkArchiveError("benchmark artifact size changed or exceeds limit")
+                digest.update(chunk)
+                destination.write(chunk)
+        if size != item["size_bytes"]:
+            raise BenchmarkArchiveError("benchmark artifact size changed; rebuild export")
+        entries.append(
+            {
+                "object_key": key,
+                "path": target.relative_to(output).as_posix(),
+                "size_bytes": size,
+                "sha256": digest.hexdigest(),
+                "updated_at": item.get("updated_at"),
+            }
+        )
+    check_claim()
+    if objects != sorted(s3.list_objects(prefix), key=lambda item: item["key"]):
+        raise BenchmarkArchiveError("benchmark artifacts changed during export; rebuild export")
+    return entries
+
+
+def _check_campaign_evidence(output: Path, members: list[dict], artifacts: list[dict]) -> list[dict]:
+    captured = {item["object_key"]: item for item in artifacts}
+    unavailable = []
+    for member in members:
+        path = output / "_scaled_evals" / "evaluations" / member["id"]
+        reference_path = path / "switchyard" / "campaign_evidence.json"
+        if not reference_path.is_file():
+            continue
+        reference = _read_json(reference_path)
+        if reference.get("status") == "unavailable":
+            unavailable.append({"evaluation_id": member["id"], "kind": "switchyard_campaign"})
+            continue
+        artifact = captured.get(reference.get("routing_stats_object_key"))
+        if (
+            reference.get("status") != "ready"
+            or artifact is None
+            or artifact["sha256"] != reference.get("routing_stats_sha256")
+        ):
+            raise BenchmarkArchiveError("referenced Switchyard campaign evidence is missing or changed")
+    return unavailable
+
+
+def _stats(trials: list[dict]) -> dict:
+    stats = {
+        "n_completed_trials": len(trials),
+        "n_errored_trials": 0,
+        "n_running_trials": 0,
+        "n_pending_trials": 0,
+        "n_cancelled_trials": 0,
+        "n_retries": 0,
+        "evals": {},
+    }
+    for trial in trials:
+        agent = trial["agent_info"]
+        model = (agent.get("model_info") or {}).get("name")
+        key = "__".join(v for v in [agent["name"], model, trial.get("source") or "adhoc"] if v)
+        group = stats["evals"].setdefault(
+            key,
+            {
+                "n_trials": 0,
+                "n_errors": 0,
+                "metrics": [],
+                "pass_at_k": {},
+                "reward_stats": {},
+                "exception_stats": {},
+            },
+        )
+        rewards = (trial.get("verifier_result") or {}).get("rewards")
+        if rewards is not None:
+            group["n_trials"] += 1
+            for reward, value in rewards.items():
+                group["reward_stats"].setdefault(reward, {}).setdefault(value, []).append(trial["trial_name"])
+        exception = trial.get("exception_info")
+        if exception:
+            group["n_errors"] += 1
+            stats["n_errored_trials"] += 1
+            kind = exception["exception_type"]
+            group["exception_stats"].setdefault(kind, []).append(trial["trial_name"])
+            stats["n_cancelled_trials"] += kind == "CancelledError"
+        contexts = (
+            [trial["agent_result"]]
+            if trial.get("agent_result") is not None
+            else [
+                step["agent_result"] for step in trial.get("step_results") or [] if step.get("agent_result") is not None
+            ]
+        )
+        for context in contexts:
+            for field in ("n_input_tokens", "n_cache_tokens", "n_output_tokens", "cost_usd"):
+                if context.get(field) is not None:
+                    stats[field] = stats.get(field, 0) + context[field]
+    # Legacy Harbor readers still use these names.
+    stats["n_trials"] = stats["n_completed_trials"]
+    stats["n_errors"] = stats["n_errored_trials"]
+    return stats
+
+
+def build_benchmark_archive(job: dict, *, check_claim: Callable[[], None]) -> dict:
+    run_id = job["benchmark_run_id"]
+    if not run_id or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for c in run_id):
+        raise BenchmarkArchiveError("invalid benchmark run id")
+    job_uuid = str(uuid5(NAMESPACE_URL, f"scaled-evals:{run_id}:{job['generation']}"))
+    budget = [0, 0]
+    trials: list[dict] = []
+    configs: list[dict] = []
+    results: list[dict] = []
+    manifest = {
+        "schema_version": "scaled-evals-benchmark-archive-v1",
+        "benchmark_run_id": run_id,
+        "generation": job["generation"],
+        "created_at": datetime.now(UTC).isoformat(),
+        "members": [],
+        "notes": [
+            "Analysis export; original member job metadata is under _scaled_evals/evaluations.",
+            "Custom metrics and pass@k are not aggregated; recompute them from trial results.",
+            "Token/cost totals include recorded values only; absent values remain unknown.",
+        ],
+    }
+    with tempfile.TemporaryDirectory(prefix="benchmark-archive-") as tmp:
+        base = Path(tmp)
+        output = base / run_id
+        output.mkdir()
+        for member in job["members"]:
+            check_claim()
+            evaluation_id = member["id"]
+            if not evaluation_id or any(
+                c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for c in evaluation_id
+            ):
+                raise BenchmarkArchiveError("invalid evaluation id")
+            compressed = base / "member.tar.gz"
+            downloaded = 0
+            digest = hashlib.sha256()
+            with compressed.open("wb") as destination:
+                for chunk in s3.stream_object(member["archive_object_key"]):
+                    downloaded += len(chunk)
+                    if downloaded > settings.benchmark_archive_max_source_bytes:
+                        raise BenchmarkArchiveError("member archive exceeds configured byte limit")
+                    digest.update(chunk)
+                    destination.write(chunk)
+            if downloaded != member["archive_size_bytes"]:
+                raise BenchmarkArchiveError(f"archive size changed for {evaluation_id}; rebuild export")
+            source = base / "member"
+            source.mkdir()
+            _unpack(compressed, source, budget)
+            labels = _local_task_labels(source, member)
+            metadata = output / "_scaled_evals" / "evaluations" / evaluation_id
+            metadata.mkdir(parents=True)
+            entry = {**member, "archive_sha256": digest.hexdigest(), "trials": [], "missing": []}
+            if (source / "config.json").is_file():
+                member_config = _read_json(source / "config.json")
+                for task in member_config.get("tasks", []):
+                    _rename_local_task({"task": task}, labels)
+                configs.append(member_config)
+            else:
+                entry["missing"].append("config.json")
+            if (source / "result.json").is_file():
+                results.append(_read_json(source / "result.json"))
+            else:
+                entry["missing"].append("result.json")
+            for path in sorted(source.iterdir()):
+                if path.is_dir() and ((path / "config.json").is_file() or (path / "result.json").is_file()):
+                    trial_name = f"{evaluation_id}__{path.name}"
+                    target = output / trial_name
+                    shutil.move(path, target)
+                    entry["trials"].append({"source": path.name, "exported": trial_name})
+                    for filename in ("config.json", "result.json"):
+                        trial_path = target / filename
+                        if not trial_path.is_file():
+                            entry["missing"].append(f"{path.name}/{filename}")
+                            continue
+                        original = metadata / path.name / filename
+                        original.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copyfile(trial_path, original)
+                        data = _read_json(trial_path)
+                        data["trial_name"] = trial_name
+                        if filename == "config.json":
+                            _rename_local_task(data, labels)
+                            data.update(job_id=job_uuid, trials_dir=run_id)
+                        if filename == "result.json":
+                            data["trial_uri"] = f"{run_id}/{trial_name}"
+                            if isinstance(data.get("config"), dict):
+                                label = _rename_local_task(data["config"], labels)
+                                if label:
+                                    data["task_name"] = label
+                                    data["task_id"] = {"path": data["config"]["task"]["path"]}
+                                data["config"].update(trial_name=trial_name, job_id=job_uuid, trials_dir=run_id)
+                            trials.append(data)
+                        _write_json(trial_path, data)
+                else:
+                    shutil.move(path, metadata / path.name)
+            if not entry["trials"]:
+                entry["missing"].append("trial directories")
+            manifest["members"].append(entry)
+            shutil.rmtree(source)
+            compressed.unlink()
+        manifest["benchmark_artifacts"] = _benchmark_artifacts(run_id, output, budget, check_claim)
+        manifest["unavailable_benchmark_evidence"] = _check_campaign_evidence(
+            output, manifest["members"], manifest["benchmark_artifacts"]
+        )
+        if not configs or not results:
+            raise BenchmarkArchiveError("no Harbor job config/results found in member archives")
+        config = dict(configs[0])
+        config.update(job_name=run_id, jobs_dir=".", metrics=[])
+        for field in ("tasks", "datasets", "agents"):
+            values = [value for item in configs for value in item.get(field, [])]
+            config[field] = list({json.dumps(value, sort_keys=True): value for value in values}.values())
+        _write_json(output / "config.json", config)
+        starts = [item["started_at"] for item in results if item.get("started_at")]
+        finishes = [item["finished_at"] for item in results if item.get("finished_at")]
+        total = sum(item.get("n_total_trials", 0) for item in results)
+        manifest["partial"] = (
+            any(m["missing"] for m in manifest["members"])
+            or total != len(trials)
+            or bool(manifest["unavailable_benchmark_evidence"])
+        )
+        manifest["n_exported_trial_results"] = len(trials)
+        manifest["n_declared_trials"] = total
+        stats = _stats(trials)
+        stats["n_retries"] = sum((item.get("stats") or {}).get("n_retries", 0) for item in results)
+        _write_json(
+            output / "result.json",
+            {
+                "id": job_uuid,
+                "started_at": min(starts) if starts else manifest["created_at"],
+                "finished_at": max(finishes) if finishes else manifest["created_at"],
+                "updated_at": manifest["created_at"],
+                "n_total_trials": max(total, len(trials)),
+                "stats": stats,
+                "trial_results": trials,
+            },
+        )
+        _write_json(output / "scaled-evals-benchmark-archive.json", manifest)
+        archive_path = base / "results.tar.gz"
+        check_claim()
+        with tarfile.open(archive_path, "w:gz") as archive:
+            archive.add(output, arcname=run_id)
+        key = f"benchmark-runs/{run_id}/archives/{job['generation']}/{job['claim_token']}.tar.gz"
+        size = s3.upload_file(archive_path, key, content_type="application/gzip")
+        return {"object_key": key, "size_bytes": size, "partial": manifest["partial"]}
