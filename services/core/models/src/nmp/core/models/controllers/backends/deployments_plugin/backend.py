@@ -87,7 +87,7 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
         teardown = await self.delete_model_deployment(resolved.deployment.workspace, resolved.deployment.name)
         if teardown.status == "DELETING":
             return DeploymentStatusUpdate(
-                status="PENDING",
+                status="CREATED",
                 status_message="Waiting for prior deployments-plugin substrate teardown before recreate.",
             )
         executor = executor_for_runtime(self._cfg, resolved.runtime)
@@ -212,7 +212,12 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
                 )
         volumes_removed = True
         for volume_name in (names.scratch, names.volume):
-            if not await self._complete_volume_delete(workspace, volume_name):
+            try:
+                volume_removed = await self._complete_volume_delete(workspace, volume_name)
+            except Exception:
+                logger.exception("Failed to complete volume teardown for %s/%s", workspace, volume_name)
+                volume_removed = False
+            if not volume_removed:
                 volumes_removed = False
         if not volumes_removed:
             result = DeploymentStatusUpdate(status="DELETING", status_message="Waiting for plugin volume teardown.")
@@ -264,6 +269,8 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
         volume = await self._get_optional(Volume, workspace, volume_name)
         if volume is None:
             return True
+        if volume.status == "DELETING":
+            return False
 
         referencing = await deployment_config_names_referencing_volume(
             self._entity_client(),
@@ -279,8 +286,6 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
             )
             return True
 
-        if volume.status == "DELETING":
-            return False
         volume.status = "DELETING"
         try:
             await self._entity_client().update(volume)
