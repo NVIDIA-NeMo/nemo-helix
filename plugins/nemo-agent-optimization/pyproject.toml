@@ -15,6 +15,9 @@ dependencies = [
   "typer>=0.20.0",
 ]
 
+[project.entry-points."nemo.cli.agents"]
+optimization-strategies = "nemo_agent_optimization_plugin.cli:OptimizationStrategiesCLI"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
