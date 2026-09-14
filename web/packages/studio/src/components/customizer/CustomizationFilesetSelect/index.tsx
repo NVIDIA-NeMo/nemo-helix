@@ -112,17 +112,7 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
     });
   }, [backend, detectedVariant, setValue]);
 
-  /**
-   * Automodel and unsloth take a second fileset reference for validation, pointed at the
-   * same fileset as training. Cleared when the fileset holds no validation files, so the
-   * backend applies the auto-split this picker already announces. RL takes one reference
-   * and finds both files inside it.
-   *
-   * File discovery is the only thing that can tell us whether the fileset carries
-   * validation rows, and it reports none both while it is still running and when it has
-   * failed. Writing in those states would assert an absence nobody established, and would
-   * wipe a reference the user entered by hand on the field itself.
-   */
+  /** Automodel and unsloth point their validation reference at the training fileset. */
   const { hasValidation, isPending: isDiscovering, discoveryError } = validation;
   useEffect(() => {
     if (backend === 'rl') return;
