@@ -12,8 +12,10 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import tomllib
 from copy import deepcopy
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path, PurePosixPath
 from unittest.mock import MagicMock
 
@@ -28,22 +30,56 @@ from harbor.models.trial.paths import EnvironmentPaths
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
-from test_trace_environment import (
-    _TRACE_ENVIRONMENT as te,
+
+# Importlib-mode collection does not add the tests directory to sys.path.
+# Load this standalone test helper module by path, as it loads the skill scripts.
+_HELPERS_SPEC = spec_from_file_location(
+    "trace_environment_fixture_helpers", Path(__file__).with_name("test_trace_environment.py")
 )
-from test_trace_environment import (
-    _candidate,
-    _fixture_atif,
-    _fixture_workspace,
-    _plan_tool_calls,
-    _resolve_tool_access,
-    _review_privacy,
-    _run,
-    _write_json,
-)
+assert _HELPERS_SPEC is not None and _HELPERS_SPEC.loader is not None
+_helpers = module_from_spec(_HELPERS_SPEC)
+_HELPERS_SPEC.loader.exec_module(_helpers)
+te = _helpers._TRACE_ENVIRONMENT
+_candidate = _helpers._candidate
+_fixture_atif = _helpers._fixture_atif
+_fixture_workspace = _helpers._fixture_workspace
+_plan_tool_calls = _helpers._plan_tool_calls
+_resolve_tool_access = _helpers._resolve_tool_access
+_review_privacy = _helpers._review_privacy
+_run = _helpers._run
+_write_json = _helpers._write_json
 
 fc = importlib.import_module("fixture_compiler")
 registration = importlib.import_module("mock_registration")
+
+
+@pytest.mark.parametrize("import_mode", ["prepend", "importlib"])
+def test_standalone_collection_without_test_directory_on_pythonpath(tmp_path, import_mode):
+    test_path = Path(__file__).resolve()
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-c",
+            str(test_path.parents[1] / "pyproject.toml"),
+            "-p",
+            "no:cacheprovider",
+            "--collect-only",
+            f"--import-mode={import_mode}",
+            str(test_path),
+            "-q",
+        ],
+        cwd=tmp_path,
+        env={key: value for key, value in os.environ.items() if key not in {"PYTHONPATH", "PYTEST_ADDOPTS"}}
+        | {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "tests collected" in result.stdout
 
 
 def _inventory(trace=None):
