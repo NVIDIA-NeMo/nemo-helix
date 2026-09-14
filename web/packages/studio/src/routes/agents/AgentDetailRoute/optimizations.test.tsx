@@ -66,9 +66,8 @@ describe('AgentDetailRoute optimizations tab', () => {
     await user.click(await screen.findByRole('button', { name: 'Optimize' }));
 
     expect(await screen.findByText('New optimization')).toBeInTheDocument();
-    // The form replaces the table rather than layering over it.
     expect(screen.queryByText('brevity-sweep-3')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Optimize' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Optimize' })).toBeDisabled();
   });
 
   it('returns to the table from the form breadcrumb', async () => {
@@ -112,7 +111,10 @@ describe('AgentDetailRoute optimizations tab', () => {
   it('holds the run closed while the form is unanswered', async () => {
     renderDetail('?tab=optimizations&view=new');
 
-    expect(await screen.findByText('Pick a judge model to score trials with.')).toBeInTheDocument();
+    // This agent has no published evaluations, so picking one is the first unanswered question.
+    expect(
+      await screen.findByText('Pick an evaluation to score trials against.')
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Run optimization' })).toBeDisabled();
   });
 });
