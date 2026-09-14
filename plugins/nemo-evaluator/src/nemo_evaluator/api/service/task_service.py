@@ -171,7 +171,7 @@ class TaskService:
 
         Only the agent-eval variant changes: its inline metrics are offloaded to derived stored
         metrics so a persisted task holds references only. A Harbor spec is already in stored form —
-        its archive was uploaded before the task was submitted.
+        its verified Fileset tree was uploaded before the task was submitted.
         """
         if isinstance(spec, HarborTaskDefinition):
             return spec

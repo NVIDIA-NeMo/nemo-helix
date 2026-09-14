@@ -258,7 +258,7 @@ TaskMetadataList: TypeAlias = Annotated[list[MetadataItem], AfterValidator(_reje
 #: says everything a list of per-file entries would — while making it impossible for the two to
 #: disagree about what the taskset ships.
 #:
-#: Same shape as ``bundle_ref`` and ``archive_ref``, so the fragment is required; here it names the
+#: Same shape as ``bundle_ref`` and Harbor tree references, so the fragment is required; here it names the
 #: prefix the files sit under rather than a single file. Use a prefix such as ``#files`` to mean
 #: "the whole of this fileset's file area".
 #:

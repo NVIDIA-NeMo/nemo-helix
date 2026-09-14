@@ -43,7 +43,7 @@ from nemo_evaluator.api.schemas import (
     TasksetInput,
     TasksetRef,
 )
-from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob
+from nemo_evaluator.jobs.agent_evaluate import DEFAULT_RESULT_NAME, AgentEvalJob
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalTaskInput,
@@ -399,12 +399,15 @@ def _harbor_eval_input_spec() -> dict:
 
 
 @pytest.mark.timeout(420)
-def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str) -> None:
+@pytest.mark.parametrize(
+    "target_kind,source", [("model", "taskset"), ("model", "refs"), ("agent", "refs"), ("offline", "refs")]
+)
+def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str, target_kind: str, source: str) -> None:
     # dim 2 (stored taskset ref) x dim 3 (submit): store a metric + two tasks + a taskset, then submit
     # an agent eval whose `tasks` is a TasksetRef (no inline tasks). Server-side to_spec must load the
     # taskset, expand BOTH member tasks, and resolve each task's stored MetricRef — all against the
     # live entity store — before the job runs. A Model target -> IGW mock provider keeps it hermetic.
-    client = NeMoPlatform(base_url=subprocess_platform, max_retries=2)
+    client = NeMoPlatform(base_url=subprocess_platform, workspace=WORKSPACE, max_retries=2)
     client_from_platform(client, WorkspacesClient).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
@@ -445,7 +448,9 @@ def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str) -
 
     # The point of the test: reference the stored taskset instead of inlining the tasks.
     spec = AgentEvalInputSpec(
-        tasks=TasksetRef(f"{WORKSPACE}/{taskset_name}"),
+        tasks=TasksetRef(f"{WORKSPACE}/{taskset_name}")
+        if source == "taskset"
+        else [TaskRef(f"{WORKSPACE}/{name}") for name in task_names],
         target=ModelTarget(
             model=Model(
                 url=_igw_chat_url(subprocess_platform, model_name), name=model_name, format=ModelFormat.OPEN_AI
@@ -454,6 +459,29 @@ def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str) -
             params=RunConfigOnlineModel(),
         ),
     ).model_dump(mode="json")
+
+    if target_kind == "agent":
+        spec["target"] = AgentTarget(
+            agent=GenericAgent(
+                url=_igw_chat_url(subprocess_platform, model_name),
+                name=model_name,
+                format=AgentFormat.GENERIC,
+                body={"model": model_name, "messages": [{"role": "user", "content": "Reply DONE."}]},
+                response_path="$.choices[0].message.content",
+            ),
+            params=RunConfigOnline(),
+        ).model_dump(mode="json")
+    elif target_kind == "offline":
+        spec["target"] = None
+        spec["trials"] = [
+            AgentEvalTrial(
+                id=f"trial-{name}",
+                task_id=name,
+                status=AgentEvalTrialStatus.COMPLETED,
+                output=AgentOutput(output_text="DONE"),
+            ).model_dump(mode="json")
+            for name in task_names
+        ]
 
     response = NemoJobScheduler().submit_remote(
         AgentEvalJob, spec, base_url=subprocess_platform, workspace=WORKSPACE, profile="default"
@@ -464,11 +492,40 @@ def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str) -
     job = wait_for_platform_job(client, job_name, WORKSPACE, timeout=360)
     assert job.status == "completed", f"job {job_name} ended {job.status!r}: {getattr(job, 'status_details', None)}"
 
+    persisted = (
+        httpx.get(f"{subprocess_platform}/apis/evaluator/v2/workspaces/{WORKSPACE}/agent-evaluate/jobs/{job_name}")
+        .raise_for_status()
+        .json()
+    )
+    persisted_ids = [task["id"] for task in persisted["spec"]["tasks"]]
+    assert set(persisted_ids) == set(task_names)
+    if source == "refs":
+        assert persisted_ids == task_names
+    assert all(task["metrics"][0]["bundle_kind"] == "metric-bundle" for task in persisted["spec"]["tasks"])
+
+    import io
+    import tarfile
+
+    from nemo_platform_plugin.jobs.client import JobsClient
+
+    payload = (
+        JobsClient(base_url=subprocess_platform, workspace=WORKSPACE)
+        .download_job_result(job=job_name, name=DEFAULT_RESULT_NAME)
+        .read()
+    )
+    with tarfile.open(fileobj=io.BytesIO(payload)) as archive:
+        member = next(member for member in archive.getmembers() if member.name.endswith("trials.jsonl"))
+        stream = archive.extractfile(member)
+        assert stream is not None
+        trials = [json.loads(line) for line in stream if line.strip()]
+    assert {trial["task_id"] for trial in trials} == set(task_names)
+
     # The taskset expanded to BOTH members and both were scored: the numeric metric aggregates to
     # count == number of members (one sample per task, one trial each), with no NaNs, and mean == 1.0
     # because the mock model returns "DONE" for every task (so every task's output contains "DONE").
     result = client.evaluator.agent_eval_results.retrieve(job_name, workspace=WORKSPACE)
-    assert (result.target_kind, result.target_name) == ("model", model_name)
+    if target_kind != "offline":
+        assert (result.target_kind, result.target_name) == (target_kind, model_name)
     assert result.scores.scores, "run produced no aggregated scores"
     aggregate = result.scores.scores[0]
     assert aggregate.nan_count == 0, f"metric failed to score some samples: nan_count={aggregate.nan_count}"

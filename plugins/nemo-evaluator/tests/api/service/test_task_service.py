@@ -15,6 +15,7 @@ from nemo_evaluator.api.schemas import (
     TaskInputs,
 )
 from nemo_evaluator.api.service.task_service import MetricRefNotFoundError, TaskService
+from nemo_evaluator.api.task_definitions.harbor import HarborTreeSource
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
@@ -393,8 +394,12 @@ def _harbor_input(digest: str = "a" * 64) -> TaskInput:
     return TaskInput(
         spec=HarborTaskDefinition(
             kind="harbor",
-            archive_ref="default/harbor-tasks#packages/org-name/abc/dist.tar.gz",
-            archive_digest=digest,
+            tree=HarborTreeSource(
+                root_ref="default/harbor-tasks#packages/org-name/abc/files",
+                manifest_ref="default/harbor-tasks#packages/org-name/abc/files.manifest.json",
+                tree_digest=digest,
+                manifest_digest="c" * 64,
+            ),
             instruction="Fix the failing test.",
             config={"verifier": {"type": "pytest"}},
         ),
@@ -408,7 +413,7 @@ async def test_stores_a_harbor_task(service: TaskService) -> None:
 
     assert published
     assert created.spec.kind == "harbor"
-    assert created.spec.archive_ref.endswith("dist.tar.gz")
+    assert created.spec.tree.root_ref.endswith("files")
     assert created.spec.config == {"verifier": {"type": "pytest"}}
 
 
@@ -449,16 +454,20 @@ async def test_kinds_with_matching_metadata_do_not_share_a_digest(service: TaskS
 
 
 async def test_harbor_config_is_stored_but_not_hashed(service: TaskService) -> None:
-    """`config` is a projection of task.toml, which lives inside the archive — a real change moves
-    `archive_digest`. Hashing the projection too would make our history sensitive to Harbor's
+    """`config` is a projection of task.toml, which lives inside the tree — a real change moves
+    `tree_digest`. Hashing the projection too would make our history sensitive to Harbor's
     serialization: a release that reordered keys would cut a revision for byte-identical files."""
     await service.create_task("fix-test", _harbor_input(), workspace="default")
 
     reserialized = TaskInput(
         spec=HarborTaskDefinition(
             kind="harbor",
-            archive_ref="default/harbor-tasks#packages/org-name/abc/dist.tar.gz",
-            archive_digest="a" * 64,
+            tree=HarborTreeSource(
+                root_ref="default/harbor-tasks#packages/org-name/abc/files",
+                manifest_ref="default/harbor-tasks#packages/org-name/abc/files.manifest.json",
+                tree_digest="a" * 64,
+                manifest_digest="c" * 64,
+            ),
             instruction="Fix the failing test.",
             config={"verifier": {"type": "pytest"}, "added_by_a_new_harbor_release": True},
         ),
@@ -482,7 +491,7 @@ async def test_harbor_config_is_stored_but_not_hashed(service: TaskService) -> N
 async def test_reference_only_change_publishes_a_revision(service: TaskService) -> None:
     """The mirror of the Harbor ``config`` case, and the reason the two differ.
 
-    ``config`` is excluded because it is a projection of content ``archive_digest`` already covers.
+    ``config`` is excluded because it is a projection of content ``tree_digest`` already covers.
     ``reference`` is nothing of the sort: it is the ground truth a metric grades against, so a task
     whose reference changed scores differently and must be a distinct revision. Deduping it onto the
     old digest would let a pinned taskset silently re-grade.
@@ -510,8 +519,8 @@ async def test_reference_only_change_publishes_a_revision(service: TaskService) 
     assert _evaluator_spec(changed).reference == {"expected": "Lyon"}
 
 
-async def test_a_real_archive_change_does_cut_a_revision(service: TaskService) -> None:
-    """The flip side: `archive_digest` is the authoritative identity, so it must still move."""
+async def test_a_real_tree_change_does_cut_a_revision(service: TaskService) -> None:
+    """The flip side: `tree_digest` is the authoritative identity, so it must still move."""
     await service.create_task("fix-test", _harbor_input(), workspace="default")
     changed, published = await service.replace_task("fix-test", _harbor_input(digest="b" * 64), workspace="default")
     assert published and changed.revision == 2

@@ -22,6 +22,7 @@ from nemo_evaluator.api.schemas import (
     TaskInputs,
 )
 from nemo_evaluator.api.service.task_service import TaskService
+from nemo_evaluator.api.task_definitions.harbor import HarborTreeSource
 from nemo_evaluator.api.v2 import tasks as tasks_routes
 from nemo_platform_plugin.entity_client import NemoEntityConflictError
 
@@ -324,7 +325,13 @@ def test_list_includes_harbor_tasks(client: TestClient) -> None:
         f"{_BASE}/harbor-task",
         json=TaskInput(
             spec=HarborTaskDefinition(
-                kind="harbor", archive_ref="default/harbor#packages/o-n/abc/dist.tar.gz", archive_digest="a" * 64
+                kind="harbor",
+                tree=HarborTreeSource(
+                    root_ref="default/harbor#packages/o-n/abc/files",
+                    manifest_ref="default/harbor#packages/o-n/abc/files.manifest.json",
+                    tree_digest="a" * 64,
+                    manifest_digest="c" * 64,
+                ),
             )
         ).model_dump(mode="json"),
     )

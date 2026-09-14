@@ -35,6 +35,7 @@ from nemo_evaluator.api.schemas import (
     TaskRef,
     TasksetInput,
 )
+from nemo_evaluator.api.task_definitions.harbor import HarborTreeSource
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.sdk import NeMoPlatform
 from nemo_platform_plugin.workspaces.client import WorkspacesClient
@@ -279,8 +280,12 @@ def _harbor_input(digest: str = "a" * 64, *, config: dict | None = None) -> Task
     return TaskInput(
         spec=HarborTaskDefinition(
             kind="harbor",
-            archive_ref="default/harbor-tasks#packages/org-name/abc/dist.tar.gz",
-            archive_digest=digest,
+            tree=HarborTreeSource(
+                root_ref="default/harbor-tasks#packages/org-name/abc/files",
+                manifest_ref="default/harbor-tasks#packages/org-name/abc/files.manifest.json",
+                tree_digest=digest,
+                manifest_digest="c" * 64,
+            ),
             instruction="Fix the failing test.",
             config=config if config is not None else {"verifier": {"type": "pytest"}},
         )
@@ -320,7 +325,7 @@ def test_harbor_task_round_trips_through_the_store(subprocess_platform: str) -> 
         fetched = client.evaluator.tasks.retrieve(name, workspace=WORKSPACE)
         assert isinstance(fetched.spec, HarborTaskDefinition)
         assert fetched.spec.kind == "harbor"
-        assert fetched.spec.archive_digest == "a" * 64
+        assert fetched.spec.tree.tree_digest == "a" * 64
         assert fetched.spec.config == {"verifier": {"type": "pytest"}}
         assert fetched.spec.instruction == "Fix the failing test."
     finally:
@@ -330,7 +335,7 @@ def test_harbor_task_round_trips_through_the_store(subprocess_platform: str) -> 
 @pytest.mark.timeout(300)
 def test_harbor_config_changes_do_not_cut_a_revision(subprocess_platform: str) -> None:
     """`config` is excluded from the digest because it is a projection of task.toml inside the
-    archive. Confirmed end-to-end, since the exclusion is applied where the digest is computed."""
+    tree. Confirmed end-to-end, since the exclusion is applied where the digest is computed."""
     client = _client(subprocess_platform)
     name = _unique("harbor")
     try:
@@ -344,6 +349,6 @@ def test_harbor_config_changes_do_not_cut_a_revision(subprocess_platform: str) -
         assert same.spec.config["new_field"] == 1
 
         moved = client.evaluator.tasks.replace(name, task=_harbor_input(digest="b" * 64), workspace=WORKSPACE)
-        assert moved.revision == 2, "an archive change must publish"
+        assert moved.revision == 2, "a tree change must publish"
     finally:
         client.evaluator.tasks.delete(name, workspace=WORKSPACE)

@@ -177,7 +177,7 @@ readme:
       params: {}
     pagination:
       type: request
-      endpoint: get /apis/audit/v2/workspaces/{workspace}/jobs
+      endpoint: get /apis/files/v2/workspaces/{workspace}/filesets
       params: {}
 
 # security_schemes:
@@ -396,9 +396,6 @@ resources:
           delete: delete /apis/inference-gateway/v2/workspaces/{workspace}/virtual-models/{name}
       # Alias for gateway.openai.v1.models (IGW OpenAI list-models); same endpoints, shorter path.
       models:
-        models:
-          open_ai_list_models_resp: OpenAIListModelsResp
-          open_ai_model_resp: OpenAIModelResp
         methods:
           list: get /apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/models
           get: get /apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1/models/{name}

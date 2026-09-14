@@ -19,12 +19,18 @@ sibling tests it stands up no platform and isn't gated on ``RUN_AGENT_EVAL_INTEG
 
 from __future__ import annotations
 
+import io
+import json
+import os
 import shutil
 import subprocess
+import tarfile
+import time
+import uuid
 from pathlib import Path
 
 import pytest
-from nemo_evaluator.api.schemas import MetricInline
+from nemo_evaluator.api.schemas import MetadataItem, MetricInline, TaskInputs
 from nemo_evaluator.jobs.agent_evaluate import AGENT_BUNDLE_DIR, DEFAULT_RESULT_NAME, AgentEvalJob
 from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, AgentEvalTaskInput, HarborRunnerTarget
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
@@ -35,6 +41,77 @@ from nemo_platform_plugin.job_results import LocalJobResults
 from nemo_platform_plugin.scheduler import NemoJobScheduler
 
 pytestmark = [pytest.mark.integration]
+
+
+@pytest.mark.skipif(
+    not os.environ.get("RUN_AGENT_EVAL_INTEGRATION"), reason="requires opt-in platform/subprocess/Docker integration"
+)
+@pytest.mark.parametrize("direct", [False, True], ids=["taskset", "direct-list"])
+@pytest.mark.timeout(900)
+def test_publish_stored_harbor_source_and_execute(request, tmp_path, direct):
+    pytest.importorskip("harbor")
+    if not _docker_available():
+        pytest.skip("Docker daemon is required to run a Harbor job")
+    import httpx
+    from nemo_evaluator.api.schemas import TaskInput, TaskRef, TasksetInput
+    from nemo_evaluator.harbor.publication import publish_harbor_task_tree
+    from nemo_platform import NeMoPlatform
+    from nemo_platform_plugin.files.client import FilesClient
+    from nemo_platform_plugin.files.types import CreateFilesetRequest
+    from nemo_platform_plugin.jobs.client import JobsClient
+
+    base_url = request.getfixturevalue("subprocess_platform")
+    name = f"harbor-bridge-{uuid.uuid4().hex[:8]}"
+    task_dir = _DATASET_DIR / "hello-world"
+    files_client = FilesClient(base_url=base_url, workspace="default")
+    files_client.create_fileset(body=CreateFilesetRequest(name=name)).data()
+    definition = publish_harbor_task_tree(task_dir, files_client=files_client, fileset_ref=f"default/{name}")
+    sdk = NeMoPlatform(base_url=base_url, workspace="default")
+    sdk.evaluator.tasks.create(
+        name,
+        task=TaskInput(spec=definition),
+    )
+    sdk.evaluator.tasksets.create(name, taskset=TasksetInput(tasks=[TaskRef(f"default/{name}")]))
+    route = f"{base_url}/apis/evaluator/v2/workspaces/default/agent-evaluate/jobs"
+    public_tasks = [f"default/{name}"] if direct else f"default/{name}"
+    response = httpx.post(
+        route,
+        json={
+            "profile": "harbor-test",
+            "spec": {
+                "tasks": public_tasks,
+                "target": {"kind": "harbor", "agent_name": "oracle"},
+            },
+        },
+        timeout=60,
+    )
+    assert response.status_code == 201, response.text
+    job = response.json()
+    assert job["spec"]["tasks"]["kind"] == ("harbor-task-list" if direct else "harbor-taskset")
+    jobs_client = JobsClient(base_url=base_url, workspace="default")
+    deadline = time.monotonic() + 600
+    while time.monotonic() < deadline:
+        status = httpx.get(f"{route}/{job['name']}/status", timeout=30).raise_for_status().json()
+        if status["status"] in {"completed", "error", "failed", "cancelled"}:
+            break
+        time.sleep(2)
+    assert status["status"] == "completed", status
+    payload = jobs_client.download_job_result(job=job["name"], name=DEFAULT_RESULT_NAME).read()
+    with tarfile.open(fileobj=io.BytesIO(payload)) as tar:
+        trial_file = next(member for member in tar.getmembers() if member.name.endswith("trials.jsonl"))
+        stream = tar.extractfile(trial_file)
+        assert stream is not None
+        trials = [json.loads(line) for line in stream if line.strip()]
+        assert trials and {trial["task_id"] for trial in trials} == {"harbor/hello-world"}
+        score_file = next(member for member in tar.getmembers() if member.name.endswith("scores.jsonl"))
+        stream = tar.extractfile(score_file)
+        assert stream is not None
+        scores = [json.loads(line) for line in stream if line.strip()]
+        assert scores and all(score["status"] == "completed" for score in scores), scores
+        assert any(
+            output["name"] == "reward" and output["value"] == 1.0 for score in scores for output in score["outputs"]
+        ), scores
+
 
 #: The bundled Harbor hello-world dataset (repo root → SDK examples).
 _DATASET_DIR = Path(__file__).resolve().parents[4] / "packages/nemo_evaluator_sdk/examples/harbor/hello_world_dataset"
@@ -85,9 +162,9 @@ def test_run_local_runs_a_real_harbor_target(tmp_path: Path) -> None:
             AgentEvalTaskInput(
                 id=rt.id,
                 intent=rt.intent,
-                inputs=rt.inputs,
+                inputs=TaskInputs.model_validate(rt.inputs),
                 metrics=[_reward_metric()],
-                metadata=[{"key": key, "value": str(value)} for key, value in rt.metadata.items()],
+                metadata=[MetadataItem(key=key, value=str(value)) for key, value in rt.metadata.items()],
             )
             for rt in runtime_tasks
         ],

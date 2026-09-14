@@ -208,6 +208,7 @@ async def test_reference_round_trips_from_input_spec_to_runtime_task() -> None:
 
     spec = await AgentEvalJob.to_spec(input_spec, workspace="dev", entity_client=None, async_sdk=None, is_local=True)
     assert isinstance(spec, AgentEvalSpec)
+    assert isinstance(spec.tasks, list)
     assert spec.tasks[0].reference == reference
     assert _to_runtime_task(spec.tasks[0]).reference == reference
 
@@ -235,6 +236,7 @@ async def test_arbitrary_inputs_round_trip_from_input_spec_to_runtime_task() -> 
     spec = await AgentEvalJob.to_spec(input_spec, workspace="dev", entity_client=None, async_sdk=None, is_local=True)
 
     assert isinstance(spec, AgentEvalSpec)
+    assert isinstance(spec.tasks, list)
     assert spec.tasks[0].inputs.model_dump(exclude_none=True)["gym_row"] == gym_row
     runtime_task = _to_runtime_task(spec.tasks[0])
     assert runtime_task.inputs["gym_row"] == gym_row
@@ -661,6 +663,7 @@ def test_input_spec_accepts_stored_metric_reference() -> None:
         target=_runner_target("openai/gpt-5.4"),
     )
     assert isinstance(spec.tasks, list)
+    assert isinstance(spec.tasks[0], AgentEvalTaskInput)
     assert isinstance(spec.tasks[0].metrics[0], MetricRef)
 
 
@@ -694,6 +697,7 @@ async def test_to_spec_resolves_inline_task_metrics_without_a_platform() -> None
     spec = await AgentEvalJob.to_spec(input_spec, workspace="dev", entity_client=None, async_sdk=None, is_local=True)
 
     assert isinstance(spec, AgentEvalSpec)
+    assert isinstance(spec.tasks, list)
     assert len(spec.tasks) == 1
     assert isinstance(spec.tasks[0].metrics[0], MetricInline)
     # Canonical metrics reconstruct to runtime instances.
@@ -1512,7 +1516,8 @@ def test_run_local_executes_each_target_type(target: Target, mocker: MockerFixtu
             AgentEvalTaskInput(
                 id="task-1",
                 intent="Answer.",
-                inputs=_task_inputs(instruction="What is 2+2?"),
+                inputs=_task_inputs(instruction="What is 2+2?", gym_row={}),
+                metadata=[MetadataItem(key="gym_row_extras", value={})],
                 metrics=[_inline_metric()],
             )
         ],

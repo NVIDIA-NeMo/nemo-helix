@@ -710,6 +710,10 @@ auditor = "nemo_auditor.docs:get_docs_path"
 "outcome-evaluator.harbor-runner" = "nemo_experimentalist_plugin.experimentalist.components.evaluator.harbor_evaluator"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
+[project.entry-points."nemo.experimentalist.taskset_sources"]
+evaluator = "nemo_evaluator.harbor.taskset_source:factory"
+
+# Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.functions"]
 "anonymizer.preview" = "nemo_anonymizer_plugin.functions.preview:PreviewFunction"
 "data-designer.preview" = "nemo_data_designer_plugin.functions.preview:PreviewFunction"

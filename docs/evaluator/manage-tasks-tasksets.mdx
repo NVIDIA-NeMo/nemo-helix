@@ -117,7 +117,7 @@ print(stored_france.id, stored_japan.id, stored_france.spec.metrics)
 A task is an evaluation unit; its `kind` says which runner executes it. There are two:
 
 - `evaluator` — the task's content is fields you author, scored by platform metrics.
-- `harbor` — the task's content is a packaged directory of files, scored by Harbor's own reward.
+- `harbor` — the task's content is a manifest-backed Fileset tree, scored by Harbor's own reward.
 
 Both are stored as the same record type, so a taskset can group them and you manage every evaluation
 unit in one place regardless of which runner executes it.
@@ -136,15 +136,145 @@ unit in one place regardless of which runner executes it.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `archive_ref` | `str` | Yes | Files reference to the task's packaged directory (`workspace/fileset#path`). One fileset per task, so a task shared by several tasksets is stored once. |
-| `archive_digest` | `str` | Yes | Content hash Harbor computed over the task directory. |
+| `tree` | `HarborTreeSource` | Yes | File prefix, manifest reference, manifest SHA-256, and strict task-tree digest. Files remain individually browsable in Filesets. |
 | `instruction` | `str` | No | The task's instruction text, when it has one. |
 | `config` | `dict` | No | Harbor's own task configuration (verifier, agent, environment, steps), stored as published. |
 
+Publish a local Harbor task into an existing Fileset, then create its stored task record:
+
+```python
+from pathlib import Path
+
+from nemo_evaluator.api.schemas import TaskInput
+from nemo_evaluator.harbor.publication import publish_harbor_task_tree
+from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.files.client import FilesClient
+
+sdk = NeMoPlatform()
+files_client = client_from_platform(sdk, FilesClient)
+definition = publish_harbor_task_tree(
+    Path("./checkout"), files_client=files_client, fileset_ref="default/harbor-tasks"
+)
+sdk.evaluator.tasks.create("checkout", task=TaskInput(spec=definition))
+```
+
+One Fileset may contain one task or many. After publishing `./checkout` and `./search` separately into
+`default/harbor-tasks`, the two task publications sit side by side like this:
+
+```text
+harbor-tasks/                                    # Fileset
+├── <checkout-publication-uuid>/
+│   ├── manifest.json                            # task_dir = "checkout"
+│   └── files/
+│       ├── task.toml
+│       ├── instruction.md
+│       ├── environment/
+│       │   └── Dockerfile
+│       ├── tests/
+│       │   └── test.sh
+│       └── solution/
+│           └── solve.sh
+└── <search-publication-uuid>/
+    ├── manifest.json                            # task_dir = "search"
+    └── files/
+        ├── task.toml
+        ├── instruction.md
+        ├── environment/
+        │   └── Dockerfile
+        └── tests/
+            └── test.sh
+```
+
+If the user uploads only `checkout`, the Fileset simply contains the first branch; no taskset or second
+task is required. Each call to `publish_harbor_task_tree` publishes exactly one task and returns references
+only to that task's branch.
+
+The publisher places publication UUID directories directly at the Fileset root. Workers follow `root_ref` and
+`manifest_ref`, so `HarborTreeSource` also permits another canonical Fileset path as long as the manifest
+is outside the executable `root_ref`.
+
+The UUID gives every publication attempt a fresh destination. It prevents a retry, concurrent publisher,
+or second publication from overwriting an earlier task tree, and it distinguishes identical tree content
+published under different task directory names (the directory name is recorded in the manifest but is not
+part of `tree_digest`). The UUID does not itself enforce storage immutability; manifest and tree digest
+verification detects later mutation. A different design could use another unique manifest-derived prefix,
+but freshness is the property the current publisher requires.
+
+For `checkout`, `tree.root_ref` is
+`default/harbor-tasks#<checkout-publication-uuid>/files` and
+`tree.manifest_ref` is
+`default/harbor-tasks#<checkout-publication-uuid>/manifest.json`. File paths
+are stored relative to `files/`; the manifest records `"task_dir":"checkout"` so the worker can
+reconstruct that directory. Empty directories have no uploaded file object and exist through their
+directory entry in `manifest.json`. The exact environment, verifier, and optional solution layout follows
+the task's `task.toml`; multistep tasks can instead carry step-specific instructions and verifiers.
+
+The publisher requires the Evaluator plugin and Harbor installed locally. Keep the input tree
+unchanged during publication. It uploads every regular file, including dotfiles and files excluded
+by `.gitignore`, into a fresh prefix, verifies uploaded bytes, and publishes the manifest last.
+Only then does it return a definition ready for task creation. Links and special files are rejected;
+executable bits and empty directories are preserved. Interrupted uploads may leave unreferenced
+files in the Fileset but never return a publishable definition.
+
+`tree` contains `format="fileset-tree-v1"`, `root_ref`, `manifest_ref`, `manifest_digest`, and
+`tree_digest`. Both references are qualified `workspace/fileset#path` strings; the manifest lives
+outside the executable file prefix. The manifest records sorted relative paths, entry kinds,
+file sizes, SHA-256 checksums, and executable bits. Its checksum covers the exact canonical JSON
+bytes. The per-task `tree_digest` covers all contents, paths, executable bits, and empty directories;
+it differs from the task revision digest and the whole-dataset materialization receipt.
+
+Workers download only manifest-listed files, stream-check their size and checksum, validate the
+complete native Harbor task, and publish the dataset atomically. Per-task limits are 16 MiB of
+manifest JSON, 100,000 entries, 4 GiB per file, and 16 GiB total file bytes. Async workers download
+at most eight files concurrently; sync workers download one at a time. Paths must be canonical,
+relative POSIX paths without traversal, URL-escape ambiguity, or case-folded aliases.
+
 <Note>
-Storing a Harbor task is supported; **running one from storage is not yet**. A taskset may group both
-kinds, but expanding a `harbor` member is rejected with `422` before the run starts, whatever target
-you submit against. Harbor evaluations continue to run through the existing dataset-driven path.
+Stored Harbor tasks run with an explicit `harbor` target. Submit either a taskset string or a list
+of individual task-reference strings to the agent-evaluate jobs endpoint:
+
+```json
+{
+  "profile": "<configured-subprocess-profile>",
+  "spec": {
+    "tasks": "default/suite#blessed",
+    "target": {"kind": "harbor", "agent_name": "oracle"}
+  }
+}
+```
+
+For individual tasks, replace `tasks` with `["default/checkout#blessed", "default/search#latest"]`.
+A top-level string always means a taskset. A direct list cannot repeat the same task identity,
+even under different tags or revisions, or mix stored references with inline tasks. Lists must be
+homogeneous for every target, including offline evaluation.
+
+Direct references to stored evaluator tasks also work with Model, Agent, Fabric, Gym, and offline
+agent-evaluation specs. Harbor targets require stored Harbor tasks; other targets require stored evaluator
+tasks. Gym tasks must retain mapping-valued `inputs.gym_row` and the `gym_row_extras` metadata entry from
+`discover_gym_tasks`. Submission validates those fields before scheduling; `gym_dataset_path` is optional
+provenance. Offline trials must name the expanded stored task IDs (the task names).
+
+Use the explicit `AgentEvalInputSpec`/HTTP job surface for direct lists. The sync live-runner convenience
+`submit(tasks=..., target=...)` currently accepts only taskset references and Gym runners; the async
+convenience API has no task-oriented submission overload.
+
+Submission pins a taskset selector to one immutable revision without fetching its task definitions.
+The worker resolves and verifies that revision's already-pinned members, then downloads and validates
+their trees before starting Harbor. Direct lists instead pin and check every selected task during
+submission; the worker rereads those exact revisions. Moving tags after submission cannot change
+the selected versions. Prefer published tasksets for evaluations with hundreds or thousands of tasks.
+
+A successful taskset submission queues member validation and execution: an incompatible member can
+fail the job during preparation. Direct-list incompatibility is rejected during submission because
+pinning already reads those definitions. Stored Harbor sources require a Harbor target and do not
+support offline trials. Existing evaluator task resolution remains eager.
+
+Workers require authenticated Entity Store and Files access. Deleted/inaccessible revisions or
+tree objects fail preparation; digest pins do not guarantee retention. Publish each changed task
+at a fresh prefix and retain objects referenced by revisions you intend to run. The verified tree
+supplies execution instructions and config. Archive task definitions are no longer supported.
+Harbor uses a configured host subprocess profile; this does not add Kubernetes execution support.
 </Note>
 
 <Note>

@@ -8,8 +8,8 @@ description as a target spec, transport to the service, and persistence — so w
 the evaluation that was configured going in.
 
 **Scope is submission, not execution.** Running a Gym eval additionally needs the ``gym`` CLI on the
-job's PATH and tasks carrying ``gym_dataset_path`` metadata from ``discover_gym_tasks``; neither is
-a property of the submit path, and asserting on them here would make this test fail for reasons that
+job's PATH and tasks carrying discovery-compatible ``gym_row`` inputs and ``gym_row_extras`` metadata.
+The dataset path is optional provenance. This fixture supplies valid row content, and asserting on them here would make this test fail for reasons that
 have nothing to do with what it covers. The job is therefore submitted and its stored spec inspected,
 not run to completion.
 
@@ -30,6 +30,7 @@ import httpx
 import pytest
 from nemo_evaluator.api.schemas import (
     EvaluatorTaskDefinition,
+    MetadataItem,
     MetricInline,
     TaskInput,
     TaskInputs,
@@ -86,7 +87,7 @@ def _inline_metric() -> MetricInline:
 
 
 def _stored_taskset(client: NeMoPlatform) -> str:
-    """A one-task taskset to reference. Its content is irrelevant — only the reference travels."""
+    """A one-task taskset with valid Gym row content for submission validation."""
     task_name = _unique("gym-submit-task")
     client.evaluator.tasks.create(
         task_name,
@@ -94,9 +95,10 @@ def _stored_taskset(client: NeMoPlatform) -> str:
             spec=EvaluatorTaskDefinition(
                 kind="evaluator",
                 intent="Placeholder task; this test asserts on submission, not execution.",
-                inputs=TaskInputs(instruction="unused"),
+                inputs=TaskInputs.model_validate({"gym_row": {"input": "Reply DONE"}}),
                 metrics=[_inline_metric()],
-            )
+            ),
+            metadata=[MetadataItem(key="gym_row_extras", value={})],
         ),
     )
     taskset_name = _unique("gym-submit-suite")

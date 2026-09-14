@@ -23,6 +23,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym.records import (
     read_jsonl,
 )
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
+from nemo_evaluator_sdk.metrics.protocol import Metric
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ def _render_instruction(responses_create_params: Mapping[str, Any]) -> str:
     return "\n\n".join(part for part in parts if part).strip()
 
 
-def _default_gym_metric() -> object:
+def _default_gym_metric() -> Metric:
     """The default reward metric, imported lazily (see ``metrics.runner_rewards``)."""
     from nemo_evaluator_sdk.metrics.runner_rewards import GymRewardMetric
 
@@ -214,6 +215,20 @@ def source_datasets(tasks: Sequence[AgentEvalTask]) -> str:
     return ", ".join(sorted(stamped)) if stamped else "<tasks with no stamped dataset path>"
 
 
+def gym_task_row(
+    *, task_id: str, inputs: Mapping[str, Any], metadata: Mapping[str, Any]
+) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+    """Validate and return the source parameters and extras required to execute a Gym task."""
+    extras = metadata.get("gym_row_extras")
+    params = inputs.get("gym_row")
+    if not isinstance(extras, Mapping) or not isinstance(params, Mapping):
+        raise ValueError(
+            f"task {task_id!r} is missing inputs['gym_row'] and/or metadata['gym_row_extras']; build tasks "
+            "with discover_gym_tasks so the Gym dataset can be re-materialized for the run"
+        )
+    return params, extras
+
+
 def materialize_dataset(tasks: Sequence[AgentEvalTask], dest: Path) -> dict[int, str]:
     """Write the normalized dataset Gym will read, and return its ``_ng_task_index`` → task-id map.
 
@@ -233,13 +248,7 @@ def materialize_dataset(tasks: Sequence[AgentEvalTask], dest: Path) -> dict[int,
     for index, task in enumerate(tasks):
         # The source row is split across inputs and metadata so the run bundle doesn't persist
         # responses_create_params twice; reassemble it here.
-        extras = task.metadata.get("gym_row_extras")
-        params = task.inputs.get("gym_row")
-        if not isinstance(extras, Mapping) or not isinstance(params, Mapping):
-            raise ValueError(
-                f"task {task.id!r} is missing inputs['gym_row'] and/or metadata['gym_row_extras']; build tasks "
-                "with discover_gym_tasks so the Gym dataset can be re-materialized for the run"
-            )
+        params, extras = gym_task_row(task_id=task.id, inputs=task.inputs, metadata=task.metadata)
         if task.id in seen_task_ids:
             raise ValueError(
                 f"task {task.id!r} was supplied more than once; one distinct row is one task, and repeated "

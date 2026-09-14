@@ -58,16 +58,16 @@ REVISION_SELF_FIELDS = frozenset({"content_hash", "revision"})
 #: view of content the digest already covers by another route.
 #:
 #: ``HarborTaskDefinition.config`` qualifies. It is a projection of ``task.toml``, which lives
-#: inside the archive, and Harbor reads the real ``task.toml`` out of the materialized archive at
-#: run time — this copy is never an execution input, only a queryable convenience. ``archive_digest``
+#: inside the Fileset tree, and Harbor reads the real ``task.toml`` out of the materialized tree at
+#: run time — this copy is never an execution input, only a queryable convenience. ``tree.tree_digest``
 #: is authoritative over every file in that directory including ``task.toml``, so a config change
 #: that actually alters execution or grading already moves the digest. Hashing the projection too
 #: would add no coverage and would make revision history sensitive to Harbor's serialization: a
 #: release that reordered keys or emitted a new defaulted field would cut a revision for
 #: byte-identical files.
 #:
-#: That makes ``archive_digest`` load-bearing. If a Harbor field ever becomes an execution input in
-#: its own right — read from the stored record rather than from the archive — it must be digested.
+#: That makes ``tree.tree_digest`` load-bearing. If a Harbor field ever becomes an execution input in
+#: its own right — read from the stored record rather than from the tree — it must be digested.
 _DERIVED_SPEC_FIELDS = {"config"}
 
 #: What a *head* record excludes when digesting: its revision pointers, plus derived spec fields.

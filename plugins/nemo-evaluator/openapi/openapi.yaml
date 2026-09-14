@@ -2554,9 +2554,12 @@ components:
           - items:
               $ref: '#/components/schemas/AgentEvalTaskInput'
             type: array
+          - items:
+              $ref: '#/components/schemas/TaskRef'
+            type: array
           title: Tasks
-          description: 'Tasks to evaluate: an inline list (at least one) or a reference
-            to a stored taskset.'
+          description: 'Tasks to evaluate: a nonempty list containing only inline
+            tasks or only task references, or a stored taskset reference.'
       additionalProperties: false
       type: object
       required:
@@ -2565,14 +2568,11 @@ components:
       description: 'Submitter-facing agent-evaluation input.
 
 
-        ``tasks`` is either an inline list of tasks (whose metrics may be inline or
-        references) or a
+        ``tasks`` accepts inline tasks, stored task references, or a stored taskset
+        reference.
 
-        :class:`TasksetRef` naming a stored taskset whose member tasks are loaded
-        and expanded during spec
-
-        resolution. Either way it hydrates to the canonical ``AgentEvalSpec.tasks``
-        list.'
+        Evaluator definitions expand at submission; stored Harbor sources are pinned
+        for worker resolution.'
     AgentEvalResult:
       properties:
         id:
@@ -2721,19 +2721,27 @@ components:
           description: Where the completed run publishes its results, beyond its own
             result bundle. Omit to publish nowhere.
         tasks:
-          items:
-            $ref: '#/components/schemas/AgentEvalTaskSpec'
-          type: array
-          minItems: 1
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/AgentEvalTaskSpec'
+            type: array
+            minItems: 1
+          - oneOf:
+            - $ref: '#/components/schemas/PinnedHarborTaskset'
+            - $ref: '#/components/schemas/PinnedHarborTaskList'
+            discriminator:
+              propertyName: kind
+              mapping:
+                harbor-task-list: '#/components/schemas/PinnedHarborTaskList'
+                harbor-taskset: '#/components/schemas/PinnedHarborTaskset'
           title: Tasks
-          description: Tasks to evaluate; at least one is required.
       additionalProperties: false
       type: object
       required:
       - tasks
       title: AgentEvalSpec
-      description: 'Canonical agent-evaluation spec: tasks with all metric references
-        resolved to inline.'
+      description: 'Canonical evaluation: resolved evaluator tasks or an immutable
+        stored Harbor source.'
     AgentEvalTaskInput:
       properties:
         id:
@@ -4395,53 +4403,66 @@ components:
           const: harbor
           title: Kind
           description: Task kind discriminator.
-        archive_ref:
-          type: string
-          pattern: ^[\w\-.]+/[\w\-.]+#[\w\-./]+$
-          title: Archive Ref
-          description: 'Files reference to the task''s packaged directory (format:
-            workspace/fileset#path).'
-        archive_digest:
-          type: string
-          maxLength: 64
-          minLength: 64
-          pattern: ^[0-9a-f]{64}$
-          title: Archive Digest
-          description: "Content hash Harbor computed over the task directory. This\
-            \ is the authoritative identity of a Harbor task's content \u2014 every\
-            \ file, including task.toml."
+        tree:
+          $ref: '#/components/schemas/HarborTreeSource'
         instruction:
           title: Instruction
-          description: The task's instruction text, when it has one (multi-step tasks
-            may not).
+          description: Task instruction text, when present.
           type: string
         config:
           additionalProperties: true
           type: object
           title: Config
-          description: "Harbor's own task configuration (verifier, agent, environment,\
-            \ steps), as published. A queryable projection of task.toml \u2014 inspect\
-            \ a task's verifier without downloading the archive. Opaque here: Harbor\
-            \ owns this schema."
+          description: Queryable projection of Harbor task.toml.
       additionalProperties: false
       type: object
       required:
       - kind
-      - archive_ref
-      - archive_digest
+      - tree
       title: HarborTaskDefinition
-      description: "A reference to the task's packaged files, plus a projection of\
-        \ Harbor's own config.\n\nHarbor identifies a task by a *directory* \u2014\
-        \ ``task.toml``, an instruction, an environment \u2014 so\nwhat is stored\
-        \ is a reference to that directory's archive in the Files service, not the\
-        \ files\nthemselves. One fileset per task, so a task shared by several tasksets\
-        \ is stored once. The\narchive is materialized back into ``<dir>/<task-name>/``\
-        \ at run time, which is the layout\nHarbor's own discovery expects.\n\nWhich\
-        \ agent runs the task is *not* stored here. That comes from the run's target\n\
-        (``HarborRunnerTarget``), so the same stored task can be evaluated against\
-        \ different agents.\nHarbor's own ``[agent]`` block \u2014 carried inside\
-        \ ``config`` \u2014 configures how the agent *phase*\nruns (timeout, user,\
-        \ network policy), not which agent it is."
+      description: Task files and a queryable projection of Harbor's config; the target
+        selects the agent.
+    HarborTreeSource:
+      properties:
+        format:
+          type: string
+          const: fileset-tree-v1
+          title: Format
+          default: fileset-tree-v1
+        root_ref:
+          type: string
+          pattern: ^[\w\-.]+/[\w\-.]+#[\w\-./]+$
+          title: Root Ref
+          description: Qualified Files reference to the file prefix.
+        manifest_ref:
+          type: string
+          pattern: ^[\w\-.]+/[\w\-.]+#[\w\-./]+$
+          title: Manifest Ref
+          description: Qualified Files reference to the manifest.
+        manifest_digest:
+          type: string
+          maxLength: 64
+          minLength: 64
+          pattern: ^[0-9a-f]{64}$
+          title: Manifest Digest
+          description: SHA-256 of the exact canonical manifest bytes.
+        tree_digest:
+          type: string
+          maxLength: 64
+          minLength: 64
+          pattern: ^[0-9a-f]{64}$
+          title: Tree Digest
+          description: Strict digest_harbor_tree checksum of the complete task directory.
+      additionalProperties: false
+      type: object
+      required:
+      - root_ref
+      - manifest_ref
+      - manifest_digest
+      - tree_digest
+      title: HarborTreeSource
+      description: Exact manifest and complete task content, independently verified
+        by the worker.
     HelloResponse:
       properties:
         message:
@@ -5123,6 +5144,38 @@ components:
       - p100
       title: Percentiles
       description: Percentile distribution of scores.
+    PinnedHarborTaskList:
+      properties:
+        kind:
+          type: string
+          const: harbor-task-list
+          title: Kind
+          default: harbor-task-list
+        task_refs:
+          items:
+            $ref: '#/components/schemas/TaskRef'
+          type: array
+          minItems: 1
+          title: Task Refs
+      additionalProperties: false
+      type: object
+      required:
+      - task_refs
+      title: PinnedHarborTaskList
+    PinnedHarborTaskset:
+      properties:
+        kind:
+          type: string
+          const: harbor-taskset
+          title: Kind
+          default: harbor-taskset
+        taskset_ref:
+          $ref: '#/components/schemas/TasksetRef'
+      additionalProperties: false
+      type: object
+      required:
+      - taskset_ref
+      title: PinnedHarborTaskset
     PlatformJobListResultResponse:
       properties:
         data:
