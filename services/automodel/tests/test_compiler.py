@@ -14,6 +14,7 @@ from nemo_platform_plugin.models.types import ModelEntity
 from nmp.automodel.adapter import automodel_spec_to_compiler_output
 from nmp.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
+    DeploymentParams,
     DistillationTraining,
     EmbeddingParams,
     LoRAParams,
@@ -26,6 +27,9 @@ from nmp.automodel.entities.values import OutputNameType
 from nmp.automodel.images import get_tasks_image, get_training_image
 from nmp.common.entities.utils import get_random_id
 from nmp.common.jobs.exceptions import PlatformJobCompilationError
+from nmp.customization_common.schemas.model_entity import (
+    DeploymentParameters as ModelEntityDeploymentParameters,
+)
 from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
 
 
@@ -466,3 +470,54 @@ async def test_platform_job_config_compiler_applies_profile_to_task_steps(
     spec = await platform_job_config_compiler(_make_job_output(), "default", platform_clients, profile="custom-gpu")
 
     assert [step.executor.profile for step in spec.steps] == ["custom-gpu"] * 4
+
+
+def test_build_model_entity_config_forwards_inline_deployment_config() -> None:
+    """The plugin-supplied deployment_config must reach the model_entity step config."""
+    from nmp.automodel.app.jobs.compiler import _build_model_entity_config
+
+    job_spec = _make_job_output().model_copy(
+        update={"deployment_config": DeploymentParams(gpu=2, image_name="img", lora_enabled=True)}
+    )
+    config = _build_model_entity_config("default", job_spec)
+
+    assert isinstance(config.deployment_config, ModelEntityDeploymentParameters)
+    assert config.deployment_config.gpu == 2
+    assert config.deployment_config.image_name == "img"
+    assert config.deployment_config.lora_enabled is True
+
+
+def test_build_model_entity_config_forwards_deployment_config_string_ref() -> None:
+    from nmp.automodel.app.jobs.compiler import _build_model_entity_config
+
+    job_spec = _make_job_output().model_copy(update={"deployment_config": "shared/existing-cfg"})
+    config = _build_model_entity_config("default", job_spec)
+
+    assert config.deployment_config == "shared/existing-cfg"
+
+
+def test_build_model_entity_config_omits_deployment_config_by_default() -> None:
+    from nmp.automodel.app.jobs.compiler import _build_model_entity_config
+
+    config = _build_model_entity_config("default", _make_job_output())
+
+    assert config.deployment_config is None
+
+
+def test_deployment_config_survives_the_plugin_adapter() -> None:
+    """End-to-end: plugin JSON -> adapter -> compiler -> model_entity step config."""
+    from nmp.automodel.app.jobs.compiler import _build_model_entity_config
+
+    spec = automodel_spec_to_compiler_output(
+        {
+            "model": "default/test-target",
+            "dataset": {"training": "default/my-dataset"},
+            "training": {"training_type": "sft", "finetuning_type": "lora"},
+            "output": {"name": "out", "type": "adapter", "fileset": "out-fs"},
+            "deployment_config": {"gpu": 3, "lora_enabled": True},
+        },
+    )
+    config = _build_model_entity_config("default", spec)
+
+    assert isinstance(config.deployment_config, ModelEntityDeploymentParameters)
+    assert config.deployment_config.gpu == 3

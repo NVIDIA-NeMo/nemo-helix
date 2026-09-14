@@ -26,8 +26,7 @@ def _infer_output_type(input_spec: AutomodelJobInput, checkpoint_head_type: str)
     is_bi_encoder = recipe == "bi_encoder" or (recipe == "auto" and checkpoint_head_type == "embedding")
     if is_bi_encoder:
         return "model"
-    lora = input_spec.training.lora
-    if input_spec.training.finetuning_type == "lora" and lora is not None and not lora.merge:
+    if input_spec.trains_standalone_lora_adapter():
         return "adapter"
     return "model"
 
@@ -78,4 +77,5 @@ async def transform_input_to_output(
         parallelism=input_spec.parallelism,
         output=output,
         integrations=input_spec.integrations,
+        deployment_config=input_spec.deployment_config,
     )

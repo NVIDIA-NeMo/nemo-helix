@@ -10,6 +10,7 @@ from typing import Any, Literal
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nmp.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
+    DeploymentParams,
     DistillationTraining,
     LoRAParams,
     OutputResponse,
@@ -110,6 +111,20 @@ def _build_integrations(spec: dict[str, Any]) -> IntegrationsSpec | None:
     return IntegrationsSpec.model_validate(raw)
 
 
+def _build_deployment_config(data: dict[str, Any]) -> str | DeploymentParams | None:
+    """Map the plugin's ``deployment_config`` onto the legacy compiler shape.
+
+    String references pass through untouched; inline params arrive as a plain dict
+    because the caller dumped the plugin model, so they are re-validated here.
+    """
+    raw = data.get("deployment_config")
+    if raw is None or isinstance(raw, str):
+        return raw
+    if isinstance(raw, BaseModel):
+        raw = raw.model_dump(mode="python")
+    return DeploymentParams.model_validate(raw)
+
+
 def automodel_spec_to_compiler_output(spec: dict[str, Any] | BaseModel) -> CustomizationJobOutput:
     """Map simplified Automodel job output (plugin schema) to ``CustomizationJobOutput``."""
     if isinstance(spec, BaseModel):
@@ -136,6 +151,6 @@ def automodel_spec_to_compiler_output(spec: dict[str, Any] | BaseModel) -> Custo
         dataset=training_uri,
         training=_build_training_block(data),
         integrations=_build_integrations(data),
-        deployment_config=None,
+        deployment_config=_build_deployment_config(data),
         output=output_resp,
     )
