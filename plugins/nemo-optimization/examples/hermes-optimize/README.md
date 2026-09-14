@@ -41,7 +41,7 @@ The lockfile cannot pull `hermes-agent` yet (dependency pin conflict). Install i
 into the same venv:
 
 ```bash
-uv pip install --python .venv/bin/python "hermes-agent==0.18.2" --no-deps
+uv pip install --python .venv/bin/python "hermes-agent==0.19.0" --no-deps
 python -c "import hermes_cli; print('ok')"
 ```
 
@@ -80,7 +80,7 @@ export ADAPTER_PYTHON="$REPO_ROOT/.venv/bin/python"
   root; see [Platform submission](#platform-submission) below.
 - Local Hermes output lands in `./artifacts/` under this folder (safe to
   delete). Do **not** stage `artifacts/` into a fileset.
-- Re-run the `hermes-agent==0.18.2 --no-deps` install after any fresh
+- Re-run the `hermes-agent==0.19.0 --no-deps` install after any fresh
   `uv sync` — sync does not install Hermes and can leave `hermes_cli` missing.
 
 ---
@@ -362,7 +362,7 @@ print(
 | Symptom | Likely fix |
 |---------|------------|
 | `nemo: command not found` | `source .venv/bin/activate` after `uv sync --package nemo-agents-plugin` |
-| `No module named hermes_cli` | Re-run the `hermes-agent==0.18.2 --no-deps` install (needed after every fresh `uv sync`) |
+| `No module named hermes_cli` | Re-run the `hermes-agent==0.19.0 --no-deps` install (needed after every fresh `uv sync`) |
 | `No module named 'nemo_fabric_adapters'` | `export ADAPTER_PYTHON="$REPO_ROOT/.venv/bin/python"` |
 | `phishing-analyzer-mcp` not found | `uv sync --all-packages` from the repo root; the example bundle is a workspace member |
 | LLM 401 | Confirm `NVIDIA_API_KEY` works on inference-api |

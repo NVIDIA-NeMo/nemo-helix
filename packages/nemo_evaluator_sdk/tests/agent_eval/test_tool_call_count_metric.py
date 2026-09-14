@@ -36,9 +36,9 @@ def test_output_spec_declares_a_count_and_a_match() -> None:
 
 
 async def test_counts_exact_and_harness_prefixed_names() -> None:
-    """Hermes registers MCP tools as ``mcp-<server>-<tool>``, so a prefixed name is the same tool."""
+    """Hermes records MCP tools as ``mcp__<server>__<tool>`` (seen live), so a prefixed name is the same tool."""
     sample = {
-        "evidence": _evidence(_atif("email_phishing_analyzer", "mcp-email-phishing-analyzer-email_phishing_analyzer"))
+        "evidence": _evidence(_atif("email_phishing_analyzer", "mcp__email_phishing_analyzer__email_phishing_analyzer"))
     }
     scores = await _score(ToolCallCountMetric(tool_name="email_phishing_analyzer", expected_calls=2), sample)
     assert scores == {"tool_call_count": 2, "tool_call_count_matches": True}

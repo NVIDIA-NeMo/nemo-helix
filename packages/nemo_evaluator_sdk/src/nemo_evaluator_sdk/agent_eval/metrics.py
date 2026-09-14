@@ -189,7 +189,7 @@ class ToolCallCountMetric(MetricBase):
 
     * ``tool_call_count`` — the number of trajectory tool calls whose ``function_name`` is
       ``tool_name`` or ends with ``-<tool_name>`` / ``_<tool_name>``, since harnesses prefix MCP tool
-      names with their server (Hermes registers ``mcp-<server>-<tool>``).
+      names with their server (Hermes records ``mcp__<server>__<tool>``).
     * ``tool_call_count_matches`` — ``True`` when that count equals ``expected_calls``.
 
     Reads the ATIF view of the trace. Without a readable trajectory the count is ``0`` and the match
