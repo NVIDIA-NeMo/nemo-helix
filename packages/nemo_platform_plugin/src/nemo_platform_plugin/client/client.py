@@ -526,6 +526,13 @@ class BaseNemoClient(Generic[HttpClientT]):
         """Shorthand for ``with_options(headers=...)``."""
         return self.with_options(headers=headers)
 
+    def with_workspace(self, workspace: str) -> Self:
+        """Return a copy of this client with *workspace* as the default workspace."""
+        clone = copy.copy(self)
+        clone._owns_http = False
+        clone._workspace = workspace
+        return clone
+
     def with_retry(self, retry: RetryPolicy) -> Self:
         """Shorthand for ``with_options(retry=...)``."""
         return self.with_options(retry=retry)

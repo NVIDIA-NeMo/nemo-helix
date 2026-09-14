@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
+import httpx
 import pytest
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.retrieve_eval import (
@@ -27,6 +28,7 @@ from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
 from nemo_platform_plugin.jobs.api_factory import CPUExecutionProviderSpec
+from nemo_platform_plugin.sdk import NeMoPlatform
 from pydantic import ValidationError
 from pytest_mock import MockerFixture
 
@@ -259,3 +261,22 @@ def test_run_records_started_at_before_evaluation(tmp_path: Path, mocker: Mocker
     metadata = json.loads((ctx.storage.persistent / "artifacts" / "run-metadata.json").read_text())
     assert metadata["started_at"] == started.isoformat()
     evaluator.run_sync.assert_called_once()
+
+
+def test_run_adapts_the_generated_sdk_the_local_cli_injects(tmp_path: Path, mocker: MockerFixture) -> None:
+    """``nemo evaluator retrieve-eval run`` injects a generated ``NeMoPlatform``, but the BEIR
+    fileset download only accepts a typed client."""
+    download = mocker.patch(
+        "nemo_evaluator.jobs.retrieve_eval.download_dataset_sync",
+        return_value=tmp_path / "downloaded",
+    )
+    mocker.patch("nemo_evaluator.jobs.retrieve_eval.load_beir_dataset", return_value=mocker.Mock(spec=BeirDataset))
+    evaluator = mocker.Mock()
+    evaluator.run_sync.return_value = _result()
+    mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
+    platform = NeMoPlatform(base_url="http://platform.test", workspace="dev", http_client=httpx.Client())
+
+    output = RetrieveEvalJob().run(_spec().model_dump(mode="json"), ctx=_context(tmp_path), sdk=platform)
+
+    assert isinstance(download.call_args.kwargs["client"], NemoClient)
+    assert output["eval_results"]["ndcg_cut_10"] == 0.75

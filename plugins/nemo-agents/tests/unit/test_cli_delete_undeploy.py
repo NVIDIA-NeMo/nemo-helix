@@ -35,11 +35,52 @@ def _install_mock_transport(handler):
     transport = httpx.MockTransport(handler)
     real_client = httpx.Client
 
-    def _factory(*args, **kwargs):
-        kwargs["transport"] = transport
-        return real_client(*args, **kwargs)
+    class _Client(real_client):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
 
-    return patch(f"{_PATCH_PREFIX}.httpx.Client", _factory)
+    return patch(f"{_PATCH_PREFIX}.httpx.Client", _Client)
+
+
+def _recording_delete_handler(requests: list[httpx.Request]):
+    def handler(req: httpx.Request) -> httpx.Response:
+        requests.append(req)
+        return httpx.Response(204, request=req)
+
+    return handler
+
+
+def _recording_deployments_handler(requests: list[httpx.Request], deployments: list[dict]):
+    def handler(req: httpx.Request) -> httpx.Response:
+        requests.append(req)
+        if req.method == "GET":
+            return httpx.Response(200, request=req, json=_mock_deployments_response(deployments))
+        return httpx.Response(204, request=req)
+
+    return handler
+
+
+def _recording_deployment_pages_handler(requests: list[httpx.Request], pages: list[list[dict]]):
+    total_results = sum(len(page) for page in pages)
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        requests.append(req)
+        if req.method == "GET":
+            page_number = int(req.url.params.get("page", "1"))
+            return httpx.Response(
+                200,
+                request=req,
+                json=_mock_deployments_response(
+                    pages[page_number - 1],
+                    page=page_number,
+                    total_pages=len(pages),
+                    total_results=total_results,
+                ),
+            )
+        return httpx.Response(204, request=req)
+
+    return handler
 
 
 # ---------------------------------------------------------------------------
@@ -104,96 +145,121 @@ class TestDeleteConfirmation:
 # ---------------------------------------------------------------------------
 
 
-def _mock_deployments_response(deployments: list[dict]) -> dict:
+def _mock_deployments_response(
+    deployments: list[dict],
+    *,
+    page: int = 1,
+    total_pages: int = 1,
+    total_results: int | None = None,
+) -> dict:
     """Build a fake paginated response for GET /deployments."""
-    return {"data": deployments}
+    total = len(deployments) if total_results is None else total_results
+    return {
+        "data": deployments,
+        "pagination": {
+            "page": page,
+            "page_size": len(deployments),
+            "current_page_size": len(deployments),
+            "total_pages": total_pages,
+            "total_results": total,
+        },
+    }
 
 
 class TestUndeployConfirmation:
     def test_undeploy_single_prompts_confirmation(self, app) -> None:
         """Undeploying a single deployment prompts for confirmation."""
-        with patch(f"{_PATCH_PREFIX}._api_request") as mock_request:
+        requests: list[httpx.Request] = []
+        with _install_mock_transport(_recording_delete_handler(requests)):
             result = runner.invoke(app, ["undeploy", "dep-1"], input="y\n")
 
         assert result.exit_code == 0, result.output
-        mock_request.assert_called_once()
-        assert mock_request.call_args.args[0] == "DELETE"
+        assert [request.method for request in requests] == ["DELETE"]
 
     def test_undeploy_single_aborts_on_decline(self, app) -> None:
         """Declining the prompt does not call the API."""
-        with patch(f"{_PATCH_PREFIX}._api_request") as mock_request:
+        requests: list[httpx.Request] = []
+        with _install_mock_transport(_recording_delete_handler(requests)):
             result = runner.invoke(app, ["undeploy", "dep-1"], input="n\n")
 
         assert result.exit_code != 0
-        mock_request.assert_not_called()
+        assert requests == []
 
     def test_undeploy_single_yes_skips_prompt(self, app) -> None:
         """--yes skips the confirmation for single deployment undeploy."""
-        with patch(f"{_PATCH_PREFIX}._api_request") as mock_request:
+        requests: list[httpx.Request] = []
+        with _install_mock_transport(_recording_delete_handler(requests)):
             result = runner.invoke(app, ["undeploy", "dep-1", "--yes"])
 
         assert result.exit_code == 0, result.output
-        mock_request.assert_called_once()
-        assert mock_request.call_args.args[0] == "DELETE"
+        assert [request.method for request in requests] == ["DELETE"]
 
     def test_undeploy_by_agent_prompts_with_count(self, app) -> None:
         """Undeploying by --agent lists deployments, shows count in prompt, and deletes on 'y'."""
-        deps = _mock_deployments_response(
-            [
-                {"name": "dep-1", "agent": "my-agent"},
-                {"name": "dep-2", "agent": "my-agent"},
-            ]
-        )
+        requests: list[httpx.Request] = []
+        deps = [
+            {"name": "dep-1", "agent": "my-agent"},
+            {"name": "dep-2", "agent": "my-agent"},
+        ]
 
-        def _request(method: str, *_args, **_kwargs):
-            if method == "GET":
-                return deps
-            return None
-
-        with patch(f"{_PATCH_PREFIX}._api_request", side_effect=_request) as mock_request:
+        with _install_mock_transport(_recording_deployments_handler(requests, deps)):
             result = runner.invoke(app, ["undeploy", "--agent", "my-agent"], input="y\n")
 
         assert result.exit_code == 0, result.output
-        assert sum(1 for call in mock_request.call_args_list if call.args[0] == "DELETE") == 2
+        assert [request.method for request in requests].count("DELETE") == 2
 
     def test_undeploy_by_agent_aborts_on_decline(self, app) -> None:
         """Declining the prompt after listing does not delete anything."""
-        deps = _mock_deployments_response(
-            [
-                {"name": "dep-1", "agent": "my-agent"},
-                {"name": "dep-2", "agent": "my-agent"},
-            ]
-        )
+        requests: list[httpx.Request] = []
+        deps = [
+            {"name": "dep-1", "agent": "my-agent"},
+            {"name": "dep-2", "agent": "my-agent"},
+        ]
 
-        def _request(method: str, *_args, **_kwargs):
-            if method == "GET":
-                return deps
-            raise AssertionError("should not DELETE after decline")
-
-        with patch(f"{_PATCH_PREFIX}._api_request", side_effect=_request) as mock_request:
+        with _install_mock_transport(_recording_deployments_handler(requests, deps)):
             result = runner.invoke(app, ["undeploy", "--agent", "my-agent"], input="n\n")
 
         assert result.exit_code != 0
-        assert all(call.args[0] != "DELETE" for call in mock_request.call_args_list)
+        assert [request.method for request in requests] == ["GET"]
 
     def test_undeploy_all_flag_works_as_agent_alias(self, app) -> None:
         """--all is an alias for --agent on undeploy."""
-        deps = _mock_deployments_response(
-            [
-                {"name": "dep-1", "agent": "my-agent"},
-            ]
-        )
+        requests: list[httpx.Request] = []
+        deps = [
+            {"name": "dep-1", "agent": "my-agent"},
+        ]
 
-        def _request(method: str, *_args, **_kwargs):
-            if method == "GET":
-                return deps
-            return None
-
-        with patch(f"{_PATCH_PREFIX}._api_request", side_effect=_request) as mock_request:
+        with _install_mock_transport(_recording_deployments_handler(requests, deps)):
             result = runner.invoke(app, ["undeploy", "--all", "my-agent", "--yes"])
 
         assert result.exit_code == 0, result.output
-        assert sum(1 for call in mock_request.call_args_list if call.args[0] == "DELETE") == 1
+        assert [request.method for request in requests].count("DELETE") == 1
+
+    def test_undeploy_by_agent_fetches_all_pages(self, app) -> None:
+        """Bulk undeploy deletes matching deployments beyond the first list page."""
+        requests: list[httpx.Request] = []
+        pages = [
+            [
+                {"name": "dep-1", "agent": "other-agent"},
+            ],
+            [
+                {"name": "dep-2", "agent": "my-agent"},
+                {"name": "dep-3", "agent": "my-agent"},
+            ],
+        ]
+
+        with _install_mock_transport(_recording_deployment_pages_handler(requests, pages)):
+            result = runner.invoke(app, ["undeploy", "--agent", "my-agent", "--yes"])
+
+        assert result.exit_code == 0, result.output
+        get_requests = [request for request in requests if request.method == "GET"]
+        delete_paths = [request.url.path for request in requests if request.method == "DELETE"]
+        assert len(get_requests) == 2
+        assert get_requests[1].url.params["page"] == "2"
+        assert delete_paths == [
+            "/apis/agents/v2/workspaces/default/deployments/dep-2",
+            "/apis/agents/v2/workspaces/default/deployments/dep-3",
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -204,26 +270,27 @@ class TestUndeployConfirmation:
 class TestDeploymentsDeleteConfirmation:
     def test_deployments_delete_prompts_without_yes(self, app) -> None:
         """deployments delete prompts for confirmation."""
-        with patch(f"{_PATCH_PREFIX}._api_request") as mock_request:
+        requests: list[httpx.Request] = []
+        with _install_mock_transport(_recording_delete_handler(requests)):
             result = runner.invoke(app, ["deployments", "delete", "dep-1"], input="y\n")
 
         assert result.exit_code == 0, result.output
-        mock_request.assert_called_once()
-        assert mock_request.call_args.args[0] == "DELETE"
+        assert [request.method for request in requests] == ["DELETE"]
 
     def test_deployments_delete_aborts_on_decline(self, app) -> None:
         """Declining aborts without calling the API."""
-        with patch(f"{_PATCH_PREFIX}._api_request") as mock_request:
+        requests: list[httpx.Request] = []
+        with _install_mock_transport(_recording_delete_handler(requests)):
             result = runner.invoke(app, ["deployments", "delete", "dep-1"], input="n\n")
 
         assert result.exit_code != 0
-        mock_request.assert_not_called()
+        assert requests == []
 
     def test_deployments_delete_skips_with_yes(self, app) -> None:
         """--yes skips the confirmation prompt."""
-        with patch(f"{_PATCH_PREFIX}._api_request") as mock_request:
+        requests: list[httpx.Request] = []
+        with _install_mock_transport(_recording_delete_handler(requests)):
             result = runner.invoke(app, ["deployments", "delete", "dep-1", "--yes"])
 
         assert result.exit_code == 0, result.output
-        mock_request.assert_called_once()
-        assert mock_request.call_args.args[0] == "DELETE"
+        assert [request.method for request in requests] == ["DELETE"]

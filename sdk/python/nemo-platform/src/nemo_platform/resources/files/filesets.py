@@ -374,6 +374,54 @@ class FilesetsResource(SyncAPIResource):
             cast_to=Fileset,
         )
 
+    def refresh(
+        self,
+        name: str,
+        *,
+        workspace: str | None = None,
+        # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
+        # The extra values given here take precedence over values defined on the client or passed to this method.
+        extra_headers: Headers | None = None,
+        extra_query: Query | None = None,
+        extra_body: Body | None = None,
+        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+    ) -> Fileset:
+        """
+        Re-resolve a fileset's tracked revision against its source.
+
+        A fileset created from a mutable ref is pinned to an immutable id so its
+        contents cannot shift under a deployment. This re-resolves that same ref and
+        repoints the fileset at whatever it names now. Everything else about the storage
+        config, including the repository and directory, is left alone.
+
+        A running deployment keeps serving the revision it staged. It moves to this one
+        when the runner next stages the fileset, and records the revision it staged.
+
+        Args:
+          extra_headers: Send extra headers
+
+          extra_query: Add additional query parameters to the request
+
+          extra_body: Add additional JSON properties to the request
+
+          timeout: Override the client-level default timeout for this request, in seconds
+        """
+        if workspace is None:
+            workspace = self._client._get_workspace_path_param()
+        if not workspace:
+            raise ValueError(f"Expected a non-empty value for `workspace` but received {workspace!r}")
+        if not name:
+            raise ValueError(f"Expected a non-empty value for `name` but received {name!r}")
+        return self._post(
+            path_template(
+                "/apis/files/v2/workspaces/{workspace}/filesets/{name}/refresh", workspace=workspace, name=name
+            ),
+            options=make_request_options(
+                extra_headers=extra_headers, extra_query=extra_query, extra_body=extra_body, timeout=timeout
+            ),
+            cast_to=Fileset,
+        )
+
 
 class AsyncFilesetsResource(AsyncAPIResource):
     @cached_property
@@ -700,6 +748,54 @@ class AsyncFilesetsResource(AsyncAPIResource):
             cast_to=Fileset,
         )
 
+    async def refresh(
+        self,
+        name: str,
+        *,
+        workspace: str | None = None,
+        # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
+        # The extra values given here take precedence over values defined on the client or passed to this method.
+        extra_headers: Headers | None = None,
+        extra_query: Query | None = None,
+        extra_body: Body | None = None,
+        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+    ) -> Fileset:
+        """
+        Re-resolve a fileset's tracked revision against its source.
+
+        A fileset created from a mutable ref is pinned to an immutable id so its
+        contents cannot shift under a deployment. This re-resolves that same ref and
+        repoints the fileset at whatever it names now. Everything else about the storage
+        config, including the repository and directory, is left alone.
+
+        A running deployment keeps serving the revision it staged. It moves to this one
+        when the runner next stages the fileset, and records the revision it staged.
+
+        Args:
+          extra_headers: Send extra headers
+
+          extra_query: Add additional query parameters to the request
+
+          extra_body: Add additional JSON properties to the request
+
+          timeout: Override the client-level default timeout for this request, in seconds
+        """
+        if workspace is None:
+            workspace = self._client._get_workspace_path_param()
+        if not workspace:
+            raise ValueError(f"Expected a non-empty value for `workspace` but received {workspace!r}")
+        if not name:
+            raise ValueError(f"Expected a non-empty value for `name` but received {name!r}")
+        return await self._post(
+            path_template(
+                "/apis/files/v2/workspaces/{workspace}/filesets/{name}/refresh", workspace=workspace, name=name
+            ),
+            options=make_request_options(
+                extra_headers=extra_headers, extra_query=extra_query, extra_body=extra_body, timeout=timeout
+            ),
+            cast_to=Fileset,
+        )
+
 
 class FilesetsResourceWithRawResponse:
     def __init__(self, filesets: FilesetsResource) -> None:
@@ -719,6 +815,9 @@ class FilesetsResourceWithRawResponse:
         )
         self.delete = to_raw_response_wrapper(
             filesets.delete,
+        )
+        self.refresh = to_raw_response_wrapper(
+            filesets.refresh,
         )
 
 
@@ -741,6 +840,9 @@ class AsyncFilesetsResourceWithRawResponse:
         self.delete = async_to_raw_response_wrapper(
             filesets.delete,
         )
+        self.refresh = async_to_raw_response_wrapper(
+            filesets.refresh,
+        )
 
 
 class FilesetsResourceWithStreamingResponse:
@@ -762,6 +864,9 @@ class FilesetsResourceWithStreamingResponse:
         self.delete = to_streamed_response_wrapper(
             filesets.delete,
         )
+        self.refresh = to_streamed_response_wrapper(
+            filesets.refresh,
+        )
 
 
 class AsyncFilesetsResourceWithStreamingResponse:
@@ -782,4 +887,7 @@ class AsyncFilesetsResourceWithStreamingResponse:
         )
         self.delete = async_to_streamed_response_wrapper(
             filesets.delete,
+        )
+        self.refresh = async_to_streamed_response_wrapper(
+            filesets.refresh,
         )

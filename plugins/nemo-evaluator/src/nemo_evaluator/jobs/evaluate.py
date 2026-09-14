@@ -27,7 +27,7 @@ from nemo_evaluator.jobs.metric_resolution import (
 from nemo_evaluator.jobs.publication import publish_row_eval_result
 from nemo_evaluator.jobs.publication_spec import RowPublicationSpec
 from nemo_evaluator.jobs.result_persistence import persist_evaluate_result
-from nemo_evaluator.jobs.utils import run_with_isolated_async_client
+from nemo_evaluator.jobs.utils import as_async_nemo_client, as_nemo_client, run_with_isolated_async_client
 from nemo_evaluator.metric_refs import MetricRefOrInline
 from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
 from nemo_evaluator_sdk import Evaluator
@@ -49,7 +49,7 @@ from nemo_platform_plugin.intake.client import AsyncIntakeClient
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform
+from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
@@ -294,10 +294,12 @@ class EvaluateJob(NemoJob):
         config: dict,
         *,
         ctx: JobContext,
-        sdk: NemoClient | None = None,
-        async_sdk: AsyncNemoClient | None = None,
+        sdk: NemoClient | NeMoPlatform | None = None,
+        async_sdk: AsyncNemoClient | AsyncNeMoPlatform | None = None,
     ) -> dict:
         """Run the evaluator job locally and persist its result artifact."""
+        client = as_nemo_client(sdk)
+        async_client = as_async_nemo_client(async_sdk)
         spec = EvaluateSpec.model_validate(config)
         # Stamped here because the row evaluator records no timing at all and `EvaluationResult` has
         # nowhere to put it. Publication needs a start time that is a function of the run, not of
@@ -309,8 +311,8 @@ class EvaluateJob(NemoJob):
         dataset = _resolve_run_dataset(
             spec.dataset,
             ctx=ctx,
-            client=sdk,
-            async_client=async_sdk,
+            client=client,
+            async_client=async_client,
         )
         if isinstance(spec.target, Model):
             if not isinstance(params, RunConfigOnlineModel):
@@ -368,7 +370,7 @@ class EvaluateJob(NemoJob):
                 metric_types=[metric.type for metric in metrics],
                 ctx=ctx,
                 bundle_ref=artifact.artifact_url,
-                async_sdk=async_sdk,
+                async_sdk=async_client,
             )
         except Exception:
             logger.warning(
@@ -394,7 +396,7 @@ class EvaluateJob(NemoJob):
         # can fail the job (when `required`).
         publication = spec.publication.intake if spec.publication is not None else None
         if publication is not None:
-            intake = AsyncIntakeClient.from_client(async_sdk) if async_sdk is not None else None
+            intake = AsyncIntakeClient.from_client(async_client) if async_client is not None else None
             outcome = publish_row_eval_result(
                 result,
                 spec=publication,

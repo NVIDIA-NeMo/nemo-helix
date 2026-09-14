@@ -240,6 +240,7 @@ resources:
       fileset_file: FilesetFileOutput
       fileset_outputs_page: FilesetOutputsPage
       fileset_purpose: FilesetPurpose
+      github_storage_config: GithubStorageConfig
       huggingface_storage_config: HuggingfaceStorageConfig
       list_fileset_files_response: ListFilesetFilesResponse
       local_storage_config: LocalStorageConfig
@@ -263,6 +264,7 @@ resources:
           retrieve: get /apis/files/v2/workspaces/{workspace}/filesets/{name}
           delete: delete /apis/files/v2/workspaces/{workspace}/filesets/{name}
           update: patch /apis/files/v2/workspaces/{workspace}/filesets/{name}
+          refresh: post /apis/files/v2/workspaces/{workspace}/filesets/{name}/refresh
       otlp:
         subresources:
           logs:

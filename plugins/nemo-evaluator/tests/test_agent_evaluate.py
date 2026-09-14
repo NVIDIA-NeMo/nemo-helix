@@ -319,6 +319,7 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(tmp_path: Path)
     harbor_target = HarborRunnerTarget(
         agent_name="oracle",
         agent_model_name="openai/gpt-5.4",
+        agent_kwargs={"fabric_adapter_id": "nvidia.fabric.codex", "fabric_harness_settings": {"max_turns": 3}},
         n_attempts=2,
         n_concurrent_trials=8,
         max_retries=1,
@@ -331,6 +332,10 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(tmp_path: Path)
     assert target._config.jobs_dir == ctx.storage.persistent / "harbor"
     # Spec knobs are forwarded onto the Harbor runtime config.
     assert target._config.agent_model_name == "openai/gpt-5.4"
+    assert target._config.agent_kwargs == {
+        "fabric_adapter_id": "nvidia.fabric.codex",
+        "fabric_harness_settings": {"max_turns": 3},
+    }
     assert target._config.n_attempts == 2
     assert target._config.reward_key == "score"
     # A runner shapes its own request, so it contributes no prompt template or inference params.
@@ -448,6 +453,27 @@ def test_runner_target_is_accepted(tmp_path: Path) -> None:
 def test_harbor_runner_target_is_accepted() -> None:
     spec = AgentEvalSpec(tasks=[_task_spec()], target=HarborRunnerTarget(agent_name="oracle"))
     assert isinstance(spec.target, HarborRunnerTarget)
+
+
+def test_harbor_agent_kwargs_round_trip_the_wire_unchanged() -> None:
+    """Nested kwargs survive JSON serialization, so what the submitter wrote is what the agent's ``__init__`` gets."""
+    agent_kwargs = {
+        "fabric_adapter_id": "nvidia.fabric.codex",
+        "fabric_package": "nemo-fabric[codex]==0.3.0b1",
+        "fabric_harness_settings": {"max_turns": 3, "tools": ["shell", None], "strict": True},
+    }
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=HarborRunnerTarget(
+            agent_import_path="nemo_fabric.integrations.harbor:FabricAgent", agent_kwargs=agent_kwargs
+        ),
+    )
+
+    restored = AgentEvalSpec.model_validate(json.loads(spec.model_dump_json()))
+
+    assert isinstance(restored.target, HarborRunnerTarget)
+    assert restored.target.agent_kwargs == agent_kwargs
+    assert HarborRunnerTarget().agent_kwargs == {}
 
 
 def test_agent_eval_job_source_is_distinct_from_evaluate_job() -> None:
@@ -576,6 +602,81 @@ def test_build_evaluator_runner_target_forwards_no_headers() -> None:
 def test_build_evaluator_without_platform_forwards_no_headers() -> None:
     target = _model_target("http://platform/apis/inference-gateway/v2/workspaces/default/model/m/-/v1/chat/completions")
     assert AgentEvalJob._build_evaluator(None, target).default_headers is None
+
+
+def _sync_platform_with_identity() -> NeMoPlatform:
+    return NeMoPlatform(
+        base_url="http://platform",
+        workspace="dev",
+        default_headers=_SDK_IDENTITY_HEADERS,
+        http_client=MagicMock(spec=httpx.Client),
+    )
+
+
+def _async_platform_with_identity() -> AsyncNeMoPlatform:
+    return AsyncNeMoPlatform(
+        base_url="http://platform",
+        workspace="dev",
+        default_headers=_SDK_IDENTITY_HEADERS,
+        http_client=AsyncMock(spec=httpx.AsyncClient),
+    )
+
+
+def _capture_evaluator_headers(mocker: MockerFixture) -> dict[str, dict[str, str] | None]:
+    """Swap in a fake ``AgentEvaluator`` that records the headers ``_build_evaluator`` computed."""
+    captured: dict[str, dict[str, str] | None] = {}
+
+    def _factory(*, default_headers: dict[str, str] | None = None) -> _FakeEvaluator:
+        captured["default_headers"] = default_headers
+        return _FakeEvaluator()
+
+    mocker.patch("nemo_evaluator.jobs.agent_evaluate.AgentEvaluator", _factory)
+    return captured
+
+
+@pytest.mark.parametrize("inject_async", [False, True], ids=["sdk", "async_sdk"])
+def test_run_accepts_the_generated_sdk_the_local_cli_injects(
+    tmp_path: Path, mocker: MockerFixture, inject_async: bool
+) -> None:
+    """A local ``nemo evaluator agent-evaluate run`` is handed a generated ``NeMoPlatform``, not a
+    typed client, and every platform call in ``run`` is typed-client-only. Without adaptation the job
+    dies with ``AttributeError: 'AsyncNeMoPlatform' object has no attribute 'is_platform_url'``
+    before it issues a single target request.
+
+    Adapting must not widen what reaches the target: the allowlist still applies, so the bearer and
+    the trace header the generated SDK carried stay behind.
+    """
+    captured = _capture_evaluator_headers(mocker)
+    config = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=_model_target(
+            "http://platform/apis/inference-gateway/v2/workspaces/default/model/m/-/v1/chat/completions"
+        ),
+    ).model_dump()
+    ctx = _job_context(tmp_path)
+
+    if inject_async:
+        result = AgentEvalJob().run(config, ctx=ctx, async_sdk=_async_platform_with_identity())
+    else:
+        result = AgentEvalJob().run(config, ctx=ctx, sdk=_sync_platform_with_identity())
+
+    assert result["status"] == "completed"
+    assert captured["default_headers"] == _FORWARDED_IDENTITY_HEADERS
+
+
+def test_run_sends_no_identity_to_a_third_party_target_via_generated_sdk(tmp_path: Path, mocker: MockerFixture) -> None:
+    """The same-origin guard is what keeps the delegated user's email and groups inside the platform.
+    Adaptation reconstructs the client the guard compares against, so a regression here would leak
+    that PII to whatever endpoint the submitter named."""
+    captured = _capture_evaluator_headers(mocker)
+    spec = AgentEvalSpec(tasks=[_task_spec()], target=_model_target("https://api.openai.com/v1/chat/completions"))
+
+    result = AgentEvalJob().run(
+        spec.model_dump(), ctx=_job_context(tmp_path), async_sdk=_async_platform_with_identity()
+    )
+
+    assert result["status"] == "completed"
+    assert captured["default_headers"] is None
 
 
 def test_input_spec_accepts_stored_metric_reference() -> None:

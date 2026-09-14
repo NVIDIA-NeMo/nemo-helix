@@ -249,8 +249,8 @@ files:
     path: /data/files_storage
     # How many bytes to buffer before flushing to disk | default: 16777216
     write_buffer_size: 16777216
-  # Comma-separated list of external hosts the Files service is allowed to access. | default: 'https://api.ngc.nvidia.com,https://huggingface.co'
-  allowed_external_hosts: https://api.ngc.nvidia.com,https://huggingface.co
+  # Comma-separated list of external hosts the Files service is allowed to access. | default: 'https://api.ngc.nvidia.com,https://huggingface.co,https://api.github.com'
+  allowed_external_hosts: https://api.ngc.nvidia.com,https://huggingface.co,https://api.github.com
   # Allow users to explicitly create filesets with local storage config. Security-sensitive: enable only in trusted deployments. | default: False
   allow_user_local_storage: false
   # TTL for file locks in seconds (default 5 minutes) | default: 300

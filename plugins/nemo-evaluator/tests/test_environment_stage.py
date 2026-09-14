@@ -9,6 +9,7 @@ from nemo_evaluator.jobs.environment_stage import EnvironmentStageJob
 from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
+from nemo_platform_plugin.sdk import NeMoPlatform
 from pytest_mock import MockerFixture
 
 
@@ -128,3 +129,25 @@ def test_failed_download_removes_partial_staging_without_replacing_environment(
     assert (environment / "existing.txt").read_text() == "complete"
     assert not (ctx.storage.persistent / ".environment-staging").exists()
     assert (ctx.storage.persistent / "workspace").is_dir()
+
+
+def test_run_adapts_the_generated_sdk_the_local_cli_injects(tmp_path: Path, mocker: MockerFixture) -> None:
+    """``nemo evaluator stage-environment run`` injects a generated ``NeMoPlatform``, but staging
+    reaches the Files service through ``FilesClient.from_client``, which only accepts a typed
+    client."""
+    received: dict[str, object] = {}
+
+    def download_contents(*, sdk: object, workspace: str, fileset: str, destination: Path) -> None:
+        received["sdk"] = sdk
+        Path(destination, "nemo-environment.yaml").write_text("format: wheels-v1\n")
+
+    mocker.patch(
+        "nemo_evaluator.jobs.environment_stage._download_fileset_contents",
+        side_effect=download_contents,
+    )
+    platform = NeMoPlatform(base_url="http://platform.test", workspace="dev", http_client=httpx.Client())
+
+    result = EnvironmentStageJob().run({"environment": "shared/custom-gym"}, ctx=_context(tmp_path), sdk=platform)
+
+    assert result["status"] == "completed"
+    assert isinstance(received["sdk"], NemoClient)

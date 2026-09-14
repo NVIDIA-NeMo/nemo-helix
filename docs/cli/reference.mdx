@@ -1384,6 +1384,7 @@ nemo files filesets [OPTIONS] COMMAND [ARGS]...
 * `create`: Create a new fileset.
 * `delete`: Delete Fileset.
 * `list`: List Filesets endpoint with filtering and pagination.
+* `refresh`: Re-resolve a fileset's tracked revision against its source.
 * `get`: Get Fileset by Workspace and Name.
 * `update`: Update Fileset Metadata.
 
@@ -1514,6 +1515,40 @@ Filter filesets by name, description, purpose, storage_type, created_at, and upd
 * `--no-truncate`: Don't truncate long values in table/markdown/csv output.
 * `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
 * `--stream`: Emit newline-delimited JSON, one record per line. Requires JSON or raw output.
+
+##### nemo files filesets refresh
+
+Re-resolve a fileset's tracked revision against its source.
+
+A fileset created from a mutable ref is pinned to an immutable id so its
+contents cannot shift under a deployment. This re-resolves that same ref and
+repoints the fileset at whatever it names now. Everything else about the storage
+config, including the repository and directory, is left alone.
+
+Deployments stage the fileset when they are created, so existing deployments
+keep serving the revision they were staged from.
+
+**Usage:**
+
+```shell
+nemo files filesets refresh [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`
+
+**Options:**
+
+* `--workspace`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo files filesets get
 

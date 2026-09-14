@@ -55,6 +55,7 @@ from nemo_evaluator.jobs.gym_sandbox import (
 from nemo_evaluator.jobs.metric_resolution import resolve_metrics_to_inline, to_runtime_bundle
 from nemo_evaluator.jobs.publication import publish_agent_eval_result
 from nemo_evaluator.jobs.result_persistence import persist_agent_eval_result
+from nemo_evaluator.jobs.utils import as_async_nemo_client, as_nemo_client
 from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
 from nemo_evaluator.task_refs import resolve_agent_eval_tasks
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
@@ -90,7 +91,7 @@ from nemo_platform_plugin.jobs.execution_profiles import (
     VolcanoJobExecutionProfile,
 )
 from nemo_platform_plugin.jobs.spec import BaseExecutionProfile
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform
+from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -584,6 +585,7 @@ class AgentEvalJob(NemoJob):
                     agent_name=target.agent_name,
                     agent_import_path=target.agent_import_path,
                     agent_model_name=target.agent_model_name,
+                    agent_kwargs=target.agent_kwargs,
                     n_attempts=target.n_attempts,
                     n_concurrent_trials=target.n_concurrent_trials,
                     max_retries=target.max_retries,
@@ -609,10 +611,12 @@ class AgentEvalJob(NemoJob):
         config: dict,
         *,
         ctx: JobContext,
-        sdk: NemoClient | None = None,
-        async_sdk: AsyncNemoClient | None = None,
+        sdk: NemoClient | NeMoPlatform | None = None,
+        async_sdk: AsyncNemoClient | AsyncNeMoPlatform | None = None,
     ) -> dict:
         """Run the agent evaluation locally and persist its result bundle as artifacts."""
+        client = as_nemo_client(sdk)
+        async_client = as_async_nemo_client(async_sdk)
         spec = AgentEvalSpec.model_validate(config)
         tasks = [_to_runtime_task(task) for task in spec.tasks]
         target, prompt_template, params = self._resolve_target(spec.target, ctx)
@@ -623,10 +627,9 @@ class AgentEvalJob(NemoJob):
             labels=spec.labels,
             fail_fast=spec.fail_fast,
         )
-        # `run` may be injected a sync `sdk` (submitted jobs, via get_task_nemo_client) and/or an
-        # `async_sdk`; forward whichever identity is present, preferring async when both are — the
-        # same precedence the SDK-backed dataset resolver uses.
-        evaluator = self._build_evaluator(async_sdk or sdk, spec.target)
+        # Forward whichever identity is present, preferring async when both are — the same
+        # precedence the SDK-backed dataset resolver uses.
+        evaluator = self._build_evaluator(async_client or client, spec.target)
         result = evaluator.run_sync(tasks=tasks, trials=spec.trials, target=target, config=run_config)
 
         files = self._write_result_files(result, ctx.storage.persistent)
@@ -639,7 +642,7 @@ class AgentEvalJob(NemoJob):
         # otherwise-successful eval — log and continue.
         try:
             persist_agent_eval_result(
-                result, target=spec.target, ctx=ctx, bundle_ref=artifact.artifact_url, async_sdk=async_sdk
+                result, target=spec.target, ctx=ctx, bundle_ref=artifact.artifact_url, async_sdk=async_client
             )
         except Exception:
             logger.warning(
@@ -654,7 +657,7 @@ class AgentEvalJob(NemoJob):
         # can fail the job (when `required`), which is why nothing depends on its result.
         publication = spec.publication.intake if spec.publication is not None else None
         if publication is not None:
-            intake = AsyncIntakeClient.from_client(async_sdk) if async_sdk is not None else None
+            intake = AsyncIntakeClient.from_client(async_client) if async_client is not None else None
             outcome = publish_agent_eval_result(
                 result,
                 spec=publication,

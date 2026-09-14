@@ -38,6 +38,7 @@ from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.entities.client import AsyncEntitiesClient
 from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_platform_plugin.files.client import AsyncFilesClient
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.job_results import ResultRef
@@ -440,5 +441,5 @@ class PackageAgentJob(NemoJob):
             agent_name=cfg.agent,
             agent_config=cfg.agent_config,
             base_dir=build_dir,
-            sdk=async_sdk.files if async_sdk is not None else None,
+            files_client=client_from_platform(async_sdk, AsyncFilesClient) if async_sdk is not None else None,
         )

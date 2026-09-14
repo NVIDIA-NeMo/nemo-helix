@@ -196,3 +196,55 @@ def test_client_from_platform_carries_disabled_timeout() -> None:
 
     # Not the transport's 60s: httpx reads an all-None Timeout as "wait forever".
     assert client._timeout == httpx.Timeout(None)
+
+
+def test_client_from_platform_carries_authorization_header() -> None:
+    """A statically configured bearer reaches the typed client.
+
+    The CLI hands config-file credentials to the generated SDK as a default ``Authorization``
+    header, so dropping the headers here would silently produce an unauthenticated client.
+    """
+    http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
+    platform = NeMoPlatform(
+        base_url="http://test",
+        workspace="default",
+        default_headers={"Authorization": "Bearer static-token"},
+        http_client=http_client,
+    )
+
+    client = client_from_platform(platform, JobsClient)
+
+    assert client._default_headers["Authorization"] == "Bearer static-token"
+
+
+def test_client_from_platform_shares_the_transport_so_token_refresh_survives() -> None:
+    """OAuth callers refresh the bearer from a request event hook on the httpx client, not from a
+    header. Rebuilding the transport here would leave only the stale seeded token and break refresh
+    for every adapter caller, with nothing failing until a request hit an authenticated deployment.
+    """
+    seen: list[str | None] = []
+
+    def refresh(request: httpx.Request) -> None:
+        request.headers["Authorization"] = f"Bearer refreshed-{len(seen) + 1}"
+
+    def record(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("Authorization"))
+        return httpx.Response(200, request=request)
+
+    http_client = httpx.Client(
+        transport=httpx.MockTransport(record),
+        event_hooks={"request": [refresh]},
+    )
+    platform = NeMoPlatform(
+        base_url="http://test",
+        workspace="default",
+        default_headers={"Authorization": "Bearer seeded"},
+        http_client=http_client,
+    )
+
+    client = client_from_platform(platform, JobsClient)
+
+    assert client._client is http_client
+    client._client.get("http://test/one")
+    client._client.get("http://test/two")
+    assert seen == ["Bearer refreshed-1", "Bearer refreshed-2"]

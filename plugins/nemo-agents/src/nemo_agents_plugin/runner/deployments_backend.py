@@ -68,6 +68,7 @@ from nemo_platform_plugin.config import LOOPBACK_ADDRESSES
 from nemo_platform_plugin.entities.base import parse_qualified_name
 from nemo_platform_plugin.entities.client import AsyncEntitiesClient
 from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_platform_plugin.files.client import AsyncFilesClient
 from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
 
 logger = logging.getLogger(__name__)
@@ -702,7 +703,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
                     agent_name=agent,
                     rewritten_agent_config=config,
                     agent_yaml_path=agent_yaml_path,
-                    sdk=sdk.files,
+                    files_client=client_from_platform(sdk, AsyncFilesClient),
                 )
             except FabricArtifactStagingError as exc:
                 logger.error("Refusing to deploy Fabric agent %r: %s", name, exc)

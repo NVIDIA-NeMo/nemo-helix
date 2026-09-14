@@ -19,4 +19,4 @@ from typing_extensions import Literal, TypeAlias
 
 __all__ = ["StorageConfigType"]
 
-StorageConfigType: TypeAlias = Literal["local", "ngc", "huggingface", "s3"]
+StorageConfigType: TypeAlias = Literal["local", "ngc", "huggingface", "s3", "github"]

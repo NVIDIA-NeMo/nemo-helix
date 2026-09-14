@@ -356,31 +356,81 @@ def test_run_rejects_endpoint_agent(tmp_path: Path, ctx: JobContext) -> None:
 # ---------------------------------------------------------------------------
 
 
-def bundle_sdk(bundle: dict[str, str], *, downloaded: dict[str, Any] | None = None) -> NeMoPlatform:
-    """An SDK stub whose ``files.download`` materializes *bundle* (relative path → contents)."""
+@contextlib.contextmanager
+def bundle_sdk(
+    bundle: dict[str, str] | None = None,
+    *,
+    downloaded: dict[str, Any] | None = None,
+    uploaded: dict[str, Any] | None = None,
+) -> Iterator[NeMoPlatform]:
+    """Patch fileset staging helpers so typed-manager calls materialize *bundle*."""
 
-    class _StubFiles:
-        def download(self, *, local_path: str, fileset: str, workspace: str) -> None:
-            if downloaded is not None:
-                downloaded.update(fileset=fileset, workspace=workspace)
-            for relative, contents in bundle.items():
-                target = Path(local_path) / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(contents)
+    bundle = bundle or {}
+    sdk = MagicMock(spec=NeMoPlatform)
+    files_client = MagicMock()
 
-    class _StubSDK:
-        files = _StubFiles()
+    def _manager(
+        _files_client: object,
+        *,
+        workspace: str,
+        fileset: str,
+        ensure_fileset_exists: bool,
+    ) -> object:
+        del _files_client
 
-    return cast(NeMoPlatform, _StubSDK())
+        class _StubManager:
+            def validate_storage(self) -> None:
+                pass
+
+            def download_from_url(self, _url: str, local_dir: str | Path | None = None) -> Any:
+                assert local_dir is not None
+                if downloaded is not None:
+                    downloaded.update(fileset=fileset, workspace=workspace)
+                root = Path(local_dir)
+                root.mkdir(parents=True, exist_ok=True)
+                for relative, contents in bundle.items():
+                    target = root / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(contents)
+                return SimpleNamespace(path=root, tmp_dir=root)
+
+            def upload(
+                self,
+                *,
+                local_path: Path,
+                remote_path: str,
+                ignore_patterns: list[str] | str | None = None,
+            ) -> str:
+                del ignore_patterns
+                if uploaded is not None:
+                    uploaded.update(
+                        local_path=local_path,
+                        remote_path=remote_path,
+                        fileset=fileset,
+                        workspace=workspace,
+                        auto_create=ensure_fileset_exists,
+                        names=sorted(p.name for p in local_path.rglob("*") if p.is_file()),
+                    )
+                return f"{workspace}/{fileset}"
+
+        return _StubManager()
+
+    with (
+        patch("nemo_agents_plugin.jobs.fileset_io.client_from_platform", return_value=files_client),
+        patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", side_effect=_manager),
+    ):
+        yield cast(NeMoPlatform, sdk)
 
 
 def test_run_stages_the_config_from_the_fileset(ctx: JobContext) -> None:
     downloaded: dict[str, Any] = {}
-    sdk = bundle_sdk({"configs/optimize.yml": yaml.safe_dump(MINIMAL_CONFIG)}, downloaded=downloaded)
 
-    with patch(
-        "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}
-    ) as dispatch:
+    with (
+        bundle_sdk({"configs/optimize.yml": yaml.safe_dump(MINIMAL_CONFIG)}, downloaded=downloaded) as sdk,
+        patch(
+            "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}
+        ) as dispatch,
+    ):
         result = OptimizeJob().run(
             {
                 "optimize_config": "configs/optimize.yml",
@@ -405,12 +455,6 @@ def test_run_resolves_relative_assets_against_the_staged_bundle(ctx: JobContext)
             "fabric": {"base_dir": "."},
         },
     }
-    sdk = bundle_sdk(
-        {
-            "optimize.yml": yaml.safe_dump(config),
-            "data/rows.json": json.dumps([{"question": "q", "answer": "a"}]),
-        }
-    )
     observed: dict[str, Any] = {}
 
     def _dispatch(**kwargs: Any) -> dict[str, Any]:
@@ -420,7 +464,15 @@ def test_run_resolves_relative_assets_against_the_staged_bundle(ctx: JobContext)
         return {"status": "completed"}
 
     cwd = Path.cwd()
-    with patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch):
+    with (
+        bundle_sdk(
+            {
+                "optimize.yml": yaml.safe_dump(config),
+                "data/rows.json": json.dumps([{"question": "q", "answer": "a"}]),
+            }
+        ) as sdk,
+        patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch),
+    ):
         OptimizeJob().run(
             {
                 "optimize_config": "optimize.yml",
@@ -438,10 +490,10 @@ def test_run_resolves_relative_assets_against_the_staged_bundle(ctx: JobContext)
 
 
 def test_run_restores_the_working_directory_when_the_study_raises(ctx: JobContext) -> None:
-    sdk = bundle_sdk({"optimize.yml": yaml.safe_dump(MINIMAL_CONFIG)})
     cwd = Path.cwd()
 
     with (
+        bundle_sdk({"optimize.yml": yaml.safe_dump(MINIMAL_CONFIG)}) as sdk,
         patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=RuntimeError("study blew up")),
         pytest.raises(RuntimeError, match="study blew up"),
     ):
@@ -459,9 +511,10 @@ def test_run_restores_the_working_directory_when_the_study_raises(ctx: JobContex
 
 
 def test_run_rejects_a_staged_config_missing_from_the_fileset(ctx: JobContext) -> None:
-    sdk = bundle_sdk({"other.yml": yaml.safe_dump(MINIMAL_CONFIG)})
-
-    with pytest.raises(FileNotFoundError, match="was not found in fileset"):
+    with (
+        bundle_sdk({"other.yml": yaml.safe_dump(MINIMAL_CONFIG)}) as sdk,
+        pytest.raises(FileNotFoundError, match="was not found in fileset"),
+    ):
         OptimizeJob().run(
             {
                 "optimize_config": "optimize.yml",
@@ -499,24 +552,18 @@ def _config_with_dataset(dataset: Any) -> dict[str, Any]:
 
 def test_run_stages_dataset_from_fileset_ref(tmp_path: Path, ctx: JobContext) -> None:
     downloaded: dict[str, Any] = {}
-
-    class _StubFiles:
-        def download(self, *, local_path: str, fileset: str, workspace: str) -> None:
-            downloaded.update(fileset=fileset, workspace=workspace)
-            (Path(local_path) / "rows.json").write_text('[{"question": "q", "answer": "a"}]')
-
-    class _StubSDK:
-        files = _StubFiles()
-
     optimize_config = write_config(tmp_path, _config_with_dataset({"file_path": "default/evals#rows.json"}))
 
-    with patch(
-        "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}
-    ) as dispatch:
+    with (
+        bundle_sdk({"rows.json": '[{"question": "q", "answer": "a"}]'}, downloaded=downloaded) as sdk,
+        patch(
+            "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}
+        ) as dispatch,
+    ):
         OptimizeJob().run(
             {"optimize_config": optimize_config, "workspace": "default"},
             ctx=ctx,
-            sdk=cast(NeMoPlatform, _StubSDK()),
+            sdk=sdk,
         )
 
     assert downloaded == {"fileset": "evals", "workspace": "default"}
@@ -555,39 +602,27 @@ def _write_study_artifacts(ctx: JobContext) -> Path:
 
 def test_run_publishes_results_to_fileset(tmp_path: Path, ctx: JobContext) -> None:
     uploaded: dict[str, Any] = {}
-
-    class _StubFiles:
-        def upload(self, *, local_path: str, fileset: str, workspace: str, fileset_auto_create: bool) -> Any:
-            uploaded.update(
-                local_path=local_path,
-                fileset=fileset,
-                workspace=workspace,
-                auto_create=fileset_auto_create,
-                names=sorted(p.name for p in Path(local_path).rglob("*") if p.is_file()),
-            )
-            return SimpleNamespace(name=fileset)
-
-    class _StubSDK:
-        files = _StubFiles()
-
     optimize_config = write_config(tmp_path, MINIMAL_CONFIG)
 
     def _dispatch(**kwargs: Any) -> dict[str, Any]:
         _write_study_artifacts(ctx)
         return {"status": "completed", "best_trial": 3}
 
-    with patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch):
+    with (
+        bundle_sdk(uploaded=uploaded) as sdk,
+        patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch),
+    ):
         result = OptimizeJob().run(
             {"optimize_config": optimize_config, "workspace": "default", "output": "tuned-results"},
             ctx=ctx,
-            sdk=cast(NeMoPlatform, _StubSDK()),
+            sdk=sdk,
         )
 
     assert uploaded["fileset"] == "tuned-results"
     assert uploaded["workspace"] == "default"
     assert uploaded["auto_create"] is True
-    # Trailing slash uploads contents, not the dir itself.
-    assert uploaded["local_path"].endswith("/")
+    assert uploaded["local_path"] == ctx.storage.persistent / "results"
+    assert uploaded["remote_path"] == ""
     assert uploaded["names"] == ["optimized_config.yml", "study_summary.json"]
     # The study's own summary survives alongside the new pointer.
     assert result["best_trial"] == 3
@@ -614,14 +649,16 @@ def test_run_publishes_results_to_local_dir(tmp_path: Path, ctx: JobContext) -> 
 
 def test_run_publishes_staged_results_after_leaving_the_bundle(ctx: JobContext, tmp_path: Path) -> None:
     """Publishing happens outside the chdir, so a relative --output lands where the caller meant."""
-    sdk_bundle = bundle_sdk({"optimize.yml": yaml.safe_dump(MINIMAL_CONFIG)})
     dest = tmp_path / "published"
 
     def _dispatch(**kwargs: Any) -> dict[str, Any]:
         _write_study_artifacts(ctx)
         return {"status": "completed"}
 
-    with patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch):
+    with (
+        bundle_sdk({"optimize.yml": yaml.safe_dump(MINIMAL_CONFIG)}) as sdk,
+        patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch),
+    ):
         result = OptimizeJob().run(
             {
                 "optimize_config": "optimize.yml",
@@ -630,7 +667,7 @@ def test_run_publishes_staged_results_after_leaving_the_bundle(ctx: JobContext, 
                 "output": str(dest),
             },
             ctx=ctx,
-            sdk=sdk_bundle,
+            sdk=sdk,
         )
 
     assert (dest / "optimizer_results" / "study_summary.json").is_file()
@@ -652,25 +689,20 @@ def test_run_without_output_publishes_nothing(tmp_path: Path, ctx: JobContext) -
 
 def test_run_does_not_publish_when_study_fails(tmp_path: Path, ctx: JobContext) -> None:
     """A crashed study must not leave partial artifacts in the target fileset."""
-
-    class _StubFiles:
-        def upload(self, **kwargs: Any) -> Any:
-            raise AssertionError("upload must not run when the study raises")
-
-    class _StubSDK:
-        files = _StubFiles()
-
+    uploaded: dict[str, Any] = {}
     optimize_config = write_config(tmp_path, MINIMAL_CONFIG)
 
     with (
+        bundle_sdk(uploaded=uploaded) as sdk,
         patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=RuntimeError("study blew up")),
         pytest.raises(RuntimeError, match="study blew up"),
     ):
         OptimizeJob().run(
             {"optimize_config": optimize_config, "workspace": "default", "output": "tuned-results"},
             ctx=ctx,
-            sdk=cast(NeMoPlatform, _StubSDK()),
+            sdk=sdk,
         )
+    assert uploaded == {}
 
 
 def test_run_rejects_fileset_output_without_sdk(tmp_path: Path, ctx: JobContext) -> None:

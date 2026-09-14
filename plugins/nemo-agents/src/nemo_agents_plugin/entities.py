@@ -13,14 +13,45 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import Any, Self
 
+from nemo_platform_plugin.agents.types import (
+    NAT_WORKFLOW_CONFIG_FORMAT as NAT_WORKFLOW_CONFIG_FORMAT,
+)
+from nemo_platform_plugin.agents.types import (
+    NEMO_AGENTS_SPEC_CONFIG_FORMAT as NEMO_AGENTS_SPEC_CONFIG_FORMAT,
+)
+from nemo_platform_plugin.agents.types import (
+    AgentEnvironmentInline as AgentEnvironmentInline,
+)
+from nemo_platform_plugin.agents.types import (
+    ComputeResources as ComputeResources,
+)
+from nemo_platform_plugin.agents.types import (
+    ComputeSpecInline as ComputeSpecInline,
+)
+from nemo_platform_plugin.agents.types import (
+    DeploymentMode as DeploymentMode,
+)
+from nemo_platform_plugin.agents.types import (
+    DeploymentStatus as DeploymentStatus,
+)
+from nemo_platform_plugin.agents.types import (
+    Endpoint as Endpoint,
+)
+from nemo_platform_plugin.agents.types import (
+    EnvironmentSpecInline as EnvironmentSpecInline,
+)
+from nemo_platform_plugin.agents.types import (
+    McpFulfillment as McpFulfillment,
+)
+from nemo_platform_plugin.agents.types import (
+    ModelProviderOverride as ModelProviderOverride,
+)
 from nemo_platform_plugin.auth import AuthContext
 from nemo_platform_plugin.entity import NemoEntity
 from nemo_platform_plugin.refs import FilesetRef
 from pydantic import BaseModel, Field, PrivateAttr, computed_field
-
-DeploymentStatus = Literal["pending", "starting", "running", "failed", "deleting"]
 
 
 class SessionStatus(StrEnum):
@@ -53,8 +84,6 @@ class SessionStatus(StrEnum):
 # agent as a local ``nat serve`` process reachable on a loopback ``endpoint``.
 # ``docker``/``k8s`` run the agent as a durable container deployment via the
 # deployments plugin; their routable address is projected onto ``endpoints``.
-DeploymentMode = Literal["subprocess", "docker", "k8s"]
-
 # Modes that compile to the nemo-deployments plugin (not local subprocess).
 CONTAINER_DEPLOYMENT_MODES: frozenset[str] = frozenset({"docker", "k8s"})
 
@@ -62,20 +91,6 @@ CONTAINER_DEPLOYMENT_MODES: frozenset[str] = frozenset({"docker", "k8s"})
 def is_container_deployment_mode(mode: str) -> bool:
     """Return True when *mode* uses the deployments-plugin runner backend."""
     return mode in CONTAINER_DEPLOYMENT_MODES
-
-
-class Endpoint(BaseModel):
-    """A routable network endpoint for a deployment.
-
-    Mirrors ``nemo_deployments_plugin.types.Endpoint`` so container-mode
-    deployments can carry the address the deployments-plugin ``Deployment``
-    projected without the agents plugin depending on that plugin at the
-    entity-schema layer.
-    """
-
-    name: str
-    url: str
-    protocol: Literal["http", "https", "grpc", "tcp"] = "http"
 
 
 # ---------------------------------------------------------------------------
@@ -90,150 +105,16 @@ class Endpoint(BaseModel):
 # authored once and reused across many Environments.
 #
 # The specs are also first-class entities (``agent_environment_spec``,
-# ``agent_compute_spec``, ``agent_environment``) with their own CRUD APIs. The
-# inline BaseModels below are the shared shape: an entity embeds the inline
-# fields, and an AgentEnvironment field accepts either a ``"workspace/name"``
-# ref string or the inline model.
+# ``agent_compute_spec``, ``agent_environment``) with their own CRUD APIs. Most
+# inline BaseModels come from ``nemo_platform_plugin.agents.types`` so the
+# entity and typed-client contracts share one shape. ``AgentInline`` stays local
+# because persisted agent configs are mutable framework payloads where
+# ``dict[str, Any]`` preserves useful static ergonomics for nested config access.
 #
 # Environment values compile into two targets at deploy time: the on-disk
 # agent.yaml / FabricConfig (env vars, MCP, model provider) and, for container
 # modes, the deployments-plugin Container.resources (compute). See
 # :mod:`nemo_agents_plugin.environment_resolution` for the merge + snapshot.
-
-
-class ComputeResources(BaseModel):
-    """Kubernetes-style resource requests/limits.
-
-    Mirrors ``nemo_deployments_plugin.entities.ResourceRequirements`` so the
-    agents entity schema does not depend on the deployments plugin. Compiled
-    into the execute container's resources for container deployment modes.
-    """
-
-    limits: dict[str, str] = Field(
-        default_factory=dict,
-        description="k8s resource limits (e.g. cpu, memory, nvidia.com/gpu).",
-    )
-    requests: dict[str, str] = Field(
-        default_factory=dict,
-        description="k8s resource requests.",
-    )
-
-
-class ComputeSpecInline(BaseModel):
-    """Inline compute spec - the resources an invocation runs with."""
-
-    description: str = Field(default="", description="Human-readable description.")
-    resources: ComputeResources = Field(
-        default_factory=ComputeResources,
-        description="k8s-style resource requests/limits for the execute container.",
-    )
-
-
-class ModelProviderOverride(BaseModel):
-    """Exceptional external model-provider override.
-
-    Null in the normal case: model selection is on the Agent and the provider
-    URL is the Inference Gateway (auto-injected). Set ONLY to point the agent at
-    a non-IGW external provider endpoint.
-    """
-
-    base_url: str = Field(description="External model-provider endpoint.")
-    api_key: str | None = Field(
-        default=None,
-        description="Secrets-service ref for the provider API key (only needed for external providers).",
-    )
-    provider: str | None = Field(
-        default=None,
-        description='Provider selector (e.g. "openai", "anthropic").',
-    )
-
-
-class McpFulfillment(BaseModel):
-    """EnvironmentSpec-side fulfillment for one MCP server the Agent declares.
-
-    The Agent DECLARES an MCP dependency by name; the EnvironmentSpec PROVIDES
-    the url + env + secrets for that same name. Matched by server-name key at
-    compile time; ``secrets`` are merged into the server's ``env``.
-    """
-
-    url: str = Field(description="Endpoint the environment provides for this MCP server.")
-    env: dict[str, str] = Field(default_factory=dict, description="Non-secret env for the MCP server.")
-    secrets: dict[str, str] = Field(
-        default_factory=dict,
-        description="ENV_NAME -> Secrets-service ref, merged into the MCP server env at compile.",
-    )
-
-
-class EnvironmentSpecInline(BaseModel):
-    """Inline environment spec - the dependencies and configuration an agent reaches.
-
-    This is the fulfillment half of a request/fulfill split: the Agent declares
-    the dependencies it needs; the EnvironmentSpec provides concrete endpoints
-    and secret references. It compiles into the agent.yaml / FabricConfig and
-    the injected process environment.
-    """
-
-    description: str = Field(default="", description="Human-readable description.")
-
-    # Env vars -> injected into the runtime process env (not authored on disk).
-    env: dict[str, str] = Field(default_factory=dict, description="Plaintext, non-secret env vars.")
-
-    # Secrets -> Secrets-service refs, injected as secret-backed env vars.
-    secrets: dict[str, str] = Field(
-        default_factory=dict,
-        description="ENV_VAR_NAME -> Secrets-service/plugin ref.",
-    )
-
-    # External model-provider override (exceptional; null in the normal IGW case).
-    model_provider_override: ModelProviderOverride | None = Field(
-        default=None,
-        description="Set only to point at a non-IGW external model provider.",
-    )
-
-    # Fabric environment mirror -> compiles into FabricConfig.environment.
-    # NOTE: ``workspace_path`` (the harness workspace path) is deliberately named
-    # to avoid colliding with the NeMo entity ``workspace`` (tenant) field that
-    # AgentEnvironmentSpec inherits from EntityBase. ``artifacts_path`` carries a
-    # matching ``_path`` suffix for symmetry.
-    provider: str = Field(default="local", description="local | docker | opensandbox | k8s.")
-    workspace_path: str | None = Field(default=None, description="Workspace path visible to the harness.")
-    artifacts_path: str | None = Field(default=None, description="Provider-specific artifact output location.")
-    control_location: str | None = Field(
-        default=None,
-        description="external_control | in_env_control.",
-    )
-    ownership: str | None = Field(default=None, description="caller_owned | fabric_owned.")
-    connection: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Provider connection metadata (server url, cred ref, namespace).",
-    )
-    metadata: dict[str, Any] = Field(default_factory=dict, description="Consumer-provided passthrough metadata.")
-    settings: dict[str, Any] = Field(default_factory=dict, description="Provider-specific settings.")
-
-    # MCP fulfillment -> merged into FabricConfig.mcp.servers.<name> by server-name key.
-    mcp: dict[str, McpFulfillment] = Field(
-        default_factory=dict,
-        description="server-name -> fulfillment (url/env/secrets) for an Agent-declared MCP dependency.",
-    )
-
-
-class AgentEnvironmentInline(BaseModel):
-    """Inline AgentEnvironment - a composition of environment + compute specs.
-
-    Each part is a ``ref | inline | None`` union: a ``"workspace/name"`` string
-    references a stored spec entity, an object provides the spec inline, and
-    ``None`` omits it. (A ``sandbox_spec`` is out of scope for now and omitted.)
-    """
-
-    description: str = Field(default="", description="Human-readable description.")
-    environment_spec: str | EnvironmentSpecInline | None = Field(
-        default=None,
-        description='"workspace/name" ref to an AgentEnvironmentSpec, an inline spec, or None.',
-    )
-    compute_spec: str | ComputeSpecInline | None = Field(
-        default=None,
-        description='"workspace/name" ref to an AgentComputeSpec, an inline spec, or None.',
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -273,43 +154,6 @@ This file is parsed into Agent.config when using the nemo-agents-spec-v1 format.
 
 ETHOS_LOCAL_ROOT = "agents"
 """Local directory holding agent build artifacts."""
-
-NAT_WORKFLOW_CONFIG_FORMAT = "nat-workflow-v1"
-"""Canonical format tag for the legacy NAT workflow config format."""
-
-NEMO_AGENTS_SPEC_CONFIG_FORMAT = "nemo-agents-spec-v1"
-"""Canonical format tag for the Platform-owned agent.yaml spec format."""
-
-
-class AgentInline(BaseModel):
-    """Inline Agent - an agent definition without entity identity.
-
-    The shared shape behind the :class:`Agent` entity: the entity embeds these
-    fields and adds name/workspace, and a field that accepts an agent can take
-    either a ``"workspace/name"`` ref string or this model. Lets a caller
-    execute an agent it composes at request time — models chosen per request,
-    settings scoped to one run — without first persisting an Agent.
-
-    Deliberately as permissive as the entity: consumers impose their own
-    requirements rather than this model narrowing them for everyone. The
-    ``agents.execute`` job, for example, accepts only ``nemo-agents-spec-v1``
-    and rejects a config that is not a valid agent spec.
-    """
-
-    description: str = Field(default="", description="Human-readable description of the agent.")
-    config: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Agent config dict interpreted according to config_format.",
-    )
-    config_format: str = Field(
-        default=NAT_WORKFLOW_CONFIG_FORMAT,
-        description=(
-            "platform-internal schema version tag for the agent config dict. "
-            "`nat-workflow-v1` is the default legacy NAT workflow format; "
-            "`nemo-agents-spec-v1` identifies the Platform-owned agent.yaml spec format."
-        ),
-    )
-
 
 # Container deployments deliver the Ethos fileset through a ConfigMap (k8s) or a
 # single env var (docker), both of which cap out around 1MiB. Bound the tree at
@@ -377,6 +221,36 @@ class AgentEnvironment(NemoEntity, AgentEnvironmentInline, entity_type="agent_en
     The single thing an AgentDeployment references. Each part is a
     ``ref | inline | None`` union so specs can be authored once and reused.
     """
+
+
+class AgentInline(BaseModel):
+    """Inline Agent - an agent definition without entity identity.
+
+    The shared shape behind the :class:`Agent` entity: the entity embeds these
+    fields and adds name/workspace, and a field that accepts an agent can take
+    either a ``"workspace/name"`` ref string or this model. Lets a caller
+    execute an agent it composes at request time — models chosen per request,
+    settings scoped to one run — without first persisting an Agent.
+
+    Deliberately as permissive as the entity: consumers impose their own
+    requirements rather than this model narrowing them for everyone. The
+    ``agents.execute`` job, for example, accepts only ``nemo-agents-spec-v1``
+    and rejects a config that is not a valid agent spec.
+    """
+
+    description: str = Field(default="", description="Human-readable description of the agent.")
+    config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Agent config dict interpreted according to config_format.",
+    )
+    config_format: str = Field(
+        default=NAT_WORKFLOW_CONFIG_FORMAT,
+        description=(
+            "platform-internal schema version tag for the agent config dict. "
+            "`nat-workflow-v1` is the default legacy NAT workflow format; "
+            "`nemo-agents-spec-v1` identifies the Platform-owned agent.yaml spec format."
+        ),
+    )
 
 
 # TODO: first-class environment, sandbox, and harness specs are planned for the

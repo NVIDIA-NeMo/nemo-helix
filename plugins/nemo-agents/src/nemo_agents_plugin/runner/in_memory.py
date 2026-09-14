@@ -47,6 +47,8 @@ from nemo_agents_plugin.fabric.gateway_credentials import platform_gateway_crede
 from nemo_agents_plugin.runner.backend import DeploymentInfo, LocalLog, LogLocation, NotYetAvailable, RunnerBackend
 from nemo_agents_plugin.runner.fabric_artifact_staging import stage_fabric_ethos_dir
 from nemo_platform_plugin.auth import AuthContext
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.files.client import AsyncFilesClient
 from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
 
 # Match characters not safe for filesystem paths.  Deployment names are
@@ -438,7 +440,7 @@ class InMemoryRunnerBackend(RunnerBackend):
             agent_name=agent,
             agent_config=config,
             base_dir=base_dir,
-            sdk=sdk.files if sdk else None,
+            files_client=client_from_platform(sdk, AsyncFilesClient) if sdk else None,
         )
 
     def _spawn(

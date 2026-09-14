@@ -10,10 +10,12 @@ from pathlib import Path
 
 from filesets import FilesetFileSystem, FilesetPathError, parse_fileset_ref
 from nemo_evaluator.filesets import FilesetRef
+from nemo_evaluator.jobs.utils import as_nemo_client
 from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
+from nemo_platform_plugin.sdk import NeMoPlatform
 from pydantic import BaseModel, ConfigDict
 
 #: Read-only tree the Gym host mounts at ``/job/environment``.
@@ -56,8 +58,9 @@ class EnvironmentStageJob(NemoJob):
     container = "nmp-cpu-tasks"
     spec_schema = EnvironmentStageSpec
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient | NeMoPlatform) -> dict:
         """Download the FileSet into ``persistent/environment``, replacing any previous tree."""
+        client = as_nemo_client(sdk)
         spec = EnvironmentStageSpec.model_validate(config)
         try:
             workspace, fileset, file_path = parse_fileset_ref(
@@ -78,7 +81,7 @@ class EnvironmentStageJob(NemoJob):
 
         try:
             _download_fileset_contents(
-                sdk=sdk,
+                sdk=client,
                 destination=staging,
                 fileset=fileset,
                 workspace=workspace,

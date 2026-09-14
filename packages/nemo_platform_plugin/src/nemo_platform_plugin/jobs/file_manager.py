@@ -205,6 +205,10 @@ class FilesetFileManager(BaseFilesetFileManager):
             local_dir = Path(local_dir)
 
         full_remote_path = self._fileset_path(remote_path)
+        if not remote_path or remote_path.endswith("/"):
+            self._fs.get(full_remote_path, str(local_dir), recursive=True)
+            return TmpDirPath(path=local_dir, tmp_dir=local_dir)
+
         info = self._fs.info(full_remote_path)
 
         if info["type"] == "directory":
@@ -267,6 +271,10 @@ class AsyncFilesetFileManager(BaseFilesetFileManager):
             local_dir = Path(local_dir)
 
         full_remote_path = self._fileset_path(remote_path)
+        if not remote_path or remote_path.endswith("/"):
+            await self._fs._get(full_remote_path, str(local_dir), recursive=True)
+            return TmpDirPath(path=local_dir, tmp_dir=local_dir)
+
         info = await self._fs._info(full_remote_path)
 
         if info["type"] == "directory":

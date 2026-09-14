@@ -3,10 +3,10 @@
 
 """NeMo Agent Toolkit telemetry exporter that writes traces via the Nemo Files API.
 
-Uses :meth:`nemo_platform.AsyncNeMoPlatform.files.upload_content` (core Files service)
-to store serialized :class:`~nat.data_models.intermediate_step.IntermediateStep` records
-as JSONL under the shared fileset **nemo-telemetry**, scoped by workspace in the API
-URL and by **project** (and optional ``path_prefix`` / ``{agent}``) in object paths.
+Uses the typed Files client to store serialized
+:class:`~nat.data_models.intermediate_step.IntermediateStep` records as JSONL
+under the shared fileset **nemo-agent-telemetry**, scoped by workspace in the
+API URL and by agent name in object paths.
 
 Configuration (under ``general.telemetry.tracing``)::
 
@@ -42,6 +42,9 @@ from nat.observability.processor.intermediate_step_serializer import (  # type: 
 )
 from nemo_agents_plugin.utils import get_base_url
 from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.files.client import AsyncFilesClient
+from nemo_platform_plugin.files.types import CreateFilesetRequest
 from pydantic import Field
 
 logger = logging.getLogger(__name__)
@@ -86,7 +89,7 @@ class NemoFilesServiceRawExporter(RawExporter[IntermediateStep, str]):
     def __init__(
         self,
         *,
-        sdk: AsyncNeMoPlatform,
+        files_client: AsyncFilesClient,
         workspace: str,
         agent_name: str,
         batch_size: int,
@@ -94,7 +97,7 @@ class NemoFilesServiceRawExporter(RawExporter[IntermediateStep, str]):
         context_state=None,
     ) -> None:
         super().__init__(context_state=context_state)
-        self._sdk = sdk
+        self._files_client = files_client
         self._workspace = workspace
         self._agent_name = agent_name
         self._batch_size = batch_size
@@ -128,12 +131,16 @@ class NemoFilesServiceRawExporter(RawExporter[IntermediateStep, str]):
                 seq,
             )
             try:
-                await self._sdk.files.upload_content(
-                    content=body.encode("utf-8"),
-                    remote_path=remote_path,
-                    fileset=TELEMETRY_FILESET_NAME,
+                await self._files_client.create_fileset(
                     workspace=self._workspace,
-                    fileset_auto_create=True,
+                    body=CreateFilesetRequest(name=TELEMETRY_FILESET_NAME),
+                    exist_ok=True,
+                )
+                await self._files_client.upload_file(
+                    workspace=self._workspace,
+                    name=TELEMETRY_FILESET_NAME,
+                    path=remote_path,
+                    content=body.encode("utf-8"),
                 )
                 logger.debug("flush: upload OK (%s)", remote_path)
             except Exception:
@@ -174,9 +181,9 @@ async def nemo_files_telemetry_exporter(config: NemoFilesTelemetryExporterConfig
     """Build an exporter that uploads telemetry to the Nemo Files service."""
     del builder  # unused; required by NAT registration signature
 
-    sdk = AsyncNeMoPlatform(base_url=get_base_url())
+    async_sdk = AsyncNeMoPlatform(base_url=get_base_url())
     exporter = NemoFilesServiceRawExporter(
-        sdk=sdk,
+        files_client=client_from_platform(async_sdk, AsyncFilesClient),
         workspace=config.workspace,
         agent_name=config.agent_name,
         batch_size=config.batch_size,
@@ -185,4 +192,4 @@ async def nemo_files_telemetry_exporter(config: NemoFilesTelemetryExporterConfig
     try:
         yield exporter
     finally:
-        await sdk.close()
+        await async_sdk.close()

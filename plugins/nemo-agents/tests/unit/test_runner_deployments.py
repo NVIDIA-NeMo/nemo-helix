@@ -1331,6 +1331,7 @@ async def test_create_deployment_fabric_docker_stages_fileset_artifacts() -> Non
         ConfigFile(path="/tmp/nemo/skills/review/SKILL.md", content="# Review\n"),
     ]
     sdk = MagicMock()
+    files_client = object()
 
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
@@ -1338,6 +1339,7 @@ async def test_create_deployment_fabric_docker_stages_fileset_artifacts() -> Non
             "nemo_agents_plugin.runner.deployments_backend.get_async_platform_sdk",
             return_value=sdk,
         ),
+        patch("nemo_agents_plugin.runner.deployments_backend.client_from_platform", return_value=files_client),
         patch(
             "nemo_agents_plugin.runner.deployments_backend.stage_fabric_ethos_config_files",
             new_callable=AsyncMock,
@@ -1355,6 +1357,9 @@ async def test_create_deployment_fabric_docker_stages_fileset_artifacts() -> Non
 
     assert info.status == "starting"
     mock_stage.assert_awaited_once()
+    stage_args = mock_stage.await_args
+    assert stage_args is not None
+    assert stage_args.kwargs["files_client"] is files_client
     created_config = entities.create.await_args_list[0].args[0]
     assert len(created_config.config_files) == 2
     assert not any(e.name == "STAGED_CONFIG_FILES_B64_JSON" for e in created_config.containers[0].env)
@@ -1381,6 +1386,7 @@ async def test_create_deployment_fabric_k8s_stages_fileset_artifacts() -> None:
         ConfigFile(path="/tmp/nemo/skills/review/SKILL.md", content="# Review\n"),
     ]
     sdk = MagicMock()
+    files_client = object()
 
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
@@ -1388,6 +1394,7 @@ async def test_create_deployment_fabric_k8s_stages_fileset_artifacts() -> None:
             "nemo_agents_plugin.runner.deployments_backend.get_async_platform_sdk",
             return_value=sdk,
         ),
+        patch("nemo_agents_plugin.runner.deployments_backend.client_from_platform", return_value=files_client),
         patch(
             "nemo_agents_plugin.runner.deployments_backend.stage_fabric_ethos_config_files",
             new_callable=AsyncMock,
@@ -1422,6 +1429,7 @@ async def test_create_deployment_fabric_staging_error_fails_before_entity_create
         "harnesses": {"main": {"kind": "codex", "settings": {}}},
     }
     sdk = MagicMock()
+    files_client = object()
 
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
@@ -1429,6 +1437,7 @@ async def test_create_deployment_fabric_staging_error_fails_before_entity_create
             "nemo_agents_plugin.runner.deployments_backend.get_async_platform_sdk",
             return_value=sdk,
         ),
+        patch("nemo_agents_plugin.runner.deployments_backend.client_from_platform", return_value=files_client),
         patch(
             "nemo_agents_plugin.runner.deployments_backend.stage_fabric_ethos_config_files",
             new_callable=AsyncMock,

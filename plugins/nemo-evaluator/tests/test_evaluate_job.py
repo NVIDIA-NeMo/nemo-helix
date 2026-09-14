@@ -1259,6 +1259,24 @@ class TestEvaluateJobRun:
         assert call_kwargs["target"] is None
         assert call_kwargs["prompt_template"] is None
 
+    def test_run_adapts_the_generated_sdk_the_local_cli_injects(self, tmp_path: Path, mocker: MockerFixture) -> None:
+        """``nemo evaluator evaluate run`` injects a generated ``NeMoPlatform``, but resolving a
+        ``FilesetRef`` dataset only accepts a typed client."""
+        evaluator = mocker.Mock()
+        evaluator.run_sync.return_value = _empty_evaluation_result()
+        mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=evaluator)
+        download_dataset_sync = mocker.patch(
+            "nemo_evaluator.jobs.evaluate.download_dataset_sync",
+            return_value=tmp_path / "persistent" / "dataset" / "default" / "helpsteer2" / "validation.jsonl",
+            create=True,
+        )
+        platform = NeMoPlatform(base_url="http://platform.test", workspace="dev", http_client=httpx.Client())
+        config = {**_exact_match_spec(), "dataset": FilesetRef(root="default/helpsteer2#validation.jsonl")}
+
+        EvaluateJob().run(config, ctx=_make_job_context(tmp_path), sdk=platform)
+
+        assert isinstance(download_dataset_sync.call_args.kwargs["client"], NemoClient)
+
     def test_prefers_sync_sdk_for_fileset_ref_when_both_sdks_injected(
         self, tmp_path: Path, mocker: MockerFixture
     ) -> None:

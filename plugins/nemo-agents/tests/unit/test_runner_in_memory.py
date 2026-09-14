@@ -550,9 +550,9 @@ async def test_create_deployment_stages_ethos_fileset_into_base_dir(tmp_path: Pa
         agent_name: str,
         agent_config: dict[str, Any],
         base_dir: Path,
-        sdk: Any,
+        files_client: Any | None,
     ) -> None:
-        del sdk
+        del files_client
         staged.append({"workspace": workspace, "agent_name": agent_name, "base_dir": base_dir})
         assert not (base_dir / "agent.yaml").exists()
         (base_dir / "mcps").mkdir()
@@ -575,6 +575,7 @@ async def test_create_deployment_stages_ethos_fileset_into_base_dir(tmp_path: Pa
         patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", _validate_platform_agent_config),
         patch("nemo_agents_plugin.runner.in_memory.stage_fabric_ethos_dir", _stage_fabric_ethos_dir),
         patch("nemo_agents_plugin.runner.in_memory.get_async_platform_sdk", MagicMock()),
+        patch("nemo_agents_plugin.runner.in_memory.client_from_platform", return_value=MagicMock()),
         patch.object(InMemoryRunnerBackend, "_spawn_fabric", _spawn_fabric),
     ):
         info = await backend.create_deployment("ws", "fabric-dep", config, port=49212, agent="fabric-agent")
@@ -604,6 +605,7 @@ async def test_create_deployment_cleans_base_dir_when_staging_fails(tmp_path: Pa
     with (
         patch("nemo_agents_plugin.runner.in_memory.stage_fabric_ethos_dir", _stage_fabric_ethos_dir),
         patch("nemo_agents_plugin.runner.in_memory.get_async_platform_sdk", MagicMock()),
+        patch("nemo_agents_plugin.runner.in_memory.client_from_platform", return_value=MagicMock()),
     ):
         with pytest.raises(FabricArtifactStagingError, match="skills/review"):
             await backend.create_deployment("ws", "fabric-dep", config, port=0, agent="fabric-agent")
@@ -623,16 +625,23 @@ async def test_redeploy_after_crash_does_not_merge_previous_fileset(tmp_path: Pa
         "models": {"default": {"provider": "openai", "model": "openai/gpt-5.4"}},
     }
 
-    def _sdk_serving(skill_name: str) -> MagicMock:
+    def _files_client_serving(skill_name: str) -> SimpleNamespace:
         async def _download(*, local_path: str, fileset: str | None = None, workspace: str | None = None) -> None:
             del fileset, workspace
             skills = Path(local_path) / "skills"
             skills.mkdir(parents=True, exist_ok=True)
             (skills / skill_name).write_text("# skill\n")
 
-        sdk = MagicMock()
-        sdk.files = SimpleNamespace(download=_download)
-        return sdk
+        return SimpleNamespace(download=_download)
+
+    async def _download_fileset(
+        files_client: Any,
+        *,
+        workspace: str,
+        fileset_name: str,
+        local_path: Path,
+    ) -> None:
+        await files_client.download(local_path=str(local_path), fileset=fileset_name, workspace=workspace)
 
     async def _validate(config_: dict[str, Any], *, base_dir: Path) -> Any:
         del config_, base_dir
@@ -648,12 +657,15 @@ async def test_redeploy_after_crash_does_not_merge_previous_fileset(tmp_path: Pa
 
     base_dirs: list[Path] = []
     for skill_name in ("old.md", "new.md"):
+        files_client = _files_client_serving(skill_name)
         with (
             patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", _validate),
             patch(
                 "nemo_agents_plugin.runner.in_memory.get_async_platform_sdk",
-                return_value=_sdk_serving(skill_name),
+                return_value=MagicMock(),
             ),
+            patch("nemo_agents_plugin.runner.in_memory.client_from_platform", return_value=files_client),
+            patch("nemo_agents_plugin.runner.fabric_artifact_staging._download_fileset", _download_fileset),
             patch.object(InMemoryRunnerBackend, "_spawn_fabric", _spawn_fabric),
         ):
             info = await backend.create_deployment("ws", "dep", config, port=49300, agent="fabric-agent")
