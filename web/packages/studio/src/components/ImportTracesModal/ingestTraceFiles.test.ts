@@ -118,7 +118,7 @@ describe('ingestTraceFile', () => {
     expect(atifMock).toHaveBeenCalledTimes(2);
     expect(outcome.results).toHaveLength(2);
     expect(outcome.results[0].status).toBe('success');
-    expect(outcome.results[1]).toMatchObject({ status: 'error' });
+    expect(outcome.results[1]).toMatchObject({ status: 'error', detail: true });
   });
 
   it('batches direct spans under the 1000-span request cap', async () => {
@@ -232,7 +232,7 @@ describe('ingestTraceFile', () => {
         message:
           'OTLP protobuf imported, 1 record rejected; the agent name comes from its own spans.',
       },
-      { label: 'export.binpb', status: 'error', message: 'span 3 dropped' },
+      { label: 'export.binpb', status: 'error', message: 'span 3 dropped', detail: true },
     ]);
   });
 

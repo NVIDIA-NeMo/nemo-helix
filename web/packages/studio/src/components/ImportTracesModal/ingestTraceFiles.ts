@@ -80,9 +80,10 @@ const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ?
 /**
  * Turns a file's failures into one outcome row — the row the modal counts — followed by the
  * remaining failures as detail, with a long tail replaced by a count so it does not bury the
- * summary.
+ * summary. Pass `underSuccess` when the file already reports a success row: every failure then
+ * reads as detail under it, so a partial import is not counted as a failed file.
  */
-const cap = (label: string, errors: string[]): ImportTraceResult[] => {
+const cap = (label: string, errors: string[], underSuccess = false): ImportTraceResult[] => {
   const [first, ...rest] = errors;
   if (first === undefined) return [];
   const shown = rest.slice(0, MAX_ERROR_ROWS - 1).map((message) => ({
@@ -93,7 +94,7 @@ const cap = (label: string, errors: string[]): ImportTraceResult[] => {
   }));
   const hidden = rest.length - shown.length;
   return [
-    { label, status: 'error', message: first },
+    { label, status: 'error', message: first, ...(underSuccess && { detail: true }) },
     ...shown,
     ...(hidden > 0
       ? [
@@ -153,7 +154,7 @@ const ingestAtifFile = async (
     }
   }
 
-  const results = cap(label, errors);
+  const results = cap(label, errors, imported > 0);
   if (imported > 0) {
     results.unshift({
       label,
@@ -224,7 +225,7 @@ const ingestSpansFile = async (
     }
   }
 
-  const results = cap(label, errors);
+  const results = cap(label, errors, imported > 0);
   if (imported > 0) {
     results.unshift({
       label,
@@ -254,13 +255,11 @@ const ingestChatCompletionsFile = async (
     }
   }
 
-  const results = cap(label, errors);
+  const results = cap(label, errors, imported > 0);
   if (imported > 0) {
     results.unshift({
       label,
       status: 'success',
-      // Chat-completions ingest carries no agent field, so these spans are queryable
-      // telemetry but never attach to an agent.
       message: `${plural(imported, 'model call')} imported, not attributed to an agent.`,
     });
   }
@@ -284,7 +283,7 @@ const ingestOtlpFile = async (
               ? `OTLP protobuf imported, ${plural(errors.length, 'record')} rejected; the agent name comes from its own spans.`
               : 'OTLP protobuf imported; the agent name comes from its own spans.',
         },
-        ...cap(label, errors),
+        ...cap(label, errors, true),
       ],
       agents: [],
     };
