@@ -374,3 +374,30 @@ def test_build_metrics_rejects_a_non_integer_tool_call_count_expectation(value: 
         _build_metrics(
             {}, {"evaluators": {"once": {"_type": "tool_call_count", "tool_name": "t", "expected_calls": value}}}
         )
+
+
+def test_resolve_mcp_server_paths_absolutizes_only_bundle_files(tmp_path: Path) -> None:
+    from nemo_optimization.backends.optuna.fabric_trial import resolve_mcp_server_paths
+
+    (tmp_path / "mcps").mkdir()
+    (tmp_path / "mcps" / "server.py").write_text("print(1)\n", encoding="utf-8")
+    config: dict[str, Any] = {
+        "mcp": {
+            "servers": {
+                "bundled": {
+                    "transport": "stdio",
+                    "url": "python3",
+                    "args": ["mcps/server.py", "--verbose", "missing.py"],
+                },
+                "script": {"transport": "stdio", "url": "mcps/server.py"},
+                "remote": {"transport": "http", "url": "mcps/server.py"},
+            }
+        }
+    }
+    resolve_mcp_server_paths(config, root=tmp_path)
+
+    servers = config["mcp"]["servers"]
+    assert servers["bundled"]["url"] == "python3"  # a command on PATH is not a bundle file
+    assert servers["bundled"]["args"] == [str(tmp_path.resolve() / "mcps" / "server.py"), "--verbose", "missing.py"]
+    assert servers["script"]["url"] == str(tmp_path.resolve() / "mcps" / "server.py")
+    assert servers["remote"]["url"] == "mcps/server.py"  # only stdio servers are launched from a path

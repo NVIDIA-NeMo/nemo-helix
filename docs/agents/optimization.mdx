@@ -378,10 +378,10 @@ print(result)
 ### MCP Hermes (phishing analyzer)
 
 The agent calls a mock phishing-analyzer MCP server that ships in the example
-bundle and is installed into the platform venv as `phishing-analyzer-mcp`
-(`command -v phishing-analyzer-mcp` to confirm). It replays the `analysis` stored
-on each `dataset-mcp.json` row, so new tasks only need a real analyzer's result
-recorded once. Trials are scored on the judged
+bundle (`phishing_analyzer_mcp/server.py`, spawned with `python3`; the optimizer
+makes bundle-relative `mcp.servers.*.args` paths absolute per trial). It replays
+the `analysis` stored on each `dataset-mcp.json` row, so new tasks only need a
+real analyzer's result recorded once. Trials are scored on the judged
 classification and on the analyzer being called exactly once, read from the ATIF
 trajectory. Full steps are in `plugins/nemo-optimization/examples/hermes-optimize/README.md`.
 
@@ -472,8 +472,9 @@ nemo agents optimize prepare-fileset \
 - the YAML parses and enables an optimizer with a non-empty search space;
 - there is an Agent under Test — either an inline
   `schema_version: fabric.agent/v1alpha1` package or a resolvable `--agent`;
-- every path the config references (dataset, `eval.fabric.base_dir`) is
-  relative and present under `--source`;
+- every path the config references (dataset, `eval.fabric.base_dir`, stdio MCP
+  server scripts in `mcp.servers.*.args`) is relative and present under
+  `--source`;
 - no absolute host path would be shipped to the worker.
 
 Use `--dry-run` to validate without uploading, and `--no-check-models` to skip

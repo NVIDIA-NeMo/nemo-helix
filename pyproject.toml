@@ -507,8 +507,6 @@ members = [
   "plugins/nemo-customizer",
   "plugins/nemo-automodel",
   "plugins/nemo-optimization",
-  # Not shipped: the fake MCP analyzer behind examples/hermes-optimize/optimize-mcp.yaml.
-  "plugins/nemo-optimization/examples/hermes-optimize",
   "plugins/nemo-unsloth",
   "plugins/nemo-rl",
   "services/automodel",

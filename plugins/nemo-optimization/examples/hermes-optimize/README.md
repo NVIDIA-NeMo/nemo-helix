@@ -9,7 +9,7 @@ Runnable demos for `nemo agents optimize` using the Hermes Fabric harness.
 Agent entity YAML lives under `agents/` and is passed to `--agent-config`.
 
 **Layout:** this directory is a self-contained **optimize bundle**. Every path
-inside the `optimize-*.yaml` files (`dataset`, `base_dir`)
+inside the `optimize-*.yaml` files (`dataset`, `base_dir`, MCP server `args`)
 is relative to *this folder*, not to the repo root. That is what makes the
 bundle portable when the platform sees only the files you staged into a fileset.
 
@@ -17,7 +17,7 @@ bundle portable when the platform sees only the files you staged into a fileset.
 |---------|--------------|---------------------|-------|
 | **Chat-only** | Tunes temperature on a short Q&A agent (no tools) | [`optimize-chatonly.yaml`](optimize-chatonly.yaml) | [`dataset-chatonly.json`](dataset-chatonly.json) |
 | **Chat-only + `--agent`** | Same study; agent body from a platform entity | [`optimize-chatonly-via-agent.yaml`](optimize-chatonly-via-agent.yaml) | [`agents/chatonly/agent.yaml`](agents/chatonly/agent.yaml) |
-| **MCP** | Tunes temperature / top_p on a phishing agent that calls a bundled MCP analyzer, scoring accuracy and exactly-one tool call | [`optimize-mcp.yaml`](optimize-mcp.yaml) | [`dataset-mcp.json`](dataset-mcp.json), [`phishing_analyzer_mcp/`](phishing_analyzer_mcp/) |
+| **MCP** | Tunes temperature / top_p on a phishing agent that calls an MCP analyzer shipped in the bundle, scoring accuracy and exactly-one tool call | [`optimize-mcp.yaml`](optimize-mcp.yaml) | [`dataset-mcp.json`](dataset-mcp.json), [`phishing_analyzer_mcp/`](phishing_analyzer_mcp/) |
 
 Official docs: [Optimize Agents](../../../../docs/agents/optimization.mdx).
 
@@ -278,10 +278,11 @@ needs installed.
 
 Same optimize flow, but the agent calls an **MCP email-phishing analyzer** on
 each dataset row. The analyzer is a mock that ships in this bundle
-([`phishing_analyzer_mcp/server.py`](phishing_analyzer_mcp/server.py)) and is
-installed into the platform `.venv` as the `phishing-analyzer-mcp` console
-script, so the example needs no other checkout and no analyzer credential. It
-replays the `analysis` stored on each row of `dataset-mcp.json`, keyed on the
+([`phishing_analyzer_mcp/server.py`](phishing_analyzer_mcp/server.py)). The
+config spawns it as `python3 phishing_analyzer_mcp/server.py`; the optimizer
+makes that bundle-relative path absolute for each trial, so the same bundle runs
+locally and as a platform job with no extra install and no analyzer credential.
+Any bundle can ship its own MCP server the same way. It replays the `analysis` stored on each row of `dataset-mcp.json`, keyed on the
 email text: an agent that passes the email verbatim gets the canned verdict, one
 that edits it gets `unknown`. The study tunes the Hermes coordinator that calls
 the tool, which is what a fixed LLM analyzer would have measured too.
@@ -290,12 +291,6 @@ To add an email to the eval set, run a real analyzer on it once and store its
 result as the row's `analysis` (the fixture reads `PHISHING_ANALYZER_DATASET` if
 you keep the dataset elsewhere).
 
-**Platform submission caveat:** the `nmp-cpu-tasks` job image installs only the
-`cpu-tasks` dependency group, which does not include this fixture (or the
-calculator example's server), so a CPU-profile job cannot spawn
-`phishing-analyzer-mcp`. Run this example locally, or add
-`nemo-optimization-example-phishing-analyzer` to the image you submit against.
-
 Two evaluators score each trial: the judge compares the final classification with
 the dataset label (`average_score`), and `tool_call_count` reads the ATIF
 trajectory to check the analyzer was called exactly once
@@ -303,12 +298,8 @@ trajectory to check the analyzer was called exactly once
 
 ### Extra setup (once)
 
-```bash
-command -v phishing-analyzer-mcp   # installed by `make bootstrap-python` / `uv sync --all-packages`
-```
-
-If it is missing, sync the workspace again from the repo root: the bundle's
-`pyproject.toml` is a workspace member.
+None beyond the common setup: `python3` must resolve to the platform `.venv`
+(activate it, as above) so the server can import `mcp`.
 
 The dataset is 5 emails (3 phishing, 2 benign), each with its canned `analysis`.
 
@@ -376,7 +367,7 @@ print(
 | `nemo: command not found` | `source .venv/bin/activate` after `uv sync --package nemo-agents-plugin` |
 | `No module named hermes_cli` | Re-run the `hermes-agent==0.19.0 --no-deps` install (needed after every fresh `uv sync`) |
 | `No module named 'nemo_fabric_adapters'` | `export ADAPTER_PYTHON="$REPO_ROOT/.venv/bin/python"` |
-| `phishing-analyzer-mcp` not found | `uv sync --all-packages` from the repo root; the example bundle is a workspace member |
+| MCP server fails to start / `No module named mcp` | `python3` must be the platform `.venv` interpreter: `source .venv/bin/activate` before running |
 | LLM 401 | Confirm `NVIDIA_API_KEY` works on inference-api |
 | Dataset / config file not found | `cd "$BUNDLE"` — paths in the YAML are relative to the bundle, not the repo root |
 | `optimize` rejected with `optimize_config_fileset is required` | Stage the bundle with `prepare-fileset`, then pass the ref it prints |
@@ -387,7 +378,7 @@ print(
 | `delete` hangs / `Aborted!` | Pass `-y` (`nemo agents delete NAME -y`) |
 | Create `409 Conflict` / stale models | Delete with `-y`, then create again; optimize always uses the **stored** agent config |
 | Optional `--agent ...` rejected for `http://` / `file://` | Pass a workspace agent name (e.g. `hermes-optimize-chatonly`), or omit `--agent` and use `--optimize-config` only |
-| MCP: many samples `trial_status: failed` / `no completed trials` | Inspect `artifacts/.fabric/hermes/runtimes/*/logs/`. Empty finals or repeat tool calls do not fail a trial, they score low on `average_score` / `tool_call_count_matches`; a hard failure usually means `phishing-analyzer-mcp` was not on `PATH` or `max_turns` < 4 |
+| MCP: many samples `trial_status: failed` / `no completed trials` | Inspect `artifacts/.fabric/hermes/runtimes/*/logs/`. Empty finals or repeat tool calls do not fail a trial, they score low on `average_score` / `tool_call_count_matches`; a hard failure usually means the venv was not active (`python3` could not import `mcp`) or `max_turns` < 4 |
 | Judge / best scores look like `4.5` not `~1.0` | `tunable_rag_evaluator` with `default_scoring` can sum component scores; compare trials relative to each other |
 
 Trajectory capture (`capture_trajectory`) is off in the chat-only YAMLs so you

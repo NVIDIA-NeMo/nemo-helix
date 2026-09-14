@@ -345,7 +345,38 @@ def _runtime_agent_config(config: Mapping[str, Any]) -> dict[str, Any]:
     runtime_config = copy.deepcopy(dict(config))
     runtime_config.pop("eval", None)
     runtime_config.pop("optimizer", None)
+    resolve_mcp_server_paths(runtime_config, root=Path.cwd())
     return runtime_config
+
+
+def resolve_mcp_server_paths(config: dict[str, Any], *, root: Path) -> None:
+    """Make bundle-relative stdio MCP server paths absolute, in place.
+
+    Paths in the optimize config are bundle-relative, but the harness spawns a stdio MCP server
+    from the per-task workspace, so a relative ``args`` entry (or a relative ``url`` that names a
+    file) would not resolve there. Anything that exists under ``root`` is rewritten; flags, commands
+    on ``PATH`` and already-absolute paths are left alone.
+    """
+    mcp = config.get("mcp")
+    servers = mcp.get("servers") if isinstance(mcp, Mapping) else None
+    if not isinstance(servers, Mapping):
+        return
+    for server in servers.values():
+        if not isinstance(server, dict) or server.get("transport") != "stdio":
+            continue
+        url = server.get("url")
+        if isinstance(url, str) and _is_bundle_file(url, root):
+            server["url"] = str((root / url).resolve())
+        args = server.get("args")
+        if isinstance(args, list):
+            server["args"] = [
+                str((root / arg).resolve()) if isinstance(arg, str) and _is_bundle_file(arg, root) else arg
+                for arg in args
+            ]
+
+
+def _is_bundle_file(value: str, root: Path) -> bool:
+    return bool(value) and not value.startswith("-") and not Path(value).is_absolute() and (root / value).is_file()
 
 
 def _optional_path(value: Any) -> Path | None:

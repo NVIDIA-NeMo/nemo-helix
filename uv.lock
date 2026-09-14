@@ -41,7 +41,6 @@ members = [
     "nemo-guardrails-plugin",
     "nemo-insights-plugin",
     "nemo-nb",
-    "nemo-optimization-example-phishing-analyzer",
     "nemo-optimization-plugin",
     "nemo-platform",
     "nemo-platform-ext",
@@ -4920,17 +4919,6 @@ requires-dist = [
     { name = "sphinx", specifier = ">=4.0" },
     { name = "typer", specifier = ">=0.9.0" },
 ]
-
-[[package]]
-name = "nemo-optimization-example-phishing-analyzer"
-version = "0.1.0"
-source = { editable = "plugins/nemo-optimization/examples/hermes-optimize" }
-dependencies = [
-    { name = "mcp", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "mcp", specifier = ">=1.28.1,<2" }]
 
 [[package]]
 name = "nemo-optimization-plugin"

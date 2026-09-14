@@ -3,11 +3,12 @@
 
 # --optimize-config: Hermes + a mock phishing-analyzer MCP server.
 # Broader search space than chat-only — temperature + top_p, several trials.
-# The analyzer is the `phishing-analyzer-mcp` console script from this bundle's
-# pyproject (installed with the platform workspace). It replays the `analysis`
-# stored on each dataset-mcp.json row, so the study tunes the Hermes coordinator
-# that calls it and scores both the classification and that the tool was called
-# exactly once. To add a task, run a real analyzer once and store its result.
+# The analyzer ships in this bundle (phishing_analyzer_mcp/server.py) and is
+# spawned with the venv's python3; the optimizer makes the bundle-relative path
+# absolute per trial. It replays the `analysis` stored on each dataset-mcp.json
+# row, so the study tunes the Hermes coordinator that calls it and scores both
+# the classification and that the tool was called exactly once. To add a task,
+# run a real analyzer once and store its result on the row.
 schema_version: fabric.agent/v1alpha1
 metadata:
   name: hermes-optimize-mcp
@@ -49,7 +50,8 @@ mcp:
   servers:
     email-phishing-analyzer:
       transport: stdio
-      url: phishing-analyzer-mcp
+      url: python3
+      args: [phishing_analyzer_mcp/server.py]
       exposure: harness_native
 tools:
   enabled:

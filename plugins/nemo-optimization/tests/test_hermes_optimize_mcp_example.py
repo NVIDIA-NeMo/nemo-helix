@@ -77,7 +77,12 @@ async def test_the_analyzer_serves_its_tool_over_mcp_stdio() -> None:
 
 def test_the_example_config_declares_the_bundled_server_and_the_exactly_once_evaluator() -> None:
     server = _CONFIG["mcp"]["servers"]["email-phishing-analyzer"]
-    assert server == {"transport": "stdio", "url": "phishing-analyzer-mcp", "exposure": "harness_native"}
+    assert server == {
+        "transport": "stdio",
+        "url": "python3",
+        "args": ["phishing_analyzer_mcp/server.py"],
+        "exposure": "harness_native",
+    }
     assert "run_hook" not in _CONFIG["eval"]
     assert _CONFIG["eval"]["fabric"]["capture_trajectory"] is True  # the evaluator reads the trajectory
 
@@ -90,6 +95,15 @@ def test_the_example_config_declares_the_bundled_server_and_the_exactly_once_eva
         assert objective["evaluator_name"] in emitted, objective
 
 
+def test_the_trial_config_spawns_the_server_from_the_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hermes launches stdio servers from the task workspace, so the trial config must carry an absolute path."""
+    from nemo_optimization.backends.optuna.fabric_trial import _runtime_agent_config
+
+    monkeypatch.chdir(_EXAMPLE)
+    (script,) = _runtime_agent_config(_CONFIG)["mcp"]["servers"]["email-phishing-analyzer"]["args"]
+    assert Path(script).is_absolute() and Path(script) == _SERVER_PATH
+
+
 def test_fabric_accepts_the_example_agent_config() -> None:
     """The MCP block must survive Fabric's own validation and planning, not just our YAML reading."""
     pytest.importorskip("nemo_fabric")
@@ -98,4 +112,4 @@ def test_fabric_accepts_the_example_agent_config() -> None:
     agent = {key: value for key, value in _CONFIG.items() if key not in {"optimizer", "eval"}}
     plan = Fabric().plan(FabricConfig.from_mapping(agent))
     servers = plan.capability_plan["mcp_servers"]
-    assert servers["email-phishing-analyzer"]["url"] == "phishing-analyzer-mcp"
+    assert servers["email-phishing-analyzer"]["args"] == ["phishing_analyzer_mcp/server.py"]

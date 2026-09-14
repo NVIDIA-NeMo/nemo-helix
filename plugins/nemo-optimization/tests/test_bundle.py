@@ -138,6 +138,27 @@ def test_rejects_numeric_optimization_with_an_empty_search_space(tmp_path: Path)
         preflight_bundle(tmp_path, "optimize.yml")
 
 
+def test_checks_stdio_mcp_server_scripts_ship_in_the_bundle(tmp_path: Path) -> None:
+    config = full_config()
+    config["mcp"] = {
+        "servers": {
+            "analyzer": {"transport": "stdio", "url": "python3", "args": ["mcps/analyzer.py", "--quiet"]},
+            "remote": {"transport": "http", "url": "https://example.test/mcp"},
+        }
+    }
+    make_bundle(tmp_path, config, files={"dataset.json": DATASET})
+
+    with pytest.raises(BundlePreflightError) as excinfo:
+        preflight_bundle(tmp_path, "optimize.yml")
+    message = str(excinfo.value)
+    assert "mcp.servers.analyzer.args[0]" in message
+    assert "--quiet" not in message  # flags are not paths
+
+    (tmp_path / "mcps").mkdir()
+    (tmp_path / "mcps" / "analyzer.py").write_text("print(1)\n", encoding="utf-8")
+    assert preflight_bundle(tmp_path, "optimize.yml")["mcp"]["servers"]["analyzer"]["args"][0] == "mcps/analyzer.py"
+
+
 def test_ignores_a_dataset_staged_from_its_own_fileset(tmp_path: Path) -> None:
     config = full_config()
     config["eval"]["general"]["dataset"] = {"file_path": "default/evals#rows.json"}

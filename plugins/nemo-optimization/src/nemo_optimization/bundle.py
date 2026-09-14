@@ -191,6 +191,8 @@ def path_references(config: Mapping[str, Any]) -> Iterator[PathReference]:
         yield from _optional(environment.get("workspace"), "environment.workspace", must_exist=False, is_dir=True)
         yield from _optional(environment.get("artifacts"), "environment.artifacts", must_exist=False, is_dir=True)
 
+    yield from _mcp_server_references(config)
+
     eval_config = config.get("eval")
     if not isinstance(eval_config, Mapping):
         return
@@ -202,6 +204,30 @@ def path_references(config: Mapping[str, Any]) -> Iterator[PathReference]:
     fabric = eval_config.get("fabric")
     if isinstance(fabric, Mapping):
         yield from _optional(fabric.get("base_dir"), "eval.fabric.base_dir", must_exist=True, is_dir=True)
+
+
+def _mcp_server_references(config: Mapping[str, Any]) -> Iterator[PathReference]:
+    """Bundle files a stdio MCP server is launched from: ``args`` entries that name a script.
+
+    A server shipped in the bundle is spawned as ``url: python3, args: [path/in/bundle.py]``; the
+    optimizer makes that path absolute at run time, so preflight has to know the file exists.
+    Only entries that look like files are checked, since ``args`` also carries flags and values.
+    """
+    mcp = config.get("mcp")
+    servers = mcp.get("servers") if isinstance(mcp, Mapping) else None
+    if not isinstance(servers, Mapping):
+        return
+    for name, server in servers.items():
+        if not isinstance(server, Mapping) or server.get("transport") != "stdio":
+            continue
+        args = server.get("args")
+        for index, arg in enumerate(args if isinstance(args, list) else []):
+            if isinstance(arg, str) and _looks_like_bundle_script(arg):
+                yield from _optional(arg, f"mcp.servers.{name}.args[{index}]", must_exist=True)
+
+
+def _looks_like_bundle_script(value: str) -> bool:
+    return not value.startswith("-") and ("/" in value or value.endswith((".py", ".js", ".sh")))
 
 
 def _dataset_reference(dataset: Any) -> Iterator[PathReference]:
