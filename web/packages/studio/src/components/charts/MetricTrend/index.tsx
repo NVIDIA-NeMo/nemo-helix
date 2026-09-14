@@ -116,14 +116,14 @@ export const MetricTrend: FC<MetricTrendProps> = ({
   };
 
   const delta = active?.delta;
-  const isNegative = delta !== undefined && delta < 0;
-  const isZero = delta === 0;
-  const deltaColor = TAG_COLOR[deltaTone(delta ?? 0)];
+  const roundedDelta =
+    delta !== undefined ? Number.parseFloat(formatDelta(delta).replace('−', '-')) : undefined;
+  const isNegative = roundedDelta !== undefined && roundedDelta < 0;
+  const isZero = roundedDelta === 0;
+  const deltaColor = TAG_COLOR[deltaTone(roundedDelta ?? 0)];
   const lineColor = isNegative ? 'var(--text-color-accent-red)' : 'var(--text-color-brand)';
   const colorMode = useNvColorMode();
   const gradient = colorMode === 'dark' ? AREA_GRADIENT.dark : AREA_GRADIENT.light;
-  // A single datapoint has no line to draw, so an AreaChart shows only a lone dot. Render a
-  // flat ReferenceLine across the surface instead, per the design.
   const isSingle = active?.points.length === 1;
 
   return (

@@ -81,9 +81,11 @@ export const DeltaText: FC<DeltaTextProps> = ({
   'aria-label': ariaLabel,
   className,
 }) => {
-  const tone = deltaTone(value, higherIsBetter);
-  const Icon = value === 0 ? Equal : Triangle;
-  const magnitude = format(Math.abs(value)).replace(/^[+−-]/, '');
+  const formattedValue = format(value);
+  const roundedValue = Number.parseFloat(formattedValue.replace('−', '-'));
+  const tone = deltaTone(roundedValue, higherIsBetter);
+  const Icon = roundedValue === 0 ? Equal : Triangle;
+  const magnitude = formattedValue.replace(/^[+−-]/, '');
   const label =
     ariaLabel ??
     (tone === 'unchanged'
@@ -110,10 +112,10 @@ export const DeltaText: FC<DeltaTextProps> = ({
         className={cn(
           'shrink-0 stroke-current',
           tone === 'unchanged' ? 'stroke-2' : 'fill-current',
-          value < 0 && 'rotate-180'
+          roundedValue < 0 && 'rotate-180'
         )}
       />
-      {format(value)}
+      {formattedValue}
     </Text>
   );
 };

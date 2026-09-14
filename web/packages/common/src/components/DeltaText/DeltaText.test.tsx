@@ -108,4 +108,39 @@ describe('DeltaText', () => {
 
     expect(screen.getByTestId('delta-text')).toHaveTextContent('-120 ms');
   });
+
+  it('stays neutral when a positive value rounds to zero at the default precision', () => {
+    render(<DeltaText value={0.001} />);
+
+    const delta = screen.getByTestId('delta-text');
+    expect(delta).toHaveTextContent('0.00');
+    expect(delta).toHaveAttribute('data-delta', 'unchanged');
+    expect(delta).toHaveAccessibleName('No change');
+
+    const icon = screen.getByTestId('delta-text-icon');
+    expect(icon).not.toHaveClass('fill-current');
+    expect(icon).not.toHaveClass('rotate-180');
+  });
+
+  it('stays neutral when a negative value rounds to zero at the default precision', () => {
+    render(<DeltaText value={-0.001} />);
+
+    const delta = screen.getByTestId('delta-text');
+    expect(delta).toHaveAttribute('data-delta', 'unchanged');
+    expect(delta).toHaveAccessibleName('No change');
+
+    const icon = screen.getByTestId('delta-text-icon');
+    expect(icon).not.toHaveClass('fill-current');
+    expect(icon).not.toHaveClass('rotate-180');
+  });
+
+  it('stays neutral when a value rounds to zero at a coarser precision', () => {
+    const format = (v: number) => formatSignedDelta(v, 0);
+
+    const { rerender } = render(<DeltaText value={0.4} format={format} />);
+    expect(screen.getByTestId('delta-text')).toHaveAttribute('data-delta', 'unchanged');
+
+    rerender(<DeltaText value={-0.4} format={format} />);
+    expect(screen.getByTestId('delta-text')).toHaveAttribute('data-delta', 'unchanged');
+  });
 });

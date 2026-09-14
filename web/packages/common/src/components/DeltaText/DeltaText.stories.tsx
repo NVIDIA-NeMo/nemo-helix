@@ -54,14 +54,6 @@ export const WithQualifier: Story = {
   },
 };
 
-/** The qualifier is context, not part of the magnitude, so keep it out of the spoken name. */
-export const WithQualifierCustomLabel: Story = {
-  args: {
-    ...WithQualifier.args,
-    'aria-label': 'Improved by 18 percent versus baseline',
-  },
-};
-
 const SIZES: [DeltaTextSize, string][] = [
   ['xs', '10px'],
   ['sm', '14px'],
