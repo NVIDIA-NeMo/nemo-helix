@@ -23,6 +23,12 @@ export interface UseServedModelResult {
   servedModel?: ServedModelMapping;
   /** `<workspace>/<name>` ref of the provider that serves it. */
   providerRef?: string;
+  /**
+   * The provider that serves it. Callers need `model_deployment_id` to reach the
+   * backing deployment; it is already fetched here, so hand it back rather than
+   * making the caller re-resolve the ref.
+   */
+  provider?: ModelProvider;
   isLoading: boolean;
 }
 
@@ -70,7 +76,7 @@ export function useServedModel(
         (sm) => sm.model_entity_id === modelEntityId
       );
       if (match) {
-        return { servedModel: match, providerRef: providerRefs[index], isLoading };
+        return { servedModel: match, providerRef: providerRefs[index], provider, isLoading };
       }
     }
 

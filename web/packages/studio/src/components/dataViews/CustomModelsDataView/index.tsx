@@ -35,7 +35,7 @@ import {
   FINETUNING_TYPE_FILTER_OPTIONS,
   HAS_ADAPTERS,
 } from '@studio/components/dataViews/CustomModelsDataView/constants';
-import { DeploymentIndicator } from '@studio/components/dataViews/CustomModelsDataView/DeploymentIndicator';
+import { DeploymentStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/DeploymentStatusBadge';
 import { KindTag } from '@studio/components/dataViews/CustomModelsDataView/KindTag';
 import { BaseModelSearchFilterField } from '@studio/components/FilterFields';
 import type { ModelPanelTab } from '@studio/components/sidePanels/ModelPanels/ModelPanel';
@@ -238,26 +238,6 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
   ) => [
     rowExpansionColumn({ size: ROW_SELECTION_COLUMN_SIZE }),
     rowSelectionColumn({ size: ROW_SELECTION_COLUMN_SIZE }),
-    accessor('id', {
-      id: 'deployment-status',
-      header: () => <span data-fixed-width aria-label="Deployment status" />,
-      enableSorting: false,
-      enableResizing: false,
-      cell: ({ row }) => (
-        <span data-fixed-width>
-          {row.depth === 0 && (
-            <DeploymentIndicator
-              workspace={workspace}
-              providerIds={row.original.model_providers}
-              modelName={row.original.name ?? ''}
-            />
-          )}
-        </span>
-      ),
-      size: 30,
-      minSize: 30,
-      maxSize: 30,
-    }),
     accessor('name', {
       header: 'Name',
       enableSorting: true,
@@ -301,6 +281,24 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
         ) : (
           <Text>-</Text>
         ),
+    }),
+    accessor('id', {
+      id: 'deployment-status',
+      header: 'Status',
+      // Derived client-side per row (providers → served_models → deployment), so
+      // there is nothing for the API to sort or filter on.
+      enableSorting: false,
+      size: 150,
+      cell: ({ row }) => (
+        <DeploymentStatusBadge
+          model={row.original._parentModel ?? row.original}
+          adapter={
+            row.original._parentModel
+              ? adapterMap.get(row.original._parentModel.id)?.get(row.original.name)
+              : undefined
+          }
+        />
+      ),
     }),
     accessor('created_at', {
       id: 'created_at',
