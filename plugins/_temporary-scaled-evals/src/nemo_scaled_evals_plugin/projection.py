@@ -23,7 +23,7 @@ from nemo_platform_plugin.entities.base import EntityNotFoundError, SyncEntityCl
 from nemo_platform_plugin.entities.client import EntitiesClient
 from nemo_platform_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nemo_platform_plugin.sdk_provider import get_platform_sdk
-from nemo_scaled_evals_plugin.entities import ScaledEvaluation, searchable_blob
+from nemo_scaled_evals_plugin.entities import PROJECTED_COLUMNS, ScaledEvaluation, searchable_blob
 from scaled_evals.api.repositories.base_repository import normalize_order, substring_search_pattern
 from scaled_evals.api.schemas.common import decode_cursor
 from scaled_evals.api.settings import settings
@@ -63,6 +63,11 @@ def jsonable(value: Any) -> Any:
     return str(value)
 
 
+def projected_detail(row: dict[str, Any]) -> dict[str, Any]:
+    """Return the JSON-safe subset of `row` the responses are rebuilt from."""
+    return jsonable({key: value for key, value in row.items() if key in PROJECTED_COLUMNS})
+
+
 def row_to_entity(row: dict[str, Any], *, workspace: str) -> ScaledEvaluation:
     """Build the projection entity for one evaluation row."""
     return ScaledEvaluation(
@@ -81,7 +86,7 @@ def row_to_entity(row: dict[str, Any], *, workspace: str) -> ScaledEvaluation:
         row_created_at=row["created_at"],
         row_updated_at=row["updated_at"],
         search_blob=searchable_blob(row),
-        detail=jsonable({key: value for key, value in row.items() if key != "deleted_at"}),
+        detail=projected_detail(row),
     )
 
 
@@ -176,6 +181,10 @@ class EvaluationProjectionReader:
                     value=["private"],
                 )
             )
+        # ponytail: the pattern is backslash-escaped for SQL's `ESCAPE '\'`,
+        # which `$like` does not honour, so a query containing % or _ matches
+        # less here than in Postgres. Under-matching, never over-matching, so
+        # no row leaks; revisit if the store documents an escape.
         if pattern := substring_search_pattern(q):
             conditions.append(
                 ComparisonOperation(
@@ -195,8 +204,12 @@ class EvaluationProjectionReader:
             sort=f"{prefix}row_created_at",
             page_size=limit + 1,
         )
-        # The store sorts on one field, so the (created_at, id) tiebreaker is
-        # reapplied here to keep cursors stable across equal timestamps.
+        # ponytail: the store sorts one field, so the (created_at, id)
+        # tiebreaker is reapplied here. That orders the page correctly but does
+        # not decide which rows the store picked, so evaluations sharing a
+        # created_at across a page boundary can still repeat or be skipped.
+        # Ceiling accepted while Postgres is authoritative; the fix is a
+        # composite sort key in the store, not more local sorting.
         entities = sorted(
             page.data,
             key=lambda item: (item.row_created_at, item.evaluation_id),
@@ -263,14 +276,15 @@ def evaluation_reader() -> EvaluationProjectionReader:
         return _reader
 
 
-def parity_report(row: dict[str, Any], *, workspace: str) -> list[str]:
-    """Return the fields where a row and its own projection disagree.
+def parity_report(row: dict[str, Any], projected: dict[str, Any]) -> list[str]:
+    """Return the fields where a Postgres row and its read-back projection differ.
 
-    An empty list means the projection round-trips. Used by the parity check so
-    drift is caught before a read is served from Entity Store.
+    `projected` must come from a real read (`EvaluationProjectionReader.get`),
+    not from re-running the mapping: the drift worth catching is whatever the
+    store does to the payload in transit, and comparing the mapping against
+    itself would always agree.
     """
-    projected = entity_to_row(row_to_entity(row, workspace=workspace))
-    expected = jsonable({key: value for key, value in row.items() if key != "deleted_at"})
+    expected = projected_detail(row)
     # Compare through JSON so tuple/list and int/float encodings agree the way
     # they would after a real round trip through the store.
     differences = []

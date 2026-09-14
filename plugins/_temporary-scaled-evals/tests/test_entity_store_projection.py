@@ -21,6 +21,7 @@ from nemo_scaled_evals_plugin.projection import (
     parity_report,
     row_to_entity,
 )
+from scaled_evals.api.routers.evaluations import _response
 from scaled_evals.api.schemas.common import encode_cursor
 from scaled_evals.api.schemas.evaluations import Evaluation
 
@@ -137,9 +138,13 @@ class FakeEntityClient:
 def test_projection_round_trips_into_the_existing_response_schemas() -> None:
     row = _row()
 
-    # The projection must be lossless for every column the read paths select,
-    # or a read served from Entity Store would silently drop response fields.
-    assert parity_report(row, workspace=WORKSPACE) == []
+    # Parity is measured against a real read-back, so the check would catch the
+    # store mangling the payload; comparing the mapping to itself would not.
+    client = FakeEntityClient()
+    EvaluationProjectionWriter(client, workspace=WORKSPACE).project(row)
+    read_back = EvaluationProjectionReader(client, workspace=WORKSPACE).get(row["id"])
+    assert read_back is not None
+    assert parity_report(row, read_back) == []
 
     entity = row_to_entity(row, workspace=WORKSPACE)
     assert entity.name == row["id"]
@@ -150,11 +155,27 @@ def test_projection_round_trips_into_the_existing_response_schemas() -> None:
     assert "nightly" in entity.search_blob and "sandbox_k8s" in entity.search_blob
     # Timestamps survive as ISO strings, not repr() output Pydantic can't parse.
     assert entity.detail["created_at"] == CREATED.isoformat()
-    assert "deleted_at" not in entity.detail
+    # Only what the responses read is copied into the second store. Prompt
+    # content and soft-delete bookkeeping stay in Postgres.
+    for withheld in (
+        "deleted_at",
+        "instruction_prefix",
+        "instruction_postfix",
+        "initial_user_turns",
+        "extra_skill_object_keys",
+        "backend_handle",
+        "archive_status",
+        "image_ref",
+    ):
+        assert withheld not in entity.detail
 
     rebuilt = Evaluation(**entity_to_row(entity))
     assert rebuilt.model_dump() == Evaluation(**row).model_dump()
     assert rebuilt.outcome.category == "completed"
+    # The detail read adds `result` and links on top of the list item. Going
+    # through the router's own builder proves the projection feeds the real
+    # response path, not just the bare model.
+    assert _response(entity_to_row(entity)).model_dump() == _response(row).model_dump()
 
     # A soft-deleted row still projects, so reads can 404 from the projection.
     deleted = row_to_entity(_row(deleted_at=CREATED), workspace=WORKSPACE)
