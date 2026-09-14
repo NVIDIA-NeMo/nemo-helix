@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
+import { isNotFoundError } from '@nemo/common/src/api/common/utils';
+import { agentsGetAgent, getAgentsGetAgentQueryKey } from '@nemo/sdk/generated/agents/agents';
 import { useListTraces } from '@nemo/sdk/generated/platform/traces';
+import { useQueries } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 /** The API's ceiling. Intake exposes no distinct-agent facet, so the names are deduped from a
@@ -11,8 +13,8 @@ const TRACE_SCAN_PAGE_SIZE = 1000;
 
 export interface TraceAgentNames {
   /** Agent names seen on traces that have no agent entity yet, oldest naming preserved. */
-  names: string[];
-  isLoading: boolean;
+  readonly names: readonly string[];
+  readonly isLoading: boolean;
 }
 
 /**
@@ -28,24 +30,34 @@ export const useTraceAgentNames = (workspace: string, enabled: boolean): TraceAg
     { query: { enabled: enabled && !!workspace } }
   );
 
-  const { data: agentsResponse, isLoading: isAgentsLoading } = useAgentsListAgents(
-    workspace,
-    undefined,
-    { query: { enabled: enabled && !!workspace } }
-  );
-
-  return useMemo(() => {
-    const registered = new Set(
-      (agentsResponse?.data ?? []).flatMap((agent) => (agent.name ? [agent.name] : []))
-    );
+  const tracedNames = useMemo(() => {
     const seen = new Set<string>();
     for (const trace of tracesResponse?.data ?? []) {
       const name = trace.agent_name?.trim();
-      if (name && !registered.has(name)) seen.add(name);
+      if (name) seen.add(name);
     }
-    return {
-      names: [...seen].sort((a, b) => a.localeCompare(b)),
-      isLoading: isTracesLoading || isAgentsLoading,
-    };
-  }, [tracesResponse, agentsResponse, isTracesLoading, isAgentsLoading]);
+    return [...seen].sort((a, b) => a.localeCompare(b));
+  }, [tracesResponse]);
+
+  // One lookup per name rather than a list: agents paginate with no name filter, so a registered
+  // agent past the first page would be offered as new. Here a 404 is the answer, not a failure,
+  // which is why these must not retry.
+  const lookups = useQueries({
+    queries: tracedNames.map((name) => ({
+      queryKey: getAgentsGetAgentQueryKey(workspace, name),
+      queryFn: () => agentsGetAgent(workspace, name),
+      enabled: enabled && !!workspace,
+      retry: false,
+    })),
+  });
+
+  return useMemo(
+    () => ({
+      // Only a confirmed 404 means unregistered; any other failure leaves the name out rather
+      // than offering one whose create would collide.
+      names: tracedNames.filter((_, index) => isNotFoundError(lookups[index]?.error)),
+      isLoading: isTracesLoading || lookups.some((lookup) => lookup.isLoading),
+    }),
+    [tracedNames, lookups, isTracesLoading]
+  );
 };

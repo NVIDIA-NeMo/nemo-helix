@@ -420,9 +420,13 @@ describe('NewAgentModal imported traces tab', () => {
           })),
         })
       ),
-      http.get('*/apis/agents/v2/workspaces/:workspace/agents', () =>
-        HttpResponse.json({ data: registered.map((name) => ({ name, workspace })) })
-      )
+      // The hook asks for each traced name; a 404 is how the API says "not registered".
+      http.get('*/apis/agents/v2/workspaces/:workspace/agents/:name', ({ params }) => {
+        const name = String(params['name']);
+        return registered.includes(name)
+          ? HttpResponse.json({ name, workspace })
+          : new HttpResponse(null, { status: 404 });
+      })
     );
   };
 
@@ -472,6 +476,28 @@ describe('NewAgentModal imported traces tab', () => {
     expect(await within(dialog).findByTestId('no-traced-agents')).toHaveTextContent(
       'intake trace import skill'
     );
+  });
+
+  it('leaves out a name whose registration could not be checked', async () => {
+    const user = userEvent.setup();
+    mockPlatform();
+    mockTraces(['billing-agent', 'research-agent']);
+    server.use(
+      http.get('*/apis/agents/v2/workspaces/:workspace/agents/:name', ({ params }) =>
+        params['name'] === 'research-agent'
+          ? new HttpResponse(null, { status: 500 })
+          : new HttpResponse(null, { status: 404 })
+      )
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openTracesTab(dialog, user);
+
+    await user.click(await within(dialog).findByRole('combobox', { name: /imported traces/i }));
+    // Offering it would hand the user a create that collides if it is in fact registered.
+    expect(await screen.findByRole('option', { name: 'billing-agent' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'research-agent' })).not.toBeInTheDocument();
   });
 
   it('creates the chosen agent and cannot submit before one is chosen', async () => {
