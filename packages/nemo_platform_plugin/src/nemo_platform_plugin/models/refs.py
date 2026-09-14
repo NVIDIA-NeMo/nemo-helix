@@ -11,9 +11,36 @@ typed clients can build route references without importing generated resources.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 _logger = logging.getLogger(__name__)
+
+
+class ServedModelMappingLike(Protocol):
+    """A provider mapping from a Model Entity id to the upstream served name."""
+
+    @property
+    def model_entity_id(self) -> str: ...
+    @property
+    def served_model_name(self) -> str: ...
+
+
+class ProviderServedModelsLike(Protocol):
+    """An object that may list which Model Entities it serves."""
+
+    @property
+    def served_models(self) -> Sequence[ServedModelMappingLike] | None: ...
+
+
+class ModelEntityRefLike(Protocol):
+    """An object identifying a Model Entity by workspace-qualified name."""
+
+    @property
+    def workspace(self) -> str: ...
+    @property
+    def name(self) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +50,7 @@ class ResolvedModelReference:
     url: str
     name: str
     host_url: str | None
+    served_model_name: str | None = None
 
 
 def parse_workspace_name_ref(ref: str, *, label: str, expected_format: str = "workspace/name") -> tuple[str, str]:
@@ -59,13 +87,24 @@ def resolved_model_reference(
     route_workspace: str,
     route_model_name: str,
     host_url: str | None,
+    served_model_name: str | None = None,
 ) -> ResolvedModelReference:
     """Build route details for a resolved model entity."""
     return ResolvedModelReference(
         url=model_entity_route_openai_url(base_url=base_url, workspace=route_workspace, name=route_model_name),
         name=name,
         host_url=host_url,
+        served_model_name=served_model_name,
     )
+
+
+def served_model_name_for_entity(provider: ProviderServedModelsLike, model_entity: ModelEntityRefLike) -> str | None:
+    """Return the provider model id mapped to this Model Entity."""
+    entity_ref = f"{model_entity.workspace}/{model_entity.name}"
+    for mapping in getattr(provider, "served_models", None) or ():
+        if mapping.model_entity_id == entity_ref:
+            return mapping.served_model_name
+    return None
 
 
 def warn_provider_host_url_resolution_failure(

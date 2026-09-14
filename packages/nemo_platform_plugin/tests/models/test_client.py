@@ -243,7 +243,17 @@ def test_resolve_model_reference_fetches_model_and_provider() -> None:
         httpx.Response(
             200,
             request=httpx.Request("GET", BASE),
-            json=_provider_json("READY", name="provider", host_url="http://nim.example.test:8000"),
+            json=_provider_json(
+                "READY",
+                name="provider",
+                host_url="http://nim.example.test:8000",
+                served_models=[
+                    {
+                        "model_entity_id": "default/judge",
+                        "served_model_name": "publisher/upstream-judge",
+                    }
+                ],
+            ),
         ),
     ]
     client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
@@ -257,6 +267,7 @@ def test_resolve_model_reference_fetches_model_and_provider() -> None:
     assert result.name == "judge"
     assert result.url == f"{BASE}/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
     assert result.host_url == "http://nim.example.test:8000"
+    assert result.served_model_name == "publisher/upstream-judge"
 
 
 def test_resolve_model_reference_ignores_missing_provider() -> None:

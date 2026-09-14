@@ -4884,6 +4884,22 @@ components:
           type: string
           title: Name
           description: Name of the model.
+        served_model_name:
+          title: Served Model Name
+          description: Provider model identifier preserved when resolving a ModelRef.
+          nullable: true
+          type: string
+        inference:
+          title: Inference
+          description: Capability-specific invocation metadata. Ranking is the only
+            variant today.
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/RankingInference'
+          discriminator:
+            propertyName: type
+            mapping:
+              ranking: '#/components/schemas/RankingInference'
         api_key_secret:
           allOf:
           - $ref: '#/components/schemas/SecretRef'
@@ -5384,6 +5400,42 @@ components:
       type: object
       title: PublicationSpec
       description: Where a completed agent-evaluation run publishes its results.
+    RankingInference:
+      properties:
+        type:
+          type: string
+          const: ranking
+          title: Type
+          default: ranking
+        contract:
+          title: Contract
+          description: Explicit reranking request and response contract selected during
+            preflight.
+          nullable: true
+          type: string
+          enum:
+          - nim-ranking-v1
+          - hosted-rerank-v1
+          - hosted-ranking-v1
+          - hosted-retrieval-reranking-v1
+        path:
+          title: Path
+          description: Explicit reranking route relative to the model's resolved /v1
+            inference-gateway URL.
+          nullable: true
+          type: string
+      additionalProperties: false
+      type: object
+      required:
+      - type
+      title: RankingInference
+      description: 'Reranking invocation contract and route.
+
+
+        Additional inference variants, such as embeddings, join InferenceConfig as
+        new
+
+        type members rather than adding more fields to Model.'
     ReasoningParams:
       properties:
         end_token:
