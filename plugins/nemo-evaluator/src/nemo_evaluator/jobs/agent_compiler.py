@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from nemo_evaluator.config import config, platform_config
-from nemo_evaluator.jobs.agent_spec import AgentEvalSpec, AgentTarget, GymRunnerTarget, ModelTarget
+from nemo_evaluator.jobs.agent_spec import AgentEvalSpec, AgentTarget, GymRunnerTarget, HarborRunnerTarget, ModelTarget
 from nemo_evaluator.jobs.environment_stage import EnvironmentStageSpec
 from nemo_evaluator.jobs.gym_sandbox import GYM_SANDBOX_PLAN_ENVVAR, SandboxPlan, resolve_sandbox_plan
 from nemo_evaluator.jobs.secret_env import build_task_environment
@@ -77,9 +77,9 @@ def _secret_refs(spec: AgentEvalSpec) -> Iterator[tuple[str, str]]:
             for env_name, secret_ref in bundle.secrets.items():
                 yield env_name, secret_ref.root
 
-    # A runner target may need credentials of its own -- a Gym environment's model API key reaches
-    # it through the OS environment, not through an endpoint spec.
-    if isinstance(spec.target, GymRunnerTarget):
+    # A runner target may need credentials of its own -- a Gym environment's or Harbor agent's model
+    # API key reaches it through the OS environment, not through an endpoint spec.
+    if isinstance(spec.target, (GymRunnerTarget, HarborRunnerTarget)):
         for env_name, secret_ref in spec.target.env_secrets.items():
             yield env_name, secret_ref.root
 
