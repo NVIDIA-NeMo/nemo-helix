@@ -485,7 +485,7 @@ externalClickhouse:
 platformConfig:
   studio:
     feature_flags:
-      assistant_studio_enabled: true
+      assistant_studio_enabled: false
 
 # -- Base platform configuration settings
 # @default -- This object has the following default values for the base platform configuration.
