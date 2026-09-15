@@ -16,7 +16,7 @@ import { useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
 import { Accordion, Stack } from '@nvidia/foundations-react-core';
 import { AGENT_CONTAINER_DEPLOYMENTS_ENABLED } from '@studio/constants/environment';
 import { useQueryClient } from '@tanstack/react-query';
-import { type FC, useEffect, useState } from 'react';
+import { type FC, useEffect, useRef, useState } from 'react';
 import { type SubmitHandler, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
@@ -110,23 +110,26 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
   });
   const deploymentMode = watch('deploymentMode');
 
-  // Opened when a packaged tag arrives, so the prefilled image is not hidden behind
-  // a disclosure the user never opened.
+  // Opened when a packaged tag is prefilled, so it is not hidden behind a
+  // disclosure the user never opened.
   const [advancedOpen, setAdvancedOpen] = useState<string | undefined>(
     initialImage ? 'advanced' : undefined
   );
 
+  // Seeded on the open transition only. A packaging job can finish while this
+  // dialog is open, and reseeding then would wipe what the user has typed.
+  const wasOpen = useRef(open);
   useEffect(() => {
-    if (initialImage) setAdvancedOpen('advanced');
-  }, [initialImage]);
-
-  useEffect(() => {
-    resetForm(makeDefaultValues(agentProp, initialImage));
-  }, [agentProp, initialImage, resetForm]);
+    if (open && !wasOpen.current) {
+      resetForm(makeDefaultValues(agentProp, initialImage));
+      setAdvancedOpen(initialImage ? 'advanced' : undefined);
+    }
+    wasOpen.current = open;
+  }, [open, agentProp, initialImage, resetForm]);
 
   const reset = () => {
     resetMutation();
-    resetForm(makeDefaultValues(agentProp));
+    resetForm(makeDefaultValues(agentProp, initialImage));
   };
 
   const resetAndClose = () => {
@@ -143,9 +146,7 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
   };
 
   // The server owns whether an image is required, so its message has to reach the user.
-  const errorMessage = createError
-    ? getErrorMessage(createError as Error, 'An error occurred')
-    : undefined;
+  const errorMessage = createError ? getErrorMessage(createError, 'An error occurred') : undefined;
 
   return (
     <FormModal

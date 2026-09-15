@@ -16,8 +16,8 @@ import {
   TabsTrigger,
   Text,
 } from '@nvidia/foundations-react-core';
+import { FABRIC_CONFIG_FORMAT } from '@studio/api/agents/packageAgent';
 import { agentSpecSource, useAgentSpecFileset } from '@studio/api/agents/useAgentSpecFileset';
-import { FABRIC_CONFIG_FORMAT } from '@studio/api/agents/usePackageAgent';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import { ImportTracesModal } from '@studio/components/ImportTracesModal';
@@ -76,6 +76,7 @@ export const AgentDetailRoute: FC = () => {
 
   const {
     agent,
+    isAgentLoading,
     agentDeployments,
     agentEvals,
     isAgentEvalsPending,
@@ -284,6 +285,7 @@ export const AgentDetailRoute: FC = () => {
               specSource={specSource}
               workspace={workspace}
               canPackage={canPackage}
+              isAgentLoading={isAgentLoading}
               onImageBuilt={(image) => {
                 rememberBuiltImage(image);
                 setCreateDeploymentOpen(true);

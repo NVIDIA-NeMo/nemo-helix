@@ -1,8 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// Deliberately without the flag: this file covers the default, where the platform
-// refuses container deployments and the form must not offer them.
+// Covers a platform that refuses container deployments, where the form must not
+// offer them.
+vi.hoisted(() => {
+  vi.stubEnv('VITE_FF_AGENT_CONTAINER_DEPLOYMENTS_ENABLED', 'false');
+});
+
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { CreateDeploymentModal } from '@studio/routes/agents/AgentDeploymentsListRoute/CreateDeploymentModal';
 import { renderRoute, screen, within } from '@studio/tests/util/render';

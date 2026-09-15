@@ -4,9 +4,10 @@
 import {
   isQueuedTooLong,
   isTerminalPackageStatus,
+  parseJobTimestamp,
   parsePackageResult,
   QUEUED_STALL_MS,
-} from '@studio/api/agents/usePackageAgent';
+} from '@studio/api/agents/packageAgent';
 
 describe('parsePackageResult', () => {
   it('reads the tag a deployment needs', () => {
@@ -89,7 +90,20 @@ describe('isQueuedTooLong', () => {
     expect(isQueuedTooLong(status, submittedAt, submittedAt + QUEUED_STALL_MS * 10)).toBe(false);
   });
 
-  it('needs a submit time before it can judge', () => {
+  it('needs a start time before it can judge', () => {
     expect(isQueuedTooLong('created', undefined, submittedAt + QUEUED_STALL_MS * 10)).toBe(false);
   });
+});
+
+describe('parseJobTimestamp', () => {
+  it('reads the job creation time a restored build is judged against', () => {
+    expect(parseJobTimestamp('2026-01-02T03:04:05Z')).toBe(Date.parse('2026-01-02T03:04:05Z'));
+  });
+
+  it.each([['nothing', undefined] as const, ['garbage', 'not-a-date'] as const])(
+    'returns undefined for %s rather than NaN',
+    (_label, value) => {
+      expect(parseJobTimestamp(value)).toBeUndefined();
+    }
+  );
 });

@@ -105,10 +105,10 @@ describe('DeploymentsTab', () => {
     expect(screen.getByText(LONG_ERROR)).toBeInTheDocument();
   });
 
-  it('keeps packaging out of the way when container deployments are off', () => {
+  it('offers packaging from the deployments header', () => {
     renderTab([failedDeployment]);
 
-    expect(screen.queryByRole('button', { name: /Container image/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Build image|Manage image/ })).toBeInTheDocument();
   });
 
   it('names the image a deployment is running, since an agent has many over time', () => {

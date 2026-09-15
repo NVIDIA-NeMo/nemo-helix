@@ -12,7 +12,7 @@ import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import { getAgentDetailRoute } from '@studio/routes/utils';
-import { renderRoute, screen } from '@studio/tests/util/render';
+import { renderRoute, screen, within } from '@studio/tests/util/render';
 import { waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -102,7 +102,7 @@ describe('AgentDetailRoute', () => {
     expect(await screen.findByRole('textbox', { name: /Task prompt/i })).toBeInTheDocument();
   });
 
-  it("offers this agent's built image to a deployment", async () => {
+  it("offers this agent's built image to a deployment when asked for it", async () => {
     mockPreviouslyPackagedAgent();
     renderDetail();
     const user = userEvent.setup();
@@ -110,12 +110,26 @@ describe('AgentDetailRoute', () => {
     await user.click(await screen.findByRole('tab', { name: 'Deployments' }));
     // The tag lives in the packaging modal now; the trigger is what reports it is ready.
     await screen.findByText('Image ready');
-
-    await user.click(screen.getAllByRole('button', { name: /^Deploy$/ })[0]);
+    await user.click(screen.getByRole('button', { name: /Manage image/ }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /^Deploy$/ }));
 
     expect(await screen.findByRole('textbox', { name: 'Container Image' })).toHaveValue(
       BUILT_IMAGE
     );
+  });
+
+  it('does not make an image built earlier the silent default for a new deployment', async () => {
+    mockPreviouslyPackagedAgent();
+    renderDetail();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('tab', { name: 'Deployments' }));
+    await screen.findByText('Image ready');
+    await user.click(screen.getAllByRole('button', { name: /^Deploy$/ })[0]);
+
+    await screen.findByRole('textbox', { name: /Deployment Name/ });
+    expect(screen.queryByRole('textbox', { name: 'Container Image' })).not.toBeInTheDocument();
   });
 
   it('shows the agent spec on the details tab and masks secrets', async () => {

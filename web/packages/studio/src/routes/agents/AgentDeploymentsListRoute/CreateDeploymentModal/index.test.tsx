@@ -14,6 +14,7 @@ import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import { within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { useState, type FC } from 'react';
 
 const workspace = workspace1.workspace;
 const agent = 'nemo-studio-assistant';
@@ -51,6 +52,34 @@ const captureCreate = (): { body?: CapturedDeployment } => {
     })
   );
   return captured;
+};
+
+const PACKAGED_IMAGE = 'nemo-agents/default/my-agent:1.0';
+
+/** Drives `open` and `initialImage` the way the agent detail route does. */
+const Harness: FC<{ startImage?: string }> = ({ startImage }) => {
+  const [open, setOpen] = useState(true);
+  const [image, setImage] = useState(startImage);
+  return (
+    <>
+      <button type="button" onClick={() => setImage(PACKAGED_IMAGE)}>
+        harness: build finished
+      </button>
+      <button type="button" onClick={() => setOpen(false)}>
+        harness: close
+      </button>
+      <button type="button" onClick={() => setOpen(true)}>
+        harness: open
+      </button>
+      <CreateDeploymentModal
+        open={open}
+        onClose={() => setOpen(false)}
+        workspace={workspace}
+        agent={agent}
+        initialImage={image}
+      />
+    </>
+  );
 };
 
 const getDeploymentDialog = async (): Promise<HTMLDialogElement> => {
@@ -160,6 +189,31 @@ describe('CreateDeploymentModal', () => {
     expect(await within(dialog).findByRole('textbox', { name: 'Container Image' })).toHaveValue(
       'nemo-agents/default/my-agent:1.0'
     );
+  });
+
+  it('keeps what the user typed when a build finishes while the dialog is open', async () => {
+    const user = userEvent.setup();
+    renderRoute(<Harness />);
+
+    const dialog = await getDeploymentDialog();
+    await user.type(within(dialog).getByRole('textbox', { name: /Deployment Name/ }), 'my-run');
+    await user.click(screen.getByRole('button', { name: 'harness: build finished' }));
+
+    expect(within(dialog).getByRole('textbox', { name: /Deployment Name/ })).toHaveValue('my-run');
+  });
+
+  it('seeds the packaged image again on a later open', async () => {
+    const user = userEvent.setup();
+    renderRoute(<Harness startImage={PACKAGED_IMAGE} />);
+
+    const dialog = await getDeploymentDialog();
+    await user.clear(within(dialog).getByRole('textbox', { name: 'Container Image' }));
+    await user.click(screen.getByRole('button', { name: 'harness: close' }));
+    await user.click(screen.getByRole('button', { name: 'harness: open' }));
+
+    expect(
+      await within(await getDeploymentDialog()).findByRole('textbox', { name: 'Container Image' })
+    ).toHaveValue(PACKAGED_IMAGE);
   });
 
   it("surfaces the server's refusal when no image resolves", async () => {

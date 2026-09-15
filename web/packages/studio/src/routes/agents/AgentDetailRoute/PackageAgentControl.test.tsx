@@ -16,6 +16,7 @@ const jobUrl = `${jobsUrl}/:name`;
 
 const renderControl = (props?: {
   canPackage?: boolean;
+  isAgentLoading?: boolean;
   onImageBuilt?: (image: string) => void;
   onImageAvailable?: (image: string) => void;
 }) =>
@@ -24,10 +25,32 @@ const renderControl = (props?: {
       workspace={workspace}
       agentName={agent}
       canPackage={props?.canPackage ?? true}
+      isAgentLoading={props?.isAgentLoading}
       onImageBuilt={props?.onImageBuilt}
       onImageAvailable={props?.onImageAvailable}
     />
   );
+
+/** A build from an earlier page load, found by the restore query rather than submitted here. */
+const mockRestoredJob = (
+  status: string,
+  createdAt = '2026-01-02T03:04:05Z',
+  image = 'nemo-agents/default/my-agent:1.0'
+) => {
+  server.use(
+    http.get(jobsUrl, () =>
+      HttpResponse.json({
+        data: [{ name: 'pkg-1', created_at: createdAt, spec: { agent } }],
+        total: 1,
+      })
+    ),
+    http.get(`${jobUrl}/status`, () => HttpResponse.json({ status })),
+    http.get(`${jobUrl}/logs`, () => HttpResponse.json({ data: [] })),
+    http.get(`${jobUrl}/results/package_result/download`, () =>
+      HttpResponse.json({ image, agent, published: '' })
+    )
+  );
+};
 
 /** A submitted job that reports *status*, with the tag behind the result artifact. */
 const mockJob = (status: string, image = 'nemo-agents/default/my-agent:1.0') => {
@@ -118,16 +141,16 @@ describe('PackageAgentControl', () => {
     expect(await screen.findByText('nemo-agents/default/my-agent:1.0')).toBeInTheDocument();
   });
 
-  it('drops the build inputs once an image exists, so they cannot read as describing it', async () => {
+  it('keeps the registry visible once an image exists, since a rebuild still pushes there', async () => {
     mockJob('completed');
-    await openControl();
+    const user = await openControl();
 
-    expect(screen.getByText('Push options')).toBeInTheDocument();
+    await user.type(await openPushOptions(user), 'nvcr.io/my-org');
     await clickBuild();
     await screen.findByText('nemo-agents/default/my-agent:1.0');
 
-    expect(screen.queryByText('Push options')).not.toBeInTheDocument();
-    expect(screen.queryByRole('textbox', { name: /Registry/ })).not.toBeInTheDocument();
+    expect(screen.getByText('Push options')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /Registry/ })).toHaveValue('nvcr.io/my-org');
   });
 
   it('hands the tag to the deployment flow', async () => {
@@ -239,5 +262,68 @@ describe('PackageAgentControl', () => {
     expect(
       await screen.findByText(/Packaging is available for Platform-managed agents/)
     ).toBeInTheDocument();
+  });
+
+  it('does not call an unloaded agent a NAT workflow', async () => {
+    await openControl({ canPackage: false, isAgentLoading: true });
+
+    expect(
+      await screen.findByText(/Checking whether this agent can be packaged/)
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Packaging is available for Platform-managed agents/)
+    ).not.toBeInTheDocument();
+  });
+
+  it('stops implying progress when the status poll fails, so the build can be retried', async () => {
+    server.use(
+      http.post(jobsUrl, () => HttpResponse.json({ name: 'pkg-1', status: 'created' })),
+      http.get(`${jobUrl}/status`, () => new HttpResponse(null, { status: 500 }))
+    );
+    await openControl();
+
+    await clickBuild();
+
+    expect(await screen.findByText(/Lost track of this build/)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Building image')).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Build image' })
+    ).toBeEnabled();
+  });
+
+  it('separates an unreadable result from a job that reported no tag', async () => {
+    server.use(
+      http.post(jobsUrl, () => HttpResponse.json({ name: 'pkg-1', status: 'created' })),
+      http.get(`${jobUrl}/status`, () => HttpResponse.json({ status: 'completed' })),
+      http.get(`${jobUrl}/logs`, () => HttpResponse.json({ data: [] })),
+      http.get(
+        `${jobUrl}/results/package_result/download`,
+        () => new HttpResponse(null, { status: 500 })
+      )
+    );
+    await openControl();
+
+    await clickBuild();
+
+    expect(await screen.findByText(/its result could not be read/)).toBeInTheDocument();
+    expect(screen.queryByText(/finished without reporting an image tag/)).not.toBeInTheDocument();
+  });
+
+  it('still warns about a stalled queue after a reload lost the submit time', async () => {
+    mockRestoredJob('created', '2026-01-02T03:04:05Z');
+    await openControl();
+
+    expect(await screen.findByText(/accepted but has not started/)).toBeInTheDocument();
+  });
+
+  it('does not make a restored image the silent default for the next deployment', async () => {
+    const onImageAvailable = vi.fn();
+    mockRestoredJob('completed');
+    await openControl({ onImageAvailable });
+
+    await screen.findByText('nemo-agents/default/my-agent:1.0');
+
+    expect(onImageAvailable).not.toHaveBeenCalled();
+    expect(screen.getByText(/rebuild to pick up newer changes/)).toBeInTheDocument();
   });
 });

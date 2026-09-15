@@ -3,6 +3,7 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { FormModal } from '@nemo/common/src/components/FormModal';
+import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import {
   Accordion,
   Badge,
@@ -31,10 +32,12 @@ interface PackageAgentControlProps {
   agentName: string;
   /** Packaging needs a Platform-managed agent config, the same gate deploying uses. */
   canPackage: boolean;
+  /** Still resolving whether this agent can be packaged, which is not the same as "no". */
+  isAgentLoading?: boolean;
   /** Offers the finished tag to the deployment flow. */
   onImageBuilt?: (image: string) => void;
   /**
-   * Reports the finished tag as soon as the build produces one, so deploying
+   * Reports the finished tag as soon as *this page load* builds one, so deploying
    * from anywhere on the page starts from the image this agent just built.
    */
   onImageAvailable?: (image: string) => void;
@@ -52,6 +55,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
   workspace,
   agentName,
   canPackage,
+  isAgentLoading = false,
   onImageBuilt,
   onImageAvailable,
 }) => {
@@ -67,21 +71,40 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
     isRunning,
     isQueued,
     isStalled,
+    isUnreachable,
     isComplete,
     isFailed,
     isRestored,
+    restoredAt,
+    isResultPending,
+    resultError,
     image,
     published,
   } = usePackageAgent({ workspace, agentName });
 
   useEffect(() => {
-    if (isComplete && image) {
+    // Only a build watched on this page load. A restored tag can be months old
+    // and from an earlier revision, so it must not silently become the default
+    // image for every deployment.
+    if (isComplete && image && !isRestored) {
       onImageAvailable?.(image);
     }
-  }, [isComplete, image, onImageAvailable]);
+  }, [isComplete, image, isRestored, onImageAvailable]);
 
   const isBusy = isQueued || isRunning;
   const hasImage = isComplete && Boolean(image);
+  const viewJobButton =
+    jobName && JOBS_ENABLED ? (
+      <Button
+        kind="secondary"
+        size="small"
+        type="button"
+        className="shrink-0"
+        onClick={() => navigate(getWorkspaceJobDetailRoute(workspace, jobName))}
+      >
+        View job
+      </Button>
+    ) : null;
 
   return (
     <>
@@ -117,7 +140,13 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
           packageAgent(registry.trim() ? { registry: registry.trim() } : {});
         }}
       >
-        {!canPackage ? (
+        {isAgentLoading ? (
+          <Text kind="body/regular/sm" color="secondary">
+            Checking whether this agent can be packaged…
+          </Text>
+        ) : null}
+
+        {!canPackage && !isAgentLoading ? (
           <Text kind="body/regular/sm" color="secondary">
             Packaging is available for Platform-managed agents. Build a NAT workflow image with{' '}
             <code>nemo agents package</code>.
@@ -126,7 +155,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
 
         {submitError ? (
           <Text kind="body/regular/sm" color="danger">
-            {getErrorMessage(submitError as Error, 'Failed to start the packaging job')}
+            {getErrorMessage(submitError, 'Failed to start the packaging job')}
           </Text>
         ) : null}
 
@@ -144,6 +173,16 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
               </CodeSnippetActions>
               <CodeSnippetCode value={image} />
             </CodeSnippetRoot>
+            {restoredAt ? (
+              <Text kind="body/regular/sm" color="secondary">
+                Built{' '}
+                <RelativeTime
+                  datetime={new Date(restoredAt).toISOString()}
+                  focusableForTooltip={false}
+                />{' '}
+                — rebuild to pick up newer changes.
+              </Text>
+            ) : null}
             {published ? (
               <Text kind="body/regular/sm" color="secondary">
                 Pushed to {published}
@@ -152,37 +191,80 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
           </Stack>
         ) : null}
 
-        {isComplete && !image ? (
-          <Text kind="body/regular/sm" color="secondary">
-            The job finished without reporting an image tag. Open the job to see why.
-          </Text>
-        ) : null}
-
-        {isStalled ? (
-          <Text kind="body/regular/sm" className="text-warning">
-            The job was accepted but has not started. Check that the platform is running a jobs
-            controller.
-          </Text>
-        ) : null}
-
-        {isFailed ? (
-          <Text kind="body/regular/sm" color="danger">
-            Packaging failed. Open the job for the build output.
-          </Text>
-        ) : null}
-
-        {isBusy && !isStalled ? (
+        {isResultPending ? (
           <Flex gap="density-sm" className="items-center">
-            <Spinner size="small" aria-label="Building image" />
+            <Spinner size="small" aria-label="Reading build result" />
             <Text kind="body/regular/sm" color="secondary">
-              {isQueued ? 'Waiting for a build to start…' : 'Building — this takes a few minutes.'}
+              Reading the build result…
             </Text>
           </Flex>
         ) : null}
 
-        {/* Build inputs belong to the *next* build, so they are absent once an image
-            exists — sitting above a finished tag they read as describing it. */}
-        {canPackage && !isBusy && !hasImage ? (
+        {resultError ? (
+          <Flex gap="density-sm" className="items-center justify-between">
+            <Text kind="body/regular/sm" color="danger">
+              The build finished, but its result could not be read. Open the job for the tag.
+            </Text>
+            {viewJobButton}
+          </Flex>
+        ) : null}
+
+        {isComplete && !isResultPending && !resultError && !image ? (
+          <Flex gap="density-sm" className="items-center justify-between">
+            <Text kind="body/regular/sm" color="secondary">
+              The job finished without reporting an image tag. Open the job to see why.
+            </Text>
+            {viewJobButton}
+          </Flex>
+        ) : null}
+
+        {isUnreachable ? (
+          <Flex gap="density-sm" className="items-center justify-between">
+            <Text kind="body/regular/sm" color="danger">
+              Lost track of this build — its status could not be read. Open the job, or start
+              another build.
+            </Text>
+            {viewJobButton}
+          </Flex>
+        ) : null}
+
+        {isStalled ? (
+          <Flex gap="density-sm" className="items-center justify-between">
+            <Text kind="body/regular/sm" className="text-warning">
+              The job was accepted but has not started. Check that the platform is running a jobs
+              controller.
+            </Text>
+            {viewJobButton}
+          </Flex>
+        ) : null}
+
+        {isFailed ? (
+          <Flex gap="density-sm" className="items-center justify-between">
+            <Text kind="body/regular/sm" color="danger">
+              Packaging failed. Open the job for the build output.
+            </Text>
+            {viewJobButton}
+          </Flex>
+        ) : null}
+
+        {isBusy && !isStalled ? (
+          <Flex gap="density-sm" className="items-center justify-between">
+            <Flex gap="density-sm" className="items-center">
+              <Spinner size="small" aria-label="Building image" />
+              <Text kind="body/regular/sm" color="secondary">
+                {isQueued
+                  ? 'Waiting for a build to start…'
+                  : 'Building — this takes a few minutes.'}
+              </Text>
+            </Flex>
+            {viewJobButton}
+          </Flex>
+        ) : null}
+
+        {/* Stays mounted once an image exists: the registry is remembered and a
+            Rebuild pushes there again, so hiding it would push somewhere the
+            user cannot see. */}
+        {canPackage && !isBusy ? (
           <Accordion
             className="[&>div]:border-b-0"
             value={pushOptionsOpen}
@@ -210,31 +292,20 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
           />
         ) : null}
 
-        {(hasImage && image && onImageBuilt) || (jobName && JOBS_ENABLED) ? (
+        {hasImage && image && onImageBuilt ? (
           <Flex gap="density-sm" align="center">
-            {hasImage && image && onImageBuilt ? (
-              <Button
-                kind="primary"
-                size="small"
-                type="button"
-                onClick={() => {
-                  setIsOpen(false);
-                  onImageBuilt(image);
-                }}
-              >
-                Deploy
-              </Button>
-            ) : null}
-            {jobName && JOBS_ENABLED ? (
-              <Button
-                kind="tertiary"
-                size="small"
-                type="button"
-                onClick={() => navigate(getWorkspaceJobDetailRoute(workspace, jobName))}
-              >
-                View job
-              </Button>
-            ) : null}
+            <Button
+              kind="primary"
+              size="small"
+              type="button"
+              onClick={() => {
+                setIsOpen(false);
+                onImageBuilt(image);
+              }}
+            >
+              Deploy
+            </Button>
+            {viewJobButton}
           </Flex>
         ) : null}
       </FormModal>
