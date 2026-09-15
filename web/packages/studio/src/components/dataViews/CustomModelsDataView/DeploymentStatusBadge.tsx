@@ -2,16 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StatusBadge, type StatusConfigEntry } from '@nemo/common/src/components/StatusBadge';
-import {
-  ModelDeploymentStatus,
-  type Adapter,
-  type ModelEntity,
-} from '@nemo/sdk/generated/platform/schema';
+import { ModelDeploymentStatus } from '@nemo/sdk/generated/platform/schema';
 import { Skeleton } from '@nvidia/foundations-react-core';
-import {
-  useModelDeploymentIndicator,
-  type DeploymentIndicatorState,
-} from '@studio/hooks/useModelDeploymentIndicator';
+import type { DeploymentIndicatorState } from '@studio/hooks/useModelDeploymentStatuses';
 import type { FC } from 'react';
 
 /**
@@ -81,18 +74,22 @@ function toStatusKey(state: DeploymentIndicatorState, isAdapter: boolean): strin
 }
 
 interface DeploymentStatusBadgeProps {
-  /** The model that owns the row. For an adapter subrow, the *parent* model. */
-  model: ModelEntity;
-  /** Set when the row is an adapter subrow. */
-  adapter?: Adapter;
+  /**
+   * Resolved status for the row. Resolved once for the whole table rather than
+   * per badge, so the row-actions menu reads the same answer. `undefined` while
+   * the row has not resolved yet.
+   */
+  state: DeploymentIndicatorState | undefined;
+  /** Whether the row is an adapter subrow, which changes the wording. */
+  isAdapter?: boolean;
 }
 
-export const DeploymentStatusBadge: FC<DeploymentStatusBadgeProps> = ({ model, adapter }) => {
-  const state = useModelDeploymentIndicator(model, adapter);
-
-  if (state.kind === 'loading') {
+export const DeploymentStatusBadge: FC<DeploymentStatusBadgeProps> = ({ state, isAdapter }) => {
+  if (!state || state.kind === 'loading') {
     return <Skeleton animated className="h-5 w-24 rounded" />;
   }
 
-  return <StatusBadge status={toStatusKey(state, Boolean(adapter))} statusConfig={STATUS_CONFIG} />;
+  return (
+    <StatusBadge status={toStatusKey(state, Boolean(isAdapter))} statusConfig={STATUS_CONFIG} />
+  );
 };
