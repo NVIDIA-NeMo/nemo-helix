@@ -11,18 +11,17 @@ from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from nemo_platform_plugin.deployment import DeploymentParams, ToolCallParams
 from nemo_platform_plugin.models.types import ModelEntity
 from nmp.automodel.adapter import automodel_spec_to_compiler_output
 from nmp.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
-    DeploymentParams,
     DistillationTraining,
     ExportParams,
     LoRAParams,
     OutputResponse,
     RetrievalParams,
     SFTTraining,
-    ToolCallParams,
 )
 from nmp.automodel.app.jobs.compiler import _build_file_download_config
 from nmp.automodel.compile import platform_job_config_compiler
@@ -30,9 +29,6 @@ from nmp.automodel.entities.values import OutputNameType
 from nmp.automodel.images import get_tasks_image, get_training_image
 from nmp.common.entities.utils import get_random_id
 from nmp.common.jobs.exceptions import PlatformJobCompilationError
-from nmp.customization_common.schemas.model_entity import (
-    DeploymentParameters as ModelEntityDeploymentParameters,
-)
 from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
 
 
@@ -489,7 +485,7 @@ def test_build_model_entity_config_forwards_inline_deployment_config() -> None:
     )
     config = _build_model_entity_config("default", job_spec)
 
-    assert isinstance(config.deployment_config, ModelEntityDeploymentParameters)
+    assert isinstance(config.deployment_config, DeploymentParams)
     assert config.deployment_config.gpu == 2
     assert config.deployment_config.image_name == "img"
     assert config.deployment_config.lora_enabled is True
@@ -527,7 +523,7 @@ def test_deployment_config_survives_the_plugin_adapter() -> None:
     )
     config = _build_model_entity_config("default", spec)
 
-    assert isinstance(config.deployment_config, ModelEntityDeploymentParameters)
+    assert isinstance(config.deployment_config, DeploymentParams)
     assert config.deployment_config.gpu == 3
 
 

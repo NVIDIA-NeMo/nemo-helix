@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 
 from nemo_platform_plugin.client.errors import NotFoundError
+from nemo_platform_plugin.deployment import DeploymentParams
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nemo_platform_plugin.jobs.api_factory import (
     ContainerSpec,
@@ -49,9 +50,6 @@ from nmp.customization_common.schemas.file_io import (
     FileIOTaskConfig,
     FileSetRef,
     UploadItem,
-)
-from nmp.customization_common.schemas.model_entity import (
-    DeploymentParameters as ModelEntityDeploymentParameters,
 )
 from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
 from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients, fetch_model_entity
@@ -89,7 +87,7 @@ from nmp.rl.images import (
     get_tasks_image,
     get_training_image,
 )
-from nmp.rl.schemas import DeploymentParams, DPOTraining, GRPOTraining, RlJobOutput
+from nmp.rl.schemas import DPOTraining, GRPOTraining, RlJobOutput
 
 logger = logging.getLogger(__name__)
 
@@ -174,14 +172,6 @@ def _build_model_entity_config(
         description = f"{method}-trained LoRA adapter from nmp-rl job ({job_spec.model})"
     else:
         description = f"{method}-trained model from nmp-rl job ({job_spec.model})"
-    # String refs pass through as-is; inline params are converted from the
-    # user-facing shape to the task-side shape via model_validate(model_dump()).
-    deployment_config: str | ModelEntityDeploymentParameters | None = None
-    if isinstance(job_spec.deployment_config, str):
-        deployment_config = job_spec.deployment_config
-    elif job_spec.deployment_config is not None:
-        deployment_config = ModelEntityDeploymentParameters.model_validate(job_spec.deployment_config.model_dump())
-
     return ModelEntityTaskConfig(
         name=job_spec.output.name,
         workspace=workspace,
@@ -191,7 +181,7 @@ def _build_model_entity_config(
         base_model=job_spec.model,
         peft=peft,
         trust_remote_code=trust_remote_code,
-        deployment_config=deployment_config,
+        deployment_config=job_spec.deployment_config,
     )
 
 

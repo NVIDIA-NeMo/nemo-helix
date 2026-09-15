@@ -8,8 +8,6 @@
 """
 
 from nmp.rl.schemas.job import (
-    DEPLOYMENT_CONFIG_DESCRIPTION,
-    DeploymentParams,
     DPOTraining,
     GRPOTraining,
     LoRAParams,
@@ -18,15 +16,12 @@ from nmp.rl.schemas.job import (
     ParallelismParams,
     RlJobOutput,
     RlSchema,
-    ToolCallParams,
     TrainingMethod,
     trains_lora_adapter,
 )
 
 __all__ = [
-    "DEPLOYMENT_CONFIG_DESCRIPTION",
     "DPOTraining",
-    "DeploymentParams",
     "GRPOTraining",
     "LoRAParams",
     "OutputRequest",
@@ -34,7 +29,6 @@ __all__ = [
     "ParallelismParams",
     "RlJobOutput",
     "RlSchema",
-    "ToolCallParams",
     "TrainingMethod",
     "trains_lora_adapter",
 ]

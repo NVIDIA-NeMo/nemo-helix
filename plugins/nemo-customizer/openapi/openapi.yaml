@@ -1221,52 +1221,6 @@ components:
       required:
       - training
       title: AutomodelDatasetSpec
-    AutomodelDeploymentParams:
-      properties:
-        gpu:
-          type: integer
-          exclusiveMinimum: 0.0
-          title: Gpu
-          description: Number of GPUs required for the deployment.
-          default: 1
-        additional_envs:
-          title: Additional Envs
-          description: Additional environment variables for the deployment.
-          additionalProperties:
-            type: string
-          type: object
-        disk_size:
-          title: Disk Size
-          description: Disk size for the deployment.
-          type: string
-        image_name:
-          title: Image Name
-          description: Container image name from NGC. If not specified, defaults to
-            multi-llm.
-          type: string
-        image_tag:
-          title: Image Tag
-          description: Container image tag from NGC.
-          type: string
-        lora_enabled:
-          type: boolean
-          title: Lora Enabled
-          description: When auto-deploying a full SFT training, setting this true
-            allows subsequent LoRA adapters to be deployed against it.
-          default: true
-        tool_call_config:
-          allOf:
-          - $ref: '#/components/schemas/AutomodelToolCallParams'
-          description: Tool calling configuration override for the NIM deployment.
-      additionalProperties: false
-      type: object
-      title: AutomodelDeploymentParams
-      description: 'Inline deployment parameters for auto-deploying a trained model.
-
-
-        Used in :class:`AutomodelJobInput.deployment_config` and passed through to
-
-        the model_entity task at compile time. When unset, no deployment is launched.'
     AutomodelExportSpec:
       properties:
         primary:
@@ -1354,8 +1308,8 @@ components:
           anyOf:
           - type: string
             title: Reference
-            description: A reference to AutomodelDeploymentParams.
-          - $ref: '#/components/schemas/AutomodelDeploymentParams'
+            description: A reference to DeploymentParams.
+          - $ref: '#/components/schemas/DeploymentParams'
           title: Deployment Config
           description: Deployment configuration for auto-deploying the model after
             training. Pass a string to reference an existing ModelDeploymentConfig
@@ -1397,8 +1351,8 @@ components:
           anyOf:
           - type: string
             title: Reference
-            description: A reference to AutomodelDeploymentParams.
-          - $ref: '#/components/schemas/AutomodelDeploymentParams'
+            description: A reference to DeploymentParams.
+          - $ref: '#/components/schemas/DeploymentParams'
           title: Deployment Config
           description: Deployment configuration for auto-deploying the model after
             training. Pass a string to reference an existing ModelDeploymentConfig
@@ -1827,27 +1781,6 @@ components:
       additionalProperties: false
       type: object
       title: AutomodelScheduleSpec
-    AutomodelToolCallParams:
-      properties:
-        tool_call_parser:
-          title: Tool Call Parser
-          description: Name of the tool call parser to use (e.g., 'openai', 'hermes',
-            'pythonic', 'llama3_json', 'mistral').
-          type: string
-        tool_call_plugin:
-          title: Tool Call Plugin
-          description: 'Reference to a fileset containing the custom tool call plugin
-            Python file. Expected format: ''{workspace}/{fileset_name}''.'
-          type: string
-          pattern: ^[\w\-.]+/[\w\-.]+$
-        auto_tool_choice:
-          title: Auto Tool Choice
-          description: Whether to enable automatic tool choice.
-          type: boolean
-      additionalProperties: false
-      type: object
-      title: AutomodelToolCallParams
-      description: Tool calling configuration for NIM deployments.
     AutomodelTrainingSpec:
       properties:
         training_type:
@@ -1970,6 +1903,53 @@ components:
           type: string
       title: DatetimeFilter
       type: object
+    DeploymentParams:
+      properties:
+        gpu:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Gpu
+          description: Number of GPUs required for the deployment.
+          default: 1
+        additional_envs:
+          title: Additional Envs
+          description: Additional environment variables for the deployment.
+          additionalProperties:
+            type: string
+          type: object
+        disk_size:
+          title: Disk Size
+          description: Disk size for the deployment.
+          type: string
+        image_name:
+          title: Image Name
+          description: Container image name from NGC. If not specified, defaults to
+            multi-llm.
+          type: string
+        image_tag:
+          title: Image Tag
+          description: Container image tag from NGC.
+          type: string
+        lora_enabled:
+          type: boolean
+          title: Lora Enabled
+          description: When auto-deploying a full-weight training, setting this true
+            allows subsequent LoRA adapters to be deployed against it.
+          default: true
+        tool_call_config:
+          allOf:
+          - $ref: '#/components/schemas/ToolCallParams'
+          description: Tool calling configuration override for the NIM deployment.
+      additionalProperties: false
+      type: object
+      title: DeploymentParams
+      description: 'Inline deployment parameters for auto-deploying a trained model.
+
+
+        Used in each backend''s ``job_spec.deployment_config`` and passed through
+        to the
+
+        model_entity task at compile time. When unset, no deployment is launched.'
     FileStorageType:
       type: string
       enum:
@@ -2544,52 +2524,6 @@ components:
       - type
       title: RlDPOTraining
       description: "Direct Preference Optimization (full-weight only \u2014 PEFT unsupported)."
-    RlDeploymentParams:
-      properties:
-        gpu:
-          type: integer
-          exclusiveMinimum: 0.0
-          title: Gpu
-          description: Number of GPUs required for the deployment.
-          default: 1
-        additional_envs:
-          title: Additional Envs
-          description: Additional environment variables for the deployment.
-          additionalProperties:
-            type: string
-          type: object
-        disk_size:
-          title: Disk Size
-          description: Disk size for the deployment.
-          type: string
-        image_name:
-          title: Image Name
-          description: Container image name from NGC. If not specified, defaults to
-            multi-llm.
-          type: string
-        image_tag:
-          title: Image Tag
-          description: Container image tag from NGC.
-          type: string
-        lora_enabled:
-          type: boolean
-          title: Lora Enabled
-          description: When auto-deploying a full-weight training, setting this true
-            allows subsequent LoRA adapters to be deployed against it.
-          default: true
-        tool_call_config:
-          allOf:
-          - $ref: '#/components/schemas/RlToolCallParams'
-          description: Tool calling configuration override for the NIM deployment.
-      additionalProperties: false
-      type: object
-      title: RlDeploymentParams
-      description: 'Inline deployment parameters for auto-deploying a trained model.
-
-
-        Used in :class:`RlJobInput.deployment_config` and passed through to the
-
-        model_entity task at compile time. When unset, no deployment is launched.'
     RlGRPOTraining:
       properties:
         optimizer_type:
@@ -3063,8 +2997,8 @@ components:
           anyOf:
           - type: string
             title: Reference
-            description: A reference to RlDeploymentParams.
-          - $ref: '#/components/schemas/RlDeploymentParams'
+            description: A reference to DeploymentParams.
+          - $ref: '#/components/schemas/DeploymentParams'
           title: Deployment Config
           description: Deployment configuration for auto-deploying the model after
             training. Pass a string to reference an existing ModelDeploymentConfig
@@ -3115,8 +3049,8 @@ components:
           anyOf:
           - type: string
             title: Reference
-            description: A reference to RlDeploymentParams.
-          - $ref: '#/components/schemas/RlDeploymentParams'
+            description: A reference to DeploymentParams.
+          - $ref: '#/components/schemas/DeploymentParams'
           title: Deployment Config
           description: Deployment configuration for auto-deploying the model after
             training. Pass a string to reference an existing ModelDeploymentConfig
@@ -3489,27 +3423,6 @@ components:
         ``overlong_buffer_length`` tokens before ``max_response_length``; ``stop_properly_penalty_coef``
 
         scales the reward of anything truncated outright.'
-    RlToolCallParams:
-      properties:
-        tool_call_parser:
-          title: Tool Call Parser
-          description: Name of the tool call parser to use (e.g., 'openai', 'hermes',
-            'pythonic', 'llama3_json', 'mistral').
-          type: string
-        tool_call_plugin:
-          title: Tool Call Plugin
-          description: 'Reference to a fileset containing the custom tool call plugin
-            Python file. Expected format: ''{workspace}/{fileset_name}''.'
-          type: string
-          pattern: ^[\w\-.]+/[\w\-.]+$
-        auto_tool_choice:
-          title: Auto Tool Choice
-          description: Whether to enable automatic tool choice.
-          type: boolean
-      additionalProperties: false
-      type: object
-      title: RlToolCallParams
-      description: Tool calling configuration for NIM deployments.
     SecretRef:
       type: string
       pattern: ^[a-z0-9_-]+(/[a-z0-9_-]+)?$
@@ -3544,6 +3457,27 @@ components:
           type: array
       title: StringFilter
       type: object
+    ToolCallParams:
+      properties:
+        tool_call_parser:
+          title: Tool Call Parser
+          description: Name of the tool call parser to use (e.g., 'openai', 'hermes',
+            'pythonic', 'llama3_json', 'mistral').
+          type: string
+        tool_call_plugin:
+          title: Tool Call Plugin
+          description: 'Reference to a fileset containing the custom tool call plugin
+            Python file. Expected format: ''{workspace}/{fileset_name}''.'
+          type: string
+          pattern: ^[\w\-.]+/[\w\-.]+$
+        auto_tool_choice:
+          title: Auto Tool Choice
+          description: Whether to enable automatic tool choice.
+          type: boolean
+      additionalProperties: false
+      type: object
+      title: ToolCallParams
+      description: Tool calling configuration for NIM deployments.
     UnslothBatchSpec:
       properties:
         per_device_train_batch_size:
@@ -3602,51 +3536,6 @@ components:
         each fileset before training; ``train_sft`` only ever sees a local
 
         filesystem path.'
-    UnslothDeploymentParams:
-      properties:
-        gpu:
-          type: integer
-          title: Gpu
-          description: Number of GPUs required for the deployment.
-          default: 1
-        additional_envs:
-          title: Additional Envs
-          description: Additional environment variables for the deployment.
-          additionalProperties:
-            type: string
-          type: object
-        disk_size:
-          title: Disk Size
-          description: Disk size for the deployment.
-          type: string
-        image_name:
-          title: Image Name
-          description: Container image name from NGC. If not specified, defaults to
-            multi-llm.
-          type: string
-        image_tag:
-          title: Image Tag
-          description: Container image tag from NGC.
-          type: string
-        lora_enabled:
-          type: boolean
-          title: Lora Enabled
-          description: When auto-deploying a full SFT training, setting this true
-            allows subsequent LoRA adapters to be deployed against it.
-          default: true
-        tool_call_config:
-          allOf:
-          - $ref: '#/components/schemas/UnslothToolCallParams'
-          description: Tool calling configuration override for the NIM deployment.
-      additionalProperties: false
-      type: object
-      title: UnslothDeploymentParams
-      description: 'Inline deployment parameters for auto-deploying a trained model.
-
-
-        Used in :class:`UnslothJobInput.deployment_config` and passed through to
-
-        the model_entity task at compile time. When unset, no deployment is launched.'
     UnslothHardwareSpec:
       properties:
         gpus:
@@ -3692,8 +3581,8 @@ components:
           anyOf:
           - type: string
             title: Reference
-            description: A reference to UnslothDeploymentParams.
-          - $ref: '#/components/schemas/UnslothDeploymentParams'
+            description: A reference to DeploymentParams.
+          - $ref: '#/components/schemas/DeploymentParams'
           title: Deployment Config
           description: Deployment configuration for auto-deploying the model after
             training. Pass a string to reference an existing ModelDeploymentConfig
@@ -3733,8 +3622,8 @@ components:
           anyOf:
           - type: string
             title: Reference
-            description: A reference to UnslothDeploymentParams.
-          - $ref: '#/components/schemas/UnslothDeploymentParams'
+            description: A reference to DeploymentParams.
+          - $ref: '#/components/schemas/DeploymentParams'
           title: Deployment Config
           description: Deployment configuration for auto-deploying the model after
             training. Pass a string to reference an existing ModelDeploymentConfig
@@ -4272,27 +4161,6 @@ components:
       type: object
       title: UnslothScheduleSpec
       description: Training schedule, scheduler, logging cadence.
-    UnslothToolCallParams:
-      properties:
-        tool_call_parser:
-          title: Tool Call Parser
-          description: Name of the tool call parser to use (e.g., 'openai', 'hermes',
-            'pythonic', 'llama3_json', 'mistral').
-          type: string
-        tool_call_plugin:
-          title: Tool Call Plugin
-          description: 'Reference to a fileset containing the custom tool call plugin
-            Python file. Expected format: ''{workspace}/{fileset_name}''.'
-          type: string
-          pattern: ^[\w\-.]+/[\w\-.]+$
-        auto_tool_choice:
-          title: Auto Tool Choice
-          description: Whether to enable automatic tool choice.
-          type: boolean
-      additionalProperties: false
-      type: object
-      title: UnslothToolCallParams
-      description: Tool calling configuration for NIM deployments.
     UnslothTrainingSpec:
       properties:
         training_type:

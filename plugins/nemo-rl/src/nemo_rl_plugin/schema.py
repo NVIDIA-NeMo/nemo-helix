@@ -12,10 +12,14 @@ into the canonical output.
 
 from __future__ import annotations
 
-from nemo_platform_plugin.integrations import IntegrationsSpec
-from nmp.rl.schemas import (
+from nemo_platform_plugin.deployment import (
     DEPLOYMENT_CONFIG_DESCRIPTION,
     DeploymentParams,
+    ToolCallParams,
+    reject_lora_without_lora_enabled,
+)
+from nemo_platform_plugin.integrations import IntegrationsSpec
+from nmp.rl.schemas import (
     DPOTraining,
     GRPOTraining,
     LoRAParams,
@@ -23,7 +27,6 @@ from nmp.rl.schemas import (
     ParallelismParams,
     RlJobOutput,
     RlSchema,
-    ToolCallParams,
     TrainingMethod,
     trains_lora_adapter,
 )
@@ -84,17 +87,8 @@ class RlJobInput(RlSchema):
 
     @model_validator(mode="after")
     def _reject_lora_without_lora_enabled(self) -> RlJobInput:
-        # A LoRA adapter cannot be served by a base deployment with lora_enabled=false --
-        # the deployed NIM would refuse to load it. Surface this at submit time rather
-        # than after an expensive GRPO run has already finished.
-        if (
-            self.trains_lora_adapter
-            and isinstance(self.deployment_config, DeploymentParams)
-            and not self.deployment_config.lora_enabled
-        ):
-            raise ValueError(
-                "deployment_config.lora_enabled must be true (or omitted) when training a LoRA adapter. "
-                "Setting lora_enabled=false would deploy the base model without LoRA support, "
-                "making the trained adapter unservable."
-            )
+        reject_lora_without_lora_enabled(
+            self.deployment_config,
+            trains_lora_adapter=self.trains_lora_adapter,
+        )
         return self

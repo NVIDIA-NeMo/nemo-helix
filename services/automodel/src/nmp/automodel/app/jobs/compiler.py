@@ -54,9 +54,6 @@ from nmp.customization_common.schemas.file_io import (
     UploadItem,
 )
 from nmp.customization_common.schemas.model_entity import (
-    DeploymentParameters as ModelEntityDeploymentParameters,
-)
-from nmp.customization_common.schemas.model_entity import (
     ModelEntityTaskConfig,
 )
 from nmp.customization_common.schemas.model_entity import (
@@ -255,16 +252,6 @@ def _build_model_entity_config(
             rank=training.peft.rank,
         )
 
-    # Only forward the user-supplied deployment_config from the job spec.
-    # tool_call_config from the *source* model entity's spec is propagated
-    # separately via fileset metadata (see build_output_fileset_metadata_from_model_entity),
-    # so we intentionally do not merge it here.
-    deployment_config: str | ModelEntityDeploymentParameters | None = None
-    if isinstance(job_spec.deployment_config, str):
-        deployment_config = job_spec.deployment_config
-    elif job_spec.deployment_config is not None:
-        deployment_config = ModelEntityDeploymentParameters.model_validate(job_spec.deployment_config.model_dump())
-
     return ModelEntityTaskConfig(
         name=job_spec.output.name,
         workspace=workspace,
@@ -277,7 +264,7 @@ def _build_model_entity_config(
         model_entity=job_spec.model,
         peft=peft_config,
         trust_remote_code=trust_remote_code,
-        deployment_config=deployment_config,
+        deployment_config=job_spec.deployment_config,
     )
 
 

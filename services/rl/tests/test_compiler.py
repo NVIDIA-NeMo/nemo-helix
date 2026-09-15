@@ -14,13 +14,11 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from nemo_platform_plugin.client.errors import NotFoundError
+from nemo_platform_plugin.deployment import DeploymentParams, ToolCallParams
 from nemo_platform_plugin.integrations import IntegrationsSpec, MlflowIntegration, WandbIntegration
 from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
 from nemo_platform_plugin.models.types import ModelEntity
 from nmp.common.entities.utils import get_random_id
-from nmp.customization_common.schemas.model_entity import (
-    DeploymentParameters as ModelEntityDeploymentParameters,
-)
 from nmp.customization_common.schemas.values import OutputNameType
 from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
 from nmp.rl.app.jobs.compiler import (
@@ -33,13 +31,11 @@ from nmp.rl.app.jobs.compiler import (
 from nmp.rl.app.jobs.training.schemas import OptimizerType, TrainingType
 from nmp.rl.entities.values import FinetuningType
 from nmp.rl.schemas import (
-    DeploymentParams,
     DPOTraining,
     GRPOTraining,
     OutputResponse,
     ParallelismParams,
     RlJobOutput,
-    ToolCallParams,
 )
 
 
@@ -483,7 +479,7 @@ def test_model_entity_config_forwards_inline_deployment_config() -> None:
     )
     config = _build_model_entity_config("default", job, trust_remote_code=False)
 
-    assert isinstance(config.deployment_config, ModelEntityDeploymentParameters)
+    assert isinstance(config.deployment_config, DeploymentParams)
     assert config.deployment_config.gpu == 2
     assert config.deployment_config.image_name == "img"
     assert config.deployment_config.lora_enabled is True
