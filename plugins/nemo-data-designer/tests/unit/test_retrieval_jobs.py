@@ -207,15 +207,10 @@ async def test_retrieval_prepare_resolves_model_fileset_for_mining() -> None:
         fileset="nvidia/nemotron-3-embed-1b-bf16",
         trust_remote_code=True,
     )
-    with (
-        patch(
-            "nemo_data_designer_plugin.jobs.retrieval_prepare.async_customization_platform_clients_from_platform",
-        ),
-        patch(
-            "nemo_data_designer_plugin.jobs.retrieval_prepare.fetch_model_entity",
-            new=AsyncMock(return_value=model),
-        ) as fetch,
-    ):
+    with patch(
+        "nemo_data_designer_plugin.jobs.retrieval_prepare.fetch_model_entity",
+        new=AsyncMock(return_value=model),
+    ) as fetch:
         step = await RetrievalPrepareJob.to_spec(
             RetrievalPrepareJobConfig(sdg_input="default/stage0", enable_mining=True),
             workspace="default",

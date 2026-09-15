@@ -21,10 +21,7 @@ from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
 from nmp.customization_common.retrieval.inline import wrapped_to_inline_jsonl
-from nmp.customization_common.service.platform_client import (
-    async_customization_platform_clients_from_platform,
-    fetch_model_entity,
-)
+from nmp.customization_common.service.platform_client import fetch_model_entity
 from pydantic import BaseModel
 
 
@@ -54,8 +51,7 @@ class RetrievalPrepareJob(NemoJob):
         if not job_config.enable_mining:
             return RetrievalPrepareStepConfig(job_config=job_config, phase="convert")
 
-        platform = async_customization_platform_clients_from_platform(cast(AsyncNeMoPlatform, async_sdk))
-        model = await fetch_model_entity(job_config.model, workspace, platform)
+        model = await fetch_model_entity(job_config.model, workspace, cast(AsyncNeMoPlatform, async_sdk))
         if not model.fileset:
             raise ValueError(
                 f"Model '{model.workspace}/{model.name}' has no fileset. "
