@@ -383,7 +383,11 @@ makes bundle-relative `mcp.servers.*.args` paths absolute per trial). It replays
 the `analysis` stored on each `dataset-mcp.json` row, so new tasks only need a
 real analyzer's result recorded once. Trials are scored on the judged
 classification, on the analyzer being called exactly once, and on the email
-reaching the tool verbatim; the last two are read from the ATIF trajectory. Full steps are in `plugins/nemo-optimization/examples/hermes-optimize/README.md`.
+reaching the tool verbatim; the last two are read from the ATIF trajectory.
+`optimize-mcp-live.yaml` runs the same study against the real analyzer from the
+`email-phishing-analyzer-harnesses` checkout, declared statically with its
+console script as `url` and its key in `env` (`PHISHING_MCP_BIN`,
+`NVIDIA_API_KEY`). Full steps are in `plugins/nemo-optimization/examples/hermes-optimize/README.md`.
 
 <Tabs>
 

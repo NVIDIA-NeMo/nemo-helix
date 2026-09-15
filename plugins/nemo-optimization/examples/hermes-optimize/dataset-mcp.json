@@ -8,12 +8,14 @@
     "analysis": {
       "is_likely_phishing": true,
       "label": "phishing",
-      "confidence": 0.98,
-      "reasons": [
-        "unsolicited prize offer",
-        "urgency to act fast",
-        "link to an unrelated domain asking for personal details"
-      ]
+      "confidence": 0.92,
+      "indicators": [
+        "request for personal information (shipping address)",
+        "suspicious link (http://malicious-link.example.com/claim)",
+        "urgent/limited offer language",
+        "free prize claim to create urgency"
+      ],
+      "explanation": "The message uses a classic phishing pattern: it offers a free high‑value item, creates a sense of urgency, and asks the recipient to click a suspicious link and provide personal details, all hallmarks of malicious intent."
     }
   },
   {
@@ -25,12 +27,15 @@
     "analysis": {
       "is_likely_phishing": true,
       "label": "phishing",
-      "confidence": 0.97,
-      "reasons": [
-        "threat of account suspension",
-        "24-hour deadline",
-        "link requesting credentials"
-      ]
+      "confidence": 0.96,
+      "indicators": [
+        "Urgent language",
+        "Request for credentials",
+        "Suspicious link",
+        "Threat of account suspension",
+        "Impersonation of support"
+      ],
+      "explanation": "The email uses urgent, threatening language and a fake support claim to trick the recipient into clicking a malicious link and entering credentials."
     }
   },
   {
@@ -42,12 +47,14 @@
     "analysis": {
       "is_likely_phishing": true,
       "label": "phishing",
-      "confidence": 0.86,
-      "reasons": [
-        "generic greeting",
-        "invoice lure with an external link",
-        "sender domain does not match a known vendor"
-      ]
+      "confidence": 0.65,
+      "indicators": [
+        "Suspicious link to external domain (http://invoice-example.com)",
+        "Unsolicited request to view invoice via link",
+        "Generic greeting and lack of specific details",
+        "Potential impersonation of customer service"
+      ],
+      "explanation": "The email contains a link to an external domain with no context, uses a generic greeting, and asks the recipient to click to view an invoice, which are common phishing tactics."
     }
   },
   {
@@ -59,12 +66,9 @@
     "analysis": {
       "is_likely_phishing": false,
       "label": "benign",
-      "confidence": 0.95,
-      "reasons": [
-        "internal meeting reminder",
-        "no links or requests for information",
-        "known colleague as sender"
-      ]
+      "confidence": 0.02,
+      "indicators": [],
+      "explanation": "The email is a straightforward reminder about a project meeting, contains no requests for personal data, credentials, urgent threats, impersonation, suspicious links, or unusual payment requests."
     }
   },
   {
@@ -76,12 +80,9 @@
     "analysis": {
       "is_likely_phishing": false,
       "label": "benign",
-      "confidence": 0.9,
-      "reasons": [
-        "references a specific existing purchase",
-        "no links or urgency",
-        "named sender at the company"
-      ]
+      "confidence": 0.96,
+      "indicators": [],
+      "explanation": "The message is a straightforward invoice follow-up with no requests for personal data, credentials, urgent language, impersonation, suspicious links, or unusual payment requests."
     }
   }
 ]

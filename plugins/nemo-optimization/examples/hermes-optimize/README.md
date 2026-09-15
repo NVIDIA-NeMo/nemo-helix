@@ -18,6 +18,7 @@ bundle portable when the platform sees only the files you staged into a fileset.
 | **Chat-only** | Tunes temperature on a short Q&A agent (no tools) | [`optimize-chatonly.yaml`](optimize-chatonly.yaml) | [`dataset-chatonly.json`](dataset-chatonly.json) |
 | **Chat-only + `--agent`** | Same study; agent body from a platform entity | [`optimize-chatonly-via-agent.yaml`](optimize-chatonly-via-agent.yaml) | [`agents/chatonly/agent.yaml`](agents/chatonly/agent.yaml) |
 | **MCP** | Tunes temperature / top_p on a phishing agent that calls an MCP analyzer shipped in the bundle, scoring accuracy, exactly-one tool call, and verbatim tool input | [`optimize-mcp.yaml`](optimize-mcp.yaml) | [`dataset-mcp.json`](dataset-mcp.json), [`phishing_analyzer_mcp/`](phishing_analyzer_mcp/) |
+| **MCP, real analyzer** | The same study against the real analyzer MCP server from the `email-phishing-analyzer-harnesses` checkout, declared statically | [`optimize-mcp-live.yaml`](optimize-mcp-live.yaml) | `PHISHING_MCP_BIN` |
 
 Official docs: [Optimize Agents](../../../../docs/agents/optimization.mdx).
 
@@ -287,9 +288,29 @@ email text: an agent that passes the email verbatim gets the canned verdict, one
 that edits it gets `unknown`. The study tunes the Hermes coordinator that calls
 the tool, which is what a fixed LLM analyzer would have measured too.
 
-To add an email to the eval set, run a real analyzer on it once and store its
-result as the row's `analysis` (the fixture reads `PHISHING_ANALYZER_DATASET` if
-you keep the dataset elsewhere).
+The stored `analysis` values were recorded from a run of
+[`optimize-mcp-live.yaml`](optimize-mcp-live.yaml) against the real analyzer
+(2026-09-15). To add an email to the eval set, run that variant on it once and
+store the analyzer's result as the row's `analysis` (the fixture reads
+`PHISHING_ANALYZER_DATASET` if you keep the dataset elsewhere).
+
+### Option 1: the real analyzer, statically configured
+
+[`optimize-mcp-live.yaml`](optimize-mcp-live.yaml) is the same study against the
+real analyzer MCP server. Only the server block differs: the analyzer's console
+script is the `url` and its credential rides in `env`, both expanded from the
+environment when the optimizer loads the config. No per-task binding, no hook.
+
+```bash
+export PHISHING_MCP_BIN="$HOME/workspace/email-phishing-analyzer-harnesses/.venv/bin/email-phishing-analyzer-mcp"
+export NVIDIA_API_KEY=...   # the analyzer's default config targets integrate.api.nvidia.com
+```
+
+Use this variant to bring a production MCP server under test; use the mock when
+the study should not depend on the tool's own model. The mock's recorded
+`analysis` per row comes from a run of this variant. Note the harness checkout's
+`configs/common.yaml` must name a live model: its default
+`nvidia/nemotron-3-nano-30b-a3b` on `integrate.api.nvidia.com` returns 410 Gone.
 
 Three evaluators score each trial: the judge compares the final classification
 with the dataset label (`average_score`); `tool_call_count` reads the ATIF

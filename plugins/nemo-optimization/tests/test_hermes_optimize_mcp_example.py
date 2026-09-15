@@ -27,6 +27,7 @@ _EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "hermes-optimize"
 # installs, but a test run synced without `--all-packages` must still exercise the fixture.
 _SERVER_PATH = _EXAMPLE / "phishing_analyzer_mcp" / "server.py"
 _CONFIG = yaml.safe_load((_EXAMPLE / "optimize-mcp.yaml").read_text(encoding="utf-8"))
+_LIVE_CONFIG = yaml.safe_load((_EXAMPLE / "optimize-mcp-live.yaml").read_text(encoding="utf-8"))
 _DATASET = json.loads((_EXAMPLE / "dataset-mcp.json").read_text(encoding="utf-8"))
 
 
@@ -113,3 +114,38 @@ def test_fabric_accepts_the_example_agent_config() -> None:
     plan = Fabric().plan(FabricConfig.from_mapping(agent))
     servers = plan.capability_plan["mcp_servers"]
     assert servers["email-phishing-analyzer"]["args"] == ["phishing_analyzer_mcp/server.py"]
+
+
+def test_the_live_variant_differs_from_the_mock_only_in_how_the_server_is_launched() -> None:
+    """Option 1 (real server) and option 2 (mock) must be the same study; only the tool changes."""
+    live_server = _LIVE_CONFIG["mcp"]["servers"]["email-phishing-analyzer"]
+    assert live_server == {
+        "transport": "stdio",
+        "url": "${PHISHING_MCP_BIN}",
+        "env": {"NVIDIA_API_KEY": "${NVIDIA_API_KEY}"},
+        "exposure": "harness_native",
+    }
+    strip = {"metadata", "mcp"}
+    assert {k: v for k, v in _LIVE_CONFIG.items() if k not in strip} == {
+        k: v for k, v in _CONFIG.items() if k not in strip
+    }
+    # The same evaluators build, so the two variants score on identical objectives.
+    live_types = sorted(type(m).__name__ for m in _build_metrics(_LIVE_CONFIG, _LIVE_CONFIG["eval"]))
+    assert live_types == sorted(type(m).__name__ for m in _build_metrics(_CONFIG, _CONFIG["eval"]))
+
+
+def test_fabric_accepts_the_live_variant_with_its_credential_in_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("nemo_fabric")
+    import os
+
+    from nemo_fabric import Fabric, FabricConfig
+
+    # The optimizer expands ${VAR} on load; do the same here with placeholder values.
+    monkeypatch.setenv("PHISHING_MCP_BIN", "/opt/analyzer/.venv/bin/email-phishing-analyzer-mcp")
+    monkeypatch.setenv("NVIDIA_API_KEY", "placeholder")
+    agent = json.loads(
+        os.path.expandvars(json.dumps({k: v for k, v in _LIVE_CONFIG.items() if k not in {"optimizer", "eval"}}))
+    )
+    server = Fabric().plan(FabricConfig.from_mapping(agent)).capability_plan["mcp_servers"]["email-phishing-analyzer"]
+    assert server["url"] == "/opt/analyzer/.venv/bin/email-phishing-analyzer-mcp"
+    assert server["env"] == {"NVIDIA_API_KEY": "placeholder"}
