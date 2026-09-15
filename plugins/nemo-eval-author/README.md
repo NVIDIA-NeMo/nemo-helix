@@ -33,6 +33,7 @@ group.
 | Skill | Role |
 | --- | --- |
 | [`eval-author`](skills/eval-author/SKILL.md) | Core. Owns the standard every sub-flow follows and routes to one. |
+| [`eval-author-first-eval`](skills/eval-author-first-eval/SKILL.md) | Sub-flow. Requires Ethos, plans cases without Harbor, and builds a small working starter suite while explaining how to run and extend it. |
 | [`eval-author-discover`](skills/eval-author-discover/SKILL.md) | Sub-flow. Records whether a repository's Harbor evals are ready to run. |
 | [`eval-author-audit`](skills/eval-author-audit/SKILL.md) | Sub-flow. Validates an existing finite `audit.md` coverage denominator. |
 | [`eval-author-inspect-trace`](skills/eval-author-inspect-trace/SKILL.md) | Sub-flow. Not user-invocable. Explains one Intake trace after `eval-author` selects it. |
@@ -92,6 +93,17 @@ The flow does not require model or provider configuration.
 
 ## Next Steps
 
+- If your agent has no evals, start with
+  [`eval-author-first-eval`](skills/eval-author-first-eval/SKILL.md). It requires
+  Ethos, saves and checks it locally in the repo using the bundled
+  [Local Ethos procedure](skills/eval-author/references/local-ethos.md), and
+  reuses saved interview answers. No NeMo service or upload is involved.
+  Missing Harbor leaves you with an evaluation plan and
+  installation guidance; it is never installed automatically. Generated eval
+  artifacts stay under `.eval-author/`; the Ethos itself defaults to root `ETHOS.md`.
+  The first milestone is a few functioning tasks and a repeatable run command,
+  with basic verifier checks and clear limitations. Coverage analysis and
+  trace-driven improvement follow once the suite is working.
 - Start with [`eval-author`](skills/eval-author/SKILL.md) to select the right
   sub-flow and apply the shared evaluation standard.
 - Use [`eval-author-discover`](skills/eval-author-discover/SKILL.md) to check

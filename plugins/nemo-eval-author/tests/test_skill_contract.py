@@ -59,6 +59,7 @@ _CORE_DIR = _SKILLS_DIR / "eval-author"
 _DISCOVER_DIR = _SKILLS_DIR / "eval-author-discover"
 _AUDIT_DIR = _SKILLS_DIR / "eval-author-audit"
 _TASK_CREATE_DIR = _SKILLS_DIR / "eval-author-task-create"
+_FIRST_EVAL_DIR = _SKILLS_DIR / "eval-author-first-eval"
 _INSPECT_DIR = _SKILLS_DIR / "eval-author-inspect-trace"
 _MLFLOW_TO_ATIF_DIR = _SKILLS_DIR / "mlflow-to-atif"
 _TRACE_ENVIRONMENT_DIR = _SKILLS_DIR / "eval-author-trace-environment"
@@ -67,11 +68,12 @@ _SKILL_DIRS = (
     _DISCOVER_DIR,
     _AUDIT_DIR,
     _TASK_CREATE_DIR,
+    _FIRST_EVAL_DIR,
     _INSPECT_DIR,
     _MLFLOW_TO_ATIF_DIR,
     _TRACE_ENVIRONMENT_DIR,
 )
-_SUB_FLOW_DIRS = (_DISCOVER_DIR, _AUDIT_DIR, _TASK_CREATE_DIR, _INSPECT_DIR, _TRACE_ENVIRONMENT_DIR)
+_SUB_FLOW_DIRS = (_DISCOVER_DIR, _AUDIT_DIR, _TASK_CREATE_DIR, _FIRST_EVAL_DIR, _INSPECT_DIR, _TRACE_ENVIRONMENT_DIR)
 _DISCOVER_SCRIPTS_DIR = _DISCOVER_DIR / "scripts"
 _AUDIT_SPEC_DIR = _AUDIT_DIR / "scripts" / "audit_spec"
 _TASK_CREATE_SCRIPTS_DIR = _TASK_CREATE_DIR / "scripts"
@@ -1683,50 +1685,40 @@ def test_audit_skill_reads_schema_before_drafting_items() -> None:
     assert "Do not use validation as the primary way to discover the format" in normalized_step
 
 
-def test_audit_skill_routes_missing_ethos_to_platform_skills() -> None:
-    """Audit needs a real Ethos contract, not a placeholder denominator source."""
-    _, body = _frontmatter_and_body(_AUDIT_DIR)
-    preflight = body.split("## Scripts", 1)[0]
-    normalized_body = re.sub(r"\s+", " ", body)
-    normalized_preflight = re.sub(r"\s+", " ", preflight)
+def test_local_ethos_handoff_resources_are_self_contained() -> None:
+    """Both entry points must resolve the same portable local procedure/template."""
+    reference = _CORE_DIR / "references" / "local-ethos.md"
+    template = _CORE_DIR / "templates" / "ETHOS.md"
+    for skill_dir in (_FIRST_EVAL_DIR, _AUDIT_DIR):
+        _, body = _frontmatter_and_body(skill_dir)
+        links = re.findall(r"\[Local Ethos\]\(([^)]+)\)", body)
+        assert links, f"{skill_dir.name} has no local Ethos handoff"
+        assert all((skill_dir / link).resolve() == reference.resolve() for link in links)
+    links = re.findall(r"\[the local template\]\(([^)]+)\)", reference.read_text())
+    assert len(links) == 1
+    assert (reference.parent / links[0]).resolve() == template.resolve()
+    frontmatter, body = template.read_text().split("---", 2)[1:]
+    front = yaml.safe_load(frontmatter)
+    assert front["schema_version"] == 1
+    assert {"name", "created_timestamp", "author"} <= front.keys()
+    headings = re.findall(r"^## (.+)$", body, re.MULTILINE)
+    assert len(headings) == len(set(headings)) == 15
 
-    assert "If the user provides `--ethos <path>`, validate and use that path" in normalized_preflight
-    assert "`<ethos_path>` before applying repository discovery" in normalized_preflight
-    assert "from `<ethos_path>` and reviewed audit items" in normalized_body
-    assert "If no Ethos file exists, stop the audit flow" in normalized_preflight
-    assert "needs a source of truth for how the agent is supposed to behave" in normalized_preflight
-    assert "Code shows what the agent does today" in normalized_preflight
-    assert "Ethos records intended behavior" in normalized_preflight
-    assert "https://docs.nvidia.com/nemo-platform/documentation/agents/optimize-agents/ethos" in preflight
-    assert "current assistant environment exposes both required Ethos creation skills" in normalized_preflight
-    assert "Ask the user whether they want you to" in normalized_preflight
-    assert "automatically generate the Ethos" in normalized_preflight
-    assert "let them create the Ethos themselves from the documentation" in normalized_preflight
-    assert "Use this user-facing message shape for that skills-present path" in normalized_preflight
-    assert "Missing Ethos" in preflight
-    assert "before it can generate an audit coverage report" in normalized_preflight
-    assert "I could not find `ETHOS.md` at the repository root" in normalized_preflight
-    assert "Docs: https://docs.nvidia.com/nemo-platform/documentation/agents/optimize-agents/ethos" in preflight
-    assert "are available here, so I can generate a real Ethos first" in normalized_preflight
-    assert "How would you like to move forward?" in preflight
-    assert "Generate the Ethos for me with `nemo-explore` and `nemo-ethos`" in preflight
-    assert "I'll create or provide an Ethos path myself" in preflight
-    assert "Only offer automatic generation when both required skills are present and usable" in normalized_preflight
-    assert "do not offer to generate it" in normalized_preflight
-    assert "Use this user-facing message shape for that skills-unavailable path" in normalized_preflight
-    assert "I do not have access to both required Ethos creation skills" in normalized_preflight
-    assert "so I cannot generate one automatically here" in normalized_preflight
-    assert "Create or provide an Ethos path" in normalized_preflight
-    assert "rerun the audit flow with `--ethos <path>`" in normalized_preflight
-    assert "nemo-explore" in preflight
-    assert "nemo-ethos" in preflight
-    assert "agents/<name>-ethos/ETHOS.md" in preflight
-    assert "Do not create a placeholder Ethos inside the audit flow" in normalized_preflight
-    assert "do not substitute other repository material for it" in normalized_preflight
-    assert "Contributor docs, operations docs, README files, code, traces, or draft labels" in normalized_preflight
-    assert "not valid source-of-truth replacements for a missing Ethos" in normalized_preflight
-    assert "Do not synthesize an audit denominator from those materials" in normalized_preflight
-    assert "even if the output is marked as draft" in normalized_preflight
+
+def test_local_ethos_template_is_compatible_with_existing_parser() -> None:
+    """A locally filled template remains usable by existing Ethos consumers."""
+    ethos_parse = pytest.importorskip("nemo_agents_plugin.ethos_parse")
+    markdown = (_CORE_DIR / "templates" / "ETHOS.md").read_text()
+    markdown = markdown.replace("<agent-name>", "airline-demo")
+    markdown = markdown.replace("<ISO-8601-creation-timestamp>", "2026-09-11T12:00:00Z")
+    markdown = markdown.replace("<actual-author>", "Example Maintainer")
+    markdown = re.sub(r"<[^>]+>", "Confirmed local intent.", markdown)
+    markdown += "\n## Local Notes\n\nKeep demo policy fixtures in the repository.\n"
+    ethos = ethos_parse.parse_ethos(markdown, strict=True)
+    assert ethos.name == "airline-demo"
+    assert ethos.author == "Example Maintainer"
+    assert "Local Notes" in ethos.sections
+    assert not ethos.warnings
 
 
 def test_audit_skill_anchors_tool_names_to_runtime_measurement_surface() -> None:
@@ -2333,10 +2325,13 @@ def test_audit_generate_explains_missing_ethos_with_docs_link(tmp_path: Path) ->
     assert "Missing file:" in result.stderr
     assert "Docs: https://docs.nvidia.com/nemo-platform/documentation/agents/optimize-agents/ethos" in result.stderr
     assert "Next steps:\n" in result.stderr
-    assert "- Create an Ethos, then rerun this command with --ethos <path>." in result.stderr
+    assert "rerun this command with --ethos <path>" in result.stderr
     assert "https://docs.nvidia.com/nemo-platform/documentation/agents/optimize-agents/ethos" in result.stderr
-    assert "nemo-explore followed by nemo-ethos" in result.stderr
-    assert "author ETHOS.md by hand" in result.stderr
+    assert "skills/eval-author/references/local-ethos.md" in result.stderr
+    assert "Save ETHOS.md in the repository and review its contents" in result.stderr
+    assert "No platform service or upload is required" in result.stderr
+    assert "nemo-explore" not in result.stderr
+    assert "nemo-ethos" not in result.stderr
     assert "Traceback" not in result.stderr
     assert not out.exists()
 
