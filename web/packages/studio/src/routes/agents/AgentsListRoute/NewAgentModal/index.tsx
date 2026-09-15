@@ -148,7 +148,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   // useWatch re-renders this modal on every keystroke; the summary depends only on entries.
   const entriesSummary = useMemo(() => {
     if (entries.length === 0) return undefined;
-    const size = `${entries.length} files, ${Math.max(1, Math.round(totalEntryBytes(entries) / 1000))} KB`;
+    const size = `${entries.length} ${entries.length === 1 ? 'file' : 'files'}, ${Math.max(1, Math.round(totalEntryBytes(entries) / 1000))} KB`;
     return sourceLabel ? `${sourceLabel} — ${size}` : size;
   }, [sourceLabel, entries]);
 

@@ -259,7 +259,7 @@ describe('NewAgentModal upload tab', () => {
     await openUploadTab(dialog);
     pickFiles(dialog, [looseFile('agent.yaml', FABRIC_YAML)]);
     await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
-    expect(within(dialog).getByText(/^1 files/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/^1 file,/)).toBeInTheDocument();
 
     await submit(dialog, user);
 
