@@ -343,6 +343,10 @@ export const getEvaluationResultsRoute = (workspace: string) => {
   return generatePath(ROUTES.workspace.evaluationResults, { workspace });
 };
 
+export const getEvaluationNewRoute = (workspace: string) => {
+  return generatePath(ROUTES.workspace.evaluationNew, { workspace });
+};
+
 export const getEvaluationResultDetailsRoute = (workspace: string, jobName: string) => {
   return generatePath(ROUTES.workspace.evaluationResultDetails, {
     workspace,

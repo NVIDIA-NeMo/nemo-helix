@@ -207,14 +207,12 @@ export const ScoreModal: FC<ScoreModalProps> = ({ open, onClose, onSave, initial
         <ControlledTextInput
           useControllerProps={{ control: form.control, name: 'name' }}
           label="Name"
-          required
           placeholder="e.g., quality"
         />
 
         <ControlledTextInput
           useControllerProps={{ control: form.control, name: 'description' }}
-          label="Description"
-          placeholder="Optional description of what this score measures"
+          label="Description (optional)"
         />
 
         {scoreType === 'range' && (
@@ -222,13 +220,11 @@ export const ScoreModal: FC<ScoreModalProps> = ({ open, onClose, onSave, initial
             <ControlledTextInput
               useControllerProps={{ control: form.control, name: 'minimum' }}
               label="Minimum"
-              required
               type="number"
             />
             <ControlledTextInput
               useControllerProps={{ control: form.control, name: 'maximum' }}
               label="Maximum"
-              required
               type="number"
             />
           </Flex>
@@ -253,7 +249,6 @@ export const ScoreModal: FC<ScoreModalProps> = ({ open, onClose, onSave, initial
                 <div className="flex-1">
                   <ControlledTextInput
                     useControllerProps={{ control: form.control, name: `rubric.${index}.label` }}
-                    required
                     placeholder="Label"
                   />
                 </div>
@@ -269,7 +264,6 @@ export const ScoreModal: FC<ScoreModalProps> = ({ open, onClose, onSave, initial
                 <div className="w-[80px] shrink-0">
                   <ControlledTextInput
                     useControllerProps={{ control: form.control, name: `rubric.${index}.value` }}
-                    required
                     type="number"
                   />
                 </div>

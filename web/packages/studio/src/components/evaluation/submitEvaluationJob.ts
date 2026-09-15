@@ -48,10 +48,13 @@ const AGENT_RUN_PARAMS = {
   ignore_request_failure: true,
 } as const;
 
+const JOB_FILESET_PREFIX = 'job-fileset-';
+export const JOB_NAME_MAX_LENGTH = FILESET_NAME_MAX_LENGTH - JOB_FILESET_PREFIX.length;
+
 export const buildEvalJobName = (filesetName: string): string => {
   const suffix = Math.random().toString(36).slice(2, 10).padEnd(8, '0');
   const base = toValidFilesetName(filesetName)
-    .slice(0, FILESET_NAME_MAX_LENGTH - suffix.length - 1)
+    .slice(0, JOB_NAME_MAX_LENGTH - suffix.length - 1)
     .replace(/-+$/, '');
   return `${base}-${suffix}`;
 };

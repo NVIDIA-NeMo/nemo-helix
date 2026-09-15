@@ -9,6 +9,7 @@ import {
   buildDatasetEvalRequestBody,
   type DatasetEvalSpec,
   buildEvalJobName,
+  JOB_NAME_MAX_LENGTH,
   buildPersistedSpec,
   injectJudgeModel,
   type InlineMetricBundle,
@@ -221,8 +222,10 @@ describe('buildEvalJobName', () => {
     expect(buildEvalJobName('--a--b--')).toMatch(/^a-b-[a-z0-9]{8}$/);
   });
 
-  it('stays within the 63-character limit', () => {
-    expect(buildEvalJobName('a'.repeat(200)).length).toBeLessThanOrEqual(63);
+  it('leaves room for the job-fileset- prefix the dispatcher prepends', () => {
+    const name = buildEvalJobName('a'.repeat(200));
+    expect(name.length).toBeLessThanOrEqual(JOB_NAME_MAX_LENGTH);
+    expect(`job-fileset-${name}`.length).toBeLessThanOrEqual(63);
   });
 });
 
