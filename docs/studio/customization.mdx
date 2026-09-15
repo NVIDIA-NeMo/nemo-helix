@@ -18,7 +18,19 @@ For customization concepts, supported models, and the underlying CLI and API wor
 
 ## Start a Customization Job
 
-Select **Customize a Model** from the Custom Models list, or open a base model's details panel and select **Customize this Model**. Both open **Fine-tune a Model**, a single form with the following sections, shown as they apply to your selections:
+Select **Customize a Model** from the Custom Models list to open **Fine-tune a Model**, which first asks how you want to start:
+
+| Option | What it does |
+| ------ | ------------ |
+| Start from a template | Provisions a ready-made NVIDIA recipe — registering its base model and loading its dataset into the workspace — then opens the form filled in. See [Start from a Template](#start-from-a-template). |
+| Build from scratch | Opens the form with default values, for you to choose your own base model and dataset. |
+
+To start from a model or job you already have, use one of these instead. Both open the form directly, with your choice applied:
+
+- **Customize this Model**, on a base model's details panel, starts a job against that model.
+- **Clone**, on a job's actions menu (**⋯**), reuses that job's settings. See [Clone an Existing Job](#clone-an-existing-job).
+
+The form has the following sections, shown as they apply to your selections:
 
 | Section | What you configure |
 | ------- | ------------------- |
@@ -37,6 +49,35 @@ Several sections include an advanced JSON field for power-user overrides — for
 Select **Start Fine-Tuning** to create the job. Studio confirms with a toast and navigates to the new job's detail page.
 
 Model eligibility for fine-tuning depends on the selected base model; **Customize this Model** is disabled for models that have no fileset to fine-tune from.
+
+### Start from a Template
+
+A template is a complete recipe: a base model, a dataset, and a tuned set of training parameters that are known to work together. Choosing one lets you run a fine-tuning job without first sourcing a model or preparing data.
+
+Studio ships these templates, all LoRA fine-tunes of Nemotron models on a text-to-SQL dataset:
+
+| Template | Total / active parameters | GPUs |
+| -------- | ------------------------- | ---- |
+| Fine-tune Nemotron 3.5 Lightning | 30B / 3B | 8 |
+| Fine-tune Nemotron 3 Super | 120B / 12B | 8 |
+| Fine-tune Nemotron 3 Ultra | 550B / 55B | 32 |
+
+Lightning is the smallest and the quickest way to see the whole flow end to end. Ultra needs a multi-node allocation.
+
+Select a template, then select **Continue**. Before the form opens, Studio prepares the workspace:
+
+1. Registers the template's base model — a fileset backed by the Hugging Face repository, and a model entity pointing at it.
+2. Downloads the template's Hugging Face dataset, converts each row to the shape the training backend expects, and uploads it as a dataset fileset with both a training and a validation split.
+
+The button reports progress while this runs, and the form opens pre-filled once it finishes.
+
+A template fills the form in — it does not submit anything. Review the settings, change whatever you want, and select **Start Fine-Tuning** when you're ready.
+
+<Note>
+
+Provisioning downloads a model and a dataset from Hugging Face into your workspace, so it needs network access to Hugging Face and enough storage for the checkpoint. If either step fails, Studio reports the error and keeps you on the selection screen so you can retry or pick a different template.
+
+</Note>
 
 ### Clone an Existing Job
 
