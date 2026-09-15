@@ -182,21 +182,27 @@ config = HarborRuntimeConfig(
 )
 ```
 
-The same fields appear on the platform job's `HarborRunnerTarget`, so a spec submitted as a job carries
-them as `runner.agent_kwargs`. Instead of `agent_env_from_host`, the platform target takes `env_secrets`, a mapping
-of environment variable name to NeMo Platform secret reference. The service resolves each reference into
-the job's environment at compile time and the job hands Harbor a `${NAME}` template, so the credential
-appears on neither the spec, the run bundle, nor `config.json`:
+The same fields appear on the platform job's `HarborRunnerTarget`, the `target` of an
+`AgentEvalInputSpec` submitted with `nemo evaluator agent-evaluate submit`. Instead of
+`agent_env_from_host`, the platform target takes `env_secrets`, a mapping of environment variable name
+to NeMo Platform secret reference. The service resolves each reference into the job's environment at
+compile time and the job hands Harbor a `${NAME}` template, so the credential appears on neither the
+spec, the run bundle, nor `config.json`:
 
-```yaml
-target:
-  kind: harbor
-  agent_import_path: nemo_fabric.integrations.harbor:FabricAgent
-  agent_kwargs:
-    fabric_adapter_id: nvidia.fabric.codex
-    fabric_package: "nemo-fabric[codex]==0.3.0b1"
-  env_secrets:
-    OPENAI_API_KEY: my-workspace/openai-key
+```json
+{
+  "target": {
+    "kind": "harbor",
+    "agent_import_path": "nemo_fabric.integrations.harbor:FabricAgent",
+    "agent_kwargs": {
+      "fabric_adapter_id": "nvidia.fabric.codex",
+      "fabric_package": "nemo-fabric[codex]==0.3.0b1"
+    },
+    "env_secrets": {
+      "OPENAI_API_KEY": "my-workspace/openai-key"
+    }
+  }
+}
 ```
 
 ## How scoring works
