@@ -635,6 +635,27 @@ describe('NewAgentModal imported traces tab', () => {
     expect(screen.queryByRole('option', { name: 'research-agent' })).not.toBeInTheDocument();
   });
 
+  it('drops a failed create once another agent is chosen', async () => {
+    const user = userEvent.setup();
+    mockPlatform();
+    mockTraces(['billing-agent', 'research-agent']);
+    server.use(http.post(AGENTS_URL, () => HttpResponse.json({ detail: 'nope' }, { status: 500 })));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openTracesTab(dialog, user);
+
+    await user.click(await within(dialog).findByRole('combobox', { name: /imported traces/i }));
+    await user.click(await screen.findByRole('option', { name: 'billing-agent' }));
+    await submit(dialog, user);
+    expect(await within(dialog).findByText(/nope|failed/i)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('combobox', { name: /imported traces/i }));
+    await user.click(await screen.findByRole('option', { name: 'research-agent' }));
+
+    await waitFor(() => expect(within(dialog).queryByText(/nope|failed/i)).not.toBeInTheDocument());
+  });
+
   it('creates the chosen agent and cannot submit before one is chosen', async () => {
     const user = userEvent.setup();
     const { created } = mockPlatform();

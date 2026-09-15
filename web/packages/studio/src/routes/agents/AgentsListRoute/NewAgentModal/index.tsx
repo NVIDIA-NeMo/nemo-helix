@@ -484,7 +484,10 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
                 <Select
                   aria-label="Agent from imported traces"
                   value={tracedAgent}
-                  onValueChange={setTracedAgent}
+                  onValueChange={(value) => {
+                    resetTracedMutation();
+                    setTracedAgent(value);
+                  }}
                   disabled={isCreatingTraced || tracedAgents.isLoading}
                   placeholder={tracedAgents.isLoading ? 'Loading...' : 'Select an agent'}
                   items={tracedAgents.names.map((name) => ({ value: name, children: name }))}
