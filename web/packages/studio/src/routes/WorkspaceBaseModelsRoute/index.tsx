@@ -70,18 +70,18 @@ type CustomizableFilterState = Partial<Record<typeof FINE_TUNABLE_KEY, true>>;
 const makeFilterColumns: ComponentProps<typeof DataView.Root<ModelEntity>>['makeColumns'] = ({
   accessor,
 }) => [
-  // Customizable filtering depends on Customizer capabilities, so hide both the
+  // Fine-tunable filtering depends on Customizer capabilities, so hide both the
   // column filter and toolbar checkbox while Customizer is launch-disabled.
   ...(CUSTOMIZER_ENABLED
     ? [
         accessor(() => '', {
           id: CUSTOMIZABLE_FILTER_ID,
-          header: 'Customizable',
+          header: 'Fine-tunable',
           enableSorting: false,
           meta: {
             filter: {
               type: 'multi-select',
-              label: 'Customizable',
+              label: 'Fine-tunable',
               options: [{ value: FINE_TUNABLE_KEY, label: 'Fine-tunable' }],
             },
           },
@@ -322,15 +322,19 @@ export const WorkspaceBaseModelsRoute: FC = () => {
                 >
                   <Flex
                     align="center"
-                    className="h-10 px-density-md rounded-md border border-base bg-surface-raised"
+                    className="h-10 shrink-0 px-density-md rounded-md border border-base bg-surface-raised"
                   >
                     <Checkbox
                       attributes={{
                         CheckboxInput: { id: 'base-models-filter-customizable' },
-                        Label: { htmlFor: 'base-models-filter-customizable' },
+                        Label: {
+                          htmlFor: 'base-models-filter-customizable',
+                          // "Fine-tunable" otherwise wraps at the hyphen when the toolbar is tight.
+                          className: 'whitespace-nowrap',
+                        },
                       }}
                       checked={customizableChecked}
-                      slotLabel="Customizable"
+                      slotLabel="Fine-tunable"
                       onCheckedChange={(checked) => handleCustomizableToggle(!!checked)}
                     />
                   </Flex>
