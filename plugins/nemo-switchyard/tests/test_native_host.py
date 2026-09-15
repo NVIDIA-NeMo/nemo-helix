@@ -360,7 +360,20 @@ async def test_vm_destroy_unregisters_native_algorithm() -> None:
 
 
 @pytest.mark.asyncio
-async def test_concurrent_process_request_same_vm() -> None:
+async def test_upsert_without_switchyard_drops_stale_native_binding() -> None:
+    mw = SwitchyardMiddleware()
+    await mw.on_startup()
+    cfg_hash = "native-stale"
+    _state.NATIVE_BY_CONFIG_HASH[cfg_hash] = NativeBinding(
+        algorithm=CountingAlgorithm(),
+        models={"any": ["workspace/llama-3-70b"]},
+        config_type="stage_router",
+    )
+    _state.VM_CONFIG_MAPPING["vm-stale"] = [cfg_hash]
+    vm = VirtualModel(id="vm-stale", workspace="ws", name="router", models=[], request_middleware=[])
+    await mw.on_virtual_model_upserted(vm)
+    assert cfg_hash not in _state.NATIVE_BY_CONFIG_HASH
+    await mw.on_shutdown()
     mw = SwitchyardMiddleware()
     await mw.on_startup()
     algorithm = CountingAlgorithm(calls=0)

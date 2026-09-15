@@ -312,12 +312,14 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
             mw for mw in getattr(virtual_model, "response_middleware", []) if mw.name == "nemo-switchyard"
         ]
 
+        previous_hashes = list(_state.VM_CONFIG_MAPPING.get(virtual_model.id, []))
         if not request_entries and not response_entries:
             logger.debug(
                 "SwitchyardMiddleware: VirtualModel %r/%r has no nemo-switchyard middleware",
                 virtual_model.workspace,
                 virtual_model.name,
             )
+            self._release_unused_config_hashes(virtual_model.id, previous_hashes, [])
             return
 
         vm_key = f"{virtual_model.workspace}/{virtual_model.name}"
@@ -343,6 +345,21 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
             )
 
         _state.VM_CONFIG_MAPPING[virtual_model.id] = registered_hashes
+        self._release_unused_config_hashes(virtual_model.id, previous_hashes, registered_hashes)
+
+    def _release_unused_config_hashes(
+        self,
+        vm_id: str,
+        previous: list[str],
+        current: list[str],
+    ) -> None:
+        if current:
+            _state.VM_CONFIG_MAPPING[vm_id] = current
+        else:
+            _state.VM_CONFIG_MAPPING.pop(vm_id, None)
+        remaining = {h for hashes in _state.VM_CONFIG_MAPPING.values() for h in hashes}
+        for cfg_hash in set(previous) - remaining:
+            _state.NATIVE_BY_CONFIG_HASH.pop(cfg_hash, None)
 
     def _register_entry(
         self,
