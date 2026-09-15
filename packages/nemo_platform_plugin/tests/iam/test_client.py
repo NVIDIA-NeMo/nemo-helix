@@ -57,7 +57,7 @@ def test_sync_role_binding_and_authz_responses() -> None:
 
     assert created.name == "rb-123"
     assert decision.result == {"allowed": True}
-    assert mock_http.request.call_args_list[0].kwargs["params"] == {"wait_role_propagation": True}
+    assert mock_http.request.call_args_list[0].kwargs["params"] is None
 
 
 def test_role_binding_pagination_dtos_and_filter_encoding() -> None:
@@ -186,9 +186,9 @@ async def test_async_iam_request_dispatch_parity() -> None:
         ("POST", f"{BASE}/apis/auth/v2/authz/allow"),
     ]
     assert calls[0].kwargs["params"] == {"filter[role]": "Viewer"}
-    assert calls[1].kwargs["params"] == {"wait_role_propagation": True}
+    assert calls[1].kwargs["params"] is None
     assert json.loads(calls[1].kwargs["content"]) == body.model_dump()
-    assert calls[2].kwargs["params"] == {"wait_role_propagation": True}
+    assert calls[2].kwargs["params"] is None
     assert json.loads(calls[3].kwargs["content"]) == {"input": {"principal_id": "user@example.com"}}
 
 

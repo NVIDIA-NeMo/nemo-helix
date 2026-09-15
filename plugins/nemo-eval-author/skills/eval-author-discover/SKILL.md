@@ -70,9 +70,26 @@ you are about to run. A repository with its own virtual environment usually need
 that environment's interpreter. Try these in order until one prints a version:
 
 ```bash
+harbor_python=""
 for py in .venv/bin/python ./venv/bin/python python3; do
-  "$py" -c "import harbor, sys; print(sys.executable, harbor.__version__)" 2>/dev/null && break
+  if "$py" -c "import harbor, sys; print(sys.executable, harbor.__version__)" 2>/dev/null; then
+    harbor_python="$py"
+    break
+  fi
 done
+```
+
+If none prints a version, check an existing uv tool installation before declaring
+Harbor unavailable. `uv tool install harbor` isolates Harbor from project Python:
+
+```bash
+if [ -z "$harbor_python" ] && command -v uv >/dev/null 2>&1; then
+  if harbor_tool_root="$(uv tool dir)" &&
+    "$harbor_tool_root/harbor/bin/python" -c \
+      "import harbor, sys; print(sys.executable, harbor.__version__)"; then
+    harbor_python="$harbor_tool_root/harbor/bin/python"
+  fi
+fi
 ```
 
 If these probes fail but a `harbor` executable exists, resolve that executable's
@@ -90,6 +107,9 @@ interpreter and continue the empty-scan conversation below when appropriate.
 Missing Harbor blocks readiness validation, not learning what evals they have.
 Mention this setup requirement even when the inventory also finds no Harbor evals.
 
+Keep the verified `harbor_python` path for Step 1, including across shell sessions.
+First-eval Ethos and case planning can also proceed without Harbor.
+
 The report records which mode produced it either way, in `runtime.harbor_importable`
 and the top-level `proven` field.
 
@@ -99,8 +119,11 @@ Point the script at the repository root, not at a suite directory. It searches f
 configs to a depth of four directories and finds datasets at any depth.
 
 ```bash
-.venv/bin/python <skill_dir>/scripts/discover.py --repo .
+"${harbor_python:?Select a Harbor interpreter using the probes above}" <skill_dir>/scripts/discover.py --repo .
 ```
+
+If no interpreter can import Harbor, substitute an available Python 3.11+
+interpreter for inventory only. Keep the resulting findings explicitly unvalidated.
 
 One JSON object goes to stdout, and `--compact` puts it on one line. The script
 writes no files; capture stdout in a temporary JSON file even when the exit code
@@ -137,7 +160,7 @@ rung's failure often disappears once you fix a higher one.
 | Check | What it means and what to do |
 |---|---|
 | `harbor` | Harbor is not importable by this interpreter. Re-run with the interpreter from **Before you start** |
-| `config` | No config file declares a nonempty `datasets` or `tasks` list. Confirm with the user where their suite lives |
+| `config` | No config file declares a nonempty `datasets` or `tasks` list. Confirm the location if an existing suite is expected. If the user has no evals and asked to build them, follow `eval-author-first-eval` |
 | `config-parse` | A config file did not parse. Either PyYAML is missing, which means the wrong interpreter, or the file's YAML is broken. The hint says which |
 | `schema` | Harbor rejected the config's shape. The message carries the offending field path |
 | `resolution` | Harbor could not turn the config into a job. Usually a `datasets[].path` that does not exist. This fails before any container starts |

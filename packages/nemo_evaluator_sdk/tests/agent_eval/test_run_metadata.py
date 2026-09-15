@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from typing import cast
 
+import pytest
 from nemo_evaluator_sdk.agent_eval.evaluator import _describe_target
 from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.base import SandboxProvider
 from nemo_evaluator_sdk.agent_eval.trials import AgentTaskRunner, RunnerInfo
@@ -104,6 +105,7 @@ def test_every_shipped_runner_reports_a_stable_name_and_result_shaping_config() 
                 "agent_name",
                 "agent_import_path",
                 "agent_kwargs",
+                "agent_env_from_host",
                 "effective_agent",
                 "n_attempts",
                 "jobs_dir",
@@ -258,6 +260,22 @@ def test_harbor_redacts_credential_looking_agent_kwargs() -> None:
         "extra_env": {"OPENAI_API_KEY": "<redacted>", "HOME": "/root"},
         "fabric_harness_settings": {"auth": {"token": "<redacted>"}},
     }
+    assert "should-not-be-recorded" not in json.dumps(recorded)
+
+
+def test_harbor_records_agent_env_from_host_not_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pathlib import Path
+
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-be-recorded")
+    runner = HarborAgentTaskRunner(
+        config=HarborRuntimeConfig(jobs_dir=Path("/jobs"), agent_env_from_host=["OPENAI_API_KEY", "FABRIC_LOG"])
+    )
+
+    recorded = runner.runner_info().config
+
+    assert recorded["agent_env_from_host"] == ["OPENAI_API_KEY", "FABRIC_LOG"]
     assert "should-not-be-recorded" not in json.dumps(recorded)
 
 

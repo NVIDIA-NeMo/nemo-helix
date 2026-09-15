@@ -17,7 +17,8 @@ silently include unrelated suites or historical runs from another agent version.
 Keep mock, recorded replay, reference-solution runs, and real-agent runs distinct.
 
 Follow the audit skill's Ethos pre-flight. If Ethos is missing, explain why the
-audit needs it and follow the supported creation/provision choices. Preserve
+audit needs it and use the bundled Local Ethos procedure to create and review it,
+or use the file the user supplies. Preserve
 the completed adaptation while that input is pending. Do not replace Ethos with
 the task set, a report, or a placeholder contract.
 

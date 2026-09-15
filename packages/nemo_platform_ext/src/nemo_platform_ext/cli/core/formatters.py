@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 import click
 import yaml
+from nemo_platform_plugin.client.response import NemoResponse
 from rich.console import Console
 from rich.syntax import Syntax
 from rich.table import Table
@@ -111,6 +112,13 @@ def _iter_items_from_response(data: Any) -> Iterator[Any]:
 
         yield from items
         return
+
+
+def unwrap_response(data: Any) -> Any:
+    """Return the parsed body of a typed entity response, or *data* unchanged."""
+    if isinstance(data, NemoResponse):
+        return data.data()
+    return data
 
 
 def _to_dict_items(items: list[Any]) -> list[dict[str, Any]]:
@@ -634,6 +642,7 @@ def format_output(
     """
     from nemo_platform_ext.cli.core.table_config import resolve_and_validate_columns, validate_output_columns
 
+    data = unwrap_response(data)
     timestamp_format = timestamp_format or "iso"
 
     if stream:

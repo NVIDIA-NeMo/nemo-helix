@@ -20,6 +20,7 @@ triggers:
   - turn uncovered_items into Harbor tasks
   - propose dataset improvements from audit findings
 not-for:
+  - eval-author-first-eval (use when the user has no evaluations yet)
   - eval-author (use for the shared standard and routing)
   - eval-author-audit (use to create the denominator and coverage report)
   - eval-author-discover (use to prove an existing suite is runnable)
@@ -54,6 +55,9 @@ actionable uncovered tool
 
 Create and prove one tool gap at a time. Keep every generated artifact under
 `.eval-author/`; do not edit existing tasks or customer source.
+
+An existing suite without a coverage report belongs in `eval-author-discover`
+and `eval-author-audit`. A missing report alone is not a first-eval request.
 
 ## Script
 
