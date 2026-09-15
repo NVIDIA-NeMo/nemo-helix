@@ -3,13 +3,14 @@
 In this mode, make reasonable design decisions autonomously based on the dataset description. Do not ask clarifying questions — infer sensible defaults and move straight through to a working preview.
 
 1. **Resolve CLI command** — Run `command -v nemo 2>/dev/null || (test -x .venv/bin/nemo && realpath .venv/bin/nemo) || echo CLI_NOT_FOUND`.
-  - If the output is a path, use `<path> data-designer` as the command prefix for all `nemo data-designer …` invocations in this workflow.
+  - If the output is a path, use it in place of `nemo` in every `nemo …` invocation in this workflow — including commands outside the `data-designer` group, such as `<path> inference providers list`.
   - If the output is `CLI_NOT_FOUND`, STOP and follow the Troubleshooting section in SKILL.md. Do not continue to the next step.
 2. **Learn** — Run `nemo data-designer agent context`.
-  - `agent context` only inspects the local `~/.data-designer/` registry; it does not see IGW-managed providers or in-script `ModelConfig`s. Whether or not it lists usable aliases, read `references/nemo-platform-plugin-additions.md` for the model-config options before proceeding. `model_configs` must be declared programmatically with IGW providers. Note your provider choice as one of the key decisions in step 3.
-  - Inspect schemas for every column, sampler type, validator, and processor you plan to use.
+  - Read schemas for every column, sampler type, validator, and processor you plan to use, from the `config_root` path it prints.
   - Never guess types or parameters — read the relevant config files first.
   - Always read `base.py` for inherited fields shared by all config objects.
+  - Ignore its **Model Aliases**, **Persona Datasets**, and **Commands** sections. Those describe a standalone local install; this skill runs on NeMo Platform, where aliases are declared in the script, persona data lives in platform filesets, and every command is prefixed with `nemo`. Read `references/platform-execution.md` instead.
+  - Run `nemo inference providers list` to pick a provider for any LLM columns. Note that choice as one of the key decisions in step 3.
 3. **Infer** — Based on the dataset description, make reasonable decisions for:
   - Axes of diversity and what should be well represented.
   - Which variables to randomize.
