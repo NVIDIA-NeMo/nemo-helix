@@ -325,7 +325,7 @@ def benchmark_import_validate(
     ctx: click.Context, manifest: Path, output_root: Path | None, max_pack_bytes: int | None
 ) -> None:
     """Validate one materialized catalog without server access or state mutation."""
-    kwargs = {"output_root": output_root}
+    kwargs: dict[str, Any] = {"output_root": output_root}
     if max_pack_bytes is not None:
         kwargs["max_pack_bytes"] = max_pack_bytes
     result = validate_benchmark_import(manifest, **kwargs)
@@ -1181,7 +1181,7 @@ def _parse_task_refs(specs: tuple[str, ...]) -> list[dict[str, object]]:
     return refs
 
 
-def _benchmark_summary(data: dict[str, object]) -> list[str]:
+def _benchmark_summary(data: dict[str, Any]) -> list[str]:
     summary = [
         f"benchmark {data['id']}",
         f"  name:       {data.get('name')}",
@@ -1477,7 +1477,8 @@ def credential_create(ctx: click.Context, name: str, provider: str, key: str | N
     if key:
         body["key"] = key
     else:
-        body["yaml"] = load_arg(yaml_)  # type: ignore[arg-type]
+        assert yaml_ is not None  # The exclusive key/yaml check above guarantees this.
+        body["yaml"] = load_arg(yaml_)
 
     data = request(ctx.obj["client"], "POST", "/credentials", json=body)
     emit(
@@ -1579,7 +1580,8 @@ def credential_rotate(ctx: click.Context, credential_id: str, key: str | None, y
     if key:
         body["key"] = key
     else:
-        body["yaml"] = load_arg(yaml_)  # type: ignore[arg-type]
+        assert yaml_ is not None  # The exclusive key/yaml check above guarantees this.
+        body["yaml"] = load_arg(yaml_)
     data = request(ctx.obj["client"], "POST", f"/credentials/{credential_id}/rotate", json=body)
     emit(data, ctx.obj["json"], _credential_summary(data))
 
@@ -2285,7 +2287,9 @@ def evaluation_wait(
 def evaluation_provenance(ctx: click.Context, evaluation_id: str, output: Path | None) -> None:
     """Print or download the run provenance manifest."""
     data = request(ctx.obj["client"], "GET", f"/evaluations/{evaluation_id}")
-    links = data.get("links") if isinstance(data.get("links"), dict) else {}
+    links = data.get("links")
+    if not isinstance(links, dict):
+        links = {}
     api_path = links.get("provenance") or (f"/evaluations/{evaluation_id}/artifacts/scaled-evals-provenance.json")
     try:
         content = fetch_artifact(ctx.obj["client"], api_path)
@@ -2322,7 +2326,9 @@ def evaluation_provenance(ctx: click.Context, evaluation_id: str, output: Path |
 def evaluation_sbom(ctx: click.Context, evaluation_id: str, output: Path | None) -> None:
     """Print or download the run-composition CycloneDX BOM."""
     data = request(ctx.obj["client"], "GET", f"/evaluations/{evaluation_id}")
-    links = data.get("links") if isinstance(data.get("links"), dict) else {}
+    links = data.get("links")
+    if not isinstance(links, dict):
+        links = {}
     api_path = links.get("sbom") or (f"/evaluations/{evaluation_id}/artifacts/scaled-evals-sbom.cdx.json")
     try:
         content = fetch_artifact(ctx.obj["client"], api_path)
@@ -2600,7 +2606,9 @@ def evaluation_harbor_viewer(
 ) -> None:
     """Show, download, or manually upload a Harbor Viewer-compatible archive."""
     data = request(ctx.obj["client"], "GET", f"/evaluations/{evaluation_id}")
-    links = data.get("links") if isinstance(data.get("links"), dict) else {}
+    links = data.get("links")
+    if not isinstance(links, dict):
+        links = {}
     archive_url = links.get("harbor_viewer_archive")
     upload_url = links.get("harbor_viewer_upload")
     viewer_url = links.get("harbor_viewer")
@@ -2609,7 +2617,7 @@ def evaluation_harbor_viewer(
     if upload_ and not upload_url:
         raise click.ClickException("evaluation has no Harbor Viewer upload endpoint")
 
-    result = {
+    result: dict[str, Any] = {
         "evaluation_id": evaluation_id,
         "archive_url": archive_url,
         "upload_url": upload_url,
@@ -2666,7 +2674,7 @@ def evaluation_harbor_viewer(
 # ---------- benchmark runs --------------------------------------------------
 
 
-def _benchmark_member_failure_codes(member: dict[str, object]) -> list[str]:
+def _benchmark_member_failure_codes(member: dict[str, Any]) -> list[str]:
     codes: list[str] = []
     direct = member.get("failure_code") or member.get("last_failure_code")
     if direct:
@@ -2718,7 +2726,7 @@ def _filter_benchmark_members(
     return filtered
 
 
-def _benchmark_member_evaluation_summary(member: dict[str, object]) -> str:
+def _benchmark_member_evaluation_summary(member: dict[str, Any]) -> str:
     codes = _benchmark_member_failure_codes(member)
     category = _benchmark_member_failure_category(member)
     failure = f"  failure={category or 'unknown'}/{','.join(codes)}" if codes else ""
@@ -2737,7 +2745,7 @@ def _benchmark_member_evaluation_summary(member: dict[str, object]) -> str:
     )
 
 
-def _benchmark_run_summary(data: dict[str, object], *, member_total: int | None = None) -> list[str]:
+def _benchmark_run_summary(data: dict[str, Any], *, member_total: int | None = None) -> list[str]:
     detail = f" ({data['status_detail']})" if data.get("status_detail") else ""
     lines = [
         f"benchmark run {data['id']}",
@@ -2807,6 +2815,99 @@ def _wait_for_benchmark_run(ctx: click.Context, run_id: str, *, interval: float,
 @cli.group(name="benchmark-run")
 def benchmark_run() -> None:
     """Run a benchmark by aggregating member task evaluations."""
+
+
+@benchmark_run.command("archive")
+@click.argument("run_id")
+@click.option("--build", is_flag=True, help="Queue archive generation.")
+@click.option("--force", is_flag=True, help="Build a fresh snapshot of member executions.")
+@click.pass_context
+def benchmark_run_archive(ctx: click.Context, run_id: str, build: bool, force: bool) -> None:
+    """Show or build a combined Harbor experiment archive."""
+    method = "POST" if build or force else "GET"
+    kwargs = {"json": {"force": force}} if method == "POST" else {}
+    data = request(ctx.obj["client"], method, f"/benchmark-runs/{run_id}/archive", **kwargs)
+    emit(data, ctx.obj["json"], [f"{run_id}: {data['status']}", data.get("error") or ""])
+
+
+@benchmark_run.command("download")
+@click.argument("run_id")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Destination directory (or tar.gz file with --archive-only). Must not exist.",
+)
+@click.option("--archive-only", is_flag=True, help="Save the tarball without extracting it.")
+@click.option("--wait", is_flag=True, help="Wait for archive generation, then download.")
+@click.option(
+    "--timeout",
+    type=click.FloatRange(min=0.1),
+    default=600.0,
+    show_default=True,
+    help="Maximum seconds to wait for archive generation.",
+)
+@click.pass_context
+def benchmark_run_download(
+    ctx: click.Context,
+    run_id: str,
+    output: Path | None,
+    archive_only: bool,
+    wait: bool,
+    timeout: float,
+) -> None:
+    """Download all member trials into one Harbor experiment directory.
+
+    Queues a missing archive. Use --wait to download when the build completes,
+    or rerun this command once the archive is ready.
+    """
+    from scaled_evals.cli.benchmark_archive import save_benchmark_archive
+
+    dest = output or Path(f"{run_id}-results.tar.gz" if archive_only else run_id)
+    if dest.exists():
+        raise click.ClickException(f"destination already exists: {dest}")
+    path = f"/benchmark-runs/{run_id}/archive"
+    data = request(ctx.obj["client"], "GET", path)
+    if data["status"] == "missing":
+        data = request(ctx.obj["client"], "POST", path, json={"force": False})
+    deadline = time.monotonic() + timeout
+    while data["status"] in {"queued", "building"}:
+        if not wait:
+            emit(
+                data,
+                ctx.obj["json"],
+                [f"{run_id}: archive {data['status']}; rerun download when ready, or use --wait."],
+            )
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise click.ClickException("timed out waiting for archive; the server build continues")
+        time.sleep(min(5.0, remaining))
+        data = request(ctx.obj["client"], "GET", path)
+    if data["status"] != "ready":
+        raise click.ClickException(
+            f"archive {data['status']}: {data.get('error') or 'not ready'}; "
+            f"retry with benchmark-run archive {run_id} --build"
+        )
+    save_benchmark_archive(
+        ctx.obj["client"],
+        data["download"],
+        dest,
+        archive_only=archive_only,
+        expected_sha256=data.get("sha256"),
+        expected_size_bytes=data.get("size_bytes"),
+    )
+    summary = [f"downloaded Harbor experiment -> {dest}"]
+    if data.get("sha256"):
+        summary.append(f"verified archive sha256: {data['sha256']}")
+    else:
+        summary.append(
+            "Legacy archive has no server checksum; rebuild it with benchmark-run archive --force to verify downloads."
+        )
+    if data.get("partial"):
+        summary.append("Some member trial data is missing; see scaled-evals-benchmark-archive.json.")
+    emit({**data, "path": str(dest)}, ctx.obj["json"], summary)
 
 
 @benchmark_run.command("preflight")
@@ -3237,7 +3338,7 @@ def benchmark_run_cancel(ctx: click.Context, run_id: str) -> None:
     emit(data, ctx.obj["json"], _benchmark_run_summary(data))
 
 
-def _evaluation_summary(data: dict[str, object]) -> list[str]:
+def _evaluation_summary(data: dict[str, Any]) -> list[str]:
     """Human-readable lines shared by evaluation create/get."""
     detail = f" ({data['status_detail']})" if data.get("status_detail") else ""
     lines = [

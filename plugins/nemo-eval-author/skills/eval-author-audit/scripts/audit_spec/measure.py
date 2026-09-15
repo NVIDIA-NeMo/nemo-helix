@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _markdown import AuditMarkdownError  # noqa: E402
 from _schema import AuditEnvironmentError, AuditSpecError, item_counts, load_audit_spec  # noqa: E402
-from measurements import capabilities, tool_calls  # noqa: E402
+from measurements import capabilities, failure_cases, tool_calls  # noqa: E402
 
 JsonObject: TypeAlias = dict[str, Any]
 
@@ -36,8 +36,10 @@ COVERAGE_SCHEMA = "nemo.eval_author.audit_coverage.v1"
 SCHEMAS_DIR = Path(__file__).resolve().parents[2] / "schemas"
 COVERAGE_SCHEMA_PATH = SCHEMAS_DIR / "audit_coverage.schema.json"
 CAPABILITY_JUDGMENTS_SCHEMA_PATH = SCHEMAS_DIR / "audit_capability_judgments.schema.json"
+FAILURE_CASE_JUDGMENTS_SCHEMA_PATH = SCHEMAS_DIR / "audit_failure_case_judgments.schema.json"
 DETAIL_SCHEMA_PATHS = {
     capabilities.DETAILS_SCHEMA: SCHEMAS_DIR / "audit_capabilities_details.schema.json",
+    failure_cases.DETAILS_SCHEMA: SCHEMAS_DIR / "audit_failure_cases_details.schema.json",
     tool_calls.DETAILS_SCHEMA: SCHEMAS_DIR / "audit_tool_calls_details.schema.json",
 }
 
@@ -47,6 +49,7 @@ class MeasurementInputs:
     """Optional sidecar inputs shared by selected measurement methods."""
 
     capability_judgments: JsonObject | None
+    failure_case_judgments: JsonObject | None
 
 
 @dataclass(frozen=True)
@@ -63,6 +66,11 @@ def _measure_capabilities(audit: JsonObject, trajectory: Trajectory, inputs: Mea
     return capabilities.measure(audit, trajectory, judgments=inputs.capability_judgments)
 
 
+def _measure_failure_cases(audit: JsonObject, trajectory: Trajectory, inputs: MeasurementInputs) -> JsonObject:
+    """Run failure-case coverage with optional skill-authored judgments."""
+    return failure_cases.measure(audit, trajectory, judgments=inputs.failure_case_judgments)
+
+
 def _measure_tool_calls(audit: JsonObject, trajectory: Trajectory, _inputs: MeasurementInputs) -> JsonObject:
     """Run tool-call coverage without sidecar inputs."""
     return tool_calls.measure(audit, trajectory)
@@ -73,6 +81,11 @@ METHODS: dict[str, MeasurementMethod] = {
         name=capabilities.METHOD_NAME,
         details_schema=capabilities.DETAILS_SCHEMA,
         measure=_measure_capabilities,
+    ),
+    failure_cases.METHOD_NAME: MeasurementMethod(
+        name=failure_cases.METHOD_NAME,
+        details_schema=failure_cases.DETAILS_SCHEMA,
+        measure=_measure_failure_cases,
     ),
     tool_calls.METHOD_NAME: MeasurementMethod(
         name=tool_calls.METHOD_NAME,
@@ -178,6 +191,11 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="JSON file of skill-authored judgments for non-tool capability evidence",
     )
+    parser.add_argument(
+        "--failure-case-judgments",
+        type=Path,
+        help="JSON file of skill-authored judgments for non-tool failure-case evidence",
+    )
     parser.add_argument("--compact", action="store_true", help="emit compact JSON")
     args = parser.parse_args(argv)
 
@@ -187,7 +205,8 @@ def main(argv: list[str] | None = None) -> int:
         audit = load_audit_spec(args.audit)
         pending_subject = _subject(args)
         loaded_trace = _load_harbor_trajectory(pending_subject.trace_path)
-        _validate_capability_judgment_trace(inputs, loaded_trace)
+        _validate_judgment_trace(inputs.capability_judgments, loaded_trace, label="capability judgments")
+        _validate_judgment_trace(inputs.failure_case_judgments, loaded_trace, label="failure-case judgments")
         subject_info = _finalize_subject(pending_subject, loaded_trace)
         reports = _measure_all(
             audit=audit,
@@ -347,39 +366,54 @@ def _measurement_inputs(args: argparse.Namespace, method_names: list[str]) -> Me
     """Load optional sidecar inputs and ensure they apply to the selected methods."""
     if args.capability_judgments is not None and capabilities.METHOD_NAME not in method_names:
         raise AuditMeasurementError("--capability-judgments requires --measure capabilities")
-    return MeasurementInputs(capability_judgments=_load_capability_judgments(args.capability_judgments))
+    if args.failure_case_judgments is not None and failure_cases.METHOD_NAME not in method_names:
+        raise AuditMeasurementError("--failure-case-judgments requires --measure failure_cases")
+    return MeasurementInputs(
+        capability_judgments=_load_judgments(
+            args.capability_judgments,
+            schema_path=CAPABILITY_JUDGMENTS_SCHEMA_PATH,
+            label="capability judgments",
+        ),
+        failure_case_judgments=_load_judgments(
+            args.failure_case_judgments,
+            schema_path=FAILURE_CASE_JUDGMENTS_SCHEMA_PATH,
+            label="failure-case judgments",
+        ),
+    )
 
 
-def _load_capability_judgments(path: Path | None) -> JsonObject | None:
-    """Read and validate optional skill-authored capability judgments."""
+def _load_judgments(path: Path | None, *, schema_path: Path, label: str) -> JsonObject | None:
+    """Read and validate an optional skill-authored judgment sidecar."""
     if path is None:
         return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise AuditMeasurementError(f"could not read capability judgments at {path}: {exc}") from exc
+        raise AuditMeasurementError(f"could not read {label} at {path}: {exc}") from exc
     if not isinstance(payload, dict):
-        raise AuditMeasurementError(f"capability judgments at {path} must be a JSON object")
+        raise AuditMeasurementError(f"{label} at {path} must be a JSON object")
     _validate_report(
         payload,
-        schema_path=CAPABILITY_JUDGMENTS_SCHEMA_PATH,
-        label="capability judgments",
+        schema_path=schema_path,
+        label=label,
         generated=False,
     )
     return payload
 
 
-def _validate_capability_judgment_trace(inputs: MeasurementInputs, loaded_trace: LoadedTrace) -> None:
+def _validate_judgment_trace(
+    judgments: JsonObject | None,
+    loaded_trace: LoadedTrace,
+    *,
+    label: str,
+) -> None:
     """Reject a judgment sidecar authored for different ATIF content."""
-    judgments = inputs.capability_judgments
     if judgments is None:
         return
     expected = f"sha256:{loaded_trace.content_sha256}"
     actual = judgments["trace_sha256"]
     if actual != expected:
-        raise AuditMeasurementError(
-            f"capability judgments trace_sha256 {actual!r} does not match measured trace {expected!r}"
-        )
+        raise AuditMeasurementError(f"{label} trace_sha256 {actual!r} does not match measured trace {expected!r}")
 
 
 def _measure_all(

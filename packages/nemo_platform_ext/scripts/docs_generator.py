@@ -16,6 +16,7 @@ import re
 from datetime import datetime
 from functools import cache
 from importlib import import_module
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 
@@ -724,11 +725,29 @@ _PLUGIN_DOCS_DISCOVERY_ENV = {
 }
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REFERENCE_DOCS_PATH = _REPO_ROOT / "docs/cli/reference.mdx"
+_SUMMARY_DOCS_PATH = _REPO_ROOT / "docs/fern/snippets/_snippets/cli-summary.mdx"
+
+
 def _enable_plugin_cli_docs() -> None:
     """Include supported plugin commands in generated CLI documentation."""
     import os
 
     os.environ.update(_PLUGIN_DOCS_DISCOVERY_ENV)
+
+
+def _with_trailing_newline(output: str) -> str:
+    """Return output with exactly the trailing newline expected in generated files."""
+    return output if output.endswith("\n") else output + "\n"
+
+
+def write_docs_files(app: typer.Typer, reference_path: Path, summary_path: Path, name: str = "nemo") -> None:
+    """Write generated CLI reference and summary docs from one imported CLI app."""
+    reference_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    reference_path.write_text(_with_trailing_newline(generate_docs(app, name=name)), encoding="utf-8")
+    summary_path.write_text(_with_trailing_newline(generate_index_snippet(app, name=name)), encoding="utf-8")
 
 
 def main() -> None:
@@ -737,25 +756,27 @@ def main() -> None:
     Usage:
         docs_generator.py reference   # Full CLI reference
         docs_generator.py summary     # Index page summary snippet
+        docs_generator.py all         # Write both generated docs files
     """
     import sys
+
+    if len(sys.argv) != 2 or sys.argv[1] not in ("reference", "summary", "all"):
+        print("Usage: docs_generator.py {reference|summary|all}", file=sys.stderr)
+        sys.exit(1)
 
     _enable_plugin_cli_docs()
 
     from nemo_platform_ext.cli.app import app
 
-    if len(sys.argv) != 2 or sys.argv[1] not in ("reference", "summary"):
-        print("Usage: docs_generator.py {reference|summary}", file=sys.stderr)
-        sys.exit(1)
-
     mode = sys.argv[1]
+    if mode == "all":
+        write_docs_files(app, _REFERENCE_DOCS_PATH, _SUMMARY_DOCS_PATH, name="nemo")
+        return
     if mode == "summary":
         output = generate_index_snippet(app, name="nemo")
     else:
         output = generate_docs(app, name="nemo")
-    sys.stdout.write(output)
-    if not output.endswith("\n"):
-        sys.stdout.write("\n")
+    sys.stdout.write(_with_trailing_newline(output))
 
 
 if __name__ == "__main__":

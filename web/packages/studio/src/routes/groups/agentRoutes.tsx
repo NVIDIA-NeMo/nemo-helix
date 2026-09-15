@@ -3,7 +3,11 @@
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
-import { AGENTS_ENABLED, MONITOR_ENABLED } from '@studio/constants/environment';
+import {
+  AGENT_OPTIMIZATIONS_ENABLED,
+  AGENTS_ENABLED,
+  MONITOR_ENABLED,
+} from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
 import { agentsRoutes, getAgentMonitorRoute } from '@studio/routes/utils';
@@ -36,6 +40,14 @@ const AgentEvaluationDetailRoute =
       default: m.AgentEvaluationDetailRoute,
     }))
   );
+const AgentOptimizationDetailRoute =
+  AGENTS_ENABLED &&
+  AGENT_OPTIMIZATIONS_ENABLED &&
+  lazy(() =>
+    import('@studio/routes/agents/AgentOptimizationDetailRoute/index').then((m) => ({
+      default: m.AgentOptimizationDetailRoute,
+    }))
+  );
 
 export const agentRoutes: RouteObject[] = agentsRoutes([
   {
@@ -57,6 +69,15 @@ export const agentRoutes: RouteObject[] = agentsRoutes([
     element: AgentEvaluationDetailRoute ? <AgentEvaluationDetailRoute /> : null,
     errorElement: <RouteErrorPanel title="Agent Evaluation" />,
   },
+  ...(AgentOptimizationDetailRoute
+    ? [
+        {
+          path: ROUTES.workspace.agentOptimizationDetail,
+          element: <AgentOptimizationDetailRoute />,
+          errorElement: <RouteErrorPanel title="Agent Optimization" />,
+        },
+      ]
+    : []),
   {
     path: ROUTES.workspace.agentDetail,
     element: AgentDetailRoute ? <AgentDetailRoute /> : null,
