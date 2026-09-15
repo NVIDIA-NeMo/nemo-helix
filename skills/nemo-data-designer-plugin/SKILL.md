@@ -33,7 +33,7 @@ Read **only** the workflow file that matches the selected mode, then follow it:
 - Do not suggest or ask about seed datasets. Only use one when the user explicitly provides seed data or asks to build from existing records. When using a seed, read `references/seed-datasets.md`.
 - When the dataset requires person data (names, demographics, addresses), read `references/person-sampling.md`.
 - If a dataset script that matches the dataset description already exists, ask the user whether to edit it or create a new one.
-- For commands and context specific to this NeMo Platform plugin (e.g., sourcing model configs from IGW providers or in-script `ModelConfig`s, installing or publishing Nemotron Personas locales, platform-side resource pointers), read `references/nemo-platform-plugin-additions.md`.
+- Data Designer runs on NeMo Platform: inference, seed data, and persona data all resolve through the platform, never from local files or a local model registry. Read `references/platform-execution.md` before writing a config — it covers model configs, validation, and what the platform accepts.
 - For Nemotron retrieval SDG Stage 0/1 (`retrieval-generate` / `retrieval-prepare`), read `references/retrieval-sdg.md`. Do not use `create` for that pipeline.
 
 # Usage Tips and Common Pitfalls
@@ -56,12 +56,16 @@ Write a Python file to the current directory with a `load_config_builder()` func
 # /// script
 # dependencies = [
 #   "data-designer", # always required
+#   "data-designer-nemo", # only if this script imports a platform seed source
 #   "pydantic", # only if this script imports from pydantic
 #   # add additional dependencies here
 # ]
 # ///
 import data_designer.config as dd
 from pydantic import BaseModel, Field
+
+# Seed data on NeMo Platform comes from the Files service:
+# from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
 
 
 # Use Pydantic models when the output needs to conform to a specific schema
@@ -84,11 +88,10 @@ def generator_function(row: dict) -> dict:
 
 def load_config_builder() -> dd.DataDesignerConfigBuilder:
     config_builder = dd.DataDesignerConfigBuilder(
-        # Declaring model configs programmatically here is optional in the upstream
-        # library, but required for workloads running on NeMo Platform. The provider below
-        # is a common default created during `nemo setup` — confirm it (or
-        # discover others) with `nemo inference providers list`. See
-        # references/nemo-platform-plugin-additions.md for the local-YAML alternative.
+        # Model configs must be declared here. `provider` is an Inference Gateway
+        # provider; the one below is a common default created during `nemo setup` —
+        # confirm it (or discover others) with `nemo inference providers list`.
+        # See references/platform-execution.md.
         model_configs=[
             dd.ModelConfig(
                 alias="text",
@@ -99,8 +102,12 @@ def load_config_builder() -> dd.DataDesignerConfigBuilder:
         ],
     )
 
-    # Seed dataset (only if the user explicitly mentions a seed dataset path)
-    # config_builder.with_seed_dataset(dd.LocalFileSeedSource(path="path/to/seed.parquet"))
+    # Seed dataset (only if the user explicitly mentions a seed dataset)
+    # Seed data must live in the Files service or on HuggingFace — see
+    # references/seed-datasets.md for the supported sources.
+    # config_builder.with_seed_dataset(
+    #     FilesetFileSeedSource(path="default/my-seed-data#records.parquet")
+    # )
 
     # config_builder.add_column(...)
     # config_builder.add_processor(...)

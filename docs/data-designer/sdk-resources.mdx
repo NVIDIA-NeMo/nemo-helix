@@ -34,8 +34,50 @@ but exposes some additional useful methods:
 
 | Method | Description |
 |--------|-------------|
+| `validate(config_builder, *, workspace=None)` | Checks a configuration and returns a `ValidationReport` (see below). |
 | `get_default_model_providers()` | Returns a list of model providers registered with the Models API and Inference Gateway API that can be used in your Data Designer config. |
 | `get_job_resource(job_name: str)` | Returns a `DataDesignerJobResource` for interacting with a job (see below). |
+
+### Validating a config
+
+`validate()` runs the same checks `preview()` and `create()` perform internally, but never short-circuits — every detectable problem appears in one report. Use it to catch configuration errors before submitting work.
+
+```python
+import data_designer.config as dd
+
+config_builder = dd.DataDesignerConfigBuilder(
+    model_configs=[
+        dd.ModelConfig(
+            provider="default/nvidia-build",
+            model="nvidia/nemotron-3-nano-30b-a3b",
+            alias="text",
+        )
+    ],
+)
+# Add columns, constraints, seed datasets, processors, and profilers here.
+
+report = client.data_designer.validate(config_builder)
+
+if not report.ok:
+    for error in report.errors:
+        print(error.message)
+```
+
+The `workspace` keyword argument selects the workspace used to resolve provider references and seed sources. It falls back to the platform client's workspace, then to `"default"`.
+
+```python
+report = client.data_designer.validate(config_builder, workspace="my-workspace")
+```
+
+## ValidationReport
+
+`validate()` returns a `ValidationReport` describing what the checks found.
+
+| Attribute | Description |
+|--------|-------------|
+| `ok` | `True` when no errors were found. |
+| `errors` | A list of `ValidationError` objects, each with a `message` string. Empty when `ok` is `True`. |
+| `config_source` | The configuration source path when validation ran through the CLI. `None` for SDK calls. |
 
 ## DataDesignerJobResource
 

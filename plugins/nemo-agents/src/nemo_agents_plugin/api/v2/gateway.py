@@ -49,7 +49,13 @@ from nemo_agents_plugin.api.v2.openai_errors import (
 from nemo_agents_plugin.api.v2.session_access import get_owned_session_by_id
 from nemo_agents_plugin.authz import scope
 from nemo_agents_plugin.deployment_routing import get_deployment_endpoint, is_deployment_routable
-from nemo_agents_plugin.entities import Agent, AgentDeployment, AgentSession, SessionStatus
+from nemo_agents_plugin.entities import (
+    NEMO_AGENTS_SPEC_CONFIG_FORMAT,
+    Agent,
+    AgentDeployment,
+    AgentSession,
+    SessionStatus,
+)
 from nemo_agents_plugin.fabric.session_manager import DEFAULT_IDLE_SESSION_TIMEOUT_SECONDS
 from nemo_agents_plugin.session_lifecycle import session_expiration_is_due
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
@@ -354,6 +360,7 @@ async def _proxy_deployment(
         session_id=session.id if session is not None else None,
         on_start=persist_start_activity if tracks_session_activity else None,
         on_complete=persist_finish_activity if tracks_session_activity else None,
+        strip_request_model=_is_nat_deployment(deployment),
     )
 
 
@@ -617,6 +624,37 @@ async def _best_effort_session_activity_update(
         )
 
 
+def _is_nat_deployment(deployment: AgentDeployment) -> bool:
+    """True for a legacy ``nat-workflow-v1`` deployment; Fabric deployments tag their config."""
+    return deployment.config.get("config_format") != NEMO_AGENTS_SPEC_CONFIG_FORMAT
+
+
+def _strip_request_model(body: bytes) -> bytes | None:
+    """Drop the ``model`` field from an OpenAI-style JSON request body.
+
+    The gateway identifies the agent by URL path, so an inbound ``model`` carries no routing
+    information. OpenAI clients (the Evaluator included) still send one, usually the agent's own
+    name. ``nat serve`` treats that field as an LLM override and forwards it to the Inference
+    Gateway, which has no VirtualModel by that name and answers 422, so every request through a
+    conforming client fails regardless of the agent's configured LLM. Removing the field makes NAT
+    fall back to ``llms.<name>.model_name`` from its own config. Fabric agents already ignore the
+    field, so only NAT deployments take this path.
+
+    Returns the rewritten body, or ``None`` when nothing changed (not a JSON object, or no
+    ``model`` key) so the caller can leave the original bytes and headers untouched.
+    """
+    if not body:
+        return None
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict) or "model" not in data:
+        return None
+    del data["model"]
+    return json.dumps(data).encode()
+
+
 async def _proxy(
     request: Request,
     endpoint: str,
@@ -626,8 +664,12 @@ async def _proxy(
     session_id: str | None = None,
     on_start: Callable[[], Awaitable[None]] | None = None,
     on_complete: Callable[[], Awaitable[None]] | None = None,
+    strip_request_model: bool = False,
 ) -> StreamingResponse:
     """Forward *request* to ``{endpoint}/{trailing_uri}`` and stream the response.
+
+    With ``strip_request_model`` set, an OpenAI-compatible request body loses its ``model``
+    field before it is forwarded; see :func:`_strip_request_model`.
 
     Error handling policy:
     - **4xx** from the agent: status and body passed through (client error, agent's
@@ -665,6 +707,12 @@ async def _proxy(
         headers[SESSION_ID_HEADER] = session_id
 
     body = await request.body()
+    if strip_request_model and is_openai_compatible_uri(trailing_uri):
+        stripped = _strip_request_model(body)
+        if stripped is not None:
+            body = stripped
+            # httpx recomputes the length from ``content``; the client's original value is stale.
+            headers.pop("content-length", None)
 
     activity_started = False
     activity_completed = False
