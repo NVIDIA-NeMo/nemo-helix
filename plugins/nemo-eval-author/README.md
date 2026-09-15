@@ -56,6 +56,10 @@ drafts under `.eval-author/adapted-tasks/`. Original evals stay unchanged.
 Conversion produces task files and the grading checks supported by the source;
 unavailable app access blocks live execution, not task creation. Written
 specifications support the tasks rather than replacing them.
+Once the user says they are done adapting their evals, the skill offers an
+optional coverage audit against their Ethos. On acceptance, `eval-author-audit`
+generates or reconciles the audit specification and reviews the created tasks;
+trace-based measured coverage is reported separately when evidence is available.
 Confirmed absence routes to `eval-author-first-eval`, introduced by
 [PR #1943](https://github.com/NVIDIA-NeMo/nemo-platform/pull/1943). Until that
 companion skill is present, the router reports the unavailable handoff explicitly.

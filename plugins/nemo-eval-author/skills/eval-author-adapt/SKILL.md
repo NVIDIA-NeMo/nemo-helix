@@ -271,6 +271,9 @@ When reporting user-requested replay or mock work, explain its contribution to
 the task drafts and label its commands as replay/mock checks. Keep the remaining
 grading and real-agent setup visible, and recommend the next feasible action
 without asking again for inputs the user already said they do not have.
+When the user says they are finished with the adapted evals, use Step 6 to offer
+the next flow. This can happen before live execution; retain any unfinished
+grading or setup requirements rather than marking them complete.
 
 ## 5. Verify and run when the prerequisites are available
 
@@ -305,3 +308,34 @@ A low agent score can be a valid baseline, not a reason to change the criteria.
 Provide a validated rerun command only when available; label any proposed command
 as unvalidated. Update task statuses and remaining work. Audit and trace-driven
 improvement are optional later work, not conversion prerequisites.
+
+## 6. Offer a coverage audit when the user finishes adaptation
+
+Once task files exist and the user indicates they are done adapting them, offer
+the next step. For example, “I'm done with these evals” or “These are ready for
+the next step” signals this handoff. Creating the first draft, a successful
+replay, or a pause for missing inputs alone does not. Do not interrupt ongoing
+adaptation or ask after every case. If the user already requested the audit,
+carry that request forward without asking again.
+
+> Now that we have some evals to start from, would you like me to audit your
+> coverage? I'll compare your Ethos—the description of what your agent should
+> do—with these evals to show what's addressed, where checks are missing, and
+> what else you may want to test.
+
+Wait for the answer before starting the audit. If the user declines or defers,
+keep their tasks and findings available without repeating the offer on every
+visit. Record their choice in the existing adaptation findings. An audit is
+optional and does not authorize new evals, agent runs, or paid judgments.
+
+If accepted, read [`eval-author-audit`](../eval-author-audit/SKILL.md) from this
+same skill tree and follow its Ethos pre-flight and adapted-eval coverage review.
+Carry forward the created task paths/IDs, adaptation findings, known Ethos path,
+unresolved grading/setup requirements, and any run artifacts with their provenance.
+Do not restart discovery or ask the user to locate files already known.
+
+An Ethos is required for the audit, not for completing adaptation. If absent,
+use the audit flow's explanation and supported Ethos creation/provision choices;
+do not invent it from the tasks. Task inspection establishes intended coverage;
+only supported trace measurement establishes observed coverage. Keep unfinished
+execution visible when the user chooses to review task coverage first.

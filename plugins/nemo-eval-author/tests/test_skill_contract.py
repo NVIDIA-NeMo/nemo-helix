@@ -1184,15 +1184,16 @@ def test_discover_report_renderer_cli_summary_and_evidence(tmp_path: Path) -> No
     assert source in saved
 
 
-def test_adapt_references_are_bundled() -> None:
-    """A copied adaptation skill must retain its linked task-explanation guidance."""
-    _, body = _frontmatter_and_body(_ADAPT_DIR)
+@pytest.mark.parametrize("skill_dir", [_ADAPT_DIR, _AUDIT_DIR])
+def test_sub_flow_references_are_bundled(skill_dir: Path) -> None:
+    """Copied skills must retain their linked workflow guidance."""
+    _, body = _frontmatter_and_body(skill_dir)
     references = re.findall(r"\]\((references/[^)]+)\)", body)
-    assert references, "adaptation must link its supporting task-explanation guidance"
+    assert references, f"{skill_dir.name} must link its supporting workflow guidance"
     for reference in references:
-        target = (_ADAPT_DIR / reference).resolve()
-        assert target.is_relative_to(_ADAPT_DIR.resolve())
-        assert target.is_file(), f"adaptation references an unbundled file: {reference}"
+        target = (skill_dir / reference).resolve()
+        assert target.is_relative_to(skill_dir.resolve())
+        assert target.is_file(), f"{skill_dir.name} references an unbundled file: {reference}"
         assert target.read_text(encoding="utf-8").strip()
 
 

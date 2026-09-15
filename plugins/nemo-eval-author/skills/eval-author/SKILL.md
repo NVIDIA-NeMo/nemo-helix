@@ -252,6 +252,21 @@ For an inventory-only request, report what was found and offer the appropriate
 next step. Creating or running evals requires that intent; discovery alone does
 not authorize either.
 
+## Continue from adaptation to coverage auditing
+
+When the user indicates they are done with their adapted evals and task files
+exist, use `eval-author-adapt` Step 6 to offer a coverage audit. Explain that it
+compares the agent's Ethos with the created evals to identify what is addressed
+and what is missing. Wait for acceptance unless the user already requested it.
+Task creation alone does not trigger an audit, and declining does not invalidate
+the adaptation work. Carry forward the user's choice and existing artifacts.
+
+On acceptance, route to `eval-author-audit` and its Ethos pre-flight, then its
+adapted-eval coverage review. Keep the task scope and any run evidence explicit;
+drafts can support a review of planned coverage even if live execution is pending.
+An audit-only request ends with the report. Proposing or creating further tasks
+remains a separate requested continuation.
+
 ## Boundaries
 
 These hold for every sub-flow. They exist because the repository belongs to the
