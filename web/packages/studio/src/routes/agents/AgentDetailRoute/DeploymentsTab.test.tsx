@@ -105,6 +105,22 @@ describe('DeploymentsTab', () => {
     expect(screen.getByText(LONG_ERROR)).toBeInTheDocument();
   });
 
+  it.each([
+    ['docker', 'Docker'],
+    ['k8s', 'Kubernetes'],
+    ['subprocess', 'Subprocess'],
+  ])('names a %s deployment its runtime, since a row otherwise hides it', (mode, label) => {
+    renderTab([deployment({ deployment_mode: mode as AgentDeployment['deployment_mode'] })]);
+
+    expect(screen.getByText(label)).toBeInTheDocument();
+  });
+
+  it('calls a deployment with no recorded runtime a subprocess, which is the default', () => {
+    renderTab([deployment()]);
+
+    expect(screen.getByText('Subprocess')).toBeInTheDocument();
+  });
+
   it('offers packaging from the deployments header', () => {
     renderTab([failedDeployment]);
 

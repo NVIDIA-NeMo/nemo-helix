@@ -4,9 +4,10 @@
 import { ExternalLink } from '@nemo/common/src/components/ExternalLink';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
-import { Button, Flex, Stack, StatusIndicator, Text } from '@nvidia/foundations-react-core';
+import { Badge, Button, Flex, Stack, StatusIndicator, Text } from '@nvidia/foundations-react-core';
 import { type AgentSpecSource, githubCommitUrl } from '@studio/api/agents/useAgentSpecFileset';
 import {
+  deploymentModeLabel,
   deploymentStatusColor,
   shortRevision,
 } from '@studio/routes/agents/AgentDetailRoute/helpers';
@@ -109,6 +110,9 @@ export const DeploymentRow: FC<DeploymentRowProps> = ({
         ) : null}
       </Stack>
       <Flex align="center" gap="2" className="shrink-0">
+        <Badge kind="outline" color="gray" size="small">
+          {deploymentModeLabel(deployment.deployment_mode)}
+        </Badge>
         <StatusBadge status={deployment.status} />
         <Flex gap="1">
           <Button
