@@ -248,6 +248,26 @@ describe('NewCustomizationForm', () => {
       expect(screen.queryByText('Deployment')).not.toBeInTheDocument();
     });
 
+    // Unsloth's merge is a save_method, not a finetuning_type, so `finetuning_type`
+    // alone would call this an adapter and offer a base-model deployment for output
+    // that is full weights.
+    it('hides the Deployment section for a merged unsloth save', async () => {
+      const values: CustomizationFormFields = {
+        ...FORM_DEFAULTS,
+        backend: 'unsloth',
+        unsloth: {
+          ...FORM_DEFAULTS.unsloth,
+          model: { ...FORM_DEFAULTS.unsloth.model, name: 'default/base-model' },
+          training: { ...FORM_DEFAULTS.unsloth.training, finetuning_type: 'lora' },
+          output: { save_method: 'merged_16bit' },
+        },
+      };
+      renderRoute(<NewCustomizationForm workspace="default" initialValues={values} />);
+
+      await screen.findByText('Compute Resources');
+      expect(screen.queryByText('Deployment')).not.toBeInTheDocument();
+    });
+
     it('hides the Deployment section for DPO, which is always full-weight', async () => {
       const values: CustomizationFormFields = { ...FORM_DEFAULTS, backend: 'rl' };
       renderRoute(<NewCustomizationForm workspace="default" initialValues={values} />);

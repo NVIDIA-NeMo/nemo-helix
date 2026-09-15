@@ -106,6 +106,13 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
     control: form.control,
     name: 'unsloth.training.finetuning_type',
   });
+  // Unsloth decides adapter-vs-merged at save time, not via `finetuning_type` — so
+  // `producesAdapter` needs this as well. No control binds it today; it is watched
+  // rather than read once so the section reacts if one is ever added.
+  const unslothSaveMethod = useWatch({
+    control: form.control,
+    name: 'unsloth.output.save_method',
+  });
   // Bound to `grpo.trainingType` rather than `rl.training.type`: the form holds one
   // `rl.training` object, and flipping the union discriminator in place would leave it
   // carrying the other arm's fields. `formToRlCreate` sets `type` from this on submit.
@@ -125,7 +132,10 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   const isAdapterRun = producesAdapter({
     backend,
     automodel: { training: { finetuning_type: automodelFinetuningType } },
-    unsloth: { training: { finetuning_type: unslothFinetuningType } },
+    unsloth: {
+      training: { finetuning_type: unslothFinetuningType },
+      output: { save_method: unslothSaveMethod },
+    },
     grpo: { trainingType: grpoTrainingType, finetuning_type: grpoFinetuningType },
   });
 

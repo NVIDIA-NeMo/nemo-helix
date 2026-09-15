@@ -82,7 +82,7 @@ export const DATASET_FIELD_BY_BACKEND: Record<CustomizationBackend, DatasetField
 export interface FinetuningTypeSource {
   backend: CustomizationBackend;
   automodel?: { training?: { finetuning_type?: string } };
-  unsloth?: { training?: { finetuning_type?: string } };
+  unsloth?: { training?: { finetuning_type?: string }; output?: { save_method?: string } };
   grpo?: { trainingType?: string; finetuning_type?: string };
 }
 
@@ -114,9 +114,21 @@ export const getActiveFinetuningType = (fields: FinetuningTypeSource): string | 
  * model, not an adapter. Anything reasoning about how the output gets *served*
  * wants this predicate; anything deciding whether to show LoRA hyperparameter
  * controls wants the broader test and must not use it.
+ *
+ * `finetuning_type` alone is not enough for unsloth. Automodel spends a separate
+ * `finetuning_type` on the distinction (`lora` vs `lora_merged`), but unsloth
+ * expresses it at save time instead: `finetuning_type: 'lora'` with
+ * `save_method: 'merged_16bit' | 'merged_4bit'` trains an adapter and then merges
+ * it into the base, emitting full weights. Mirrors `is_lora_adapter` in
+ * `nemo_unsloth_plugin/schema.py`, which is the authority the job itself uses.
  */
-export const producesAdapter = (fields: FinetuningTypeSource): boolean =>
-  getActiveFinetuningType(fields) === 'lora';
+export const producesAdapter = (fields: FinetuningTypeSource): boolean => {
+  if (getActiveFinetuningType(fields) !== 'lora') return false;
+  if (fields.backend !== 'unsloth') return true;
+  // Absent means the API default, which is `lora` — an unmerged adapter.
+  const saveMethod = fields.unsloth?.output?.save_method;
+  return saveMethod === undefined || saveMethod === 'lora';
+};
 
 type ModelFieldName = 'automodel.model' | 'unsloth.model.name' | 'rl.model';
 
@@ -536,7 +548,14 @@ export const formToUnslothCreate = (
         : { ...f.unsloth.model, load_in_4bit: false, load_in_8bit: false },
       hardware: { ...f.unsloth.hardware, gpus: f.unsloth.hardware?.gpus || undefined },
       training: training && { ...training, lora: usesLora ? training.lora : undefined },
-      output: { name: f.outputName || undefined, description: f.description || undefined },
+      // `save_method` is carried through rather than dropped: `producesAdapter` reads it
+      // to decide whether the output is an adapter, and a value the predicate honours but
+      // the request discards would let Studio and the job disagree about what a run emits.
+      output: {
+        name: f.outputName || undefined,
+        description: f.description || undefined,
+        save_method: f.unsloth.output?.save_method,
+      },
       // Native field here — `UnslothJobInput` already declares it, so no intersection is
       // needed. Set unconditionally rather than via `deploymentConfigField`: the spread of
       // `f.unsloth` above can carry an inline config from a cloned job, and that would

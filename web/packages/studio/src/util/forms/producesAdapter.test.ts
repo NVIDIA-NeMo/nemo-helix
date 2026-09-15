@@ -90,4 +90,49 @@ describe('producesAdapter', () => {
   it('is false for DPO', () => {
     expect(producesAdapter(fields({ backend: 'rl', grpo: { trainingType: 'dpo' } }))).toBe(false);
   });
+
+  // Unsloth's equivalent of automodel's `lora_merged`, expressed at save time rather
+  // than as a distinct finetuning_type. `finetuning_type` alone would call these
+  // adapters and offer a base-model deployment for output that is full weights.
+  describe('unsloth merges at save time', () => {
+    const unsloth = (save_method?: string): FinetuningTypeSource => ({
+      backend: 'unsloth',
+      unsloth: { training: { finetuning_type: 'lora' }, output: { save_method } },
+    });
+
+    it.each(['merged_16bit', 'merged_4bit'])('is false for save_method=%s', (method) => {
+      expect(producesAdapter(unsloth(method))).toBe(false);
+    });
+
+    it('is true for save_method=lora', () => {
+      expect(producesAdapter(unsloth('lora'))).toBe(true);
+    });
+
+    // Omitted means the API default, which is `lora`.
+    it('is true when save_method is unset', () => {
+      expect(producesAdapter(unsloth(undefined))).toBe(true);
+      expect(
+        producesAdapter(
+          fields({ backend: 'unsloth', unsloth: { training: { finetuning_type: 'lora' } } })
+        )
+      ).toBe(true);
+    });
+
+    // The merge happens at save time, so it has no bearing on the other backends —
+    // and reading unsloth's namespace for an automodel run would be a cross-backend leak.
+    it('does not let a stale unsloth save_method affect automodel', () => {
+      expect(
+        producesAdapter(
+          fields({
+            backend: 'automodel',
+            automodel: { training: { finetuning_type: 'lora' } },
+            unsloth: {
+              training: { finetuning_type: 'lora' },
+              output: { save_method: 'merged_16bit' },
+            },
+          })
+        )
+      ).toBe(true);
+    });
+  });
 });
