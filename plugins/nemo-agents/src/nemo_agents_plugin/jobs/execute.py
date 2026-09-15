@@ -301,7 +301,7 @@ class ExecuteAgentJob(NemoJob):
         is optional precisely so a job can defer to the execution profile's
         ``default_task_image`` and then the platform CPU tasks image.
         """
-        return request_image or AgentsConfig.get().jobs.default_image or None
+        return request_image.strip() or AgentsConfig.get().jobs.default_image.strip() or None
 
     @classmethod
     async def to_spec(

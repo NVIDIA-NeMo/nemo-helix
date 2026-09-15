@@ -571,6 +571,21 @@ async def test_compile_omits_image_to_inherit_substrate_chain() -> None:
 
 
 @pytest.mark.asyncio
+async def test_blank_config_default_is_treated_as_unset() -> None:
+    """A whitespace-only configured default inherits the chain rather than reaching the runtime.
+
+    Whitespace is truthy, so without stripping it would short-circuit the
+    fallback and be handed to the container runtime as an unpullable image.
+    ``ContainerSpec.image`` does not catch it either -- it rejects only the
+    empty string. Config is not validated for this (no image setting anywhere
+    in the platform is), so the resolution treats blank as absent.
+    """
+    blank_default = AgentsConfig(jobs=AgentJobsConfig(default_image="   "))
+
+    assert await _compiled_image(blank_default, ExecuteAgentJobConfig(agent="calc", input="hello")) is None
+
+
+@pytest.mark.asyncio
 async def test_deployments_default_image_untouched_by_jobs_default() -> None:
     """The two knobs do not cross-talk in either direction."""
     deployments_only = AgentsConfig(deployments=DeploymentsRunnerConfig(default_image="registry.example/deploy:test"))
