@@ -28,11 +28,13 @@ from nemo_agents_plugin.entities import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
     AgentDeployment,
     AgentSession,
+    Endpoint,
     SessionStatus,
 )
 from nemo_agents_plugin.runner.backend import DeploymentInfo
 from nemo_agents_plugin.runner.controller import AgentDeploymentController
 from nemo_agents_plugin.spec_revision import SpecRevision
+from nemo_deployments_plugin.endpoint_transport import DIRECT, EndpointTransport
 from nemo_platform_plugin.auth import AuthContext
 from nemo_platform_plugin.entities.client import AsyncEntitiesClient
 from nemo_platform_plugin.entity_client import NemoEntityConflictError
@@ -467,11 +469,45 @@ async def test_read_runtime_instance_validates_health_response(
     response.json.return_value = payload
     client = MagicMock()
     client.get = AsyncMock(return_value=response)
-    ctrl._runtime_health_client = client
+    ctrl._runtime_health_clients[DIRECT] = client
 
     assert await ctrl._read_runtime_instance(deployment) == expected
-    client.get.assert_awaited_once_with("http://localhost:9001/health")
+    client.get.assert_awaited_once_with("http://localhost:9001/health", headers={})
     response.raise_for_status.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_read_runtime_instance_dials_a_gateway_routed_endpoint_through_its_gateway() -> None:
+    """An openshell-style transport gets its own TLS-bearing client and the minted host as Host."""
+    ctrl, _ = _make_controller()
+    deployment = _make_fabric_deployment()
+    deployment.deployment_mode = "k8s"
+    deployment.endpoint = ""
+    deployment.endpoints = [Endpoint(name="http", url="https://default--dep--http.openshell.localhost:8080/")]
+    transport = EndpointTransport(
+        connect_base="https://openshell.openshell.svc.cluster.local:8080",
+        ca_cert="/tls/ca.crt",
+        client_cert=("/tls/tls.crt", "/tls/tls.key"),
+    )
+    tls_context = object()
+    response = MagicMock()
+    response.json.return_value = {"runtime_instance_id": "runtime-1", "runtime_started_at": EXPIRATION_NOW.isoformat()}
+    client = MagicMock()
+    client.get = AsyncMock(return_value=response)
+
+    with (
+        patch("nemo_agents_plugin.deployment_routing.get_deployment_transport", return_value=transport),
+        patch.object(EndpointTransport, "client_kwargs", return_value={"verify": tls_context}),
+        patch("httpx.AsyncClient", return_value=client) as client_cls,
+    ):
+        assert await ctrl._read_runtime_instance(deployment) == ("runtime-1", EXPIRATION_NOW)
+
+    assert client_cls.call_args.kwargs["verify"] is tls_context
+    client.get.assert_awaited_once_with(
+        "https://openshell.openshell.svc.cluster.local:8080/health",
+        headers={"Host": "default--dep--http.openshell.localhost:8080"},
+    )
+    assert ctrl._runtime_health_clients == {transport: client}
 
 
 @pytest.mark.asyncio

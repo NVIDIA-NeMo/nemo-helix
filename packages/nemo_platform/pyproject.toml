@@ -421,8 +421,10 @@ nemo-optimization-plugin = [
 nemo-platform-plugin = [
   "anthropic>=0.88.0",
   "fastapi>=0.115.4",
+  "filesets",
   "jsonschema>=4.0.0",
   "lark>=1.1.0",
+  "models",
   "nemo-platform-sdk",
   "openai>=1.109.1",
   "pydantic>=2.12.0",

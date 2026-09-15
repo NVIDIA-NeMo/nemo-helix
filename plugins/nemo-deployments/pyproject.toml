@@ -54,6 +54,7 @@ dev = [
   "fastapi>=0.115",
   "docker>=7.0",
   "kubernetes>=30.1.0",
+  "cryptography>=42",
   # openshell/grpcio/protobuf are intentionally NOT in this dev group. openshell is a
   # platform-restricted wheel (manylinux_2_39 / macOS 13 arm64, no sdist); a dev-group
   # entry would make `uv sync --all-packages` (bootstrap) hard-fail on any host with

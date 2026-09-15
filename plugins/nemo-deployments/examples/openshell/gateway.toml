@@ -22,6 +22,14 @@ log_level = "info"
 compute_drivers = ["docker"]
 disable_tls = true
 
+# Advertised deployment URLs. ExposeService returns
+# http://<workspace>--<sandbox>--<service>.<domain>:17670/ where <domain> is the
+# first wildcard DNS SAN below with its "*." stripped, else openshell.localhost,
+# which resolves only on this host. The platform never resolves it (it dials this
+# gateway and sends that host as the Host header), so this only matters for people
+# and tools reaching a deployment from another machine:
+# server_sans = ["*.agents.example.com"]
+
 [openshell.gateway.auth]
 # Local-dev escape hatch: accept CLI/API calls without mTLS or OIDC. Sandbox
 # supervisors still authenticate with the gateway-minted JWTs below. Never set

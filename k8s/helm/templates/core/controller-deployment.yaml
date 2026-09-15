@@ -126,10 +126,16 @@ spec:
             - name: config
               mountPath:  /etc/nmp/config.yaml
               subPath: config.yaml
+            {{- with .Values.core.controller.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         - name: config
           configMap:
             name: {{ include "nemo-platform.platform-configmap" . }}
+        {{- with .Values.core.controller.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- with .Values.core.controller.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

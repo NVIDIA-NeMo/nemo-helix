@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# CI validates by running: helm template nemo-platform . -f ci/25-controller-extra-volumes-openshell.yaml
+# Exercises controller extra volume/mount rendering; also the worked example for an
+# OpenShell gateway installed separately (ghcr.io/nvidia/openshell/helm-chart, mTLS defaults).
+#
+# Copy the gateway's openshell-client-tls Secret (ca.crt, tls.crt, tls.key) into this
+# release namespace. Both pods instantiate the executor, so both need the mount.
+# platformConfig lists replace the base config, so restate local-k8s.
+# The gateway's server certificate must carry an Authority Key Identifier (pkiInitJob
+# output predating that, or any non-RFC 5280 PKI, must be regenerated).
+
+api:
+  extraVolumes:
+    - name: openshell-client-tls
+      secret:
+        secretName: openshell-client-tls
+  extraVolumeMounts:
+    - name: openshell-client-tls
+      mountPath: /etc/openshell-tls/client
+      readOnly: true
+core:
+  controller:
+    extraVolumes:
+      - name: openshell-client-tls
+        secret:
+          secretName: openshell-client-tls
+    extraVolumeMounts:
+      - name: openshell-client-tls
+        mountPath: /etc/openshell-tls/client
+        readOnly: true
+platformConfig:
+  deployments:
+    executors:
+      - name: local-k8s
+        backend: k8s
+        config:
+          default_namespace: nemo
+      - name: openshell
+        backend: openshell
+        config:
+          gateway_endpoint: https://openshell.openshell.svc.cluster.local:8080
+          tls:
+            ca_cert_path: /etc/openshell-tls/client/ca.crt
+            client_cert_path: /etc/openshell-tls/client/tls.crt
+            client_key_path: /etc/openshell-tls/client/tls.key
+          platform_egress:
+            host: nemo-platform-api.nemo.svc
+            port: 8080
+    default_executor: local-k8s
