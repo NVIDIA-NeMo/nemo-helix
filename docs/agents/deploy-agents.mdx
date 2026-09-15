@@ -34,6 +34,8 @@ durable container through the deployments plugin.
 | `docker` | A Docker container | Yes | A container image and a configured `docker` executor |
 | `k8s` | A Kubernetes Deployment + Service | Yes | A container image and a configured `k8s` executor |
 
+The `k8s` executor can also be an OpenShell gateway, in which case the agent runs inside a sandbox with a network policy that allows only the platform. See [Sandboxed Deployments](/documentation/agents/sandboxed-deployments).
+
 In every mode the agent is reached the same way — through the Agents gateway,
 which resolves the agent's active deployment and proxies the request, so
 clients do not need to know which mode the agent runs in.

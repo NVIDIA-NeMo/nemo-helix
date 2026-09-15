@@ -42,6 +42,9 @@ navigation:
         contents:
           - page: Deploy Agents
             path: ../../agents/deploy-agents.mdx
+          - page: Sandboxed Deployments
+            path: ../../agents/sandboxed-deployments.mdx
+            slug: sandboxed-deployments
           - page: Add Guardrails
             path: ../../agents/add-guardrails.mdx
             slug: add-guardrails
@@ -432,6 +435,9 @@ navigation:
                   - page: OpenSandbox with Kata
                     slug: opensandbox-kata
                     path: ../../set-up/helm/opensandbox-kata.mdx
+                  - page: OpenShell
+                    slug: openshell
+                    path: ../../set-up/helm/openshell.mdx
                   - page: OpenShift
                     slug: openshift
                     path: ../../set-up/helm/openshift.mdx

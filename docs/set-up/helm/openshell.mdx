@@ -1,0 +1,181 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "OpenShell"
+description: "Install an OpenShell gateway next to NeMo Platform on Kubernetes and register it as a deployment executor."
+---
+
+[OpenShell](https://github.com/NVIDIA/OpenShell) runs agents inside sandboxes with a network policy that allows only the destinations you list. With an OpenShell gateway in the cluster and an `openshell` executor in the platform configuration, `nemo agents deploy --mode k8s` places each agent in its own sandbox, and the agent can reach the platform and nothing else.
+
+The NeMo Platform Helm chart does not install OpenShell. This page installs the upstream chart, then adds the executor to the platform. Once both are in place, follow [Sandboxed Deployments](/documentation/agents/sandboxed-deployments) to deploy an agent.
+
+<Warning>
+
+The values on this page put the gateway in an evaluation posture: no TLS and no user authentication. That is fine for a lab cluster you control. For anything shared, enable TLS through cert-manager and configure OIDC for user access. The OpenShell chart README documents both. NeMo Platform cannot yet authenticate to a gateway that requires OIDC, so an authenticated gateway is not a supported target today.
+
+</Warning>
+
+## Before you start
+
+You need:
+
+- A Kubernetes cluster, version 1.29 or later, with `kubectl` access.
+- Helm 3 or 4.
+- The NeMo Platform chart and image available to the cluster. If the platform is already installed, you will upgrade its values rather than install it.
+
+Pick the names used throughout this page. The defaults match the rest of the Helm documentation.
+
+```sh
+export NMP_NAMESPACE=nemo-platform
+export NMP_HELM_RELEASE=nemo-platform
+export OPENSHELL_VERSION=0.0.116
+```
+
+## Install the Agent Sandbox controller
+
+OpenShell creates sandbox pods through the Kubernetes [Agent Sandbox](https://agent-sandbox.sigs.k8s.io) controller. Install it first:
+
+```sh
+kubectl apply -f https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v1.0.1/sandbox.yaml
+kubectl -n agent-sandbox-system rollout status deployment --timeout=120s
+```
+
+Pin the version instead of using `latest`. OpenShell 0.0.116 expects the `v1beta1` API that Agent Sandbox v1.0.1 serves.
+
+## Install the OpenShell gateway
+
+Write the values file:
+
+```sh
+cat > openshell-values.yaml <<'EOF'
+server:
+  disableTls: true
+  auth:
+    allowUnauthenticatedUsers: true
+EOF
+```
+
+Install the chart:
+
+```sh
+helm upgrade --install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
+  --version "$OPENSHELL_VERSION" \
+  --namespace openshell --create-namespace \
+  --values openshell-values.yaml \
+  --wait --timeout 5m
+```
+
+Confirm the gateway is running:
+
+```sh
+kubectl -n openshell get pods
+```
+
+You should see one pod, `openshell-0`, with status `Running` and `1/1` ready. Sandbox pods will appear in this same namespace later.
+
+The gateway listens on `openshell.openshell.svc.cluster.local:8080` inside the cluster. That single port serves both the control plane the platform talks to and the HTTP route the platform uses to reach agents.
+
+## Install the OpenShell CLI
+
+You need the CLI on your machine to look inside sandboxes. Install the same version as the gateway. The release ships a single static binary:
+
+```sh
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64)  ASSET=openshell-x86_64-unknown-linux-musl.tar.gz ;;
+  Linux-aarch64) ASSET=openshell-aarch64-unknown-linux-musl.tar.gz ;;
+  Darwin-arm64)  ASSET=openshell-aarch64-apple-darwin.tar.gz ;;
+esac
+curl -fsSL -o "$ASSET" "https://github.com/NVIDIA/OpenShell/releases/download/v${OPENSHELL_VERSION}/${ASSET}"
+tar -xzf "$ASSET"
+install -m 0755 openshell ~/.local/bin/openshell
+openshell --version
+```
+
+Point it at the gateway through a port-forward. The gateway's own port is 8080, the same as the platform API, so use a different local port:
+
+```sh
+kubectl -n openshell port-forward svc/openshell 18080:8080 &
+openshell gateway add http://127.0.0.1:18080 --local --name nemo-k8s
+openshell gateway select nemo-k8s
+openshell sandbox list
+```
+
+`sandbox list` prints `No sandboxes found.` on a new gateway. If it prints an `UNAUTHENTICATED` error instead, the values file did not apply; check `helm get values openshell -n openshell`.
+
+<Note>
+
+The `openshell` package on PyPI is the Python SDK and does not include the CLI. The `install.sh` script in the OpenShell repository installs a system package and needs `sudo`. The tarball above needs neither.
+
+</Note>
+
+## Add the executor to the platform
+
+The platform reaches the gateway at its in-cluster Service address, and the sandbox policy allows the agent one destination: the platform API Service. Both names depend on your release name and namespace, so write them into the values.
+
+```sh
+cat > platform-openshell-values.yaml <<EOF
+platformConfig:
+  deployments:
+    default_executor: local-k8s
+    executors:
+      - name: local-k8s
+        backend: k8s
+        config:
+          default_namespace: "{{ .Release.Namespace }}"
+      - name: openshell
+        backend: openshell
+        config:
+          gateway_endpoint: http://openshell.openshell.svc.cluster.local:8080
+          platform_egress:
+            host: ${NMP_HELM_RELEASE}-api.${NMP_NAMESPACE}.svc.cluster.local
+            port: 8080
+          serve_workdir: /tmp
+  agents:
+    deployments:
+      k8s_executor: openshell
+      k8s_internal_base_url: http://${NMP_HELM_RELEASE}-api.${NMP_NAMESPACE}.svc.cluster.local:8080
+EOF
+```
+
+Two of these settings are easy to get wrong:
+
+- **Keep `local-k8s` in the list.** `platformConfig` lists replace the chart's defaults rather than merging with them. Dropping the `local-k8s` entry removes the default executor and the platform fails to start.
+- **Use the full Service name.** The chart hands agents a short `<release>-api` hostname that only resolves inside the platform's own namespace. Sandboxes run in the `openshell` namespace, so `k8s_internal_base_url` and `platform_egress.host` must carry the `.svc.cluster.local` form, and the two must match.
+
+`serve_workdir: /tmp` is required on Kubernetes. The sandbox user cannot write to the default `/home/sandbox` there.
+
+Apply the values alongside the ones you already use for the platform:
+
+```sh
+helm upgrade --install "$NMP_HELM_RELEASE" <chart> \
+  --namespace "$NMP_NAMESPACE" \
+  --values values.yaml \
+  --values platform-openshell-values.yaml \
+  --wait --timeout 20m
+```
+
+Replace `<chart>` with the chart reference from [Install](/documentation/kubernetes-deployment/setup/helm/install) and `values.yaml` with your existing values file.
+
+## Verify
+
+The controller registers executors at startup. Confirm the openshell one made it in:
+
+```sh
+kubectl -n "$NMP_NAMESPACE" get configmap "${NMP_HELM_RELEASE}-config" -o yaml | grep -A 8 'name: openshell'
+kubectl -n "$NMP_NAMESPACE" logs deployment/"${NMP_HELM_RELEASE}-core-controller" | grep -i 'skipping executor'
+```
+
+The first command shows the executor block you wrote. The second should print nothing. A line like `Skipping executor 'openshell': backend 'openshell' is unavailable` means the platform image was built without the OpenShell SDK; use a platform image from September 2026 or later.
+
+You are ready to deploy an agent. Continue with [Sandboxed Deployments](/documentation/agents/sandboxed-deployments).
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `helm install openshell` fails before creating anything, message about the Sandbox API | Agent Sandbox controller not installed | Install it first, confirm `kubectl get crd sandboxes.agents.x-k8s.io`, retry |
+| `openshell sandbox list` returns `UNAUTHENTICATED` | Gateway installed without `allowUnauthenticatedUsers: true` | `helm upgrade` OpenShell with the values file above |
+| Controller log: `Skipping executor 'openshell'` | Platform image lacks the OpenShell SDK | Use a newer platform image |
+| Platform fails to start after the upgrade | `local-k8s` executor dropped from the list | Add it back; the list replaces the chart default |
+| Sandbox pods stay `Pending`, PVC pending | No default StorageClass for the sandbox workspace volume | Set `server.workspaceStorageClass` in the OpenShell values |
