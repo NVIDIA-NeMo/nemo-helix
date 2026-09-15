@@ -89,7 +89,11 @@ WORKSPACE = "default"
 #: Headers a job's task client carries (mirrors ``get_task_nemo_client``): an internal service principal the
 #: default PDP policy grants full permissions. Authenticates test-side calls against the
 #: auth-enabled platform without standing up OIDC.
-SERVICE_PRINCIPAL_HEADERS = {"X-NMP-Principal-Id": "service:evaluator", "X-NMP-Internal": "true"}
+SERVICE_PRINCIPAL_HEADERS = {
+    "X-NMP-Principal-Id": "service:evaluator",
+    "X-NMP-Actor-Aliases": "service:evaluator",
+    "X-NMP-Internal": "true",
+}
 
 
 # Pickle metrics defined in this test module BY VALUE so the cloudpickle bundle embeds the class

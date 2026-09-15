@@ -15,6 +15,7 @@ dependencies = [
     "httpx>=0.27.0",
     "pyyaml>=6.0.0",
     "nmp-common",
+    "nmp-entities",
     "wasmtime>=20.0.0",
 ]
 version = "0.0.0"
@@ -24,6 +25,7 @@ auth-server = "nmp.core.auth.main:run_standalone"
 
 [tool.uv.sources]
 nmp-common = { workspace = true }
+nmp-entities = { workspace = true }
 nmp-testing = { workspace = true }
 
 

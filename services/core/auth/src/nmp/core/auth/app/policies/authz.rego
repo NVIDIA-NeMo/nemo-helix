@@ -16,6 +16,7 @@ import data.common.has_permissions
 import data.common.req_callers
 import data.common.req_deny
 import data.common.req_permissions
+import data.common.request_caller_kind
 
 # Main entry point - returns result with X-NMP-Authorized header
 #
@@ -277,8 +278,7 @@ deny_request if {
 	path_parts[6] == "secrets"
 	path_parts[8] == "access"
 
-	principal_id := extract_principal_id
-	not startswith(principal_id, "service:")
+	request_caller_kind != "service_principal"
 }
 
 # OPA policy bundle download: system-scoped iam.bundle.read only (see static-authz endpoints).
@@ -313,8 +313,7 @@ nested_entities_internal_only if {
 
 deny_request if {
 	nested_entities_internal_only
-	principal_id := extract_principal_id
-	not startswith(principal_id, "service:")
+	request_caller_kind != "service_principal"
 	not platform_admin_in_system
 }
 
@@ -343,8 +342,7 @@ service_only_route if {
 # retains access to every route, service-only routes included.
 deny_request if {
 	service_only_route
-	principal_id := extract_principal_id
-	not startswith(principal_id, "service:")
+	request_caller_kind != "service_principal"
 	not platform_admin_in_system
 }
 
@@ -368,8 +366,7 @@ principal_only_route if {
 # ServiceSystem "*" wildcard), so `callers` could not actually scope a route to human users.
 deny_request if {
 	principal_only_route
-	principal_id := extract_principal_id
-	startswith(principal_id, "service:")
+	request_caller_kind == "service_principal"
 }
 
 # True when any applicable principal has PlatformAdmin in the system workspace (see allow_request).

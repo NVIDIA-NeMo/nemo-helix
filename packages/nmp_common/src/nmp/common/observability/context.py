@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import logging
 from abc import ABC
+from collections.abc import MutableMapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, fields, replace
@@ -16,9 +16,16 @@ from opentelemetry.sdk.trace import SpanProcessor
 from opentelemetry.trace import Span, Tracer
 
 AUTH_HEADER_USERID = "x-nmp-principal-id"
+AUTH_HEADER_ACCOUNT_ID = "x-nmp-actor-account-id"
 AUTH_HEADER_EMAIL = "x-nmp-principal-email"
 AUTH_HEADER_FILTERS = "x-nmp-principal-filters"
 AUTH_HEADER_GROUPS = "x-nmp-principal-groups"
+AUTH_HEADER_ALIASES = "x-nmp-actor-aliases"
+AUTH_HEADER_ON_BEHALF_OF = "x-nmp-principal-on-behalf-of"
+AUTH_HEADER_ON_BEHALF_OF_EMAIL = "x-nmp-principal-on-behalf-of-email"
+AUTH_HEADER_ON_BEHALF_OF_GROUPS = "x-nmp-principal-on-behalf-of-groups"
+AUTH_HEADER_ON_BEHALF_OF_ACCOUNT_ID = "x-nmp-subject-account-id"
+AUTH_HEADER_ON_BEHALF_OF_ALIASES = "x-nmp-subject-aliases"
 
 
 def _get_trace_id():
@@ -50,7 +57,7 @@ class BaseContext(ABC):
                 value = str(value)
             span.set_attribute(key, value)
 
-    def add_to_log(self, event_dict: dict):
+    def add_to_log(self, event_dict: MutableMapping[str, Any]) -> None:
         for key, value in self._fields.items():
             if value is None:
                 continue
@@ -66,20 +73,41 @@ class AuthContext(BaseContext):
     otel_prefix: str = "auth"
 
     principal_id: str | None = None
+    account_id: str | None = None
     email: str | None = None
     filters: str | None = None
     groups: str | None = None
+    authz_aliases: str | None = None
+    on_behalf_of: str | None = None
+    on_behalf_of_email: str | None = None
+    on_behalf_of_groups: str | None = None
+    on_behalf_of_account_id: str | None = None
+    on_behalf_of_authz_aliases: str | None = None
 
     def to_headers(self) -> dict[str, str]:
         headers: dict[str, str] = {}
         if self.principal_id is not None:
             headers[AUTH_HEADER_USERID] = self.principal_id
+        if self.account_id is not None:
+            headers[AUTH_HEADER_ACCOUNT_ID] = self.account_id
         if self.email is not None:
             headers[AUTH_HEADER_EMAIL] = self.email
         if self.filters is not None:
             headers[AUTH_HEADER_FILTERS] = self.filters
         if self.groups is not None:
             headers[AUTH_HEADER_GROUPS] = self.groups
+        if self.authz_aliases is not None:
+            headers[AUTH_HEADER_ALIASES] = self.authz_aliases
+        if self.on_behalf_of is not None:
+            headers[AUTH_HEADER_ON_BEHALF_OF] = self.on_behalf_of
+        if self.on_behalf_of_email is not None:
+            headers[AUTH_HEADER_ON_BEHALF_OF_EMAIL] = self.on_behalf_of_email
+        if self.on_behalf_of_groups is not None:
+            headers[AUTH_HEADER_ON_BEHALF_OF_GROUPS] = self.on_behalf_of_groups
+        if self.on_behalf_of_account_id is not None:
+            headers[AUTH_HEADER_ON_BEHALF_OF_ACCOUNT_ID] = self.on_behalf_of_account_id
+        if self.on_behalf_of_authz_aliases is not None:
+            headers[AUTH_HEADER_ON_BEHALF_OF_ALIASES] = self.on_behalf_of_authz_aliases
         return headers
 
     @classmethod
@@ -87,12 +115,26 @@ class AuthContext(BaseContext):
         ctx = cls()
         if userid := headers.get(AUTH_HEADER_USERID):
             ctx.principal_id = userid
+        if account_id := headers.get(AUTH_HEADER_ACCOUNT_ID):
+            ctx.account_id = account_id
         if email := headers.get(AUTH_HEADER_EMAIL):
             ctx.email = email
         if filters := headers.get(AUTH_HEADER_FILTERS):
             ctx.filters = filters
         if groups := headers.get(AUTH_HEADER_GROUPS):
             ctx.groups = groups
+        if aliases := headers.get(AUTH_HEADER_ALIASES):
+            ctx.authz_aliases = aliases
+        if on_behalf_of := headers.get(AUTH_HEADER_ON_BEHALF_OF):
+            ctx.on_behalf_of = on_behalf_of
+        if on_behalf_of_email := headers.get(AUTH_HEADER_ON_BEHALF_OF_EMAIL):
+            ctx.on_behalf_of_email = on_behalf_of_email
+        if on_behalf_of_groups := headers.get(AUTH_HEADER_ON_BEHALF_OF_GROUPS):
+            ctx.on_behalf_of_groups = on_behalf_of_groups
+        if on_behalf_of_account_id := headers.get(AUTH_HEADER_ON_BEHALF_OF_ACCOUNT_ID):
+            ctx.on_behalf_of_account_id = on_behalf_of_account_id
+        if on_behalf_of_aliases := headers.get(AUTH_HEADER_ON_BEHALF_OF_ALIASES):
+            ctx.on_behalf_of_authz_aliases = on_behalf_of_aliases
         return ctx
 
 
@@ -153,7 +195,7 @@ class AppContext:
                     result[key] = value
         return result
 
-    def add_to_log(self, event_dict: dict):
+    def add_to_log(self, event_dict: MutableMapping[str, Any]) -> None:
         event_dict.update(self._log_fields)
 
     @classmethod
@@ -315,7 +357,9 @@ def create_app_context_dependency(service_name: str, include_auth_context: bool 
 # --------- Processors --------- #
 
 
-def AppContextLogProcessor(logger: logging.Logger, method_name: str, event_dict: dict):
+def AppContextLogProcessor(
+    logger: Any, method_name: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
     if (ctx := get_app_ctx()) is None:
         return event_dict
     ctx.add_to_log(event_dict)

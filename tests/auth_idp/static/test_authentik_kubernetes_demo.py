@@ -31,9 +31,13 @@ AUTHENTIK_SERVICE_URL_TEMPLATE = '{{ include "nemo-platform-authentik.serviceUrl
 PUBLIC_GATEWAY_URL_TEMPLATE = '{{ include "nemo-platform-authentik.publicGatewayUrl" . }}'
 AUTH_CALLOUT_RESPONSE_PRINCIPAL_HEADERS = {
     "x-nmp-principal-id",
+    "x-nmp-actor-account-id",
     "x-nmp-principal-email",
     "x-nmp-principal-groups",
+    "x-nmp-actor-aliases",
     "x-nmp-principal-on-behalf-of",
+    "x-nmp-subject-account-id",
+    "x-nmp-subject-aliases",
     "x-nmp-principal-on-behalf-of-email",
     "x-nmp-principal-on-behalf-of-groups",
     "x-nmp-scopes",

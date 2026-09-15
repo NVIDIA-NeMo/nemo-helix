@@ -16,7 +16,7 @@ from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_platform_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
 from nemo_platform_plugin.secrets.client import AsyncSecretsClient
-from nmp.common.auth import AuthClient
+from nmp.common.auth import AuthClient, Principal
 from nmp.common.entities.client import EntityClient, EntityNotFoundError
 from nmp.common.entities.utils import parse_entity_ref
 from nmp.common.observability import MARK_INTERNAL_REQUEST_HEADERS
@@ -303,15 +303,16 @@ async def resolve_storage_secrets_for_user(
 ) -> dict[str, str]:
     """Resolve storage secrets using delegated headers on request-scoped SDK."""
     effective_principal = auth_client.principal.effective_principal
-    headers = {
-        **MARK_INTERNAL_REQUEST_HEADERS,
-        "X-NMP-Principal-Id": "service:files",
-        "X-NMP-Principal-On-Behalf-Of": effective_principal.id,
-    }
-    if effective_principal.email:
-        headers["X-NMP-Principal-On-Behalf-Of-Email"] = effective_principal.email
-    if effective_principal.groups:
-        headers["X-NMP-Principal-On-Behalf-Of-Groups"] = ",".join(effective_principal.groups)
+    service_principal = Principal(
+        id="service:files",
+        authz_aliases=["service:files"],
+        on_behalf_of=effective_principal.id,
+        on_behalf_of_email=effective_principal.email,
+        on_behalf_of_groups=effective_principal.groups,
+        on_behalf_of_account_id=effective_principal.account_id,
+        on_behalf_of_authz_aliases=effective_principal.authz_aliases,
+    )
+    headers = {**MARK_INTERNAL_REQUEST_HEADERS, **service_principal.get_headers()}
     service_sdk = sdk.with_options(set_default_headers=headers)
     return await resolve_storage_secrets(storage, workspace, service_sdk)
 
