@@ -12,7 +12,7 @@ client the caller holds.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Protocol, TypeVar, cast, overload, runtime_checkable
+from typing import Any, Protocol, TypeVar, cast, overload, runtime_checkable
 
 import httpx
 from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
@@ -30,7 +30,8 @@ class PlatformClient(Protocol):
     generated ``NeMoPlatform`` / ``AsyncNeMoPlatform`` SDK classes. Use it to
     annotate ``sdk`` / ``async_sdk`` parameters that are only forwarded to
     :func:`client_from_platform`, so the annotating module does not need to
-    import the generated SDK.
+    import the generated SDK. Prefer :class:`SyncPlatformClient` or
+    :class:`AsyncPlatformClient` when the parameter is one or the other.
     """
 
     @property
@@ -38,6 +39,20 @@ class PlatformClient(Protocol):
 
     @property
     def workspace(self) -> str | None: ...
+
+
+@runtime_checkable
+class SyncPlatformClient(PlatformClient, Protocol):
+    """A sync platform handle (``NeMoPlatform`` or :class:`NemoClient`)."""
+
+    def __enter__(self) -> Any: ...
+
+
+@runtime_checkable
+class AsyncPlatformClient(PlatformClient, Protocol):
+    """An async platform handle (``AsyncNeMoPlatform`` or :class:`AsyncNemoClient`)."""
+
+    async def __aenter__(self) -> Any: ...
 
 
 class _PlatformClient(Protocol):
@@ -76,9 +91,9 @@ def _platform_default_headers(platform: _PlatformClient) -> dict[str, str] | Non
 
 
 @overload
-def client_from_platform(platform: PlatformClient, client_cls: type[SyncT]) -> SyncT: ...
+def client_from_platform(platform: SyncPlatformClient, client_cls: type[SyncT]) -> SyncT: ...
 @overload
-def client_from_platform(platform: PlatformClient, client_cls: type[AsyncT]) -> AsyncT: ...
+def client_from_platform(platform: AsyncPlatformClient, client_cls: type[AsyncT]) -> AsyncT: ...
 
 
 def client_from_platform(
@@ -87,25 +102,22 @@ def client_from_platform(
 ) -> NemoClient | AsyncNemoClient:
     """Create a typed client sharing a platform client's transport.
 
-    When *platform* is already a :class:`NemoClient` or :class:`AsyncNemoClient`
-    the typed client is derived with ``client_cls.from_client`` and shares its
-    auth, headers, retry policy, and transport. Otherwise *platform* is treated
-    as a generated ``NeMoPlatform`` SDK instance.
+    A :class:`NemoClient` / :class:`AsyncNemoClient` is derived with
+    ``client_cls.from_client`` and shares its auth, headers, retry policy and
+    transport. A generated ``NeMoPlatform`` / ``AsyncNeMoPlatform`` is adapted
+    onto its httpx client.
 
-    The overloads preserve the sync/async pairing between platform and client.
+    The overloads pair sync platforms with sync clients and async with async,
+    so a mismatch is a type error at the call site.
     """
-    if isinstance(platform, AsyncNemoClient):
-        if not issubclass(client_cls, AsyncNemoClient):
-            raise TypeError("AsyncNemoClient requires an AsyncNemoClient class")
-        if isinstance(platform, client_cls):
-            return platform
-        return client_cls.from_client(platform)
     if isinstance(platform, NemoClient):
         if not issubclass(client_cls, NemoClient):
-            raise TypeError("NemoClient requires a NemoClient class")
-        if isinstance(platform, client_cls):
-            return platform
-        return client_cls.from_client(platform)
+            raise TypeError(f"NemoClient cannot back {client_cls.__name__}: sync/async mismatch")
+        return platform if isinstance(platform, client_cls) else client_cls.from_client(platform)
+    if isinstance(platform, AsyncNemoClient):
+        if not issubclass(client_cls, AsyncNemoClient):
+            raise TypeError(f"AsyncNemoClient cannot back {client_cls.__name__}: sync/async mismatch")
+        return platform if isinstance(platform, client_cls) else client_cls.from_client(platform)
 
     platform_client = cast(_PlatformClient, platform)
     headers = _platform_default_headers(platform_client)

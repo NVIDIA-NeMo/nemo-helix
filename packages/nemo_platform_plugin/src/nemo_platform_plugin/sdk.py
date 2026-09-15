@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
 
-from nemo_platform_plugin.client.adapter import PlatformClient
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient, SyncPlatformClient
 
 SyncResourceT = TypeVar("SyncResourceT")
 AsyncResourceT = TypeVar("AsyncResourceT")
@@ -17,17 +17,18 @@ AsyncResourceT = TypeVar("AsyncResourceT")
 
 @dataclass(frozen=True, slots=True)
 class NemoPluginSDKResources(Generic[SyncResourceT, AsyncResourceT]):
-    """Container for plugin SDK resources exposed as platform client namespaces.
+    """Container for plugin SDK resources exposed on legacy platform SDK owners.
 
-    Each factory receives the owning platform client (a ``NeMoPlatform`` or a
-    :class:`~nemo_platform_plugin.client.client.NemoClient`, sync or async) and
-    returns the plugin's resource object. Typed clients should expose resources
-    through explicit typed APIs instead of consuming this dynamic ``nemo.sdk``
-    entry-point surface.
+    ``sync_resource`` receives the owning ``NeMoPlatform``; ``async_resource``
+    receives the owning ``AsyncNeMoPlatform``. The parameters are typed as the
+    sync/async platform protocols rather than the SDK classes so this module,
+    which plugin discovery imports, does not depend on the generated SDK.
+    Typed clients should expose resources through explicit typed APIs instead
+    of consuming this dynamic legacy ``nemo.sdk`` entry-point surface.
     """
 
-    sync_resource: Callable[[PlatformClient], SyncResourceT] | None = None
-    async_resource: Callable[[PlatformClient], AsyncResourceT] | None = None
+    sync_resource: Callable[[SyncPlatformClient], SyncResourceT] | None = None
+    async_resource: Callable[[AsyncPlatformClient], AsyncResourceT] | None = None
 
     def __post_init__(self) -> None:
         if self.sync_resource is None and self.async_resource is None:
