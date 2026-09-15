@@ -297,21 +297,29 @@ rather than inferred from the tool's answer. All three are study objectives in
 
 ### Extra setup (once)
 
-```bash
-export PHISHING_AGENT_ROOT="${PHISHING_AGENT_ROOT:-$HOME/workspace/email-phishing-analyzer-harnesses}"
-(cd "$PHISHING_AGENT_ROOT" && uv sync)
-export PHISHING_MCP_BIN="$PHISHING_AGENT_ROOT/.venv/bin/email-phishing-analyzer-mcp"
-test -x "$PHISHING_MCP_BIN"
-```
+1. Clone and sync the agent checkout (adjust the path if yours differs):
 
-The analyzer reads `NVIDIA_API_KEY` from the `env` the config passes it and its
-model settings from that checkout's `configs/common.yaml`. That file must name a
-live model: as of 2026-09-15 its default `nvidia/nemotron-3-nano-30b-a3b` on
-`integrate.api.nvidia.com` returns 410 Gone, and every tool call fails with
-`analyzer request failed` until it is pointed at a current model (for example
+   ```bash
+   export PHISHING_AGENT_ROOT="${PHISHING_AGENT_ROOT:-$HOME/work/email-phishing-analyzer-harnesses}"
+   cd "$PHISHING_AGENT_ROOT"
+   uv sync
+   ```
+
+2. Point the config at that checkout's MCP binary:
+
+   ```bash
+   export PHISHING_MCP_BIN="$PHISHING_AGENT_ROOT/.venv/bin/email-phishing-analyzer-mcp"
+   test -x "$PHISHING_MCP_BIN"
+   ```
+
+`optimize-mcp.yaml` reads that variable and passes `NVIDIA_API_KEY` to the
+analyzer through the server's `env`. The analyzer takes its model settings from
+the checkout's `configs/common.yaml`, which must name a live model: as of
+2026-09-15 its default `nvidia/nemotron-3-nano-30b-a3b` on
+`integrate.api.nvidia.com` returns 410 Gone and every tool call fails with
+`analyzer request failed` until it points at a current one (for example
 `nvidia/nvidia/nemotron-3-nano-30b-a3b` on `https://inference-api.nvidia.com/v1`).
-
-The dataset is 5 emails (3 phishing, 2 benign).
+The dataset is the agent's full eval set (5 emails: 3 phishing, 2 benign).
 
 ### Variant: the mock analyzer
 
@@ -338,6 +346,10 @@ the dataset elsewhere). For the mock, `python3` must resolve to the platform
 source "$REPO_ROOT/.venv/bin/activate"
 cd "$BUNDLE"
 
+# Re-export if this is a new shell:
+export PHISHING_AGENT_ROOT="${PHISHING_AGENT_ROOT:-$HOME/work/email-phishing-analyzer-harnesses}"
+export PHISHING_MCP_BIN="$PHISHING_AGENT_ROOT/.venv/bin/email-phishing-analyzer-mcp"
+
 nemo agents optimize prepare-fileset \
   --source "$BUNDLE" \
   --optimize-config optimize-mcp.yaml \
@@ -350,8 +362,9 @@ nemo agents optimize \
   --workspace default
 ```
 
-**Success:** job finishes with `status: completed`, `n_trials: 4`, and both
-objectives near `1.0` when the model follows the “call the analyzer once” prompt.
+**Success:** job finishes with `status: completed`, `n_trials: 4`, the two tool
+objectives at `1.0`, and `average_score` near `1.0` when the model follows the
+“call the analyzer once” prompt.
 
 **Flakiness:** some models return an empty final message after a successful
 analyzer tool call, or re-call the tool. Those trials score low on
@@ -371,6 +384,10 @@ from nemo_platform_plugin.scheduler import NemoJobScheduler
 
 WORKSPACE = "default"
 bundle = Path(os.environ["BUNDLE"]).resolve()
+agent_root = Path(
+    os.environ.get("PHISHING_AGENT_ROOT", Path.home() / "work/email-phishing-analyzer-harnesses")
+)
+os.environ.setdefault("PHISHING_MCP_BIN", str(agent_root / ".venv/bin/email-phishing-analyzer-mcp"))
 os.chdir(bundle)
 
 client = NeMoPlatform(
