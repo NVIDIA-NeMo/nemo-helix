@@ -11,19 +11,19 @@ import typing
 from dataclasses import dataclass, field
 
 import typer
+from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 
 from nemo_platform_ext.cli.core.types import ListOutputFormat as OutputFormat
 from nemo_platform_ext.cli.core.types import TimestampFormat
 
 if typing.TYPE_CHECKING:
     from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-    from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 
     from nemo_platform_ext.config.config import ConfigParams, Context
     from nemo_platform_ext.quickstart import QuickstartConfig
 
-TypedClientT = typing.TypeVar("TypedClientT", bound="NemoClient")
-AsyncTypedClientT = typing.TypeVar("AsyncTypedClientT", bound="AsyncNemoClient")
+TypedClientT = typing.TypeVar("TypedClientT", bound=NemoClient)
+AsyncTypedClientT = typing.TypeVar("AsyncTypedClientT", bound=AsyncNemoClient)
 
 logger = logging.getLogger("nemo_platform_ext.cli")
 

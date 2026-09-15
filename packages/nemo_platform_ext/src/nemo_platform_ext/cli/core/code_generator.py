@@ -100,7 +100,22 @@ def generate_python_code(
     watch_config: dict[str, Any] | None = None,
     watch_options: dict[str, Any] | None = None,
 ) -> str:
-    """Generate the typed-client Python code equivalent to a CLI command."""
+    """Generate the typed-client Python code equivalent to a CLI command.
+
+    Args:
+        client_cls: Typed client class the command uses (e.g. ``ModelsClient``).
+        method: Method name on that client (e.g. ``"list_models"``).
+        kwargs: Keyword arguments the CLI passed; ``None`` values are omitted and
+            request models render as constructor calls with their imports.
+        base_url: Base URL for the client constructor, when configured.
+        result: How the response is consumed: ``entity`` prints ``response.data()``,
+            ``list`` iterates the first page, ``none`` and ``binary`` render no read.
+        wait_config / wait_options: Emit a status wait after the call.
+        watch_config / watch_options: Emit a job watch after the call.
+
+    Returns:
+        Python source for the snippet, imports first.
+    """
     if wait_config and watch_config:
         raise ValueError("Only one of wait_config or watch_config may be provided")
 
