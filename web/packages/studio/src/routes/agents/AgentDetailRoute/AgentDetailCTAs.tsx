@@ -3,11 +3,8 @@
 
 import { Block, Button, Flex } from '@nvidia/foundations-react-core';
 import { INTAKE_ENABLED } from '@studio/constants/environment';
-import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import type { AgentDetailTab } from '@studio/routes/agents/AgentDetailRoute/tabs';
-import { getIntakeTracesRoute } from '@studio/routes/utils';
 import { type FC, type RefObject } from 'react';
-import { useNavigate } from 'react-router';
 
 /** The action each tab promotes to the brand-colored slot. Tabs left out promote `deploy`, which
  *  is the only action every tab can offer — the others depend on a tab-specific target. */
@@ -39,6 +36,7 @@ export interface AgentDetailCTAsProps {
   onRunEvaluation: () => void;
   /** Omitted until the tab can render the optimization form; the button stays visible but inert. */
   onOptimize?: () => void;
+  onImportTraces: () => void;
 }
 
 /**
@@ -60,10 +58,8 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
   onDeploy,
   onRunEvaluation,
   onOptimize,
+  onImportTraces,
 }) => {
-  const workspace = useWorkspaceFromPath();
-  const navigate = useNavigate();
-
   const actions: Action[] = [
     {
       id: 'evaluate',
@@ -103,9 +99,11 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
   return (
     <Flex gap="2" wrap="wrap" justify="end">
       {INTAKE_ENABLED && showSecondaryActions && (
-        <Button kind="secondary" onClick={() => navigate(getIntakeTracesRoute(workspace))}>
-          Open traces
-        </Button>
+        <>
+          <Button kind="secondary" onClick={onImportTraces} disabled={!agentName}>
+            Import traces
+          </Button>
+        </>
       )}
       {ordered.map((action) => {
         const isPrimary = action.id === primaryId;
