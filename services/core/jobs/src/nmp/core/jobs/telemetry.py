@@ -12,7 +12,7 @@ from datetime import datetime
 from importlib import metadata
 from typing import Any
 
-from nemo_platform_plugin.jobs.telemetry import get_job_telemetry_session_id
+from nemo_platform_plugin.jobs.telemetry import get_job_telemetry_plugins, get_job_telemetry_session_id
 from nemo_platform_plugin.telemetry.events import JobRunEvent, TaskStatusEnum
 from nemo_platform_plugin.telemetry.handler import TelemetryHandler
 
@@ -100,7 +100,7 @@ def build_job_run_telemetry(
         job_type=_job_type_bucket(source),
         task_status=_STATUS_MAP.get(status, TaskStatusEnum.UNDEFINED),
         duration_sec=_duration_sec(created_at, updated_at),
-        plugins=[],
+        plugins=get_job_telemetry_plugins(custom_fields),
         model=_model_data_bucket(details.get("model")),
         input_tokens=_token_count(details, "input_tokens"),
         output_tokens=_token_count(details, "output_tokens"),

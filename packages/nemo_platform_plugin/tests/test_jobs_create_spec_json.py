@@ -210,6 +210,53 @@ def test_create_job_forwards_transformed_spec_in_json_mode() -> None:
     json.dumps({"spec": spec})
 
 
+def test_create_job_stamps_plugin_telemetry_custom_fields() -> None:
+    router = job_route_factory(
+        service_name="nemo-data-designer-plugin",
+        job_type="Widget",
+        job_input=_InputSpec,
+        job_output=_OutputSpec,
+        input_to_output=_to_output,
+        platform_job_config_compiler=_compiler,
+    )
+    app = FastAPI()
+    app.include_router(router, prefix="/apis/data-designer/v2/workspaces/{workspace}")
+    app.dependency_overrides[get_sdk_client] = lambda: MagicMock()
+    app.dependency_overrides[get_entity_client] = lambda: MagicMock()
+
+    mock_jobs = _RecordingJobsClient()
+
+    client = TestClient(app)
+    with patch(
+        "nemo_platform_plugin.jobs.api_factory.client_from_platform",
+        return_value=mock_jobs,
+    ):
+        response = client.post(
+            "/apis/data-designer/v2/workspaces/default/jobs",
+            json={
+                "spec": {"label": "metric"},
+                "custom_fields": {
+                    "kept": "value",
+                    "_nemo_telemetry": {
+                        "session_id": "session-123",
+                        "plugins": ["caller-controlled"],
+                    },
+                },
+            },
+        )
+
+    assert response.status_code == 201, response.text
+    body = mock_jobs.created_body
+    assert body is not None
+    assert body.custom_fields == {
+        "kept": "value",
+        "_nemo_telemetry": {
+            "session_id": "session-123",
+            "plugins": ["data-designer"],
+        },
+    }
+
+
 def test_create_job_forwards_profile_and_options_to_compiler() -> None:
     """Submitter controls belong to the compiler, not Pydantic's ignored extras."""
     seen: dict[str, object] = {}
