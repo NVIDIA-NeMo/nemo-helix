@@ -419,16 +419,6 @@ export const GeneralParametersSection = () => {
                     disabled={disabled}
                   />
                   <ControlledTextInput
-                    useControllerProps={{ name: 'automodel.dataset.validation', control }}
-                    formFieldProps={{
-                      slotLabel: 'Validation Dataset',
-                      slotInfo:
-                        'Fileset to validate against, as `workspace/name`. Leave blank to skip validation.',
-                    }}
-                    placeholder="default/my-validation-set"
-                    disabled={disabled}
-                  />
-                  <ControlledTextInput
                     useControllerProps={{ name: 'automodel.dataset.prompt_template', control }}
                     formFieldProps={{
                       slotLabel: 'Prompt Template',
@@ -728,16 +718,6 @@ export const GeneralParametersSection = () => {
                   prefix="unsloth.schedule"
                   defaults={UNSLOTH_SPEC_DEFAULTS}
                   defaultsPrefix="schedule_progress_reporting"
-                  disabled={disabled}
-                />
-                <ControlledTextInput
-                  useControllerProps={{ name: 'unsloth.dataset.validation_path', control }}
-                  formFieldProps={{
-                    slotLabel: 'Validation Dataset',
-                    slotInfo:
-                      'Fileset to validate against, as `workspace/name`. Leave blank to skip validation.',
-                  }}
-                  placeholder="default/my-validation-set"
                   disabled={disabled}
                 />
                 <ControlledTextInput
