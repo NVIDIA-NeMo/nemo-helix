@@ -168,6 +168,17 @@ class TestLoadPlatformSkills:
         assert "--environment" not in no_environment
         assert '--workspace "$WORKSPACE"' in no_environment
 
+    def test_retrieval_recipes_references_are_packaged(self):
+        skill = load_skills()["nemo-retrieval-recipes"]
+        assert skill.source_dir is not None
+        for relative in (
+            "references/embed.md",
+            "references/rerank.md",
+        ):
+            assert (skill.source_dir / relative).is_file(), relative
+        assert "nemo data-designer create" in skill.content
+        assert "retrieve-eval" in skill.content
+
     def test_model_selection_benchmark_cache_is_packaged(self):
         skill = load_skills()["nemo-model-selection"]
         assert skill.source_dir is not None

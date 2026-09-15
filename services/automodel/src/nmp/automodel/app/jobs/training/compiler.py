@@ -29,9 +29,9 @@ from nmp.automodel.app.constants import (
 )
 from nmp.automodel.app.jobs.training.schemas import (
     DistillationConfig,
-    EmbeddingConfig,
     LoRAConfig,
     ModelConfig,
+    RetrievalConfig,
     TrainingRecipe,
     TrainingStepConfig,
 )
@@ -212,7 +212,7 @@ def compile_training_step(
         ),
         integrations=job_spec.integrations,
         output_model=job_spec.output.name,
-        embedding=_translate_embedding_config(training),
+        retrieval=_translate_retrieval_config(training),
     )
 
     container = ContainerSpec(
@@ -326,13 +326,13 @@ def _translate_training_config(
     )
 
 
-def _translate_embedding_config(training: AnyTraining) -> EmbeddingConfig | None:
-    raw = getattr(training, "embedding", None)
+def _translate_retrieval_config(training: AnyTraining) -> RetrievalConfig | None:
+    raw = getattr(training, "retrieval", None)
     if raw is None:
         return None
-    if isinstance(raw, EmbeddingConfig):
+    if isinstance(raw, RetrievalConfig):
         return raw
-    return EmbeddingConfig.model_validate(raw.model_dump(mode="python"))
+    return RetrievalConfig.model_validate(raw.model_dump(mode="python"))
 
 
 def _translate_lora_config(api_lora: LoRAParams, me: ModelEntity) -> LoRAConfig:

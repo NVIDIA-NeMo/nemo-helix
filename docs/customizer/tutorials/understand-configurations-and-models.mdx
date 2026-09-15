@@ -372,8 +372,8 @@ flowchart TD
 
 | Model Type | Status | Details |
 | --- | --- | --- |
-| **Embedding Models** | ✅ Supported | **Model**: Llama 3.2 NV EmbedQA 1B for question-answering and retrieval tasks **Use Cases**: Semantic search, document retrieval, question-answering systems, RAG pipelines **Note**: Typically disabled by default—contact your administrator for access |
-| **Reranking Models** | ❌ Not Supported | **Alternative**: Use embedding models for retrieval tasks, or implement reranking in your application layer |
+| **Embedding Models** | ✅ Supported | **Defaults**: Nemotron 3 Embed 1B (`nvidia/Nemotron-3-Embed-1B-BF16`, `training.recipe: bi_encoder`, Retriever NIM `nemotron-3-embed-1b:2.2.0`) and Llama Nemotron Embed 1B v2. Use cases: semantic search, RAG first-stage retrieval. |
+| **Reranking Models** | ✅ Supported | **Model**: Llama Nemotron Rerank 1B v2 with `training.recipe: cross_encoder`. Automodel merges to a Hugging Face sequence-classification checkpoint, then exports ONNX (`logits`) with HF weights under `alternates/hf/` for Ranking NIM `llama-nemotron-rerank-1b-v2:1.10.0`. |
 
 ### Importing Custom Models
 

@@ -36,9 +36,18 @@ The miner's recipe config is generated from the prepare spec, not shipped in the
 nemo data-designer retrieval-prepare --spec '{"sdg_input":"default/stage0-out","enable_mining":true,"model":"default/nemotron-3-embed-1b","mining":{"corpus_chunk_size":10000,"hard_neg_margin_type":"abs"}}'
 ```
 
-Chaining generate then prepare is a jobs-service multi-step job (`retrieval-run`), not Data Designer workflow chaining.
+Chaining generate then prepare is a jobs-service multi-step job (`retrieval-run`), not Data Designer workflow chaining. Prefer `retrieval-run` when the user wants both stages.
 
-## Next Steps
+Tiny corpora (one source file / `num_files: 1`) can place every query in the test split and leave train empty. Conversion must fail before mining when `train.json` has no records. Generate with enough documents (50+ recommended) or raise `train_ratio`.
 
-Use the emitted `training.jsonl` in an embedding or reranking customization job.
+## Previous / Next / artifacts
+
+| Direction | Skill or job | Artifact |
+|---|---|---|
+| Previous | User corpus fileset or `hf://` URI | Raw docs |
+| This stage | `retrieval-generate` → `retrieval-prepare` (or `retrieval-run`) | `generation_result.json`; `eval_beir/corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`; `training.jsonl` |
+| Next | `nemo-retrieval-recipes`, or `nemo customization automodel submit` with `training.recipe: bi_encoder` (embed) or `cross_encoder` (rerank) | Dataset fileset with `training.jsonl` at the root; freeze `eval_beir` for `retrieve-eval` |
+
+Do not regenerate `eval_beir` for base vs fine-tuned comparisons.
+
 See [platform validation guidance](nemo-platform-plugin-additions.md) for fileset and platform validation guidance.

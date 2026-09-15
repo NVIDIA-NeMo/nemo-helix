@@ -13,7 +13,15 @@ from nmp.common.entities.constants import (
     REGEX_WORD_CHARACTER_DOT_DASH,
 )
 from nmp.customization_common.training.reporting import ProgressReportingConfig
-from pydantic import AfterValidator, BaseModel, ConfigDict, Discriminator, Field, model_validator
+from pydantic import (
+    AfterValidator,
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    model_validator,
+)
 
 # Important!!! Do not import Pydantic models from this file into tasks.
 # Instead, duplicate models from this file into corresponding task module schemas.py.
@@ -123,8 +131,34 @@ class LoRAParams(_PEFTParams):
 PeftMethod = LoRAParams
 
 
-class EmbeddingParams(BaseModel):
-    """Retrieval dataset and collator settings for bi_encoder / cross_encoder recipes."""
+class ExportParams(BaseModel):
+    """ONNX export and fileset layout. ``primary`` is the artifact at the root; the other is under ``alternates/``."""
+
+    primary: Literal["onnx", "hf"] = Field(
+        default="onnx",
+        description="Artifact at the fileset root. Use 'hf' when the NIM loads the PyTorch checkpoint.",
+    )
+    opset: int = Field(default=17, gt=0, description="ONNX opset version.")
+    precision: Literal["fp32", "fp16", "bf16"] = Field(
+        default="fp32",
+        description="Trace precision. fp16 has no CPU kernels for much of the graph.",
+    )
+    attn_implementation: Literal["eager", "sdpa", "flash_attention_2"] = Field(
+        default="eager",
+        description="Attention backend for the traced model. The exporter cannot trace SDPA/GQA.",
+    )
+    pooling: Literal["avg", "cls", "last"] = Field(
+        default="avg", description="Embedding pooling over hidden states. Ignored for cross_encoder."
+    )
+    normalize: bool = Field(default=True, description="L2-normalize pooled embeddings. Ignored for cross_encoder.")
+    dimensions: bool = Field(
+        default=False,
+        description="Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.",
+    )
+
+
+class RetrievalParams(BaseModel):
+    """Collator, dataset, and export knobs for ``bi_encoder`` / ``cross_encoder``."""
 
     train_n_passages: int = Field(default=5, ge=2, description="Passages per query: 1 positive + (n-1) negatives.")
     eval_negative_size: Optional[int] = Field(
@@ -138,6 +172,10 @@ class EmbeddingParams(BaseModel):
     query_prefix: str = Field(default="query:", description="Collator-side prefix; do not include a trailing space.")
     passage_prefix: str = Field(
         default="passage:", description="Collator-side prefix; do not include a trailing space."
+    )
+    export: Optional[ExportParams] = Field(
+        default=None,
+        description="Output artifact layout and ONNX export settings. Defaults are applied when omitted.",
     )
 
 
@@ -292,9 +330,10 @@ class _TrainingBase(BaseModel):
         default=None,
         description="Random seed for reproducibility. Optional.",
     )
-    embedding: Optional[EmbeddingParams] = Field(
+    retrieval: Optional[RetrievalParams] = Field(
         default=None,
-        description="Retrieval collator/dataset knobs. Used when recipe is bi_encoder or cross_encoder.",
+        validation_alias=AliasChoices("retrieval", "embedding"),
+        description="Retrieval dataset, collator, and export knobs. Used when recipe is bi_encoder or cross_encoder.",
     )
 
     # --- Enterprise Infrastucture ---
@@ -306,7 +345,7 @@ class _TrainingBase(BaseModel):
         "(e.g., 'a100', 'high_priority'). If omitted, uses the service-level default.",
     )
 
-    model_config = {"protected_namespaces": ()}
+    model_config = {"protected_namespaces": (), "populate_by_name": True}
 
     def with_resolved_recipe(self, recipe: str) -> Self:
         """Return this training config with its resolved recipe defaults."""

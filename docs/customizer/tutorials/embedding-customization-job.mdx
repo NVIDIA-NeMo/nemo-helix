@@ -23,6 +23,12 @@ Embedding models convert text into dense vector representations that capture sem
 
 **About the baseline:** In retrieval benchmarks like SciDocs, the pretrained model achieves ~0.159 Recall@5. After fine-tuning on scientific paper triplets, you can expect 6-10% improvement (~0.17 Recall@5).
 
+<Note>
+
+The cosine-similarity demo later in this notebook is **serving sanity** only. Domain retrieval quality is Nemotron Stage 3: freeze Stage 1 `eval_beir`, then `nemo evaluator retrieve-eval submit` with a `baseline` and `k: [1,5,10,100]`. The end-to-end recipe is the `nemo-retrieval-recipes` skill. Default catalog model for that recipe is `nvidia/Nemotron-3-Embed-1B-BF16` (`recipe: bi_encoder`); this tutorial's Llama embed path remains valid for the SPECTER demo.
+
+</Note>
+
 ### Dataset Format for Embedding Models
 
 Embedding models require **triplet format** for contrastive learning:

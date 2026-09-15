@@ -51,7 +51,7 @@ from nmp.automodel.tasks.training.backends.config import (  # noqa: E402
     resolve_warmup_steps,
 )
 from nmp.automodel.tasks.training.datasets.preparation import PreparedDataset  # noqa: E402
-from nmp.automodel.tasks.training.schemas import EmbeddingConfig, TrainingRecipe, TrainingStepConfig  # noqa: E402
+from nmp.automodel.tasks.training.schemas import RetrievalConfig, TrainingRecipe, TrainingStepConfig  # noqa: E402
 
 CONFIG_MODULE = "nmp.automodel.tasks.training.backends.config"
 AUTOCONFIG_PATCH = "transformers.AutoConfig"
@@ -194,7 +194,7 @@ class TestConfigureRetrievalDataset:
             train_file,
             val_file,
             seed=42,
-            embedding_config=EmbeddingConfig(),
+            retrieval_config=RetrievalConfig(),
             recipe=TrainingRecipe.BI_ENCODER,
         )
 
@@ -218,7 +218,7 @@ class TestConfigureRetrievalDataset:
             train_file,
             val_file,
             seed=42,
-            embedding_config=EmbeddingConfig(),
+            retrieval_config=RetrievalConfig(),
             recipe=TrainingRecipe.CROSS_ENCODER,
         )
 
@@ -243,7 +243,7 @@ class TestConfigureRetrievalDataset:
             train_file,
             val_file,
             seed=42,
-            embedding_config=EmbeddingConfig(
+            retrieval_config=RetrievalConfig(
                 train_n_passages=7,
                 query_max_length=256,
                 passage_max_length=384,
@@ -668,10 +668,10 @@ def test_auto_recipe_prefers_cross_encoder_head_over_stale_embedding_alias(tmp_p
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelCrossEncoder.from_pretrained")
 
 
-def test_bi_encoder_compile_uses_fused_adam_and_job_embedding_config(tmp_path: Path) -> None:
+def test_bi_encoder_compile_uses_fused_adam_and_job_retrieval_config(tmp_path: Path) -> None:
     config, prepared = _embed_training_config(
         tmp_path,
-        embedding=EmbeddingConfig(query_prefix="query: ", passage_prefix="passage: ", train_n_passages=6),
+        retrieval=RetrievalConfig(query_prefix="query: ", passage_prefix="passage: ", train_n_passages=6),
     )
     config.training.recipe = TrainingRecipe.BI_ENCODER
 

@@ -78,7 +78,7 @@ def _build_training_block(spec: dict[str, Any]) -> SFTTraining | DistillationTra
         "precision": training.get("precision"),
         "attn_implementation": training.get("attn_implementation", "sdpa"),
         "seed": schedule.get("seed"),
-        "embedding": training.get("embedding"),
+        "retrieval": training.get("retrieval") or training.get("embedding"),
         "parallelism": ParallelismParams(
             num_nodes=parallelism.get("num_nodes", 1),
             num_gpus_per_node=parallelism.get("num_gpus_per_node", 1),

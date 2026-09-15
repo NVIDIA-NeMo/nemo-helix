@@ -20,6 +20,8 @@ $ARGUMENTS
 
 # Workflow
 
+If the user wants Nemotron-style **embedding or reranking** data (corpus → Q&A → `training.jsonl` / `eval_beir` → fine-tune), **stop**. Announce a handoff to `nemo-retrieval-recipes`. Do not enter Autopilot or Interactive `create`. Dedicated jobs are documented in `references/retrieval-sdg.md` for Stage 0/1 debugging only.
+
 Use **Autopilot** mode if the user implies they don't want to answer questions — e.g., they say something like "be opinionated", "you decide", "make reasonable assumptions", "just build it", "surprise me", etc. Otherwise, use **Interactive** mode (default).
 
 Read **only** the workflow file that matches the selected mode, then follow it:
@@ -34,7 +36,7 @@ Read **only** the workflow file that matches the selected mode, then follow it:
 - When the dataset requires person data (names, demographics, addresses), read `references/person-sampling.md`.
 - If a dataset script that matches the dataset description already exists, ask the user whether to edit it or create a new one.
 - For commands and context specific to this NeMo Platform plugin (e.g., sourcing model configs from IGW providers or in-script `ModelConfig`s, installing or publishing Nemotron Personas locales, platform-side resource pointers), read `references/nemo-platform-plugin-additions.md`.
-- For Nemotron retrieval SDG Stage 0/1 (`retrieval-generate` / `retrieval-prepare`), read `references/retrieval-sdg.md`. Do not use `create` for that pipeline.
+- For Nemotron retrieval SDG Stage 0/1 (`retrieval-generate` / `retrieval-prepare` / `retrieval-run`), read `references/retrieval-sdg.md`. Do not use `create` for that pipeline. Full embed/rerank recipes belong to `nemo-retrieval-recipes`.
 
 # Usage Tips and Common Pitfalls
 

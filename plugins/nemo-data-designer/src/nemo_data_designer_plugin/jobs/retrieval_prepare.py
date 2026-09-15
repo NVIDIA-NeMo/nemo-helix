@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from typing import ClassVar, cast
@@ -20,7 +21,10 @@ from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
 from nmp.customization_common.retrieval.inline import wrapped_to_inline_jsonl
-from nmp.customization_common.service.platform_client import fetch_model_entity
+from nmp.customization_common.service.platform_client import (
+    async_customization_platform_clients_from_platform,
+    fetch_model_entity,
+)
 from pydantic import BaseModel
 
 
@@ -50,7 +54,8 @@ class RetrievalPrepareJob(NemoJob):
         if not job_config.enable_mining:
             return RetrievalPrepareStepConfig(job_config=job_config, phase="convert")
 
-        model = await fetch_model_entity(job_config.model, workspace, cast(AsyncNeMoPlatform, async_sdk))
+        platform = async_customization_platform_clients_from_platform(cast(AsyncNeMoPlatform, async_sdk))
+        model = await fetch_model_entity(job_config.model, workspace, platform)
         if not model.fileset:
             raise ValueError(
                 f"Model '{model.workspace}/{model.name}' has no fileset. "
@@ -173,6 +178,7 @@ def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobConte
         train_file = conversion.train_file
 
     train_file = _stage_train_file(Path(train_file), output_dir)
+    _assert_nonempty_training_split(train_file)
 
     if not job.enable_mining:
         inline_path = output_dir / "training.jsonl"
@@ -185,6 +191,21 @@ def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobConte
         "train_file": str(train_file),
         "results": {"artifacts": artifacts.model_dump()},
     }
+
+
+def _assert_nonempty_training_split(train_file: Path) -> None:
+    """Fail before mining when conversion parked every query in the test split."""
+    try:
+        payload = json.loads(train_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Could not read training file {train_file}: {exc}") from exc
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if isinstance(rows, list) and not rows:
+        raise RuntimeError(
+            "Retrieval conversion produced an empty training split. Tiny corpora can "
+            "land entirely in the test split. Generate with more source files "
+            "(recommended 50+ documents) or raise train_ratio before enabling mining."
+        )
 
 
 def _stage_train_file(train_file: Path, output_dir: Path) -> Path:

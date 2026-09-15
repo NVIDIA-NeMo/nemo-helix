@@ -10,19 +10,20 @@ from typing import Literal, Self
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nmp.customization_common.schema import NamespacedModel
 from nmp.customization_common.training.reporting import ProgressReportingConfig
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 
 __all__ = [
     "AutomodelJobInput",
     "AutomodelJobOutput",
     "BatchSpec",
     "DatasetSpec",
-    "EmbeddingSpec",
+    "ExportSpec",
     "LoRAParams",
     "OptimizerSpec",
     "OutputRequest",
     "OutputResponse",
     "ParallelismSpec",
+    "RetrievalSpec",
     "ScheduleSpec",
     "TrainingSpec",
     "ValidationError",
@@ -60,8 +61,30 @@ class DatasetSpec(AutomodelSchema):
     prompt_template: str | None = None
 
 
-class EmbeddingSpec(AutomodelSchema):
-    """Collator and dataset knobs for bi_encoder / cross_encoder recipes."""
+class ExportSpec(AutomodelSchema):
+    """ONNX export and fileset layout. ``primary`` is the artifact at the root; the other is under ``alternates/``."""
+
+    primary: Literal["onnx", "hf"] = Field(
+        default="onnx", description="Artifact at the fileset root. Use 'hf' when the NIM loads PyTorch weights."
+    )
+    opset: int = Field(default=17, gt=0)
+    precision: Literal["fp32", "fp16", "bf16"] = Field(
+        default="fp32", description="Trace precision. fp16 has no CPU kernels for much of the graph."
+    )
+    attn_implementation: Literal["eager", "sdpa", "flash_attention_2"] = Field(
+        default="eager", description="Attention backend for tracing. The exporter cannot trace SDPA/GQA."
+    )
+    pooling: Literal["avg", "cls", "last"] = Field(
+        default="avg", description="Embedding pooling. Ignored for cross_encoder."
+    )
+    normalize: bool = Field(default=True, description="L2-normalize embeddings. Ignored for cross_encoder.")
+    dimensions: bool = Field(
+        default=False, description="Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings."
+    )
+
+
+class RetrievalSpec(AutomodelSchema):
+    """Dataset, collator, and export knobs for bi_encoder / cross_encoder recipes."""
 
     train_n_passages: int = Field(default=5, ge=2)
     eval_negative_size: int | None = Field(default=None, ge=1)
@@ -70,9 +93,14 @@ class EmbeddingSpec(AutomodelSchema):
     passage_max_length: int = Field(default=512, ge=1)
     query_prefix: str = Field(default="query:", description="Collator-side prefix; BiEncoderCollator adds a space.")
     passage_prefix: str = Field(default="passage:", description="Collator-side prefix; BiEncoderCollator adds a space.")
+    export: ExportSpec | None = Field(
+        default=None, description="Artifact layout and ONNX export settings. Defaults are applied when omitted."
+    )
 
 
 class TrainingSpec(AutomodelSchema):
+    model_config = AutomodelSchema.model_config | {"populate_by_name": True}
+
     training_type: Literal["sft", "distillation"] = "sft"
     recipe: Literal["auto", "sft", "bi_encoder", "cross_encoder"] = Field(
         default="auto",
@@ -98,9 +126,10 @@ class TrainingSpec(AutomodelSchema):
     distillation_temperature: float = Field(default=1.0, gt=0.0)
     teacher_precision: Literal["bf16", "fp16", "fp32"] = "bf16"
     offload_teacher: bool = False
-    embedding: EmbeddingSpec | None = Field(
+    retrieval: RetrievalSpec | None = Field(
         default=None,
-        description="Retrieval collator/dataset knobs. Used when recipe is bi_encoder or cross_encoder.",
+        validation_alias=AliasChoices("retrieval", "embedding"),
+        description="Retrieval dataset, collator, and export knobs. Used when recipe is bi_encoder or cross_encoder.",
     )
 
     @model_validator(mode="after")
