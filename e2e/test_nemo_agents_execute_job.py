@@ -13,7 +13,6 @@ from typing import Any
 import pytest
 from nemo_agents_plugin.entities import NEMO_AGENTS_SPEC_CONFIG_FORMAT
 from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.agents.client import AgentsClient
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.files.types import CreateFilesetRequest
@@ -73,16 +72,7 @@ def _list_execute_job_results(sdk: NeMoPlatform, workspace: str, job_name: str) 
 
 
 def _download_execute_job_result(sdk: NeMoPlatform, workspace: str, job_name: str, result_name: str) -> bytes:
-    """Fetch one saved result's bytes.
-
-    Goes through the typed ``AgentsClient`` rather than ``nemo.agents.jobs``
-    because the SDK resource exposes ``list_results`` but no way to fetch one --
-    every other call in this module has an ``agents.jobs.execute`` equivalent.
-    """
-    client = client_from_platform(sdk, AgentsClient)
-    return client.download_agent_job_result(
-        workspace=workspace, collection="execute", job=job_name, name=result_name
-    ).read()
+    return sdk.agents.jobs.execute.download_result(result_name, job=job_name, workspace=workspace)
 
 
 def _result_names(results: dict[str, Any]) -> set[str]:

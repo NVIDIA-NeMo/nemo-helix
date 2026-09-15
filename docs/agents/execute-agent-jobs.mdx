@@ -152,8 +152,10 @@ credential, so a private image has to be reachable with those.
 
 ## Track a Job and Fetch Its Results
 
-An execute job is an ordinary platform job, so the `nemo jobs` commands work on
-it by name (e.g. `"calc-run-1"` in the example commands below).
+An execute job is an ordinary platform job. `nemo agents execute` submits it;
+from there it is tracked and read back like any other job, by name (e.g.
+`"calc-run-1"` below), using the generic `nemo jobs` commands. The Python SDK
+does mirror the whole lifecycle under `agents.jobs.execute`.
 
 <Tabs>
 
@@ -176,13 +178,29 @@ nemo jobs results download output_workdir --job calc-run-1 -o output_workdir.tar
 <Tab title="Python SDK">
 
 ```python
+import json
+import tarfile
+from io import BytesIO
+
 job = client.agents.jobs.execute.get("calc-run-1")
 print(job["status"])
 
 results = client.agents.jobs.execute.list_results("calc-run-1")
 for result in results["data"]:
     print(result["name"])
+
+# Directory results arrive as a gzipped tarball...
+workdir = client.agents.jobs.execute.download_result("output_workdir", job="calc-run-1")
+with tarfile.open(fileobj=BytesIO(workdir), mode="r:gz") as tar:
+    print(tar.getnames())
+
+# ...and the run record as JSON.
+run = json.loads(client.agents.jobs.execute.download_result("fabric_run_result", job="calc-run-1"))
+print(run["status"], run["response"])
 ```
+
+`download_result` returns bytes rather than writing a file, so results can be
+read in memory. The same calls exist on `AsyncNeMoPlatform`.
 
 </Tab>
 
