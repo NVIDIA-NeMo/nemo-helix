@@ -51,11 +51,7 @@ export const selectionRootName = (picked: PickedFile[]): string => {
   return picked.every(({ relativePath }) => relativePath.startsWith(`${root}/`)) ? root : '';
 };
 
-/**
- * The fileset holds the agent's own files, so the directory a whole selection sits under is
- * stripped from every path. Individually picked files arrive with no directory of their own,
- * and a directory picked alongside them stays where it is.
- */
+/** The fileset holds the agent's own files, so a whole selection's shared root directory is stripped from every path. */
 export const collectAgentEntries = (picked: PickedFile[]): UploadAgentEntry[] => {
   const root = selectionRootName(picked);
   const entries: UploadAgentEntry[] = [];
