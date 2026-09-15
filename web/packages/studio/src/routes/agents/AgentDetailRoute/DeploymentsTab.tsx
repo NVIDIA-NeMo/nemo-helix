@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ExternalLink } from '@nemo/common/src/components/ExternalLink';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Button, Flex, Stack, StatusIndicator, Text } from '@nvidia/foundations-react-core';
 import { type AgentSpecSource, githubCommitUrl } from '@studio/api/agents/useAgentSpecFileset';
-import { ExternalLink } from '@studio/routes/agents/AgentDetailRoute/ExternalLink';
 import {
   deploymentStatusColor,
   shortRevision,

@@ -9,7 +9,12 @@ import {
 } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput, GithubStorageConfig } from '@nemo/sdk/generated/platform/schema';
 import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  type UseMutationResult,
+  type UseQueryResult,
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query';
 
 export interface AgentSpecSource {
   owner: string;
@@ -57,7 +62,10 @@ export const agentSpecSource = (
  * The agent's spec fileset. A 404 is a normal answer — an agent registered without
  * one deploys from its inline config — so it resolves to undefined rather than an error.
  */
-export const useAgentSpecFileset = (workspace: string, agentName: string | undefined) => {
+export const useAgentSpecFileset = (
+  workspace: string,
+  agentName: string | undefined
+): UseQueryResult<FilesetOutput | undefined, Error | null> => {
   const filesetName = agentName ? agentSpecFilesetName(agentName) : '';
 
   return useFilesRetrieveFileset(workspace, filesetName, {
@@ -69,7 +77,10 @@ export const useAgentSpecFileset = (workspace: string, agentName: string | undef
 };
 
 /** Re-resolves the fileset's tracked ref, moving it to whatever that ref names now. */
-export const useRefreshAgentSpecFileset = (workspace: string, agentName: string | undefined) => {
+export const useRefreshAgentSpecFileset = (
+  workspace: string,
+  agentName: string | undefined
+): UseMutationResult<FilesetOutput, Error, void> => {
   const queryClient = useQueryClient();
   const filesetName = agentName ? agentSpecFilesetName(agentName) : '';
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage, isNotFoundError } from '@nemo/common/src/api/common/utils';
+import { ExternalLink } from '@nemo/common/src/components/ExternalLink';
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { Button, Stack, Text } from '@nvidia/foundations-react-core';
@@ -10,7 +11,6 @@ import {
   useAgentSpecFileset,
   useRefreshAgentSpecFileset,
 } from '@studio/api/agents/useAgentSpecFileset';
-import { ExternalLink } from '@studio/routes/agents/AgentDetailRoute/ExternalLink';
 import { shortRevision } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { RefreshCw } from 'lucide-react';
