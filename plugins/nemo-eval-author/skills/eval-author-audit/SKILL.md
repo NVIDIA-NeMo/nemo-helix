@@ -142,8 +142,8 @@ existing evals, source-of-truth documents, or `ETHOS.md`.
 Audit-spec mechanics live under `scripts/audit_spec/`:
 
 Read `scripts/audit_spec/README.md` for the current measurement assumptions:
-ATIF input, Harbor trajectory parsing, v1 `tool_calls` and `capabilities`
-coverage, and coverage aggregation from `coverage.json` files.
+ATIF input, Harbor trajectory parsing, v1 `tool_calls`, `capabilities`, and
+`failure_cases` coverage, and coverage aggregation from `coverage.json` files.
 
 | Script | Use it to |
 |---|---|
@@ -189,6 +189,13 @@ Capabilities that do not need tools, such as policy refusals or out-of-scope
 handling, should use `required_tools: []`. Failure cases attach to capability
 names through `applies_to`; tool-level failure expectations stay on the tool item
 as `expected_failure_behavior`.
+
+For failure cases, make the trigger and safe response explicit in
+`evidence_required`. Include prohibited output classes in an `output` evidence
+description when their absence must gate coverage. Measurement uses
+`prohibited_tools` as a deterministic gate; `applies_to`, `expected_tools`,
+`trigger`, `expected_behavior`, and `prohibited_outputs` otherwise provide the
+rubric and authoring context rather than separate hidden checks.
 
 ## Step 2: Generate Or Reconcile Audit.md
 
@@ -313,11 +320,11 @@ uv run --with-requirements <skill_dir>/requirements.txt \
 ```
 
 `--measure` may be passed more than once or as CSV, for example
-`--measure tool_calls,capabilities`. The default is `tool_calls`; include
-`capabilities` when the user wants the same trace to count against capability
-items. The script loads the trajectory once, then runs each selected method
-against the same parsed Harbor trajectory model. Unknown method names fail
-before the trace is loaded.
+`--measure tool_calls,capabilities,failure_cases`. The default is `tool_calls`;
+include the other methods when the user wants the same trace to count against
+capability or failure-case items. The script loads the trajectory once, then runs
+each selected method against the same parsed Harbor trajectory model. Unknown
+method names fail before the trace is loaded.
 
 When capability evidence contains non-tool kinds such as `user_intent`, `output`,
 `outcome`, `policy_boundary`, or `verifier`, inspect the trace and write a
@@ -355,6 +362,31 @@ satisfied, and every judged evidence requirement must be satisfied. Missing
 judgments leave the capability uncovered. Stale judgments fail measurement
 before the script writes a coverage report, including judgments bound to a
 different trace digest.
+
+Failure-case coverage follows the same pattern. Inspect the trace and write
+`schemas/audit_failure_case_judgments.schema.json`, targeting each non-tool
+evidence requirement by failure-case `name`, zero-based index, exact `kind`, and
+exact `description`. Judge only what `evidence_required` states, using the
+failure case's trigger, expected behavior, and prohibited outputs as context.
+Then measure it with:
+
+```bash
+uv run --with-requirements <skill_dir>/requirements.txt \
+  <skill_dir>/scripts/audit_spec/measure.py \
+  --audit .eval-author/audit.md \
+  --trace <path-to>/trajectory.json \
+  --task-id <task-id> \
+  --run-id <run-id> \
+  --measure failure_cases \
+  --failure-case-judgments .eval-author/failure-case-judgments.json \
+  --out-dir .eval-author/audit-measurements
+```
+
+A failure case is covered only when every evidence requirement is satisfied and
+none of its `prohibited_tools` appears anywhere in the trace. Missing judgments
+leave it uncovered, and a subjective judgment cannot override missing
+`tool_call` evidence or an observed prohibited tool. The same trace-digest and
+stale-target checks used for capability judgments apply.
 
 The script writes one folder per task, run, and method. Task and run ids are
 encoded as single path components so ids containing `/` cannot create nested or

@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Composite audit coverage for capability items."""
+"""Composite audit coverage for failure-case items."""
 
 from __future__ import annotations
 
@@ -18,15 +18,15 @@ except ImportError:
 JsonObject: TypeAlias = dict[str, Any]
 
 _SPEC = CompositeSpec(
-    method_name="capabilities",
-    item_kind="capability",
-    details_schema="nemo.eval_author.audit_capabilities_details.v1",
-    judgments_schema="nemo.eval_author.audit_capability_judgments.v1",
+    method_name="failure_cases",
+    item_kind="failure_case",
+    details_schema="nemo.eval_author.audit_failure_cases_details.v1",
+    judgments_schema="nemo.eval_author.audit_failure_case_judgments.v1",
     tool_gate=ToolGateSpec(
-        item_field="required_tools",
-        result_field="required_tool_results",
-        should_be_observed=True,
-        failure_reason="missing_required_tool",
+        item_field="prohibited_tools",
+        result_field="prohibited_tool_results",
+        should_be_observed=False,
+        failure_reason="prohibited_tool_observed",
     ),
 )
 
@@ -37,5 +37,5 @@ JUDGMENTS_SCHEMA = _SPEC.judgments_schema
 
 
 def measure(audit: JsonObject, trajectory: Trajectory, *, judgments: JsonObject | None = None) -> JsonObject:
-    """Measure capability items from deterministic trace evidence plus optional judgments."""
+    """Measure failure cases from prohibited tools, trace evidence, and optional judgments."""
     return measure_composite(audit, trajectory, judgments=judgments, spec=_SPEC)

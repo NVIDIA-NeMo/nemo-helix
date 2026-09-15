@@ -24,6 +24,13 @@ Current assumptions:
   only; deterministic tool requirements still come from the ATIF trace. The
   sidecar's required `trace_sha256` binds its judgments to the exact ATIF bytes
   that were inspected, and measurement rejects a digest mismatch.
+- Failure-case measurement follows the capability pattern with
+  `--failure-case-judgments`. It also deterministically requires every
+  `prohibited_tools` value to be absent from the ATIF trace.
+- Measurement does not infer that a failure-case `trigger` occurred from its
+  prose field. Authors must represent the trigger in `evidence_required` and
+  judge that evidence from the trace; otherwise unrelated traces, especially a
+  failure case containing only `tool_call` evidence, can overstate coverage.
 - Reports are written under encoded path components:
   `<out-dir>/task=<task-id>/run=<run-id>/<method>/coverage.json` and
   `details.json`. The raw `task_id` and `run_id` remain in the JSON payloads.
@@ -55,10 +62,9 @@ Current assumptions:
   version before Harbor models are updated. If that happens, prefer contributing
   or adopting a permissive Harbor consumer reader before maintaining a local ATIF
   parser here.
-- Failure-case coverage and richer deterministic predicates such as argument,
-  output, state, verifier, and ordering checks remain out of scope. For
-  capability coverage, keep additional gates inside the composite capability
-  method unless aggregation learns prerequisite-aware merging.
+- Richer deterministic predicates such as argument, output, state, verifier,
+  and ordering checks remain out of scope. Keep additional gates inside each
+  composite item method unless aggregation learns prerequisite-aware merging.
 
 ## Script Inventory
 
@@ -70,11 +76,13 @@ Current assumptions:
 | `scripts/audit_spec/validate.py` | Validate the marked audit-spec block in `audit.md` |
 
 Private shared helpers live in `scripts/audit_spec/_schema.py`,
-`scripts/audit_spec/_markdown.py`, and
+`scripts/audit_spec/_markdown.py`,
+`scripts/audit_spec/measurements/_composite.py`, and
 `scripts/audit_spec/measurements/trace_tools.py`. Measurement methods live under
 `scripts/audit_spec/measurements/`; v1 ships
 `scripts/audit_spec/measurements/tool_calls.py` and
-`scripts/audit_spec/measurements/capabilities.py`.
+`scripts/audit_spec/measurements/capabilities.py`, plus
+`scripts/audit_spec/measurements/failure_cases.py`.
 
 ## Schemas And Examples
 
@@ -82,14 +90,19 @@ Private shared helpers live in `scripts/audit_spec/_schema.py`,
 |---|---|
 | Shared coverage schema | `schemas/audit_coverage.schema.json` |
 | Capability judgment input schema | `schemas/audit_capability_judgments.schema.json` |
+| Failure-case judgment input schema | `schemas/audit_failure_case_judgments.schema.json` |
 | Aggregate coverage report schema | `schemas/audit_coverage_report.schema.json` |
 | Capability details schema | `schemas/audit_capabilities_details.schema.json` |
+| Failure-case details schema | `schemas/audit_failure_cases_details.schema.json` |
 | Tool-call details schema | `schemas/audit_tool_calls_details.schema.json` |
 | Tool-call coverage example | `examples/schemas/tool_calls.coverage.json` |
 | Tool-call details example | `examples/schemas/tool_calls.details.json` |
 | Capability judgment input example | `examples/schemas/capability_judgments.json` |
 | Capability coverage example | `examples/schemas/capabilities.coverage.json` |
 | Capability details example | `examples/schemas/capabilities.details.json` |
+| Failure-case judgment input example | `examples/schemas/failure_case_judgments.json` |
+| Failure-case coverage example | `examples/schemas/failure_cases.coverage.json` |
+| Failure-case details example | `examples/schemas/failure_cases.details.json` |
 | Aggregate coverage report example | `examples/schemas/coverage_report.json` |
 
 ## Measurement Methods
@@ -98,6 +111,7 @@ Private shared helpers live in `scripts/audit_spec/_schema.py`,
 |---|---|---|
 | `tool_calls` | `tool` items | Matches each tool item's `name` against ATIF `steps[].tool_calls[].function_name`, including embedded subagent trajectories |
 | `capabilities` | `capability` items | Requires every declared `required_tools` value and every `tool_call` evidence predicate to appear in the trace; non-tool evidence can be satisfied by a structured skill-authored judgment sidecar |
+| `failure_cases` | `failure_case` items | Requires prohibited tools to be absent and every evidence predicate to be satisfied; `tool_call` evidence is deterministic and non-tool evidence uses a structured skill-authored judgment sidecar |
 
 `capabilities` treats deterministic requirements as hard gates. A supplied
 judgment can satisfy non-tool evidence kinds such as `user_intent`, `output`,
@@ -106,3 +120,8 @@ when required tools or `tool_call` evidence are missing. Missing judgments are
 reported as `unjudged` and leave the capability uncovered. Judgments bound to a
 different trace digest are rejected before reports are written. Unknown evidence
 kinds remain `unsupported`.
+
+`failure_cases` uses the same evidence and judgment rules. It additionally treats
+each declared prohibited tool as a hard gate. Other failure-case fields are
+rubric context; conditions that must gate coverage belong in
+`evidence_required`.
