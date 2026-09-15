@@ -3,7 +3,7 @@
 In this mode, make reasonable design decisions autonomously based on the dataset description. Do not ask clarifying questions — infer sensible defaults and move straight through to a working preview.
 
 1. **Resolve CLI command** — Run `command -v nemo 2>/dev/null || (test -x .venv/bin/nemo && realpath .venv/bin/nemo) || echo CLI_NOT_FOUND`.
-  - If the output is a path, use `<path> data-designer` as the command prefix for all `nemo data-designer …` invocations in this workflow.
+  - If the output is a path, use it in place of `nemo` in every `nemo …` invocation in this workflow — including commands outside the `data-designer` group, such as `<path> inference providers list`.
   - If the output is `CLI_NOT_FOUND`, STOP and follow the Troubleshooting section in SKILL.md. Do not continue to the next step.
 2. **Learn** — Run `nemo data-designer agent context`.
   - Read schemas for every column, sampler type, validator, and processor you plan to use, from the `config_root` path it prints.

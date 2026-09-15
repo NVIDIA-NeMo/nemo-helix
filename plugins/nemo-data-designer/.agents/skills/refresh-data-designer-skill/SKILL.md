@@ -84,7 +84,7 @@ If upstream adds a file with no platform meaning, do not vendor it. If upstream 
 
 ```text
 1. **Resolve CLI command** — Run `command -v nemo 2>/dev/null || (test -x .venv/bin/nemo && realpath .venv/bin/nemo) || echo CLI_NOT_FOUND`.
-  - If the output is a path, use `<path> data-designer` as the command prefix for all `nemo data-designer …` invocations in this workflow.
+  - If the output is a path, use it in place of `nemo` in every `nemo …` invocation in this workflow — including commands outside the `data-designer` group, such as `<path> inference providers list`.
   - If the output is `CLI_NOT_FOUND`, STOP and follow the Troubleshooting section in SKILL.md. Do not continue to the next step.
 ```
 
