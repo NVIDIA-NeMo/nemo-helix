@@ -47,13 +47,14 @@ For a local SDK run, this runner is **not** zero-dependency — it shells out to
 ## Install NeMo Gym
 
 ```bash
-uv venv ~/gym-env --python 3.13.14
-uv pip install --python ~/gym-env/bin/python nemo-gym tiktoken
+uv venv ~/gym-env --python 3.13.15
+uv pip install --python ~/gym-env/bin/python "nemo-gym==0.5.0" tiktoken
 export PATH="$HOME/gym-env/bin:$PATH"
 ```
 
-Gym goes in **its own environment**, with that environment's `bin` on `PATH`. Gym imports Ray at
-module load, and `nemo-helix` excludes Ray by constraint, so the two generally cannot share a
+NeMo Gym 0.5.0 requires Python 3.13.14 or newer. Pin the Gym version so the local runner matches the
+NeMo Helix job image. Install Gym into **its own environment** and put that environment's `bin` on `PATH`. Gym imports Ray
+at module load, and `nemo-helix` excludes Ray by constraint, so the two generally cannot share a
 virtualenv.
 
 <Note>
