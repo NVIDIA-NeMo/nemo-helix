@@ -64,8 +64,12 @@ you are about to run. A repository with its own virtual environment usually need
 that environment's interpreter. Try these in order until one prints a version:
 
 ```bash
+harbor_python=""
 for py in .venv/bin/python ./venv/bin/python python3; do
-  "$py" -c "import harbor, sys; print(sys.executable, harbor.__version__)" 2>/dev/null && break
+  if "$py" -c "import harbor, sys; print(sys.executable, harbor.__version__)" 2>/dev/null; then
+    harbor_python="$py"
+    break
+  fi
 done
 ```
 
@@ -73,14 +77,18 @@ If none prints a version, check an existing uv tool installation before declarin
 Harbor unavailable. `uv tool install harbor` isolates Harbor from project Python:
 
 ```bash
-if command -v uv >/dev/null 2>&1; then
-  harbor_tool_root="$(uv tool dir)" &&
+if [ -z "$harbor_python" ] && command -v uv >/dev/null 2>&1; then
+  if harbor_tool_root="$(uv tool dir)" &&
     "$harbor_tool_root/harbor/bin/python" -c \
-      "import harbor, sys; print(sys.executable, harbor.__version__)"
+      "import harbor, sys; print(sys.executable, harbor.__version__)"; then
+    harbor_python="$harbor_tool_root/harbor/bin/python"
+  fi
 fi
 ```
 
-Use the printed interpreter for discovery; a successful CLI invocation alone is
+Keep `harbor_python` for Step 1 in the same shell and repository directory. If
+using separate shell sessions, explicitly carry over the successfully probed
+interpreter path. A successful CLI invocation alone is
 not enough. If the CLI works but these probes fail, inspect its launcher or ask
 for the environment that owns it rather than reporting that Harbor is not
 installed anywhere. Preserve the existing compatible version; do not install
@@ -97,7 +105,7 @@ Point the script at the repository root, not at a suite directory. It searches f
 configs to a depth of four directories and finds datasets at any depth.
 
 ```bash
-.venv/bin/python <skill_dir>/scripts/discover.py --repo .
+"${harbor_python:?Select a Harbor interpreter using the probes above}" <skill_dir>/scripts/discover.py --repo .
 ```
 
 One JSON object goes to stdout, and `--compact` puts it on one line. The script
