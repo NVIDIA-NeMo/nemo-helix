@@ -288,7 +288,17 @@ def compile_model_deployment(
                 k8s=K8sVolumeConfig(storageClass=config.default_storage_class),
             ),
         )
-        puller_env = {"HF_ENDPOINT": resolved.files_hf_url, "HF_TOKEN": "service:models"}
+        # `hf download --local-dir` still writes its refs/commit-hash bookkeeping (and
+        # incomplete-download staging) into the hub cache, which defaults to
+        # $HOME/.cache/huggingface — ephemeral container storage, not the PVC. Point
+        # HF_HOME at the mounted PVC so that bookkeeping lands beside the weights;
+        # otherwise a large checkpoint overflows ephemeral storage (ENOSPC). Mirrors
+        # how other HF consumers scope the cache (unsloth/rl training tasks).
+        puller_env = {
+            "HF_ENDPOINT": resolved.files_hf_url,
+            "HF_TOKEN": "service:models",
+            "HF_HOME": _WEIGHTS_MOUNT,
+        }
         puller_args = ["download", f"{resolved.model_namespace}/{resolved.model_name}", "--local-dir", _WEIGHTS_MOUNT]
         if resolved.model_revision:
             puller_args.extend(["--revision", resolved.model_revision])
