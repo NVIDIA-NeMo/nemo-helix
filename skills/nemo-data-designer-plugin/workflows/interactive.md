@@ -6,13 +6,13 @@ This is an interactive, iterative design process. Do not disengage from the loop
   - If the output is a path, use `<path> data-designer` as the command prefix for all `nemo data-designer …` invocations in this workflow.
   - If the output is `CLI_NOT_FOUND`, STOP and follow the Troubleshooting section in SKILL.md. Do not continue to the next step.
 2. **Learn** — Run `nemo data-designer agent context`.
-  - `agent context` only inspects the local `~/.data-designer/` registry; it does not see IGW-managed providers or in-script `ModelConfig`s. Whether or not it lists usable aliases, read `references/nemo-platform-plugin-additions.md` for the model-config options before proceeding.
-  - Inspect schemas for every column, sampler type, validator, and processor you plan to use.
+  - Read schemas for every column, sampler type, validator, and processor you plan to use, from the `config_root` path it prints.
   - Never guess types or parameters — read the relevant config files first.
   - Always read `base.py` for inherited fields shared by all config objects.
+  - Ignore its **Model Aliases**, **Persona Datasets**, and **Commands** sections. Those describe a standalone local install; this skill runs on NeMo Platform, where aliases are declared in the script, persona data lives in platform filesets, and every command is prefixed with `nemo`. Read `references/platform-execution.md` instead.
 3. **Clarify** — Ask the user clarifying questions to narrow down precisely what they want.
   - Optimize for a great user experience: prefer a structured question tool over plain text if one is available, batch related questions together, keep the set short, provide concrete options/examples/defaults where possible, and use structured inputs (single-select, multi-select, free text, etc.) when they make answering easier.
-  - If the dataset uses LLM columns, confirm with the user which provider/model(s) to use. `model_configs` must be delcared programmatically with IGW providers; see `references/nemo-platform-plugin-additions.md`. Use `nemo inference providers list` to discover what IGW has registered.
+  - If the dataset uses LLM columns, confirm with the user which provider/model(s) to use. Run `nemo inference providers list` to see what is registered, and offer those as options. See `references/platform-execution.md`.
   - Common things to make precise:
     - What the "axes of diversity" are — what should be well represented and diverse in the resulting dataset.
     - The kind and nature of any input data.
