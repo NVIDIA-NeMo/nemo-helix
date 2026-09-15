@@ -276,3 +276,31 @@ def test_all_weights_allows_lora_enabled_false() -> None:
         }
     )
     assert spec.trains_standalone_lora_adapter() is False
+
+
+@pytest.mark.parametrize("gpu", [0, -1])
+def test_deployment_config_rejects_non_positive_gpu(gpu: int) -> None:
+    """Caught at submit, not at compile time where the task-side schema would reject it."""
+    with pytest.raises(ValueError, match="greater than 0"):
+        AutomodelJobInput.model_validate(
+            {
+                "model": "meta/llama",
+                "dataset": {"training": "default/train"},
+                "training": {"training_type": "sft", "finetuning_type": "lora"},
+                "deployment_config": {"gpu": gpu},
+            }
+        )
+
+
+def test_deployment_config_accepts_a_positive_gpu_count() -> None:
+    spec = AutomodelJobInput.model_validate(
+        {
+            "model": "meta/llama",
+            "dataset": {"training": "default/train"},
+            "training": {"training_type": "sft", "finetuning_type": "lora"},
+            "deployment_config": {"gpu": 1},
+        }
+    )
+
+    assert isinstance(spec.deployment_config, DeploymentParams)
+    assert spec.deployment_config.gpu == 1
