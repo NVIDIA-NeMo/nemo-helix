@@ -478,6 +478,10 @@ Create a customization job to fine-tune the embedding model using contrastive le
 
 Submit to the **Automodel** backend using `AutomodelJobInput` with split `schedule`, `batch`, `optimizer`, and `parallelism` sections. Reference the model entity and dataset fileset by workspace/name (not `fileset://` URIs).
 
+When you want the backend to fill recipe-specific defaults for fields that you leave out,
+serialize the input with `exclude_unset=True` at submission time. This preserves which nested
+fields you explicitly set instead of expanding every general SFT schema default on the client.
+
 **Key hyperparameters for embedding fine-tuning:**
 - **`training.training_type`**: `sft`
 - **`training.recipe`**: `bi_encoder`, or `auto` when the entity `head_type` is `embedding`
@@ -527,7 +531,9 @@ spec = AutomodelJobInput(
 )
 
 job = client.customization.automodel.jobs.create(
-    spec=spec, workspace="default", name=JOB_NAME
+    spec=spec.model_dump(mode="json", exclude_unset=True),
+    workspace="default",
+    name=JOB_NAME,
 )
 
 print(f"Submitted job: {job.job.name}")

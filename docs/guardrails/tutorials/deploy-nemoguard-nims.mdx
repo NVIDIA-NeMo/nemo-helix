@@ -23,6 +23,7 @@ Before you begin:
 - You have access to a running NeMo Platform.
 - `NMP_BASE_URL` is set to the NeMo Platform base URL.
 - Your infrastructure has 1 GPU available per NIM deployment.
+- Your NeMo Platform administrator configured an NGC API key for NIM image pulls. The key must be available through the `platform.ngc_api_key_secret` setting, which defaults to `system/ngc-api-key`.
 
 ---
 
@@ -48,7 +49,7 @@ Use the Platform's Inference Gateway service to deploy each NIM. This process cr
 
 <Tip>
 
-Enabling [KV cache reuse](https://docs.nvidia.com/nim/large-language-models/latest/kv-cache-reuse.html) on the LLM-based NIMs could improve inference speed. These examples enable this feature by setting `NIM_ENABLE_KV_CACHE_REUSE=1` via the `nim_deployment.additional_envs` option.
+Enabling [KV cache reuse](https://docs.nvidia.com/nim/large-language-models/latest/kv-cache-reuse.html) on the LLM-based NIMs could improve inference speed. These examples enable this feature by setting `NIM_ENABLE_KV_CACHE_REUSE=1` via the `executor_config.additional_envs` option.
 
 </Tip>
 
@@ -59,17 +60,19 @@ Enabling [KV cache reuse](https://docs.nvidia.com/nim/large-language-models/late
 <Tab title="CLI">
 
 ```bash
-nemo inference deployment-configs create \
---name "nemotron-safety-guard-config" \
---nim-deployment '{
-"gpu": 1,
-"image_name": "nvcr.io/nim/nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
-"image_tag": "1.14.0",
-"additional_envs": {"NIM_ENABLE_KV_CACHE_REUSE": "1"}
+nemo inference deployment-configs create "nemotron-safety-guard-config" \
+--engine "nim" \
+--model-spec '{
+    "model_name": "nvidia/llama-3.1-nemotron-safety-guard-8b-v3"
+}' \
+--executor-config '{
+    "gpu": 1,
+    "image_name": "nvcr.io/nim/nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
+    "image_tag": "1.14.0",
+    "additional_envs": {"NIM_ENABLE_KV_CACHE_REUSE": "1"}
 }'
 
-nemo inference deployments create \
---name "nemotron-safety-guard" \
+nemo inference deployments create "nemotron-safety-guard" \
 --config "nemotron-safety-guard-config"
 
 nemo wait inference deployment nemotron-safety-guard
@@ -81,7 +84,11 @@ nemo wait inference deployment nemotron-safety-guard
 ```python
 client.inference.deployment_configs.create(
     name="nemotron-safety-guard-config",
-    nim_deployment={
+    engine="nim",
+    model_spec={
+        "model_name": "nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
+    },
+    executor_config={
         "gpu": 1,
         "image_name": "nvcr.io/nim/nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
         "image_tag": "1.14.0",
@@ -114,17 +121,19 @@ print("Content safety NIM ready")
 <Tab title="CLI">
 
 ```bash
-nemo inference deployment-configs create \
---name "nemoguard-topic-control-config" \
---nim-deployment '{
-"gpu": 1,
-"image_name": "nvcr.io/nim/nvidia/llama-3.1-nemoguard-8b-topic-control",
-"image_tag": "1.10.1",
-"additional_envs": {"NIM_ENABLE_KV_CACHE_REUSE": "1"}
+nemo inference deployment-configs create "nemoguard-topic-control-config" \
+--engine "nim" \
+--model-spec '{
+    "model_name": "nvidia/llama-3.1-nemoguard-8b-topic-control"
+}' \
+--executor-config '{
+    "gpu": 1,
+    "image_name": "nvcr.io/nim/nvidia/llama-3.1-nemoguard-8b-topic-control",
+    "image_tag": "1.10.1",
+    "additional_envs": {"NIM_ENABLE_KV_CACHE_REUSE": "1"}
 }'
 
-nemo inference deployments create \
---name "nemoguard-topic-control" \
+nemo inference deployments create "nemoguard-topic-control" \
 --config "nemoguard-topic-control-config"
 
 nemo wait inference deployment nemoguard-topic-control
@@ -136,7 +145,11 @@ nemo wait inference deployment nemoguard-topic-control
 ```python
 client.inference.deployment_configs.create(
     name="nemoguard-topic-control-config",
-    nim_deployment={
+    engine="nim",
+    model_spec={
+        "model_name": "nvidia/llama-3.1-nemoguard-8b-topic-control",
+    },
+    executor_config={
         "gpu": 1,
         "image_name": "nvcr.io/nim/nvidia/llama-3.1-nemoguard-8b-topic-control",
         "image_tag": "1.10.1",
@@ -169,16 +182,16 @@ print("Topic control NIM ready")
 <Tab title="CLI">
 
 ```bash
-nemo inference deployment-configs create \
---name "nemoguard-jailbreak-config" \
---nim-deployment '{
-"gpu": 1,
-"image_name": "nvcr.io/nim/nvidia/nemoguard-jailbreak-detect",
-"image_tag": "1.10.1"
+nemo inference deployment-configs create "nemoguard-jailbreak-config" \
+--engine "nim" \
+--model-spec '{}' \
+--executor-config '{
+    "gpu": 1,
+    "image_name": "nvcr.io/nim/nvidia/nemoguard-jailbreak-detect",
+    "image_tag": "1.10.1"
 }'
 
-nemo inference deployments create \
---name "nemoguard-jailbreak" \
+nemo inference deployments create "nemoguard-jailbreak" \
 --config "nemoguard-jailbreak-config"
 
 nemo wait inference deployment nemoguard-jailbreak
@@ -190,7 +203,9 @@ nemo wait inference deployment nemoguard-jailbreak
 ```python
 client.inference.deployment_configs.create(
     name="nemoguard-jailbreak-config",
-    nim_deployment={
+    engine="nim",
+    model_spec={},
+    executor_config={
         "gpu": 1,
         "image_name": "nvcr.io/nim/nvidia/nemoguard-jailbreak-detect",
         "image_tag": "1.10.1",

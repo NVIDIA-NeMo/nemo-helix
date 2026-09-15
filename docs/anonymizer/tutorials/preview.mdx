@@ -62,7 +62,7 @@ config = AnonymizerConfig(
 model_configs = [
     ModelConfig(alias="gliner-pii-detector", provider=MODEL_PROVIDER, model="nvidia/gliner-pii"),
     ModelConfig(alias="gpt-oss-120b", provider=MODEL_PROVIDER, model="openai/gpt-oss-120b"),
-    ModelConfig(alias="nemotron-30b-thinking", provider=MODEL_PROVIDER, model="nvidia/nemotron-3-nano-30b-a3b"),
+    ModelConfig(alias="nemotron-30b-thinking", provider=MODEL_PROVIDER, model="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"),
 ]
 
 request = PreviewRequest(
@@ -124,14 +124,21 @@ nemo anonymizer preview \
 `AsyncAnonymizerResource.preview` has the same signature and return type:
 
 ```python
+import asyncio
 import os
 from nemo_platform import AsyncNeMoPlatform
 
-async_sdk = AsyncNeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
-preview = await async_sdk.anonymizer.preview(request)
+async def run_preview():
+    async_sdk = AsyncNeMoPlatform(
+        base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+        workspace=WORKSPACE,
+    )
+    try:
+        return await async_sdk.anonymizer.preview(request)
+    finally:
+        await async_sdk.close()
+
+preview = asyncio.run(run_preview())
 ```
 
 </Accordion>

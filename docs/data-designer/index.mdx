@@ -19,12 +19,6 @@ The plugin is built on the open-source [NVIDIA NeMo Data Designer library](https
 
 Data Designer separates **configuration** from **execution**.
 
-<Note>
-
-The code snippets below are for conceptual demonstration purposes only.
-For runnable examples, see the [tutorials](/documentation/design-synthetic-data/tutorials).
-
-</Note>
 ### 1. Build Configurations
 
 Use `data_designer.config` to define the dataset you want to generate:
@@ -36,15 +30,27 @@ import data_designer.config as dd
 model_configs = [
     dd.ModelConfig(
         provider="default/nvidia-build",
-        model="nvidia/nemotron-3-nano-30b-a3b",
+        model="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
         alias="text",
     )
 ]
 
 # Build configuration
 config_builder = dd.DataDesignerConfigBuilder(model_configs)
-config_builder.add_column(dd.SamplerColumnConfig(...))
-config_builder.add_column(dd.LLMTextColumnConfig(...))
+config_builder.add_column(
+    dd.SamplerColumnConfig(
+        name="sentiment",
+        sampler_type="category",
+        params=dd.CategorySamplerParams(values=["positive", "negative"]),
+    )
+)
+config_builder.add_column(
+    dd.LLMTextColumnConfig(
+        name="review",
+        prompt="Write one short {{ sentiment }} product review.",
+        model_alias="text",
+    )
+)
 ```
 
 Configuration code describes the dataset schema, columns, dependencies, constraints, seed data, processors, profilers, and inference settings.

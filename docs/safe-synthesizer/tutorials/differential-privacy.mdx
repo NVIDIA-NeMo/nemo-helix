@@ -69,10 +69,10 @@ then install the tutorial-only packages (`kagglehub matplotlib`) in that environ
 For a PyPI install:
 
 ```shell
-if command -v uv &> /dev/null; then
- uv pip install "nemo-platform[all]" kagglehub matplotlib
+if command -v uv >/dev/null 2>&1 && [ -n "$VIRTUAL_ENV" ]; then
+    uv pip install "nemo-platform[all]" 'kagglehub==0.3.13' matplotlib
 else
- pip install "nemo-platform[all]" kagglehub matplotlib
+    pip install "nemo-platform[all]" 'kagglehub==0.3.13' matplotlib
 fi
 ```
 
@@ -89,6 +89,14 @@ client = NeMoPlatform(
     base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+
+# Use the provider configured during NeMo Platform setup for PII classification.
+provider_name = os.environ.get("NSS_CLASSIFY_MODEL_PROVIDER", "default/nvidia-build")
+if "/" in provider_name:
+    provider_workspace, provider_id = provider_name.split("/", 1)
+    client.inference.providers.retrieve(provider_id, workspace=provider_workspace)
+else:
+    client.inference.providers.retrieve(provider_name)
 ```
 
 ---
@@ -103,7 +111,7 @@ path = kagglehub.dataset_download("nicapotato/womens-ecommerce-clothing-reviews"
 df = pd.read_csv(f"{path}/Womens Clothing E-Commerce Reviews.csv", index_col=0)
 
 print(f"Dataset size: {len(df)} records")
-print(f"Recommended delta: {1 / (len(df) ** 2):.2e}")
+print(f"Recommended delta: {1 / (len(df) ** 1.2):.2e}")
 ```
 
 ---
@@ -120,16 +128,14 @@ print("🔬 Experiment 1: No Differential Privacy (Baseline)")
 builder_baseline = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
+    .with_classify_model_provider(provider_name)
     .with_replace_pii()
     .synthesize()
 )
 
 # Create a project for our jobs (creates if it doesn't exist)
 project_name = "test-project"
-try:
-    client.projects.create(workspace="default", name=project_name)
-except Exception:
-    pass  # Project may already exist
+client.projects.create(workspace="default", name=project_name, exist_ok=True)
 
 job_baseline = builder_baseline.create_job(
     name=f"dp-baseline-{int(time.time())}", project="test-project"
@@ -156,8 +162,9 @@ print("\n🔬 Experiment 2: Moderate Privacy (ε=6)")
 builder_moderate = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
+    .with_classify_model_provider(provider_name)
     .with_replace_pii()
-    .with_differential_privacy(epsilon=6.0, delta=1e-5)
+    .with_differential_privacy(dp_enabled=True, epsilon=6.0, delta=1e-5)
     .synthesize()
 )
 
@@ -186,8 +193,9 @@ print("\n🔬 Experiment 3: Strong Privacy (ε=1)")
 builder_strong = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
+    .with_classify_model_provider(provider_name)
     .with_replace_pii()
-    .with_differential_privacy(epsilon=1.0, delta=1e-5)
+    .with_differential_privacy(dp_enabled=True, epsilon=1.0, delta=1e-5)
     .synthesize()
 )
 
@@ -238,16 +246,16 @@ fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 ax1.bar(experiments, safe_sqs, color=["blue", "green", "red"], alpha=0.7)
 ax1.set_ylabel("Score")
 ax1.set_title("Synthetic Quality Score (SQS)")
-ax1.set_ylim([0, 100])
-ax1.axhline(y=70, color="gray", linestyle="--", label="Good threshold")
+ax1.set_ylim([0, 10])
+ax1.axhline(y=7, color="gray", linestyle="--", label="Good threshold")
 ax1.legend()
 
 # DPS comparison
 ax2.bar(experiments, safe_dps, color=["blue", "green", "red"], alpha=0.7)
 ax2.set_ylabel("Score")
 ax2.set_title("Data Privacy Score (DPS)")
-ax2.set_ylim([0, 100])
-ax2.axhline(y=70, color="gray", linestyle="--", label="Good threshold")
+ax2.set_ylim([0, 10])
+ax2.axhline(y=7, color="gray", linestyle="--", label="Good threshold")
 ax2.legend()
 
 plt.tight_layout()
@@ -285,6 +293,7 @@ privacy_config = DifferentialPrivacyHyperparams(
 builder_custom = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
+    .with_classify_model_provider(provider_name)
     .with_replace_pii()
     .with_differential_privacy(config=privacy_config)
     .synthesize()
@@ -296,14 +305,15 @@ builder_custom = (
 For datasets where multiple records belong to the same entity (e.g., a patient with multiple visits), group-level privacy protects entire entities rather than individual records:
 
 ```python
-# Group-level privacy for multi-record entities
+# Group-level privacy for repeated records in this tutorial's sample dataset.
+# For patient data, replace "Clothing ID" with your patient identifier column.
 builder_grouped = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
-    .with_train(
-        group_training_examples_by="patient_id"  # Group records by patient
+    .with_data(
+        group_training_examples_by="Clothing ID"
     )
-    .with_differential_privacy(epsilon=8.0)
+    .with_differential_privacy(dp_enabled=True, epsilon=8.0)
     .synthesize()
 )
 ```
@@ -313,13 +323,14 @@ builder_grouped = (
 When running multiple experiments, the privacy budget compounds:
 
 ```python
-# Total privacy budget across experiments
-total_epsilon = 0.0  # No DP baseline
-total_epsilon += 6.0  # Moderate privacy
-total_epsilon += 1.0  # Strong privacy
+# Basic sequential composition for DP outputs released from the same source data.
+# Do not release the non-DP baseline: it has no finite DP guarantee.
+released_budgets = [(6.0, 1e-5), (1.0, 1e-5)]
+total_epsilon = sum(epsilon for epsilon, _ in released_budgets)
+total_delta = sum(delta for _, delta in released_budgets)
 
-print(f"\n🔐 Total Privacy Budget Consumed: ε = {total_epsilon}")
-print("Note: Each additional release compounds the privacy budget")
+print(f"\n🔐 Composed Privacy Budget: ε = {total_epsilon}, δ = {total_delta:.1e}")
+print("Note: Each additional DP release compounds the privacy budget")
 print("Best practice: Only release one synthetic dataset per original dataset")
 ```
 
@@ -342,7 +353,7 @@ print(f"Moderate (ε=6): {moderate_report.membership_inference_protection_score}
 
 print("\nInterpretation:")
 print("- Higher score = Better protection")
-print("- Score > 0.5 means attacker cannot reliably identify training records")
+print("- Scores use a 0-10 scale; higher values indicate stronger protection")
 ```
 
 ### Attribute Inference Attack (AIA)
@@ -369,20 +380,20 @@ Differential privacy works best with larger datasets:
 
 ```python
 def check_data_requirements(dataset_size):
- """Check if dataset size is suitable for DP."""
- print(f"📏 Dataset Size Analysis: {dataset_size} records")
+    """Check if dataset size is suitable for DP."""
+    print(f"📏 Dataset Size Analysis: {dataset_size} records")
 
- if dataset_size >= 10000:
- print("✅ Excellent - Dataset size is ideal for DP")
- print(" Expected: Good quality with ε ∈ [8, 12]")
- elif dataset_size >= 5000:
- print("⚠️ Moderate - Dataset may work with DP")
- print(" Recommendation: Start with higher epsilon (ε=10-12)")
- else:
- print("❌ Small - DP may significantly reduce quality")
- print(" Consider: Collecting more data or using DP without")
+    if dataset_size >= 10000:
+        print("✅ Excellent - Dataset size is ideal for DP")
+        print(" Expected: Good quality with ε ∈ [8, 12]")
+    elif dataset_size >= 5000:
+        print("⚠️ Moderate - Dataset may work with DP")
+        print(" Recommendation: Start with higher epsilon (ε=10-12)")
+    else:
+        print("❌ Small - DP may significantly reduce quality")
+        print(" Consider collecting more data or running without DP")
 
- print(f"\n Recommended delta: {1 / (dataset_size ** 1.2):.2e}")
+    print(f"\n Recommended delta: {1 / (dataset_size ** 1.2):.2e}")
 
 check_data_requirements(len(df))
 ```
@@ -435,9 +446,14 @@ builder_optimized = (
     .with_data_source(df)
     .with_train(
         batch_size=256,  # Larger batch sizes benefit DP
-        num_epochs=10,  # May need more epochs for convergence
+        num_input_records_to_sample=len(df) * 10,  # Approximately ten passes over the input
     )
-    .with_differential_privacy(epsilon=8.0, delta="auto", per_sample_max_grad_norm=1.0)
+    .with_differential_privacy(
+        dp_enabled=True,
+        epsilon=8.0,
+        delta="auto",
+        per_sample_max_grad_norm=1.0,
+    )
     .synthesize()
 )
 ```
@@ -485,10 +501,12 @@ builder_improved = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
     .with_train(
-        num_epochs=10  # More training
+        num_input_records_to_sample=len(df) * 10  # Approximately ten passes over the input
     )
+    .with_classify_model_provider(provider_name)
     .with_replace_pii()
     .with_differential_privacy(
+        dp_enabled=True,
         epsilon=6.0,  # Slightly higher
         delta=1e-5,
         per_sample_max_grad_norm=1.5,  # Less aggressive clipping

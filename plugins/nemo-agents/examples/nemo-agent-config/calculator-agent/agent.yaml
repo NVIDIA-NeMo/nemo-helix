@@ -22,7 +22,7 @@ harnesses:
 models:
   default:
     provider: nvidia
-    model: nvidia-nemotron-3-5-lightning-30b-a3b
+    model: ${NEMO_DEFAULT_MODEL}
     api_key_env: NVIDIA_API_KEY
 
 skills:

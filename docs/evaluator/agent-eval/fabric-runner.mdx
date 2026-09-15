@@ -17,12 +17,12 @@ The result and bundle are the same as the
 
 ## Harnesses
 
-| `adapter_id` | Harness | Transport |
+| `adapter_id` | Harness | Execution |
 |---|---|---|
-| `nvidia.fabric.codex` | Codex CLI | `cli` (subprocess) |
-| `nvidia.fabric.claude` | Claude | `cli` |
-| `nvidia.fabric.hermes` | Hermes SDK | `library` (in-process) |
-| `nvidia.fabric.langchain.deepagents` | LangChain deepagents | `library` |
+| `nvidia.fabric.codex` | Codex | Selected by the Fabric adapter |
+| `nvidia.fabric.claude` | Claude | Selected by the Fabric adapter |
+| `nvidia.fabric.hermes` | Hermes SDK | Selected by the Fabric adapter |
+| `nvidia.fabric.langchain.deepagents` | LangChain deepagents | Selected by the Fabric adapter |
 
 <Warning>
 
@@ -41,7 +41,8 @@ This runner is **not** zero-dependency. It needs:
   script/dev-install-fabric.sh
   ```
 
-- **The harness's own CLI**, for `transport: cli` harnesses — `codex` on `PATH` and authenticated.
+- **The harness's own runtime**, when required by the selected adapter — for example, `codex` on
+  `PATH` and authenticated for the Codex adapter.
 
 The `fabric` extra installs the Codex, Claude, and Hermes adapters. The deepagents adapter is
 deliberately excluded from it, because that adapter does not support the Relay observability
@@ -64,11 +65,8 @@ config = {
         "settings": {"sandbox": "workspace-write"},
     },
     "runtime": {
-        "mode": "oneshot",
-        "transport": "cli",
         "input_schema": "text",
         "output_schema": "message",
-        "timeout_seconds": 180,
     },
     "environment": {"provider": "local"},
     "models": {"default": {"provider": "openai", "model": "<provider-model>"}},
@@ -79,9 +77,9 @@ config = {
 An `environment.workspace` set here is **overridden per task** — the runtime gives every task its own
 fresh workspace under `work_root`, so setting one in the config has no effect.
 
-Across harnesses the shape differs mainly in `adapter_id`, `runtime.transport`, and any
-harness-specific `harness.settings`. Codex runs as a subprocess (`transport: cli`) while the Hermes
-SDK harness runs in-library (`transport: library`). For complete Codex-CLI and Hermes-SDK
+Across harnesses the shape differs mainly in `adapter_id`, optional input/output schemas, and any
+harness-specific `harness.settings`. Fabric owns each adapter's execution mechanism; callers select
+the adapter instead of configuring a CLI-versus-library transport. For complete Codex and Hermes
 configurations, see `examples/fabric_harness_runtimes.py` in the SDK.
 
 <Warning>
@@ -122,6 +120,7 @@ tasks = [
 runtime = FabricAgentRuntime(
     config=config,
     work_root="fabric",
+    timeout_s=180,
     capture_trajectory=True,
 )
 

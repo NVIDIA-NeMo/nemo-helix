@@ -90,7 +90,7 @@ Runtime behavior is described by the platform-managed `agent.yaml`:
 | `instructions` | Defines shared instructions for every harness. `instructions.system.content` contains the system prompt. | `system.content: You are a concise calculator agent.` |
 | `default_harness` | Selects the entry under `harnesses` that runs by default. | `deepagents` |
 | `harnesses` | Declares the supported harness adapters and their harness-specific model or runtime settings. | `deepagents.kind: deepagents` |
-| `models` | Declares shared named model bindings. A harness uses `models.default` unless it defines its own model. | `default.provider: nvidia`, `default.model: nvidia-nemotron-3-nano-30b-a3b` |
+| `models` | Declares shared named model bindings. A harness uses `models.default` unless it defines its own model. | `default.provider: nvidia`, `default.model: ${NEMO_DEFAULT_MODEL}` |
 | `skills` | Lists skill directories, relative to `agent.yaml`, that are made available to the harness. | `paths: [./skills/math]` |
 | `mcp` | Configures shared MCP servers that expose tools and resources to the harness. | `servers.github.transport: streamable-http`, `servers.github.url: ${GITHUB_MCP_URL}` |
 | `tools` | Defines shared tool policy, such as tool names that the harness must block. | `blocked: [shell, browser]` |
@@ -123,7 +123,7 @@ harnesses:
 models:
   default:
     provider: nvidia
-    model: nvidia-nemotron-3-nano-30b-a3b
+    model: ${NEMO_DEFAULT_MODEL}
     api_key_env: NVIDIA_API_KEY
 
 skills:
@@ -193,7 +193,7 @@ functions:
 llms:
   llm:
     _type: openai
-    model_name: nvidia-nemotron-3-nano-30b-a3b
+    model_name: nvidia-nemotron-3-5-lightning-30b-a3b
 
 workflow:
   _type: react_agent
@@ -207,7 +207,7 @@ directly, so the platform can resolve model names, attach credentials, and
 route through middleware on the agent's behalf. Two conventions apply when a
 config targets a deployed agent:
 
-- **Model names use the Inference Gateway entity form**, with slashes and dots converted to hyphens (`nvidia/nemotron-3-nano-30b-a3b` becomes `nvidia-nemotron-3-nano-30b-a3b`). The Inference Gateway resolves the entity to the upstream provider that owns it.
+- **Model names use the Inference Gateway entity form**, with slashes and dots converted to hyphens (`nvidia/nemotron-3.5-lightning-30b-a3b` becomes `nvidia-nemotron-3-5-lightning-30b-a3b`). The Inference Gateway resolves the entity to the upstream provider that owns it.
 - **Leave `base_url` and `api_key` unset on `openai` and `nim` LLMs.** NeMo Platform injects an Inference Gateway URL when it deploys the agent, and the gateway retrieves upstream credentials from the secrets service. Setting `base_url` explicitly bypasses both.
 
 ## Common Tasks

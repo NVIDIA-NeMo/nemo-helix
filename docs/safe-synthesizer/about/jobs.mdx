@@ -73,7 +73,7 @@ Jobs are configured through a hierarchical configuration structure:
 
 ### Configuration Sections
 
-- **data_prep**: Grouping, ordering, holdout configuration
+- **data**: Grouping, ordering, and holdout configuration
 - **replace_pii**: PII detection and replacement rules
 - **training**: Model selection and training parameters
 - **generation**: Synthetic data generation settings
@@ -118,13 +118,14 @@ The `SafeSynthesizerJobBuilder` provides a high-level interface for common workf
 
 ```python
 import os
+import time
+
 import pandas as pd
 
 from nemo_platform import NeMoPlatform
 from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuilder
 
-# Placeholders
-df: pd.DataFrame = pd.DataFrame()
+df = pd.DataFrame({"text": [f"sample record {i}" for i in range(200)]})
 client = NeMoPlatform(
     base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
     workspace="default",
@@ -133,10 +134,11 @@ client = NeMoPlatform(
 builder = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
+    .with_classify_model_provider("default/nvidia-build")
     .with_replace_pii()
     .synthesize()
 )
-job = builder.create_job(name="my-job", project="my-project")
+job = builder.create_job(name=f"my-job-{int(time.time())}")
 ```
 
 The builder does the following:
@@ -256,7 +258,7 @@ for log in job.fetch_logs():
 
 - Increase `num_input_records_to_sample` for more training
 - Adjust `temperature` (try 0.7-1.0 range)
-- Enable `use_structured_generation` for better format adherence
+- Set `generation.structured_generation.enabled` to `true` for better format adherence
 - Review evaluation report for specific quality issues
 
 ## Related Topics

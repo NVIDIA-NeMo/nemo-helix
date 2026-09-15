@@ -46,11 +46,13 @@ The async resource exposes the same methods as `async def` methods.
 `SafeSynthesizerJobBuilder` assembles a job spec, uploads local datasets to Files, creates the job, and returns a `SafeSynthesizerJob` wrapper.
 
 ```python
+import time
+
 import pandas as pd
 
 from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuilder
 
-df = pd.DataFrame({"text": ["sample record"]})
+df = pd.DataFrame({"text": [f"sample record {i}" for i in range(200)]})
 
 job = (
     SafeSynthesizerJobBuilder(client, workspace="default")
@@ -58,7 +60,7 @@ job = (
     .with_classify_model_provider("default/nvidia-build")
     .with_replace_pii()
     .synthesize()
-    .create_job(name="safe-synth-job", project="default-project")
+    .create_job(name=f"safe-synth-job-{int(time.time())}")
 )
 ```
 
@@ -70,7 +72,7 @@ job = (
 | `with_generate(config=None, **kwargs)` | Sets generation parameters and enables synthesis. |
 | `synthesize()` | Enables synthesis. |
 | `with_evaluate(config=None, **kwargs)` | Sets evaluation parameters. |
-| `with_differential_privacy(config=None, **kwargs)` | Sets DP-SGD parameters. |
+| `with_differential_privacy(config=None, **kwargs)` | Sets DP-SGD parameters. Pass `dp_enabled=True` to enable DP-SGD. |
 | `with_time_series(config=None, **kwargs)` | Sets time-series parameters. |
 | `with_replace_pii(config=None, **kwargs)` | Enables PII replacement. |
 | `with_classify_model_provider(provider_name)` | Sets the Inference Gateway provider used for PII column classification. Pair with `with_replace_pii()`. |

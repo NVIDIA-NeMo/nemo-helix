@@ -179,6 +179,10 @@ If you use task-driven evaluation, update Gym and Harbor evaluation configs to
 the documented runner fields before moving production suites to sandboxed Gym
 execution.
 
+If you have pre-0.5 platform-owned agent intent packages, use the `nemo-ethos`
+coding-agent skill to write `ETHOS.md`, then remove the legacy spec package
+before using newer optimization workflows.
+
 ## Compatibility
 
 - Python 3.12-3.13
@@ -211,14 +215,15 @@ execution.
   or retrieval corpus inputs and configured embedding or ranking model access.
 - **GRPO runtime.** GRPO jobs require Kubernetes/Ray execution and sandboxed
   Gym configuration. They do not have a local Docker fallback.
-- **GRPO environment packaging.** `adapter-wheels-v1` packages require network
-  access at job start for the built-in `verifiers_agent` path. Fully offline
-  `wheels-v1` jobs need a complete wheel closure for the training image's
+- **GRPO environment packaging.** Converter-built `adapter-wheels-v1` packages
+  include a complete wheel closure and do not require network access at job
+  start. Conversion still requires an internet-connected host. Offline
+  `wheels-v1` jobs likewise need a complete closure for the training image's
   Python and node architecture.
 - **DPO runtime.** Customizer `rl` DPO jobs run on Kubernetes/Ray and do not
   have a local Docker fallback. DPO remains full-weight only.
 - **Agent intent migration.** `AGENT-SPEC.md` is legacy. Use `ETHOS.md` for
-  new work and run `nemo agents ethos migrate` for platform-owned legacy
+  new work and the `nemo-ethos` coding-agent skill for platform-owned legacy
   packages before relying on optimizer workflows.
 - **Optuna HPO runtime.** Optuna-based hyperparameter optimization runs locally
   from a developer workstation. It is not available as a horizontally scaled

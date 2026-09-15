@@ -27,9 +27,9 @@ NeMo Platform exposes Nemotron embed/rerank Stage 0 (`sdg`) and Stage 1
 nemo data-designer retrieval-generate --workspace default --spec '{
   "corpus": "default/my-docs",
   "provider": "default/nvidia-build",
-  "artifact_extraction_model": "nvidia/nemotron-3-nano-30b-a3b",
-  "qa_generation_model": "nvidia/nemotron-3-nano-30b-a3b",
-  "quality_judge_model": "nvidia/nemotron-3-nano-30b-a3b",
+  "artifact_extraction_model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+  "qa_generation_model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+  "quality_judge_model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
   "embed_model": "nvidia/nemotron-3-embed-1b"
 }'
 ```
@@ -44,7 +44,7 @@ Equivalent helper:
 nemo data-designer retrieval generate \
   --corpus default/my-docs \
   --provider default/nvidia-build \
-  --chat-model nvidia/nemotron-3-nano-30b-a3b \
+  --chat-model nvidia/nemotron-3-nano-omni-30b-a3b-reasoning \
   --embed-model nvidia/nemotron-3-embed-1b
 ```
 
@@ -53,7 +53,7 @@ Output fileset includes Q&A JSONL and `generation_result.json`.
 Preview without a full job:
 
 ```bash
-nemo data-designer retrieval-preview --spec '{"generate":{"corpus":"default/my-docs","provider":"default/nvidia-build","artifact_extraction_model":"nvidia/nemotron-3-nano-30b-a3b","qa_generation_model":"nvidia/nemotron-3-nano-30b-a3b","quality_judge_model":"nvidia/nemotron-3-nano-30b-a3b","embed_model":"nvidia/nemotron-3-embed-1b"},"num_records":1}'
+nemo data-designer retrieval-preview --spec '{"generate":{"corpus":"default/my-docs","provider":"default/nvidia-build","artifact_extraction_model":"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning","qa_generation_model":"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning","quality_judge_model":"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning","embed_model":"nvidia/nemotron-3-embed-1b"},"num_records":1}'
 ```
 
 ## Prepare (Stage 1)
@@ -87,9 +87,9 @@ nemo data-designer retrieval-run --spec '{
   "generate": {
     "corpus": "default/my-docs",
     "provider": "default/nvidia-build",
-    "artifact_extraction_model": "nvidia/nemotron-3-nano-30b-a3b",
-    "qa_generation_model": "nvidia/nemotron-3-nano-30b-a3b",
-    "quality_judge_model": "nvidia/nemotron-3-nano-30b-a3b",
+    "artifact_extraction_model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    "qa_generation_model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    "quality_judge_model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
     "embed_model": "nvidia/nemotron-3-embed-1b"
   },
   "prepare": {}
@@ -111,9 +111,9 @@ client.data_designer.retrieval_generate(
     RetrievalGenerateJobConfig(
         corpus="default/my-docs",
         provider="default/nvidia-build",
-        artifact_extraction_model="nvidia/nemotron-3-nano-30b-a3b",
-        qa_generation_model="nvidia/nemotron-3-nano-30b-a3b",
-        quality_judge_model="nvidia/nemotron-3-nano-30b-a3b",
+        artifact_extraction_model="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+        qa_generation_model="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+        quality_judge_model="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
         embed_model="nvidia/nemotron-3-embed-1b",
     )
 )

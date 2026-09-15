@@ -93,7 +93,7 @@ harnesses:
 models:
   default:
     provider: nvidia
-    model: nvidia-nemotron-3-nano-30b-a3b
+    model: nvidia-nemotron-3-5-lightning-30b-a3b
     api_key_env: NVIDIA_API_KEY
 
 mcp:
@@ -162,14 +162,16 @@ client.secrets.create(name="research-github-pat", value=os.environ["GITHUB_PAT"]
 
 client.agents.environment_specs.create(
     name="research",
-    provider="local",
-    env={"LOG_LEVEL": "debug"},
-    mcp={
-        "github": {
-            "url": "docker",
-            "env": {"GITHUB_TOOLSETS": "repos,issues"},
-            "secrets": {"GITHUB_PERSONAL_ACCESS_TOKEN": "default/research-github-pat"},
-        }
+    spec={
+        "provider": "local",
+        "env": {"LOG_LEVEL": "debug"},
+        "mcp": {
+            "github": {
+                "url": "docker",
+                "env": {"GITHUB_TOOLSETS": "repos,issues"},
+                "secrets": {"GITHUB_PERSONAL_ACCESS_TOKEN": "default/research-github-pat"},
+            }
+        },
     },
 )
 
@@ -582,8 +584,10 @@ conventions apply to `agent.yaml`:
 
 - **Set `models.default.model` to the Inference Gateway entity name.** The
   models controller creates these names by replacing slashes and dots with
-  hyphens (`nvidia/nemotron-3-nano-30b-a3b` becomes
-  `nvidia-nemotron-3-nano-30b-a3b`).
+  hyphens (`nvidia/nemotron-3.5-lightning-30b-a3b` becomes
+  `nvidia-nemotron-3-5-lightning-30b-a3b`). The bundled calculator config uses
+  `${NEMO_DEFAULT_MODEL}`; the CLI resolves it from the active context or the
+  environment before creating the agent.
 - **Leave `base_url` unset for a Platform-routed model.** When `provider` is
   `nvidia`, `openai`, or `openai-compatible`, the deployment supplies the
   Inference Gateway URL. `api_key_env` names the environment variable expected
@@ -595,7 +599,7 @@ The calculator agent uses:
 models:
   default:
     provider: nvidia
-    model: nvidia-nemotron-3-nano-30b-a3b
+    model: ${NEMO_DEFAULT_MODEL}
     api_key_env: NVIDIA_API_KEY
 ```
 

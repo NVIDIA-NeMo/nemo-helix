@@ -41,87 +41,111 @@ You can configure multiple execution profiles to suit the shape of your compute 
 
 ```yaml
 jobs:
- executors:
- # Allow any CPU-bound job to run anywhere
- - provider: cpu
- profile: default
- backend: kubernetes_job
- config: {...}
- 
- # Run on A100 hardware
- - provider: gpu
- profile: a100-pool
- backend: kubernetes_job
- config:
- # use the appropriate pod scheduling for a100-pool
- node_selector:
- node-pool-name: a100-pool
+  executors:
+    # Allow any CPU-bound job to run anywhere
+    - provider: cpu
+      profile: default
+      backend: kubernetes_job
+      config: {}
 
- # Run on H200 hardware
- - provider: gpu
- profile: h200-pool
- backend: kubernetes_job
- config:
- # use the appropriate pod scheduling for h200-pool
- node_selector:
- node-pool-name: h200-pool
+    # Run on A100 hardware
+    - provider: gpu
+      profile: a100-pool
+      backend: kubernetes_job
+      config:
+        # Use the appropriate pod scheduling for a100-pool.
+        node_selector:
+          node-pool-name: a100-pool
+
+    # Run on H200 hardware
+    - provider: gpu
+      profile: h200-pool
+      backend: kubernetes_job
+      config:
+        # Use the appropriate pod scheduling for h200-pool.
+        node_selector:
+          node-pool-name: h200-pool
 ```
 
 For full configuration details, see the [platform configuration reference](/documentation/kubernetes-deployment/config-reference).
 
 ### Default Execution Profiles
 
-The NeMo Platform defines a default execution profile for each execution backend depending on the platform's control plane. The default execution profile is used when no specific execution profile is specified for a job.
+Each execution profile is addressed by its `(provider, profile)` pair. When a job does not request a named profile, it uses `profile: default` for its provider. The built-in profiles depend on the platform runtime.
 
-- Default CPU Execution Profile (`cpu`): The default execution profile for CPU based jobs.
-- Default GPU Execution Profile (`gpu`): The default execution profile for GPU based jobs.
+- CPU provider: `provider: cpu`, `profile: default`.
+- GPU provider: `provider: gpu`, `profile: default`.
+- Local host subprocess provider: `provider: subprocess`, `profile: default`. It is enabled by default for Docker and no-control-plane runtimes, and disabled by default for Kubernetes.
 
 You may configure the default execution profiles by updating the `executor_defaults` section of the `jobs` section of the [platform configuration](/documentation/kubernetes-deployment/config-reference). The structure of the `executor_defaults` matches the configuration of the execution backend configuration.
 
 ```yaml
 jobs:
- executor_defaults:
- # Override the default Docker execution profile configuration
- docker:
- storage:
- volume_name: nemo-jobs-storage
+  executor_defaults:
+    # Override the default Docker execution profile configuration.
+    docker:
+      storage:
+        volume_name: nemo-jobs-storage
 
- # Override the default Kubernetes execution profile configuration
- kubernetes_job:
- tolerations:
- - key: nvidia.com/gpu
- operator: Exists
- effect: NoSchedule
- node_selector:
- kubernetes.io/arch: amd64
+    # Override the default host subprocess execution profile configuration.
+    subprocess:
+      working_directory: /tmp/nmp-subprocess-jobs
+      cleanup_completed_jobs_immediately: false
 
- # Override the default Volcano execution profile configuration
- volcano_job:
- storage:
- pvc_name: nemo-jobs-storage
- tolerations:
- - key: nvidia.com/gpu
- operator: Exists
- effect: NoSchedule
- node_selector:
- kubernetes.io/arch: amd64
+    # Override the default Kubernetes execution profile configuration.
+    kubernetes_job:
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      node_selector:
+        kubernetes.io/arch: amd64
+
+    # Override the default Volcano execution profile configuration.
+    volcano_job:
+      storage:
+        pvc_name: nemo-jobs-storage
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      node_selector:
+        kubernetes.io/arch: amd64
 ```
 
 ## Execution Backends
 
-Execution backends are the containerized job execution systems that NeMo Platform jobs are scheduled to run on. Each execution backend is responsible for launching and managing the job containers, and the Jobs service communicates with the execution backend to schedule and manage jobs.
+Execution backends launch and manage job tasks. Docker, Kubernetes, and Volcano run tasks in containers; the subprocess backend runs a command directly on the Platform host.
 
 NeMo Platform currently supports the following execution backends:
 
 - Docker (`docker`)
 - Kubernetes Jobs (`kubernetes_job`)
 - Volcano Jobs (`volcano_job`)
+- Subprocess (`subprocess`)
+
+### Subprocess
+
+The subprocess backend runs job commands directly on the Platform host. It is useful for trusted local development workloads, but it does not provide container isolation and should not run untrusted code.
+
+The source quickstart registers `subprocess/default`. Compatible CPU container steps that request the default profile are translated to this host backend. Kubernetes deployments do not enable it by default.
+
+```yaml
+jobs:
+  executors:
+    - provider: subprocess
+      profile: default
+      backend: subprocess
+      config:
+        working_directory: /tmp/nmp-subprocess-jobs
+        cleanup_completed_jobs_immediately: false
+```
 
 ### Docker
 
 The NeMo Platform supports Docker as an execution backend for CPU and GPU based jobs. When the shared GPU pool is configured (see below), Docker will use only the configured GPU devices and will not over-schedule jobs if there are not currently enough GPUs available.
 
-**Note:** The NeMo Platform supports Docker-based job execution by default when running the NeMo Platform in quickstart mode, which requires no configuration.
+With `platform.runtime: docker`, NeMo Platform registers Docker-backed `cpu/default` and `gpu/default` profiles when Docker is available. The source quickstart also registers `subprocess/default` and translates compatible default CPU steps to it. Configure or select an explicit image-backed profile when a workload must run in a container.
 
 <Tip>
 
@@ -131,22 +155,22 @@ If you are running GPU jobs with Docker, see [GPU Configuration](/documentation/
 
 ```yaml
 jobs:
- executors:
- # Define the default CPU provider
- - provider: cpu
- profile: default
- backend: docker
- config:
- storage:
- volume_name: nemo-platform_jobs_storage
+  executors:
+    # Define the default CPU provider.
+    - provider: cpu
+      profile: default
+      backend: docker
+      config:
+        storage:
+          volume_name: nemo-platform_jobs_storage
 
- # Define the default GPU provider
- - provider: gpu
- profile: default
- backend: docker
- config:
- storage:
- volume_name: nemo-platform_jobs_storage
+    # Define the default GPU provider.
+    - provider: gpu
+      profile: default
+      backend: docker
+      config:
+        storage:
+          volume_name: nemo-platform_jobs_storage
 ```
 
 ### Kubernetes Jobs
@@ -155,51 +179,51 @@ The NeMo Platform supports Kubernetes Jobs as an execution backend for CPU and G
 
 ```yaml
 jobs:
- executors:
- # Define the default CPU provider
- - profile: default
- backend: kubernetes_job
- provider: cpu
- config:
- # Storage is the kubernetes_job storage configuration
- storage:
- # Define the name of a persistent volume claim that will be used by launched jobs
- pvc_name: nemo-core-jobs-storage
+  executors:
+    # Define the default CPU provider.
+    - profile: default
+      backend: kubernetes_job
+      provider: cpu
+      config:
+        # Storage is the kubernetes_job storage configuration.
+        storage:
+          # Persistent volume claim used by launched jobs.
+          pvc_name: nemo-core-jobs-storage
 
- # Define the default GPU provider
- - profile: default
- backend: kubernetes_job
- provider: gpu
- config:
- storage:
- pvc_name: nemo-core-jobs-storage
- # You can configure custom labels and annotations on Kubernetes Jobs and their pods. This may be useful within environments that require adding integration with service meshes or similar cluster-level integrations.
- job_metadata:
- labels:
- my-custom-label: "value"
- annotations:
- example.com/annotation: "value"
- pod_metadata:
- labels:
- sidecar.istio.io/inject: "false"
- annotations:
- example.com/annotation: "value"
- # You can configure typical Kubernetes pod scheduling behavior via node selectors, tolerations, and node/pod affinities.
- node_selector:
- kubernetes.io/arch: amd64
- tolerations:
- - key: nvidia.com/gpu
- operator: Exists
- effect: NoSchedule
- affinity:
- nodeAffinity:
- requiredDuringSchedulingIgnoredDuringExecution:
- nodeSelectorTerms:
- - matchExpressions:
- - key: highmem
- operator: In
- values:
- - "true"
+    # Define the default GPU provider.
+    - profile: default
+      backend: kubernetes_job
+      provider: gpu
+      config:
+        storage:
+          pvc_name: nemo-core-jobs-storage
+        # Add integration metadata to Kubernetes Jobs and their pods.
+        job_metadata:
+          labels:
+            my-custom-label: "value"
+          annotations:
+            example.com/annotation: "value"
+        pod_metadata:
+          labels:
+            sidecar.istio.io/inject: "false"
+          annotations:
+            example.com/annotation: "value"
+        # Configure standard Kubernetes pod scheduling behavior.
+        node_selector:
+          kubernetes.io/arch: amd64
+        tolerations:
+          - key: nvidia.com/gpu
+            operator: Exists
+            effect: NoSchedule
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: highmem
+                      operator: In
+                      values:
+                        - "true"
 ```
 
 #### KAI Scheduler
@@ -208,22 +232,22 @@ jobs:
 
 ```yaml
 jobs:
- executors:
- - profile: default
- backend: kubernetes_job
- provider: gpu
- config:
- # Direct pods to the KAI scheduler
- scheduler_name: kai-scheduler
- # Required labels for KAI Scheduler queue assignment
- job_metadata:
- labels:
- kai.scheduler/queue-name: default
- pod_metadata:
- labels:
- kai.scheduler/queue-name: default
- storage:
- pvc_name: nemo-core-jobs-storage
+  executors:
+    - profile: default
+      backend: kubernetes_job
+      provider: gpu
+      config:
+        # Direct pods to the KAI scheduler.
+        scheduler_name: kai-scheduler
+        # Required labels for KAI Scheduler queue assignment.
+        job_metadata:
+          labels:
+            kai.scheduler/queue-name: default
+        pod_metadata:
+          labels:
+            kai.scheduler/queue-name: default
+        storage:
+          pvc_name: nemo-core-jobs-storage
 ```
 
 See the [KAI Scheduler documentation](https://github.com/kai-scheduler/KAI-Scheduler/tree/main/docs) for more information on how to configure jobs with KAI Scheduler.
@@ -242,16 +266,15 @@ Volcano Jobs are configured using the same configuration as Kubernetes Jobs, but
 
 ```yaml
 jobs:
- executors:
- - profile: default
- backend: volcano_job
- provider: gpu_distributed
- config:
- queue: default
- scheduler_name: volcano
- plugins:
- pytorch: ["--master=leader", "--worker=worker", "--port=23456"]
- max_retry: 0
- # Additional configuration for the Volcano Job, shared with Kubernetes Jobs
- ...
+  executors:
+    - profile: default
+      backend: volcano_job
+      provider: gpu_distributed
+      config:
+        queue: default
+        scheduler_name: volcano
+        plugins:
+          pytorch: ["--master=leader", "--worker=worker", "--port=23456"]
+        max_retry: 0
+        # Add any other supported Kubernetes Job configuration here.
 ```
