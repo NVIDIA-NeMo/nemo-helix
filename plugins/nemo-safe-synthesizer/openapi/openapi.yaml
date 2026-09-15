@@ -986,6 +986,12 @@ components:
           description: The fraction of invalid records that will stop generation after
             the ``patience`` limit is reached. Must be in [0, 1].
           default: 0.8
+        max_tokens_multiplier:
+          type: number
+          title: max_tokens_multiplier
+          description: Multiplier on the longest training example when sizing per-sample
+            max_tokens. Must be a finite value > 0. Default 1.2.
+          default: 1.2
         structured_generation:
           allOf:
           - $ref: '#/components/schemas/StructuredGenerationParameters'
@@ -1609,6 +1615,16 @@ components:
           title: Emit Telemetry
           description: Whether to emit anonymous Safe Synthesizer telemetry events.
             Defaults from NEMO_TELEMETRY_ENABLED when unset.
+        unknown_fields:
+          type: string
+          enum:
+          - ignore
+          - reject
+          title: Unknown Fields
+          description: How unknown configuration keys are handled recursively. Use
+            'ignore' only for compatibility with stale configurations and notebooks
+            or mismatched client and service versions.
+          default: reject
         enable_synthesis:
           type: boolean
           title: Enable Synthesis
@@ -1856,6 +1872,11 @@ components:
           description: Whether to use a regex that matches exactly one sequence or
             record if ``max_sequences_per_example`` is 1.
           default: false
+        max_records_per_sequence:
+          title: max_records_per_sequence
+          description: Max records per grouped sequence under structured generation.
+            None uses the largest training group size. Must be None or >= 1.
+          type: integer
       type: object
       title: StructuredGenerationParameters
       description: 'Configuration for vLLM structured generation.
@@ -1952,12 +1973,18 @@ components:
           description: The weight decay to apply to all layers except all bias and
             LayerNorm weights in the AdamW optimizer. Must be in (0, 1).
           default: 0.01
-        warmup_ratio:
+        warmup_steps:
           type: number
-          title: warmup_ratio
-          description: Ratio of total training steps used for a linear warmup from
-            0 to the learning rate. Must be > 0.
+          title: warmup_steps
+          description: Linear warmup from 0 to the learning rate. A whole number of
+            1 or more sets the exact number of warmup steps; a float in (0, 1) is
+            treated as a ratio of total training steps; 0 disables warmup. Must be
+            finite and >= 0, and cannot be fractional at or above 1.
           default: 0.05
+        warmup_ratio:
+          title: warmup_ratio
+          description: Deprecated. Use warmup_steps instead.
+          type: number
         lr_scheduler:
           type: string
           title: lr_scheduler
@@ -2141,6 +2168,12 @@ components:
           description: Whether to automatically fix unordered records in a sequence
             by sorting the records.
           default: false
+        enforce_numeric_range:
+          type: boolean
+          title: enforce_numeric_range
+          description: When True, reject floats outside the training-observed min/max.
+            Set False to skip float range checks (integers/enums still enforced).
+          default: true
       type: object
       title: ValidationParameters
       description: 'Configuration for record and sequence validation.
