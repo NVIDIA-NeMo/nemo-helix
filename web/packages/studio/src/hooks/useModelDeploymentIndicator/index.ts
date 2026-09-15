@@ -102,14 +102,18 @@ export function useModelDeploymentIndicator(
     };
   }
 
+  // A provider we could not read might be the one serving this id, so nothing below
+  // may assert otherwise. This has to precede the base probe: with several
+  // providers, one readable provider can serve the base while the failed one serves
+  // the adapter, and matching the base first would claim "Not served" on evidence we
+  // never gathered.
+  if (isTargetError) return { kind: 'unknown' };
+
   if (needsBaseProbe) {
     if (isBaseLoading) return { kind: 'loading' };
     if (baseServedModel) return { kind: 'adapter-not-loaded' };
     if (isBaseError) return { kind: 'unknown' };
   }
-
-  // Only assert "nothing serves this" when every provider was actually read.
-  if (isTargetError) return { kind: 'unknown' };
 
   return { kind: 'not-deployed' };
 }

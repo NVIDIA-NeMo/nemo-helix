@@ -157,6 +157,41 @@ describe('useModelDeploymentIndicator', () => {
     expect(result.current.kind).toBe('unknown');
   });
 
+  it('reports unknown for an adapter when one of several providers could not be read', async () => {
+    // provider-a serves the base but not the adapter; provider-b fails. The adapter
+    // may well be served by provider-b, so matching the base first and reporting
+    // "Not served" would assert something we never actually learned.
+    mockedGetProvider.mockImplementation((_workspace: string, name: string) =>
+      name === 'provider-a'
+        ? Promise.resolve(buildProvider([BASE_ID]))
+        : Promise.reject(new Error('boom'))
+    );
+    const { result } = renderHook(
+      () =>
+        useModelDeploymentIndicator(
+          { ...model, model_providers: ['ws/provider-a', 'ws/provider-b'] },
+          adapter
+        ),
+      { wrapper: createWrapper() }
+    );
+    await waitFor(() => expect(result.current.kind).not.toBe('loading'));
+    expect(result.current.kind).toBe('unknown');
+  });
+
+  it('still reports adapter-not-loaded when every provider was read', async () => {
+    mockedGetProvider.mockResolvedValue(buildProvider([BASE_ID]));
+    const { result } = renderHook(
+      () =>
+        useModelDeploymentIndicator(
+          { ...model, model_providers: ['ws/provider-a', 'ws/provider-b'] },
+          adapter
+        ),
+      { wrapper: createWrapper() }
+    );
+    await waitFor(() => expect(result.current.kind).not.toBe('loading'));
+    expect(result.current.kind).toBe('adapter-not-loaded');
+  });
+
   it('reports unknown for an adapter when the base probe fails', async () => {
     mockedGetProvider.mockRejectedValue(new Error('boom'));
     const { result } = renderIndicator(adapter);
