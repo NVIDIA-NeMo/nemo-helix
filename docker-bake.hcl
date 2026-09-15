@@ -40,26 +40,24 @@ variable "NMP_PYTHON_IMAGE" {
 }
 
 variable "DISTROLESS_BASE_3_13" {
-  # NGC 3.13-v4.0.9 (2026-08-06) is still CPython 3.13.14 and ships
-  # libexpat1 2.8.2-1~deb13u1 (sheet CVE-2026-66046). No newer 3.13 tag
-  # was published as of 2026-08-27; do not invent one.
-  default = "nvcr.io/nvidia/distroless/python:3.13-v4.0.9"
+  # NGC 3.13-v4.1.3 (2026-09-09) ships CPython 3.13.15 and OpenSSL 3.5.7,
+  # clearing the interpreter and OpenSSL CVEs open against 3.13-v4.0.9.
+  # glibc is still 2.41-12+deb13u3 (CVE-2026-5450/5928 need deb13u4) as of
+  # this tag; tracked separately pending a newer NGC publish, not blocking
+  # this bump.
+  default = "nvcr.io/nvidia/distroless/python:3.13-v4.1.3"
 }
 
 variable "NMP_API_RUNTIME_BASE" {
-  default = "root-distroless-base-3-13"
+  default = "nmp-python-base"
 }
 
 variable "NMP_CORE_RUNTIME_BASE" {
-  default = "root-distroless-base-3-13"
+  default = "nmp-python-base"
 }
 
 variable "NMP_CPU_TASKS_RUNTIME_BASE" {
-  default = "root-distroless-base-3-13"
-}
-
-variable "AUDITOR_RUNTIME_BASE" {
-  default = "root-distroless-base-3-13"
+  default = "nmp-python-base"
 }
 
 variable "AUTOMODEL_BASE_CONTEXT" {
@@ -650,7 +648,6 @@ target "nmp-api-docker" {
     nmp-studio-ui             = "target:nmp-studio-ui"
     policy-wasm-artifacts     = "target:root-policy-wasm-artifacts"
     root-busybox              = "target:root-busybox"
-    root-distroless-base-3-13 = "target:root-distroless-base-3-13"
     fastembed-cache           = FASTEMBED_CACHE_CONTEXT
   }
   args = {
@@ -677,7 +674,6 @@ target "nmp-core-docker" {
     nmp-jobs-launcher         = "target:nmp-jobs-launcher"
     policy-wasm-artifacts     = "target:root-policy-wasm-artifacts"
     root-busybox              = "target:root-busybox"
-    root-distroless-base-3-13 = "target:root-distroless-base-3-13"
   }
   args = {
     NMP_CORE_RUNTIME_BASE = NMP_CORE_RUNTIME_BASE
@@ -699,7 +695,6 @@ target "nmp-cpu-tasks-docker" {
     nmp-python-base           = "target:nmp-python-base"
     nmp-workspace             = "target:nmp-workspace"
     root-busybox              = "target:root-busybox"
-    root-distroless-base-3-13 = "target:root-distroless-base-3-13"
   }
   args = {
     NMP_COLLECT_SOURCES        = NMP_COLLECT_SOURCES
@@ -721,7 +716,6 @@ target "nmp-cpu-tasks-smoke-test" {
     nmp-python-base           = "target:nmp-python-base"
     nmp-workspace             = "target:nmp-workspace"
     root-busybox              = "target:root-busybox"
-    root-distroless-base-3-13 = "target:root-distroless-base-3-13"
   }
   args = {
     NMP_COLLECT_SOURCES        = NMP_COLLECT_SOURCES
@@ -1144,12 +1138,10 @@ target "auditor-tasks-docker" {
   contexts = {
     root-lib-source-artifacts = "target:root-lib-source-artifacts"
     root-busybox              = "target:root-busybox"
-    root-distroless-base-3-13 = "target:root-distroless-base-3-13"
   }
   dockerfile = "docker/Dockerfile.auditor-tasks"
   args = {
-    NMP_COLLECT_SOURCES  = NMP_COLLECT_SOURCES
-    AUDITOR_RUNTIME_BASE = AUDITOR_RUNTIME_BASE
+    NMP_COLLECT_SOURCES = NMP_COLLECT_SOURCES
   }
   cache-to   = maybe_registry_cache_to("auditor-tasks")
   cache-from = maybe_registry_cache_from("auditor-tasks")
