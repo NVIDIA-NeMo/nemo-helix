@@ -12,7 +12,7 @@ import { useAgentsListOptimizeJobs } from '@nemo/sdk/generated/agents/agents';
 import type { OptimizeJob, OptimizeJobsListFilter } from '@nemo/sdk/generated/agents/schema';
 import { Banner, Text } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';
+import { getAgentOptimizationDetailRoute } from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
 import { type ComponentProps, type FC, useCallback } from 'react';
 import { useNavigate } from 'react-router';
@@ -133,7 +133,7 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName }) => 
         dataViewState={dataViewState}
         searchField="name"
         makeColumns={makeColumns}
-        onRowClick={(row) => navigate(getWorkspaceJobDetailRoute(workspace, row.name))}
+        onRowClick={(row) => navigate(getAgentOptimizationDetailRoute(workspace, row.name))}
         attributes={{
           DataViewSearchBar: { placeholder: 'Search by name...' },
           DataViewRoot: {

@@ -6,6 +6,8 @@ This file was primarily authored with the assistance of an AI coding assistant (
 """
 
 import json
+import os
+import tempfile
 from copy import deepcopy
 from pathlib import Path
 from typing import Optional, Tuple
@@ -53,12 +55,25 @@ def load_openapi_spec(file_path: str) -> dict:
 
 def save_openapi_spec(spec: dict, output_path: str) -> None:
     """Save OpenAPI specification to a YAML or JSON file."""
-    if output_path.endswith(".json"):
-        with open(output_path, "w") as f:
-            f.write(json.dumps(spec, indent=2))
-    else:
-        with open(output_path, "w") as f:
-            yaml.dump(spec, f, default_flow_style=False, sort_keys=False)
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    suffix = output.suffix or ".tmp"
+    existing_mode = output.stat().st_mode & 0o7777 if output.exists() else None
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile("w", delete=False, dir=output.parent, suffix=suffix, encoding="utf-8") as f:
+            temp_path = Path(f.name)
+            if output_path.endswith(".json"):
+                f.write(json.dumps(spec, indent=2))
+            else:
+                yaml.dump(spec, f, default_flow_style=False, sort_keys=False)
+        if existing_mode is not None:
+            os.chmod(temp_path, existing_mode)
+        os.replace(temp_path, output)
+    except Exception:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+        raise
 
     print_verbose(f"Saved specification to {output_path}", style="bold green")
 
@@ -1034,7 +1049,7 @@ def remove_schema_command(
         raise typer.Exit(1)
 
 
-def remove_endpoint(spec: dict, path: str, method: Optional[str] = None) -> None:
+def remove_endpoint(spec: dict, path: str, method: Optional[str] = None, prune_unused: bool = True) -> None:
     """Remove an endpoint and its associated schemas from the specification.
     If method is None, removes all methods for the given path."""
     if "paths" not in spec:
@@ -1061,8 +1076,8 @@ def remove_endpoint(spec: dict, path: str, method: Optional[str] = None) -> None
         # Remove all methods for the path
         del spec["paths"][path]
 
-    # Remove any unused schemas
-    remove_unused_schemas(spec)
+    if prune_unused:
+        remove_unused_schemas(spec)
 
 
 @app.command(name="remove-endpoint")

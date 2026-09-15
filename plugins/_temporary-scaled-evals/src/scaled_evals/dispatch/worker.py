@@ -47,7 +47,7 @@ import socket
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -61,6 +61,7 @@ from scaled_evals.api import s3
 from scaled_evals.api.build.task_image_identity import verify_stored_task_image
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.api.redaction import redact_secret_text
+from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
 from scaled_evals.api.repositories.benchmark_run_repository import BenchmarkRunRepository
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
 from scaled_evals.api.repositories.execution_cleanup_repository import (
@@ -78,6 +79,8 @@ from scaled_evals.api.repositories.switchyard_campaign_repository import (
     SwitchyardCampaignRepository,
 )
 from scaled_evals.api.settings import settings
+from scaled_evals.benchmark_archive import build_benchmark_archive
+from scaled_evals.benchmark_archive_cleanup import cleanup_benchmark_archives as cleanup_archive_objects
 from scaled_evals.dispatch.credentials import materialize_credential_envs
 from scaled_evals.dispatch.harbor_dataset_images import (
     dataset_configs,
@@ -101,6 +104,7 @@ from scaled_evals.dispatch.switchyard import (
     switchyard_routing_runner_env,
     switchyard_runner_env,
 )
+from scaled_evals.dispatch.switchyard_archive import check_campaign_evidence
 from scaled_evals.dispatch.switchyard_run_manifest import write_switchyard_run_manifest
 from scaled_evals.harbor_runners import resolve_harbor_runner
 from scaled_evals.harbor_viewer import (
@@ -234,12 +238,12 @@ def assert_lifecycle_covers_agent_floor(row: Mapping[str, Any], floor_sec: int) 
         )
 
 
-def _connect_database() -> psycopg.Connection:
+def _connect_database() -> psycopg.Connection[Any]:
     deadline = time.monotonic() + _DATABASE_CONNECT_RETRY_SECONDS
     attempt = 0
     while True:
         try:
-            return psycopg.connect(settings.resolved_database_url(), row_factory=dict_row)
+            return psycopg.Connection[dict[str, Any]].connect(settings.resolved_database_url(), row_factory=dict_row)
         except psycopg.OperationalError:
             attempt += 1
             remaining = deadline - time.monotonic()
@@ -254,7 +258,7 @@ def _connect_database() -> psycopg.Connection:
 
 
 @contextmanager
-def _default_connect() -> AbstractContextManager[psycopg.Connection]:
+def _default_connect() -> Iterator[psycopg.Connection[Any]]:
     # Standalone connection for the background task. Mirrors api.db.get_conn
     # rather than importing it — get_conn is a request-scoped generator
     # dependency, not a context manager. Autocommit so status writes from the
@@ -542,7 +546,73 @@ class Dispatcher:
         if archive_evaluation_id is not None:
             self.build_archive(archive_evaluation_id)
             return True
+        with self.connect() as conn:
+            benchmark_archive = BenchmarkArchiveRepository(conn).claim(claim_timeout=self.claim_timeout)
+        if benchmark_archive is not None:
+            if benchmark_archive["status"] == "building":
+                self.build_benchmark_archive(benchmark_archive)
+            return True
+        with self.connect() as conn:
+            cleanup_run_id = BenchmarkArchiveRepository(conn).claim_cleanup(
+                interval_seconds=settings.benchmark_archive_cleanup_interval_seconds,
+            )
+        if cleanup_run_id is not None:
+            self.cleanup_benchmark_archives(cleanup_run_id)
+            return True
         return did_work
+
+    def cleanup_benchmark_archives(self, run_id: str, *, object_keys: list[str] | None = None) -> None:
+        """Best-effort immediate cleanup; durable periodic sweeps retry failures."""
+        try:
+            cleanup_archive_objects(self.connect, run_id, object_keys=object_keys)
+        except Exception as exc:  # noqa: BLE001 - retain objects when database/store state is uncertain
+            LOG.warning("benchmark archive cleanup deferred for %s: %s", run_id, redact_secret_text(str(exc)))
+
+    def build_benchmark_archive(self, job: dict) -> None:
+        stop = threading.Event()
+        lost = threading.Event()
+
+        def keep_claim() -> None:
+            while not stop.wait(max(0.1, min(30.0, self.claim_timeout / 3))):
+                try:
+                    with self.connect() as conn:
+                        owned = BenchmarkArchiveRepository(conn).heartbeat(job["benchmark_run_id"], job["claim_token"])
+                    if not owned:
+                        lost.set()
+                        return
+                except Exception:  # noqa: BLE001 - a transient DB failure is not proof of lease loss
+                    LOG.exception("benchmark archive heartbeat failed")
+
+        def check_claim() -> None:
+            if lost.is_set():
+                raise RuntimeError("benchmark archive worker lease lost")
+
+        keeper = threading.Thread(target=keep_claim, daemon=True)
+        keeper.start()
+        archive: dict | None = None
+        published = False
+        try:
+            with self.connect() as conn:
+                BenchmarkArchiveRepository(conn).validate_members(job["benchmark_run_id"], job["members"])
+            archive = build_benchmark_archive(job, check_claim=check_claim, evidence_checks=(check_campaign_evidence,))
+            check_claim()
+            with self.connect() as conn:
+                published = BenchmarkArchiveRepository(conn).finish(job, **archive)
+            if not published:
+                raise RuntimeError("benchmark archive claim lost before publication")
+        except Exception as exc:  # noqa: BLE001 — record a retryable export failure
+            # Object-store errors may contain URLs; expose only a redacted message.
+            detail = redact_secret_text(str(exc))[:2000]
+            LOG.warning("benchmark archive failed for %s: %s", job["benchmark_run_id"], detail)
+            with self.connect() as conn:
+                BenchmarkArchiveRepository(conn).fail(job, detail)
+        finally:
+            stop.set()
+            keeper.join(timeout=5)
+            if archive is not None and not published:
+                # A commit acknowledgement can fail after the row became ready.
+                # Recheck authoritative references under lock before deleting.
+                self.cleanup_benchmark_archives(job["benchmark_run_id"], object_keys=[archive["object_key"]])
 
     def claim_next_execution_cleanup(self) -> dict | None:
         with self.connect() as conn:
@@ -862,7 +932,7 @@ class Dispatcher:
         execution_number: int | None = None
         try:
             with self.connect() as conn:
-                row = EvaluationRepository(conn).load_for_dispatch(evaluation_id)
+                row: dict[str, Any] | None = EvaluationRepository(conn).load_for_dispatch(evaluation_id)
                 if row is None:
                     raise RuntimeError(f"evaluation not found: {evaluation_id}")
                 if row.get("status") not in _DB_TERMINAL_STATUSES:
@@ -1246,7 +1316,7 @@ class Dispatcher:
         ``benchmark_run_repository.derive_run_view``), so there is no fan-in here.
         """
         with self.connect() as conn:
-            row = self._load(conn, evaluation_id)
+            row: dict[str, Any] | None = self._load(conn, evaluation_id)
             if row is None:
                 return
             if row["status"] == "cancelled" and row.get("cancel_teardown_status") == "pending":
@@ -1502,7 +1572,11 @@ class Dispatcher:
                         )
                         switchyard_lease = switchyard_lease_from_row(resource_row)
                         switchyard_render = None
-                        if switchyard_lease is None or resource_row.get("status") != "provisioned":
+                        if (
+                            switchyard_lease is None
+                            or resource_row is None
+                            or resource_row.get("status") != "provisioned"
+                        ):
 
                             def persist_lease(lease: SwitchyardLease) -> None:
                                 nonlocal resource_row
@@ -1646,20 +1720,23 @@ class Dispatcher:
                     )
                     return
 
-            snapshot_evaluation = (
-                snapshot.get("evaluation")
-                if snapshot is not None and isinstance(snapshot.get("evaluation"), Mapping)
-                else row
-            )
+            # validate_execution_snapshot already guarantees an evaluation object.
+            snapshot_evaluation: Mapping[str, Any] = snapshot["evaluation"] if snapshot is not None else row
             runner_metadata = snapshot_evaluation.get("runner_metadata") or {}
-            runner_artifact = runner_metadata.get("artifact") if isinstance(runner_metadata, Mapping) else {}
+            runner_artifact: Mapping[str, Any] | None = (
+                runner_metadata.get("artifact") if isinstance(runner_metadata, Mapping) else {}
+            )
             if not isinstance(runner_artifact, Mapping):
                 runner_artifact = {}
             agent_floor = snapshot_agent_timeout_floor(row)
+            task_slug = snapshot["task"].get("slug") if snapshot else row.get("task_slug")
+            if task_slug is not None and not isinstance(task_slug, str):
+                raise ValueError("task slug must be a string")
             spec = LaunchSpec(
                 evaluation_id=execution_id,
                 benchmark_run_id=row.get("benchmark_run_id"),
                 name=row["name"],
+                task_slug=task_slug,
                 framework=row["framework"],
                 framework_version=snapshot_evaluation.get("framework_version"),
                 runner_image_ref=snapshot_evaluation.get("runner_image_ref"),

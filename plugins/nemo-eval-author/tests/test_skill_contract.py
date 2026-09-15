@@ -142,7 +142,8 @@ _needs_unreadable_files = pytest.mark.skipif(
 
 # Bundled scripts may name only these third-party roots. Anything else would
 # become a hidden dependency for repositories that copy the skill.
-_PERMITTED_THIRD_PARTY = frozenset({"harbor", "jsonschema", "pydantic", "yaml"})
+# referencing is the declared offline registry dependency of trace schema validation.
+_PERMITTED_THIRD_PARTY = frozenset({"harbor", "jsonschema", "pydantic", "referencing", "yaml"})
 
 
 def _not_for_names(frontmatter: dict) -> set[str]:
@@ -640,20 +641,32 @@ def test_no_skill_can_edit_what_it_did_not_write(skill_dir: Path) -> None:
     grant and the reason these ship as skills.
     """
     frontmatter, _ = _frontmatter_and_body(skill_dir)
-    tools = set(frontmatter["allowed-tools"])
+    tools = _allowed_tools(frontmatter)
     assert not {"Edit", "MultiEdit", "NotebookEdit"} & tools, (
         f"{skill_dir.name} edits nothing that predates it, so {sorted(tools)} is too broad"
     )
 
 
+def _allowed_tools(frontmatter: dict) -> set[str]:
+    value = frontmatter["allowed-tools"]
+    if isinstance(value, str):
+        return set(value.replace(",", " ").split())
+    assert isinstance(value, list)
+    tools: set[str] = set()
+    for tool in value:
+        assert isinstance(tool, str)
+        tools.add(tool)
+    return tools
+
+
 def test_the_core_routes_and_the_sub_flow_executes() -> None:
     """The core only picks a sub-flow, so it neither runs nor saves anything."""
-    core_tools = set(_frontmatter_and_body(_CORE_DIR)[0]["allowed-tools"])
-    discover_tools = set(_frontmatter_and_body(_DISCOVER_DIR)[0]["allowed-tools"])
-    audit_tools = set(_frontmatter_and_body(_AUDIT_DIR)[0]["allowed-tools"])
-    task_create_tools = set(_frontmatter_and_body(_TASK_CREATE_DIR)[0]["allowed-tools"])
-    inspect_tools = set(_frontmatter_and_body(_INSPECT_DIR)[0]["allowed-tools"])
-    trace_environment_tools = set(_frontmatter_and_body(_TRACE_ENVIRONMENT_DIR)[0]["allowed-tools"])
+    core_tools = _allowed_tools(_frontmatter_and_body(_CORE_DIR)[0])
+    discover_tools = _allowed_tools(_frontmatter_and_body(_DISCOVER_DIR)[0])
+    audit_tools = _allowed_tools(_frontmatter_and_body(_AUDIT_DIR)[0])
+    task_create_tools = _allowed_tools(_frontmatter_and_body(_TASK_CREATE_DIR)[0])
+    inspect_tools = _allowed_tools(_frontmatter_and_body(_INSPECT_DIR)[0])
+    trace_environment_tools = _allowed_tools(_frontmatter_and_body(_TRACE_ENVIRONMENT_DIR)[0])
 
     assert not {"Bash", "Write"} & core_tools, f"the core routes and explains; {sorted(core_tools)} is too broad"
     assert {"Bash", "Write"} <= discover_tools, (

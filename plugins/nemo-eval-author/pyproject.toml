@@ -6,6 +6,7 @@ name = "nemo-eval-author-plugin"
 version = "0.1.0"
 description = "Eval Author skills for Harbor suite discovery, audit validation, trace-derived environments, and Intake trace understanding."
 requires-python = ">=3.12,<3.14"
+dependencies = ["jsonschema>=4.23", "referencing>=0.28.4"]
 
 [tool.uv]
 # Nothing here installs as a package. The directory holds standalone skills, their
