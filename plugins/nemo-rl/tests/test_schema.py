@@ -74,3 +74,10 @@ def test_a_string_ref_is_not_rejected_at_submit_time_for_lora() -> None:
     spec = RlJobInput.model_validate(_grpo_lora_job(deployment_config="shared/base-cfg"))
 
     assert spec.deployment_config == "shared/base-cfg"
+
+
+@pytest.mark.parametrize("gpu", [0, -1])
+def test_deployment_config_rejects_non_positive_gpu(gpu: int) -> None:
+    """Caught at submit, not at compile time where the task-side schema would reject it."""
+    with pytest.raises(ValueError, match="greater than 0"):
+        RlJobInput.model_validate(_job(deployment_config={"gpu": gpu}))
