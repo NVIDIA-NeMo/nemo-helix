@@ -17,7 +17,7 @@ bundle portable when the platform sees only the files you staged into a fileset.
 |---------|--------------|---------------------|-------|
 | **Chat-only** | Tunes temperature on a short Q&A agent (no tools) | [`optimize-chatonly.yaml`](optimize-chatonly.yaml) | [`dataset-chatonly.json`](dataset-chatonly.json) |
 | **Chat-only + `--agent`** | Same study; agent body from a platform entity | [`optimize-chatonly-via-agent.yaml`](optimize-chatonly-via-agent.yaml) | [`agents/chatonly/agent.yaml`](agents/chatonly/agent.yaml) |
-| **MCP** | Tunes temperature / top_p on a phishing agent that calls an MCP analyzer shipped in the bundle, scoring accuracy and exactly-one tool call | [`optimize-mcp.yaml`](optimize-mcp.yaml) | [`dataset-mcp.json`](dataset-mcp.json), [`phishing_analyzer_mcp/`](phishing_analyzer_mcp/) |
+| **MCP** | Tunes temperature / top_p on a phishing agent that calls an MCP analyzer shipped in the bundle, scoring accuracy, exactly-one tool call, and verbatim tool input | [`optimize-mcp.yaml`](optimize-mcp.yaml) | [`dataset-mcp.json`](dataset-mcp.json), [`phishing_analyzer_mcp/`](phishing_analyzer_mcp/) |
 
 Official docs: [Optimize Agents](../../../../docs/agents/optimization.mdx).
 
@@ -291,10 +291,14 @@ To add an email to the eval set, run a real analyzer on it once and store its
 result as the row's `analysis` (the fixture reads `PHISHING_ANALYZER_DATASET` if
 you keep the dataset elsewhere).
 
-Two evaluators score each trial: the judge compares the final classification with
-the dataset label (`average_score`), and `tool_call_count` reads the ATIF
+Three evaluators score each trial: the judge compares the final classification
+with the dataset label (`average_score`); `tool_call_count` reads the ATIF
 trajectory to check the analyzer was called exactly once
-(`tool_call_count_matches`). Both are study objectives in `optimizer.eval_metrics`.
+(`tool_call_count_matches`); and `tool_argument_matches_input` checks the
+`text` the agent passed to the tool equals the task instruction
+(`tool_argument_matches_input`), which is the "copy verbatim" requirement scored
+directly rather than inferred from the tool's answer. All three are study
+objectives in `optimizer.eval_metrics`.
 
 ### Extra setup (once)
 

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
-from nemo_evaluator_sdk.agent_eval.metrics import ToolCallCountMetric
+from nemo_evaluator_sdk.agent_eval.metrics import ToolArgumentMatchesInputMetric, ToolCallCountMetric
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nemo_evaluator_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
@@ -239,6 +239,8 @@ def _build_metrics(payload: Mapping[str, Any], eval_config: Mapping[str, Any]) -
             metrics.append(_build_tunable_rag_metric(payload, evaluator))
         elif evaluator_type in {"tool_call_count", "tool-call-count"}:
             metrics.append(_build_tool_call_count_metric(evaluator))
+        elif evaluator_type in {"tool_argument_matches_input", "tool-argument-matches-input"}:
+            metrics.append(_build_tool_argument_matches_input_metric(evaluator))
         else:
             raise StudyDriverError(f"Unsupported evaluator type for optimize trial path: {evaluator_type!r}")
     if not metrics:
@@ -246,10 +248,24 @@ def _build_metrics(payload: Mapping[str, Any], eval_config: Mapping[str, Any]) -
     return metrics
 
 
-def _build_tool_call_count_metric(evaluator: Mapping[str, Any]) -> ToolCallCountMetric:
+def _build_tool_argument_matches_input_metric(evaluator: Mapping[str, Any]) -> ToolArgumentMatchesInputMetric:
+    tool_name = _required_tool_name(evaluator, "tool_argument_matches_input")
+    fields = {key: evaluator[key] for key in ("argument", "input_key", "normalize") if key in evaluator}
+    try:
+        return ToolArgumentMatchesInputMetric(tool_name=tool_name, **fields)
+    except ValidationError as exc:
+        raise StudyDriverError(f"tool_argument_matches_input evaluator is invalid: {exc}") from exc
+
+
+def _required_tool_name(evaluator: Mapping[str, Any], evaluator_type: str) -> str:
     tool_name = evaluator.get("tool_name")
     if not isinstance(tool_name, str) or not tool_name.strip():
-        raise StudyDriverError("tool_call_count evaluator requires a non-empty tool_name.")
+        raise StudyDriverError(f"{evaluator_type} evaluator requires a non-empty tool_name.")
+    return tool_name.strip()
+
+
+def _build_tool_call_count_metric(evaluator: Mapping[str, Any]) -> ToolCallCountMetric:
+    tool_name = _required_tool_name(evaluator, "tool_call_count")
     expected_calls = evaluator.get("expected_calls", 1)
     # A bool is an int in Python and a float would silently truncate, so both are rejected.
     if isinstance(expected_calls, bool) or not isinstance(expected_calls, int):
@@ -257,7 +273,7 @@ def _build_tool_call_count_metric(evaluator: Mapping[str, Any]) -> ToolCallCount
             f"tool_call_count evaluator expected_calls must be a non-negative integer, got {expected_calls!r}."
         )
     try:
-        return ToolCallCountMetric(tool_name=tool_name.strip(), expected_calls=expected_calls)
+        return ToolCallCountMetric(tool_name=tool_name, expected_calls=expected_calls)
     except ValidationError as exc:
         raise StudyDriverError(
             f"tool_call_count evaluator expected_calls must be a non-negative integer: {exc}"

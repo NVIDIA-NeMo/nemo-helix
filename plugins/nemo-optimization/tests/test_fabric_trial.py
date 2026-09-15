@@ -401,3 +401,26 @@ def test_resolve_mcp_server_paths_absolutizes_only_bundle_files(tmp_path: Path) 
     assert servers["bundled"]["args"] == [str(tmp_path.resolve() / "mcps" / "server.py"), "--verbose", "missing.py"]
     assert servers["script"]["url"] == str(tmp_path.resolve() / "mcps" / "server.py")
     assert servers["remote"]["url"] == "mcps/server.py"  # only stdio servers are launched from a path
+
+
+def test_build_metrics_accepts_tool_argument_matches_input_and_rejects_bad_normalize() -> None:
+    from nemo_evaluator_sdk.agent_eval.metrics import ToolArgumentMatchesInputMetric
+    from nemo_optimization.backends.optuna.fabric_trial import _build_metrics
+
+    (metric,) = _build_metrics(
+        {},
+        {"evaluators": {"v": {"_type": "tool_argument_matches_input", "tool_name": "t", "input_key": "email"}}},
+    )
+    assert isinstance(metric, ToolArgumentMatchesInputMetric)
+    assert (metric.tool_name, metric.argument, metric.input_key, metric.normalize) == (
+        "t",
+        "text",
+        "email",
+        "whitespace",
+    )
+    with pytest.raises(StudyDriverError, match="tool_argument_matches_input evaluator is invalid"):
+        _build_metrics(
+            {}, {"evaluators": {"v": {"_type": "tool_argument_matches_input", "tool_name": "t", "normalize": "fuzzy"}}}
+        )
+    with pytest.raises(StudyDriverError, match="requires a non-empty tool_name"):
+        _build_metrics({}, {"evaluators": {"v": {"_type": "tool_argument_matches_input"}}})

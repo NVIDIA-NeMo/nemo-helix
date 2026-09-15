@@ -221,22 +221,91 @@ class ToolCallCountMetric(MetricBase):
         )
 
     async def _count_calls(self, candidate: CandidateOutput) -> int:
-        evidence = candidate.evidence
-        if evidence is None or evidence.get(self.trace_evidence) is None:
-            return 0
-        try:
-            trajectory = await (await evidence.trace(self.trace_evidence, format=EVIDENCE_FORMAT_ATIF)).trace()
-        except KeyError:
-            return 0
-        except (ValueError, ValidationError, OSError) as exc:
-            logger.warning("ToolCallCountMetric scored 0: could not read ATIF trace %r (%s)", self.trace_evidence, exc)
+        trajectory = await _read_atif(candidate, self.trace_evidence, metric=type(self).__name__)
+        if trajectory is None:
             return 0
         return sum(
-            1 for step in trajectory.steps for call in step.tool_calls or [] if self._is_tool(call.function_name)
+            1
+            for step in trajectory.steps
+            for call in step.tool_calls or []
+            if _tool_name_matches(call.function_name, self.tool_name)
         )
 
-    def _is_tool(self, function_name: str) -> bool:
-        return function_name == self.tool_name or function_name.endswith(("-" + self.tool_name, "_" + self.tool_name))
+
+class ToolArgumentMatchesInputMetric(MetricBase):
+    """Emit ``tool_argument_matches_input``: the agent passed a task input to a tool unchanged.
+
+    Scores the agent's tool call, not the tool: for every trajectory call to ``tool_name`` (matched
+    like :class:`ToolCallCountMetric`), the ``argument`` value must equal the task input under
+    ``input_key`` after ``normalize``. ``True`` only when the tool was called at least once and every
+    call matched; ``False`` when it was never called, the argument is missing or not a string, the
+    task has no such input, or no readable ATIF trajectory exists.
+
+    Reads the task input from the metric row's ``inputs`` (agent-eval passes ``task.inputs`` through
+    verbatim there), so it works against any server, real or mock, in either execution mode.
+    """
+
+    type: Literal[MetricType.TOOL_ARGUMENT_MATCHES_INPUT] = MetricType.TOOL_ARGUMENT_MATCHES_INPUT
+    tool_name: str = Field(description="Tool whose calls are checked, without any harness or MCP server prefix.")
+    argument: str = Field(default="text", description="Tool-call argument that must carry the task input.")
+    input_key: str = Field(default="instruction", description="Task input the argument must equal.")
+    normalize: Literal["exact", "whitespace"] = Field(
+        default="whitespace",
+        description="``whitespace`` collapses runs of whitespace and trims before comparing; ``exact`` does not.",
+    )
+    trace_evidence: str = Field(default=EVIDENCE_TRACE, description="Trace evidence to scan for tool calls.")
+
+    OUTPUT_MATCHES: ClassVar[str] = "tool_argument_matches_input"
+
+    def output_spec(self) -> list[MetricOutputSpec]:
+        return [MetricOutputSpec.boolean(self.OUTPUT_MATCHES)]
+
+    async def compute_scores(self, input: MetricInput) -> MetricResult:
+        inputs = input.row.data.get("inputs")
+        expected = inputs.get(self.input_key) if isinstance(inputs, Mapping) else None
+        matches = isinstance(expected, str) and await self._every_call_matches(input.candidate, expected)
+        return MetricResult(outputs=[MetricOutput(name=self.OUTPUT_MATCHES, value=matches)])
+
+    async def _every_call_matches(self, candidate: CandidateOutput, expected: str) -> bool:
+        trajectory = await _read_atif(candidate, self.trace_evidence, metric=type(self).__name__)
+        if trajectory is None:
+            return False
+        calls = [
+            call
+            for step in trajectory.steps
+            for call in step.tool_calls or []
+            if _tool_name_matches(call.function_name, self.tool_name)
+        ]
+        if not calls:
+            return False
+        wanted = self._normalize(expected)
+        for call in calls:
+            value = call.arguments.get(self.argument) if isinstance(call.arguments, Mapping) else None
+            if not isinstance(value, str) or self._normalize(value) != wanted:
+                return False
+        return True
+
+    def _normalize(self, text: str) -> str:
+        return " ".join(text.split()) if self.normalize == "whitespace" else text
+
+
+def _tool_name_matches(function_name: str, tool_name: str) -> bool:
+    """Whether a trajectory tool name is ``tool_name``, allowing a harness/MCP-server prefix."""
+    return function_name == tool_name or function_name.endswith(("-" + tool_name, "_" + tool_name))
+
+
+async def _read_atif(candidate: CandidateOutput, trace_evidence: str, *, metric: str) -> Trajectory | None:
+    """The ATIF trajectory behind ``trace_evidence``, or None when absent or unreadable (logged)."""
+    evidence = candidate.evidence
+    if evidence is None or evidence.get(trace_evidence) is None:
+        return None
+    try:
+        return await (await evidence.trace(trace_evidence, format=EVIDENCE_FORMAT_ATIF)).trace()
+    except KeyError:
+        return None
+    except (ValueError, ValidationError, OSError) as exc:
+        logger.warning("%s could not read ATIF trace %r (%s)", metric, trace_evidence, exc)
+        return None
 
 
 async def _otlp_used(evidence: CandidateEvidence, name: str, locations: list[str]) -> bool:

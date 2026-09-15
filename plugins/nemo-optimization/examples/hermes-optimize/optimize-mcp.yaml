@@ -6,9 +6,10 @@
 # The analyzer ships in this bundle (phishing_analyzer_mcp/server.py) and is
 # spawned with the venv's python3; the optimizer makes the bundle-relative path
 # absolute per trial. It replays the `analysis` stored on each dataset-mcp.json
-# row, so the study tunes the Hermes coordinator that calls it and scores both
-# the classification and that the tool was called exactly once. To add a task,
-# run a real analyzer once and store its result on the row.
+# row, so the study tunes the Hermes coordinator that calls it and scores the
+# classification, that the tool was called exactly once, and that the email
+# reached it verbatim. To add a task, run a real analyzer once and store its
+# result on the row.
 schema_version: fabric.agent/v1alpha1
 metadata:
   name: hermes-optimize-mcp
@@ -83,6 +84,10 @@ optimizer:
       evaluator_name: tool_call_count_matches
       direction: maximize
       weight: 1.0
+    tool_argument_matches_input:
+      evaluator_name: tool_argument_matches_input
+      direction: maximize
+      weight: 1.0
   search_space:
     temperature:
       type: fabric
@@ -108,6 +113,10 @@ eval:
       _type: tool_call_count
       tool_name: email_phishing_analyzer
       expected_calls: 1
+    verbatim_input:
+      _type: tool_argument_matches_input
+      tool_name: email_phishing_analyzer
+      argument: text
     accuracy:
       _type: tunable_rag_evaluator
       llm_name: judge

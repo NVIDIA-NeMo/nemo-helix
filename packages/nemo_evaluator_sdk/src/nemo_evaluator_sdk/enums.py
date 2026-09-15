@@ -49,6 +49,7 @@ class MetricType(str, Enum):
     EVIDENCE_PRESENCE = "evidence_presence"
     SKILL_USED = "skill_used"
     TOOL_CALL_COUNT = "tool_call_count"
+    TOOL_ARGUMENT_MATCHES_INPUT = "tool_argument_matches_input"
 
     SYSTEM = "system"
 

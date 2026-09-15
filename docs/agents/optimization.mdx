@@ -382,8 +382,8 @@ bundle (`phishing_analyzer_mcp/server.py`, spawned with `python3`; the optimizer
 makes bundle-relative `mcp.servers.*.args` paths absolute per trial). It replays
 the `analysis` stored on each `dataset-mcp.json` row, so new tasks only need a
 real analyzer's result recorded once. Trials are scored on the judged
-classification and on the analyzer being called exactly once, read from the ATIF
-trajectory. Full steps are in `plugins/nemo-optimization/examples/hermes-optimize/README.md`.
+classification, on the analyzer being called exactly once, and on the email
+reaching the tool verbatim; the last two are read from the ATIF trajectory. Full steps are in `plugins/nemo-optimization/examples/hermes-optimize/README.md`.
 
 <Tabs>
 
