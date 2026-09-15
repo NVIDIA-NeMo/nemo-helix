@@ -21,6 +21,10 @@ interface CancelJobButtonProps {
   jobName: string;
   jobStatus?: PlatformJobStatus;
   compact?: boolean;
+  /** Invalidate the caller's own list. This button only knows the platform
+   *  jobs query keys, so a list backed by a different endpoint (e.g. the
+   *  evaluator's) keeps showing the cancelled row as active without it. */
+  onCancelled?: () => void;
 }
 
 export const CancelJobButton: FC<CancelJobButtonProps> = ({
@@ -28,6 +32,7 @@ export const CancelJobButton: FC<CancelJobButtonProps> = ({
   jobName,
   jobStatus,
   compact,
+  onCancelled,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const toast = useToast();
@@ -43,6 +48,7 @@ export const CancelJobButton: FC<CancelJobButtonProps> = ({
         queryClient.invalidateQueries({
           queryKey: getJobsListJobsQueryKey(workspace),
         });
+        onCancelled?.();
       },
     },
   });

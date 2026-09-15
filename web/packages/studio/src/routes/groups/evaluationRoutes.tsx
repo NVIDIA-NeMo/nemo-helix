@@ -34,6 +34,11 @@ const EvaluationResultDetailsRoute = lazy(() =>
     default: module.EvaluationResultDetailsRoute,
   }))
 );
+const EvaluationNewRoute = lazy(() =>
+  import('@studio/routes/evaluation/EvaluationNewRoute').then((module) => ({
+    default: module.EvaluationNewRoute,
+  }))
+);
 
 export const evaluationRoutes: RouteObject[] = gateEvaluationRoutes([
   {
@@ -47,6 +52,11 @@ export const evaluationRoutes: RouteObject[] = gateEvaluationRoutes([
       },
       ...gateEvaluationBenchmarksRoutes([]),
     ],
+  },
+  {
+    path: ROUTES.workspace.evaluationNew,
+    element: <EvaluationNewRoute />,
+    errorElement: <RouteErrorPanel title="Evaluator" />,
   },
   {
     path: ROUTES.workspace.evaluationResultDetails,
