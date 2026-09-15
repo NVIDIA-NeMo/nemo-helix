@@ -170,8 +170,8 @@ def delete_filesets(
     Permanently deletes an unreferenced fileset from the platform.
 
     Referencing model
-    or adapter entities must be relinked or deleted first. For local storage backends, this also deletes the
-    underlying files."""
+    or adapter entities must be relinked or deleted first. For local storage
+    backends, this also deletes the underlying files."""
     state: CLIContext = ctx.obj
     client = state.get_client()
 
@@ -279,6 +279,45 @@ def list_filesets(
     )
     if not all_pages:
         warn_if_more_pages(items, pagination_type)
+
+
+@app.command("refresh")
+@collect_warnings
+@handle_errors
+def refresh_filesets(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument()],
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Re-resolve a fileset's tracked revision against its source.
+
+    A fileset created from a mutable ref is pinned to an immutable id so its
+    contents cannot shift under a deployment. This re-resolves that same ref and
+    repoints the fileset at whatever it names now. Everything else about the storage
+    config, including the repository and directory, is left alone.
+
+    Deployments stage the fileset when they are created, so existing deployments
+    keep serving the revision they were staged from."""
+    state: CLIContext = ctx.obj
+    output_format = state.get_output_format(output_format)
+
+    kwargs = build_kwargs(
+        workspace=workspace,
+    )
+    if handle_code_generation(["files", "filesets"], "refresh", kwargs, output_format, state):
+        return
+
+    client = state.get_client()
+    result = client.files.filesets.refresh(name, **kwargs)
+
+    format_output(
+        result,
+        is_list=False,
+        output_format=output_format,
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
 
 
 @app.command("get")

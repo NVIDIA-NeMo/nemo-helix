@@ -15,6 +15,7 @@ import asyncio
 from typing import Any
 from unittest.mock import patch
 
+import httpx
 import pytest
 from nemo_automodel_plugin.jobs.jobs import AutomodelJob
 from nemo_automodel_plugin.schema import AutomodelJobOutput
@@ -38,15 +39,26 @@ def _make_canonical(**parallelism: Any) -> AutomodelJobOutput:
 
 
 def _compile(canonical: AutomodelJobOutput) -> Any:
-    return asyncio.run(
-        AutomodelJob.compile(
+    async def run_compile() -> Any:
+        async_sdk = AsyncNeMoPlatform(
+            base_url="http://test",
             workspace="default",
-            spec=canonical,
-            entity_client=object(),
-            job_name=None,
-            async_sdk=object.__new__(AsyncNeMoPlatform),
-        ),
-    )
+            http_client=httpx.AsyncClient(
+                transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request))
+            ),
+        )
+        try:
+            return await AutomodelJob.compile(
+                workspace="default",
+                spec=canonical,
+                entity_client=object(),
+                job_name=None,
+                async_sdk=async_sdk,
+            )
+        finally:
+            await async_sdk.close()
+
+    return asyncio.run(run_compile())
 
 
 class TestCompileValidationErrors:

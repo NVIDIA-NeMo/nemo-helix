@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getEvaluatorListEvaluateJobResultsQueryKey } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
 import { PlatformJobStatus } from '@nemo/sdk/generated/evaluator/schema';
 import { ComparisonPanel } from '@studio/components/evaluation/Jobs/ComparisonPanel';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { metricEvaluationJob1 } from '@studio/mocks/evaluation/v1/evaluations';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { mockUseParams } from '@studio/tests/util/mockUseParams';
 import { renderRoute } from '@studio/tests/util/render';
@@ -24,9 +26,12 @@ describe('ComparisonPanel', () => {
 
     // Mock the results list endpoint used by useEvaluatorListEvaluateJobResults
     server.use(
-      http.get('*/apis/evaluator/v2/workspaces/:workspace/evaluate/jobs/:jobName/results', () => {
-        return HttpResponse.json({ data: [], pagination: {} });
-      })
+      http.get(
+        mockApiUrl(getEvaluatorListEvaluateJobResultsQueryKey, ':workspace', ':jobName'),
+        () => {
+          return HttpResponse.json({ data: [], pagination: {} });
+        }
+      )
     );
   });
 
@@ -77,11 +82,14 @@ describe('ComparisonPanel', () => {
   describe('Completed Status', () => {
     beforeEach(() => {
       server.use(
-        http.get('*/apis/evaluator/v2/workspaces/:workspace/evaluate/jobs/:jobName/results', () => {
-          return HttpResponse.json({
-            download_url: 'http://localhost/mock-scores.json',
-          });
-        })
+        http.get(
+          mockApiUrl(getEvaluatorListEvaluateJobResultsQueryKey, ':workspace', ':jobName'),
+          () => {
+            return HttpResponse.json({
+              download_url: 'http://localhost/mock-scores.json',
+            });
+          }
+        )
       );
     });
 

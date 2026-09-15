@@ -139,14 +139,14 @@ class RlConfig(create_service_config_class("rl")):  # type: ignore[misc]  # ty: 
     )
 
     sandbox_resources: dict[str, str] | None = Field(
-        default=None,
+        default_factory=lambda: {"cpu": "2", "memory": "4Gi"},
         description=(
-            "CPU/memory requested for the Gym sandbox pod, as env.nemo_gym.sandbox.resources "
-            "(e.g. {'cpu': '2', 'memory': '8Gi'}). Leave unset to take the OpenSandbox "
-            "server's default. The sandbox runs a Gym server process per config entry plus "
-            "its own Ray instance, so the default is easily too small and the pod is "
-            "OOMKilled mid-rollout, surfacing as a proxy 502 rather than as a memory error. "
-            "Operator-scoped: jobs cannot set it, since it spends cluster capacity."
+            "CPU/memory requested for the Gym sandbox pod, as env.nemo_gym.sandbox.resources. "
+            "Defaults to 2 CPU / 4Gi. The OpenSandbox SDK default (1 CPU / 2Gi) OOMKills a "
+            "Gym server process per config entry plus its own Ray instance mid-rollout, "
+            "surfacing as a proxy 502 rather than as a memory error. Raise further if the "
+            "environment is larger. Operator-scoped: jobs cannot set it, since it spends "
+            "cluster capacity."
         ),
     )
 

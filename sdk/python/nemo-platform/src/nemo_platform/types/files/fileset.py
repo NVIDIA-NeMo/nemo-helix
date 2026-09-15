@@ -23,12 +23,15 @@ from .fileset_purpose import FilesetPurpose
 from .s3_storage_config import S3StorageConfig
 from .ngc_storage_config import NGCStorageConfig
 from .local_storage_config import LocalStorageConfig
+from .github_storage_config import GitHubStorageConfig
 from ..shared.fileset_metadata import FilesetMetadata
 from .huggingface_storage_config import HuggingfaceStorageConfig
 
 __all__ = ["Fileset", "Storage"]
 
-Storage: TypeAlias = Union[LocalStorageConfig, NGCStorageConfig, HuggingfaceStorageConfig, S3StorageConfig]
+Storage: TypeAlias = Union[
+    LocalStorageConfig, NGCStorageConfig, HuggingfaceStorageConfig, S3StorageConfig, GitHubStorageConfig
+]
 
 
 class Fileset(BaseModel):

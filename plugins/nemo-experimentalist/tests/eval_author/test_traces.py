@@ -17,7 +17,7 @@ import httpx
 import pytest
 from nemo_experimentalist_plugin.eval_author import traces
 from nemo_experimentalist_plugin.eval_author.agent import EvalAuthor
-from nemo_platform import APIConnectionError, APIStatusError
+from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError, raise_for_status
 
 _BASE = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
@@ -83,29 +83,26 @@ class _FakeClient:
         self.span_calls: list[dict[str, Any]] = []
         self.trace_calls: list[dict[str, Any]] = []
         self.group_calls: list[dict[str, Any]] = []
-        self.intake = SimpleNamespace(
-            spans=SimpleNamespace(
-                list=self._list_spans,
-                groups=SimpleNamespace(list=self._list_groups),
-            ),
-            traces=SimpleNamespace(list=self._list_traces),
-        )
 
-    def _list_spans(self, **kwargs: Any) -> Any:
-        self.span_calls.append(kwargs)
-        return _pages(self._spans, self._error)
+    async def list_spans(self, *, workspace: str, query_params: dict[str, Any] | None = None) -> Any:
+        del workspace
+        self.span_calls.append(query_params or {})
+        return SimpleNamespace(items=lambda: _pages(self._spans, self._error))
 
-    def _list_groups(self, **kwargs: Any) -> Any:
-        self.group_calls.append(kwargs)
-        return _pages(self._groups, self._error)
+    async def list_span_groups(self, *, workspace: str, query_params: dict[str, Any] | None = None) -> Any:
+        del workspace
+        self.group_calls.append(query_params or {})
+        return SimpleNamespace(items=lambda: _pages(self._groups, self._error))
 
-    def _list_traces(self, **kwargs: Any) -> Any:
-        self.trace_calls.append(kwargs)
+    async def list_traces(self, *, workspace: str, query_params: dict[str, Any] | None = None) -> Any:
+        del workspace
+        params = query_params or {}
+        self.trace_calls.append(params)
         rows = self._summaries
-        wanted = kwargs.get("filter", {}).get("id", {}).get("$in")
+        wanted = params.get("filter", {}).get("id", {}).get("$in")
         if wanted is not None:
             rows = [row for row in rows if row.model_dump()["id"] in set(wanted)]
-        return _pages(rows, self._error)
+        return SimpleNamespace(items=lambda: _pages(rows, self._error))
 
 
 def _client(
@@ -118,9 +115,19 @@ def _client(
     return _FakeClient(spans or [], summaries or [], groups or [], error)
 
 
-def _status_error(code: int) -> APIStatusError:
+@pytest.fixture(autouse=True)
+def fake_intake_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(traces.AsyncIntakeClient, "from_client", lambda client: client)
+
+
+def _status_error(code: int) -> NemoHTTPError:
     request = httpx.Request("GET", "https://example.invalid/spans")
-    return APIStatusError("boom", response=httpx.Response(code, request=request), body=None)
+    response = httpx.Response(code, request=request, json={"detail": "boom"})
+    try:
+        raise_for_status(response)
+    except NemoHTTPError as exc:
+        return exc
+    raise AssertionError(f"HTTP {code} did not raise")
 
 
 # --- raw queries -------------------------------------------------------------------
@@ -357,7 +364,7 @@ async def test_an_unexpected_status_still_names_itself() -> None:
 
 async def test_unreachable_platform_names_the_base_url() -> None:
     request = httpx.Request("GET", "https://example.invalid/spans")
-    client = _client(error=APIConnectionError(request=request))
+    client = _client(error=NemoTransportError(httpx.ConnectError("unreachable", request=request)))
 
     with pytest.raises(traces.TraceQueryError, match="NMP_BASE_URL"):
         await traces.query_traces(client, workspace="ws")

@@ -42,11 +42,13 @@ from nmp.core.jobs.app.schemas import (
     PlatformJobSpec,
 )
 from nmp.core.jobs.entities import (
+    STEP_SPEC_NAME_CONFIG_KEY,
     PlatformJob,
     PlatformJobAttempt,
     PlatformJobResult,
     PlatformJobStep,
     PlatformJobTask,
+    get_step_spec_name,
 )
 from opentelemetry import metrics, trace
 
@@ -615,7 +617,7 @@ class JobDispatcher:
         # With parent-scoped uniqueness, step names are unique per attempt (parent)
         # Store original spec name in config for reference
         step_config = dict(first_step.config) if first_step.config else {}
-        step_config["_step_spec_name"] = first_step.name
+        step_config[STEP_SPEC_NAME_CONFIG_KEY] = first_step.name
         await self.store.create(
             PlatformJobStep(
                 name=first_step.name,  # Simple name, unique per attempt via parent-scoped uniqueness
@@ -1009,7 +1011,7 @@ class JobDispatcher:
         new_attempt_status = attempt.status
 
         # Get the original step spec name from config (step entity names have suffixes for uniqueness)
-        step_spec_name = saved_step.config.get("_step_spec_name", saved_step.name)
+        step_spec_name = get_step_spec_name(saved_step.config, saved_step.name) or saved_step.name
 
         if (
             saved_step.status == PlatformJobStatus.PENDING
@@ -1043,7 +1045,7 @@ class JobDispatcher:
             if next_step:
                 # With parent-scoped uniqueness, use simple step name (unique per attempt)
                 next_step_config = dict(next_step.config) if next_step.config else {}
-                next_step_config["_step_spec_name"] = next_step.name
+                next_step_config[STEP_SPEC_NAME_CONFIG_KEY] = next_step.name
                 try:
                     await self.store.create(
                         PlatformJobStep(

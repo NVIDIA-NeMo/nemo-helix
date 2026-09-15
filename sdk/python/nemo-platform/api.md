@@ -7,43 +7,30 @@
 from nemo_platform.types import (
     APIEndpointData,
     AuthContext,
-    AuthDiscoveryResponse,
     BackendFormat,
     DatasetMetadataContent,
     DatetimeFilter,
     DeleteResponse,
     EnvironmentMetadataContent,
-    FileStorageType,
     FilesetMetadata,
     FinetuningType,
     GenericSortField,
     HTTPValidationError,
     InferenceParams,
-    JsonWebKey,
-    JsonWebKeySetResponse,
     LinearLayerSpec,
     MambaConfig,
     MoEConfig,
     ModelMetadataContent,
     ModelSpec,
-    OidcDiscoveryResponse,
     PaginationData,
-    PlatformJobListResultResponse,
     PlatformJobLog,
     PlatformJobLogPage,
-    PlatformJobResultResponse,
-    PlatformJobStatus,
-    PlatformJobStatusResponse,
-    PlatformJobStepStatusResponse,
-    PlatformJobTaskStatusResponse,
     PromptData,
     SlidingWindowConfig,
     StringFilter,
     ToolCallConfig,
     ToolCallingMetadataContent,
     ValidationError,
-    WorkloadTokenExchangeErrorResponse,
-    WorkloadTokenExchangeResponse,
 )
 ```
 
@@ -57,17 +44,11 @@ from nemo_platform.types import (
 
 # [Inference](src/nemo_platform/resources/inference/api.md)
 
-# [Jobs](src/nemo_platform/resources/jobs/api.md)
-
 # [Models](src/nemo_platform/resources/models/api.md)
 
 # [Workspaces](src/nemo_platform/resources/workspaces/api.md)
 
 # [SafeSynthesizer](src/nemo_platform/resources/safe_synthesizer/api.md)
-
-# [Secrets](src/nemo_platform/resources/secrets/api.md)
-
-# [Iam](src/nemo_platform/resources/iam/api.md)
 
 # [Projects](src/nemo_platform/resources/projects/api.md)
 
@@ -78,7 +59,3 @@ from nemo_platform.types import (
 # [Evaluations](src/nemo_platform/resources/evaluations/api.md)
 
 # [Experiments](src/nemo_platform/resources/experiments/api.md)
-
-# [Auth](src/nemo_platform/resources/auth/api.md)
-
-# [AccessKeys](src/nemo_platform/resources/access_keys/api.md)

@@ -536,7 +536,7 @@ class EntityClient:
 
         This should be called during shutdown to properly close HTTP connections.
         """
-        await self._client._http.aclose()
+        await self._client.aclose()
 
     def _convert_api_entity_to_model(self, entity: Entity, entity_type: EntityTypeLike) -> EntityT:
         """Convert an API entity to an EntityBase model."""
@@ -1067,7 +1067,7 @@ class SyncEntityClient:
 
         This should be called during shutdown to properly close HTTP connections.
         """
-        self._client._http.close()
+        self._client.close()
 
     def _convert_api_entity_to_model(self, entity: Entity, entity_type: EntityTypeLike) -> EntityT:
         """Convert an API entity to an EntityBase model."""

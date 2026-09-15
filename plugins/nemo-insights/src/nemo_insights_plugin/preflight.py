@@ -9,8 +9,8 @@ from pathlib import Path
 
 import httpx
 from nemo_insights_plugin.analyst.analyst_backend import make_analyst_backend
-from nemo_insights_plugin.client import make_client
 from nemo_insights_plugin.contracts.checks import CheckResult, make_check_result
+from nemo_insights_plugin.platform_client import make_client
 from nemo_insights_plugin.profile import AnalysisProfile
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatformError
 from nemo_platform_plugin.nooa_model_client import configured_model_refs

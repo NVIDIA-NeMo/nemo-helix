@@ -10,8 +10,10 @@ from typing import Any, get_args
 from unittest.mock import MagicMock, patch
 
 import anthropic.types as anthropic_types
+import httpx
 import openai.types.chat as openai_chat_types
 import pytest
+from nemo_platform_plugin.client.client import AsyncNemoClient
 from nemo_platform_plugin.discovery import (
     _ALL_SURFACE_GROUPS,
     discover,
@@ -313,6 +315,19 @@ class TestPluginImplementedConfigMethods:
 
         with pytest.raises(ValueError, match="Unknown config_type"):
             await _StrictPlugin().validate_middleware_config("bad_type", {})
+
+    def test_get_platform_client_requires_injection(self, plugin: _MinimalMiddleware):
+        with pytest.raises(RuntimeError, match="platform client"):
+            plugin._get_platform_client("on_startup")
+
+    async def test_get_platform_client_returns_injected_client(self, plugin: _MinimalMiddleware):
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request))
+        ) as http_client:
+            client = AsyncNemoClient(base_url="http://test", http_client=http_client)
+            plugin._inject_platform_client(client)
+
+            assert plugin._get_platform_client("on_startup") is client
 
 
 # ---------------------------------------------------------------------------

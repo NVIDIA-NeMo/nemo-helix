@@ -23,10 +23,10 @@ from unittest.mock import patch
 
 import pytest
 from nemo_platform import NeMoPlatform
-from nemo_platform import PermissionDeniedError as StainlessPermissionDeniedError
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.errors import PermissionDeniedError
 from nemo_platform_plugin.files.client import FilesClient
+from nemo_platform_plugin.files.storage_config import HuggingfaceStorageConfig
 from nemo_platform_plugin.files.types import CreateFilesetRequest
 from nemo_platform_plugin.models.client import ModelsClient
 from nemo_platform_plugin.models.types import (
@@ -53,6 +53,25 @@ from nmp.testing import (
     unique_email,
 )
 from pydantic import SecretStr
+
+from .conftest import (
+    create_deployment,
+    create_deployment_config,
+    create_provider,
+    delete_deployment,
+    delete_deployment_config,
+    delete_provider,
+    get_deployment,
+    get_deployment_config,
+    get_provider,
+    list_deployment_configs,
+    list_deployments,
+    list_providers,
+    models_client_from_sdk,
+    update_deployment,
+    update_deployment_config,
+    upsert_provider,
+)
 
 
 async def _build_authorization_data_without_secrets(entities_client=None):
@@ -329,19 +348,22 @@ def viewer_workspace(sdk: NeMoPlatform):
     client_from_platform(admin_sdk, ModelsClient).create_model(
         workspace=workspace, body=CreateModelEntityRequest(name=model_name)
     ).data()
-    admin_sdk.inference.providers.create(
+    create_provider(
+        models_client_from_sdk(admin_sdk),
         workspace=workspace,
         name=provider_name,
         host_url="http://example.com",
     )
-    admin_sdk.inference.deployment_configs.create(
+    create_deployment_config(
+        models_client_from_sdk(admin_sdk),
         workspace=workspace,
         name=config_name,
         engine="nim",
         model_spec={"model_name": "test"},
         executor_config={"gpu": 1},
     )
-    admin_sdk.inference.deployments.create(
+    create_deployment(
+        models_client_from_sdk(admin_sdk),
         workspace=workspace,
         name=deployment_name,
         config=config_name,
@@ -403,21 +425,22 @@ class TestViewerModelsAccess:
     # -- Providers: allowed --
 
     def test_viewer_can_list_providers(self, viewer_workspace):
-        workspace, viewer_sdk, _, _ = viewer_workspace
-        result = viewer_sdk.inference.providers.list(workspace=workspace)
-        assert result.data is not None
+        workspace, viewer_sdk, _, names = viewer_workspace
+        result = list_providers(models_client_from_sdk(viewer_sdk), workspace=workspace)
+        assert any(provider.name == names["provider"] for provider in result)
 
     def test_viewer_can_get_provider(self, viewer_workspace):
         workspace, viewer_sdk, _, names = viewer_workspace
-        provider = viewer_sdk.inference.providers.retrieve(name=names["provider"], workspace=workspace)
+        provider = get_provider(models_client_from_sdk(viewer_sdk), name=names["provider"], workspace=workspace)
         assert provider.name == names["provider"]
 
     # -- Providers: denied --
 
     def test_viewer_cannot_create_provider(self, viewer_workspace):
         workspace, viewer_sdk, _, _ = viewer_workspace
-        with pytest.raises(StainlessPermissionDeniedError):
-            viewer_sdk.inference.providers.create(
+        with pytest.raises(PermissionDeniedError):
+            create_provider(
+                models_client_from_sdk(viewer_sdk),
                 workspace=workspace,
                 name="should-fail",
                 host_url="http://example.com",
@@ -425,8 +448,9 @@ class TestViewerModelsAccess:
 
     def test_viewer_cannot_upsert_provider(self, viewer_workspace):
         workspace, viewer_sdk, _, names = viewer_workspace
-        with pytest.raises(StainlessPermissionDeniedError):
-            viewer_sdk.inference.providers.update(
+        with pytest.raises(PermissionDeniedError):
+            upsert_provider(
+                models_client_from_sdk(viewer_sdk),
                 name=names["provider"],
                 workspace=workspace,
                 host_url="http://updated.com",
@@ -434,27 +458,28 @@ class TestViewerModelsAccess:
 
     def test_viewer_cannot_delete_provider(self, viewer_workspace):
         workspace, viewer_sdk, _, names = viewer_workspace
-        with pytest.raises(StainlessPermissionDeniedError):
-            viewer_sdk.inference.providers.delete(name=names["provider"], workspace=workspace)
+        with pytest.raises(PermissionDeniedError):
+            delete_provider(models_client_from_sdk(viewer_sdk), name=names["provider"], workspace=workspace)
 
     # -- Deployment Configs: allowed --
 
     def test_viewer_can_list_deployment_configs(self, viewer_workspace):
-        workspace, viewer_sdk, _, _ = viewer_workspace
-        result = viewer_sdk.inference.deployment_configs.list(workspace=workspace)
-        assert result.data is not None
+        workspace, viewer_sdk, _, names = viewer_workspace
+        result = list_deployment_configs(models_client_from_sdk(viewer_sdk), workspace=workspace)
+        assert any(config.name == names["config"] for config in result)
 
     def test_viewer_can_get_deployment_config(self, viewer_workspace):
         workspace, viewer_sdk, _, names = viewer_workspace
-        config = viewer_sdk.inference.deployment_configs.retrieve(name=names["config"], workspace=workspace)
+        config = get_deployment_config(models_client_from_sdk(viewer_sdk), name=names["config"], workspace=workspace)
         assert config.name == names["config"]
 
     # -- Deployment Configs: denied --
 
     def test_viewer_cannot_create_deployment_config(self, viewer_workspace):
         workspace, viewer_sdk, _, _ = viewer_workspace
-        with pytest.raises(StainlessPermissionDeniedError):
-            viewer_sdk.inference.deployment_configs.create(
+        with pytest.raises(PermissionDeniedError):
+            create_deployment_config(
+                models_client_from_sdk(viewer_sdk),
                 workspace=workspace,
                 name="should-fail",
                 engine="nim",
@@ -464,8 +489,9 @@ class TestViewerModelsAccess:
 
     def test_viewer_cannot_update_deployment_config(self, viewer_workspace):
         workspace, viewer_sdk, _, names = viewer_workspace
-        with pytest.raises(StainlessPermissionDeniedError):
-            viewer_sdk.inference.deployment_configs.update(
+        with pytest.raises(PermissionDeniedError):
+            update_deployment_config(
+                models_client_from_sdk(viewer_sdk),
                 name=names["config"],
                 workspace=workspace,
                 engine="nim",
@@ -475,27 +501,28 @@ class TestViewerModelsAccess:
 
     def test_viewer_cannot_delete_deployment_config(self, viewer_workspace):
         workspace, viewer_sdk, _, names = viewer_workspace
-        with pytest.raises(StainlessPermissionDeniedError):
-            viewer_sdk.inference.deployment_configs.delete(name=names["config"], workspace=workspace)
+        with pytest.raises(PermissionDeniedError):
+            delete_deployment_config(models_client_from_sdk(viewer_sdk), name=names["config"], workspace=workspace)
 
     # -- Deployments: allowed --
 
     def test_viewer_can_list_deployments(self, viewer_workspace):
-        workspace, viewer_sdk, _, _ = viewer_workspace
-        result = viewer_sdk.inference.deployments.list(workspace=workspace)
-        assert result.data is not None
+        workspace, viewer_sdk, _, names = viewer_workspace
+        result = list_deployments(models_client_from_sdk(viewer_sdk), workspace=workspace)
+        assert any(deployment.name == names["deployment"] for deployment in result)
 
     def test_viewer_can_get_deployment(self, viewer_workspace):
         workspace, viewer_sdk, _, names = viewer_workspace
-        deployment = viewer_sdk.inference.deployments.retrieve(name=names["deployment"], workspace=workspace)
+        deployment = get_deployment(models_client_from_sdk(viewer_sdk), name=names["deployment"], workspace=workspace)
         assert deployment.name == names["deployment"]
 
     # -- Deployments: denied --
 
     def test_viewer_cannot_create_deployment(self, viewer_workspace):
         workspace, viewer_sdk, _, names = viewer_workspace
-        with pytest.raises(StainlessPermissionDeniedError):
-            viewer_sdk.inference.deployments.create(
+        with pytest.raises(PermissionDeniedError):
+            create_deployment(
+                models_client_from_sdk(viewer_sdk),
                 workspace=workspace,
                 name="should-fail",
                 config=names["config"],
@@ -503,8 +530,9 @@ class TestViewerModelsAccess:
 
     def test_viewer_cannot_update_deployment(self, viewer_workspace):
         workspace, viewer_sdk, _, names = viewer_workspace
-        with pytest.raises(StainlessPermissionDeniedError):
-            viewer_sdk.inference.deployments.update(
+        with pytest.raises(PermissionDeniedError):
+            update_deployment(
+                models_client_from_sdk(viewer_sdk),
                 name=names["deployment"],
                 workspace=workspace,
                 config=names["config"],
@@ -512,8 +540,8 @@ class TestViewerModelsAccess:
 
     def test_viewer_cannot_delete_deployment(self, viewer_workspace):
         workspace, viewer_sdk, _, names = viewer_workspace
-        with pytest.raises(StainlessPermissionDeniedError):
-            viewer_sdk.inference.deployments.delete(name=names["deployment"], workspace=workspace)
+        with pytest.raises(PermissionDeniedError):
+            delete_deployment(models_client_from_sdk(viewer_sdk), name=names["deployment"], workspace=workspace)
 
 
 @pytest.mark.integration
@@ -582,7 +610,8 @@ class TestEditorModelsAccess:
         )
 
         editor_sdk = as_user(sdk, editor_email)
-        created = editor_sdk.inference.providers.create(
+        created = create_provider(
+            models_client_from_sdk(editor_sdk),
             workspace=workspace,
             name=provider_name,
             host_url="http://example.com",
@@ -606,7 +635,8 @@ class TestEditorModelsAccess:
         )
 
         editor_sdk = as_user(sdk, editor_email)
-        created = editor_sdk.inference.deployment_configs.create(
+        created = create_deployment_config(
+            models_client_from_sdk(editor_sdk),
             workspace=workspace,
             name=config_name,
             engine="nim",
@@ -636,7 +666,8 @@ class TestProviderSecretPermissions:
         )
 
         editor_sdk = as_user(sdk, editor_email)
-        provider = editor_sdk.inference.providers.create(
+        provider = create_provider(
+            models_client_from_sdk(editor_sdk),
             workspace=workspace,
             name=short_unique_name("prov"),
             host_url="http://example.com",
@@ -664,7 +695,8 @@ class TestProviderSecretPermissions:
         )
 
         editor_sdk = as_user(sdk, editor_email)
-        provider = editor_sdk.inference.providers.create(
+        provider = create_provider(
+            models_client_from_sdk(editor_sdk),
             workspace=workspace,
             name=short_unique_name("prov"),
             host_url="http://example.com",
@@ -694,7 +726,8 @@ class TestProviderSecretPermissions:
         )
 
         editor_sdk = as_user(sdk, editor_email)
-        provider = editor_sdk.inference.providers.update(
+        provider = upsert_provider(
+            models_client_from_sdk(editor_sdk),
             name=provider_name,
             workspace=workspace,
             host_url="http://example.com",
@@ -725,15 +758,17 @@ class TestProviderSecretPermissions:
 
             user_sdk = as_user(sdk, user_email)
 
-            provider_ok = user_sdk.inference.providers.create(
+            provider_ok = create_provider(
+                models_client_from_sdk(user_sdk),
                 workspace=workspace,
                 name=short_unique_name("prov"),
                 host_url="http://example.com",
             )
             assert provider_ok.api_key_secret_name is None
 
-            with pytest.raises(StainlessPermissionDeniedError):
-                user_sdk.inference.providers.create(
+            with pytest.raises(PermissionDeniedError):
+                create_provider(
+                    models_client_from_sdk(user_sdk),
                     workspace=workspace,
                     name=short_unique_name("prov"),
                     host_url="http://example.com",
@@ -763,8 +798,9 @@ class TestProviderSecretPermissions:
 
             user_sdk = as_user(sdk, user_email)
 
-            with pytest.raises(StainlessPermissionDeniedError):
-                user_sdk.inference.providers.update(
+            with pytest.raises(PermissionDeniedError):
+                upsert_provider(
+                    models_client_from_sdk(user_sdk),
                     name=short_unique_name("prov"),
                     workspace=workspace,
                     host_url="http://example.com",
@@ -793,7 +829,8 @@ class TestProviderDeploymentRefPermissions:
         )
 
         editor_sdk = as_user(sdk, editor_email)
-        provider = editor_sdk.inference.providers.create(
+        provider = create_provider(
+            models_client_from_sdk(editor_sdk),
             workspace=workspace,
             name=short_unique_name("prov"),
             host_url="http://example.com",
@@ -818,7 +855,8 @@ class TestProviderDeploymentRefPermissions:
         )
 
         editor_sdk = as_user(sdk, editor_email)
-        provider = editor_sdk.inference.providers.update(
+        provider = upsert_provider(
+            models_client_from_sdk(editor_sdk),
             name=short_unique_name("prov"),
             workspace=workspace,
             host_url="http://example.com",
@@ -845,8 +883,9 @@ class TestProviderDeploymentRefPermissions:
 
             user_sdk = as_user(sdk, user_email)
 
-            with pytest.raises(StainlessPermissionDeniedError):
-                user_sdk.inference.providers.create(
+            with pytest.raises(PermissionDeniedError):
+                create_provider(
+                    models_client_from_sdk(user_sdk),
                     workspace=workspace,
                     name=short_unique_name("prov"),
                     host_url="http://example.com",
@@ -872,8 +911,9 @@ class TestProviderDeploymentRefPermissions:
 
             user_sdk = as_user(sdk, user_email)
 
-            with pytest.raises(StainlessPermissionDeniedError):
-                user_sdk.inference.providers.update(
+            with pytest.raises(PermissionDeniedError):
+                upsert_provider(
+                    models_client_from_sdk(user_sdk),
                     name=short_unique_name("prov"),
                     workspace=workspace,
                     host_url="http://example.com",
@@ -902,7 +942,8 @@ class TestDeploymentConfigPermissions:
         )
 
         editor_sdk = as_user(sdk, editor_email)
-        config = editor_sdk.inference.deployment_configs.create(
+        config = create_deployment_config(
+            models_client_from_sdk(editor_sdk),
             workspace=workspace,
             name=short_unique_name("cfg"),
             engine="nim",
@@ -929,8 +970,9 @@ class TestDeploymentConfigPermissions:
         )
 
         editor_sdk = as_user(sdk, editor_email)
-        with pytest.raises(StainlessPermissionDeniedError):
-            editor_sdk.inference.deployment_configs.create(
+        with pytest.raises(PermissionDeniedError):
+            create_deployment_config(
+                models_client_from_sdk(editor_sdk),
                 workspace=workspace,
                 name=short_unique_name("cfg"),
                 engine="nim",
@@ -949,7 +991,8 @@ class TestDeploymentConfigPermissions:
         client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
             body=CreateWorkspaceRequest(name=workspace)
         ).data()
-        admin_sdk.inference.deployment_configs.create(
+        create_deployment_config(
+            models_client_from_sdk(admin_sdk),
             workspace=workspace,
             name=config_name,
             engine="nim",
@@ -964,7 +1007,8 @@ class TestDeploymentConfigPermissions:
         )
 
         editor_sdk = as_user(sdk, editor_email)
-        updated = editor_sdk.inference.deployment_configs.update(
+        updated = update_deployment_config(
+            models_client_from_sdk(editor_sdk),
             name=config_name,
             workspace=workspace,
             engine="nim",
@@ -984,7 +1028,8 @@ class TestDeploymentConfigPermissions:
         client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
             body=CreateWorkspaceRequest(name=workspace)
         ).data()
-        admin_sdk.inference.deployment_configs.create(
+        create_deployment_config(
+            models_client_from_sdk(admin_sdk),
             workspace=workspace,
             name=config_name,
             engine="nim",
@@ -999,8 +1044,9 @@ class TestDeploymentConfigPermissions:
         )
 
         editor_sdk = as_user(sdk, editor_email)
-        with pytest.raises(StainlessPermissionDeniedError):
-            editor_sdk.inference.deployment_configs.update(
+        with pytest.raises(PermissionDeniedError):
+            update_deployment_config(
+                models_client_from_sdk(editor_sdk),
                 name=config_name,
                 workspace=workspace,
                 engine="nim",
@@ -1028,8 +1074,9 @@ class TestDeploymentConfigPermissions:
 
             user_sdk = as_user(sdk, user_email)
 
-            with pytest.raises(StainlessPermissionDeniedError):
-                user_sdk.inference.deployment_configs.create(
+            with pytest.raises(PermissionDeniedError):
+                create_deployment_config(
+                    models_client_from_sdk(user_sdk),
                     workspace=workspace,
                     name=short_unique_name("cfg"),
                     engine="nim",
@@ -1049,7 +1096,8 @@ class TestDeploymentConfigPermissions:
             client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
-            admin_sdk.inference.deployment_configs.create(
+            create_deployment_config(
+                models_client_from_sdk(admin_sdk),
                 workspace=workspace,
                 name=config_name,
                 engine="nim",
@@ -1065,8 +1113,9 @@ class TestDeploymentConfigPermissions:
 
             user_sdk = as_user(sdk, user_email)
 
-            with pytest.raises(StainlessPermissionDeniedError):
-                user_sdk.inference.deployment_configs.update(
+            with pytest.raises(PermissionDeniedError):
+                update_deployment_config(
+                    models_client_from_sdk(user_sdk),
                     name=config_name,
                     workspace=workspace,
                     engine="nim",
@@ -1090,7 +1139,8 @@ class TestDeploymentPermissions:
         client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
             body=CreateWorkspaceRequest(name=workspace)
         ).data()
-        admin_sdk.inference.deployment_configs.create(
+        create_deployment_config(
+            models_client_from_sdk(admin_sdk),
             workspace=workspace,
             name=config_name,
             engine="nim",
@@ -1105,7 +1155,8 @@ class TestDeploymentPermissions:
         )
 
         editor_sdk = as_user(sdk, editor_email)
-        deployment = editor_sdk.inference.deployments.create(
+        deployment = create_deployment(
+            models_client_from_sdk(editor_sdk),
             workspace=workspace,
             name=short_unique_name("dep"),
             config=config_name,
@@ -1123,14 +1174,16 @@ class TestDeploymentPermissions:
         client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
             body=CreateWorkspaceRequest(name=workspace)
         ).data()
-        admin_sdk.inference.deployment_configs.create(
+        create_deployment_config(
+            models_client_from_sdk(admin_sdk),
             workspace=workspace,
             name=config_name,
             engine="nim",
             model_spec={"model_name": "test-model"},
             executor_config={"gpu": 1},
         )
-        admin_sdk.inference.deployments.create(
+        create_deployment(
+            models_client_from_sdk(admin_sdk),
             workspace=workspace,
             name=deploy_name,
             config=config_name,
@@ -1143,7 +1196,8 @@ class TestDeploymentPermissions:
         )
 
         editor_sdk = as_user(sdk, editor_email)
-        updated = editor_sdk.inference.deployments.update(
+        updated = update_deployment(
+            models_client_from_sdk(editor_sdk),
             name=deploy_name,
             workspace=workspace,
             config=config_name,
@@ -1161,7 +1215,8 @@ class TestDeploymentPermissions:
             client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
-            admin_sdk.inference.deployment_configs.create(
+            create_deployment_config(
+                models_client_from_sdk(admin_sdk),
                 workspace=workspace,
                 name=config_name,
                 engine="nim",
@@ -1177,8 +1232,9 @@ class TestDeploymentPermissions:
 
             user_sdk = as_user(sdk, user_email)
 
-            with pytest.raises(StainlessPermissionDeniedError):
-                user_sdk.inference.deployments.create(
+            with pytest.raises(PermissionDeniedError):
+                create_deployment(
+                    models_client_from_sdk(user_sdk),
                     workspace=workspace,
                     name=short_unique_name("dep"),
                     config=config_name,
@@ -1196,14 +1252,16 @@ class TestDeploymentPermissions:
             client_from_platform(admin_sdk, WorkspacesClient).create_workspace(
                 body=CreateWorkspaceRequest(name=workspace)
             ).data()
-            admin_sdk.inference.deployment_configs.create(
+            create_deployment_config(
+                models_client_from_sdk(admin_sdk),
                 workspace=workspace,
                 name=config_name,
                 engine="nim",
                 model_spec={"model_name": "test-model"},
                 executor_config={"gpu": 1},
             )
-            admin_sdk.inference.deployments.create(
+            create_deployment(
+                models_client_from_sdk(admin_sdk),
                 workspace=workspace,
                 name=deploy_name,
                 config=config_name,
@@ -1217,8 +1275,9 @@ class TestDeploymentPermissions:
 
             user_sdk = as_user(sdk, user_email)
 
-            with pytest.raises(StainlessPermissionDeniedError):
-                user_sdk.inference.deployments.update(
+            with pytest.raises(PermissionDeniedError):
+                update_deployment(
+                    models_client_from_sdk(user_sdk),
                     name=deploy_name,
                     workspace=workspace,
                     config=config_name,
@@ -1477,7 +1536,7 @@ class TestTrustRemoteCodePermission:
         ).data()
         client_from_platform(admin_sdk, FilesClient).create_fileset(
             workspace=workspace,
-            body=CreateFilesetRequest(name=fileset_name, storage={"type": "huggingface", "repo_id": "Qwen/Qwen3-0.6B"}),
+            body=CreateFilesetRequest(name=fileset_name, storage=HuggingfaceStorageConfig(repo_id="Qwen/Qwen3-0.6B")),
         )
         grant_workspace_role(
             admin_sdk,
@@ -1514,7 +1573,7 @@ class TestTrustRemoteCodePermission:
             client_from_platform(admin_sdk, FilesClient).create_fileset(
                 workspace=workspace,
                 body=CreateFilesetRequest(
-                    name=fileset_name, storage={"type": "huggingface", "repo_id": "Qwen/Qwen3-0.6B"}
+                    name=fileset_name, storage=HuggingfaceStorageConfig(repo_id="Qwen/Qwen3-0.6B")
                 ),
             )
             grant_workspace_role(
@@ -1551,7 +1610,7 @@ class TestTrustRemoteCodePermission:
         ).data()
         client_from_platform(admin_sdk, FilesClient).create_fileset(
             workspace=workspace,
-            body=CreateFilesetRequest(name=fileset_name, storage={"type": "huggingface", "repo_id": "Qwen/Qwen3-0.6B"}),
+            body=CreateFilesetRequest(name=fileset_name, storage=HuggingfaceStorageConfig(repo_id="Qwen/Qwen3-0.6B")),
         )
         grant_workspace_role(
             admin_sdk,
@@ -1591,7 +1650,7 @@ class TestTrustRemoteCodePermission:
             client_from_platform(admin_sdk, FilesClient).create_fileset(
                 workspace=workspace,
                 body=CreateFilesetRequest(
-                    name=fileset_name, storage={"type": "huggingface", "repo_id": "Qwen/Qwen3-0.6B"}
+                    name=fileset_name, storage=HuggingfaceStorageConfig(repo_id="Qwen/Qwen3-0.6B")
                 ),
             )
             grant_workspace_role(
@@ -1633,7 +1692,7 @@ class TestTrustRemoteCodePermission:
                 workspace=workspace,
                 body=CreateFilesetRequest(
                     name=trusted_fs,
-                    storage={"type": "huggingface", "repo_id": "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"},
+                    storage=HuggingfaceStorageConfig(repo_id="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"),
                 ),
             )
             client_from_platform(admin_sdk, ModelsClient).create_model(
@@ -1645,7 +1704,7 @@ class TestTrustRemoteCodePermission:
             # New fileset resolves to a repo not on the allow list.
             files.create_fileset(
                 workspace=workspace,
-                body=CreateFilesetRequest(name=new_fs, storage={"type": "huggingface", "repo_id": "Qwen/Qwen3-0.6B"}),
+                body=CreateFilesetRequest(name=new_fs, storage=HuggingfaceStorageConfig(repo_id="Qwen/Qwen3-0.6B")),
             )
             grant_workspace_role(
                 admin_sdk,
@@ -1680,7 +1739,7 @@ class TestTrustRemoteCodePermission:
                 workspace=workspace,
                 body=CreateFilesetRequest(
                     name=fileset_name,
-                    storage={"type": "huggingface", "repo_id": "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"},
+                    storage=HuggingfaceStorageConfig(repo_id="nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"),
                 ),
             )
             grant_workspace_role(

@@ -19,6 +19,7 @@ from types import TracebackType
 import yaml
 from nmp.automodel.app.constants import DEFAULT_TRAINING_RESULT_FILE_NAME
 from nmp.customization_common.service.context import NMPJobContext
+from nmp.customization_common.service.path_utils import remap_job_storage_path
 
 from .backends.backend import AUTOMODEL_CONFIG_FILENAME, AutomodelBackend
 from .distributed import DistributedContext
@@ -116,7 +117,36 @@ class TrainingRunner:
 
     def _load_config(self, config_path: Path) -> TrainingStepConfig:
         with open(config_path) as f:
-            return TrainingStepConfig.model_validate(json.load(f))
+            config = TrainingStepConfig.model_validate(json.load(f))
+        return self._normalize_storage_paths(config)
+
+    def _normalize_storage_paths(self, config: TrainingStepConfig) -> TrainingStepConfig:
+        storage_path = self._job_ctx.storage_path
+
+        model = config.model.model_copy(
+            update={"path": str(remap_job_storage_path(storage_path, config.model.path))},
+        )
+        dataset = config.dataset.model_copy(
+            update={"path": str(remap_job_storage_path(storage_path, config.dataset.path))},
+        )
+        training = config.training
+        if training.kd is not None:
+            teacher_model = training.kd.teacher_model.model_copy(
+                update={"path": str(remap_job_storage_path(storage_path, training.kd.teacher_model.path))},
+            )
+            training = training.model_copy(
+                update={"kd": training.kd.model_copy(update={"teacher_model": teacher_model})},
+            )
+
+        return config.model_copy(
+            update={
+                "model": model,
+                "dataset": dataset,
+                "training": training,
+                "workspace_path": str(remap_job_storage_path(storage_path, config.workspace_path)),
+                "output_path": str(remap_job_storage_path(storage_path, config.output_path)),
+            },
+        )
 
     def _get_library_config_path(self) -> Path:
         return self._workspace_path / AUTOMODEL_CONFIG_FILENAME

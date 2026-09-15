@@ -287,10 +287,11 @@ def test_policy_backend_has_no_megatron_member_yet() -> None:
     assert {b.value for b in PolicyBackend} == {"dtensor", "automodel"}
 
 
-def test_automodel_backend_rejects_full_weight() -> None:
-    """It trains fine, then saves a checkpoint the publisher cannot read -- fail before the GPU."""
-    with pytest.raises(ValueError, match="requires policy_backend='dtensor'"):
-        GRPOTraining(type="grpo", finetuning_type="all_weights", policy_backend=PolicyBackend.AUTOMODEL)
+def test_automodel_backend_accepts_full_weight() -> None:
+    """Automodel writes a consolidated HuggingFace tree the publisher can copy."""
+    t = GRPOTraining(type="grpo", finetuning_type="all_weights", policy_backend=PolicyBackend.AUTOMODEL)
+    assert t.policy_backend is PolicyBackend.AUTOMODEL
+    assert t.finetuning_type == "all_weights"
 
 
 def test_dtensor_backend_rejects_lora() -> None:
@@ -344,7 +345,7 @@ def test_grpo_lora_rejects_lora_merged() -> None:
     # looked at -- this would pass even if lora_merged were accepted. Match on the
     # field name so the assertion is about lora_merged and nothing else.
     with pytest.raises(ValueError, match="finetuning_type"):
-        GRPOTraining(type="grpo", finetuning_type="lora_merged")  # type: ignore[arg-type]
+        GRPOTraining.model_validate({"type": "grpo", "finetuning_type": "lora_merged"})
 
 
 def test_grpo_lora_requires_adapter_output() -> None:

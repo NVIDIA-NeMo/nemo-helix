@@ -27,8 +27,7 @@ from nemo_deployments_plugin.entities import (
     Toleration,
     VolumeMount,
 )
-from nemo_platform.types.inference.k8s_nim_operator_config import K8sNIMOperatorConfig
-from nemo_platform_plugin.models.types import ModelEntity
+from nemo_platform_plugin.models.types import K8sNIMOperatorConfig, ModelEntity
 from nmp.common.config import Runtime
 from nmp.core.models.app import is_multi_llm_image, parse_model_name_revision
 from nmp.core.models.controllers.backends.common import DeploymentConfigView
@@ -251,12 +250,10 @@ def _image(name: str, tag: str) -> str:
     return name if "@" in name or name.endswith(f":{tag}") else f"{name}:{tag}"
 
 
-def _k8s_config_dict(k8s_config: K8sNIMOperatorConfig | dict[str, Any] | Any) -> dict[str, Any]:
-    if hasattr(k8s_config, "model_dump"):
+def _k8s_config_dict(k8s_config: K8sNIMOperatorConfig | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(k8s_config, K8sNIMOperatorConfig):
         return k8s_config.model_dump(exclude_none=True)
-    if isinstance(k8s_config, dict):
-        return {key: value for key, value in k8s_config.items() if value is not None}
-    return {}
+    return {key: value for key, value in k8s_config.items() if value is not None}
 
 
 def _tolerations_from_config(raw: list[dict[str, Any]]) -> list[Toleration]:
@@ -268,16 +265,19 @@ def _tolerations_from_config(raw: list[dict[str, Any]]) -> list[Toleration]:
 
 
 def _affinity_from_node_selector(node_selector: dict[str, str]) -> Affinity:
-    return Affinity(
-        node_affinity={
-            "requiredDuringSchedulingIgnoredDuringExecution": {
-                "nodeSelectorTerms": [
-                    {
-                        "matchExpressions": [
-                            {"key": key, "operator": "In", "values": [value]} for key, value in node_selector.items()
-                        ]
-                    }
-                ]
+    return Affinity.model_validate(
+        {
+            "nodeAffinity": {
+                "requiredDuringSchedulingIgnoredDuringExecution": {
+                    "nodeSelectorTerms": [
+                        {
+                            "matchExpressions": [
+                                {"key": key, "operator": "In", "values": [value]}
+                                for key, value in node_selector.items()
+                            ]
+                        }
+                    ]
+                }
             }
         }
     )
@@ -323,7 +323,13 @@ def pod_security_context_for_engine(
         group_id = view.run_as_group if view.run_as_group is not None else config.default_group_id
     if user_id is None and group_id is None:
         return None
-    return PodSecurityContext(run_as_user=user_id, run_as_group=group_id, fs_group=group_id)
+    return PodSecurityContext.model_validate(
+        {
+            "runAsUser": user_id,
+            "runAsGroup": group_id,
+            "fsGroup": group_id,
+        }
+    )
 
 
 def _default_tolerations(config: DeploymentsPluginConfig) -> list[Toleration]:
@@ -408,8 +414,10 @@ def startup_probe_failure_threshold(view: DeploymentConfigView, *, period_second
 
 def apply_container_resources(container: Container, resources: dict[str, Any]) -> None:
     """Apply k8s resource requirements to a plugin container."""
-    requests = resources.get("requests") if isinstance(resources.get("requests"), dict) else {}
-    limits = resources.get("limits") if isinstance(resources.get("limits"), dict) else {}
+    raw_requests = resources.get("requests")
+    raw_limits = resources.get("limits")
+    requests = raw_requests if isinstance(raw_requests, dict) else {}
+    limits = raw_limits if isinstance(raw_limits, dict) else {}
     if not requests and not limits:
         return
     existing = container.resources

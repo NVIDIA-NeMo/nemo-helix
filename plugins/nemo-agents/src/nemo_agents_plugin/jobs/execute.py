@@ -53,12 +53,14 @@ from nemo_agents_plugin.telemetry.intake_export import (
     supports_intake_atif_export,
 )
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.constants import (
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
     is_workload_identity_token_file_set,
 )
 from nemo_platform_plugin.client.oidc_factory import resolve_workload_exchange_provider
 from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
+from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.job_results import ResultRef
@@ -328,8 +330,9 @@ class ExecuteAgentJob(NemoJob):
 
         workdir = None
         if request.workdir is not None:
-            sdk = cast(AsyncNeMoPlatform, async_sdk)
-            workdir = await validate_agent_workdir(request.workdir, sdk.files, default_workspace=workspace)
+            async_sdk_handle = cast(AsyncNeMoPlatform, async_sdk)
+            files_client = client_from_platform(async_sdk_handle, AsyncFilesClient)
+            workdir = await validate_agent_workdir(request.workdir, files_client, default_workspace=workspace)
 
         extension = request.extension or _make_noop_extension_config()
         validate_execute_agent_extension_config(extension.kind, extension.config)
@@ -429,7 +432,8 @@ class ExecuteAgentJob(NemoJob):
             if sdk is None:
                 raise RuntimeError("sdk is required to stage workdir inputs.")
             logger.info("Staging workdir inputs for agent %s.", agent_ref)
-            materialize_agent_workdir(step_config.workdir, sdk.files, fabric_dirs.workspace)
+            files_client = client_from_platform(sdk, FilesClient)
+            materialize_agent_workdir(step_config.workdir, files_client, fabric_dirs.workspace)
 
         input_workdir_ref = ctx.results.save(INPUT_WORKDIR_RESULT_NAME, fabric_dirs.workspace)
 

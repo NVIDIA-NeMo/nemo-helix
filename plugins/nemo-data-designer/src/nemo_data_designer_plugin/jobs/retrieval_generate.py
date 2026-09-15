@@ -5,10 +5,10 @@ from __future__ import annotations
 
 from typing import ClassVar, cast
 
-from data_designer_nemo.context import create_data_designer_context
+from data_designer_nemo.context import create_validation_context
 from nemo_data_designer_plugin.jobs.retrieval_common import retrieval_step, work_dir
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig, RetrievalGenerateStepConfig
-from nemo_data_designer_plugin.retrieval.corpus import materialize_corpus
+from nemo_data_designer_plugin.retrieval.corpus import hf_token_from_env, materialize_corpus
 from nemo_data_designer_plugin.retrieval.providers import build_retrieval_model_configs, resolve_retrieval_providers
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.job import NemoJob
@@ -37,7 +37,7 @@ class RetrievalGenerateJob(NemoJob):
     ) -> BaseModel:
         async_sdk = cast(AsyncNeMoPlatform, async_sdk)
         job_config = cast(RetrievalGenerateJobConfig, input_spec)
-        dd_ctx = create_data_designer_context(async_sdk, workspace)
+        dd_ctx = create_validation_context(async_sdk, workspace)
         model_configs = build_retrieval_model_configs(
             provider=job_config.provider,
             chat_provider=job_config.chat_provider,
@@ -66,6 +66,7 @@ class RetrievalGenerateJob(NemoJob):
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
+        spec = cast(RetrievalGenerateStepConfig, spec)
         return PlatformJobSpec(
             steps=[
                 await retrieval_step(
@@ -74,6 +75,7 @@ class RetrievalGenerateJob(NemoJob):
                     spec,
                     profile=profile,
                     async_sdk=async_sdk,
+                    hf_token_secret=spec.job_config.hf_token_secret,
                 )
             ]
         )
@@ -90,6 +92,7 @@ class RetrievalGenerateJob(NemoJob):
             dest=ctx.storage.ephemeral / "corpus",
             sdk=sdk,
             workspace=ctx.workspace,
+            hf_token=hf_token_from_env(),
         )
         run_config = build_generation_run_config(
             corpus_dir=corpus_dir,

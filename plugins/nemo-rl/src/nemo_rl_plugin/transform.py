@@ -9,11 +9,10 @@ accepted — the container pipeline expects a real fileset to download from.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from nmp.customization_common.contributor.transform import generated_output_name
 from nmp.customization_common.schemas.values import OutputNameType
 from nmp.customization_common.service.platform_client import (
+    AsyncCustomizationPlatformClients,
     check_dataset_access,
     check_environment_access,
     check_gym_dataset_layout,
@@ -24,9 +23,6 @@ from nmp.rl.schemas import GRPOTraining, OutputResponse, RlJobOutput
 
 from nemo_rl_plugin.environment import check_environment_package
 from nemo_rl_plugin.schema import OutputRequest, RlJobInput
-
-if TYPE_CHECKING:
-    from nemo_platform import AsyncNeMoPlatform
 
 
 def _infer_output_type(input_spec: RlJobInput) -> OutputNameType:
@@ -39,7 +35,7 @@ def _infer_output_type(input_spec: RlJobInput) -> OutputNameType:
 async def transform_input_to_output(
     input_spec: RlJobInput,
     workspace: str,
-    sdk: "AsyncNeMoPlatform",
+    platform: AsyncCustomizationPlatformClients,
 ) -> RlJobOutput:
     """Enrich submitter input into a canonical :class:`RlJobOutput`.
 
@@ -49,15 +45,15 @@ async def transform_input_to_output(
     """
     training_type = TrainingType(input_spec.training.type)
 
-    model_entity = await fetch_model_entity(input_spec.model, workspace, sdk)
-    await check_dataset_access(sdk, input_spec.dataset, workspace)
+    model_entity = await fetch_model_entity(input_spec.model, workspace, platform)
+    await check_dataset_access(platform, input_spec.dataset, workspace)
 
     if training_type == TrainingType.GRPO:
         if not input_spec.environment:
             raise ValueError("GRPO jobs require an environment fileset reference.")
-        await check_environment_access(sdk, input_spec.environment, workspace)
-        await check_environment_package(sdk, input_spec.environment, workspace)
-        await check_gym_dataset_layout(sdk, input_spec.dataset, workspace)
+        await check_environment_access(platform, input_spec.environment, workspace)
+        await check_environment_package(platform, input_spec.environment, workspace)
+        await check_gym_dataset_layout(platform, input_spec.dataset, workspace)
 
     model_spec = model_entity.spec
     head_type = getattr(model_spec, "head_type", None) if model_spec else None

@@ -13,7 +13,6 @@ from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_platform_plugin.jobs.client import AsyncJobsClient, JobsClient
 from nemo_platform_plugin.jobs.constants import NEMO_JOB_WORKSPACE_ENVVAR
 from nemo_platform_plugin.jobs.result_manager import CreateJobResultError
-from nmp.common.config import Configuration
 from nmp.common.jobs import result_manager as rm
 from nmp.common.jobs.file_manager import TmpDirPath
 
@@ -56,10 +55,8 @@ def _generated_async_sdk(workspace: str | None = "test-ws") -> AsyncNeMoPlatform
 # =============================================================================
 
 
-@patch.object(Configuration, "get_platform_config")
-def test_result_manager_factory_fileset(mock_platform_config):
+def test_result_manager_factory_fileset():
     """Test factory creates ResultManager with FilesetFileManager class."""
-    mock_platform_config.return_value.base_url = "http://localhost:8080"
     sdk = _generated_sync_sdk()
 
     mgr = rm.result_manager_factory(
@@ -72,13 +69,11 @@ def test_result_manager_factory_fileset(mock_platform_config):
     assert isinstance(mgr.files_client, FilesClient)
     assert mgr.files_client._http is sdk._client
     assert isinstance(mgr.jobs_client, JobsClient)
+    assert mgr.jobs_client._http is sdk._client
 
 
-@pytest.mark.asyncio
-@patch.object(Configuration, "get_platform_config")
-async def test_result_manager_factory_fileset_async(mock_platform_config):
+def test_result_manager_factory_fileset_async():
     """Test factory creates AsyncResultManager with AsyncFilesetFileManager class."""
-    mock_platform_config.return_value.base_url = "http://localhost:8080"
     sdk = _generated_async_sdk()
 
     mgr = rm.async_result_manager_factory(
@@ -91,6 +86,7 @@ async def test_result_manager_factory_fileset_async(mock_platform_config):
     assert isinstance(mgr.files_client, AsyncFilesClient)
     assert mgr.files_client._http is sdk._client
     assert isinstance(mgr.jobs_client, AsyncJobsClient)
+    assert mgr.jobs_client._http is sdk._client
 
 
 @pytest.mark.asyncio
@@ -109,13 +105,14 @@ async def test_download_from_result_info(mock_factory, tmp_path):
         result_name="my-result",
         job_name="test-job",
         artifact_url="my-workspace/url-fileset-name#path/to/artifact",
+        workspace="my-workspace",
         sdk=sdk,
     )
 
     # Verify factory was called with correct parameters
     call_kwargs = mock_factory.call_args.kwargs
     assert call_kwargs["job_name"] == "test-job"
-    assert "workspace" not in call_kwargs
+    assert call_kwargs["workspace"] == "my-workspace"
     assert call_kwargs["sdk"] is sdk
 
 
@@ -173,7 +170,9 @@ def test_create_result_returns_existing_on_conflict_sync(tmp_path, mock_sync_fil
     mock_jobs.create_job_result.side_effect = _conflict_error()
     mock_jobs.get_job_result.return_value = _resp(existing_result)
     # Job retrieval provides the fileset name.
-    mock_jobs.get_job.return_value = _resp(MagicMock(attempt_id="att-123", fileset="test-fileset"))
+    mock_jobs.get_job.return_value = _resp(
+        MagicMock(attempt_id="att-123", fileset="test-fileset", output_location=None)
+    )
 
     sdk = _sync_client()
     mgr = rm.ResultManager(
@@ -195,7 +194,9 @@ def test_create_result_wraps_transport_errors_sync(tmp_path, mock_sync_file_mana
     test_file.write_bytes(b"test content")
     request = httpx.Request("POST", "http://test/apis/jobs/v2/workspaces/test-ws/jobs/test-job/results/my-result")
     mock_jobs = MagicMock(spec=JobsClient)
-    mock_jobs.get_job.return_value = _resp(MagicMock(attempt_id="att-123", fileset="test-fileset"))
+    mock_jobs.get_job.return_value = _resp(
+        MagicMock(attempt_id="att-123", fileset="test-fileset", output_location=None)
+    )
     mock_jobs.create_job_result.side_effect = NemoTransportError(
         httpx.ConnectError("Connection refused", request=request)
     )
@@ -226,7 +227,9 @@ async def test_create_result_returns_existing_on_conflict_async(tmp_path, mock_a
     mock_jobs.create_job_result = AsyncMock(side_effect=_conflict_error())
     mock_jobs.get_job_result = AsyncMock(return_value=_resp(existing_result))
     # Job retrieval provides the fileset name.
-    mock_jobs.get_job = AsyncMock(return_value=_resp(MagicMock(attempt_id="att-123", fileset="test-fileset")))
+    mock_jobs.get_job = AsyncMock(
+        return_value=_resp(MagicMock(attempt_id="att-123", fileset="test-fileset", output_location=None))
+    )
 
     sdk = _async_client()
     mgr = rm.AsyncResultManager(
@@ -249,7 +252,9 @@ async def test_create_result_wraps_transport_errors_async(tmp_path, mock_async_f
     test_file.write_bytes(b"test content")
     request = httpx.Request("POST", "http://test/apis/jobs/v2/workspaces/test-ws/jobs/test-job/results/my-result")
     mock_jobs = MagicMock(spec=AsyncJobsClient)
-    mock_jobs.get_job = AsyncMock(return_value=_resp(MagicMock(attempt_id="att-123", fileset="test-fileset")))
+    mock_jobs.get_job = AsyncMock(
+        return_value=_resp(MagicMock(attempt_id="att-123", fileset="test-fileset", output_location=None))
+    )
     mock_jobs.create_job_result = AsyncMock(
         side_effect=NemoTransportError(httpx.ConnectError("Connection refused", request=request))
     )
@@ -285,3 +290,31 @@ async def test_async_result_manager_factory_defaults_unscoped_sdk_workspace(monk
     mgr = rm.async_result_manager_factory(job_name="test-job", sdk=sdk)
 
     assert mgr.workspace == "default"
+
+
+@pytest.mark.asyncio
+@patch("nmp.common.jobs.result_manager.async_result_manager_factory")
+@patch("nmp.common.jobs.result_manager.get_async_platform_sdk")
+async def test_download_from_result_info_defaults_sdk(mock_get_sdk, mock_factory, tmp_path, mock_async_nmp_sdk):
+    """Test that download_from_result_info auto-creates SDK when sdk is None."""
+    mock_get_sdk.return_value = mock_async_nmp_sdk
+
+    test_file = tmp_path / "artifact.bin"
+    test_file.write_bytes(b"test content")
+    mock_mgr = MagicMock()
+    mock_mgr.download_artifact = AsyncMock(return_value=TmpDirPath(tmp_dir=tmp_path, path=test_file))
+    mock_factory.return_value = mock_mgr
+
+    await rm.download_from_result_info(
+        result_name="my-result",
+        job_name="test-job",
+        artifact_url="workspace/fileset#path",
+        workspace="workspace",
+    )
+
+    mock_get_sdk.assert_called_once_with()
+    mock_factory.assert_called_once_with(
+        job_name="test-job",
+        workspace="workspace",
+        sdk=mock_async_nmp_sdk,
+    )

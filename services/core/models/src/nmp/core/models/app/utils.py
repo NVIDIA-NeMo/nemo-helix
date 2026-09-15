@@ -9,9 +9,6 @@ from enum import Enum
 from logging import getLogger
 from typing import Generic, List, Optional, TypeVar
 
-from nemo_platform.types.inference.model_deployment import ModelDeployment
-from nemo_platform.types.inference.model_deployment_config import ModelDeploymentConfig
-from nemo_platform.types.inference.model_provider import ModelProvider
 from nemo_platform_plugin.k8s_naming import (
     DNS_LABEL_MAX_LENGTH,
     DNS_SUBDOMAIN_MAX_LENGTH,
@@ -19,7 +16,7 @@ from nemo_platform_plugin.k8s_naming import (
     k8s_safe_name,
     workspace_name_identity,
 )
-from nemo_platform_plugin.models.types import ModelEntity
+from nemo_platform_plugin.models.types import ModelDeployment, ModelDeploymentConfig, ModelEntity, ModelProvider
 from nmp.common.api.common import PaginationData
 from nmp.common.entities.constants import NAME_PATTERN as ENTITY_NAME_PATTERN
 from pydantic import BaseModel
@@ -108,7 +105,7 @@ def parse_model_name_revision(
             parsed_name = name_without_revision
 
         # Parse namespace prefix only if explicit model_namespace was NOT provided
-        if not model_namespace and "/" in parsed_name:
+        if not model_namespace and parsed_name is not None and "/" in parsed_name:
             # Split on first / to extract namespace
             parts = parsed_name.split("/", 1)
             parsed_namespace = parts[0]
@@ -169,12 +166,10 @@ def get_model_weights_type(
     if model_entity and model_entity.fileset:
         return ModelWeightsType.FILES_SERVICE
 
-    # Guard the nested groups: a partial/legacy config may omit executor_config or
-    # model_spec, and we must not raise AttributeError while resolving weights.
-    executor_cfg = getattr(model_deployment_config, "executor_config", None)
-    model_spec_cfg = getattr(model_deployment_config, "model_spec", None)
-    image_name = getattr(executor_cfg, "image_name", None)
-    model_name = getattr(model_spec_cfg, "model_name", None)
+    executor_cfg = model_deployment_config.executor_config if model_deployment_config else None
+    model_spec_cfg = model_deployment_config.model_spec if model_deployment_config else None
+    image_name = executor_cfg.image_name if executor_cfg else None
+    model_name = model_spec_cfg.model_name if model_spec_cfg else None
 
     # If the model is a multi-LLM, we have already ruled out HF weights, so we download from Files service
     if is_multi_llm_image(image_name) and model_name:

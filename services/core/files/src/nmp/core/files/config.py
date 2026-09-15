@@ -28,7 +28,7 @@ class FilesConfig(create_service_config_class("files")):  # type: ignore
     )
 
     allowed_external_hosts: str = Field(
-        default="https://api.ngc.nvidia.com,https://huggingface.co",
+        default="https://api.ngc.nvidia.com,https://huggingface.co,https://api.github.com",
         description="Comma-separated list of external hosts the Files service is allowed to access.",
     )
 

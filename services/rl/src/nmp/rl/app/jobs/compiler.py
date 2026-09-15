@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import logging
 
-from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nemo_platform_plugin.jobs.api_factory import (
     ContainerSpec,
@@ -49,7 +48,7 @@ from nmp.customization_common.schemas.file_io import (
     UploadItem,
 )
 from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
-from nmp.customization_common.service.platform_client import fetch_model_entity
+from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients, fetch_model_entity
 from nmp.customization_common.tasks.file_io_metadata import build_output_fileset_metadata_from_model_entity
 from nmp.rl.app.constants import (
     BASE_LOG_DIR_ENVVAR,
@@ -89,6 +88,9 @@ from nmp.rl.schemas import DPOTraining, GRPOTraining, RlJobOutput
 logger = logging.getLogger(__name__)
 
 
+GPU_TRAINING_SHM_GIB_PER_GPU = 8
+
+
 def _get_cpu_resources() -> ResourcesSpec:
     return ResourcesSpec(
         limits=ResourcesLimitsSpec(
@@ -99,6 +101,14 @@ def _get_cpu_resources() -> ResourcesSpec:
             cpu=config.default_job_resource_cpu_request,
             memory=config.default_job_resource_memory_request,
         ),
+    )
+
+
+def _gpu_training_resources(*, num_nodes: int = 1, num_gpus: int) -> ResourcesSpec:
+    return ResourcesSpec(
+        num_nodes=num_nodes,
+        num_gpus=num_gpus,
+        shm_size=f"{GPU_TRAINING_SHM_GIB_PER_GPU * max(1, num_gpus)}Gi",
     )
 
 
@@ -309,6 +319,7 @@ def _build_grpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code
             name=job_spec.model,
             max_seq_length=t.max_seq_length,
             trust_remote_code=trust_remote_code,
+            v4_compatible=t.v4_compatible,
         ),
         dataset=TrainingStepConfig.DatasetConfig(path=DEFAULT_DATASET_PATH),
         gym=TrainingStepConfig.GymConfig(
@@ -472,22 +483,21 @@ def _build_training_step(
             )
         # Ray's bootstrap writes the ENDED marker + barriers under BASE_LOG_DIR.
         environment = [*environment, EnvironmentVariable(name=BASE_LOG_DIR_ENVVAR, value=shared_dir)]
-        executor = {
-            "provider": "gpu_distributed",
-            "container": container,
-            "resources": ResourcesSpec(num_nodes=num_nodes, num_gpus=num_gpus_per_node),
-        }
         resolved_profile = profile or config.default_distributed_execution_profile
+        executor = DistributedGPUExecutionProviderSpec(
+            provider="gpu_distributed",
+            container=container,
+            resources=_gpu_training_resources(num_nodes=num_nodes, num_gpus=num_gpus_per_node),
+            profile=resolved_profile if resolved_profile is not None else "default",
+        )
     else:
-        executor = {
-            "provider": "gpu",
-            "container": container,
-            "resources": ResourcesSpec(num_gpus=num_gpus_per_node),
-        }
         resolved_profile = profile or config.default_training_execution_profile
-
-    if resolved_profile is not None:
-        executor["profile"] = resolved_profile
+        executor = GPUExecutionProviderSpec(
+            provider="gpu",
+            container=container,
+            resources=_gpu_training_resources(num_gpus=num_gpus_per_node),
+            profile=resolved_profile if resolved_profile is not None else "default",
+        )
 
     return PlatformJobStep(
         name=step_name,
@@ -500,7 +510,7 @@ def _build_training_step(
 async def platform_job_config_compiler(
     workspace: str,
     job_spec: RlJobOutput,
-    sdk: AsyncNeMoPlatform,
+    platform: AsyncCustomizationPlatformClients,
     *,
     job_name: str | None = None,
     profile: str | None = None,
@@ -526,7 +536,7 @@ async def platform_job_config_compiler(
 
     job_spec.validate_for_training()
 
-    me = await fetch_model_entity(job_spec.model, workspace, sdk)
+    me = await fetch_model_entity(job_spec.model, workspace, platform)
     trust_remote_code = me.trust_remote_code or False
 
     cpu_resources = _get_cpu_resources()

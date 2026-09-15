@@ -183,6 +183,17 @@ class AccessKeyNotImplementedErrorResponse(BaseModel):
     detail: str
 
 
+class AccessKeyErrorResponse(BaseModel):
+    """Scoped Access Key error response."""
+
+    detail: str
+    code: Literal["access_keys_disabled"] | None = Field(
+        default=None,
+        json_schema_extra={"nullable": True},
+        description="Set to access_keys_disabled when the Scoped Access Key feature is disabled.",
+    )
+
+
 class JsonWebKey(BaseModel):
     """JSON Web Key object."""
 

@@ -13,8 +13,7 @@ from data_designer.engine.resources.seed_reader import (
 from data_designer_nemo.filesystem import make_filesystem
 from filesets import FilesetFileSystem, FilesetPathError, build_fileset_ref, parse_fileset_ref
 from fsspec.implementations.dirfs import DirFileSystem
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_platform import NeMoPlatform
 
 
 class _FilesetDirFileSystem(DirFileSystem):
@@ -67,17 +66,15 @@ class FilesetFileSystemProvider:
 
     def __init__(
         self,
-        sdk: NeMoPlatform | AsyncNeMoPlatform,
+        sdk: NeMoPlatform,
         *,
         workspace: str,
         validated_roots: set[str] | None = None,
     ) -> None:
         self._sdk = sdk
         self._filesystem: FilesetFileSystem | None = None
-        self._files_client: FilesClient | None = None
-        self._async_files_client: AsyncFilesClient | None = None
         self._workspace = workspace
-        self._validated_roots = validated_roots or set()
+        self._validated_roots = set(validated_roots or ())
 
     def create_context(self, *, runtime_path: str) -> SeedReaderFileSystemContext:
         workspace, fileset, fragment = self._parse(runtime_path)

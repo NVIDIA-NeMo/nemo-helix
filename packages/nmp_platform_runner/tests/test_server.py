@@ -19,6 +19,7 @@ from nemo_platform_plugin.jobs.openapi_utils import clear_query_param_schemas, g
 from nmp.common.config import AuthConfig, Configuration
 from nmp.common.config.base import OIDCConfig
 from nmp.common.controller import ControllerManager
+from nmp.common.platform_endpoint import _SyncPlatformEndpointRoutingTransport
 from nmp.common.service import RouterConfig, Service
 from nmp.platform_runner import config as runner_config
 from nmp.platform_runner import server
@@ -262,13 +263,11 @@ def test_create_app_mounted_services_drive_sdk_local_routing_without_services_en
 
         server.create_app(services=[PluginService()])
 
-        sdk = get_platform_sdk()
-        prepared = sdk._prepare_url("https://nemo-gateway:8080/apis/agents/v2/example")
+        with get_platform_sdk() as sdk:
+            transport = sdk._client._transport
 
         assert platform_cfg.services == "agents"
-        assert prepared.scheme == "http"
-        assert prepared.host == "127.0.0.1"
-        assert prepared.port == 8080
+        assert isinstance(transport, _SyncPlatformEndpointRoutingTransport)
     finally:
         Configuration.clear_cache()
 

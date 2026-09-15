@@ -17,9 +17,9 @@ from data_designer_nemo.nemotron_personas import (
     get_resource_name_for_locale,
     sync_nemotron_personas_fileset,
 )
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.client.errors import ConflictError
+from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.secrets.client import SecretsClient
 from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
 from pydantic import SecretStr
@@ -85,11 +85,12 @@ def make_fileset_command(
     api_key = _get_api_key_from_env(api_key_env_var)
 
     print_header("Nemotron Personas Fileset")
-    sdk = NeMoPlatform()
+    client = NemoClient.from_config()
+    files = FilesClient.from_client(client)
 
     if api_key is not None:
         try:
-            secrets = client_from_platform(sdk, SecretsClient)
+            secrets = SecretsClient.from_client(client)
             secrets.create_secret(
                 workspace=secret_workspace,
                 body=PlatformSecretCreateRequest(name=secret_name, value=SecretStr(api_key)),
@@ -107,7 +108,7 @@ def make_fileset_command(
     fileset_name = get_resource_name_for_locale(locale)
     fileset_ref = f"{WORKSPACE}/{fileset_name}"
     try:
-        result = sync_nemotron_personas_fileset(sdk=sdk, locale=locale, api_key_secret=api_key_secret)
+        result = sync_nemotron_personas_fileset(files=files, locale=locale, api_key_secret=api_key_secret)
     except Exception as exc:
         print_error(f"Failed to create fileset {fileset_ref!r}: {exc}")
         raise typer.Exit(code=1) from exc

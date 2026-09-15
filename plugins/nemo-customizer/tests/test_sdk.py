@@ -121,7 +121,7 @@ def test_customization_composes_contributor_resources_on_typed_nemo_client() -> 
     assert customization.automodel.jobs is not None
 
 
-def test_customization_accepts_legacy_nemo_platform_owner() -> None:
+def test_customization_accepts_generated_nemo_platform_owner() -> None:
     transport, requests = _recording_customization_transport()
     platform = NeMoPlatform(
         base_url="http://localhost:8000",
@@ -238,7 +238,7 @@ async def test_async_plugin_status_hits_versioned_hub_healthz() -> None:
     assert status["status"] == "ok"
 
 
-async def test_async_customization_accepts_legacy_nemo_platform_owner() -> None:
+async def test_async_customization_accepts_generated_nemo_platform_owner() -> None:
     transport, requests = _recording_customization_transport()
     platform = AsyncNeMoPlatform(
         base_url="http://localhost:8000",

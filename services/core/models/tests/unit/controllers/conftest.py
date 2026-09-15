@@ -3,10 +3,12 @@
 
 """Test fixtures for Models Controller tests."""
 
+import inspect
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from nemo_platform_plugin.client.errors import ConflictError, NemoHTTPError, NotFoundError
 from nmp.common.config import PlatformConfig
 
 
@@ -68,6 +70,13 @@ def mock_asyncio_run_patch():
     """Patch event loop run_until_complete for controller step tests."""
     # Create a mock event loop with run_until_complete method
     mock_loop = MagicMock()
+
+    def _run_until_complete(awaitable):
+        if inspect.iscoroutine(awaitable):
+            awaitable.close()
+        return mock_loop.run_until_complete.return_value
+
+    mock_loop.run_until_complete.side_effect = _run_until_complete
     with patch("nmp.core.models.controllers.models_controller.asyncio.new_event_loop", return_value=mock_loop):
         yield mock_loop.run_until_complete
 
@@ -76,13 +85,6 @@ def mock_asyncio_run_patch():
 def mock_models_sdk():
     """Create a mock AsyncNeMoPlatform SDK for testing."""
     mock_sdk = MagicMock()
-
-    # Set up the nested structure for v2.inference.deployments
-    mock_sdk.v2 = MagicMock()
-    mock_sdk.v2.inference = MagicMock()
-    mock_sdk.v2.inference.deployments = MagicMock()
-    mock_sdk.v2.inference.deployments.list = MagicMock()
-
     return mock_sdk
 
 
@@ -168,11 +170,6 @@ def _assert_asyncio_run_called_once(mock_asyncio_run_patch):
     assert mock_asyncio_run_patch.call_count == 1
 
 
-def _assert_sdk_list_called_for_all_statuses(mock_models_sdk, non_terminal_states_count):
-    """Assert that SDK list method was called for each non-terminal status."""
-    assert mock_models_sdk.inference.deployments.list.call_count == non_terminal_states_count
-
-
 def _assert_deployments_count(deployments, expected_count):
     """Assert the number of deployments returned."""
     assert len(deployments) == expected_count
@@ -186,7 +183,6 @@ class AssertHelpers:
     assert_controller_healthy = staticmethod(_assert_controller_healthy)
     assert_sdk_initialized_correctly = staticmethod(_assert_sdk_initialized_correctly)
     assert_asyncio_run_called_once = staticmethod(_assert_asyncio_run_called_once)
-    assert_sdk_list_called_for_all_statuses = staticmethod(_assert_sdk_list_called_for_all_statuses)
     assert_deployments_count = staticmethod(_assert_deployments_count)
 
 
@@ -199,21 +195,6 @@ def assert_helpers():
             assert_helpers.assert_controller_healthy(controller)
     """
     return AssertHelpers
-
-
-class AsyncPaginator:
-    """Async iterator standing in for the SDK's paginated list() responses."""
-
-    def __init__(self, items):
-        self._items = list(items)
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        if not self._items:
-            raise StopAsyncIteration
-        return self._items.pop(0)
 
 
 class _AsyncPage:
@@ -241,14 +222,14 @@ class _ModelResponse:
 
 
 def _status_error(status: int, detail: str):
-    """Build a plugin client HTTP error for a given status (409/404)."""
-    from nemo_platform_plugin.client.errors import ConflictError, NotFoundError
-
+    """Build a plugin client HTTP error for a given status."""
     request = httpx.Request("POST", "http://test")
     response = httpx.Response(status, request=request, json={"detail": detail})
+    if status == 404:
+        return NotFoundError(response)
     if status == 409:
         return ConflictError(response)
-    return NotFoundError(response)
+    return NemoHTTPError(response)
 
 
 def make_async_models_client() -> MagicMock:
@@ -259,6 +240,17 @@ def make_async_models_client() -> MagicMock:
     client.create_model = AsyncMock(return_value=_ModelResponse())
     client.get_model = AsyncMock(return_value=_ModelResponse())
     client.update_model = AsyncMock(return_value=_ModelResponse())
+    client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
+    client.get_deployment = AsyncMock(return_value=_ModelResponse())
+    client.get_deployment_config_version = AsyncMock(return_value=_ModelResponse())
+    client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
+    client.delete_deployment_version = AsyncMock(return_value=_ModelResponse())
+    client.list_providers = AsyncMock(return_value=_AsyncPage([]))
+    client.get_provider = AsyncMock(return_value=_ModelResponse())
+    client.create_provider = AsyncMock(return_value=_ModelResponse())
+    client.upsert_provider = AsyncMock(return_value=_ModelResponse())
+    client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+    client.delete_provider = AsyncMock(return_value=_ModelResponse())
     return client
 
 

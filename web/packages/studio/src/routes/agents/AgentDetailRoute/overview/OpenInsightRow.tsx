@@ -24,7 +24,7 @@ export const OpenInsightRow: FC<OpenInsightRowProps> = ({ insight, onOpen }) => 
       size="small"
       type="button"
       onClick={() => onOpen(insight)}
-      className="w-full cursor-pointer border-0 bg-transparent px-4 py-3.5 text-left hover:bg-surface-hover"
+      className="w-full px-4 py-3.5 text-left justify-start"
     >
       <Flex gap="4" align="start">
         <Stack align="center" className="w-14 shrink-0">

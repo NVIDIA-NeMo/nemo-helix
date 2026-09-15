@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -941,7 +941,7 @@ async def test_under_covered_job_resumes_when_harbor_can(tmp_path: Path, monkeyp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mutation", ["agent", "task", "option"])
+@pytest.mark.parametrize("mutation", ["agent", "agent_kwargs", "task", "option"])
 async def test_changed_inputs_invalidate_the_cache(tmp_path: Path, mutation: str) -> None:
     # Each of these changes what a run would produce, so the stamped dir must not be
     # served. Reaching run_job (and failing there) is the observable signal.
@@ -957,12 +957,63 @@ async def test_changed_inputs_invalidate_the_cache(tmp_path: Path, mutation: str
         config = config.model_copy(
             update={"agent_import_path": "wrapper:Agent", "agent_dir": agent_dir},
         )
+    elif mutation == "agent_kwargs":
+        config = config.model_copy(update={"agent_kwargs": {"fabric_telemetry": "relay"}})
     elif mutation == "task":
         (dataset_path / "t" / "task.toml").write_text('[task]\nname = "t"\nchanged = true\n')
     else:
         config = config.model_copy(update={"n_attempts": 2})
 
     assert _cache_is_stale(job_dir, _cache_stamp(config, dataset_path, [task])) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("agent_shape", ["builtin", "installed_import_path", "agent_dir"])
+async def test_agent_kwargs_reach_harbor_agent_config_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent_shape: str
+) -> None:
+    """``agent_kwargs`` must land on Harbor's ``AgentConfig.kwargs`` (its ``--ak``) for every agent shape.
+
+    Harbor merges ``AgentConfig.kwargs`` into the agent constructor for built-in and import-path agents
+    alike, so a shape that dropped them would silently run the agent with its defaults.
+    """
+    import harbor.job
+
+    agent_kwargs = {"fabric_adapter_id": "nvidia.fabric.codex", "fabric_harness_settings": {"turns": [1, 2]}}
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    agent_options: dict[str, object] = {"agent_kwargs": agent_kwargs}
+    if agent_shape == "installed_import_path":
+        agent_options["agent_import_path"] = "mypkg.agent:WrappedAgent"
+    elif agent_shape == "agent_dir":
+        agent_dir = tmp_path / "agent"
+        agent_dir.mkdir()
+        (agent_dir / "harbor_wrapper.py").write_text("x = 1\n", encoding="utf-8")
+        agent_options.update(agent_import_path="harbor_wrapper:WrappedAgent", agent_dir=agent_dir)
+    config = HarborRuntimeConfig(jobs_dir=jobs_dir, job_name="kwargs-job", **agent_options)
+
+    created: list[Any] = []
+
+    class FakeJob:
+        @classmethod
+        async def create(cls, job_config: Any) -> "FakeJob":
+            created.append(job_config)
+            return cls()
+
+        async def run(self) -> None:
+            return None
+
+    monkeypatch.setattr(harbor.job, "Job", FakeJob)
+    _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="kwargs-job")
+    await run_job()
+
+    assert len(created) == 1
+    (agent_config,) = created[0].agents
+    assert agent_config.kwargs == agent_kwargs
+    if agent_shape == "builtin":
+        assert agent_config.name == "oracle"
+    else:
+        assert agent_config.import_path is not None and agent_config.import_path.endswith(":WrappedAgent")
 
 
 @pytest.mark.asyncio

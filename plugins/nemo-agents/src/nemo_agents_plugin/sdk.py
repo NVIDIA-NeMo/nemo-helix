@@ -62,67 +62,102 @@ remain sync-only.
 from __future__ import annotations
 
 import re
-from typing import Any, List, Mapping
+from collections.abc import Mapping
+from typing import TypeVar
 
-import httpx
 from nemo_agents_plugin.entities import (
     AgentEnvironmentInline,
     ComputeSpecInline,
     EnvironmentSpecInline,
 )
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
+from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_platform_plugin.agents.client import AgentsClient, AsyncAgentsClient
+from nemo_platform_plugin.agents.types import (
+    AgentJobRequest,
+    CreateAgentRequest,
+    CreateComputeSpecRequest,
+    CreateDeploymentRequest,
+    CreateEnvironmentRequest,
+    CreateEnvironmentSpecRequest,
+    InvokeAgentRequest,
+    JsonMap,
+)
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_platform_plugin.sdk import NemoPluginSDKResources
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
-_DEFAULT_WORKSPACE = "default"
-_DEFAULT_TIMEOUT = 30
 _DEFAULT_MODEL_PLACEHOLDER = re.compile(r"\$(?:\{NEMO_DEFAULT_MODEL\}|NEMO_DEFAULT_MODEL(?![A-Za-z0-9_]))")
+_DEFAULT_WORKSPACE = "default"
+_JSON_MAP_ADAPTER = TypeAdapter(JsonMap)
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
 
 
-def _resolve_workspace(platform: Any, workspace: str | None) -> str:
-    return workspace or getattr(platform, "workspace", None) or _DEFAULT_WORKSPACE
+def _json_map(value: object) -> JsonMap:
+    return _JSON_MAP_ADAPTER.validate_python(value)
 
 
-def _spec_to_dict(spec: BaseModel | dict[str, Any] | None) -> dict[str, Any]:
-    """Normalize a typed ``*Inline`` model (or a loose dict) to a request body.
+def _json_map_from_response(response: NemoResponse[_ModelT]) -> JsonMap:
+    response.data()
+    body: object = response.http_response.json()
+    return _json_map(body)
 
-    Accepts one of the shared backend ``*Inline`` models, a plain dict, or
-    ``None``. Pydantic models are dumped with ``exclude_unset=True`` so only the
-    fields the caller actually set are sent — matching the ``**spec`` behavior
-    where unspecified fields simply were not in the payload.
-    """
+
+def _json_map_from_page(response: NemoPaginatedResponse[_ModelT]) -> JsonMap:
+    response.page()
+    body: object = response.http_response.json()
+    return _json_map(body)
+
+
+def _spec_to_dict(spec: BaseModel | Mapping[str, object] | None) -> JsonMap:
+    """Normalize a typed ``*Inline`` model or a loose mapping to a request body."""
     if spec is None:
         return {}
     if isinstance(spec, BaseModel):
-        return spec.model_dump(exclude_unset=True, mode="json")
-    return dict(spec)
+        return _json_map(spec.model_dump(exclude_unset=True, mode="json"))
+    return _json_map(dict(spec))
 
 
-def _contains_default_model_placeholder(value: Any) -> bool:
+def _contains_default_model_placeholder(value: object) -> bool:
     """Return True when *value* still contains an unresolved default-model placeholder."""
     if isinstance(value, str):
         protected = value.replace("$$", "\0DOLLAR\0")
         return _DEFAULT_MODEL_PLACEHOLDER.search(protected) is not None
     if isinstance(value, dict):
-        return any(_contains_default_model_placeholder(v) for v in value.values())
+        return any(_contains_default_model_placeholder(item) for item in value.values())
     if isinstance(value, list):
-        return any(_contains_default_model_placeholder(v) for v in value)
+        return any(_contains_default_model_placeholder(item) for item in value)
     return False
+
+
+def _agents_client_from_platform(platform: NeMoPlatform) -> AgentsClient:
+    client = client_from_platform(platform, AgentsClient)
+    if client.workspace is None:
+        return client.with_workspace(_DEFAULT_WORKSPACE)
+    return client
+
+
+def _async_agents_client_from_platform(platform: AsyncNeMoPlatform) -> AsyncAgentsClient:
+    async_client = client_from_platform(platform, AsyncAgentsClient)
+    if async_client.workspace is None:
+        return async_client.with_workspace(_DEFAULT_WORKSPACE)
+    return async_client
 
 
 class AgentsResource:
     """SDK namespace for ``nemo.agents.*``."""
 
-    def __init__(self, platform: Any) -> None:
+    def __init__(self, platform: NeMoPlatform) -> None:
         """
         Args:
-            platform: The ``NeMo`` hub object (or any object with a
-                ``base_url`` attribute).  Provides the base URL for all API calls.
-                An optional ``default_headers`` attribute (a ``dict[str, str]``)
-                is attached to every request — this is how the CLI threads its
-                resolved auth token through the SDK.
+            platform: The generated ``NeMoPlatform`` client. The Agents resource
+                adapts it to the typed ``AgentsClient`` while sharing the same
+                base URL, default workspace, auth headers, timeout, retry policy,
+                and underlying HTTP transport.
         """
         self._platform = platform
+        self._client = _agents_client_from_platform(platform)
         self._deployments: _DeploymentResource | None = None
         self._environments: _EnvironmentResource | None = None
         self._environment_specs: _EnvironmentSpecResource | None = None
@@ -137,11 +172,11 @@ class AgentsResource:
         self,
         *,
         name: str,
-        config: dict[str, Any],
+        config: Mapping[str, object],
         description: str = "",
         config_format: str = "nat-workflow-v1",
         workspace: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> JsonMap:
         """Create a new agent.
 
         Args:
@@ -158,70 +193,73 @@ class AgentsResource:
         """
         from nemo_agents_plugin.utils import inject_default_model
 
-        resolved_config = inject_default_model(config)
+        resolved_config = _json_map(inject_default_model(dict(config)))
         if _contains_default_model_placeholder(resolved_config):
             raise ValueError(
                 "Agent config references ${NEMO_DEFAULT_MODEL}, but no default model is selected. "
                 "Run `nemo setup`, set NEMO_DEFAULT_MODEL, or replace the placeholder with an explicit "
                 "VirtualModel name."
             )
-        payload = {
-            "name": name,
-            "config": resolved_config,
-            "description": description,
-            "config_format": config_format,
-        }
-        return self._post(f"/v2/workspaces/{self._workspace(workspace)}/agents", payload)
+        response = self._client.create_agent(
+            workspace=workspace,
+            body=CreateAgentRequest(
+                name=name,
+                config=resolved_config,
+                description=description,
+                config_format=config_format,
+            ),
+        )
+        return _json_map_from_response(response)
 
-    def list(self, workspace: str | None = None) -> List[dict[str, Any]]:
+    def list(self, workspace: str | None = None) -> JsonMap:
         """List agents in *workspace*."""
-        return self._get(f"/v2/workspaces/{self._workspace(workspace)}/agents")
+        return _json_map_from_page(self._client.list_agents(workspace=workspace))
 
-    def get(self, name: str, workspace: str | None = None) -> dict[str, Any]:
+    def get(self, name: str, workspace: str | None = None) -> JsonMap:
         """Get an agent by name."""
-        return self._get(f"/v2/workspaces/{self._workspace(workspace)}/agents/{name}")
+        return _json_map_from_response(self._client.get_agent(workspace=workspace, name=name))
 
     def delete(self, name: str, workspace: str | None = None) -> None:
         """Delete an agent by name."""
-        self._delete(f"/v2/workspaces/{self._workspace(workspace)}/agents/{name}")
+        self._client.delete_agent(workspace=workspace, name=name).data()
 
     # ------------------------------------------------------------------
     # Deployment sub-resource
     # ------------------------------------------------------------------
 
     @property
-    def deployments(self) -> _DeploymentResource:
+    def deployments(self) -> "_DeploymentResource":
         """Sub-resource for deployment lifecycle operations."""
         if self._deployments is None:
-            self._deployments = _DeploymentResource(self)
+            self._deployments = _DeploymentResource(self._client)
         return self._deployments
 
     @property
-    def environments(self) -> _EnvironmentResource:
+    def environments(self) -> "_EnvironmentResource":
         """Sub-resource for AgentEnvironment CRUD (``nemo.agents.environments``)."""
         if self._environments is None:
-            self._environments = _EnvironmentResource(self)
+            self._environments = _EnvironmentResource(self._client)
         return self._environments
 
     @property
-    def environment_specs(self) -> _EnvironmentSpecResource:
+    def environment_specs(self) -> "_EnvironmentSpecResource":
         """Sub-resource for AgentEnvironmentSpec CRUD (``nemo.agents.environment_specs``)."""
         if self._environment_specs is None:
-            self._environment_specs = _EnvironmentSpecResource(self)
+            self._environment_specs = _EnvironmentSpecResource(self._client)
         return self._environment_specs
 
     @property
-    def compute_specs(self) -> _ComputeSpecResource:
+    def compute_specs(self) -> "_ComputeSpecResource":
         """Sub-resource for AgentComputeSpec CRUD (``nemo.agents.compute_specs``)."""
         if self._compute_specs is None:
-            self._compute_specs = _ComputeSpecResource(self)
+            self._compute_specs = _ComputeSpecResource(self._client)
         return self._compute_specs
 
     @property
     def jobs(self) -> "_JobsResource":
         """Sub-resource for agents job collections."""
         if self._jobs is None:
-            self._jobs = _JobsResource(self._platform)
+            self._jobs = _JobsResource(self._client)
         return self._jobs
 
     # ------------------------------------------------------------------
@@ -237,7 +275,7 @@ class AgentsResource:
         session_id: str | None = None,
         workspace: str | None = None,
         timeout: int = 300,
-    ) -> dict[str, Any]:
+    ) -> JsonMap:
         """Send a single request to an agent via the gateway.
 
         Args:
@@ -252,22 +290,21 @@ class AgentsResource:
         Returns:
             The agent's response as a dict.
         """
-        resolved_workspace = self._workspace(workspace)
-        if agent:
-            path = f"/v2/workspaces/{resolved_workspace}/agents/{agent}/-/v1/chat/completions"
-        elif deployment:
-            path = f"/v2/workspaces/{resolved_workspace}/deployments/{deployment}/-/v1/chat/completions"
-        else:
-            raise ValueError("Provide either agent= or deployment=.")
+        if agent is not None and deployment is not None:
+            raise ValueError("Provide either agent= or deployment=, not both.")
         if session_id == "":
             raise ValueError("session_id must not be empty.")
 
-        payload = {
-            "messages": [{"role": "user", "content": input}],
-            "stream": False,
-        }
-        headers = {SESSION_ID_HEADER: session_id} if session_id is not None else None
-        return self._post(path, payload, timeout=timeout, headers=headers)
+        body = InvokeAgentRequest(messages=[{"role": "user", "content": input}], stream=False)
+        client = self._client.with_options(
+            headers={SESSION_ID_HEADER: session_id} if session_id is not None else None,
+            timeout=timeout,
+        )
+        if agent is not None:
+            return client.invoke_agent(workspace=workspace, name=agent, body=body).data()
+        if deployment is not None:
+            return client.invoke_deployment(workspace=workspace, name=deployment, body=body).data()
+        raise ValueError("Provide either agent= or deployment=.")
 
     def evaluate(
         self,
@@ -276,7 +313,7 @@ class AgentsResource:
         agent: str | None = None,
         endpoint: str | None = None,
         workspace: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> JsonMap:
         """Trigger an evaluation run.
 
         .. note::
@@ -288,63 +325,19 @@ class AgentsResource:
 
         Raises:
             NotImplementedError: Always — platform-managed evaluation is not
-                yet available.  Use ``nemo agents evaluate`` CLI instead.
+                yet available. Use ``nemo agents evaluate`` CLI instead.
         """
         raise NotImplementedError(
             "Platform-managed evaluation is not yet implemented. "
             "Use the CLI: nemo agents evaluate --eval-config <path> [--agent <name>]"
         )
 
-    # ------------------------------------------------------------------
-    # HTTP helpers
-    # ------------------------------------------------------------------
-
-    def _base_url(self) -> str:
-        base = getattr(self._platform, "base_url", "http://localhost:8000")
-        return str(base).rstrip("/")
-
-    def _workspace(self, workspace: str | None) -> str:
-        return _resolve_workspace(self._platform, workspace)
-
-    def _agents_url(self, path: str) -> str:
-        return self._base_url() + "/apis/agents" + path
-
-    def _default_headers(self) -> dict[str, str] | None:
-        headers = getattr(self._platform, "default_headers", None)
-        if isinstance(headers, dict) and headers:
-            return {str(key): str(value) for key, value in headers.items()}
-        return None
-
-    def _get(self, path: str) -> Any:
-        with httpx.Client(timeout=_DEFAULT_TIMEOUT) as client:
-            resp = client.get(self._agents_url(path), headers=self._default_headers())
-            resp.raise_for_status()
-            return resp.json()
-
-    def _post(
-        self,
-        path: str,
-        payload: dict[str, Any],
-        timeout: int = _DEFAULT_TIMEOUT,
-        headers: dict[str, str] | None = None,
-    ) -> dict[str, Any]:
-        merged = {**(self._default_headers() or {}), **(headers or {})} or None
-        with httpx.Client(timeout=timeout) as client:
-            resp = client.post(self._agents_url(path), json=payload, headers=merged)
-            resp.raise_for_status()
-            return resp.json()
-
-    def _delete(self, path: str) -> None:
-        with httpx.Client(timeout=_DEFAULT_TIMEOUT) as client:
-            resp = client.delete(self._agents_url(path), headers=self._default_headers())
-            resp.raise_for_status()
-
 
 class _DeploymentResource:
     """Deployment lifecycle operations under ``nemo.agents.deployments``."""
 
-    def __init__(self, parent: AgentsResource) -> None:
-        self._parent = parent
+    def __init__(self, client: AgentsClient) -> None:
+        self._client = client
 
     def create(
         self,
@@ -354,9 +347,9 @@ class _DeploymentResource:
         deployment_mode: str = "subprocess",
         image: str | None = None,
         use_image_entrypoint: bool = False,
-        environment: str | dict[str, Any] | None = None,
+        environment: str | Mapping[str, object] | AgentEnvironmentInline | None = None,
         workspace: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> JsonMap:
         """Create a deployment for *agent*.
 
         Args:
@@ -386,28 +379,36 @@ class _DeploymentResource:
             raise ValueError("image requires deployment_mode='docker' or 'k8s'.")
         if use_image_entrypoint and deployment_mode == "subprocess":
             raise ValueError("use_image_entrypoint requires deployment_mode='docker' or 'k8s'.")
-        payload: dict[str, Any] = {"agent": agent, "deployment_mode": deployment_mode}
-        if name:
+        if isinstance(environment, Mapping):
+            environment_body: str | AgentEnvironmentInline | None = AgentEnvironmentInline.model_validate(environment)
+        else:
+            environment_body = environment
+        payload: dict[str, object] = {"agent": agent, "deployment_mode": deployment_mode}
+        if name is not None:
             payload["name"] = name
-        if image:
+        if image is not None:
             payload["image"] = image
         if use_image_entrypoint:
             payload["use_image_entrypoint"] = True
-        if environment is not None:
-            payload["environment"] = environment
-        return self._parent._post(f"/v2/workspaces/{self._parent._workspace(workspace)}/deployments", payload)
+        if environment_body is not None:
+            payload["environment"] = environment_body
+        response = self._client.create_deployment(
+            workspace=workspace,
+            body=CreateDeploymentRequest.model_validate(payload),
+        )
+        return _json_map_from_response(response)
 
-    def list(self, workspace: str | None = None) -> List[dict[str, Any]]:
+    def list(self, workspace: str | None = None) -> JsonMap:
         """List all deployments in *workspace*."""
-        return self._parent._get(f"/v2/workspaces/{self._parent._workspace(workspace)}/deployments")
+        return _json_map_from_page(self._client.list_deployments(workspace=workspace))
 
-    def get(self, name: str, workspace: str | None = None) -> dict[str, Any]:
+    def get(self, name: str, workspace: str | None = None) -> JsonMap:
         """Get a deployment by name."""
-        return self._parent._get(f"/v2/workspaces/{self._parent._workspace(workspace)}/deployments/{name}")
+        return _json_map_from_response(self._client.get_deployment(workspace=workspace, name=name))
 
     def delete(self, name: str, workspace: str | None = None) -> None:
         """Mark a deployment for deletion."""
-        self._parent._delete(f"/v2/workspaces/{self._parent._workspace(workspace)}/deployments/{name}")
+        self._client.delete_deployment(workspace=workspace, name=name).data()
 
 
 class _EnvironmentSpecResource:
@@ -419,16 +420,16 @@ class _EnvironmentSpecResource:
     at deployment/job create time.
     """
 
-    def __init__(self, parent: AgentsResource) -> None:
-        self._parent = parent
+    def __init__(self, client: AgentsClient) -> None:
+        self._client = client
 
     def create(
         self,
         *,
         name: str,
-        spec: EnvironmentSpecInline | dict[str, Any] | None = None,
+        spec: EnvironmentSpecInline | Mapping[str, object] | None = None,
         workspace: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> JsonMap:
         """Create an environment spec.
 
         Args:
@@ -441,20 +442,24 @@ class _EnvironmentSpecResource:
         Returns:
             The created AgentEnvironmentSpec as a dict.
         """
-        payload: dict[str, Any] = {**_spec_to_dict(spec), "name": name}
-        return self._parent._post(f"/v2/workspaces/{self._parent._workspace(workspace)}/environment-specs", payload)
+        payload = {**_spec_to_dict(spec), "name": name}
+        response = self._client.create_environment_spec(
+            workspace=workspace,
+            body=CreateEnvironmentSpecRequest.model_validate(payload),
+        )
+        return _json_map_from_response(response)
 
-    def list(self, workspace: str | None = None) -> List[dict[str, Any]]:
+    def list(self, workspace: str | None = None) -> JsonMap:
         """List environment specs in *workspace*."""
-        return self._parent._get(f"/v2/workspaces/{self._parent._workspace(workspace)}/environment-specs")
+        return _json_map_from_page(self._client.list_environment_specs(workspace=workspace))
 
-    def get(self, name: str, workspace: str | None = None) -> dict[str, Any]:
+    def get(self, name: str, workspace: str | None = None) -> JsonMap:
         """Get an environment spec by name."""
-        return self._parent._get(f"/v2/workspaces/{self._parent._workspace(workspace)}/environment-specs/{name}")
+        return _json_map_from_response(self._client.get_environment_spec(workspace=workspace, name=name))
 
     def delete(self, name: str, workspace: str | None = None) -> None:
         """Delete an environment spec by name."""
-        self._parent._delete(f"/v2/workspaces/{self._parent._workspace(workspace)}/environment-specs/{name}")
+        self._client.delete_environment_spec(workspace=workspace, name=name).data()
 
 
 class _EnvironmentResource:
@@ -465,19 +470,19 @@ class _EnvironmentResource:
     a deployment or execute job references via its ``environment`` field.
     """
 
-    def __init__(self, parent: AgentsResource) -> None:
-        self._parent = parent
+    def __init__(self, client: AgentsClient) -> None:
+        self._client = client
 
     def create(
         self,
         *,
         name: str,
-        spec: AgentEnvironmentInline | dict[str, Any] | None = None,
-        environment_spec: str | dict[str, Any] | None = None,
-        compute_spec: str | dict[str, Any] | None = None,
+        spec: AgentEnvironmentInline | Mapping[str, object] | None = None,
+        environment_spec: str | Mapping[str, object] | EnvironmentSpecInline | None = None,
+        compute_spec: str | Mapping[str, object] | ComputeSpecInline | None = None,
         description: str | None = None,
         workspace: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> JsonMap:
         """Create an AgentEnvironment.
 
         Args:
@@ -500,26 +505,30 @@ class _EnvironmentResource:
         Returns:
             The created AgentEnvironment as a dict.
         """
-        payload: dict[str, Any] = {**_spec_to_dict(spec), "name": name}
+        payload = {**_spec_to_dict(spec), "name": name}
         if description is not None:
             payload["description"] = description
         if environment_spec is not None:
-            payload["environment_spec"] = environment_spec
+            payload["environment_spec"] = _environment_spec_body(environment_spec)
         if compute_spec is not None:
-            payload["compute_spec"] = compute_spec
-        return self._parent._post(f"/v2/workspaces/{self._parent._workspace(workspace)}/environments", payload)
+            payload["compute_spec"] = _compute_spec_body(compute_spec)
+        response = self._client.create_environment(
+            workspace=workspace,
+            body=CreateEnvironmentRequest.model_validate(payload),
+        )
+        return _json_map_from_response(response)
 
-    def list(self, workspace: str | None = None) -> List[dict[str, Any]]:
+    def list(self, workspace: str | None = None) -> JsonMap:
         """List environments in *workspace*."""
-        return self._parent._get(f"/v2/workspaces/{self._parent._workspace(workspace)}/environments")
+        return _json_map_from_page(self._client.list_environments(workspace=workspace))
 
-    def get(self, name: str, workspace: str | None = None) -> dict[str, Any]:
+    def get(self, name: str, workspace: str | None = None) -> JsonMap:
         """Get an environment by name."""
-        return self._parent._get(f"/v2/workspaces/{self._parent._workspace(workspace)}/environments/{name}")
+        return _json_map_from_response(self._client.get_environment(workspace=workspace, name=name))
 
     def delete(self, name: str, workspace: str | None = None) -> None:
         """Delete an environment by name."""
-        self._parent._delete(f"/v2/workspaces/{self._parent._workspace(workspace)}/environments/{name}")
+        self._client.delete_environment(workspace=workspace, name=name).data()
 
 
 class _ComputeSpecResource:
@@ -529,16 +538,16 @@ class _ComputeSpecResource:
     invocation runs with.
     """
 
-    def __init__(self, parent: AgentsResource) -> None:
-        self._parent = parent
+    def __init__(self, client: AgentsClient) -> None:
+        self._client = client
 
     def create(
         self,
         *,
         name: str,
-        spec: ComputeSpecInline | dict[str, Any] | None = None,
+        spec: ComputeSpecInline | Mapping[str, object] | None = None,
         workspace: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> JsonMap:
         """Create a compute spec.
 
         Args:
@@ -551,144 +560,151 @@ class _ComputeSpecResource:
         Returns:
             The created AgentComputeSpec as a dict.
         """
-        payload: dict[str, Any] = {**_spec_to_dict(spec), "name": name}
-        return self._parent._post(f"/v2/workspaces/{self._parent._workspace(workspace)}/compute-specs", payload)
+        payload = {**_spec_to_dict(spec), "name": name}
+        response = self._client.create_compute_spec(
+            workspace=workspace,
+            body=CreateComputeSpecRequest.model_validate(payload),
+        )
+        return _json_map_from_response(response)
 
-    def list(self, workspace: str | None = None) -> List[dict[str, Any]]:
+    def list(self, workspace: str | None = None) -> JsonMap:
         """List compute specs in *workspace*."""
-        return self._parent._get(f"/v2/workspaces/{self._parent._workspace(workspace)}/compute-specs")
+        return _json_map_from_page(self._client.list_compute_specs(workspace=workspace))
 
-    def get(self, name: str, workspace: str | None = None) -> dict[str, Any]:
+    def get(self, name: str, workspace: str | None = None) -> JsonMap:
         """Get a compute spec by name."""
-        return self._parent._get(f"/v2/workspaces/{self._parent._workspace(workspace)}/compute-specs/{name}")
+        return _json_map_from_response(self._client.get_compute_spec(workspace=workspace, name=name))
 
     def delete(self, name: str, workspace: str | None = None) -> None:
         """Delete a compute spec by name."""
-        self._parent._delete(f"/v2/workspaces/{self._parent._workspace(workspace)}/compute-specs/{name}")
+        self._client.delete_compute_spec(workspace=workspace, name=name).data()
 
 
-# ----------------------------------------------------------------------
-# Job sub-resources
-# ----------------------------------------------------------------------
-#
-# Unlike the resources above, these route through the platform client's own
-# request pipeline (``platform.post`` / ``platform.get``) rather than a bare
-# ``httpx`` client, so the caller's auth headers, base URL, and retry policy
-# are applied. A ``NemoJob`` subclass gets CLI and HTTP routes for free but no
-# SDK surface, so each job collection needs a resource like this one.
+def _environment_spec_body(value: str | Mapping[str, object] | EnvironmentSpecInline) -> str | EnvironmentSpecInline:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, EnvironmentSpecInline):
+        return value
+    return EnvironmentSpecInline.model_validate(value)
 
 
-def _execute_jobs_base(workspace: str) -> str:
-    return f"/apis/agents/v2/workspaces/{workspace}/jobs/execute"
+def _compute_spec_body(value: str | Mapping[str, object] | ComputeSpecInline) -> str | ComputeSpecInline:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, ComputeSpecInline):
+        return value
+    return ComputeSpecInline.model_validate(value)
 
 
 def _execute_job_body(
-    spec: Mapping[str, Any],
+    spec: Mapping[str, object],
     name: str | None,
     description: str | None,
-) -> dict[str, Any]:
+) -> AgentJobRequest:
     """Build the create-job request body.
 
     ``name`` is omitted when not supplied so the Jobs service generates a
     unique one; sending a fixed name makes the second submission collide.
     """
-    body: dict[str, Any] = {"spec": dict(spec)}
+    payload: dict[str, object] = {"spec": _json_map(dict(spec))}
     if name is not None:
-        body["name"] = name
+        payload["name"] = name
     if description is not None:
-        body["description"] = description
-    return body
+        payload["description"] = description
+    return AgentJobRequest.model_validate(payload)
 
 
 class _ExecuteJobsResource:
     """Sync ``client.agents.jobs.execute`` — the ``agents.execute`` job collection."""
 
-    def __init__(self, platform: Any) -> None:
-        self._platform = platform
+    def __init__(self, client: AgentsClient) -> None:
+        self._client = client
 
     def create(
         self,
         *,
-        spec: Mapping[str, Any],
+        spec: Mapping[str, object],
         name: str | None = None,
         description: str | None = None,
         workspace: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> JsonMap:
         """Submit an execute-agent job. *spec* is an ``ExecuteAgentJobConfig``."""
-        return self._platform.post(
-            _execute_jobs_base(_resolve_workspace(self._platform, workspace)),
+        response = self._client.create_agent_job(
+            workspace=workspace,
+            collection="execute",
             body=_execute_job_body(spec, name, description),
-            cast_to=dict[str, Any],
         )
+        return _json_map_from_response(response)
 
-    def get(self, name: str, workspace: str | None = None) -> dict[str, Any]:
+    def get(self, name: str, workspace: str | None = None) -> JsonMap:
         """Get one execute-agent job by name."""
-        base = _execute_jobs_base(_resolve_workspace(self._platform, workspace))
-        return self._platform.get(f"{base}/{name}", cast_to=dict[str, Any])
+        response = self._client.get_agent_job(workspace=workspace, collection="execute", name=name)
+        return _json_map_from_response(response)
 
-    def list_results(self, name: str, workspace: str | None = None) -> dict[str, Any]:
+    def list_results(self, name: str, workspace: str | None = None) -> JsonMap:
         """List the named results a finished execute-agent job saved."""
-        base = _execute_jobs_base(_resolve_workspace(self._platform, workspace))
-        return self._platform.get(f"{base}/{name}/results", cast_to=dict[str, Any])
+        response = self._client.list_agent_job_results(workspace=workspace, collection="execute", name=name)
+        return _json_map_from_response(response)
 
 
 class _AsyncExecuteJobsResource:
     """Async ``client.agents.jobs.execute``."""
 
-    def __init__(self, platform: Any) -> None:
-        self._platform = platform
+    def __init__(self, client: AsyncAgentsClient) -> None:
+        self._client = client
 
     async def create(
         self,
         *,
-        spec: Mapping[str, Any],
+        spec: Mapping[str, object],
         name: str | None = None,
         description: str | None = None,
         workspace: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> JsonMap:
         """Submit an execute-agent job. *spec* is an ``ExecuteAgentJobConfig``."""
-        return await self._platform.post(
-            _execute_jobs_base(_resolve_workspace(self._platform, workspace)),
+        response = await self._client.create_agent_job(
+            workspace=workspace,
+            collection="execute",
             body=_execute_job_body(spec, name, description),
-            cast_to=dict[str, Any],
         )
+        return _json_map_from_response(response)
 
-    async def get(self, name: str, workspace: str | None = None) -> dict[str, Any]:
+    async def get(self, name: str, workspace: str | None = None) -> JsonMap:
         """Get one execute-agent job by name."""
-        base = _execute_jobs_base(_resolve_workspace(self._platform, workspace))
-        return await self._platform.get(f"{base}/{name}", cast_to=dict[str, Any])
+        response = await self._client.get_agent_job(workspace=workspace, collection="execute", name=name)
+        return _json_map_from_response(response)
 
-    async def list_results(self, name: str, workspace: str | None = None) -> dict[str, Any]:
+    async def list_results(self, name: str, workspace: str | None = None) -> JsonMap:
         """List the named results a finished execute-agent job saved."""
-        base = _execute_jobs_base(_resolve_workspace(self._platform, workspace))
-        return await self._platform.get(f"{base}/{name}/results", cast_to=dict[str, Any])
+        response = await self._client.list_agent_job_results(workspace=workspace, collection="execute", name=name)
+        return _json_map_from_response(response)
 
 
 class _JobsResource:
     """Sync ``client.agents.jobs`` namespace."""
 
-    def __init__(self, platform: Any) -> None:
-        self._platform = platform
+    def __init__(self, client: AgentsClient) -> None:
+        self._client = client
         self._execute: _ExecuteJobsResource | None = None
 
     @property
     def execute(self) -> _ExecuteJobsResource:
         if self._execute is None:
-            self._execute = _ExecuteJobsResource(self._platform)
+            self._execute = _ExecuteJobsResource(self._client)
         return self._execute
 
 
 class _AsyncJobsResource:
     """Async ``client.agents.jobs`` namespace."""
 
-    def __init__(self, platform: Any) -> None:
-        self._platform = platform
+    def __init__(self, client: AsyncAgentsClient) -> None:
+        self._client = client
         self._execute: _AsyncExecuteJobsResource | None = None
 
     @property
     def execute(self) -> _AsyncExecuteJobsResource:
         if self._execute is None:
-            self._execute = _AsyncExecuteJobsResource(self._platform)
+            self._execute = _AsyncExecuteJobsResource(self._client)
         return self._execute
 
 
@@ -699,15 +715,16 @@ class AsyncAgentsResource:
     remain sync-only on :class:`AgentsResource`.
     """
 
-    def __init__(self, platform: Any) -> None:
+    def __init__(self, platform: AsyncNeMoPlatform) -> None:
         self._platform = platform
+        self._client = _async_agents_client_from_platform(platform)
         self._jobs: _AsyncJobsResource | None = None
 
     @property
     def jobs(self) -> _AsyncJobsResource:
         """Sub-resource for agents job collections."""
         if self._jobs is None:
-            self._jobs = _AsyncJobsResource(self._platform)
+            self._jobs = _AsyncJobsResource(self._client)
         return self._jobs
 
 

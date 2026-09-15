@@ -61,9 +61,9 @@ from nemo_evaluator_sdk.enums import AgentFormat, ModelFormat
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nemo_evaluator_sdk.values import GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel
-from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.scheduler import NemoJobScheduler
+from nemo_platform_plugin.sdk import NeMoPlatform
 from nemo_platform_plugin.workspaces.client import WorkspacesClient
 from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
 from nmp.testing import add_mock_provider

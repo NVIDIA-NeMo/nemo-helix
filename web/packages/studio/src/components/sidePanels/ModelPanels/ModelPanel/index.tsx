@@ -25,6 +25,7 @@ import {
 import { Empty } from '@studio/components/Empty';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { ModelChat } from '@studio/components/ModelChat';
+import { DeployModelCta } from '@studio/components/ModelChat/DeployModelCta';
 import {
   ModelArtifactData,
   ModelDetailOverview,
@@ -238,6 +239,9 @@ export const ModelPanel: FC<ModelPanelProps> = ({
         <Empty
           title="Adapter is not currently served"
           description="No provider lists this adapter among its served models, so it cannot be chatted with yet. It becomes available once the deployment serving its base model has loaded the adapter."
+          slotAction={
+            <DeployModelCta modelRef={`${workspace}/${model.name}`} label="Deploy base model" />
+          }
         />
       );
     } else {
@@ -248,6 +252,11 @@ export const ModelPanel: FC<ModelPanelProps> = ({
           baseURL={adapterBaseURL}
           promptData={model.prompt}
           modelChatStatus={modelChatStatus}
+          // `model` is the base model in both branches. Deploying it is what makes
+          // an adapter servable, so the adapter case links to the same wizard —
+          // only the copy changes, since "this model" would name the wrong entity.
+          deployModelRef={`${workspace}/${model.name}`}
+          deployModelLabel={adapter ? 'Deploy base model' : undefined}
         />
       );
     }

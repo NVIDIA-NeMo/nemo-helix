@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path, PurePosixPath
 
 from data_designer_nemo.filesystem import make_filesystem
@@ -10,6 +11,14 @@ from filesets import FilesetPathError, build_fileset_ref, parse_fileset_ref
 from nemo_platform import NeMoPlatform
 
 _HF_PREFIX = "hf://"
+
+#: Env var the job steps populate from the spec's ``hf_token_secret`` reference.
+HF_TOKEN_ENVVAR = "HF_TOKEN"  # pragma: allowlist secret
+
+
+def hf_token_from_env() -> str | None:
+    """Read the Hugging Face token a job step received from its secret reference."""
+    return os.environ.get(HF_TOKEN_ENVVAR) or None
 
 
 def materialize_corpus(

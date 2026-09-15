@@ -17,7 +17,7 @@ import {
   getListEvaluationsQueryKey,
 } from '@nemo/sdk/generated/platform/evaluations';
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
-import { type EvalJobRow, evalDurationMs, evalJobDetailRoute } from '@studio/api/evaluation/utils';
+import { type EvalJobRow, evalDurationMs } from '@studio/api/evaluation/utils';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { evaluationFilesetName } from '@studio/components/evaluation/experimentEvalConfig';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
@@ -26,7 +26,7 @@ import {
   type AgentEvaluationRow,
   primaryExperimentName,
 } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
-import { getEvaluationDetailRoute } from '@studio/routes/utils';
+import { getEvaluationDetailRoute, getWorkspaceJobDetailRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Trash } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
@@ -274,7 +274,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
             if (!job) return <Text>—</Text>;
             return (
               <Link
-                to={evalJobDetailRoute(workspace, job)}
+                to={getWorkspaceJobDetailRoute(workspace, job.name)}
                 className="text-primary underline"
                 title={job.name}
               >
@@ -301,7 +301,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
                 ? [
                     {
                       children: 'View job',
-                      onSelect: () => navigate(evalJobDetailRoute(workspace, job)),
+                      onSelect: () => navigate(getWorkspaceJobDetailRoute(workspace, job.name)),
                     },
                   ]
                 : []),

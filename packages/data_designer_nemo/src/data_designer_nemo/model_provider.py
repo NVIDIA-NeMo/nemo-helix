@@ -9,7 +9,6 @@ from data_designer.config.default_model_settings import get_default_providers
 from data_designer.engine.model_provider import ModelProvider as NDDModelProvider
 from data_designer.engine.model_provider import ModelProviderRegistry, resolve_model_provider_registry
 from data_designer_nemo.errors import NDDInternalError, NDDInvalidConfigError
-from data_designer_nemo.sdk_translation import sync_to_async_sdk
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.errors import NemoTransportError, NotFoundError, PermissionDeniedError
@@ -58,26 +57,6 @@ def _make_local_model_provider_registry() -> ModelProviderRegistry | None:
     providers = get_default_providers()
     if len(providers) > 0:
         return resolve_model_provider_registry(providers)
-
-
-async def _get_igw_model_provider_registry(
-    sdk: AsyncNeMoPlatform | NeMoPlatform,
-    model_configs: list[dd.ModelConfig],
-    default_workspace: str,
-) -> ModelProviderRegistry | None:
-    if isinstance(sdk, NeMoPlatform):
-        async_sdk = sync_to_async_sdk(sdk)
-    else:
-        async_sdk = sdk
-
-    try:
-        return await make_model_provider_registry(model_configs, sdk=async_sdk, default_workspace=default_workspace)
-    except (NDDInvalidConfigError, NDDInternalError) as e:
-        raise type(e)(
-            "Error(s) occurred while checking Inference Gateway for model providers. "
-            "Ensure all referenced providers are either defined in the local config file "
-            f"or are registered with the Models and Inference Gateway services. \n{e}"
-        ) from e
 
 
 @dataclass

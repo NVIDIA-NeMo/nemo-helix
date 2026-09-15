@@ -24,8 +24,10 @@ from nemo_experimentalist_plugin.experimentalist.components.evaluator.harbor_nat
     HarborNativeOutcomeEvaluator,
 )
 from nemo_experimentalist_plugin.experimentalist.otlp import jsonl_to_protobuf, read_trace_id
-from nemo_platform import AsyncNeMoPlatform, ConflictError, NotFoundError
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_platform_plugin.client.errors import ConflictError, NotFoundError
+from nemo_platform_plugin.intake.client import AsyncIntakeClient
+from nemo_platform_plugin.intake.types import EvaluationCreateRequest, ExperimentCreateRequest
 from nemo_platform_plugin.workspaces.client import AsyncWorkspacesClient
 from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
 
@@ -131,26 +133,29 @@ def _write_upload_summary(
     return summary_path
 
 
-async def _ensure_evaluation(client: AsyncNeMoPlatform, *, workspace: str, name: str) -> None:
+async def _ensure_evaluation(client: AsyncNemoClient, *, workspace: str, name: str) -> None:
     """Register the Evaluation these spans name, or Intake drops them."""
+    intake = AsyncIntakeClient.from_client(client)
     try:
-        group = await client.experiments.create(workspace=workspace, name=name)
+        group = (await intake.create_experiment(workspace=workspace, body=ExperimentCreateRequest(name=name))).data()
     except ConflictError:
-        group = await client.experiments.retrieve(name, workspace=workspace)
+        group = (await intake.get_experiment(name=name, workspace=workspace)).data()
     try:
-        await client.evaluations.create(
+        await intake.create_evaluation(
             workspace=workspace,
-            name=name,
-            experiment_ids=[group.id],
-            dataset_name=name,
-            dataset_version="v1",
+            body=EvaluationCreateRequest(
+                name=name,
+                experiment_ids=[group.id],
+                dataset_name=name,
+                dataset_version="v1",
+            ),
         )
     except ConflictError:
         pass
 
 
 async def _upload_trials(
-    client: AsyncNeMoPlatform,
+    client: AsyncNemoClient,
     trials: list[TrialResult],
     *,
     workspace: str,
@@ -160,6 +165,7 @@ async def _upload_trials(
     model: str,
 ) -> dict[str, str]:
     trace_ids: dict[str, str] = {}
+    intake = AsyncIntakeClient.from_client(client)
 
     for trial in trials:
         if trial.trace is None:
@@ -181,25 +187,26 @@ async def _upload_trials(
         if not payloads:
             raise RuntimeError(f"Trial {trial.id} produced an empty agent execution trace")
         for payload in payloads:
-            await client.intake.ingest.otlp.v1.traces.create(body=payload, workspace=workspace)
+            await intake.create_otlp_traces(content=payload, workspace=workspace)
         trace_ids[trial.id] = trace_id
 
     return trace_ids
 
 
 async def _wait_for_traces(
-    client: AsyncNeMoPlatform,
+    client: AsyncNemoClient,
     trace_ids: set[str],
     *,
     workspace: str,
     retries: int = 6,
 ) -> None:
     pending = set(trace_ids)
+    intake = AsyncIntakeClient.from_client(client)
     delay = 1.0
     for attempt in range(retries):
         for trace_id in tuple(pending):
             try:
-                await client.intake.traces.retrieve(trace_id, workspace=workspace)
+                await intake.get_trace(id=trace_id, workspace=workspace)
             except NotFoundError:
                 continue
             pending.remove(trace_id)
@@ -237,7 +244,7 @@ async def run(args: argparse.Namespace) -> Path:
 
         evaluation_name = args.evaluation_name or run_dir.name
         client = make_client(args.base_url)
-        workspaces = client_from_platform(client, AsyncWorkspacesClient)
+        workspaces = AsyncWorkspacesClient.from_client(client)
         try:
             (
                 await workspaces.create_workspace(
@@ -282,7 +289,7 @@ async def run(args: argparse.Namespace) -> Path:
 
     _configure_models(model=args.model, user_model=args.user_model, api_base=args.api_base)
     client = make_client(args.base_url)
-    workspaces = client_from_platform(client, AsyncWorkspacesClient)
+    workspaces = AsyncWorkspacesClient.from_client(client)
     try:
         (
             await workspaces.create_workspace(

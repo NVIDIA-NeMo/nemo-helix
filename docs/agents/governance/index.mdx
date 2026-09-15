@@ -1,0 +1,147 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Agent Governance"
+description: ""
+---
+<a id="agents-governance"></a>
+
+<Warning>
+
+Agent Governance is released with _early access_ availability and is subject to limited support and potential API changes in future releases.
+
+</Warning>
+
+Use Agent Governance to attack an agent, harden it, and confirm the hardening
+worked before you promote it. A run probes a sandboxed copy of the agent with
+adversarial input, generates guardrail and sandbox-policy fixes for whatever got
+through, and then replays the original attacks against those fixes.
+
+The engine behind it is Agent Hardener, which drives garak, NeMo Guardrails and
+OpenShell as a single cycle. You reach it through the `nemo agent-hardener` CLI.
+
+## What a Run Produces
+
+Every run reports two rates:
+
+| Rate | What it measures | Why it matters |
+|------|------------------|----------------|
+| Attack block rate | How many of the original attacks the applied fixes now stop | Tells you the hardening works |
+| Benign pass rate | How many ordinary requests still succeed under the same fixes | Tells you what the hardening costs |
+
+Narrowing what an agent can reach blocks some legitimate requests. The benign
+pass rate tells you how much.
+
+Alongside the rates, a run produces the fixes themselves: a hardened agent
+workflow containing guardrail middleware, and an OpenShell policy narrowing
+what the agent's sandbox can reach.
+
+## How It Works
+
+A run puts three groups of agents against a sandboxed copy of your agent. Your
+running deployment is never touched.
+
+| Group | What it does |
+|-------|--------------|
+| Attackers | Probe the agent with a garak `agent_breaker` swarm: prompt injection, indirect injection through tool output, and jailbreaks |
+| Defenders | Generate fixes for what got through. The guardrails defender writes pre-tool verifier middleware into the agent's workflow. The OpenShell policy defender writes a sandbox policy covering network egress, filesystem access, process identity, seccomp and Landlock |
+| Validators | Score the fixes. The attacker validator replays every original attack against the hardened agent, and the benign validator runs the benign suite |
+
+The cycle runs in four stages:
+
+1. **Attack.** The attackers probe the sandboxed copy. Run live, or replay a
+   recorded hitlog when you need a deterministic result.
+1. **Defend.** Both defenders work the findings in parallel, one on agent
+   behavior and one on sandbox permissions.
+1. **Review.** Proposed fixes arrive as individually toggleable items, each
+   tagged Guardrail or Policy, grouped by the tool it guards, and each showing
+   the attack that motivated it plus the exact configuration diff.
+1. **Validate.** Replay the attacks and the benign suite against the subset you
+   chose, then read both rates before applying anything.
+
+Nothing reaches your agent until you apply it.
+
+### Runs Target a Frozen Manifest
+
+`nemo agent-hardener init` resolves your agent once and saves the result as a
+manifest. Every later run war-games that saved manifest, so two runs of the
+same manifest are comparable and you can answer whether hardening helped by
+comparing their reports.
+
+Editing the agent afterwards does not change an existing manifest. Pick up
+those changes with `nemo agent-hardener refresh`. Applying a fix refreshes the
+manifest for you, so a run, harden, apply, run sequence measures the change you
+just made.
+
+A result describes one agent, one model, one tool set and one prompt. Re-run the
+cycle when any of those change.
+
+## How Agent Governance Relates to Other Platform Features
+
+| Feature | What it targets | What it returns |
+|---------|-----------------|-----------------|
+| [Vulnerability Scanning](/documentation/vulnerability-scanning) | A model reachable through the Inference Gateway | A report on the model |
+| [Guardrail Models](/documentation/guardrail-models) | Model traffic, as Inference Gateway middleware | The guardrail configurations the defenders write against |
+| Agent Governance | The agent, its tools and its sandbox | Reviewable fixes, plus both rates |
+
+Vulnerability scanning tells you a model is exploitable. Agent Governance
+produces the guardrail and sandbox policy that stop the exploit on a specific
+agent, and measures what they cost in ordinary traffic.
+
+## Prerequisites
+
+Before running a war-game, make sure you have:
+
+1. Local services running with the models and jobs controllers, bound so the
+   sandbox can reach the Inference Gateway:
+   ```bash
+   nemo services run --service-group all --controllers models,jobs \
+     --host 0.0.0.0 --port 8080
+   ```
+1. Docker running on the host.
+1. The OpenShell gateway installed with its native installer. Installing
+   OpenShell as a standalone CLI tool gives you the command without the gateway
+   service, and a war-game needs the gateway.
+1. Agent Hardener provisioned once per machine with `nemo agent-hardener setup`, which
+   creates its virtual environments and the inference credential. Confirm
+   everything with `nemo agent-hardener doctor`.
+1. At least one [Inference Gateway](/documentation/models-and-inference) model
+   provider, so the attackers, defenders and the agent under test can all reach
+   models.
+1. An agent registered with `nemo agents create`. Unlike the other agent
+   workflows, Agent Governance does not need the agent deployed: it reads the
+   stored config and builds its own sandboxed copy. You can also point a run at
+   a local agent project directory instead of registering anything.
+
+## Scope
+
+- **Attacks focus on agent behavior.** Probes exercise how the agent responds to
+  adversarial input, including prompt injection, indirect injection through tool
+  output and jailbreaks. Network reach is covered on the defense side, where the
+  OpenShell policy defender narrows what the sandbox can reach.
+- **Harness support is expanding.** Broader coverage is planned for a future
+  release.
+- **Runs use a benign suite.** `nemo agent-hardener run` consumes a benign suite
+  rather than generating one, so create it once with
+  `nemo agent-hardener synth-benign`. It is cached on the manifest and reused by
+  later runs.
+- **Agent Governance runs before you ship.** The fixes it generates keep working
+  once applied. For signals from an agent already serving traffic, see
+  [Observe Agents](/documentation/agents/observe-agents).
+
+<Warning>
+
+Declare the hosts your agent's tools call when you create the manifest. The
+sandbox drops any outbound traffic the manifest does not allow-list, and a
+blocked tool usually looks like a passing run, because the model answers from
+its own knowledge instead of calling the tool. Agent Hardener can only discover
+hosts by scanning a project's source, so an agent whose tools live in an
+installed package needs its hosts declared explicitly.
+
+</Warning>
+
+## Next Steps
+
+- [Run a War-Game](/documentation/agents/governance/run-a-war-game): create a manifest, generate a benign suite, and run the cycle end to end.
+- [Review and Apply Mitigations](/documentation/agents/governance/apply-mitigations): choose which fixes to keep, score them, and write them back to the agent.

@@ -61,6 +61,14 @@ from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
 from nemo_platform_plugin.jobs.routes import add_job_routes
 
 
+class _TypedFilesResponse:
+    def __init__(self, data: list[object]) -> None:
+        self._body = SimpleNamespace(data=data)
+
+    def data(self) -> SimpleNamespace:
+        return self._body
+
+
 def _agent_config(**environment: str) -> dict[str, Any]:
     config = {
         "config_format": "nemo-agents-spec-v1",
@@ -81,7 +89,7 @@ def _agent(name: str = "calc", workspace: str = "default", config_format: str = 
 
 def _sdk_with_files(data: list[object] | None = None) -> MagicMock:
     sdk = MagicMock()
-    sdk.files.list = AsyncMock(return_value=SimpleNamespace(data=data if data is not None else [object()]))
+    sdk.files.list_files = AsyncMock(return_value=_TypedFilesResponse(data if data is not None else [object()]))
     return sdk
 
 
@@ -223,18 +231,23 @@ async def test_to_spec_validates_and_canonicalizes_base_workdir() -> None:
     entity_client.get.return_value = _agent()
     sdk = _sdk_with_files()
 
-    spec = await ExecuteAgentJob.to_spec(
-        ExecuteAgentJobConfig(agent="calc", input="hello", workdir=AgentWorkdir(base_workdir="source#project")),
-        workspace="default",
-        entity_client=entity_client,
-        async_sdk=sdk,
-        is_local=False,
-    )
+    with patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files):
+        spec = await ExecuteAgentJob.to_spec(
+            ExecuteAgentJobConfig(agent="calc", input="hello", workdir=AgentWorkdir(base_workdir="source#project")),
+            workspace="default",
+            entity_client=entity_client,
+            async_sdk=sdk,
+            is_local=False,
+        )
 
     step_config = ExecuteAgentStepConfig.model_validate(spec)
     assert step_config.workdir is not None
     assert step_config.workdir.base_workdir == "default/source#project/"
-    sdk.files.list.assert_awaited_once_with(remote_path="default/source#project/")
+    sdk.files.list_files.assert_awaited_once_with(
+        workspace="default",
+        name="source",
+        query_params={"path": "project/"},
+    )
 
 
 @pytest.mark.asyncio
@@ -292,13 +305,19 @@ async def test_to_spec_rejects_single_file_base_workdir() -> None:
     entity_client.get.return_value = _agent()
 
     with pytest.raises(ValueError, match="non-empty directory"):
-        await ExecuteAgentJob.to_spec(
-            ExecuteAgentJobConfig(agent="calc", input="hello", workdir=AgentWorkdir(base_workdir="source#README.md")),
-            workspace="default",
-            entity_client=entity_client,
-            async_sdk=_sdk_with_files(data=[]),
-            is_local=False,
-        )
+        sdk = _sdk_with_files(data=[])
+        with patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files):
+            await ExecuteAgentJob.to_spec(
+                ExecuteAgentJobConfig(
+                    agent="calc",
+                    input="hello",
+                    workdir=AgentWorkdir(base_workdir="source#README.md"),
+                ),
+                workspace="default",
+                entity_client=entity_client,
+                async_sdk=sdk,
+                is_local=False,
+            )
 
 
 def test_canonical_base_workdir_ref_rejects_path_escape() -> None:
@@ -371,7 +390,7 @@ def test_workdir_spec_allows_sibling_mount_paths() -> None:
 @pytest.mark.asyncio
 async def test_validate_agent_workdir_canonicalizes_refs() -> None:
     files_client = MagicMock()
-    files_client.list = AsyncMock(return_value=SimpleNamespace(data=[object()]))
+    files_client.list_files = AsyncMock(return_value=_TypedFilesResponse([object()]))
 
     spec = await validate_agent_workdir(
         AgentWorkdir(
@@ -387,78 +406,81 @@ async def test_validate_agent_workdir_canonicalizes_refs() -> None:
     assert spec.artifact_mounts == [
         AgentWorkdirArtifactMount(ref="default/artifacts#notes.txt", mount_path="notes.txt")
     ]
-    files_client.list.assert_has_awaits(
-        [call(remote_path="default/source#project/"), call(remote_path="default/artifacts#notes.txt")]
+    files_client.list_files.assert_has_awaits(
+        [
+            call(workspace="default", name="source", query_params={"path": "project/"}),
+            call(workspace="default", name="artifacts", query_params={"path": "notes.txt"}),
+        ]
     )
 
 
 def test_materialize_agent_workdir_downloads_base_and_mounts(tmp_path: Path) -> None:
     files_client = MagicMock()
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[str, Path]] = []
 
-    def _download(*, remote_path: str, local_path: str) -> None:
-        calls.append((remote_path, local_path))
-        local = Path(local_path)
-        local.parent.mkdir(parents=True, exist_ok=True)
-        if remote_path == "default/source#project/":
+    def _download(_files_client: object, ref: str, *, local_dir: Path) -> SimpleNamespace:
+        del _files_client
+        calls.append((ref, local_dir))
+        local_dir.mkdir(parents=True, exist_ok=True)
+        if ref == "default/source#project/":
+            local = local_dir
             local.mkdir(parents=True, exist_ok=True)
             (local / "config.yaml").write_text("name: calc\n")
         else:
+            local = local_dir / "notes.txt"
             local.write_text("mounted artifact\n")
+        return SimpleNamespace(path=local, tmp_dir=local_dir)
 
-    files_client.download.side_effect = _download
     target = tmp_path / "workdir"
 
-    materialize_agent_workdir(
-        AgentWorkdir(
-            base_workdir="default/source#project/",
-            artifact_mounts=[AgentWorkdirArtifactMount(ref="default/artifacts#notes.txt", mount_path="notes.txt")],
-        ),
-        files_client,
-        target,
-    )
+    with patch("nemo_agents_plugin.tasks.execute.workdir._download_fileset_ref", side_effect=_download):
+        materialize_agent_workdir(
+            AgentWorkdir(
+                base_workdir="default/source#project/",
+                artifact_mounts=[AgentWorkdirArtifactMount(ref="default/artifacts#notes.txt", mount_path="notes.txt")],
+            ),
+            files_client,
+            target,
+        )
 
-    assert calls == [
-        ("default/source#project/", str(target)),
-        ("default/artifacts#notes.txt", str(target / "notes.txt")),
-    ]
+    assert [ref for ref, _ in calls] == ["default/source#project/", "default/artifacts#notes.txt"]
+    assert calls[0][1] == target
     assert (target / "config.yaml").read_text() == "name: calc\n"
     assert (target / "notes.txt").read_text() == "mounted artifact\n"
 
 
 def test_materialize_agent_workdir_replaces_base_directory_for_directory_mount(tmp_path: Path) -> None:
     files_client = MagicMock()
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[str, Path]] = []
 
-    def _download(*, remote_path: str, local_path: str) -> None:
-        calls.append((remote_path, local_path))
-        local = Path(local_path)
-        local.parent.mkdir(parents=True, exist_ok=True)
-        if remote_path == "default/source#project/":
+    def _download(_files_client: object, ref: str, *, local_dir: Path) -> SimpleNamespace:
+        del _files_client
+        calls.append((ref, local_dir))
+        local_dir.mkdir(parents=True, exist_ok=True)
+        if ref == "default/source#project/":
+            local = local_dir
             (local / "data").mkdir(parents=True)
             (local / "data" / "stale.txt").write_text("stale\n")
         else:
-            if local.is_dir():
-                raise IsADirectoryError(local)
+            local = local_dir / "data"
             local.mkdir(parents=True)
             (local / "mounted.txt").write_text("mounted artifact\n")
+        return SimpleNamespace(path=local, tmp_dir=local_dir)
 
-    files_client.download.side_effect = _download
     target = tmp_path / "workdir"
 
-    materialize_agent_workdir(
-        AgentWorkdir(
-            base_workdir="default/source#project/",
-            artifact_mounts=[AgentWorkdirArtifactMount(ref="default/artifacts#data/", mount_path="data")],
-        ),
-        files_client,
-        target,
-    )
+    with patch("nemo_agents_plugin.tasks.execute.workdir._download_fileset_ref", side_effect=_download):
+        materialize_agent_workdir(
+            AgentWorkdir(
+                base_workdir="default/source#project/",
+                artifact_mounts=[AgentWorkdirArtifactMount(ref="default/artifacts#data/", mount_path="data")],
+            ),
+            files_client,
+            target,
+        )
 
-    assert calls == [
-        ("default/source#project/", str(target)),
-        ("default/artifacts#data/", str(target / "data")),
-    ]
+    assert [ref for ref, _ in calls] == ["default/source#project/", "default/artifacts#data/"]
+    assert calls[0][1] == target
     assert not (target / "data" / "stale.txt").exists()
     assert (target / "data" / "mounted.txt").read_text() == "mounted artifact\n"
 
@@ -624,7 +646,7 @@ async def test_to_spec_mcp_secret_indirection_through_environment() -> None:
     config), and the server's env references the value by name so the running
     step reads it from the process env the substrate populates.
     """
-    mcp_agent_config = {
+    mcp_agent_config: dict[str, Any] = {
         "config_format": "nemo-agents-spec-v1",
         "name": "calc",
         "default_harness": "hermes",
@@ -986,24 +1008,29 @@ def test_run_downloads_and_registers_input_workdir(ctx: JobContext) -> None:
     sdk = MagicMock()
     download_calls: list[tuple[str, str]] = []
 
-    def _download(*, remote_path: str, local_path: str) -> None:
-        download_calls.append((remote_path, local_path))
-        local = Path(local_path)
-        local.parent.mkdir(parents=True, exist_ok=True)
-        if remote_path == "default/source#project/":
+    def _download(_files_client: object, ref: str, *, local_dir: Path) -> SimpleNamespace:
+        del _files_client
+        download_calls.append((ref, str(local_dir)))
+        local_dir.mkdir(parents=True, exist_ok=True)
+        if ref == "default/source#project/":
+            local = local_dir
             local.mkdir(parents=True, exist_ok=True)
-            Path(local_path, "config.yaml").write_text("name: calc\n")
+            (local / "config.yaml").write_text("name: calc\n")
         else:
+            local = local_dir / "notes.txt"
             local.write_text("mounted artifact\n")
-
-    sdk.files.download.side_effect = _download
+        return SimpleNamespace(path=local, tmp_dir=local_dir)
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
         (request.base_dir / "workspace" / "answer.txt").write_text("done\n")
         (request.base_dir / "artifacts" / "artifact.txt").write_text("artifact\n")
         return FabricRuntimeResult(status="succeeded", response="done")
 
-    with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
+    with (
+        patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files),
+        patch("nemo_agents_plugin.tasks.execute.workdir._download_fileset_ref", side_effect=_download),
+        patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
+    ):
         result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=sdk)
 
     assert result["status"] == "completed"
@@ -1033,19 +1060,23 @@ def test_run_clears_stale_input_workdir_before_materializing(ctx: JobContext) ->
     (stale_workdir / "stale.txt").write_text("stale\n")
     sdk = MagicMock()
 
-    def _download(*, remote_path: str, local_path: str) -> None:
-        assert remote_path == "default/source#project/"
-        local = Path(local_path)
+    def _download(_files_client: object, ref: str, *, local_dir: Path) -> SimpleNamespace:
+        del _files_client
+        assert ref == "default/source#project/"
+        local = local_dir
         assert not (local / "stale.txt").exists()
         local.mkdir(parents=True, exist_ok=True)
         (local / "config.yaml").write_text("name: calc\n")
-
-    sdk.files.download.side_effect = _download
+        return SimpleNamespace(path=local, tmp_dir=local_dir)
 
     async def _invoke(request: Any) -> FabricRuntimeResult:
         return FabricRuntimeResult(status="succeeded")
 
-    with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
+    with (
+        patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files),
+        patch("nemo_agents_plugin.tasks.execute.workdir._download_fileset_ref", side_effect=_download),
+        patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
+    ):
         result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=sdk)
 
     assert result["status"] == "completed"
@@ -1089,9 +1120,15 @@ def test_run_failed_download_does_not_register_partial_result(ctx: JobContext) -
         workdir=AgentWorkdir(base_workdir="default/source#project/"),
     )
     sdk = MagicMock()
-    sdk.files.download.side_effect = RuntimeError("download failed")
 
-    with pytest.raises(RuntimeError, match="download failed"):
+    with (
+        patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files),
+        patch(
+            "nemo_agents_plugin.tasks.execute.workdir._download_fileset_ref",
+            side_effect=RuntimeError("download failed"),
+        ),
+        pytest.raises(RuntimeError, match="download failed"),
+    ):
         ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=sdk)
 
     assert not (ctx.storage.persistent / "results" / "input_workdir").exists()
@@ -1208,7 +1245,10 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
         return response
 
     fake_jobs = SimpleNamespace(create_job=_create_job)
-    with patch("nemo_platform_plugin.jobs.api_factory.client_from_platform", return_value=fake_jobs):
+    with (
+        patch("nemo_platform_plugin.jobs.api_factory.client_from_platform", return_value=fake_jobs),
+        patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files),
+    ):
         response = TestClient(app).post(
             "/apis/agents/v2/workspaces/default/jobs/execute",
             json={

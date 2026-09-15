@@ -241,8 +241,9 @@ consumer's job.
 ### Asking for one trace format
 
 A runner may record the same trial in more than one encoding. Harbor registers both under
-`trace:atif` and `trace:otlp` when the agent under test emits both. Pass `format=` to choose one
-and get a narrowed handle back, with no runtime branch:
+`trace:atif` and `trace:otlp` when the agent under test emits both, and Fabric registers both
+whenever it captures an OTLP trace from Relay. Pass `format=` to choose one and get a narrowed
+handle back, with no runtime branch:
 
 ```python
 from nemo_evaluator_sdk.values.evidence import CandidateEvidence
@@ -256,8 +257,8 @@ async def read_both_views(evidence: CandidateEvidence) -> None:
 ```
 
 `trace()` with no `format` still returns whichever encoding the runner made primary. For Harbor
-that is the OTLP trace when the agent emits one and the ATIF trace otherwise — there is no setting
-to choose between them. A `format=` request raises `KeyError` when the trial carries no trace in
+and Fabric alike that is the OTLP trace when one was recorded and the ATIF trace otherwise — there
+is no setting to choose between them. A `format=` request raises `KeyError` when the trial carries no trace in
 that encoding, so a metric that depends on one specific view fails loudly instead of silently
 scoring nothing.
 

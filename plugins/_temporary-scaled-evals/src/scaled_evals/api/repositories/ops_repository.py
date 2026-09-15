@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import psycopg
 
 
 class OperationsRepository:
-    def __init__(self, conn: psycopg.Connection) -> None:
+    def __init__(self, conn: psycopg.Connection[Any]) -> None:
         self.conn = conn
 
     def ping(self) -> None:
@@ -20,6 +22,9 @@ class OperationsRepository:
 
         self.conn.execute(f"SELECT {EVALUATION_COLUMNS} FROM evaluations WHERE false")
         self.conn.execute("SELECT id FROM evaluation_execution_cleanups WHERE false")
+        self.conn.execute(
+            "SELECT benchmark_run_id, generation, status, claim_token, sha256, cleanup_checked_at FROM benchmark_run_archives WHERE false"
+        )
 
     def has_fresh_service_heartbeat(self, service: str, *, stale_seconds: float) -> bool:
         with self.conn.cursor() as cur:

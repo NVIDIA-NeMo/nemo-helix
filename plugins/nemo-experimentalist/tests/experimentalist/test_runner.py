@@ -6,7 +6,7 @@
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import ClassVar
+from typing import ClassVar, cast
 
 import pytest
 from doubles import FakeBackend, FakeEvaluator, fake_client, make_candidate
@@ -24,12 +24,14 @@ from nemo_experimentalist_plugin.entities import (
 from nemo_experimentalist_plugin.experimentalist import runner as runner_module
 from nemo_experimentalist_plugin.experimentalist.context import ExperimentContext
 from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import LocalExperimentalistBackend
+from nemo_experimentalist_plugin.experimentalist.roles import Strategy
 from nemo_experimentalist_plugin.experimentalist.runner import ExperimentRunner
+from nemo_experimentalist_plugin.experimentalist.seam import StrategyContext
 from nemo_insights_plugin.entities import Insight
 from nemo_platform_plugin.config import Configuration
 
 
-class RecordingStrategy:
+class RecordingStrategy(Strategy):
     """Keeps the context it was handed, then returns (or raises) what it was told to."""
 
     supports_resume: ClassVar[bool] = True
@@ -39,8 +41,8 @@ class RecordingStrategy:
         self.error = error
         self.ctx: ExperimentContext | None = None
 
-    async def run(self, ctx: ExperimentContext) -> Candidate | None:
-        self.ctx = ctx
+    async def run(self, ctx: StrategyContext) -> Candidate | None:
+        self.ctx = cast(ExperimentContext, ctx)
         if self.error is not None:
             raise self.error
         if self.winner is not None:
@@ -288,7 +290,7 @@ async def test_a_failed_run_is_visible_on_disk(monkeypatch, tmp_path) -> None:
     agent_dir = tmp_path / "agent"
     agent_dir.mkdir()
     runner = ExperimentRunner(
-        backend=LocalExperimentalistBackend(path=tmp_path / "experiment"),
+        backend=LocalExperimentalistBackend(client=fake_client(), path=tmp_path / "experiment"),
         strategy=RecordingStrategy(error=ValueError("baseline failed")),
         config=EvolutionaryOptimizerConfig(),
         workspace="default",

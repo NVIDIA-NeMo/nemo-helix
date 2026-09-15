@@ -29,12 +29,11 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 import httpx
-from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.errors import NotFoundError
 from nemo_platform_plugin.jobs.client import JobsClient
 from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
 from nemo_platform_plugin.jobs.types import PlatformJobTaskUpdate
-from nmp.common.sdk_factory import get_task_sdk
+from nmp.common.client_factory import get_task_nemo_client
 from nmp.customization_common.service.context import NMPJobContext
 
 logger = logging.getLogger(__name__)
@@ -55,11 +54,12 @@ class JobsServiceProgressReporter:
 
     def __init__(self, job_ctx: NMPJobContext, service_name: str):
         self._job_ctx = job_ctx
-        # with_options rather than handing get_task_sdk a client: that function
+        # with_options rather than handing get_task_nemo_client a client: that function
         # skips its workload-identity branch entirely when passed one, so
         # supplying a client just to set a timeout would quietly change how the
         # task authenticates.
-        self._sdk = get_task_sdk(service_name).with_options(timeout=_REPORT_TIMEOUT)
+        self._client = get_task_nemo_client(service_name)
+        self._jobs = JobsClient.from_client(self._client).with_options(timeout=_REPORT_TIMEOUT)
         self._is_main_rank = int(os.environ.get("RANK", "0")) == 0
         self._max_steps = 0
         self._num_epochs = 0
@@ -94,8 +94,7 @@ class JobsServiceProgressReporter:
             return
 
         try:
-            jobs = client_from_platform(self._sdk, JobsClient)
-            jobs.update_job_step_task(
+            self._jobs.update_job_step_task(
                 name=self._job_ctx.normalized_task,
                 workspace=self._job_ctx.workspace,
                 job=self._job_ctx.job_id,
@@ -148,8 +147,7 @@ class JobsServiceProgressReporter:
             return {}
 
         try:
-            jobs = client_from_platform(self._sdk, JobsClient)
-            task = jobs.get_job_step_task(
+            task = self._jobs.get_job_step_task(
                 name=self._job_ctx.normalized_task,
                 workspace=self._job_ctx.workspace,
                 job=self._job_ctx.job_id,
@@ -193,4 +191,4 @@ class JobsServiceProgressReporter:
         self.update_task(status="error", error_details=error_details)
 
     def close(self) -> None:
-        self._sdk.close()
+        self._client.close()

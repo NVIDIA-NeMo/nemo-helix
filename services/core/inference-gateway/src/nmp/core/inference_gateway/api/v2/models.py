@@ -6,6 +6,8 @@ from typing import Annotated
 
 from aiohttp import ClientSession
 from fastapi import APIRouter, Depends, Request, Response, status
+from nemo_platform_plugin.client.client import AsyncNemoClient
+from nmp.common.service.dependencies import get_nemo_client
 from nmp.core.inference_gateway.api.authz import (
     MODEL_EXEC_PERMISSION,
     enforce_delegated_workspace_access,
@@ -80,6 +82,7 @@ async def model_entity_proxy(
     name: str,
     trailing_uri: str,
     http_client: Annotated[ClientSession, Depends(global_http_client)],
+    nemo_client: Annotated[AsyncNemoClient, Depends(get_nemo_client)],
     model_cache: Annotated[ModelCache, Depends(global_model_cache)],
     virtual_model_cache: Annotated[VirtualModelCache, Depends(global_virtual_model_cache)],
     registry: Annotated[MiddlewareRegistry, Depends(global_middleware_registry)],
@@ -134,4 +137,5 @@ async def model_entity_proxy(
         http_client=http_client,
         model_cache=model_cache,
         registry=registry,
+        request_nemo_client=nemo_client,
     )

@@ -1,16 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from collections.abc import Callable
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.models.client import AsyncModelsClient
-from nmp.customization_common.service.platform_client import fetch_model_entity
+from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients, fetch_model_entity
 
 
 def _not_found() -> NotFoundError:
@@ -21,7 +18,7 @@ def _clients(
     model: SimpleNamespace,
     *,
     fileset_error: Exception | None = None,
-) -> tuple[MagicMock, MagicMock, Callable[[object, type], MagicMock]]:
+) -> tuple[MagicMock, MagicMock, AsyncCustomizationPlatformClients]:
     models = MagicMock()
     models.get_model = AsyncMock(return_value=SimpleNamespace(data=lambda: model))
     files = MagicMock()
@@ -29,25 +26,14 @@ def _clients(
     if fileset_error is not None:
         files.get_fileset.side_effect = fileset_error
 
-    def dispatch(_sdk: object, client_type: type):
-        if client_type is AsyncModelsClient:
-            return models
-        if client_type is AsyncFilesClient:
-            return files
-        raise AssertionError(f"Unexpected client type: {client_type}")
-
-    return models, files, dispatch
+    return models, files, AsyncCustomizationPlatformClients(files=files, models=models)
 
 
 async def test_fetch_model_entity_verifies_weights_fileset() -> None:
     model = SimpleNamespace(name="base", workspace="default", fileset="weights/default-base")
-    models, files, dispatch = _clients(model)
+    models, files, platform = _clients(model)
 
-    with patch(
-        "nmp.customization_common.service.platform_client.client_from_platform",
-        side_effect=dispatch,
-    ):
-        result = await fetch_model_entity("default/base", "default", MagicMock())
+    result = await fetch_model_entity("default/base", "default", platform)
 
     assert result is model
     models.get_model.assert_awaited_once_with(
@@ -60,27 +46,17 @@ async def test_fetch_model_entity_verifies_weights_fileset() -> None:
 
 async def test_fetch_model_entity_rejects_missing_weights_fileset() -> None:
     model = SimpleNamespace(name="base", workspace="default", fileset="default/missing")
-    _, _, dispatch = _clients(model, fileset_error=_not_found())
+    _, _, platform = _clients(model, fileset_error=_not_found())
 
-    with (
-        patch(
-            "nmp.customization_common.service.platform_client.client_from_platform",
-            side_effect=dispatch,
-        ),
-        pytest.raises(ValueError, match="Weights for model 'default/base' fileset 'missing' not found"),
-    ):
-        await fetch_model_entity("default/base", "default", MagicMock())
+    with pytest.raises(ValueError, match="Weights for model 'default/base' fileset 'missing' not found"):
+        await fetch_model_entity("default/base", "default", platform)
 
 
 async def test_fetch_model_entity_without_weights_fileset_skips_files_service() -> None:
     model = SimpleNamespace(name="api-model", workspace="default", fileset=None)
-    _, files, dispatch = _clients(model)
+    _, files, platform = _clients(model)
 
-    with patch(
-        "nmp.customization_common.service.platform_client.client_from_platform",
-        side_effect=dispatch,
-    ):
-        result = await fetch_model_entity("api-model", "default", MagicMock())
+    result = await fetch_model_entity("api-model", "default", platform)
 
     assert result is model
     files.get_fileset.assert_not_awaited()

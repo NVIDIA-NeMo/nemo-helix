@@ -13,6 +13,7 @@
 import crypto from 'crypto';
 import { execSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { serviceConfigs } from './orval/constants';
 
@@ -20,8 +21,37 @@ const FORCE = process.argv.includes('--force');
 const GENERATED_DIR = path.join(__dirname, 'generated');
 const HASH_FILE = path.join(GENERATED_DIR, '.input-hash');
 const ORVAL_DIR = path.join(__dirname, 'orval');
+const MIN_SERVICE_PIPELINES = 4;
+const MAX_PROCESSES_ENV = 'WEB_SDK_GEN_MAX_PROCESSES';
+const MAX_PROCESSES_PATTERN = /^(\d+)(%)?$/;
 
 const services = Object.keys(serviceConfigs) as Array<keyof typeof serviceConfigs>;
+
+const availableParallelism = (): number =>
+  typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
+
+const defaultMaxProcesses = (): number => {
+  return Math.min(services.length, Math.max(MIN_SERVICE_PIPELINES, availableParallelism()));
+};
+
+const maxProcesses = (): string => {
+  const configured = process.env[MAX_PROCESSES_ENV]?.trim();
+  if (configured) {
+    const match = configured.match(MAX_PROCESSES_PATTERN);
+    const value = match ? Number(match[1]) : Number.NaN;
+    if (!match || value < 1) {
+      throw new Error(
+        `${MAX_PROCESSES_ENV} must be a positive count or percent, got "${configured}"`
+      );
+    }
+
+    const configuredProcesses = match[2]
+      ? Math.round((availableParallelism() * value) / 100)
+      : value;
+    return String(Math.min(services.length, Math.max(1, configuredProcesses)));
+  }
+  return String(defaultMaxProcesses());
+};
 
 interface GenerationConfig {
   service: string;
@@ -131,9 +161,12 @@ const main = async () => {
 
   const commands = generationConfigs.map(generateCommands);
   const serviceNames = generationConfigs.map((config) => config.service);
+  const maxServicePipelines = maxProcesses();
   const colors = ['red', 'blue', 'green', 'yellow', 'magenta', 'cyan', 'purple', 'white', 'gray'];
 
   const concurrentlyArgs = [
+    '--max-processes',
+    maxServicePipelines,
     '--names',
     serviceNames.join(','),
     '-c',
@@ -143,7 +176,7 @@ const main = async () => {
 
   const concurrentlyCommand = `pnpm exec concurrently ${concurrentlyArgs.join(' ')}`;
 
-  console.log('Executing commands in parallel:');
+  console.log(`Executing commands in parallel (max ${maxServicePipelines} service pipelines):`);
   commands.forEach((cmd, index) => {
     console.log(`  ${index + 1}. ${cmd}`);
   });

@@ -48,15 +48,26 @@ export const OverviewTab: FC<OverviewTabProps> = ({
   onRunEvaluation,
 }) => {
   const navigate = useNavigate();
-  const [range, setRange] = useState<TraceStatisticsRange>('week');
-  const { summary, buckets, isPending } = useAgentTraceMetrics({
+  const [range, setRange] = useState<TraceStatisticsRange>('max');
+  const {
+    summary,
+    buckets,
+    isPending,
+    isPlaceholderData,
+    error: traceMetricsError,
+  } = useAgentTraceMetrics({
     workspace,
     agentName: agent?.name,
     range,
     enabled: INTAKE_ENABLED,
   });
   const experiments = useMemo(() => toRecentExperiments(evals), [evals]);
-  const awaitingTelemetry = !isPending && (summary === null || summary.totalTraces === 0);
+  const awaitingTelemetry =
+    !isPending &&
+    !isPlaceholderData &&
+    !traceMetricsError &&
+    range === 'max' &&
+    (summary === null || summary.totalTraces === 0);
   const {
     insights,
     totalCount: insightCount,
@@ -87,6 +98,7 @@ export const OverviewTab: FC<OverviewTabProps> = ({
             onRunAgent={onRunAgent}
             isPending={isPending}
             caption={bucketAdverbForRange(range)}
+            error={traceMetricsError}
           />
         )}
         <RecentExperimentsPanel
@@ -106,7 +118,7 @@ export const OverviewTab: FC<OverviewTabProps> = ({
             insights={insights}
             totalCount={insightCount}
             isPending={insightsPending}
-            error={insightsError}
+            hasError={!!insightsError}
             awaitingTelemetry={awaitingTelemetry}
             onOpenInsight={(insight) => navigate(getOptimizerInsightRoute(workspace, insight.id))}
             onViewAll={() => navigate(getOptimizerRoute(workspace))}

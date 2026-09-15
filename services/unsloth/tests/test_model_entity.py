@@ -18,7 +18,7 @@ import json
 import types
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from nemo_platform_plugin.files.client import FilesClient
@@ -53,16 +53,14 @@ def _make_job_ctx(workspace: str = "default"):
     )
 
 
-def _make_runner(sdk):
+def _make_runner(models: ModelsClient, files: FilesClient):
     from nmp.customization_common.tasks.model_entity.run import ModelEntityRunner
 
-    return ModelEntityRunner(sdk=sdk, job_ctx=_make_job_ctx())
+    return ModelEntityRunner(models=models, files=files, job_ctx=_make_job_ctx())
 
 
-def _make_sdk() -> MagicMock:
-    sdk = MagicMock()
-    sdk.with_options.return_value = sdk
-    return sdk
+def _make_clients() -> tuple[MagicMock, MagicMock]:
+    return MagicMock(), MagicMock()
 
 
 def _response(data: object) -> MagicMock:
@@ -75,21 +73,6 @@ def _page(items: list[object]) -> MagicMock:
     response = MagicMock()
     response.items.return_value = items
     return response
-
-
-def _configure_clients(mock_client_from_platform: MagicMock) -> tuple[MagicMock, MagicMock]:
-    models = MagicMock()
-    files = MagicMock()
-
-    def make_client(_sdk: object, client_type: type) -> MagicMock:
-        if client_type is ModelsClient:
-            return models
-        if client_type is FilesClient:
-            return files
-        raise AssertionError(f"Unexpected client type: {client_type}")
-
-    mock_client_from_platform.side_effect = make_client
-    return models, files
 
 
 def _raise_runner_conflict() -> None:
@@ -160,18 +143,16 @@ class TestSanitizeName:
 
 
 class TestCreateFullEntity:
-    @patch("nmp.customization_common.tasks.model_entity.run.client_from_platform")
-    def test_creates_model_entity_for_full_sft(self, mock_cfp) -> None:
+    def test_creates_model_entity_for_full_sft(self) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
         from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig
 
-        sdk = _make_sdk()
-        models, files = _configure_clients(mock_cfp)
+        models, files = _make_clients()
         models.get_model.return_value = _response(_model_entity(name="base-model"))
         new_me = _model_entity(name="trained-model")
         models.create_model.return_value = _response(new_me)
 
-        runner = _make_runner(sdk)
+        runner = _make_runner(models, files)
         config = ModelEntityTaskConfig(
             name="trained-model",
             workspace="default",
@@ -196,19 +177,17 @@ class TestCreateFullEntity:
         assert deploy_target is new_me
         assert result is not None
 
-    @patch("nmp.customization_common.tasks.model_entity.run.client_from_platform")
-    def test_conflict_falls_back_to_update(self, mock_cfp) -> None:
+    def test_conflict_falls_back_to_update(self) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
         from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig
 
-        sdk = _make_sdk()
-        models, _files = _configure_clients(mock_cfp)
+        models, files = _make_clients()
         models.get_model.return_value = _response(_model_entity(name="base-model"))
         models.create_model.side_effect = lambda **_: _raise_runner_conflict()
         updated_me = _model_entity(name="trained-model")
         models.update_model.return_value = _response(updated_me)
 
-        runner = _make_runner(sdk)
+        runner = _make_runner(models, files)
         config = ModelEntityTaskConfig(
             name="trained-model",
             workspace="default",
@@ -229,15 +208,13 @@ class TestCreateFullEntity:
         assert body.base_model is None
         assert body.trust_remote_code is False
 
-    @patch("nmp.customization_common.tasks.model_entity.run.client_from_platform")
-    def test_missing_fileset_raises_creation_error(self, mock_cfp) -> None:
+    def test_missing_fileset_raises_creation_error(self) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
         from nmp.customization_common.schemas.model_entity import ModelEntityCreationError, ModelEntityTaskConfig
 
-        sdk = _make_sdk()
-        models, files = _configure_clients(mock_cfp)
+        models, files = _make_clients()
         files.get_fileset.side_effect = RuntimeError("fileset missing")
-        runner = _make_runner(sdk)
+        runner = _make_runner(models, files)
         config = ModelEntityTaskConfig(
             name="x",
             workspace="default",
@@ -258,19 +235,17 @@ class TestCreateFullEntity:
 
 
 class TestCreateAdapter:
-    @patch("nmp.customization_common.tasks.model_entity.run.client_from_platform")
-    def test_creates_adapter_for_lora(self, mock_cfp) -> None:
+    def test_creates_adapter_for_lora(self) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
         from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
         from nmp.unsloth.entities.values import FinetuningType
 
-        sdk = _make_sdk()
-        models, _files = _configure_clients(mock_cfp)
+        models, files = _make_clients()
         base_me = _model_entity(name="base-model")
         models.get_model.return_value = _response(base_me)
         models.create_model_adapter.return_value = _response(_model_entity(name="adapter-x"))
 
-        runner = _make_runner(sdk)
+        runner = _make_runner(models, files)
         config = ModelEntityTaskConfig(
             name="adapter-x",
             workspace="default",
@@ -295,19 +270,17 @@ class TestCreateAdapter:
         assert body.enabled is True
         assert deploy_target is base_me
 
-    @patch("nmp.customization_common.tasks.model_entity.run.client_from_platform")
-    def test_adapter_conflict_falls_back_to_update(self, mock_cfp) -> None:
+    def test_adapter_conflict_falls_back_to_update(self) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
         from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
         from nmp.unsloth.entities.values import FinetuningType
 
-        sdk = _make_sdk()
-        models, _files = _configure_clients(mock_cfp)
+        models, files = _make_clients()
         models.get_model.return_value = _response(_model_entity(name="base-model"))
         models.create_model_adapter.side_effect = lambda **_: _raise_runner_conflict()
         models.update_model_adapter.return_value = _response(_model_entity(name="adapter-x"))
 
-        runner = _make_runner(sdk)
+        runner = _make_runner(models, files)
         config = ModelEntityTaskConfig(
             name="adapter-x",
             workspace="default",
@@ -335,14 +308,12 @@ class TestCreateAdapter:
 
 
 class TestLaunchModel:
-    @patch("nmp.customization_common.tasks.model_entity.run.client_from_platform")
-    def test_no_deployment_config_returns_early(self, mock_cfp) -> None:
+    def test_no_deployment_config_returns_early(self) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
         from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig
 
-        sdk = _make_sdk()
-        models, _files = _configure_clients(mock_cfp)
-        runner = _make_runner(sdk)
+        models, files = _make_clients()
+        runner = _make_runner(models, files)
         me = _model_entity(name="x")
         config = ModelEntityTaskConfig(
             name="x",
@@ -357,13 +328,11 @@ class TestLaunchModel:
         models.create_deployment.assert_not_called()
         models.create_deployment_config.assert_not_called()
 
-    @patch("nmp.customization_common.tasks.model_entity.run.client_from_platform")
-    def test_inline_params_creates_config_then_deployment(self, mock_cfp) -> None:
+    def test_inline_params_creates_config_then_deployment(self) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
         from nmp.customization_common.schemas.model_entity import DeploymentParameters, ModelEntityTaskConfig
 
-        sdk = _make_sdk()
-        models, _files = _configure_clients(mock_cfp)
+        models, files = _make_clients()
         deployment_config = types.SimpleNamespace(workspace="other", name="sft-cfg-x")
         deployment = types.SimpleNamespace(workspace="other", name="sft-deploy-x")
         deployment_status = types.SimpleNamespace(
@@ -375,7 +344,7 @@ class TestLaunchModel:
         models.create_deployment.return_value = _response(deployment)
         models.get_deployment.return_value = _response(deployment_status)
 
-        runner = _make_runner(sdk)
+        runner = _make_runner(models, files)
         me = _model_entity(
             workspace="other",
             name="x",
@@ -411,13 +380,11 @@ class TestLaunchModel:
         assert deployment_body.config == "sft-cfg-x"
         models.get_deployment.assert_called_once_with(workspace="other", name="sft-deploy-x")
 
-    @patch("nmp.customization_common.tasks.model_entity.run.client_from_platform")
-    def test_inline_config_conflict_updates_before_deployment(self, mock_cfp) -> None:
+    def test_inline_config_conflict_updates_before_deployment(self) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
         from nmp.customization_common.schemas.model_entity import DeploymentParameters, ModelEntityTaskConfig
 
-        sdk = _make_sdk()
-        models, _files = _configure_clients(mock_cfp)
+        models, files = _make_clients()
         models.create_deployment_config.side_effect = lambda **_: _raise_runner_conflict()
         updated_config = types.SimpleNamespace(workspace="default", name="sft-cfg-x")
         deployment = types.SimpleNamespace(workspace="default", name="sft-deploy-x")
@@ -431,7 +398,7 @@ class TestLaunchModel:
             )
         )
 
-        runner = _make_runner(sdk)
+        runner = _make_runner(models, files)
         me = _model_entity(
             name="x",
             spec=types.SimpleNamespace(family="llama", base_num_parameters=1_000_000_000),
@@ -455,13 +422,11 @@ class TestLaunchModel:
         assert body.executor_config.gpu == 2
         models.create_deployment.assert_called_once()
 
-    @patch("nmp.customization_common.tasks.model_entity.run.client_from_platform")
-    def test_string_ref_resolves_existing_config(self, mock_cfp) -> None:
+    def test_string_ref_resolves_existing_config(self) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
         from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig
 
-        sdk = _make_sdk()
-        models, _files = _configure_clients(mock_cfp)
+        models, files = _make_clients()
         deployment_config = types.SimpleNamespace(workspace="shared", name="existing-cfg")
         deployment = types.SimpleNamespace(workspace="shared", name="sft-deploy-x")
         models.get_deployment_config.return_value = _response(deployment_config)
@@ -474,7 +439,7 @@ class TestLaunchModel:
             )
         )
 
-        runner = _make_runner(sdk)
+        runner = _make_runner(models, files)
         me = _model_entity(name="x", spec=types.SimpleNamespace(family="llama", base_num_parameters=1))
         config = ModelEntityTaskConfig(
             name="x",
@@ -492,8 +457,7 @@ class TestLaunchModel:
         assert deployment_call.kwargs["workspace"] == "shared"
         assert deployment_call.kwargs["body"].config == "existing-cfg"
 
-    @patch("nmp.customization_common.tasks.model_entity.run.client_from_platform")
-    def test_lora_with_active_deployment_skips(self, mock_cfp) -> None:
+    def test_lora_with_active_deployment_skips(self) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
         from nmp.customization_common.schemas.model_entity import (
             DeploymentParameters,
@@ -502,14 +466,13 @@ class TestLaunchModel:
         )
         from nmp.unsloth.entities.values import FinetuningType
 
-        sdk = _make_sdk()
-        models, _files = _configure_clients(mock_cfp)
+        models, files = _make_clients()
         existing_config = types.SimpleNamespace(workspace="other", name="cfg-1")
         active_deployment = types.SimpleNamespace(status=ModelDeploymentStatus.READY)
         models.list_deployment_configs.return_value = _page([existing_config])
         models.list_deployments.return_value = _page([active_deployment])
 
-        runner = _make_runner(sdk)
+        runner = _make_runner(models, files)
         me = _model_entity(workspace="other", name="base")
         config = ModelEntityTaskConfig(
             name="adapter",
@@ -534,10 +497,8 @@ class TestLaunchModel:
         models.create_deployment_config.assert_not_called()
         models.create_deployment.assert_not_called()
 
-    @patch("nmp.customization_common.tasks.model_entity.run.client_from_platform")
     def test_lora_with_lora_enabled_false_warns_and_skips(
         self,
-        mock_cfp,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
@@ -548,11 +509,10 @@ class TestLaunchModel:
         )
         from nmp.unsloth.entities.values import FinetuningType
 
-        sdk = _make_sdk()
-        models, _files = _configure_clients(mock_cfp)
+        models, files = _make_clients()
         models.list_deployment_configs.return_value = _page([])
 
-        runner = _make_runner(sdk)
+        runner = _make_runner(models, files)
         me = _model_entity(name="base")
         config = ModelEntityTaskConfig(
             name="adapter",

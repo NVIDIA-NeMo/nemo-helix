@@ -6,7 +6,7 @@ from __future__ import annotations
 import httpx
 import pytest
 from nemo_evaluator.sdk.resources import AsyncEvaluator, Evaluator, evaluator_sdk_resources
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
 
 BASE = "http://test"
 

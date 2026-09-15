@@ -6,13 +6,13 @@
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from nemo_platform import AsyncNeMoPlatform
-from nemo_platform._exceptions import APIStatusError, ConflictError, NotFoundError
-from nemo_platform.types.inference import ServedModelMapping
-from nemo_platform.types.inference.model_provider import ModelProvider
+from nemo_platform_plugin.client.errors import NemoHTTPError
+from nemo_platform_plugin.models.types import ModelProvider, ModelProviderStatus, ServedModelMapping
 from nmp.core.models.config import ControllerConfig
 from nmp.core.models.controllers.context import ModelContext
 from nmp.core.models.controllers.entity_cache import ModelEntityCache
@@ -30,12 +30,11 @@ from nmp.core.models.controllers.provider_reconciler import (
     _is_valid_served_model_entity_id,
     _resolve_base_backend_model_id,
 )
-from nmp.core.models.schemas import ModelProviderStatus
 
 from .conftest import (
-    AsyncPaginator,
     _AsyncPage,
     _ModelResponse,
+    _status_error,
     make_async_models_client,
     make_entity,
     seed_entity_cache,
@@ -47,7 +46,44 @@ def _discovery_models_from_ids(ids: list[str]) -> list[dict]:
     return [{"id": i, "root": None, "parent": None} for i in ids]
 
 
-_AsyncPaginator = AsyncPaginator
+def _enum_value(value: Enum | str) -> str:
+    return value.value if isinstance(value, Enum) else value
+
+
+def _provider_status_call(update_status: AsyncMock, index: int = -1) -> dict[str, object]:
+    call = update_status.call_args_list[index]
+    body = call.kwargs["body"]
+    values: dict[str, object] = {
+        "name": call.kwargs["name"],
+        "workspace": call.kwargs["workspace"],
+    }
+    if "served_models" in body.model_fields_set:
+        values["served_models"] = body.served_models
+    if "status" in body.model_fields_set:
+        values["status"] = _enum_value(body.status)
+    if "status_message" in body.model_fields_set:
+        values["status_message"] = body.status_message
+    return values
+
+
+def _request_body_call(method: AsyncMock, index: int = -1) -> dict[str, object]:
+    call = method.call_args_list[index]
+    values: dict[str, object] = {}
+    if "workspace" in call.kwargs:
+        values["workspace"] = call.kwargs["workspace"]
+    if "name" in call.kwargs:
+        values["name"] = call.kwargs["name"]
+    values.update(call.kwargs["body"].model_dump(exclude_unset=True, mode="json"))
+    return values
+
+
+def _virtual_model_delete_call(delete_virtual_model: AsyncMock, index: int = -1) -> dict[str, object]:
+    call = delete_virtual_model.call_args_list[index]
+    return {
+        "name": call.kwargs["name"],
+        "workspace": call.kwargs["workspace"],
+        "expected_db_version": call.kwargs["query_params"]["expected_db_version"],
+    }
 
 
 def test_infer_backend_format():
@@ -80,7 +116,8 @@ def _make_discoverable_provider(
 def _configure_discovery_sdk(mock_models_sdk: MagicMock) -> MagicMock:
     """Wire mock_models_sdk.with_options to return a discovery-scoped SDK mock."""
     discovery_sdk = MagicMock()
-    discovery_sdk.inference.gateway.provider.get = AsyncMock(
+    discovery_sdk.gateway_provider_client = MagicMock()
+    discovery_sdk.gateway_provider_client.get_provider_models = AsyncMock(
         return_value={"object": "list", "data": [{"id": "model-1"}]}
     )
     mock_models_sdk.with_options = MagicMock(return_value=discovery_sdk)
@@ -106,13 +143,13 @@ def controller_config():
 def mock_models_sdk():
     """Create a mock AsyncNeMoPlatform SDK."""
     sdk = MagicMock(spec=AsyncNeMoPlatform)
-    # virtual_models.create must be an AsyncMock so tests that exercise the full
-    # reconcile path don't fail when _ensure_passthrough_virtual_model awaits it.
-    sdk.inference.virtual_models.create = AsyncMock(return_value=None)
-    sdk.inference.virtual_models.delete = AsyncMock(return_value=None)
-    sdk.inference.virtual_models.list = MagicMock(return_value=_AsyncPaginator([]))
     sdk.models_client = make_async_models_client()
-    sdk.inference.gateway.provider.get = AsyncMock()
+    sdk.virtual_models_client = MagicMock()
+    sdk.virtual_models_client.list_virtual_models = AsyncMock(return_value=_AsyncPage([]))
+    sdk.virtual_models_client.create_virtual_model = AsyncMock(return_value=_ModelResponse())
+    sdk.virtual_models_client.delete_virtual_model = AsyncMock(return_value=_ModelResponse())
+    sdk.gateway_provider_client = MagicMock()
+    sdk.gateway_provider_client.get_provider_models = AsyncMock()
     sdk.with_options = MagicMock(return_value=sdk)
     return sdk
 
@@ -121,9 +158,26 @@ def mock_models_sdk():
 def _patch_entity_cache_client_from_platform(mock_models_sdk):
     """Route ``client_from_platform(sdk, AsyncModelsClient)`` in the entity cache
     back to the mock typed client on ``mock_models_sdk.models_client``."""
-    with patch(
-        "nmp.core.models.controllers.entity_cache.client_from_platform",
-        side_effect=lambda sdk, cls: sdk.models_client,
+
+    def _client_from_platform(sdk, cls):
+        match cls.__name__:
+            case "AsyncModelsClient":
+                return sdk.models_client
+            case "AsyncVirtualModelsClient":
+                return sdk.virtual_models_client
+            case "AsyncInferenceGatewayProviderClient":
+                return sdk.gateway_provider_client
+        raise AssertionError(f"Unexpected typed client class: {cls.__name__}")
+
+    with (
+        patch(
+            "nmp.core.models.controllers.entity_cache.client_from_platform",
+            side_effect=_client_from_platform,
+        ),
+        patch(
+            "nmp.core.models.controllers.provider_reconciler.client_from_platform",
+            side_effect=_client_from_platform,
+        ),
     ):
         yield
 
@@ -165,7 +219,7 @@ async def reconcile_and_flush(reconciler, entity_cache, provider_contexts):
 @pytest.mark.asyncio
 async def test_get_available_models_from_provider_success(reconciler, mock_models_sdk, controller_config):
     """Test successfully getting models from OpenAI-compliant provider."""
-    mock_models_sdk.inference.gateway.provider.get = AsyncMock(
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
         return_value={
             "object": "list",
             "data": [
@@ -181,8 +235,7 @@ async def test_get_available_models_from_provider_success(reconciler, mock_model
 
     assert isinstance(result, DiscoverySuccess)
     assert result.model_ids == ["model-1", "model-2", "model-3"]
-    mock_models_sdk.inference.gateway.provider.get.assert_called_once_with(
-        "v1/models",
+    mock_models_sdk.gateway_provider_client.get_provider_models.assert_called_once_with(
         workspace="test-ns",
         name="test-provider",
         timeout=controller_config.provider_discovery_timeout_seconds,
@@ -195,7 +248,7 @@ async def test_get_available_models_from_provider_success(reconciler, mock_model
 @pytest.mark.asyncio
 async def test_discover_models_passes_configured_timeout(mock_models_sdk):
     """Discovery should honor controller_config.provider_discovery_timeout_seconds."""
-    mock_models_sdk.inference.gateway.provider.get = AsyncMock(
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
         return_value={"object": "list", "data": [{"id": "model-1"}]}
     )
     config = ControllerConfig(provider_discovery_timeout_seconds=240)
@@ -208,8 +261,7 @@ async def test_discover_models_passes_configured_timeout(mock_models_sdk):
 
     await reconciler._discover_models(_make_discoverable_provider())
 
-    mock_models_sdk.inference.gateway.provider.get.assert_called_once_with(
-        "v1/models",
+    mock_models_sdk.gateway_provider_client.get_provider_models.assert_called_once_with(
         workspace="test-ns",
         name="test-provider",
         timeout=240,
@@ -223,7 +275,6 @@ async def test_discover_models_passes_configured_timeout(mock_models_sdk):
         (
             2,
             {
-                "path": "v1/models",
                 "workspace": "test-ns",
                 "name": "test-provider",
             },
@@ -248,10 +299,9 @@ async def test_discover_models_uses_discovery_sdk_with_configured_retries(
 
     mock_models_sdk.with_options.assert_called_once_with(max_retries=max_retries)
     if expect_get_call_kwargs is None:
-        discovery_sdk.inference.gateway.provider.get.assert_called_once()
+        discovery_sdk.gateway_provider_client.get_provider_models.assert_called_once()
     else:
-        discovery_sdk.inference.gateway.provider.get.assert_called_once_with(
-            expect_get_call_kwargs["path"],
+        discovery_sdk.gateway_provider_client.get_provider_models.assert_called_once_with(
             workspace=expect_get_call_kwargs["workspace"],
             name=expect_get_call_kwargs["name"],
             timeout=config.provider_discovery_timeout_seconds,
@@ -262,11 +312,7 @@ async def test_discover_models_uses_discovery_sdk_with_configured_retries(
     "discovery_side_effect",
     [
         pytest.param(
-            APIStatusError(
-                "Error code: 502 - {'detail': 'Backend networking error: Connection refused'}",
-                response=MagicMock(status_code=502),
-                body={"detail": "Backend networking error: Connection refused"},
-            ),
+            _status_error(502, "Backend networking error: Connection refused"),
             id="http_502",
         ),
         pytest.param(Exception("Request timed out."), id="network_timeout"),
@@ -277,7 +323,7 @@ async def test_discover_models_transient_errors_log_debug_not_warning(
     reconciler, mock_models_sdk, caplog, discovery_side_effect
 ):
     """Transient gateway and network failures during discovery must log at debug, not warning."""
-    mock_models_sdk.inference.gateway.provider.get = AsyncMock(side_effect=discovery_side_effect)
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(side_effect=discovery_side_effect)
 
     with caplog.at_level(logging.DEBUG):
         result = await reconciler._discover_models(_make_discoverable_provider())
@@ -289,7 +335,7 @@ async def test_discover_models_transient_errors_log_debug_not_warning(
 @pytest.mark.asyncio
 async def test_get_available_models_from_provider_non_compliant_missing_data(reconciler, mock_models_sdk):
     """Test provider with non-OpenAI compliant response (missing 'data' field)."""
-    mock_models_sdk.inference.gateway.provider.get = AsyncMock(
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
         return_value={"object": "list"}  # Missing 'data'
     )
 
@@ -310,7 +356,7 @@ async def test_get_available_models_from_provider_parses_json_string_response(re
     """A valid JSON body served without an application/json Content-Type (e.g. some
     Ollama versions) arrives as a raw string from the SDK. Discovery should still
     parse it instead of treating it as non-compliant."""
-    mock_models_sdk.inference.gateway.provider.get = AsyncMock(
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
         return_value=json.dumps(
             {
                 "object": "list",
@@ -335,7 +381,7 @@ async def test_get_available_models_from_provider_parses_json_string_response(re
 @pytest.mark.asyncio
 async def test_get_available_models_from_provider_non_compliant_unparsable_string(reconciler, mock_models_sdk):
     """A non-JSON string response (genuinely non-compliant) is still rejected."""
-    mock_models_sdk.inference.gateway.provider.get = AsyncMock(return_value="<html>not json</html>")
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(return_value="<html>not json</html>")
 
     model_provider = ModelProvider(
         name="test-provider",
@@ -352,7 +398,7 @@ async def test_get_available_models_from_provider_non_compliant_unparsable_strin
 @pytest.mark.asyncio
 async def test_get_available_models_from_provider_non_compliant_wrong_type(reconciler, mock_models_sdk):
     """Test provider with non-dict response."""
-    mock_models_sdk.inference.gateway.provider.get = AsyncMock(
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
         return_value=["model-1", "model-2"]  # Not a dict
     )
 
@@ -371,7 +417,9 @@ async def test_get_available_models_from_provider_non_compliant_wrong_type(recon
 @pytest.mark.asyncio
 async def test_get_available_models_from_provider_non_compliant_data_not_list(reconciler, mock_models_sdk):
     """Test provider with 'data' field that is not a list."""
-    mock_models_sdk.inference.gateway.provider.get = AsyncMock(return_value={"object": "list", "data": "not-a-list"})
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
+        return_value={"object": "list", "data": "not-a-list"}
+    )
 
     model_provider = ModelProvider(
         name="test-provider",
@@ -388,7 +436,7 @@ async def test_get_available_models_from_provider_non_compliant_data_not_list(re
 @pytest.mark.asyncio
 async def test_get_available_models_from_provider_skips_invalid_entries(reconciler, mock_models_sdk):
     """Test provider response with some invalid model entries."""
-    mock_models_sdk.inference.gateway.provider.get = AsyncMock(
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
         return_value={
             "object": "list",
             "data": [
@@ -419,7 +467,7 @@ async def test_get_available_models_from_provider_skips_invalid_entries(reconcil
 @pytest.mark.asyncio
 async def test_get_available_models_from_provider_handles_exception(reconciler, mock_models_sdk):
     """Test that exceptions from provider endpoint return DiscoveryTransientError."""
-    mock_models_sdk.inference.gateway.provider.get = AsyncMock(side_effect=Exception("Connection error"))
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(side_effect=Exception("Connection error"))
 
     model_provider = ModelProvider(
         name="test-provider",
@@ -436,14 +484,8 @@ async def test_get_available_models_from_provider_handles_exception(reconciler, 
 @pytest.mark.asyncio
 async def test_query_available_models_gateway_404_provider_not_in_cache_is_transient(reconciler, mock_models_sdk):
     """Gateway 404 'Model provider not found' (cache miss) must be treated as transient."""
-    mock_response = MagicMock()
-    mock_response.status_code = 404
-    mock_models_sdk.inference.gateway.provider.get = AsyncMock(
-        side_effect=APIStatusError(
-            "Error code: 404 - {'detail': 'Model provider not found for test-ns/test-provider'}",
-            response=mock_response,
-            body={"detail": "Model provider not found for test-ns/test-provider"},
-        )
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
+        side_effect=_status_error(404, "Model provider not found for test-ns/test-provider")
     )
 
     model_provider = ModelProvider(
@@ -461,14 +503,8 @@ async def test_query_available_models_gateway_404_provider_not_in_cache_is_trans
 @pytest.mark.asyncio
 async def test_query_available_models_502_backend_404_is_non_compliant(reconciler, mock_models_sdk):
     """502 with 'Backend returned 404' means backend has no GET /v1/models — non-compliant."""
-    mock_response = MagicMock()
-    mock_response.status_code = 502
-    mock_models_sdk.inference.gateway.provider.get = AsyncMock(
-        side_effect=APIStatusError(
-            "Error code: 502 - {'detail': 'Backend returned 404: Not Found'}",
-            response=mock_response,
-            body={"detail": "Backend returned 404: Not Found"},
-        )
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
+        side_effect=_status_error(502, "Backend returned 404: Not Found")
     )
 
     model_provider = ModelProvider(
@@ -486,14 +522,8 @@ async def test_query_available_models_502_backend_404_is_non_compliant(reconcile
 @pytest.mark.asyncio
 async def test_query_available_models_502_other_detail_is_transient(reconciler, mock_models_sdk):
     """502 with detail other than 'Backend returned 404' is treated as transient."""
-    mock_response = MagicMock()
-    mock_response.status_code = 502
-    mock_models_sdk.inference.gateway.provider.get = AsyncMock(
-        side_effect=APIStatusError(
-            "Error code: 502 - {'detail': 'Backend networking error: Connection refused'}",
-            response=mock_response,
-            body={"detail": "Backend networking error: Connection refused"},
-        )
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
+        side_effect=_status_error(502, "Backend networking error: Connection refused")
     )
 
     model_provider = ModelProvider(
@@ -511,7 +541,7 @@ async def test_query_available_models_502_other_detail_is_transient(reconciler, 
 @pytest.mark.asyncio
 async def test_get_available_models_from_provider_empty_list(reconciler, mock_models_sdk):
     """Test provider with no models."""
-    mock_models_sdk.inference.gateway.provider.get = AsyncMock(return_value={"object": "list", "data": []})
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(return_value={"object": "list", "data": []})
 
     model_provider = ModelProvider(
         name="test-provider",
@@ -721,6 +751,7 @@ async def test_ensure_model_entity_creates_new_entity(reconciler):
         await reconciler._ensure_model_entity_for_provider(
             model_workspace="test-ns",
             model_name="test-model",
+            provider=ctx.model_provider,
             provider_id="test-ns/test-provider",
             ctx=ctx,
         )
@@ -765,6 +796,7 @@ async def test_ensure_model_entity_updates_existing_adds_provider(reconciler):
         await reconciler._ensure_model_entity_for_provider(
             model_workspace="test-ns",
             model_name="test-model",
+            provider=ctx.model_provider,
             provider_id="test-ns/test-provider",
             ctx=ctx,
         )
@@ -805,6 +837,7 @@ async def test_ensure_model_entity_skips_if_provider_already_linked(reconciler):
         await reconciler._ensure_model_entity_for_provider(
             model_workspace="test-ns",
             model_name="test-model",
+            provider=ctx.model_provider,
             provider_id="test-ns/test-provider",
             ctx=ctx,
         )
@@ -839,6 +872,7 @@ async def test_ensure_model_entity_backfills_missing_backend_format(reconciler):
         await reconciler._ensure_model_entity_for_provider(
             model_workspace="test-ns",
             model_name="anthropic.claude-3-5-sonnet",
+            provider=ctx.model_provider,
             provider_id="test-ns/test-provider",
             ctx=ctx,
         )
@@ -880,6 +914,7 @@ async def test_ensure_model_entity_adds_artifact_to_existing_without_artifact(re
         await reconciler._ensure_model_entity_for_provider(
             model_workspace="test-ns",
             model_name="test-model",
+            provider=ctx.model_provider,
             provider_id="test-ns/test-provider",
             ctx=ctx,
         )
@@ -924,6 +959,7 @@ async def test_ensure_model_entity_doesnt_overwrite_existing_artifact(reconciler
         await reconciler._ensure_model_entity_for_provider(
             model_workspace="test-ns",
             model_name="test-model",
+            provider=ctx.model_provider,
             provider_id="test-ns/test-provider",
             ctx=ctx,
         )
@@ -964,6 +1000,7 @@ async def test_ensure_model_entity_doesnt_overwrite_existing_backend_format(reco
         await reconciler._ensure_model_entity_for_provider(
             model_workspace="test-ns",
             model_name="test-model",
+            provider=ctx.model_provider,
             provider_id="test-ns/test-provider",
             ctx=ctx,
         )
@@ -1003,6 +1040,7 @@ async def test_ensure_model_entity_handles_null_model_providers(reconciler):
         await reconciler._ensure_model_entity_for_provider(
             model_workspace="test-ns",
             model_name="test-model",
+            provider=ctx.model_provider,
             provider_id="test-ns/test-provider",
             ctx=ctx,
         )
@@ -1036,6 +1074,7 @@ async def test_ensure_model_entity_handles_create_exception(reconciler):
         await reconciler._ensure_model_entity_for_provider(
             model_workspace="test-ns",
             model_name="test-model",
+            provider=ctx.model_provider,
             provider_id="test-ns/test-provider",
             ctx=ctx,
         )
@@ -1049,17 +1088,9 @@ async def test_entity_cache_load_failure_propagates_and_stages_nothing(reconcile
     The controller loads the cache at the start of the phase, so this failure aborts
     the step before reconciliation runs; see the models controller tests for that.
     """
-    mock_response = MagicMock()
-    mock_response.status_code = 503
-    mock_models_sdk.models_client.list_models = AsyncMock(
-        side_effect=APIStatusError(
-            "Service unavailable",
-            response=mock_response,
-            body={"detail": "upstream error"},
-        )
-    )
+    mock_models_sdk.models_client.list_models = AsyncMock(side_effect=_status_error(503, "upstream error"))
 
-    with pytest.raises(APIStatusError):
+    with pytest.raises(NemoHTTPError):
         await reconciler._entity_cache.refresh()
 
     await reconciler._entity_cache.flush()
@@ -1087,8 +1118,8 @@ async def test_virtual_model_listing_failure_does_not_abort_provider_reconciliat
         model_entity=None,
     )
 
-    mock_models_sdk.inference.virtual_models.list = MagicMock(side_effect=Exception("listing unavailable"))
-    mock_models_sdk.inference.providers.update_status = AsyncMock()
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(side_effect=Exception("listing unavailable"))
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(
         reconciler,
@@ -1099,11 +1130,11 @@ async def test_virtual_model_listing_failure_does_not_abort_provider_reconciliat
     await entity_cache.flush()
 
     # Provider status and entity linking still happened.
-    mock_models_sdk.inference.providers.update_status.assert_awaited()
+    mock_models_sdk.models_client.update_provider_status.assert_awaited()
     mock_models_sdk.models_client.create_model.assert_awaited_once()
     # VirtualModel work was skipped rather than acted on with an unknown state.
-    mock_models_sdk.inference.virtual_models.create.assert_not_awaited()
-    mock_models_sdk.inference.virtual_models.delete.assert_not_awaited()
+    mock_models_sdk.virtual_models_client.create_virtual_model.assert_not_awaited()
+    mock_models_sdk.virtual_models_client.delete_virtual_model.assert_not_awaited()
 
 
 # ============================================================================
@@ -1128,7 +1159,7 @@ async def test_update_model_providers_success(reconciler):
         model_entity=None,
     )
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(
         reconciler,
@@ -1145,8 +1176,8 @@ async def test_update_model_providers_success(reconciler):
     assert mock_ensure.call_count == 2
 
     # Verify provider was updated with served models
-    reconciler._models_sdk.inference.providers.update_status.assert_called_once()
-    call_kwargs = reconciler._models_sdk.inference.providers.update_status.call_args.kwargs
+    reconciler._models_client.update_provider_status.assert_called_once()
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
     assert call_kwargs["name"] == "test-provider"
     assert call_kwargs["workspace"] == "test-ns"
     assert call_kwargs["status"] == "READY"
@@ -1170,7 +1201,7 @@ async def test_update_model_providers_filters_by_enabled_models(reconciler):
         model_entity=None,
     )
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(
         reconciler,
@@ -1218,7 +1249,7 @@ async def test_ensure_external_entities_retries_after_transient_entity_failure(r
         model_entity=None,
     )
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(
         reconciler,
@@ -1258,7 +1289,7 @@ async def test_update_model_providers_removes_no_longer_served_models(reconciler
         model_entity=None,
     )
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     # Now only serving model-1 and model-2 (model-3 removed)
     with patch.object(
@@ -1270,7 +1301,7 @@ async def test_update_model_providers_removes_no_longer_served_models(reconciler
             await reconciler.reconcile_model_providers([ctx])
 
     # Verify only model-1 and model-2 are in final served_models
-    call_kwargs = reconciler._models_sdk.inference.providers.update_status.call_args.kwargs
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
     served_model_names = {m.served_model_name for m in call_kwargs["served_models"]}
     assert served_model_names == {"model-1", "model-2"}
 
@@ -1290,7 +1321,7 @@ async def test_update_model_providers_handles_non_compliant_provider(reconciler)
         model_entity=None,
     )
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     # Provider returns DiscoveryNonCompliant (confirmed non-compliant)
     with patch.object(reconciler, "_discover_models", return_value=DiscoveryNonCompliant()):
@@ -1301,8 +1332,8 @@ async def test_update_model_providers_handles_non_compliant_provider(reconciler)
     mock_ensure.assert_not_called()
 
     # Verify provider was updated with empty served_models and appropriate message
-    reconciler._models_sdk.inference.providers.update_status.assert_called_once()
-    call_kwargs = reconciler._models_sdk.inference.providers.update_status.call_args.kwargs
+    reconciler._models_client.update_provider_status.assert_called_once()
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
     assert call_kwargs["served_models"] == []
     assert call_kwargs["status"] == "READY"
     assert "Non-OpenAI compliant" in call_kwargs["status_message"]
@@ -1325,7 +1356,7 @@ async def test_update_model_providers_handles_update_exception(reconciler):
         model_entity=None,
     )
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock(side_effect=Exception("Update failed"))
+    reconciler._models_client.update_provider_status = AsyncMock(side_effect=Exception("Update failed"))
 
     with patch.object(
         reconciler,
@@ -1354,7 +1385,7 @@ async def test_update_model_providers_normalizes_model_names(reconciler):
         model_entity=None,
     )
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     # Model with special characters that need normalization
     with patch.object(
@@ -1370,7 +1401,7 @@ async def test_update_model_providers_normalizes_model_names(reconciler):
     assert "model-with-colons" in str(mock_ensure.call_args)  # Normalized
 
     # Verify served_models keeps original name
-    call_kwargs = reconciler._models_sdk.inference.providers.update_status.call_args.kwargs
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
     served_models = call_kwargs["served_models"]
     assert len(served_models) == 1
     assert served_models[0].served_model_name == "model:with:colons"  # Original
@@ -1394,7 +1425,7 @@ async def test_update_model_providers_strips_same_workspace_prefix_from_model_id
         model_entity=None,
     )
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     # Backend reports model id as workspace/name (e.g. NIM_SERVED_MODEL_NAME set to workspace/name)
     with patch.object(
@@ -1411,7 +1442,7 @@ async def test_update_model_providers_strips_same_workspace_prefix_from_model_id
     assert call_kwargs["model_name"] == "qwen-2-5-1-5b"
 
     # served_models should have model_entity_id = workspace/name (no duplicate prefix in name)
-    update_kwargs = reconciler._models_sdk.inference.providers.update_status.call_args.kwargs
+    update_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
     served_models = update_kwargs["served_models"]
     assert len(served_models) == 1
     assert served_models[0].model_entity_id == "test-ns/qwen-2-5-1-5b"
@@ -1435,7 +1466,7 @@ async def test_update_model_providers_with_empty_discovery(reconciler):
         model_entity=None,
     )
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(
         reconciler,
@@ -1449,7 +1480,7 @@ async def test_update_model_providers_with_empty_discovery(reconciler):
     mock_ensure.assert_not_called()
 
     # Verify provider was updated with empty served_models
-    call_kwargs = reconciler._models_sdk.inference.providers.update_status.call_args.kwargs
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
     assert call_kwargs["served_models"] == []
     assert call_kwargs["status"] == "READY"
 
@@ -1474,7 +1505,7 @@ async def test_update_model_providers_multiple_providers(reconciler):
     ctx1 = ModelContext(model_provider=provider1)
     ctx2 = ModelContext(model_provider=provider2)
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     async def get_models_side_effect(model_provider: ModelProvider):
         if model_provider.workspace == "ns1":
@@ -1487,7 +1518,7 @@ async def test_update_model_providers_multiple_providers(reconciler):
 
     # Verify both providers were processed
     assert mock_get_models.call_count == 2
-    assert reconciler._models_sdk.inference.providers.update_status.call_count == 2
+    assert reconciler._models_client.update_provider_status.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -1508,14 +1539,14 @@ async def test_reconcile_preserves_served_models_on_transient_error(reconciler):
         model_entity=None,
     )
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(reconciler, "_discover_models", return_value=DiscoveryTransientError()):
         with patch.object(reconciler, "_ensure_model_entity_for_provider") as mock_ensure:
             await reconciler.reconcile_model_providers([ctx])
 
     # Transient error must not trigger any status update — served_models are preserved implicitly
-    reconciler._models_sdk.inference.providers.update_status.assert_not_called()
+    reconciler._models_client.update_provider_status.assert_not_called()
     mock_ensure.assert_not_called()
 
 
@@ -1540,7 +1571,7 @@ async def test_reconcile_preserves_served_models_when_deployment_base_id_unresol
         model_entity=None,
     )
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with (
         patch.object(reconciler, "_discover_models", return_value=DiscoverySuccess([{"id": "test-ns/base"}])),
@@ -1549,7 +1580,7 @@ async def test_reconcile_preserves_served_models_when_deployment_base_id_unresol
     ):
         await reconciler.reconcile_model_providers([ctx])
 
-    reconciler._models_sdk.inference.providers.update_status.assert_not_called()
+    reconciler._models_client.update_provider_status.assert_not_called()
     mock_ensure.assert_not_called()
     # WARNING must surface the provider id so operators can correlate with
     # downstream "model not found" reports during a flaky prefetch tick.
@@ -1577,7 +1608,7 @@ async def test_reconcile_clears_served_models_on_confirmed_non_compliant(reconci
         model_entity=None,
     )
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(reconciler, "_discover_models", return_value=DiscoveryNonCompliant()):
         with patch.object(reconciler, "_ensure_model_entity_for_provider") as mock_ensure:
@@ -1585,8 +1616,8 @@ async def test_reconcile_clears_served_models_on_confirmed_non_compliant(reconci
 
     # Non-compliant must clear served_models
     mock_ensure.assert_not_called()
-    reconciler._models_sdk.inference.providers.update_status.assert_called_once()
-    call_kwargs = reconciler._models_sdk.inference.providers.update_status.call_args.kwargs
+    reconciler._models_client.update_provider_status.assert_called_once()
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
     assert call_kwargs["served_models"] == []
     assert call_kwargs["status"] == "READY"
     assert "Non-OpenAI compliant" in call_kwargs["status_message"]
@@ -1610,7 +1641,7 @@ async def test_reconcile_prunes_invalid_served_model_entity_ids_before_update_st
 
     ctx = ModelContext(model_provider=provider, model_deployment=None, model_deployment_config=None, model_entity=None)
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     bad = ServedModelMapping(model_entity_id="ws/Bad.Name", served_model_name="Bad.Name")
     good = ServedModelMapping(model_entity_id="ws/model-a", served_model_name="model-a")
@@ -1626,12 +1657,12 @@ async def test_reconcile_prunes_invalid_served_model_entity_ids_before_update_st
     ):
         await reconciler.reconcile_model_providers([ctx])
 
-    reconciler._models_sdk.inference.providers.update_status.assert_called_once()
-    emitted = reconciler._models_sdk.inference.providers.update_status.call_args.kwargs["served_models"]
+    reconciler._models_client.update_provider_status.assert_called_once()
+    emitted = _provider_status_call(reconciler._models_client.update_provider_status)["served_models"]
     assert [m.model_entity_id for m in emitted] == ["ws/model-a"]
     # Passthrough VirtualModel is attempted only for the surviving (non-LoRA) mapping.
     created_names = {
-        call.kwargs["name"] for call in reconciler._models_sdk.inference.virtual_models.create.call_args_list
+        call.kwargs["body"].name for call in reconciler._virtual_models_client.create_virtual_model.call_args_list
     }
     assert created_names == {"model-a"}
 
@@ -1655,7 +1686,7 @@ async def test_reconcile_keeps_valid_lora_composite_through_gate(reconciler):
         model_provider=provider, model_deployment=None, model_deployment_config=config, model_entity=None
     )
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(
         reconciler,
@@ -1669,12 +1700,12 @@ async def test_reconcile_keeps_valid_lora_composite_through_gate(reconciler):
     ):
         await reconciler.reconcile_model_providers([ctx])
 
-    emitted = reconciler._models_sdk.inference.providers.update_status.call_args.kwargs["served_models"]
+    emitted = _provider_status_call(reconciler._models_client.update_provider_status)["served_models"]
     eids = {m.model_entity_id for m in emitted}
     assert eids == {"ws/base", "ws/base&adapters/ws/lora-1"}
     # Only the base entity gets a passthrough VirtualModel; LoRA is skipped by design.
     created_names = {
-        call.kwargs["name"] for call in reconciler._models_sdk.inference.virtual_models.create.call_args_list
+        call.kwargs["body"].name for call in reconciler._virtual_models_client.create_virtual_model.call_args_list
     }
     assert created_names == {"base"}
 
@@ -1727,7 +1758,7 @@ async def test_exception_in_one_provider_does_not_affect_others(reconciler):
     ctx_bad = ModelContext(model_provider=bad_provider)
     ctx_good = ModelContext(model_provider=good_provider)
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     call_count = 0
 
@@ -1746,8 +1777,8 @@ async def test_exception_in_one_provider_does_not_affect_others(reconciler):
     # Both providers were attempted
     assert call_count == 2
     # Good provider was still updated successfully
-    reconciler._models_sdk.inference.providers.update_status.assert_called_once()
-    call_kwargs = reconciler._models_sdk.inference.providers.update_status.call_args.kwargs
+    reconciler._models_client.update_provider_status.assert_called_once()
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
     assert call_kwargs["workspace"] == "ns-good"
     assert call_kwargs["status"] == "READY"
 
@@ -1778,7 +1809,7 @@ async def test_created_provider_escalated_to_error_after_threshold(reconciler, _
     provider = _make_provider(status=ModelProviderStatus.CREATED, created_at=stale, updated_at=stale)
     ctx = ModelContext(model_provider=provider)
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(
         reconciler,
@@ -1787,8 +1818,8 @@ async def test_created_provider_escalated_to_error_after_threshold(reconciler, _
     ):
         await reconciler.reconcile_model_providers([ctx])
 
-    reconciler._models_sdk.inference.providers.update_status.assert_called_once()
-    call_kwargs = reconciler._models_sdk.inference.providers.update_status.call_args.kwargs
+    reconciler._models_client.update_provider_status.assert_called_once()
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
     assert call_kwargs["status"] == "ERROR"
     assert "connection refused" in call_kwargs["status_message"]
 
@@ -1800,13 +1831,13 @@ async def test_created_provider_not_escalated_before_threshold(reconciler, _make
     provider = _make_provider(status=ModelProviderStatus.CREATED, created_at=recent, updated_at=recent)
     ctx = ModelContext(model_provider=provider)
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(reconciler, "_discover_models", return_value=DiscoveryTransientError()):
         await reconciler.reconcile_model_providers([ctx])
 
     # Should NOT update status — still within grace period
-    reconciler._models_sdk.inference.providers.update_status.assert_not_called()
+    reconciler._models_client.update_provider_status.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1838,7 +1869,7 @@ async def test_error_provider_retried_after_cooldown(reconciler, _make_provider)
     )
     ctx = ModelContext(model_provider=provider)
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(
         reconciler,
@@ -1848,8 +1879,8 @@ async def test_error_provider_retried_after_cooldown(reconciler, _make_provider)
         await reconciler.reconcile_model_providers([ctx])
 
     # Should update status to bump updated_at for next retry pacing
-    reconciler._models_sdk.inference.providers.update_status.assert_called_once()
-    call_kwargs = reconciler._models_sdk.inference.providers.update_status.call_args.kwargs
+    reconciler._models_client.update_provider_status.assert_called_once()
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
     assert call_kwargs["status"] == "ERROR"
     assert "still down" in call_kwargs["status_message"]
 
@@ -1870,15 +1901,15 @@ async def test_error_provider_transitions_to_lost(reconciler, _make_provider):
         updated_at=datetime.now(timezone.utc),
     )
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock(return_value=updated_provider)
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse(updated_provider))
 
     with patch.object(reconciler, "_discover_models") as mock_query:
         await reconciler.reconcile_model_providers([ctx])
 
     # Should transition to LOST without attempting discovery
     mock_query.assert_not_called()
-    reconciler._models_sdk.inference.providers.update_status.assert_called_once()
-    call_kwargs = reconciler._models_sdk.inference.providers.update_status.call_args.kwargs
+    reconciler._models_client.update_provider_status.assert_called_once()
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
     assert call_kwargs["status"] == "LOST"
     assert "permanently failed" in call_kwargs["status_message"]
     assert ctx.model_provider is updated_provider
@@ -1895,7 +1926,7 @@ async def test_error_provider_recovers_to_ready(reconciler, _make_provider):
     )
     ctx = ModelContext(model_provider=provider)
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(
         reconciler,
@@ -1905,8 +1936,8 @@ async def test_error_provider_recovers_to_ready(reconciler, _make_provider):
         with patch.object(reconciler, "_ensure_model_entity_for_provider"):
             await reconciler.reconcile_model_providers([ctx])
 
-    reconciler._models_sdk.inference.providers.update_status.assert_called_once()
-    call_kwargs = reconciler._models_sdk.inference.providers.update_status.call_args.kwargs
+    reconciler._models_client.update_provider_status.assert_called_once()
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
     assert call_kwargs["status"] == "READY"
     assert len(call_kwargs["served_models"]) == 1
 
@@ -1917,13 +1948,13 @@ async def test_lost_provider_skipped_entirely(reconciler, _make_provider):
     provider = _make_provider(status=ModelProviderStatus.LOST)
     ctx = ModelContext(model_provider=provider)
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(reconciler, "_discover_models") as mock_query:
         await reconciler.reconcile_model_providers([ctx])
 
     mock_query.assert_not_called()
-    reconciler._models_sdk.inference.providers.update_status.assert_not_called()
+    reconciler._models_client.update_provider_status.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1943,19 +1974,19 @@ async def test_ready_provider_preserves_served_models_on_transient_error(reconci
     )
     ctx = ModelContext(model_provider=provider)
 
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(reconciler, "_discover_models", return_value=DiscoveryTransientError()):
         await reconciler.reconcile_model_providers([ctx])
 
     # Should NOT update status — existing served_models preserved
-    reconciler._models_sdk.inference.providers.update_status.assert_not_called()
+    reconciler._models_client.update_provider_status.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_discovery_transient_error_carries_message(reconciler, mock_models_sdk):
     """DiscoveryTransientError should carry the error message from the gateway."""
-    mock_models_sdk.inference.gateway.provider.get = AsyncMock(side_effect=Exception("Connection refused"))
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(side_effect=Exception("Connection refused"))
 
     provider = ModelProvider(
         name="test-provider",
@@ -1980,22 +2011,18 @@ async def test_ensure_passthrough_virtual_model_creates_when_not_exists(reconcil
     """Creates a passthrough VirtualModel with the correct arguments."""
     await reconciler._ensure_passthrough_virtual_model("my-ws", "llama-3b", set())
 
-    mock_models_sdk.inference.virtual_models.create.assert_awaited_once_with(
-        workspace="my-ws",
-        name="llama-3b",
-        default_model_entity="my-ws/llama-3b",
-        autoprovisioned=True,
-    )
+    assert _request_body_call(mock_models_sdk.virtual_models_client.create_virtual_model) == {
+        "workspace": "my-ws",
+        "name": "llama-3b",
+        "default_model_entity": "my-ws/llama-3b",
+        "autoprovisioned": True,
+    }
 
 
 @pytest.mark.asyncio
 async def test_ensure_passthrough_virtual_model_ignores_conflict_error(reconciler, mock_models_sdk):
     """ConflictError (409) means the VirtualModel already exists — must not propagate."""
-    mock_response = MagicMock()
-    mock_response.status_code = 409
-    mock_models_sdk.inference.virtual_models.create = AsyncMock(
-        side_effect=ConflictError("Conflict", response=mock_response, body={})
-    )
+    mock_models_sdk.virtual_models_client.create_virtual_model = AsyncMock(side_effect=_status_error(409, "Conflict"))
 
     # Should not raise
     await reconciler._ensure_passthrough_virtual_model("my-ws", "llama-3b", set())
@@ -2004,7 +2031,7 @@ async def test_ensure_passthrough_virtual_model_ignores_conflict_error(reconcile
 @pytest.mark.asyncio
 async def test_ensure_passthrough_virtual_model_logs_warning_on_unexpected_error(reconciler, mock_models_sdk, caplog):
     """Unexpected exceptions are logged as warnings and must not propagate."""
-    mock_models_sdk.inference.virtual_models.create = AsyncMock(side_effect=RuntimeError("network timeout"))
+    mock_models_sdk.virtual_models_client.create_virtual_model = AsyncMock(side_effect=RuntimeError("network timeout"))
 
     with caplog.at_level(logging.WARNING):
         # Should not raise
@@ -2035,7 +2062,7 @@ async def test_reconcile_creates_passthrough_virtual_models_for_all_served_model
         model_entity=None,
     )
 
-    mock_models_sdk.inference.providers.update_status = AsyncMock()
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(
         reconciler,
@@ -2045,13 +2072,15 @@ async def test_reconcile_creates_passthrough_virtual_models_for_all_served_model
         with patch.object(reconciler, "_ensure_model_entity_for_provider"):
             await reconciler.reconcile_model_providers([ctx])
 
-    assert mock_models_sdk.inference.virtual_models.create.await_count == 2
-    created_names = {call.kwargs["name"] for call in mock_models_sdk.inference.virtual_models.create.call_args_list}
+    assert mock_models_sdk.virtual_models_client.create_virtual_model.await_count == 2
+    created_names = {
+        call.kwargs["body"].name for call in mock_models_sdk.virtual_models_client.create_virtual_model.call_args_list
+    }
     assert created_names == {"model-a", "model-b"}
-    for call in mock_models_sdk.inference.virtual_models.create.call_args_list:
-        assert call.kwargs["default_model_entity"] == f"test-ns/{call.kwargs['name']}"
+    for call in mock_models_sdk.virtual_models_client.create_virtual_model.call_args_list:
+        assert call.kwargs["body"].default_model_entity == f"test-ns/{call.kwargs['body'].name}"
         assert call.kwargs["workspace"] == "test-ns"
-        assert call.kwargs["autoprovisioned"] is True
+        assert call.kwargs["body"].autoprovisioned is True
 
 
 # ============================================================================
@@ -2113,8 +2142,8 @@ def _provider_context(
 @pytest.mark.asyncio
 async def test_reconcile_with_no_providers_deletes_orphaned_autoprovisioned_virtual_model(reconciler, mock_models_sdk):
     """When the last provider is gone, the final cleanup pass deletes its autoprovisioned VM."""
-    mock_models_sdk.inference.virtual_models.list = MagicMock(
-        return_value=_AsyncPaginator(
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(
+        return_value=_AsyncPage(
             [
                 _virtual_model(
                     "model-a",
@@ -2127,12 +2156,14 @@ async def test_reconcile_with_no_providers_deletes_orphaned_autoprovisioned_virt
 
     await reconciler.reconcile_model_providers([])
 
-    mock_models_sdk.inference.virtual_models.list.assert_called_once_with(workspace="-", page_size=200)
-    mock_models_sdk.inference.virtual_models.delete.assert_awaited_once_with(
-        name="model-a",
-        workspace="ws",
-        expected_db_version=1,
+    mock_models_sdk.virtual_models_client.list_virtual_models.assert_called_once_with(
+        workspace="-", query_params={"page_size": 200}
     )
+    assert _virtual_model_delete_call(mock_models_sdk.virtual_models_client.delete_virtual_model) == {
+        "name": "model-a",
+        "workspace": "ws",
+        "expected_db_version": 1,
+    }
 
 
 @pytest.mark.asyncio
@@ -2143,8 +2174,8 @@ async def test_cleanup_keeps_autoprovisioned_virtual_model_served_by_remaining_p
             ServedModelMapping(model_entity_id="ws/model-a", served_model_name="model-a"),
         ]
     )
-    mock_models_sdk.inference.virtual_models.list = MagicMock(
-        return_value=_AsyncPaginator(
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(
+        return_value=_AsyncPage(
             [
                 _virtual_model(
                     "model-a",
@@ -2158,14 +2189,14 @@ async def test_cleanup_keeps_autoprovisioned_virtual_model_served_by_remaining_p
     vm_snapshot, _ = await reconciler._load_virtual_models()
     await reconciler._cleanup_orphaned_virtual_models([ctx], vm_snapshot)
 
-    mock_models_sdk.inference.virtual_models.delete.assert_not_awaited()
+    mock_models_sdk.virtual_models_client.delete_virtual_model.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_cleanup_keeps_autoprovisioned_virtual_model_without_default_model_entity(reconciler, mock_models_sdk):
     """An adopted/customized autoprovisioned VM without a default route is not an orphan mismatch."""
-    mock_models_sdk.inference.virtual_models.list = MagicMock(
-        return_value=_AsyncPaginator(
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(
+        return_value=_AsyncPage(
             [
                 _virtual_model(
                     "model-a",
@@ -2179,7 +2210,7 @@ async def test_cleanup_keeps_autoprovisioned_virtual_model_without_default_model
     vm_snapshot, _ = await reconciler._load_virtual_models()
     await reconciler._cleanup_orphaned_virtual_models([], vm_snapshot)
 
-    mock_models_sdk.inference.virtual_models.delete.assert_not_awaited()
+    mock_models_sdk.virtual_models_client.delete_virtual_model.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2226,13 +2257,13 @@ async def test_cleanup_uses_virtual_model_updated_at_then_created_at_for_snapsho
     await reconciler._cleanup_orphaned_virtual_models([], [virtual_model], snapshot_taken_at=snapshot_taken_at)
 
     if should_delete:
-        mock_models_sdk.inference.virtual_models.delete.assert_awaited_once_with(
-            name="model-a",
-            workspace="ws",
-            expected_db_version=1,
-        )
+        assert _virtual_model_delete_call(mock_models_sdk.virtual_models_client.delete_virtual_model) == {
+            "name": "model-a",
+            "workspace": "ws",
+            "expected_db_version": 1,
+        }
     else:
-        mock_models_sdk.inference.virtual_models.delete.assert_not_awaited()
+        mock_models_sdk.virtual_models_client.delete_virtual_model.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2244,8 +2275,8 @@ async def test_cleanup_lost_provider_does_not_protect_autoprovisioned_virtual_mo
             ServedModelMapping(model_entity_id="ws/model-a", served_model_name="model-a"),
         ],
     )
-    mock_models_sdk.inference.virtual_models.list = MagicMock(
-        return_value=_AsyncPaginator(
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(
+        return_value=_AsyncPage(
             [
                 _virtual_model(
                     "model-a",
@@ -2259,18 +2290,18 @@ async def test_cleanup_lost_provider_does_not_protect_autoprovisioned_virtual_mo
     vm_snapshot, _ = await reconciler._load_virtual_models()
     await reconciler._cleanup_orphaned_virtual_models([ctx], vm_snapshot)
 
-    mock_models_sdk.inference.virtual_models.delete.assert_awaited_once_with(
-        name="model-a",
-        workspace="ws",
-        expected_db_version=1,
-    )
+    assert _virtual_model_delete_call(mock_models_sdk.virtual_models_client.delete_virtual_model) == {
+        "name": "model-a",
+        "workspace": "ws",
+        "expected_db_version": 1,
+    }
 
 
 @pytest.mark.asyncio
 async def test_cleanup_never_deletes_user_created_virtual_model(reconciler, mock_models_sdk):
     """Only autoprovisioned VirtualModels are eligible for orphan cleanup."""
-    mock_models_sdk.inference.virtual_models.list = MagicMock(
-        return_value=_AsyncPaginator(
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(
+        return_value=_AsyncPage(
             [
                 _virtual_model(
                     "model-a",
@@ -2284,14 +2315,14 @@ async def test_cleanup_never_deletes_user_created_virtual_model(reconciler, mock
     vm_snapshot, _ = await reconciler._load_virtual_models()
     await reconciler._cleanup_orphaned_virtual_models([], vm_snapshot)
 
-    mock_models_sdk.inference.virtual_models.delete.assert_not_awaited()
+    mock_models_sdk.virtual_models_client.delete_virtual_model.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_cleanup_delete_failure_is_logged_and_non_fatal(reconciler, mock_models_sdk, caplog):
     """Delete failures are swallowed so the next reconcile cycle can retry."""
-    mock_models_sdk.inference.virtual_models.list = MagicMock(
-        return_value=_AsyncPaginator(
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(
+        return_value=_AsyncPage(
             [
                 _virtual_model(
                     "model-a",
@@ -2301,25 +2332,25 @@ async def test_cleanup_delete_failure_is_logged_and_non_fatal(reconciler, mock_m
             ]
         )
     )
-    mock_models_sdk.inference.virtual_models.delete = AsyncMock(side_effect=RuntimeError("delete failed"))
+    mock_models_sdk.virtual_models_client.delete_virtual_model = AsyncMock(side_effect=RuntimeError("delete failed"))
 
     with caplog.at_level(logging.WARNING):
         vm_snapshot, _ = await reconciler._load_virtual_models()
     await reconciler._cleanup_orphaned_virtual_models([], vm_snapshot)
 
-    mock_models_sdk.inference.virtual_models.delete.assert_awaited_once_with(
-        name="model-a",
-        workspace="ws",
-        expected_db_version=1,
-    )
+    assert _virtual_model_delete_call(mock_models_sdk.virtual_models_client.delete_virtual_model) == {
+        "name": "model-a",
+        "workspace": "ws",
+        "expected_db_version": 1,
+    }
     assert any("Failed to delete orphaned autoprovisioned VirtualModel ws/model-a" in r.message for r in caplog.records)
 
 
 @pytest.mark.asyncio
 async def test_cleanup_skips_orphaned_virtual_model_without_db_version(reconciler, mock_models_sdk, caplog):
     """Cleanup must not fall back to an unconditional delete when the listed VM has no version."""
-    mock_models_sdk.inference.virtual_models.list = MagicMock(
-        return_value=_AsyncPaginator(
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(
+        return_value=_AsyncPage(
             [
                 _virtual_model(
                     "model-a",
@@ -2335,7 +2366,7 @@ async def test_cleanup_skips_orphaned_virtual_model_without_db_version(reconcile
         vm_snapshot, _ = await reconciler._load_virtual_models()
         await reconciler._cleanup_orphaned_virtual_models([], vm_snapshot)
 
-    mock_models_sdk.inference.virtual_models.delete.assert_not_awaited()
+    mock_models_sdk.virtual_models_client.delete_virtual_model.assert_not_awaited()
     assert any(
         "Skipping orphaned autoprovisioned VirtualModel ws/model-a because it has no database version" in r.message
         for r in caplog.records
@@ -2367,7 +2398,7 @@ async def test_deployment_backed_never_calls_ensure_model_entity(reconciler, moc
         model_entity=None,
     )
 
-    mock_models_sdk.inference.providers.update_status = AsyncMock()
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     discovered = [
         {"id": "ws/base-entity", "root": "ws/base-entity", "parent": None},
@@ -2378,7 +2409,7 @@ async def test_deployment_backed_never_calls_ensure_model_entity(reconciler, moc
             await reconciler.reconcile_model_providers([ctx])
 
     mock_ensure.assert_not_called()
-    call_kwargs = mock_models_sdk.inference.providers.update_status.call_args.kwargs
+    call_kwargs = _provider_status_call(mock_models_sdk.models_client.update_provider_status)
     assert len(call_kwargs["served_models"]) == 2
 
 
@@ -2428,7 +2459,7 @@ async def test_deployment_backed_links_base_entity_to_provider(reconciler, mock_
     reconciler._models_sdk.models_client.list_models = AsyncMock(return_value=_AsyncPage([_base_entity([])]))
     await reconciler._entity_cache.refresh()
 
-    mock_models_sdk.inference.providers.update_status = AsyncMock()
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
     with patch.object(reconciler, "_discover_models", return_value=DiscoverySuccess(_DEPLOYMENT_DISCOVERED)):
         await reconciler.reconcile_model_providers([_deployment_backed_ctx()])
     await reconciler._entity_cache.flush()
@@ -2449,7 +2480,7 @@ async def test_deployment_backed_link_is_idempotent(reconciler, mock_models_sdk)
     reconciler._models_sdk.models_client.list_models = AsyncMock(return_value=_AsyncPage([entity]))
     await reconciler._entity_cache.refresh()
 
-    mock_models_sdk.inference.providers.update_status = AsyncMock()
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
     with patch.object(reconciler, "_discover_models", return_value=DiscoverySuccess(_DEPLOYMENT_DISCOVERED)):
         await reconciler.reconcile_model_providers([_deployment_backed_ctx()])
     await reconciler._entity_cache.flush()
@@ -2463,7 +2494,7 @@ async def test_deployment_backed_does_not_link_lora_composite_ids(reconciler, mo
     reconciler._models_sdk.models_client.list_models = AsyncMock(return_value=_AsyncPage([_base_entity([])]))
     await reconciler._entity_cache.refresh()
 
-    mock_models_sdk.inference.providers.update_status = AsyncMock()
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
     with patch.object(reconciler, "_discover_models", return_value=DiscoverySuccess(_DEPLOYMENT_DISCOVERED)):
         await reconciler.reconcile_model_providers([_deployment_backed_ctx()])
     await reconciler._entity_cache.flush()
@@ -2472,7 +2503,7 @@ async def test_deployment_backed_does_not_link_lora_composite_ids(reconciler, mo
     written = {c.kwargs["name"] for c in update.await_args_list}
     assert written == {"base-entity"}
     # The adapter is still routable via the composite served_models mapping.
-    served = mock_models_sdk.inference.providers.update_status.call_args.kwargs["served_models"]
+    served = _provider_status_call(mock_models_sdk.models_client.update_provider_status)["served_models"]
     assert any("&adapters/" in m.model_entity_id for m in served)
 
 
@@ -2497,7 +2528,7 @@ async def test_reconcile_creates_virtual_models_for_previously_served_models(rec
         model_entity=None,
     )
 
-    mock_models_sdk.inference.providers.update_status = AsyncMock()
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     # Discover old-model (already served) and new-model (new)
     with patch.object(
@@ -2509,8 +2540,10 @@ async def test_reconcile_creates_virtual_models_for_previously_served_models(rec
             await reconciler.reconcile_model_providers([ctx])
 
     # Both models (old + new) get a VirtualModel create attempt
-    assert mock_models_sdk.inference.virtual_models.create.await_count == 2
-    created_names = {call.kwargs["name"] for call in mock_models_sdk.inference.virtual_models.create.call_args_list}
+    assert mock_models_sdk.virtual_models_client.create_virtual_model.await_count == 2
+    created_names = {
+        call.kwargs["body"].name for call in mock_models_sdk.virtual_models_client.create_virtual_model.call_args_list
+    }
     assert created_names == {"old-model", "new-model"}
 
 
@@ -2529,12 +2562,12 @@ async def test_reconcile_does_not_create_virtual_models_for_non_compliant_provid
         model_entity=None,
     )
 
-    mock_models_sdk.inference.providers.update_status = AsyncMock()
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(reconciler, "_discover_models", return_value=DiscoveryNonCompliant()):
         await reconciler.reconcile_model_providers([ctx])
 
-    mock_models_sdk.inference.virtual_models.create.assert_not_awaited()
+    mock_models_sdk.virtual_models_client.create_virtual_model.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2555,8 +2588,8 @@ async def test_reconcile_creates_virtual_models_even_when_update_status_fails(re
     )
 
     # update_status raises — VirtualModel creation must still run
-    mock_models_sdk.inference.providers.update_status = AsyncMock(side_effect=Exception("service unavailable"))
-    mock_models_sdk.inference.virtual_models.list = MagicMock(return_value=_AsyncPaginator([]))
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(side_effect=Exception("service unavailable"))
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(return_value=_AsyncPage([]))
 
     with patch.object(
         reconciler,
@@ -2566,13 +2599,13 @@ async def test_reconcile_creates_virtual_models_even_when_update_status_fails(re
         with patch.object(reconciler, "_ensure_model_entity_for_provider"):
             await reconciler.reconcile_model_providers([ctx])
 
-    mock_models_sdk.inference.virtual_models.create.assert_awaited_once_with(
-        workspace="test-ns",
-        name="model-x",
-        default_model_entity="test-ns/model-x",
-        autoprovisioned=True,
-    )
-    mock_models_sdk.inference.virtual_models.delete.assert_not_awaited()
+    assert _request_body_call(mock_models_sdk.virtual_models_client.create_virtual_model) == {
+        "workspace": "test-ns",
+        "name": "model-x",
+        "default_model_entity": "test-ns/model-x",
+        "autoprovisioned": True,
+    }
+    mock_models_sdk.virtual_models_client.delete_virtual_model.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2605,12 +2638,12 @@ async def test_deployment_backed_served_models_base_lora_prompt_tuned(reconciler
         {"id": "qwen-lora-base-lora-e2e-dataset-5c30", "root": "/scratch/loras/...", "parent": "e2e-ws/qwen-lora-base"},
         {"id": "qwen-lora-prompt-tuned", "root": "e2e-ws/qwen-lora-base", "parent": None},
     ]
-    reconciler._models_sdk.inference.providers.update_status = AsyncMock()
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
     with patch.object(reconciler, "_discover_models", return_value=DiscoverySuccess(discovered)):
         await reconciler.reconcile_model_providers([ctx])
 
-    served = reconciler._models_sdk.inference.providers.update_status.call_args.kwargs["served_models"]
+    served = _provider_status_call(reconciler._models_client.update_provider_status)["served_models"]
     by_entity_id = {m.model_entity_id: m.served_model_name for m in served}
     assert by_entity_id["e2e-ws/qwen-lora-base"] == "e2e-ws/qwen-lora-base"
     lora_entity_id = "e2e-ws/qwen-lora-base&adapters/e2e-ws/qwen-lora-base-lora-e2e-dataset-5c30"
@@ -2618,13 +2651,13 @@ async def test_deployment_backed_served_models_base_lora_prompt_tuned(reconciler
     assert by_entity_id["e2e-ws/qwen-lora-prompt-tuned"] == "qwen-lora-prompt-tuned"
     assert len(served) == 3
 
-    vm_create_calls = reconciler._models_sdk.inference.virtual_models.create.call_args_list
-    created_names = {call.kwargs["name"] for call in vm_create_calls}
+    vm_create_calls = reconciler._virtual_models_client.create_virtual_model.call_args_list
+    created_names = {call.kwargs["body"].name for call in vm_create_calls}
     assert created_names == {"qwen-lora-base", "qwen-lora-prompt-tuned"}
     for call in vm_create_calls:
         assert call.kwargs["workspace"] == "e2e-ws"
-        assert call.kwargs["default_model_entity"] == f"e2e-ws/{call.kwargs['name']}"
-        assert call.kwargs["autoprovisioned"] is True
+        assert call.kwargs["body"].default_model_entity == f"e2e-ws/{call.kwargs['body'].name}"
+        assert call.kwargs["body"].autoprovisioned is True
 
 
 def test_handle_model_deployment_provider_base_only(reconciler):
@@ -3027,7 +3060,7 @@ async def test_virtual_model_list_is_read_once_per_pass(reconciler, mock_models_
         model_entity=None,
     )
 
-    mock_models_sdk.inference.virtual_models.list = MagicMock(return_value=_AsyncPaginator([]))
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(return_value=_AsyncPage([]))
     with patch.object(
         reconciler,
         "_discover_models",
@@ -3035,19 +3068,21 @@ async def test_virtual_model_list_is_read_once_per_pass(reconciler, mock_models_
     ):
         await reconciler.reconcile_model_providers([ctx])
 
-    mock_models_sdk.inference.virtual_models.list.assert_called_once_with(workspace="-", page_size=200)
+    mock_models_sdk.virtual_models_client.list_virtual_models.assert_called_once_with(
+        workspace="-", query_params={"page_size": 200}
+    )
 
 
 @pytest.mark.asyncio
 async def test_existing_virtual_model_is_not_recreated(reconciler, mock_models_sdk):
     """A VirtualModel already present is left alone instead of re-attempted."""
     existing = _virtual_model("m1", workspace="test-ns", default_model_entity="test-ns/m1")
-    mock_models_sdk.inference.virtual_models.list = MagicMock(return_value=_AsyncPaginator([existing]))
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(return_value=_AsyncPage([existing]))
 
     vm_snapshot, existing_vm_names = await reconciler._load_virtual_models()
     await reconciler._ensure_passthrough_virtual_model("test-ns", "m1", existing_vm_names)
 
-    mock_models_sdk.inference.virtual_models.create.assert_not_awaited()
+    mock_models_sdk.virtual_models_client.create_virtual_model.assert_not_awaited()
     assert vm_snapshot == [existing]
 
 
@@ -3055,12 +3090,12 @@ async def test_existing_virtual_model_is_not_recreated(reconciler, mock_models_s
 async def test_user_managed_virtual_model_name_is_not_recreated(reconciler, mock_models_sdk):
     """A name held by a non-autoprovisioned VirtualModel is still treated as taken."""
     manual = _virtual_model("m1", workspace="test-ns", default_model_entity="other/thing", autoprovisioned=False)
-    mock_models_sdk.inference.virtual_models.list = MagicMock(return_value=_AsyncPaginator([manual]))
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(return_value=_AsyncPage([manual]))
 
     _, existing_vm_names = await reconciler._load_virtual_models()
     await reconciler._ensure_passthrough_virtual_model("test-ns", "m1", existing_vm_names)
 
-    mock_models_sdk.inference.virtual_models.create.assert_not_awaited()
+    mock_models_sdk.virtual_models_client.create_virtual_model.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -3071,7 +3106,7 @@ async def test_virtual_model_created_in_pass_is_not_attempted_twice(reconciler, 
     await reconciler._ensure_passthrough_virtual_model("test-ns", "m1", existing_vm_names)
     await reconciler._ensure_passthrough_virtual_model("test-ns", "m1", existing_vm_names)
 
-    mock_models_sdk.inference.virtual_models.create.assert_awaited_once()
+    mock_models_sdk.virtual_models_client.create_virtual_model.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -3091,7 +3126,7 @@ async def test_virtual_model_created_in_pass_is_never_deleted_as_orphan(reconcil
     )
 
     # Nothing exists up front, so the pass creates the VirtualModel itself.
-    mock_models_sdk.inference.virtual_models.list = MagicMock(return_value=_AsyncPaginator([]))
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(return_value=_AsyncPage([]))
     with patch.object(
         reconciler,
         "_discover_models",
@@ -3099,24 +3134,22 @@ async def test_virtual_model_created_in_pass_is_never_deleted_as_orphan(reconcil
     ):
         await reconciler.reconcile_model_providers([ctx])
 
-    mock_models_sdk.inference.virtual_models.create.assert_awaited_once()
-    mock_models_sdk.inference.virtual_models.delete.assert_not_awaited()
+    mock_models_sdk.virtual_models_client.create_virtual_model.assert_awaited_once()
+    mock_models_sdk.virtual_models_client.delete_virtual_model.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_cleanup_tolerates_virtual_model_deleted_concurrently(reconciler, mock_models_sdk):
     """A VirtualModel removed after the snapshot was taken is not an error."""
-    mock_models_sdk.inference.virtual_models.list = MagicMock(
-        return_value=_AsyncPaginator([_virtual_model("model-a", default_model_entity="ws/model-a")])
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(
+        return_value=_AsyncPage([_virtual_model("model-a", default_model_entity="ws/model-a")])
     )
-    mock_models_sdk.inference.virtual_models.delete = AsyncMock(
-        side_effect=NotFoundError("gone", response=MagicMock(), body=None)
-    )
+    mock_models_sdk.virtual_models_client.delete_virtual_model = AsyncMock(side_effect=_status_error(404, "gone"))
 
     vm_snapshot, _ = await reconciler._load_virtual_models()
     await reconciler._cleanup_orphaned_virtual_models([], vm_snapshot)
 
-    mock_models_sdk.inference.virtual_models.delete.assert_awaited_once()
+    mock_models_sdk.virtual_models_client.delete_virtual_model.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -3134,15 +3167,15 @@ async def test_provider_skipped_before_discovery_keeps_served_models_unresolved(
     ctx.model_provider.created_at = datetime.now(timezone.utc)
     ctx.served_models = []
 
-    mock_models_sdk.inference.virtual_models.list = MagicMock(
-        return_value=_AsyncPaginator([_virtual_model("model-a", default_model_entity="ws/model-a")])
+    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(
+        return_value=_AsyncPage([_virtual_model("model-a", default_model_entity="ws/model-a")])
     )
 
     await reconciler.reconcile_model_providers([ctx])
 
     # Still within the retry cooldown, so discovery never ran and nothing was deleted.
     assert ctx.served_models is None
-    mock_models_sdk.inference.virtual_models.delete.assert_not_awaited()
+    mock_models_sdk.virtual_models_client.delete_virtual_model.assert_not_awaited()
 
 
 @pytest.mark.asyncio

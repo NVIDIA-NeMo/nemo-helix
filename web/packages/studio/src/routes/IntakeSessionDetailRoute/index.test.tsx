@@ -1,12 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getGetSessionQueryKey } from '@nemo/sdk/generated/platform/sessions';
+import { getGetSpanQueryKey, getListSpansQueryKey } from '@nemo/sdk/generated/platform/spans';
+import { getGetTraceQueryKey, getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
 import {
   mockSessionById,
   mockSpanById,
   mockSpansPage,
   mockTracesPage,
 } from '@studio/mocks/intake/telemetry';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { IntakeSessionDetailRoute } from '@studio/routes/IntakeSessionDetailRoute';
 import { mockFeatureFlags } from '@studio/tests/util/mockFeatureFlags';
@@ -46,13 +50,13 @@ describe('IntakeSessionDetailRoute', () => {
     const spanListRequests: URL[] = [];
     const spanDetailRequests: string[] = [];
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/sessions/:sessionId', ({ params }) => {
+      http.get(mockApiUrl(getGetSessionQueryKey, ':workspace', ':sessionId'), ({ params }) => {
         const sessionId = String(params['sessionId']);
         sessionDetailRequests.push(sessionId);
         const session = mockSessionById(sessionId);
         return session ? HttpResponse.json(session) : new HttpResponse(null, { status: 404 });
       }),
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces', ({ request }) => {
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), ({ request }) => {
         const url = new URL(request.url);
         traceListRequests.push(url);
         const data = mockTracesPage.data
@@ -68,11 +72,11 @@ describe('IntakeSessionDetailRoute', () => {
           },
         });
       }),
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces/:traceId', ({ params }) => {
+      http.get(mockApiUrl(getGetTraceQueryKey, ':workspace', ':traceId'), ({ params }) => {
         traceDetailRequests.push(String(params['traceId']));
         return new HttpResponse(null, { status: 500 });
       }),
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans', ({ request }) => {
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), ({ request }) => {
         const url = new URL(request.url);
         spanListRequests.push(url);
         const data = mockSpansPage.data.filter(
@@ -88,7 +92,7 @@ describe('IntakeSessionDetailRoute', () => {
           },
         });
       }),
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans/:spanId', ({ params }) => {
+      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), ({ params }) => {
         spanDetailRequests.push(String(params['spanId']));
         return new HttpResponse(null, { status: 500 });
       })
@@ -146,7 +150,7 @@ describe('IntakeSessionDetailRoute', () => {
     const session = mockSessionById('session-agent-run-001');
     expect(session).toBeDefined();
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/sessions/:sessionId', ({ params }) => {
+      http.get(mockApiUrl(getGetSessionQueryKey, ':workspace', ':sessionId'), ({ params }) => {
         sessionDetailRequests.push(String(params['sessionId']));
         return HttpResponse.json({ ...session!, span_count: 47, total_tokens: 9999 });
       })
@@ -224,7 +228,7 @@ describe('IntakeSessionDetailRoute', () => {
       failSpans = () =>
         resolve(HttpResponse.json({ detail: 'Could not load span summaries' }, { status: 500 }));
     });
-    server.use(http.get('*/apis/intake/v2/workspaces/:workspace/spans', () => spansResponse));
+    server.use(http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), () => spansResponse));
 
     renderSessionDetail('session-agent-run-001', '?traceId=trace-agent-run-001');
 
@@ -248,7 +252,7 @@ describe('IntakeSessionDetailRoute', () => {
     };
     const spanDetailRequests: string[] = [];
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans', () =>
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), () =>
         HttpResponse.json({
           ...mockSpansPage,
           data: [erroredChild],
@@ -259,7 +263,7 @@ describe('IntakeSessionDetailRoute', () => {
           },
         })
       ),
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans/:spanId', ({ params }) => {
+      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), ({ params }) => {
         spanDetailRequests.push(String(params['spanId']));
         return HttpResponse.json(erroredChild);
       })
@@ -284,7 +288,7 @@ describe('IntakeSessionDetailRoute', () => {
       name: 'Format available troubleshooting context',
     };
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans', () =>
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), () =>
         HttpResponse.json({
           ...mockSpansPage,
           data: [rootSpan, successfulChild],
@@ -295,7 +299,7 @@ describe('IntakeSessionDetailRoute', () => {
           },
         })
       ),
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans/:spanId', ({ params }) => {
+      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), ({ params }) => {
         if (params['spanId'] === successfulChild.span_id) {
           return HttpResponse.json(successfulChild);
         }
@@ -364,7 +368,7 @@ describe('IntakeSessionDetailRoute', () => {
     const traceId = 'trace-agent-run-003';
     const traceSpans = mockSpansPage.data.filter((span) => span.trace_id === traceId);
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans', ({ request }) => {
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), ({ request }) => {
         const requestedTraceId = new URL(request.url).searchParams.get('filter[trace_id]');
         const data = requestedTraceId === traceId ? traceSpans : [];
         return HttpResponse.json({
@@ -392,7 +396,7 @@ describe('IntakeSessionDetailRoute', () => {
   it('warns when the trace span request fails and session spans are used', async () => {
     mockFeatureFlags({ traceGraphEnabled: true });
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans', ({ request }) => {
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), ({ request }) => {
         const traceId = new URL(request.url).searchParams.get('filter[trace_id]');
         return traceId ? new HttpResponse(null, { status: 500 }) : HttpResponse.json(mockSpansPage);
       })
@@ -457,7 +461,7 @@ describe('IntakeSessionDetailRoute', () => {
     const detailSpanIds: string[] = [];
     const spanListRequests: URL[] = [];
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans', ({ request }) => {
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), ({ request }) => {
         const url = new URL(request.url);
         spanListRequests.push(url);
         const sessionId = url.searchParams.get('filter[session_id]');
@@ -475,7 +479,7 @@ describe('IntakeSessionDetailRoute', () => {
           },
         });
       }),
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans/:spanId', ({ params }) => {
+      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), ({ params }) => {
         const spanId = String(params['spanId']);
         detailSpanIds.push(spanId);
         const span = mockSpanById(spanId);
@@ -516,7 +520,7 @@ describe('IntakeSessionDetailRoute', () => {
     };
 
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans', ({ request }) => {
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), ({ request }) => {
         const sessionId = new URL(request.url).searchParams.get('filter[session_id]');
         const data = mockSpansPage.data.filter(
           (span) => span.session_id === sessionId && span.span_id === 'span-root-001'
@@ -527,7 +531,7 @@ describe('IntakeSessionDetailRoute', () => {
           pagination: { ...mockSpansPage.pagination, total_results: 1001, total_pages: 2 },
         });
       }),
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans/:spanId', async ({ params }) => {
+      http.get(mockApiUrl(getGetSpanQueryKey, ':workspace', ':spanId'), async ({ params }) => {
         if (params['spanId'] === outsidePageSpan.span_id) {
           await outsidePageSpanGate;
           return HttpResponse.json(outsidePageSpan);
@@ -564,7 +568,7 @@ describe('IntakeSessionDetailRoute', () => {
     };
 
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces', () =>
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () =>
         HttpResponse.json({
           ...mockTracesPage,
           data: [],
@@ -575,12 +579,12 @@ describe('IntakeSessionDetailRoute', () => {
           },
         })
       ),
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces/:traceId', ({ params }) =>
+      http.get(mockApiUrl(getGetTraceQueryKey, ':workspace', ':traceId'), ({ params }) =>
         params['traceId'] === traceId
           ? new HttpResponse(null, { status: 404 })
           : new HttpResponse(null, { status: 500 })
       ),
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans', () =>
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), () =>
         HttpResponse.json({
           ...mockSpansPage,
           data: [receivedSpan],
@@ -609,7 +613,7 @@ describe('IntakeSessionDetailRoute', () => {
   it('shows not found when neither trace details nor matching spans exist', async () => {
     const traceId = 'trace-never-received';
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces', () =>
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () =>
         HttpResponse.json({
           ...mockTracesPage,
           data: [],
@@ -621,10 +625,10 @@ describe('IntakeSessionDetailRoute', () => {
         })
       ),
       http.get(
-        '*/apis/intake/v2/workspaces/:workspace/traces/:traceId',
+        mockApiUrl(getGetTraceQueryKey, ':workspace', ':traceId'),
         () => new HttpResponse(null, { status: 404 })
       ),
-      http.get('*/apis/intake/v2/workspaces/:workspace/spans', () =>
+      http.get(mockApiUrl(getListSpansQueryKey, ':workspace'), () =>
         HttpResponse.json({
           ...mockSpansPage,
           data: [],
@@ -646,7 +650,7 @@ describe('IntakeSessionDetailRoute', () => {
   it('shows an error when trace details are missing and session spans fail to load', async () => {
     const traceId = 'trace-with-failed-activity-request';
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces', () =>
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () =>
         HttpResponse.json({
           ...mockTracesPage,
           data: [],
@@ -658,11 +662,11 @@ describe('IntakeSessionDetailRoute', () => {
         })
       ),
       http.get(
-        '*/apis/intake/v2/workspaces/:workspace/traces/:traceId',
+        mockApiUrl(getGetTraceQueryKey, ':workspace', ':traceId'),
         () => new HttpResponse(null, { status: 404 })
       ),
       http.get(
-        '*/apis/intake/v2/workspaces/:workspace/spans',
+        mockApiUrl(getListSpansQueryKey, ':workspace'),
         () => new HttpResponse(null, { status: 500 })
       )
     );

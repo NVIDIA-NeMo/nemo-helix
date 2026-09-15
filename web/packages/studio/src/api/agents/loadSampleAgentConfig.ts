@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { CreateAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/CreateAgentRequestConfig';
 import { fetchSampleText } from '@studio/api/agents/fetchSampleText';
 import YAML from 'yaml';
 
@@ -21,9 +22,9 @@ export const loadSampleAgentConfig = async (
   agentConfigPath: string,
   modelName: string,
   workspace: string
-): Promise<Record<string, unknown>> => {
+): Promise<CreateAgentRequestConfig> => {
   const text = await fetchSampleText(agentConfigPath);
-  const config = YAML.parse(text) as Record<string, unknown>;
+  const config = YAML.parse(text) as CreateAgentRequestConfig;
 
   const configFormat = config?.config_format;
 

@@ -1439,6 +1439,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/PlatformJobStatus'
           description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
         updated_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -2521,8 +2526,16 @@ components:
           description: NeMo-RL policy worker that trains the model. `lora` requires
             `automodel` (NeMo Automodel + Transformer Engine, Hopper or newer; the
             only backend with expert parallelism and automodel_kwargs). `all_weights`
-            requires `dtensor` (stock HuggingFace on PyTorch FSDP2, also the pre-Hopper
-            option). Omit it to get the supported one.
+            defaults to `dtensor` (stock HuggingFace on PyTorch FSDP2, also the pre-Hopper
+            option) and may be set to `automodel` for a consolidated HuggingFace export.
+            Omit it to get the default for the finetuning type.
+        v4_compatible:
+          type: boolean
+          title: V4 Compatible
+          description: Keep the base checkpoint's transformers-v4 config.json on the
+            trained export. The platform's vLLM cannot read the v5 config Automodel
+            otherwise writes. Set false to export that v5 config instead.
+          default: true
         val_at_start:
           type: boolean
           title: Val At Start
@@ -2999,6 +3012,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/PlatformJobStatus'
           description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
         updated_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -3600,6 +3618,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/PlatformJobStatus'
           description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
         updated_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'

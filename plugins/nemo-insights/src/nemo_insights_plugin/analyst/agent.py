@@ -31,6 +31,7 @@ from typing import Annotated, Any
 from nemo_insights_plugin.analyst.deps import AnalystDeps
 from nemo_insights_plugin.analyst.functions import annotations, insights, spans
 from nemo_insights_plugin.analyst.result import AnalystResult
+from nemo_platform_plugin.intake.types import SpanMode
 from nemo_platform_plugin.nooa_model_client import get_default_model, get_fast_model
 from nooa import Agent, CodeActStrategy, hidden, strategy
 from nooa.agents import TokenBudgetSummarizer
@@ -192,7 +193,7 @@ class Analyst(Agent):
         filter: dict[str, object] | None = None,
         group_by: str | None = None,
         sort: str | None = None,
-        mode: str = "detailed",
+        mode: SpanMode = "detailed",
         limit: int | None = None,
     ) -> dict[str, object]:
         """List the AUT's spans from Intake, or roll them up into groups.

@@ -32,7 +32,7 @@ export interface CreateAgentFromUploadParams {
 export class AgentSpecFilesetConflictError extends Error {
   constructor(public readonly filesetName: string) {
     super(
-      `An agent named "${filesetName.replace(/-spec$/, '')}" already owns the fileset "${filesetName}". Choose a different name.`
+      `An agent named "${filesetName.replace(/-ethos$/, '')}" already owns the fileset "${filesetName}". Choose a different name.`
     );
   }
 }

@@ -41,7 +41,7 @@ function selectArtifacts(value, allowedArtifacts, label, inputName) {
 async function resolveReleasePlan({
   env,
   context,
-  getCommit,
+  listBranches,
   now = () => new Date(),
 }) {
   const allWheels = JSON.parse(env.RELEASE_WHEELS_JSON);
@@ -57,7 +57,8 @@ async function resolveReleasePlan({
   const helmVersionOverride = isManual
     ? (inputs["helm-version"] ?? "").trim()
     : "";
-  let sourceSha = isManual ? (inputs["source-sha"] ?? "").trim() : context.sha;
+  let sourceSha = isManual ? (inputs["source-sha"] ?? "").trim() : "";
+  let sourceBranch = "";
   const version = releaseType === "stable" ? (inputs.version ?? "").trim() : "";
 
   if (releaseType === "stable") {
@@ -75,10 +76,25 @@ async function resolveReleasePlan({
         "A pinned nightly source must be an exact 40-character SHA.",
       );
     }
-    if (!sourceSha && dryRun) {
-      sourceSha = context.sha;
-    } else if (!sourceSha) {
-      sourceSha = await getCommit(context.payload.repository.default_branch);
+    if (!sourceSha) {
+      const [branch] = (await listBranches())
+        .filter(({ name }) => /^release\/\d+\.\d+$/.test(name))
+        .sort((a, b) => {
+          const [aMajor, aMinor] = a.name
+            .slice("release/".length)
+            .split(".")
+            .map(Number);
+          const [bMajor, bMinor] = b.name
+            .slice("release/".length)
+            .split(".")
+            .map(Number);
+          return bMajor - aMajor || bMinor - aMinor;
+        });
+      if (!branch) {
+        throw new Error("No release/X.X branch found for nightly publication.");
+      }
+      sourceBranch = branch.name;
+      sourceSha = branch.commit.sha;
     }
   }
 
@@ -150,6 +166,7 @@ async function resolveReleasePlan({
     releaseType,
     releaseScope,
     sourceSha,
+    sourceBranch,
     version,
     releaseLabel,
     nightlyTimestamp,

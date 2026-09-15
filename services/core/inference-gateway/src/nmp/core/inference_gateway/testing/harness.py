@@ -36,11 +36,14 @@ from nemo_platform.types.inference.middleware_call_param import MiddlewareCallPa
 from nemo_platform.types.inference.virtual_model import VirtualModel as SDKVirtualModel
 from nemo_platform.types.inference.virtual_model_inference_config_param import VirtualModelInferenceConfigParam
 from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.client import AsyncNemoClient
 from nemo_platform_plugin.discovery import discover_inference_middleware
 from nemo_platform_plugin.inference_middleware import NemoInferenceMiddleware
 from nemo_platform_plugin.secrets.client import SecretsClient
 from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
 from nmp.common.entities.client import EntityClient
+from nmp.common.observability import MARK_INTERNAL_REQUEST_HEADERS
+from nmp.common.service.headers import build_downstream_service_headers
 from nmp.core.inference_gateway.api.dependencies import (
     global_middleware_registry,
     global_model_cache,
@@ -287,6 +290,12 @@ class IGWPluginHarness:
     # Plugin registration (context-managed)
     # ------------------------------------------------------------------
 
+    def _plugin_sdk(self, name: str) -> AsyncNeMoPlatform:
+        headers = dict(self.async_sdk.default_headers)
+        headers.update(MARK_INTERNAL_REQUEST_HEADERS)
+        headers.update(build_downstream_service_headers(name))
+        return self.async_sdk.with_options(set_default_headers=headers)
+
     @contextmanager
     def use_plugin(
         self,
@@ -321,6 +330,9 @@ class IGWPluginHarness:
         original = self._registry.plugins.get(name)
 
         plugin._inject_cache(self._cache_accessor)
+        sdk = self._plugin_sdk(name)
+        plugin._inject_platform_sdk(sdk)
+        plugin._inject_platform_client(client_from_platform(sdk, AsyncNemoClient))
         if call_lifecycle:
             asyncio.run(plugin.on_startup())
         self._registry.plugins[name] = plugin
@@ -328,7 +340,8 @@ class IGWPluginHarness:
             yield plugin
         finally:
             if original_present:
-                self._registry.plugins[name] = original  # type: ignore[assignment]
+                assert original is not None
+                self._registry.plugins[name] = original
             else:
                 self._registry.plugins.pop(name, None)
             if call_lifecycle:
@@ -363,6 +376,9 @@ class IGWPluginHarness:
         original = self._registry.plugins.get(name)
 
         plugin._inject_cache(self._cache_accessor)
+        sdk = self._plugin_sdk(name)
+        plugin._inject_platform_sdk(sdk)
+        plugin._inject_platform_client(client_from_platform(sdk, AsyncNemoClient))
         if call_lifecycle:
             await plugin.on_startup()
         self._registry.plugins[name] = plugin
@@ -370,7 +386,8 @@ class IGWPluginHarness:
             yield plugin
         finally:
             if original_present:
-                self._registry.plugins[name] = original  # type: ignore[assignment]
+                assert original is not None
+                self._registry.plugins[name] = original
             else:
                 self._registry.plugins.pop(name, None)
             if call_lifecycle:

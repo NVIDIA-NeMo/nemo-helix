@@ -9,12 +9,15 @@ interface EmptyProps {
   title?: string;
   description?: string;
   icon?: React.ReactNode;
+  /** Optional call to action rendered below the description. */
+  slotAction?: React.ReactNode;
 }
 
 export const Empty: FC<EmptyProps> = ({
   title = 'No Content Available',
   description = 'There is currently no content to display.',
   icon = <TriangleAlert className="size-12" />,
+  slotAction,
 }) => {
   return (
     <Stack
@@ -29,6 +32,7 @@ export const Empty: FC<EmptyProps> = ({
         <Text kind="title/sm">{title}</Text>
       </header>
       <Label color="textSecondary">{description}</Label>
+      {slotAction}
     </Stack>
   );
 };

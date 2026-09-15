@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
+import importlib.metadata
 import ipaddress
 import json
 import os
@@ -21,14 +23,31 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
+from fixture_compiler import (  # noqa: E402
+    DECISIONS_SCHEMA,
+    build_call_fixtures,
+    build_mcp_scenario,
+    derive_tool_call_inventory,
+    derive_tool_call_plan,
+    resolve_tool_access,
+)
+from mock_registration import probe_registration  # noqa: E402
+
 SCHEMA = "nemo.eval_author.trace_environment_summary.v2"
 CANDIDATE_SCHEMA = "nemo.eval_author.trace_environment_candidate.v2"
 VALIDATION_SCHEMA = "nemo.eval_author.trace_environment_validation.v5"
 RUN_INPUT_SCHEMA = "nemo.eval_author.trace_environment_run_input.v1"
 PRIVACY_AUDIT_SCHEMA = "nemo.eval_author.trace_environment_privacy_audit.v1"
+PUBLICATION_REVIEW_SCHEMA = "nemo.eval_author.trace_environment_publication_review.v1"
+TOOL_CALL_GENERATION_SCHEMA = "nemo.eval_author.trace_environment_tool_call_generation.v1"
 REPRODUCIBILITY_SCHEMA = "nemo.eval_author.trace_environment_reproducibility.v3"
 EXPORT_SCHEMA = "nemo.eval_author.trace_environment_product.v3"
 BATCH_SCHEMA = "nemo.eval_author.trace_environment_batch.v1"
+TOOL_CALL_AUDIT_LOG = "/tmp/tool-call-fixture-audit.jsonl"  # nosec B108 - isolated task-container scratch data
 MAX_RAW_SOURCE_BYTES = 128 * 1024 * 1024
 MAX_CANONICAL_BYTES = 25 * 1024 * 1024
 TASK_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -333,13 +352,13 @@ def _init(args: argparse.Namespace) -> dict[str, Any]:
     if ".eval-author" not in root.parts:
         raise ContractError("task workspace root must stay under a .eval-author directory")
     _mkdir_private(root)
-    ignore = root / ".gitignore"
-    ignore_text = "*\n!.gitignore\n"
-    if ignore.exists():
-        if ignore.is_symlink() or ignore.read_text(encoding="utf-8") != ignore_text:
-            raise ContractError(f"refusing to replace unexpected ignore rules at {ignore}")
+    gitignore_path = root / ".gitignore"
+    expected_gitignore = "*\n!.gitignore\n"
+    if gitignore_path.exists():
+        if gitignore_path.is_symlink() or gitignore_path.read_text(encoding="utf-8") != expected_gitignore:
+            raise ContractError(f"workspace .gitignore must contain only the required exclusions: {gitignore_path}")
     else:
-        _write_text(ignore, ignore_text)
+        _write_text(gitignore_path, expected_gitignore)
 
     task_dir = root / args.task_id
     if task_dir.exists():
@@ -597,25 +616,50 @@ def _bound_stringified_images(payload: dict[str, Any]) -> dict[str, int]:
             parts.append({"type": "text", "text": content[emitted_cursor:]})
         return parts, converted_count, converted_characters
 
-    def bound_metadata(value: Any) -> None:
+    def bound_metadata(value: Any, *, image_context: bool = False) -> Any:
         if isinstance(value, dict):
-            image_like = value.get("type") in {"image", "base64"} or (
-                isinstance(value.get("media_type"), str) and value["media_type"].startswith("image/")
+            image_like = (
+                image_context
+                or value.get("type") in {"image", "base64"}
+                or (isinstance(value.get("media_type"), str) and value["media_type"].startswith("image/"))
             )
             for key, nested in value.items():
                 if (
                     isinstance(nested, str)
-                    and len(nested) > 100_000
-                    and (key == "base64" or (key == "data" and image_like))
+                    and nested
+                    and ((key in {"base64", "data"} and image_like) or (key == "base64" and len(nested) > 100_000))
                 ):
                     counts["metadata_field_count"] += 1
                     counts["metadata_omitted_characters"] += len(nested)
                     value[key] = ""
                 else:
-                    bound_metadata(nested)
+                    value[key] = bound_metadata(nested, image_context=image_like)
         elif isinstance(value, list):
-            for nested in value:
-                bound_metadata(nested)
+            for index, nested in enumerate(value):
+                value[index] = bound_metadata(nested, image_context=image_context)
+        elif isinstance(value, str):
+            # Tool observations may repeat image metadata as JSON inside a text
+            # part, not as a structured ATIF image. Preserve surrounding prose
+            # and nonbinary metadata; never decode or execute encoded contents.
+            decoder = json.JSONDecoder()
+            fragments: list[str] = []
+            search_cursor = emitted_cursor = 0
+            while match := _IMAGE_OBJECT_START.search(value, search_cursor):
+                try:
+                    metadata, end = decoder.raw_decode(value, match.start())
+                except json.JSONDecodeError:
+                    search_cursor = match.end()
+                    continue
+                previous_count = counts["metadata_field_count"]
+                bound_metadata(metadata)
+                if counts["metadata_field_count"] != previous_count:
+                    fragments.extend((value[emitted_cursor : match.start()], json.dumps(metadata, ensure_ascii=False)))
+                    emitted_cursor = end
+                search_cursor = end
+            if fragments:
+                fragments.append(value[emitted_cursor:])
+                return "".join(fragments)
+        return value
 
     def bound_image_parts(value: Any) -> None:
         if isinstance(value, dict):
@@ -884,6 +928,363 @@ def _review_privacy(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _tool_call_source(task_dir: Path) -> tuple[dict[str, Any], dict[str, Any], str]:
+    summary = _load_summary(task_dir)
+    source = summary.get("source")
+    if not isinstance(source, dict):
+        raise ContractError("prepare safe ATIF evidence before inventorying interactions")
+    safe_path = task_dir / source["safe_path"]
+    if safe_path.is_symlink() or not safe_path.is_file():
+        raise ContractError("safe ATIF must be a retained regular file")
+    if safe_path.stat().st_size > MAX_CANONICAL_BYTES:
+        raise ContractError(f"safe ATIF exceeds the {MAX_CANONICAL_BYTES}-byte limit")
+    with safe_path.open("rb") as stream:
+        safe_bytes = stream.read(MAX_CANONICAL_BYTES + 1)
+    if len(safe_bytes) > MAX_CANONICAL_BYTES:
+        raise ContractError(f"safe ATIF exceeds the {MAX_CANONICAL_BYTES}-byte limit")
+    safe_sha256 = _sha256(safe_bytes)
+    if safe_sha256 != source["safe_sha256"]:
+        raise ContractError("safe ATIF digest does not match the task summary")
+    try:
+        safe = json.loads(safe_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ContractError("could not read safe ATIF as UTF-8 JSON") from error
+    if not isinstance(safe, dict):
+        raise ContractError("safe ATIF must contain one JSON object")
+    _validate_trajectory(safe)
+    return summary, safe, safe_sha256
+
+
+def _current_tool_call_inventory(task_dir: Path) -> dict[str, Any]:
+    _, safe, safe_sha256 = _tool_call_source(task_dir)
+    return derive_tool_call_inventory(safe, safe_atif_sha256=safe_sha256)
+
+
+def _inventory_tool_calls(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    output = task_dir / "private/tool-call-inventory.json"
+    if output.exists():
+        raise ContractError("refusing to replace existing tool-call-inventory.json")
+    inventory = _current_tool_call_inventory(task_dir)
+    _write_bytes_once(output, (json.dumps(inventory, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode())
+    return {
+        "task_dir": str(task_dir),
+        "tool_count": inventory["tool_count"],
+        "call_count": inventory["call_count"],
+        "inventory": str(output),
+    }
+
+
+def _current_tool_call_inventory_file(task_dir: Path) -> dict[str, Any]:
+    inventory = _load_object(task_dir / "private/tool-call-inventory.json", label="tool-call inventory")
+    if inventory != _current_tool_call_inventory(task_dir):
+        raise ContractError("tool-call-inventory.json differs from the current safe ATIF")
+    return inventory
+
+
+def _plan_tool_call_access(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    output = task_dir / "private/tool-call-plan.json"
+    if output.exists():
+        raise ContractError("refusing to replace existing tool-call-plan.json")
+    inventory = _current_tool_call_inventory_file(task_dir)
+    overrides_path = task_dir / "private/tool-schema-overrides.json"
+    if overrides_path.exists():
+        raise ContractError("refusing to replace existing tool-schema-overrides.json")
+    overrides = (
+        _load_object(args.schema_overrides, label="reviewed schema overrides") if args.schema_overrides else None
+    )
+    try:
+        plan = derive_tool_call_plan(inventory, overrides)
+    except ValueError as error:
+        raise ContractError(str(error)) from error
+    if overrides is not None:
+        _write_bytes_once(
+            overrides_path, (json.dumps(overrides, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
+        )
+    _write_bytes_once(output, (json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode())
+    return {
+        "task_dir": str(task_dir),
+        "tool_count": len(plan["tools"]),
+        "mock_support_counts": plan["mock_support_counts"],
+        "plan": str(output),
+    }
+
+
+def _current_tool_call_plan(task_dir: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    inventory = _current_tool_call_inventory_file(task_dir)
+    plan = _load_object(task_dir / "private/tool-call-plan.json", label="tool-call plan")
+    overrides_path = task_dir / "private/tool-schema-overrides.json"
+    overrides = _load_object(overrides_path, label="reviewed schema overrides") if overrides_path.exists() else None
+    try:
+        expected = derive_tool_call_plan(inventory, overrides)
+    except ValueError as error:
+        raise ContractError(str(error)) from error
+    if plan != expected:
+        raise ContractError("tool-call-plan.json differs from the current tool-call inventory")
+    return inventory, plan
+
+
+def _resolve_tool_call_access(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    output = task_dir / "private/tool-access.json"
+    if output.exists():
+        raise ContractError("refusing to replace existing tool-access.json")
+    inventory, plan = _current_tool_call_plan(task_dir)
+    requested = _load_object(args.decisions, label="tool access decisions")
+    try:
+        access = resolve_tool_access(inventory, plan, requested, reviewer_kind=args.reviewer_kind)
+    except ValueError as error:
+        raise ContractError(str(error)) from error
+    _write_bytes_once(output, (json.dumps(access, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode())
+    return {
+        "task_dir": str(task_dir),
+        "access_counts": access["access_counts"],
+        "access": str(output),
+    }
+
+
+def _current_tool_access(task_dir: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    inventory, plan = _current_tool_call_plan(task_dir)
+    access = _load_object(task_dir / "private/tool-access.json", label="tool access")
+    decisions = [
+        {key: decision.get(key) for key in ("tool_id", "name", "access", "adapter", "note")}
+        for decision in access.get("decisions", [])
+        if isinstance(decision, dict)
+    ]
+    requested = {"schema": DECISIONS_SCHEMA, "decisions": decisions}
+    reviewer_kind = access.get("reviewer_kind")
+    if not isinstance(reviewer_kind, str):
+        raise ContractError("tool-access.json reviewer_kind must be agent or human")
+    try:
+        expected = resolve_tool_access(
+            inventory,
+            plan,
+            requested,
+            reviewer_kind=reviewer_kind,
+        )
+    except ValueError as error:
+        raise ContractError(f"tool-access.json is invalid: {error}") from error
+    if access != expected:
+        raise ContractError("tool-access.json differs from the current tool-call plan")
+    return inventory, plan, access
+
+
+def _fixture_readme() -> str:
+    return (
+        "# Trace-derived tool-call mock\n\n"
+        "`call-fixtures.json` is the transport-neutral set of tool-call inputs and outputs selected for mock "
+        "access by the evaluation author. The included MCP adapter exposes those functions to Harbor agents, "
+        "matches tool names and canonical JSON arguments exactly, and returns an error for every unmatched call.\n\n"
+        "Copy this directory to `/opt/tool-call-fixtures` in the agent image, ensure Python 3 is present, and merge "
+        "`integration.toml` into the task's `[environment]` config. The optional audit log is written to "
+        f"`{TOOL_CALL_AUDIT_LOG}`. Finalization rejects a candidate task that selected mock access but "
+        "did not configure this MCP adapter.\n\n"
+        "The stdio process and fixture files are inspectable by a shell-capable agent. Do not use them to hold "
+        "hidden verifier truth. Prefer a filesystem-isolated sidecar when fixture contents must remain hidden.\n"
+    )
+
+
+def _fixture_integration() -> str:
+    return (
+        "# Merge this array entry into the real task.toml after copying this directory\n"
+        "# to /opt/tool-call-fixtures in the agent image.\n"
+        "[[environment.mcp_servers]]\n"
+        'name = "trace-tool-call-replay"\n'
+        'transport = "stdio"\n'
+        'command = "/opt/tool-call-fixtures/launch-replay.sh"\n'
+        "args = []\n"
+    )
+
+
+def _fixture_launcher() -> str:
+    # An argument-free executable also works with Harbor adapters that serialize
+    # command + args as one executable name (notably Codex in Harbor 0.20.0).
+    return (
+        "#!/bin/sh\n"
+        'exec python3 "$(dirname "$0")/mcp_replay.py" '
+        '--scenario "$(dirname "$0")/mcp-scenario.json" '
+        f'--audit-log "${{TRACE_TOOL_CALL_AUDIT_LOG:-{TOOL_CALL_AUDIT_LOG}}}"\n'
+    )
+
+
+def _generated_fixture_files(fixture_dir: Path, task_dir: Path) -> list[dict[str, Any]]:
+    files: list[dict[str, Any]] = []
+    for path in sorted(fixture_dir.rglob("*")):
+        if path.is_symlink():
+            raise ContractError("generated trace fixtures must not contain symlinks")
+        if not path.is_file():
+            continue
+        files.append(
+            {
+                "path": str(path.relative_to(task_dir)),
+                "sha256": _sha256_file(path),
+                "mode": stat.S_IMODE(path.stat().st_mode),
+            }
+        )
+    return files
+
+
+def _generate_mock_tool_calls(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    summary, _, _ = _tool_call_source(task_dir)
+    privacy = summary.get("privacy")
+    if not isinstance(privacy, dict) or not privacy.get("contextual_review_complete"):
+        raise ContractError("mock tool-call generation requires the review-privacy command")
+    if privacy.get("blocking_reasons"):
+        raise ContractError("mock tool-call generation is blocked by unresolved privacy evidence")
+    inventory, _, access = _current_tool_access(task_dir)
+    call_fixtures = build_call_fixtures(inventory, access)
+    scenario = build_mcp_scenario(call_fixtures)
+    if not call_fixtures["tools"]:
+        raise ContractError("tool access decisions select no mock tool calls to generate")
+
+    fixture_dir = task_dir / "task/environment/tool-call-fixtures"
+    receipt_path = task_dir / "private/tool-call-generation.json"
+    if fixture_dir.exists() or receipt_path.exists():
+        raise ContractError("refusing to replace existing generated mock tool calls")
+    fixture_dir.parent.mkdir(parents=True, exist_ok=True)
+    runtime_source = Path(__file__).with_name("replay_mcp_server.py")
+    with tempfile.TemporaryDirectory(prefix="tool-call-fixtures-", dir=task_dir / "private") as temporary:
+        staged = Path(temporary) / "tool-call-fixtures"
+        _mkdir_private(staged)
+        _write_bytes_once(
+            staged / "call-fixtures.json",
+            (json.dumps(call_fixtures, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(),
+        )
+        _write_bytes_once(
+            staged / "mcp-scenario.json",
+            (json.dumps(scenario, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(),
+        )
+        _write_bytes_once(staged / "mcp_replay.py", runtime_source.read_bytes())
+        _write_bytes_once(staged / "launch-replay.sh", _fixture_launcher().encode())
+        _write_bytes_once(staged / "integration.toml", _fixture_integration().encode())
+        _write_bytes_once(staged / "README.md", _fixture_readme().encode())
+        if os.name == "posix":
+            (staged / "mcp_replay.py").chmod(0o755)
+            (staged / "launch-replay.sh").chmod(0o755)
+            for name in ("call-fixtures.json", "mcp-scenario.json", "integration.toml", "README.md"):
+                (staged / name).chmod(0o644)
+        staged.rename(fixture_dir)
+
+    files = _generated_fixture_files(fixture_dir, task_dir)
+    receipt = {
+        "schema": TOOL_CALL_GENERATION_SCHEMA,
+        "safe_atif_sha256": inventory["safe_atif_sha256"],
+        "inventory_sha256": _sha256_file(task_dir / "private/tool-call-inventory.json"),
+        "plan_sha256": _sha256_file(task_dir / "private/tool-call-plan.json"),
+        "access_sha256": _sha256_file(task_dir / "private/tool-access.json"),
+        "call_fixtures_sha256": _sha256_file(fixture_dir / "call-fixtures.json"),
+        "files": files,
+    }
+    _write_bytes_once(
+        receipt_path,
+        (json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(),
+    )
+    return {
+        "task_dir": str(task_dir),
+        "generated_mock_tool_count": len(scenario["tools"]),
+        "fixture_dir": str(fixture_dir),
+        "receipt": str(receipt_path),
+    }
+
+
+def _validate_tool_call_pipeline(task_dir: Path, *, require_decisions: bool = False) -> None:
+    inventory_path = task_dir / "private/tool-call-inventory.json"
+    plan_path = task_dir / "private/tool-call-plan.json"
+    access_path = task_dir / "private/tool-access.json"
+    receipt_path = task_dir / "private/tool-call-generation.json"
+    fixture_dir = task_dir / "task/environment/tool-call-fixtures"
+    overrides_path = task_dir / "private/tool-schema-overrides.json"
+    if require_decisions:
+        current = _current_tool_call_inventory(task_dir)
+        if current["unresolved_call_count"]:
+            raise ContractError("candidate contains unresolved tool calls; correct source evidence or use no_candidate")
+        if current["call_count"] and not all(path.is_file() for path in (inventory_path, plan_path, access_path)):
+            raise ContractError("candidate tool calls require complete reviewed real/mock/none access decisions")
+    if not any(
+        path.exists() for path in (inventory_path, plan_path, access_path, receipt_path, fixture_dir, overrides_path)
+    ):
+        return
+    if not inventory_path.is_file():
+        raise ContractError("tool-call artifacts require private/tool-call-inventory.json")
+    inventory = _current_tool_call_inventory_file(task_dir)
+    if not plan_path.exists():
+        if access_path.exists() or receipt_path.exists() or fixture_dir.exists() or overrides_path.exists():
+            raise ContractError("tool access artifacts require private/tool-call-plan.json")
+        return
+    _current_tool_call_plan(task_dir)
+    if not access_path.exists():
+        if receipt_path.exists() or fixture_dir.exists():
+            raise ContractError("generated mock tool calls require private/tool-access.json")
+        return
+    _, _, access = _current_tool_access(task_dir)
+    has_mock_access = any(decision["access"] == "mock" for decision in access["decisions"])
+    if not has_mock_access:
+        if receipt_path.exists() or fixture_dir.exists():
+            raise ContractError("generated mock tool calls require at least one mock access decision")
+        return
+    if receipt_path.exists() != fixture_dir.exists():
+        raise ContractError("generated mock tool-call directory and receipt must exist together")
+    if not receipt_path.exists():
+        raise ContractError("mock tool-call access requires generated mock tool-call artifacts")
+    receipt = _load_object(receipt_path, label="fixture generation receipt")
+    expected_keys = {
+        "schema",
+        "safe_atif_sha256",
+        "inventory_sha256",
+        "plan_sha256",
+        "access_sha256",
+        "call_fixtures_sha256",
+        "files",
+    }
+    if set(receipt) != expected_keys or receipt.get("schema") != TOOL_CALL_GENERATION_SCHEMA:
+        raise ContractError("tool-call generation receipt fields do not match the versioned contract")
+    call_fixtures = _load_object(fixture_dir / "call-fixtures.json", label="generated call fixtures")
+    if call_fixtures != build_call_fixtures(inventory, access):
+        raise ContractError("generated call fixtures differ from the current tool access decisions")
+    scenario = _load_object(fixture_dir / "mcp-scenario.json", label="generated MCP scenario")
+    if scenario != build_mcp_scenario(call_fixtures):
+        raise ContractError("generated MCP scenario differs from the current fixture plan")
+    expected = {
+        "schema": TOOL_CALL_GENERATION_SCHEMA,
+        "safe_atif_sha256": inventory["safe_atif_sha256"],
+        "inventory_sha256": _sha256_file(inventory_path),
+        "plan_sha256": _sha256_file(plan_path),
+        "access_sha256": _sha256_file(access_path),
+        "call_fixtures_sha256": _sha256_file(fixture_dir / "call-fixtures.json"),
+        "files": _generated_fixture_files(fixture_dir, task_dir),
+    }
+    if receipt != expected:
+        raise ContractError("tool-call generation receipt differs from the generated task files")
+
+
+def _validate_mock_tool_call_integration(task_dir: Path, config: dict[str, Any]) -> None:
+    access_path = task_dir / "private/tool-access.json"
+    if not access_path.exists():
+        return
+    _, _, access = _current_tool_access(task_dir)
+    mocked = [decision for decision in access["decisions"] if decision["access"] == "mock"]
+    if not mocked:
+        return
+    environment = config.get("environment")
+    servers = environment.get("mcp_servers") if isinstance(environment, dict) else None
+    if not isinstance(servers, list):
+        raise ContractError("mock tool-call access requires [[environment.mcp_servers]] in task/task.toml")
+    matching = [
+        server for server in servers if isinstance(server, dict) and server.get("name") == "trace-tool-call-replay"
+    ]
+    if len(matching) != 1:
+        raise ContractError("mock tool-call access requires exactly one trace-tool-call-replay MCP server")
+    server = matching[0]
+    if (
+        server.get("transport") != "stdio"
+        or server.get("command") != "/opt/tool-call-fixtures/launch-replay.sh"
+        or server.get("args") != []
+    ):
+        raise ContractError("trace-tool-call-replay MCP server differs from the generated integration contract")
+
+
 def _evidence_steps(value: Any, step_ids: set[int], *, label: str) -> list[int]:
     if (
         not isinstance(value, list)
@@ -928,7 +1329,8 @@ def _validate_requirements(value: Any, step_ids: set[int]) -> list[dict[str, Any
         label = f"candidate.requirements[{index}]"
         if not isinstance(requirement, dict) or set(requirement) != _REQUIREMENT_KEYS:
             raise ContractError(f"{label} fields do not match the versioned contract")
-        if not isinstance(requirement.get("description"), str) or not requirement["description"].strip():
+        description = requirement.get("description")
+        if not isinstance(description, str) or not description.strip():
             raise ContractError(f"{label}.description must be nonempty text")
         _evidence_steps(requirement.get("evidence_steps"), step_ids, label=f"{label}.evidence_steps")
     return value
@@ -938,14 +1340,14 @@ def _validate_ground_truth(task_dir: Path, value: Any, step_ids: set[int]) -> di
     if not isinstance(value, dict) or set(value) != _GROUND_TRUTH_KEYS:
         raise ContractError("candidate.ground_truth fields do not match the versioned contract")
     availability = value.get("availability")
-    if availability not in {"available", "partial", "absent", "unknown"}:
+    if not isinstance(availability, str) or availability not in {"available", "partial", "absent", "unknown"}:
         raise ContractError("candidate.ground_truth.availability is not recognized")
     artifacts = value.get("artifacts")
     if not isinstance(artifacts, list):
         raise ContractError("candidate.ground_truth.artifacts must be a list")
     absence_reason = value.get("absence_reason")
     use = value.get("use")
-    if use not in {"none", "comparison_only", "verification"}:
+    if not isinstance(use, str) or use not in {"none", "comparison_only", "verification"}:
         raise ContractError("candidate.ground_truth.use is not recognized")
     if absence_reason is not None and (not isinstance(absence_reason, str) or not absence_reason.strip()):
         raise ContractError("candidate.ground_truth.absence_reason must be null or nonempty text")
@@ -975,7 +1377,8 @@ def _validate_ground_truth(task_dir: Path, value: Any, step_ids: set[int]) -> di
         label = f"candidate.ground_truth.artifacts[{index}]"
         if not isinstance(artifact, dict) or set(artifact) != _GROUND_TRUTH_ARTIFACT_KEYS:
             raise ContractError(f"{label} fields do not match the versioned contract")
-        if artifact.get("kind") not in allowed_kinds:
+        kind = artifact.get("kind")
+        if not isinstance(kind, str) or kind not in allowed_kinds:
             raise ContractError(f"{label}.kind is not recognized")
         relative_path = artifact.get("path")
         if not isinstance(relative_path, str) or not relative_path.startswith("private/ground-truth/"):
@@ -1015,16 +1418,19 @@ def _validate_software_requirements(value: Any, step_ids: set[int]) -> list[dict
         if not isinstance(name, str) or not name.strip() or name.casefold() in names:
             raise ContractError(f"{label}.name must be nonempty and unique")
         names.add(name.casefold())
-        if requirement.get("category") not in allowed_categories:
+        category = requirement.get("category")
+        if not isinstance(category, str) or category not in allowed_categories:
             raise ContractError(f"{label}.category is not recognized")
         if type(requirement.get("required")) is not bool:
             raise ContractError(f"{label}.required must be a boolean")
         version = requirement.get("version")
         if version is not None and (not isinstance(version, str) or not version.strip()):
             raise ContractError(f"{label}.version must be null or nonempty text")
-        if requirement.get("license") not in allowed_licenses:
+        license_class = requirement.get("license")
+        if not isinstance(license_class, str) or license_class not in allowed_licenses:
             raise ContractError(f"{label}.license is not recognized")
-        if requirement.get("availability") not in allowed_availability:
+        availability = requirement.get("availability")
+        if not isinstance(availability, str) or availability not in allowed_availability:
             raise ContractError(f"{label}.availability is not recognized")
         redistributable = requirement.get("redistributable")
         if redistributable is not None and type(redistributable) is not bool:
@@ -1072,6 +1478,36 @@ def _validate_candidate(task_dir: Path, status: str, step_ids: set[int]) -> dict
         if candidate.get("requirements") != []:
             raise ContractError("no_candidate records must set requirements to an empty list")
     return candidate
+
+
+def _check_candidate(args: argparse.Namespace) -> dict[str, Any]:
+    """Check authored metadata against its prepared evidence without changing it."""
+    task_dir = _ensure_task_dir(args.task_dir)
+    summary = _load_summary(task_dir)
+    source = summary["source"]
+    if source is None:
+        raise ContractError("prepare ATIF evidence before checking candidate metadata")
+    safe_path = task_dir / source["safe_path"]
+    if safe_path.is_symlink() or not safe_path.is_file():
+        raise ContractError("safe ATIF must be a retained regular file")
+    if safe_path.stat().st_size > MAX_CANONICAL_BYTES:
+        raise ContractError(f"safe ATIF exceeds the {MAX_CANONICAL_BYTES}-byte limit")
+    safe_bytes = safe_path.read_bytes()
+    if _sha256(safe_bytes) != source["safe_sha256"] or len(safe_bytes) != source["safe_size_bytes"]:
+        raise ContractError("safe ATIF digest or size changed")
+    safe_payload = _load_object(safe_path, label="safe ATIF")
+    _validate_trajectory(safe_payload)
+    status = _load_object(task_dir / "candidate.json", label="candidate").get("status")
+    if status not in ("candidate", "no_candidate"):
+        raise ContractError("candidate.status must be candidate or no_candidate")
+    _validate_candidate(task_dir, status, {step["step_id"] for step in safe_payload["steps"]})
+    return {
+        "task_dir": str(task_dir),
+        "valid": True,
+        "scope": "candidate_metadata",
+        "status": status,
+        "execution_verified": False,
+    }
 
 
 def _task_tree_info(root: Path) -> dict[str, Any]:
@@ -1125,8 +1561,23 @@ def _dockerfile_images(task_dir: Path) -> list[dict[str, Any]]:
         logical_line = ""
         first_line = 1
         escape = "\\"
+        parser_directives = True
+        frontend_seen = False
         for line_number, line in enumerate(lines, start=1):
             stripped = line.strip()
+            if parser_directives:
+                directive = re.fullmatch(r"#\s*(syntax|escape|check)\s*=\s*(.*?)\s*", stripped, re.IGNORECASE)
+                if directive is None:
+                    parser_directives = False
+                elif directive[1].casefold() == "syntax":
+                    if frontend_seen or not directive[2] or len(directive[2].split()) != 1:
+                        raise ContractError(
+                            f"{path.relative_to(task_dir)}:{line_number} has an invalid syntax directive"
+                        )
+                    frontend_seen = True
+                    frontend = _image_reference(path, task_dir, line_number, "frontend", directive[2], set())
+                    frontend["immutable"] = _IMAGE_DIGEST.fullmatch(directive[2]) is not None
+                    images.append(frontend)
             if stripped.lower().startswith("# escape="):
                 escape = stripped.split("=", 1)[1].strip()
             if not stripped or stripped.startswith("#"):
@@ -1444,6 +1895,7 @@ def _validate_task(task_dir: Path) -> dict[str, Any]:
             not isinstance(step_environment, dict) or step_environment.get("network_mode") != "no-network"
         ):
             raise ContractError(f"[steps.verifier.environment] for step {index} must set network_mode to no-network")
+    _validate_mock_tool_call_integration(task_dir, config)
     return {
         "verifier_environment_mode": mode,
         "isolation_status": "isolated",
@@ -1482,6 +1934,142 @@ def _harbor_task_checksum(task_dir: Path) -> str:
         return Task(task_dir / "task").checksum
     except (ValueError, FileNotFoundError) as error:
         raise ContractError(f"Harbor could not validate the proof task: {error}") from error
+
+
+def _runtime_mode_roundtrip(model: Any) -> bool:
+    """Probe a declared provider field, without constructing a proof result."""
+    from pydantic import TypeAdapter
+
+    field = model.model_fields.get("verifier_environment_mode")
+    if field is None:
+        return False
+    adapter = TypeAdapter(field.annotation)
+    for mode in ("shared", "separate"):
+        value = adapter.validate_python(mode)
+        # Other required trial fields are deliberately absent: this is only a
+        # field serialization probe, never a validated or retained trial.
+        probe = model.model_construct(verifier_environment_mode=value)
+        if probe.model_dump(mode="json", exclude_unset=True).get("verifier_environment_mode") != mode:
+            return False
+    return True
+
+
+def _check_runtime(args: argparse.Namespace) -> dict[str, Any]:
+    """Read-only capability preflight; version labels are informational only."""
+    checks: list[dict[str, Any]] = []
+    report: dict[str, Any] = {
+        "schema": "nemo.eval_author.trace_environment_runtime_check.v2",
+        "valid": False,
+        "scope": "single_step_proof",
+        "harbor_version": None,
+        "python_executable": sys.executable,
+        "checks": checks,
+        "execution_verified": False,
+        "hint": "Use the same existing Harbor Python environment for this check, proof receipts and Harbor jobs. "
+        "Do not install or upgrade Harbor automatically. Actual trial results must still prove separate mode.",
+    }
+
+    def check(name: str, passed: bool, message: str) -> None:
+        checks.append({"name": name, "passed": passed, "message": message})
+
+    try:
+        report["harbor_version"] = importlib.metadata.version("harbor")
+    except importlib.metadata.PackageNotFoundError:
+        # Editable/source installations may have usable APIs without metadata.
+        pass
+    try:
+        config_model = importlib.import_module("harbor.models.task.config").TaskConfig
+        result_model = importlib.import_module("harbor.models.trial.result").TrialResult
+        task_model = importlib.import_module("harbor.models.task.task").Task
+    except Exception as error:
+        # Provider import/validation exception types can change between releases.
+        # Keep an incompatible installation a structured finding, not a traceback.
+        check("provider_imports", False, f"Required Harbor APIs are unavailable ({type(error).__name__}).")
+        return report
+    check("provider_imports", True, "Required Harbor model APIs imported in this interpreter.")
+    check("task_checksum_api", hasattr(task_model, "checksum"), "Proof receipts require Harbor's Task.checksum API.")
+    try:
+        config = config_model.model_validate(
+            {
+                "environment": {"network_mode": "no-network"},
+                "verifier": {
+                    "environment_mode": "separate",
+                    "network_mode": "no-network",
+                    "environment": {"network_mode": "no-network"},
+                },
+            }
+        )
+        for name, model, expected in (
+            ("agent_network_config", config.environment, {"network_mode": "no-network"}),
+            (
+                "separate_verifier_config",
+                config.verifier,
+                {"environment_mode": "separate", "network_mode": "no-network"},
+            ),
+            ("verifier_environment_config", config.verifier.environment, {"network_mode": "no-network"}),
+        ):
+            declared = model is not None and all(key in type(model).model_fields for key in expected)
+            dumped = model.model_dump(mode="json") if declared else {}
+            check(
+                name,
+                all(dumped.get(key) == value for key, value in expected.items()),
+                "Required isolation settings must be declared and retained by Harbor, not ignored extras.",
+            )
+    except Exception as error:
+        check(
+            "isolation_config", False, f"Harbor could not retain required isolation settings ({type(error).__name__})."
+        )
+    try:
+        mode_supported = _runtime_mode_roundtrip(result_model)
+        check(
+            "trial_verifier_mode", mode_supported, "TrialResult must declare and serialize verifier_environment_mode."
+        )
+    except Exception as error:
+        check("trial_verifier_mode", False, f"Verifier-mode serialization is incompatible ({type(error).__name__}).")
+    if args.task_dir is not None:
+        task_dir = _ensure_task_dir(args.task_dir)
+        try:
+            task = task_model(task_dir / "task")
+            access_path = task_dir / "private/tool-access.json"
+            if access_path.exists():
+                _, _, access = _current_tool_access(task_dir)
+                if any(item["access"] == "mock" for item in access["decisions"]):
+                    _validate_mock_tool_call_integration(task_dir, task.config.model_dump(mode="json"))
+                    agent = getattr(args, "mock_agent", None)
+                    servers = [
+                        server
+                        for server in task.config.environment.mcp_servers
+                        if server.name == "trace-tool-call-replay"
+                    ]
+                    registration = probe_registration(agent, servers)
+                    report["mock_integration"] = {
+                        "adapter": "mcp",
+                        "registration": registration,
+                        "execution": {"status": "unverified", "reason": "native_agent_run_required"},
+                    }
+                    check(
+                        "mock_agent_registration",
+                        registration["status"] != "unsupported",
+                        f"Registration: {registration['status']} ({registration['reason']}). "
+                        "Only a demonstrated mismatch blocks this preflight. Unverified registration needs "
+                        "harness-specific evidence; valid does not prove native-agent mock access.",
+                    )
+            single_step = not task.config.steps
+            check(
+                "task_proof_shape",
+                single_step,
+                "The current proof reader requires trial-level verifier mode; multi-step proof is not certified by this preflight.",
+            )
+            checksum = task.checksum
+            check(
+                "task_checksum", isinstance(checksum, str) and bool(checksum), "Harbor must compute the task checksum."
+            )
+        except Exception as error:
+            check("task_validation", False, f"Harbor could not validate this proof task ({type(error).__name__}).")
+    if getattr(args, "mock_agent", None) and "mock_integration" not in report:
+        check("mock_agent_scope", False, "--mock-agent requires --task-dir with resolved mock tool-call access.")
+    report["valid"] = all(item["passed"] for item in checks)
+    return report
 
 
 def _run_input_path(task_dir: Path, job_dir: Path) -> Path:
@@ -1658,10 +2246,11 @@ def _validation_from_jobs(
     if len(job_ids) != len(set(job_ids)):
         raise ContractError("validation Harbor config.job_id values must be distinct")
     checksums = {trial.get("task_checksum") for trial in trials}
+    retained_checksum = next(iter(checksums))
     if (
         len(checksums) != 1
-        or not isinstance(next(iter(checksums)), str)
-        or _TASK_CHECKSUM.fullmatch(next(iter(checksums))) is None
+        or not isinstance(retained_checksum, str)
+        or _TASK_CHECKSUM.fullmatch(retained_checksum) is None
     ):
         raise ContractError("all validation Harbor results must have one matching task checksum")
     modes = {trial.get("verifier_environment_mode") for trial in trials}
@@ -1679,7 +2268,7 @@ def _validation_from_jobs(
     return {
         "schema": VALIDATION_SCHEMA,
         "harbor_version": harbor_version,
-        "task_checksum": next(iter(checksums)),
+        "task_checksum": retained_checksum,
         "task_tree_sha256": reproducibility["task_tree_sha256"],
         "verifier_environment_mode": mode,
         "distinct_jobs": True,
@@ -1807,6 +2396,24 @@ def _summary_markdown(summary: dict[str, Any]) -> str:
     )
 
 
+def _environment_status(
+    candidate: dict[str, Any], technical_status: str, isolation_status: str, review_status: str
+) -> str:
+    if technical_status == "failed":
+        return "failed"
+    unknown_required = any(
+        item["required"] and item["availability"] == "unknown" for item in candidate["software_requirements"]
+    )
+    if (
+        technical_status == "passed"
+        and isolation_status == "isolated"
+        and review_status == "human_reviewed"
+        and not unknown_required
+    ):
+        return "ready"
+    return "unproven"
+
+
 def _finalize(args: argparse.Namespace) -> dict[str, Any]:
     task_dir = _ensure_task_dir(args.task_dir)
     summary = _load_summary(task_dir)
@@ -1818,6 +2425,7 @@ def _finalize(args: argparse.Namespace) -> dict[str, Any]:
     safe_path = task_dir / summary["source"]["safe_path"]
     safe_payload = _load_object(safe_path, label="safe ATIF")
     _validate_trajectory(safe_payload)
+    _validate_tool_call_pipeline(task_dir, require_decisions=args.status == "candidate")
     step_ids = {step["step_id"] for step in safe_payload["steps"]}
     candidate = _validate_candidate(task_dir, args.status, step_ids)
 
@@ -1847,12 +2455,7 @@ def _finalize(args: argparse.Namespace) -> dict[str, Any]:
             technical_status = "passed" if validation["passed"] else "failed"
         else:
             technical_status = "not_run"
-        if technical_status == "failed":
-            environment_status = "failed"
-        elif technical_status == "passed" and isolation_status == "isolated" and args.human_reviewed:
-            environment_status = "ready"
-        else:
-            environment_status = "unproven"
+        environment_status = _environment_status(candidate, technical_status, isolation_status, review_status)
 
     reasons = list(args.reason)
     if args.status == "no_candidate" and not reasons:
@@ -1908,7 +2511,7 @@ def _check(args: argparse.Namespace) -> dict[str, Any]:
     else:
         errors.append("source has not been prepared")
     privacy = summary.get("privacy")
-    if isinstance(privacy, dict):
+    if isinstance(privacy, dict) and isinstance(source, dict):
         try:
             privacy_payload = _load_object(task_dir / privacy["path"], label="privacy report")
             if privacy != {"path": privacy["path"], "audit_path": privacy["audit_path"], **privacy_payload}:
@@ -1939,7 +2542,9 @@ def _check(args: argparse.Namespace) -> dict[str, Any]:
                     or not privacy["contextual_review_complete"]
                     or privacy["blocking_reasons"]
                 ):
-                    errors.append("finalized candidate lacks a clear contextual privacy review")
+                    errors.append(
+                        "finalized candidate lacks a completed contextual privacy review with no blocking findings"
+                    )
                 task_contract = _validate_task(task_dir)
                 _validate_reproducibility(task_dir)
                 if environment.get("verifier_environment_mode") != task_contract["verifier_environment_mode"]:
@@ -1952,16 +2557,13 @@ def _check(args: argparse.Namespace) -> dict[str, Any]:
                     expected_technical = "passed" if validation["passed"] else "failed"
                     if environment.get("technical_status") != expected_technical:
                         errors.append("summary technical status does not match Harbor evidence")
-                    expected_status = "failed"
-                    if validation["passed"]:
-                        expected_status = (
-                            "ready"
-                            if task_contract["isolation_status"] == "isolated"
-                            and environment.get("review_status") == "human_reviewed"
-                            else "unproven"
-                        )
+                    expected_status = _environment_status(
+                        candidate, expected_technical, task_contract["isolation_status"], environment["review_status"]
+                    )
                     if environment.get("status") != expected_status:
-                        errors.append("summary environment status does not match proof, review, and isolation")
+                        errors.append(
+                            "summary environment status does not match proof, review, isolation, and software"
+                        )
                     if environment.get("validation") != "validation.json":
                         errors.append("summary omits retained Harbor validation")
                 elif environment.get("technical_status") != "not_run":
@@ -1983,6 +2585,10 @@ def _check(args: argparse.Namespace) -> dict[str, Any]:
                 errors.append("summary.md is missing or does not match summary.json")
         except ContractError as error:
             errors.append(str(error))
+    try:
+        _validate_tool_call_pipeline(task_dir, require_decisions=summary["status"] == "candidate")
+    except ContractError as error:
+        errors.append(str(error))
     return {"task_dir": str(task_dir), "valid": not errors, "errors": errors}
 
 
@@ -2095,26 +2701,47 @@ def _reject_symlinks(root: Path) -> None:
             raise ContractError(f"safe export refuses symlink: {path.relative_to(root.parent)}")
 
 
-def _export(args: argparse.Namespace) -> dict[str, Any]:
-    task_dir = _ensure_task_dir(args.task_dir)
+def _copy_publication_file(source: Path, destination: Path) -> None:
+    """Copy only file bytes and normalized executable bits, never source metadata."""
+
+    if source.is_symlink() or not source.is_file():
+        raise ContractError("publication source must be a regular file")
+    with source.open("rb") as incoming, destination.open("xb") as outgoing:
+        shutil.copyfileobj(incoming, outgoing)
+    destination.chmod(0o644 | (stat.S_IMODE(source.stat().st_mode) & 0o111))
+
+
+def _copy_publication_tree(source: Path, destination: Path) -> None:
+    """Keep the new root private while copying; do not propagate directory xattrs."""
+
+    _reject_symlinks(source)
+    destination.mkdir(mode=0o700, parents=True, exist_ok=False)
+    for path in sorted(source.iterdir()):
+        target = destination / path.name
+        if path.is_dir():
+            _copy_publication_tree(path, target)
+            target.chmod(0o755)
+        else:
+            _copy_publication_file(path, target)
+
+
+def _write_publication(task_dir: Path, output_dir: Path) -> None:
+    """Render the complete publication inside an owner-private staging directory."""
+
     summary = _load_summary(task_dir)
     if summary["status"] == "pending":
         raise ContractError("finalize the task workspace before export")
     checked = _check(argparse.Namespace(task_dir=task_dir))
     if not checked["valid"]:
         raise ContractError(f"task workspace check failed: {'; '.join(checked['errors'])}")
-    output_dir = args.output_dir.resolve()
-    if output_dir.is_relative_to(task_dir) or ".eval-author" in output_dir.parts:
-        raise ContractError("export directory must be outside every private .eval-author workspace")
-    if output_dir.exists():
-        raise ContractError(f"refusing to replace existing export directory: {output_dir}")
-    output_dir.mkdir(parents=True)
+    _reject_symlinks(task_dir / "candidate.json")
     candidate = _load_object(task_dir / "candidate.json", label="candidate")
-    shutil.copy2(task_dir / "candidate.json", output_dir / "candidate.json")
+    _copy_publication_file(task_dir / "candidate.json", output_dir / "candidate.json")
     if summary["status"] == "candidate":
         _reject_symlinks(task_dir / "task")
-        shutil.copytree(task_dir / "task", output_dir / "task")
-        shutil.copy2(task_dir / "reproducibility.json", output_dir / "reproducibility.json")
+        _reject_symlinks(task_dir / "reproducibility.json")
+        _copy_publication_tree(task_dir / "task", output_dir / "task")
+        _copy_publication_file(task_dir / "reproducibility.json", output_dir / "reproducibility.json")
     reproducibility_summary = None
     if summary["status"] == "candidate":
         reproducibility = _validate_reproducibility(task_dir)
@@ -2184,9 +2811,106 @@ def _export(args: argparse.Namespace) -> dict[str, Any]:
             path.chmod(0o644 | (stat.S_IMODE(path.stat().st_mode) & 0o111))
         elif path.is_dir():
             path.chmod(0o755)
+
+
+def _publication_inventory(root: Path) -> dict[str, Any]:
+    tree = _task_tree_info(root)
+    # The task digest tracks whether a file is executable; publication review
+    # additionally binds exact permission bits for every entry (except the root).
+    modes = {path.relative_to(root).as_posix(): stat.S_IMODE(path.stat().st_mode) for path in sorted(root.rglob("*"))}
+    digest = _sha256(json.dumps({"tree": tree, "modes": modes}, sort_keys=True).encode())
+    return {"sha256": digest, "file_count": tree["file_count"], "total_bytes": tree["total_bytes"]}
+
+
+def _prepare_publication(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    publications = task_dir / "private" / "publications"
+    if (task_dir / "private").is_symlink() or publications.is_symlink():
+        raise ContractError("publication staging directories must not be symlinks")
+    _mkdir_private(task_dir / "private")
+    _mkdir_private(publications)
+    # Keep each preview, including superseded ones, as private review evidence.
+    with tempfile.TemporaryDirectory(prefix="staging-", dir=publications) as temporary:
+        preview = Path(temporary) / "product"
+        _mkdir_private(preview)
+        _write_publication(task_dir, preview)
+        inventory = _publication_inventory(preview)
+        destination = publications / inventory["sha256"].removeprefix("sha256:")
+        if destination.exists():
+            if _publication_inventory(destination) != inventory:
+                raise ContractError("retained publication preview changed; preserve it and prepare a new workspace")
+        else:
+            preview.rename(destination)
+    return {"task_dir": str(task_dir), "preview_dir": str(destination), **inventory}
+
+
+def _review_publication(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    if not args.note.strip():
+        raise ContractError("publication review note must be nonempty")
+    if (task_dir / "private").is_symlink() or (task_dir / "private/publications").is_symlink():
+        raise ContractError("publication staging directories must not be symlinks")
+    preview = args.preview_dir
+    if not preview.is_absolute():
+        preview = task_dir / preview
+    if preview.is_symlink():
+        raise ContractError("publication preview must not be a symlink")
+    preview = preview.resolve()
+    if preview.parent != task_dir / "private/publications":
+        raise ContractError("review requires a retained private publication preview")
+    inventory = _publication_inventory(preview)
+    if inventory["sha256"] != args.sha256 or preview.name != args.sha256.removeprefix("sha256:"):
+        raise ContractError("publication preview does not match the reviewed digest")
+    with tempfile.TemporaryDirectory(dir=task_dir / "private") as temporary:
+        current = Path(temporary)
+        _write_publication(task_dir, current)
+        if _publication_inventory(current) != inventory:
+            raise ContractError("publication preview is stale; prepare and review the current product")
+    _write_json(
+        task_dir / "private/publication-review.json",
+        {
+            "schema": PUBLICATION_REVIEW_SCHEMA,
+            "publication": inventory,
+            "reviewer_kind": args.reviewer_kind,
+            "note": args.note.strip(),
+        },
+    )
+    return {"task_dir": str(task_dir), "reviewed": True, **inventory}
+
+
+def _export(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    if (task_dir / "private").is_symlink():
+        raise ContractError("publication staging directories must not be symlinks")
+    _mkdir_private(task_dir / "private")
+    output_dir = args.output_dir.resolve()
+    if output_dir.is_relative_to(task_dir) or ".eval-author" in output_dir.parts:
+        raise ContractError("export directory must be outside every private .eval-author workspace")
+    if output_dir.exists():
+        raise ContractError(f"refusing to replace existing export directory: {output_dir}")
+    review_path = task_dir / "private/publication-review.json"
+    if not review_path.is_file():
+        raise ContractError("export requires prepare-publication and review-publication for every product")
+    _reject_symlinks(review_path)
+    review = _load_object(review_path, label="publication review")
+    if (
+        set(review) != {"schema", "publication", "reviewer_kind", "note"}
+        or review.get("schema") != PUBLICATION_REVIEW_SCHEMA
+        or review.get("reviewer_kind") not in ("agent", "human")
+        or not isinstance(review.get("note"), str)
+        or not review["note"].strip()
+    ):
+        raise ContractError("publication review does not match the versioned contract")
+    with tempfile.TemporaryDirectory(dir=task_dir / "private") as temporary:
+        staged = Path(temporary)
+        _write_publication(task_dir, staged)
+        if _publication_inventory(staged) != review["publication"]:
+            raise ContractError("publication review is stale; prepare and review the current product")
+        # Publish the checked snapshot, never reread mutable source files after review.
+        _copy_publication_tree(staged, output_dir)
     output_dir.chmod(0o755)
     return {
-        "task_id": summary["task_id"],
+        "task_id": task_dir.name,
         "output_dir": str(output_dir),
         "files": sorted(str(path.relative_to(output_dir)) for path in output_dir.rglob("*") if path.is_file()),
     }
@@ -2195,6 +2919,13 @@ def _export(args: argparse.Namespace) -> dict[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    runtime = subparsers.add_parser("check-runtime", help="probe the installed Harbor proof APIs without running jobs")
+    runtime.add_argument(
+        "--mock-agent", help="Harbor agent name or trusted module:Class to probe for mock registration"
+    )
+    runtime.add_argument("--task-dir", type=Path, help="also validate an authored task and its proof shape")
+    runtime.set_defaults(run=_check_runtime)
 
     init = subparsers.add_parser("init", help="create one private, gitignored task workspace")
     init.add_argument("--root", type=Path, default=Path(".eval-author/trace-environments"))
@@ -2212,6 +2943,42 @@ def _parser() -> argparse.ArgumentParser:
     review.add_argument("--reviewer-kind", choices=("agent", "human"), required=True)
     review.add_argument("--note", required=True)
     review.set_defaults(run=_review_privacy)
+
+    inventory = subparsers.add_parser(
+        "inventory-tool-calls", help="derive a private tool-call input and output inventory from safe ATIF"
+    )
+    inventory.add_argument("--task-dir", required=True, type=Path)
+    inventory.set_defaults(run=_inventory_tool_calls)
+
+    access_plan = subparsers.add_parser(
+        "plan-tool-call-access", help="report which observed tool calls support deterministic mock replay"
+    )
+    access_plan.add_argument("--task-dir", required=True, type=Path)
+    access_plan.add_argument(
+        "--schema-overrides", type=Path, help="reviewed, inventory-bound input schemas; source ATIF stays unchanged"
+    )
+    access_plan.set_defaults(run=_plan_tool_call_access)
+
+    access = subparsers.add_parser(
+        "resolve-tool-call-access", help="record real, mock, or no access for every observed tool-call surface"
+    )
+    access.add_argument("--task-dir", required=True, type=Path)
+    access.add_argument("--decisions", required=True, type=Path)
+    access.add_argument("--reviewer-kind", choices=("agent", "human"), required=True)
+    access.set_defaults(run=_resolve_tool_call_access)
+
+    mock_generation = subparsers.add_parser(
+        "generate-mock-tool-calls", help="materialize deterministic mocks selected by the tool access decision"
+    )
+    mock_generation.add_argument("--task-dir", required=True, type=Path)
+    mock_generation.set_defaults(run=_generate_mock_tool_calls)
+
+    candidate_check = subparsers.add_parser(
+        "check-candidate",
+        help="read-only metadata and evidence-reference check; does not prove execution or privacy review",
+    )
+    candidate_check.add_argument("--task-dir", required=True, type=Path)
+    candidate_check.set_defaults(run=_check_candidate)
 
     reproducibility = subparsers.add_parser(
         "record-reproducibility", help="hash the task tree and record portability and contamination evidence"
@@ -2260,6 +3027,20 @@ def _parser() -> argparse.ArgumentParser:
     batch_status.add_argument("--root", type=Path, default=Path(".eval-author/trace-environments"))
     batch_status.add_argument("--manifest", required=True, type=Path)
     batch_status.set_defaults(run=_batch_status)
+
+    publication = subparsers.add_parser("prepare-publication", help="stage the exact public product for private review")
+    publication.add_argument("--task-dir", required=True, type=Path)
+    publication.set_defaults(run=_prepare_publication)
+
+    publication_review = subparsers.add_parser(
+        "review-publication", help="attest review of an exact publication preview"
+    )
+    publication_review.add_argument("--task-dir", required=True, type=Path)
+    publication_review.add_argument("--preview-dir", required=True, type=Path)
+    publication_review.add_argument("--sha256", required=True)
+    publication_review.add_argument("--reviewer-kind", choices=("agent", "human"), required=True)
+    publication_review.add_argument("--note", required=True)
+    publication_review.set_defaults(run=_review_publication)
 
     export = subparsers.add_parser("export", help="publish only the reviewed candidate, task, and result summary")
     export.add_argument("--task-dir", required=True, type=Path)

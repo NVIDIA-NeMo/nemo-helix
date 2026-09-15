@@ -7,7 +7,7 @@ import duckdb
 from data_designer.engine.resources.seed_reader import SeedReader
 from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
 from data_designer_nemo.filesystem import make_filesystem
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_platform import NeMoPlatform
 
 workspace_cvar = ContextVar[str | None]("workspace_cvar", default=None)
 
@@ -16,7 +16,7 @@ class FilesetFileSeedReader(SeedReader[FilesetFileSeedSource]):
     # The Data Designer library discovers seed-reader plugins by instantiating them with no args.
     # Within this plugin we always inject an SDK and pass a collection of readers that replaces
     # any library-produced default collection of readers.
-    def __init__(self, sdk: NeMoPlatform | AsyncNeMoPlatform | None = None):
+    def __init__(self, sdk: NeMoPlatform | None = None) -> None:
         self._sdk = sdk
 
     def create_duckdb_connection(self) -> duckdb.DuckDBPyConnection:

@@ -14,6 +14,8 @@ import pytest
 from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult
 from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
 from nemo_agents_plugin.service import AgentsService
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import PlatformJobResults
 from nmp.core.files.service import FilesService
@@ -130,7 +132,11 @@ def test_execute_job_materializes_layered_input_workspace(tmp_path: Path) -> Non
         job_ctx = JobContext(
             workspace="default",
             storage=StoragePaths(ephemeral=ephemeral, persistent=persistent),
-            results=PlatformJobResults(job_name=job_name, workspace="default", sdk=ctx.sdk),
+            results=PlatformJobResults(
+                job_name=job_name,
+                workspace="default",
+                client=client_from_platform(ctx.sdk, NemoClient),
+            ),
             job_id=job["id"],
         )
 
@@ -239,7 +245,11 @@ def test_execute_job_saves_error_results_when_fabric_raises(tmp_path: Path) -> N
         job_ctx = JobContext(
             workspace="default",
             storage=StoragePaths(ephemeral=ephemeral, persistent=persistent),
-            results=PlatformJobResults(job_name=job_name, workspace="default", sdk=ctx.sdk),
+            results=PlatformJobResults(
+                job_name=job_name,
+                workspace="default",
+                client=client_from_platform(ctx.sdk, NemoClient),
+            ),
             job_id=job["id"],
         )
 

@@ -107,7 +107,7 @@ job fails in a way that matches:
 | `rl.sandbox_rollout_chunk_size` | NeMo-RL's 8 | Every rollout fails with HTTP 500 after a long POST — the OpenSandbox proxy caps how long one request may stay open, and a large `max_new_tokens` overruns it. Read elapsed time on the failing POSTs and divide down |
 | `rl.sandbox_rollout_max_in_flight` | NeMo-RL's 8 | In-flight rollouts are chunk × this. Raise in proportion when lowering the chunk, or step throughput falls with it |
 | `rl.sandbox_ttl_s` | NeMo-RL's 14400 (4h) | A run outliving the reap timer loses its sandbox mid-rollout and fails with a proxy 502. Must exceed the longest accepted run; capped by the server's `max_sandbox_timeout_seconds` |
-| `rl.sandbox_resources` | OpenSandbox default | Sandbox OOMKilled mid-rollout, surfacing as a proxy 502 rather than a memory error. The pod runs one Gym server process per config entry plus its own Ray |
+| `rl.sandbox_resources` | `cpu: "2"`, `memory: 4Gi` | Sandbox OOMKilled mid-rollout, surfacing as a proxy 502 rather than a memory error. The pod runs one Gym server process per config entry plus its own Ray. The OpenSandbox SDK default (1 CPU / 2Gi) is too small for that |
 | `rl.gym_runtime_image` | the `nmp-rl-training` image | Only if the sandbox must run a different image |
 
 Reference (local platform config): `docs/set-up/manage-jobs.mdx` (execution

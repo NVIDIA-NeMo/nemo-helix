@@ -19,7 +19,7 @@ import { featureFlags } from '@studio/constants/featureFlags';
  * @param envVarKey - The key of the environment variable to get.
  * @returns The value of the environment variable, or undefined if the environment variable is not set.
  */
-const getEnvVar = (envVarKey: string) => (import.meta.env[envVarKey] as string)?.toLowerCase();
+const getEnvVar = (envVarKey: string) => import.meta.env[envVarKey] as string;
 
 // Special keyword env vars
 export const IS_PROD = import.meta.env.PROD;
@@ -30,6 +30,7 @@ export const PLATFORM_BASE_URL = resolveBrowserBaseUrl(getEnvVar('VITE_PLATFORM_
 
 // Vars to indicate whether certain microservices should be turned off, to
 // distinguish that logic from code that calls the URL itself
+export const AGENT_OPTIMIZATIONS_ENABLED = featureFlags.agentOptimizationsEnabled !== false;
 export const AGENT_OVERVIEW_ENABLED = featureFlags.agentOverviewEnabled !== false;
 export const AGENTS_ENABLED = featureFlags.agentsEnabled !== false;
 export const ANONYMIZER_ENABLED = featureFlags.anonymizerEnabled !== false;
@@ -61,12 +62,12 @@ export const TOOL_CALLING_ENABLED = featureFlags.toolCallingEnabled !== false;
 export const TOUR_ENABLED = featureFlags.tourEnabled !== false;
 
 // Vars used by OpenTelemetry
-export const TELEMETRY_ENABLED = getEnvVar('VITE_TELEMETRY_ENABLED') === 'true';
+export const TELEMETRY_ENABLED = getEnvVar('VITE_TELEMETRY_ENABLED')?.toLowerCase() === 'true';
 const normalizedBaseUrl = BASE_URL.replace(/\/+$/, '');
 export const OTEL_PROXY_URL = `${normalizedBaseUrl}/telemetry`;
 export const OTEL_SERVICE_NAME = getEnvVar('VITE_OTEL_SERVICE_NAME');
 
-export const isLocalDevelopmentEnv = getEnvVar('VITE_IS_LOC_ENV') === 'true';
+export const isLocalDevelopmentEnv = getEnvVar('VITE_IS_LOC_ENV')?.toLowerCase() === 'true';
 
 // Vars used by the oidc provider
 export const AUTH_CLIENT_ID = getEnvVar('VITE_AUTH_CLIENT_ID');

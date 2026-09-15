@@ -186,8 +186,6 @@ class ExperimentRunner:
         insight = None
         if self._insight is not None:
             insight = await self._backend.get_insight(workspace=self._workspace, insight_id=str(self._insight))
-            if self._backend.client is None:
-                raise ValueError("Platform client is required for insight task template loading")
             assert template_ref is not None
             staged = await stage_eval_author_inputs(
                 self._root,
@@ -235,7 +233,6 @@ class ExperimentRunner:
 
         if insight is not None:
             assert template_ref is not None
-            assert self._backend.client is not None
             # Lazy: a run without an Insight never authors an eval suite, so it must not
             # fail to import when the Eval Author package is absent.
             from nemo_experimentalist_plugin.eval_author.agent import EvalAuthor  # noqa: PLC0415

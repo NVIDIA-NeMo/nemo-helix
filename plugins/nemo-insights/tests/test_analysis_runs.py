@@ -25,10 +25,14 @@ from nemo_insights_plugin.analysis_runs import (
 )
 from nemo_insights_plugin.entities import AnalysisRun
 from nemo_insights_plugin.schema import AnalysisRunPage
-from nemo_platform import APIConnectionError, APIStatusError, AsyncNeMoPlatform
+from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.agents.client import AsyncAgentsClient
+from nemo_platform_plugin.agents.types import CreateExecuteJobRequest
+from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError, raise_for_status
 from nemo_platform_plugin.entities.base import ListResponse, PaginationInfo
 from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_platform_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
+from nemo_platform_plugin.models.client import AsyncModelsClient
 from pydantic import ValidationError
 
 DEFAULT_MODEL = "default/big"
@@ -87,12 +91,57 @@ class _StubModels:
         return object()
 
 
+class _TypedResponse:
+    def __init__(self, body: object) -> None:
+        self._body = body
+
+    def data(self) -> object:
+        return self._body
+
+
+class _TypedAgentsClient:
+    def __init__(self, jobs: _StubExecuteJobs) -> None:
+        self._jobs = jobs
+
+    async def create_execute_job(
+        self, *, body: CreateExecuteJobRequest, workspace: str | None = None
+    ) -> _TypedResponse:
+        assert workspace is not None
+        return _TypedResponse(await self._jobs.create(spec=body.spec, name=body.name, workspace=workspace))
+
+    async def get_execute_job(self, *, name: str, workspace: str | None = None) -> _TypedResponse:
+        assert workspace is not None
+        return _TypedResponse(await self._jobs.get(name, workspace=workspace))
+
+
+class _TypedModelsClient:
+    def __init__(self, models: _StubModels) -> None:
+        self._models = models
+
+    async def get_model(self, *, name: str, workspace: str | None = None) -> _TypedResponse:
+        assert workspace is not None
+        return _TypedResponse(await self._models.retrieve(name, workspace=workspace))
+
+
 class _StubSdk:
     """Minimal stand-in for the request-scoped ``AsyncNeMoPlatform``."""
 
     def __init__(self, jobs: _StubExecuteJobs, models: _StubModels | None = None) -> None:
+        self.jobs = jobs
         self.agents = type("_Agents", (), {"jobs": type("_Jobs", (), {"execute": jobs})()})()
         self.models = models or _StubModels()
+
+
+@pytest.fixture(autouse=True)
+def _patch_clients(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_client_from_platform(platform: _StubSdk, client_cls: type[object]) -> object:
+        if client_cls is AsyncAgentsClient:
+            return _TypedAgentsClient(platform.jobs)
+        if client_cls is AsyncModelsClient:
+            return _TypedModelsClient(platform.models)
+        raise AssertionError(f"unexpected client type: {client_cls!r}")
+
+    monkeypatch.setattr("nemo_insights_plugin.analysis_runs.client_from_platform", fake_client_from_platform)
 
 
 class _StubEntities:
@@ -147,10 +196,18 @@ def _raise(error: Exception) -> Any:
     return _fail
 
 
-def _api_status_error(status_code: int, body: Any) -> APIStatusError:
+def _nemo_http_error(status_code: int, body: Any) -> NemoHTTPError:
     request = httpx.Request("POST", "http://platform/apis/agents/v2/workspaces/default/jobs/execute")
     response = httpx.Response(status_code, json=body, request=request)
-    return APIStatusError("boom", response=response, body=body)
+    try:
+        raise_for_status(response)
+    except NemoHTTPError as exc:
+        return exc
+    raise AssertionError("expected raise_for_status to fail")
+
+
+def _transport_error(method: str, url: str) -> NemoTransportError:
+    return NemoTransportError(httpx.ConnectError("boom", request=httpx.Request(method, url)))
 
 
 def _run(**overrides: Any) -> AnalysisRun:
@@ -354,7 +411,7 @@ async def test_a_bare_model_name_is_looked_up_in_the_run_workspace() -> None:
 
 async def test_a_denied_model_lookup_keeps_the_status_the_store_returned() -> None:
     """A cross-workspace ref the caller cannot read is a 403, not a malformed request."""
-    denied = _api_status_error(403, {"detail": "no access to workspace-b"})
+    denied = _nemo_http_error(403, {"detail": "no access to workspace-b"})
     entities = _StubEntities()
 
     with pytest.raises(HTTPException) as excinfo:
@@ -372,7 +429,7 @@ async def test_a_denied_model_lookup_keeps_the_status_the_store_returned() -> No
 
 async def test_an_unreachable_models_service_is_not_reported_as_a_bad_request() -> None:
     """Nothing is recorded yet, so this is a 503 rather than a 422 blaming the caller."""
-    unreachable = APIConnectionError(request=httpx.Request("GET", "http://platform/models"))
+    unreachable = _transport_error("GET", "http://platform/models")
     entities = _StubEntities()
 
     with pytest.raises(HTTPException) as excinfo:
@@ -397,7 +454,7 @@ async def test_nothing_is_submitted_when_the_run_cannot_be_recorded() -> None:
 
 async def test_a_failed_submission_leaves_the_run_record_in_place() -> None:
     """Deleting it could orphan a job that a timed-out create actually landed."""
-    jobs = _StubExecuteJobs(error=_api_status_error(422, {"detail": "bad model ref"}))
+    jobs = _StubExecuteJobs(error=_nemo_http_error(422, {"detail": "bad model ref"}))
     entities = _StubEntities()
 
     with pytest.raises(HTTPException) as excinfo:
@@ -409,12 +466,12 @@ async def test_a_failed_submission_leaves_the_run_record_in_place() -> None:
 
 
 async def test_an_unreachable_jobs_service_leaves_a_findable_run_record() -> None:
-    """APIConnectionError is a sibling of APIStatusError, so it needs its own arm.
+    """Transport errors are siblings of HTTP status errors, so they need their own arm.
 
     This is the case a retry could plausibly fix, so the orphan has to be
     findable afterwards rather than vanishing into an unhandled 500.
     """
-    unreachable = APIConnectionError(request=httpx.Request("POST", "http://platform/jobs/execute"))
+    unreachable = _transport_error("POST", "http://platform/jobs/execute")
     jobs = _StubExecuteJobs(error=unreachable)
     entities = _StubEntities()
 
@@ -424,12 +481,13 @@ async def test_an_unreachable_jobs_service_leaves_a_findable_run_record() -> Non
     assert excinfo.value.status_code == 503
     assert len(entities.created) == 1
     # The caller cannot recover a run it was never told the name of.
+    assert isinstance(excinfo.value.detail, dict)
     assert excinfo.value.detail["run"] == entities.created[0].name
 
 
 async def test_a_failed_submission_falls_back_to_the_raw_error_body() -> None:
     """A body with no ``detail`` key is surfaced whole rather than dropped."""
-    jobs = _StubExecuteJobs(error=_api_status_error(500, {"message": "upstream exploded"}))
+    jobs = _StubExecuteJobs(error=_nemo_http_error(500, {"message": "upstream exploded"}))
     entities = _StubEntities()
 
     with pytest.raises(HTTPException) as excinfo:
@@ -457,7 +515,7 @@ async def test_get_joins_the_run_with_its_backing_job() -> None:
 
 async def test_a_run_whose_job_is_missing_reads_as_never_submitted() -> None:
     """This is the disambiguation: no job under the run's name means it never landed."""
-    jobs = _StubExecuteJobs(get_error=_api_status_error(404, {"detail": "not found"}))
+    jobs = _StubExecuteJobs(get_error=_nemo_http_error(404, {"detail": "not found"}))
     entities = _StubEntities(existing=_run())
 
     response = await get_analysis_run("default", RUN_NAME, _sdk(jobs), _entities(entities))
@@ -467,10 +525,10 @@ async def test_a_run_whose_job_is_missing_reads_as_never_submitted() -> None:
 
 
 async def test_a_non_404_job_lookup_failure_is_not_swallowed() -> None:
-    jobs = _StubExecuteJobs(get_error=_api_status_error(503, {"detail": "jobs down"}))
+    jobs = _StubExecuteJobs(get_error=_nemo_http_error(503, {"detail": "jobs down"}))
     entities = _StubEntities(existing=_run())
 
-    with pytest.raises(APIStatusError):
+    with pytest.raises(NemoHTTPError):
         await get_analysis_run("default", RUN_NAME, _sdk(jobs), _entities(entities))
 
 

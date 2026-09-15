@@ -327,6 +327,15 @@ uv sync --package nemo-agents-plugin --extra container
 The examples below use the calculator agent that ships with the source
 checkout. Run them from the repository root. Its config is located at
 `plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml`.
+Build a wheel from the checkout and select it for packaging:
+
+```bash
+uv build --package nemo-platform --wheel --out-dir dist
+export NEMO_AGENTS_WHEEL=LATEST
+```
+
+`LATEST` selects the newest `nemo_platform-*.whl` file in `dist`. You can instead
+set `NEMO_AGENTS_WHEEL` to an absolute wheel path.
 
 <Tabs>
 
@@ -345,6 +354,9 @@ nemo agents package \
   --publish \
   --registry <your-registry>
 ```
+
+The Docker host running the command must already be authenticated to the
+registry.
 
 </Tab>
 
@@ -540,6 +552,25 @@ response = client.agents.invoke(
 
 </Tabs>
 ---
+
+## Interact with a Deployed Agent
+
+Start an interactive, multi-turn session with a running deployment:
+
+```bash
+nemo agents chat \
+  --agent-deployment calculator-agent-k8s \
+  --session-name calculator-chat
+```
+
+Leaving the chat does not close the session. Resume or manage it with:
+
+```bash
+nemo agents chat --session calculator-chat
+nemo agents sessions list --agent-deployment calculator-agent-k8s
+nemo agents sessions get calculator-chat
+nemo agents sessions close calculator-chat
+```
 
 ## Model Access from a Deployed Agent
 

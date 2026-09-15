@@ -4,10 +4,9 @@
 """Live end-to-end: run a real Fabric task inside a Docker sandbox via FabricContainerRuntime.
 
 Constructs the runtime directly (the plugin `_resolve_target` wiring is not yet in place — see
-AALGO-321) and drives one task through the hermes-sdk harness. The sandbox image is provisioned
-opaquely (build-if-missing) on first run — no Dockerfile to write. Requires a running Docker daemon,
-a NeMo-Fabric checkout (`$NEMO_FABRIC_REPO`) for the image build, and NVIDIA_API_KEY (or
-NVIDIA_API_KEY_FILE). See README.md.
+AALGO-321) and drives one task through the hermes harness. The sandbox image is provisioned opaquely
+(build-if-missing) on first run from published wheels — no Dockerfile to write and no source checkout.
+Requires a running Docker daemon and NVIDIA_API_KEY.
 """
 
 from __future__ import annotations

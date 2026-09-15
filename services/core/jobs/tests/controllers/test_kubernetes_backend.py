@@ -2068,9 +2068,8 @@ def test_schedule_with_additional_volumes(kubernetes_job, cpu_execution_provider
 def test_cleanup_steps_by_ttl(kubernetes_job, cleanup_completed_jobs_immediately):
     kubernetes_job._execution_profile_config.cleanup_completed_jobs_immediately = cleanup_completed_jobs_immediately
 
-    # Both return True when terminal or when entity not found (404). Persistent storage cleanup uses check_job_is_terminal.
+    # Step cleanup proceeds for terminal steps or when the step entity is gone.
     kubernetes_job.check_step_is_terminal = MagicMock(return_value=True)
-    kubernetes_job.check_job_is_terminal = MagicMock(return_value=True)
 
     # Mock active job status
     mock_job_spec = MagicMock()
@@ -2623,8 +2622,8 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(kubernetes_j
 
     kubernetes_job.check_step_is_terminal = MagicMock(side_effect=check_step_side_effect)
 
-    # Mock check_job_is_terminal to return False (job is not terminal - has more steps)
-    kubernetes_job.check_job_is_terminal = MagicMock(return_value=False)
+    # Mock persistent storage cleanup eligibility to return False (job has more steps)
+    kubernetes_job.check_job_persistent_storage_cleanup_allowed = MagicMock(return_value=False)
 
     # Create mock Kubernetes job for step 1 that completed successfully
     mock_job_step1_spec = MagicMock()
@@ -2701,8 +2700,10 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(kubernetes_j
             job="multi-step-job", step_name="step1", workspace="default"
         )
 
-        # Verify job terminal check was called for step 1
-        kubernetes_job.check_job_is_terminal.assert_called_once_with(job="multi-step-job", workspace="default")
+        # Verify persistent storage cleanup eligibility was checked for step 1
+        kubernetes_job.check_job_persistent_storage_cleanup_allowed.assert_called_once_with(
+            job="multi-step-job", step_name="step1", workspace="default"
+        )
 
         # Verify persistent storage cleanup was NOT called
         # because the job is not terminal yet (step 2 still active)
@@ -2712,13 +2713,12 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(kubernetes_j
 def test_cleanup_steps_proceeds_when_entity_not_found(kubernetes_job):
     """When step/job entities are gone (e.g. workspace deleted) but the backend job is terminal and ours, still clean up.
 
-    check_step_is_terminal and check_job_is_terminal return True when terminal or when the entity is not found (404).
+    check_step_is_terminal returns True when terminal or when the entity is not found (404).
     """
     kubernetes_job._execution_profile_config.cleanup_completed_jobs_immediately = True
 
     # Simulate entity-not-found: both return True so cleanup proceeds
     kubernetes_job.check_step_is_terminal = MagicMock(return_value=True)
-    kubernetes_job.check_job_is_terminal = MagicMock(return_value=True)
 
     mock_job_spec = MagicMock()
     mock_job_spec.suspend = False
@@ -2751,7 +2751,7 @@ def test_cleanup_steps_proceeds_when_entity_not_found(kubernetes_job):
 def test_cleanup_steps_proceeds_when_job_entity_not_found_with_persistent_storage(kubernetes_job):
     """When job entity is not found (404) but backend job is completed and uses persistent storage, still run full cleanup.
 
-    check_job_is_terminal returns True when job is terminal or when job entity is not found (404).
+    check_job_persistent_storage_cleanup_allowed returns True when cleanup should proceed.
     """
     kubernetes_job._execution_profile_config.cleanup_completed_jobs_immediately = True
     kubernetes_job._execution_profile_config.storage = MagicMock()
@@ -2759,7 +2759,7 @@ def test_cleanup_steps_proceeds_when_job_entity_not_found_with_persistent_storag
     kubernetes_job._execution_profile_config.storage.volume_permissions_image = "busybox"
 
     kubernetes_job.check_step_is_terminal = MagicMock(return_value=True)
-    kubernetes_job.check_job_is_terminal = MagicMock(return_value=True)  # job entity 404 → True
+    kubernetes_job.check_job_persistent_storage_cleanup_allowed = MagicMock(return_value=True)
 
     mock_job_spec = MagicMock()
     mock_job_spec.suspend = False

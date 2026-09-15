@@ -327,7 +327,7 @@ def platform_server(clickhouse: None) -> Iterator[str]:  # noqa: ARG001 - orderi
 # --------------------------------------------------------------------------- #
 def _count_traces() -> int:
     from nemo_insights_plugin.analyst.analyst_backend import make_analyst_backend
-    from nemo_insights_plugin.client import make_client
+    from nemo_insights_plugin.platform_client import make_client
 
     async def _run() -> int:
         client = make_client(BASE_URL)
@@ -341,7 +341,7 @@ def _count_traces() -> int:
 
 
 def _list_insight_ids() -> list[str]:
-    from nemo_insights_plugin.client import make_client
+    from nemo_insights_plugin.platform_client import make_client
 
     async def _run() -> list[str]:
         client = make_client(BASE_URL)
@@ -355,7 +355,7 @@ def _list_insight_ids() -> list[str]:
 
 
 def _delete_insights(insight_ids: list[str]) -> None:
-    from nemo_insights_plugin.client import make_client
+    from nemo_insights_plugin.platform_client import make_client
 
     async def _run() -> None:
         client = make_client(BASE_URL)

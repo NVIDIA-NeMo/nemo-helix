@@ -113,7 +113,7 @@ const renderModal = () =>
     ],
   });
 
-/** The prompt tab is the default, so upload tests have to switch before the form exists. */
+/** Upload tests have to switch tabs before the form exists. */
 const openUploadTab = async (dialog: HTMLElement) => {
   fireEvent.click(within(dialog).getByRole('tab', { name: 'Upload agent' }));
   await screen.findByTestId('agent-directory-input');
@@ -404,5 +404,119 @@ describe('NewAgentModal folder drop', () => {
 
     await waitFor(() => expect(created).toHaveLength(1));
     expect([...uploaded].sort()).toEqual(['agent.yaml', 'mcps/calculator.py']);
+  });
+});
+
+describe('NewAgentModal imported traces tab', () => {
+  const mockTraces = (agentNames: (string | undefined)[], registered: string[] = []) => {
+    server.use(
+      http.get('*/apis/intake/v2/workspaces/:workspace/traces', () =>
+        HttpResponse.json({
+          data: agentNames.map((agent_name, index) => ({
+            trace_id: `t-${index}`,
+            root_span_id: `s-${index}`,
+            started_at: '2026-01-01T00:00:00Z',
+            ...(agent_name ? { agent_name } : {}),
+          })),
+        })
+      ),
+      // The hook asks for each traced name; a 404 is how the API says "not registered".
+      http.get('*/apis/agents/v2/workspaces/:workspace/agents/:name', ({ params }) => {
+        const name = String(params['name']);
+        return registered.includes(name)
+          ? HttpResponse.json({ name, workspace })
+          : new HttpResponse(null, { status: 404 });
+      })
+    );
+  };
+
+  const openTracesTab = async (dialog: HTMLElement, user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(within(dialog).getByRole('tab', { name: 'Create from traces' }));
+  };
+
+  it('offers each distinct agent seen in the traces', async () => {
+    const user = userEvent.setup();
+    mockPlatform();
+    mockTraces(['billing-agent', 'billing-agent', 'research-agent', undefined]);
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openTracesTab(dialog, user);
+
+    await user.click(await within(dialog).findByRole('combobox', { name: /imported traces/i }));
+    // Deduped, and a trace with no agent contributes nothing.
+    expect(await screen.findByRole('option', { name: 'billing-agent' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'research-agent' })).toBeInTheDocument();
+    expect(screen.getAllByRole('option')).toHaveLength(2);
+  });
+
+  it('leaves out agents that are registered already', async () => {
+    const user = userEvent.setup();
+    mockPlatform();
+    mockTraces(['billing-agent', 'research-agent'], ['research-agent']);
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openTracesTab(dialog, user);
+
+    await user.click(await within(dialog).findByRole('combobox', { name: /imported traces/i }));
+    expect(await screen.findByRole('option', { name: 'billing-agent' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'research-agent' })).not.toBeInTheDocument();
+  });
+
+  it('shows the import prompt when no unregistered agent is left to offer', async () => {
+    const user = userEvent.setup();
+    mockPlatform();
+    mockTraces(['research-agent'], ['research-agent']);
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openTracesTab(dialog, user);
+
+    expect(await within(dialog).findByTestId('no-traced-agents')).toHaveTextContent(
+      'intake trace import skill'
+    );
+  });
+
+  it('leaves out a name whose registration could not be checked', async () => {
+    const user = userEvent.setup();
+    mockPlatform();
+    mockTraces(['billing-agent', 'research-agent']);
+    server.use(
+      http.get('*/apis/agents/v2/workspaces/:workspace/agents/:name', ({ params }) =>
+        params['name'] === 'research-agent'
+          ? new HttpResponse(null, { status: 500 })
+          : new HttpResponse(null, { status: 404 })
+      )
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openTracesTab(dialog, user);
+
+    await user.click(await within(dialog).findByRole('combobox', { name: /imported traces/i }));
+    // Offering it would hand the user a create that collides if it is in fact registered.
+    expect(await screen.findByRole('option', { name: 'billing-agent' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'research-agent' })).not.toBeInTheDocument();
+  });
+
+  it('creates the chosen agent and cannot submit before one is chosen', async () => {
+    const user = userEvent.setup();
+    const { created } = mockPlatform();
+    mockTraces(['billing-agent']);
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openTracesTab(dialog, user);
+
+    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+
+    await user.click(await within(dialog).findByRole('combobox', { name: /imported traces/i }));
+    await user.click(await screen.findByRole('option', { name: 'billing-agent' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => expect(created).toHaveLength(1));
+    // Telemetry carries no config, and the platform defaults an empty one.
+    expect(created[0]).toMatchObject({ name: 'billing-agent', config: {} });
   });
 });

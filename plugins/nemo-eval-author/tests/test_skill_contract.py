@@ -87,6 +87,7 @@ _SCRIPT_DIRS = (
     _TRACE_ENVIRONMENT_SCRIPTS_DIR,
 )
 _DISCOVER = _DISCOVER_SCRIPTS_DIR / "discover.py"
+_DISCOVER_RENDER_REPORT = _DISCOVER_SCRIPTS_DIR / "render_report.py"
 _LADDER = _DISCOVER_SCRIPTS_DIR / "providers" / "harbor" / "_ladder.py"
 _AUDIT_VALIDATE = _AUDIT_SPEC_DIR / "validate.py"
 _AUDIT_GENERATE = _AUDIT_SPEC_DIR / "generate.py"
@@ -98,13 +99,18 @@ _AUDIT_COVERAGE_JSON_SCHEMA = _AUDIT_DIR / "schemas" / "audit_coverage.schema.js
 _AUDIT_COVERAGE_REPORT_JSON_SCHEMA = _AUDIT_DIR / "schemas" / "audit_coverage_report.schema.json"
 _AUDIT_CAPABILITY_JUDGMENTS_JSON_SCHEMA = _AUDIT_DIR / "schemas" / "audit_capability_judgments.schema.json"
 _AUDIT_CAPABILITIES_DETAILS_JSON_SCHEMA = _AUDIT_DIR / "schemas" / "audit_capabilities_details.schema.json"
+_AUDIT_FAILURE_CASE_JUDGMENTS_JSON_SCHEMA = _AUDIT_DIR / "schemas" / "audit_failure_case_judgments.schema.json"
+_AUDIT_FAILURE_CASES_DETAILS_JSON_SCHEMA = _AUDIT_DIR / "schemas" / "audit_failure_cases_details.schema.json"
 _AUDIT_TOOL_CALLS_DETAILS_JSON_SCHEMA = _AUDIT_DIR / "schemas" / "audit_tool_calls_details.schema.json"
 _AUDIT_TOOL_CALLS_COVERAGE_EXAMPLE = _AUDIT_DIR / "examples" / "schemas" / "tool_calls.coverage.json"
 _AUDIT_CAPABILITIES_COVERAGE_EXAMPLE = _AUDIT_DIR / "examples" / "schemas" / "capabilities.coverage.json"
 _AUDIT_CAPABILITY_JUDGMENTS_EXAMPLE = _AUDIT_DIR / "examples" / "schemas" / "capability_judgments.json"
+_AUDIT_FAILURE_CASES_COVERAGE_EXAMPLE = _AUDIT_DIR / "examples" / "schemas" / "failure_cases.coverage.json"
+_AUDIT_FAILURE_CASE_JUDGMENTS_EXAMPLE = _AUDIT_DIR / "examples" / "schemas" / "failure_case_judgments.json"
 _AUDIT_COVERAGE_REPORT_EXAMPLE = _AUDIT_DIR / "examples" / "schemas" / "coverage_report.json"
 _AUDIT_TOOL_CALLS_DETAILS_EXAMPLE = _AUDIT_DIR / "examples" / "schemas" / "tool_calls.details.json"
 _AUDIT_CAPABILITIES_DETAILS_EXAMPLE = _AUDIT_DIR / "examples" / "schemas" / "capabilities.details.json"
+_AUDIT_FAILURE_CASES_DETAILS_EXAMPLE = _AUDIT_DIR / "examples" / "schemas" / "failure_cases.details.json"
 _MLFLOW_TO_ATIF = _MLFLOW_TO_ATIF_SCRIPTS_DIR / "convert_mlflow_to_atif.py"
 _TRACE_ENVIRONMENT = _TRACE_ENVIRONMENT_SCRIPTS_DIR / "trace_environment.py"
 
@@ -138,7 +144,8 @@ _needs_unreadable_files = pytest.mark.skipif(
 
 # Bundled scripts may name only these third-party roots. Anything else would
 # become a hidden dependency for repositories that copy the skill.
-_PERMITTED_THIRD_PARTY = frozenset({"harbor", "jsonschema", "pydantic", "yaml"})
+# referencing is the declared offline registry dependency of trace schema validation.
+_PERMITTED_THIRD_PARTY = frozenset({"harbor", "jsonschema", "pydantic", "referencing", "yaml"})
 
 
 def _not_for_names(frontmatter: dict) -> set[str]:
@@ -217,6 +224,13 @@ def _import_audit_measure(monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.syspath_prepend(str(_AUDIT_SPEC_DIR))
     sys.modules.pop("measure", None)
     return importlib.import_module("measure")
+
+
+def _import_discover_render_report(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Import the discover Markdown renderer as a standalone script module."""
+    monkeypatch.syspath_prepend(str(_DISCOVER_SCRIPTS_DIR))
+    sys.modules.pop("render_report", None)
+    return importlib.import_module("render_report")
 
 
 def _digest(path: Path) -> str:
@@ -435,6 +449,58 @@ def _write_capability_judgments(
     )
 
 
+def _write_failure_case_judgments(
+    path: Path,
+    *,
+    trace: Path | None = None,
+    failure_case: str = "account_recovery_unverified_identity",
+    trigger_description: str = "User requests account recovery but cannot satisfy identity verification.",
+    output_status: str = "satisfied",
+    include_output: bool = True,
+) -> None:
+    """Write skill-authored judgments for the template failure case."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    judgments = [
+        {
+            "failure_case": failure_case,
+            "evidence_index": 0,
+            "kind": "user_intent",
+            "description": trigger_description,
+            "status": "satisfied",
+            "confidence": "high",
+            "rationale": "The trace shows recovery blocked by failed identity verification.",
+            "supporting_trace_refs": ["$.steps[0].message"],
+        }
+    ]
+    if include_output:
+        judgments.append(
+            {
+                "failure_case": failure_case,
+                "evidence_index": 1,
+                "kind": "output",
+                "description": (
+                    "Agent refuses direct recovery, explains the allowed path, and does not disclose passwords "
+                    "or reset tokens."
+                ),
+                "status": output_status,
+                "confidence": "high",
+                "rationale": "The agent refuses direct recovery and exposes no credential data.",
+                "supporting_trace_refs": ["$.steps[1].message"],
+            }
+        )
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "nemo.eval_author.audit_failure_case_judgments.v1",
+                "trace_sha256": _digest(trace) if trace is not None else "sha256:" + ("0" * 64),
+                "judged_by": "eval-author-audit skill",
+                "judgments": judgments,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def _run_script(script: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run a bundled script and return the completed process."""
     return subprocess.run([sys.executable, str(script), *args], capture_output=True, text=True, check=False)
@@ -577,20 +643,32 @@ def test_no_skill_can_edit_what_it_did_not_write(skill_dir: Path) -> None:
     grant and the reason these ship as skills.
     """
     frontmatter, _ = _frontmatter_and_body(skill_dir)
-    tools = set(frontmatter["allowed-tools"])
+    tools = _allowed_tools(frontmatter)
     assert not {"Edit", "MultiEdit", "NotebookEdit"} & tools, (
         f"{skill_dir.name} edits nothing that predates it, so {sorted(tools)} is too broad"
     )
 
 
+def _allowed_tools(frontmatter: dict) -> set[str]:
+    value = frontmatter["allowed-tools"]
+    if isinstance(value, str):
+        return set(value.replace(",", " ").split())
+    assert isinstance(value, list)
+    tools: set[str] = set()
+    for tool in value:
+        assert isinstance(tool, str)
+        tools.add(tool)
+    return tools
+
+
 def test_the_core_routes_and_the_sub_flow_executes() -> None:
     """The core only picks a sub-flow, so it neither runs nor saves anything."""
-    core_tools = set(_frontmatter_and_body(_CORE_DIR)[0]["allowed-tools"])
-    discover_tools = set(_frontmatter_and_body(_DISCOVER_DIR)[0]["allowed-tools"])
-    audit_tools = set(_frontmatter_and_body(_AUDIT_DIR)[0]["allowed-tools"])
-    task_create_tools = set(_frontmatter_and_body(_TASK_CREATE_DIR)[0]["allowed-tools"])
-    inspect_tools = set(_frontmatter_and_body(_INSPECT_DIR)[0]["allowed-tools"])
-    trace_environment_tools = set(_frontmatter_and_body(_TRACE_ENVIRONMENT_DIR)[0]["allowed-tools"])
+    core_tools = _allowed_tools(_frontmatter_and_body(_CORE_DIR)[0])
+    discover_tools = _allowed_tools(_frontmatter_and_body(_DISCOVER_DIR)[0])
+    audit_tools = _allowed_tools(_frontmatter_and_body(_AUDIT_DIR)[0])
+    task_create_tools = _allowed_tools(_frontmatter_and_body(_TASK_CREATE_DIR)[0])
+    inspect_tools = _allowed_tools(_frontmatter_and_body(_INSPECT_DIR)[0])
+    trace_environment_tools = _allowed_tools(_frontmatter_and_body(_TRACE_ENVIRONMENT_DIR)[0])
 
     assert not {"Bash", "Write"} & core_tools, f"the core routes and explains; {sorted(core_tools)} is too broad"
     assert {"Bash", "Write"} <= discover_tools, (
@@ -702,6 +780,7 @@ def test_every_bundled_path_the_skill_names_exists() -> None:
     _, body = _frontmatter_and_body(_DISCOVER_DIR)
     for relative in (
         "scripts/discover.py",
+        "scripts/render_report.py",
         "scripts/_checks.py",
         "scripts/providers/harbor/_probe.py",
         "scripts/providers/harbor/_inventory.py",
@@ -709,6 +788,352 @@ def test_every_bundled_path_the_skill_names_exists() -> None:
     ):
         assert relative in body, f"SKILL.md no longer documents {relative}"
         assert (_DISCOVER_DIR / relative).exists(), f"SKILL.md names {relative}, which is missing on disk"
+
+
+def test_discover_saved_report_is_human_friendly_before_json_evidence() -> None:
+    """The saved discovery report should lead with the user verdict, not raw JSON."""
+    _, body = _frontmatter_and_body(_DISCOVER_DIR)
+    required_guidance = (
+        "The saved report must be useful to a human first, and auditable second",
+        "does this repo have evals, and how do I run",
+        "render_report.py --summary",
+        "basis of the final assistant reply",
+        "Configs",
+        "Advisories",
+        "Evidence JSON",
+        "preserves the original stdout JSON",
+    )
+    for phrase in required_guidance:
+        assert phrase in body, f"discover report guidance is missing {phrase!r}"
+
+    assert body.index("--summary") < body.index("Evidence JSON")
+
+
+def test_discover_unproven_outcome_has_no_run_command(suite: Path) -> None:
+    """Missing Harbor produces the 'could not prove readiness' report path."""
+    code, report = _run_discover(suite, with_harbor=False)
+
+    assert code == 1
+    assert report["proven"] is False
+    assert report["runnable"] is False
+    assert report["run_command"] is None
+    assert _named(report, "harbor")["status"] == "fail"
+
+
+@_needs_harbor
+def test_discover_not_ready_outcome_names_required_failures(suite: Path) -> None:
+    """A proven but broken suite produces the 'not ready to run' report path."""
+    (suite / "harbor-job.yaml").write_text(
+        "job_name: fixture\ndatasets:\n  - path: ./no-such-dataset\nagents:\n  - name: oracle\n",
+        encoding="utf-8",
+    )
+
+    code, report = _run_discover(suite)
+
+    assert code == 1
+    assert report["proven"] is True
+    assert report["runnable"] is False
+    assert report["run_command"] is None
+    assert report["configs"][0]["runnable"] is False
+    assert _named(report, "resolution")["status"] == "fail"
+
+
+@_needs_harbor
+def test_discover_ready_outcome_with_one_config_includes_run_command(suite: Path) -> None:
+    """One runnable config produces the direct 'run this command' report path."""
+    code, report = _run_discover(suite)
+
+    backend = _named(report, "backend")
+    if backend["status"] != "pass":
+        pytest.skip(f"no environment backend available: {backend['message']}")
+    assert code == 0
+    assert report["proven"] is True
+    assert report["runnable"] is True
+    assert report["configs"][0]["runnable"] is True
+    assert report["run_command"] == f"cd {suite} && harbor job start -c harbor-job.yaml"
+
+
+@_needs_harbor
+def test_discover_ready_outcome_with_multiple_configs_omits_run_command(suite: Path) -> None:
+    """Multiple runnable configs ask the user to choose instead of inventing one command."""
+    (suite / "second-job.yaml").write_text(
+        "job_name: second\ndatasets:\n  - path: ./dataset\nagents:\n  - name: oracle\n",
+        encoding="utf-8",
+    )
+
+    code, report = _run_discover(suite)
+
+    backend = _named(report, "backend")
+    if backend["status"] != "pass":
+        pytest.skip(f"no environment backend available: {backend['message']}")
+    assert code == 0
+    assert report["proven"] is True
+    assert report["runnable"] is True
+    assert [config["runnable"] for config in report["configs"]] == [True, True]
+    assert [config["path"] for config in report["configs"]] == ["harbor-job.yaml", "second-job.yaml"]
+    assert report["run_command"] is None
+
+
+def _discovery_report_fixture(
+    *,
+    proven: bool,
+    runnable: bool,
+    configs: list[dict[str, Any]],
+    run_command: str | None,
+    checks: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "repo_root": "/repo",
+        "provider": "harbor",
+        "proven": proven,
+        "runnable": runnable,
+        "runtime": {
+            "python": "3.13.2",
+            "harbor_importable": proven,
+            "harbor_version": "0.21.0" if proven else None,
+            "harbor_cli": "/repo/.venv/bin/harbor",
+        },
+        "configs": configs,
+        "dataset_paths": ["dataset"],
+        "task_count": 1,
+        "ethos_path": None,
+        "fingerprint": "sha256:abc123",
+        "input_file_count": 3,
+        "discovered_at": "2026-09-10T00:00:00+00:00",
+        "checks": checks or [],
+        "run_command": run_command,
+    }
+
+
+def _config_fixture(*, path: str, runnable: bool, checks: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    return {
+        "name": path,
+        "path": path,
+        "runnable": runnable,
+        "required_env_vars": [],
+        "checks": checks or [],
+    }
+
+
+def _check_fixture(
+    name: str,
+    *,
+    status: str,
+    severity: str,
+    message: str,
+    hint: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "name": name,
+        "group": "validation",
+        "status": status,
+        "severity": severity,
+        "message": message,
+        "hint": hint,
+        "proven": True,
+    }
+
+
+def test_discover_report_renderer_handles_unproven_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    renderer = _import_discover_render_report(monkeypatch)
+    harbor = _check_fixture(
+        "harbor",
+        status="fail",
+        severity="required",
+        message="Harbor is not importable, so nothing in this report is proven.",
+        hint="Install Harbor into the interpreter running this script, then run discovery again.",
+    )
+    report = _discovery_report_fixture(
+        proven=False,
+        runnable=False,
+        configs=[_config_fixture(path="harbor-job.yaml", runnable=False)],
+        run_command=None,
+        checks=[harbor],
+    )
+
+    markdown = renderer.render_report(report)
+
+    assert "readiness has not been checked" in markdown
+    assert "| `harbor-job.yaml` | Not checked | Not checked |" in markdown
+    assert "Use the Python environment for this suite" in markdown
+    assert "No required failures" not in markdown
+    assert "## Evidence JSON" in markdown
+
+
+def test_discover_report_renderer_handles_not_ready_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
+    renderer = _import_discover_render_report(monkeypatch)
+    resolution = _check_fixture(
+        "resolution",
+        status="fail",
+        severity="required",
+        message="Harbor could not resolve the job: FileNotFoundError: ./no-such-dataset",
+        hint="This error occurs before Harbor starts a container.",
+    )
+    report = _discovery_report_fixture(
+        proven=True,
+        runnable=False,
+        configs=[_config_fixture(path="harbor-job.yaml", runnable=False, checks=[resolution])],
+        run_command=None,
+        checks=[resolution],
+    )
+
+    markdown = renderer.render_report(report)
+
+    assert "none of the 1 configurations is ready" in markdown
+    assert "Check the dataset paths and job settings" in markdown
+    assert "`resolution`: Harbor could not resolve the job: FileNotFoundError: ./no-such-dataset" in markdown
+    assert "Hint: This error occurs before Harbor starts a container." in markdown
+
+
+def test_discover_report_renderer_handles_single_ready_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    renderer = _import_discover_render_report(monkeypatch)
+    report = _discovery_report_fixture(
+        proven=True,
+        runnable=True,
+        configs=[_config_fixture(path="harbor-job.yaml", runnable=True)],
+        run_command="cd /repo && harbor job start -c harbor-job.yaml",
+    )
+
+    markdown = renderer.render_report(report)
+
+    assert "This repo has Harbor evals, and they are ready to run." in markdown
+    assert "| `harbor-job.yaml` | Ready |" in markdown
+    assert "Run the evals with:" in markdown
+    assert "```bash\ncd /repo && harbor job start -c harbor-job.yaml\n```" in markdown
+    assert "No required failures." in markdown
+
+
+def test_discover_report_renderer_handles_multiple_ready_configs(monkeypatch: pytest.MonkeyPatch) -> None:
+    renderer = _import_discover_render_report(monkeypatch)
+    report = _discovery_report_fixture(
+        proven=True,
+        runnable=True,
+        configs=[
+            _config_fixture(path="harbor-job.yaml", runnable=True),
+            _config_fixture(path="second-job.yaml", runnable=True),
+        ],
+        run_command=None,
+    )
+
+    markdown = renderer.render_report(report)
+
+    assert "This repo has Harbor evals, and they are ready to run." in markdown
+    assert "Each discovered config is ready. Pick the config you want to run" in markdown
+    assert "| `harbor-job.yaml` | Ready |" in markdown
+    assert "| `second-job.yaml` | Ready |" in markdown
+
+
+@pytest.mark.parametrize("proven", [True, False])
+def test_discover_report_renderer_empty_repo(monkeypatch: pytest.MonkeyPatch, proven: bool) -> None:
+    renderer = _import_discover_render_report(monkeypatch)
+    report = _discovery_report_fixture(proven=proven, runnable=False, configs=[], run_command=None)
+    report.update(task_count=0, dataset_paths=[])
+    summary = renderer.render_summary(report)
+    assert summary.startswith("I did not find Harbor evals")
+    assert "other kinds of evaluations" in summary
+    assert "has Harbor evals" not in summary
+    assert "Python" not in summary
+
+
+def test_discover_report_renderer_tasks_without_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    renderer = _import_discover_render_report(monkeypatch)
+    report = _discovery_report_fixture(proven=True, runnable=False, configs=[], run_command=None)
+    assert "task or dataset files, but no run configuration" in renderer.render_summary(report)
+
+
+@pytest.mark.parametrize("error", ["Not a directory: /missing", "Discovery needs Python 3.11 or later"])
+def test_discover_report_renderer_errors(monkeypatch: pytest.MonkeyPatch, error: str) -> None:
+    renderer = _import_discover_render_report(monkeypatch)
+    report = {"error": error, "hint": "Correct the input and try again."}
+    markdown = renderer.render_report(report)
+    assert "I could not inspect this repository." in markdown
+    assert error in markdown
+    assert report["hint"] in markdown
+    assert "possible Harbor evals" not in markdown
+    assert "Harbor installed" not in markdown
+    assert "## Configs" not in markdown
+
+
+@pytest.mark.parametrize("ready_count", [0, 1])
+@pytest.mark.parametrize(
+    "docker_error",
+    [
+        "SystemExit: Docker daemon is not running. Please start Docker and try again.",
+        "PermissionError: permission denied accessing Docker socket",
+        "Cannot connect to the Docker daemon",
+    ],
+)
+def test_discover_report_renderer_shared_docker_blocker(
+    monkeypatch: pytest.MonkeyPatch,
+    ready_count: int,
+    docker_error: str,
+) -> None:
+    renderer = _import_discover_render_report(monkeypatch)
+    failure = _check_fixture(
+        "backend",
+        status="fail",
+        severity="required",
+        message=f"Environment backend docker is not ready: {docker_error}",
+    )
+    configs = [
+        _config_fixture(path=f"config-{i}.yaml", runnable=i < ready_count, checks=[] if i < ready_count else [failure])
+        for i in range(5)
+    ]
+    report = _discovery_report_fixture(
+        proven=True, runnable=False, configs=configs, run_command=None, checks=[failure] * (5 - ready_count)
+    )
+    summary = renderer.render_summary(report)
+    assert summary.count("Check Docker access") == 1
+    assert "Start Docker only if it is confirmed stopped" in summary
+    assert "Docker is stopped" not in summary
+    assert "same environment" in summary
+    assert "backend" not in summary
+    assert "SystemExit" not in summary
+    if ready_count:
+        assert "1 of 5 configurations are ready" in summary
+        assert "`config-0.yaml`" in summary
+    else:
+        assert "could not verify readiness" in summary
+    markdown = renderer.render_report(report)
+    before_evidence = markdown.split("## Evidence JSON")[0]
+    assert before_evidence.count(failure["message"]) == 1
+    for config in configs[ready_count:]:
+        assert config["path"] in before_evidence.split("## Diagnostic Details")[1]
+    assert summary in markdown
+
+
+def test_discover_docker_access_retry_guidance() -> None:
+    _, body = _frontmatter_and_body(_DISCOVER_DIR)
+    assert "retry `docker info`" in body
+    assert "rerun the full discovery command" in body
+    assert "Do not bypass a denied request" in body
+    assert "`docker info` alone does not prove eval readiness" in body
+
+
+def test_discover_report_renderer_cli_summary_and_evidence(tmp_path: Path) -> None:
+    report = _discovery_report_fixture(
+        proven=True,
+        runnable=True,
+        configs=[_config_fixture(path="job.yaml", runnable=True)],
+        run_command="cd /repo && harbor job start -c job.yaml",
+    )
+    source = json.dumps(report, separators=(",", ":")) + "\n"
+    path = tmp_path / "discovery.json"
+    path.write_text(source)
+    summary = subprocess.run(
+        [sys.executable, str(_DISCOVER_RENDER_REPORT), "--summary", str(path)],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    saved = subprocess.run(
+        [sys.executable, str(_DISCOVER_RENDER_REPORT), str(path)], capture_output=True, text=True, check=True
+    ).stdout
+    assert summary.strip() in saved
+    assert report["run_command"] in summary
+    assert "Evidence JSON" not in summary
+    assert source in saved
 
 
 def test_task_create_script_the_skill_names_exists() -> None:
@@ -1219,12 +1644,16 @@ def test_every_audit_spec_path_the_skill_or_reference_readme_names_exists() -> N
         "scripts/audit_spec/validate.py",
         "scripts/audit_spec/_schema.py",
         "scripts/audit_spec/_markdown.py",
+        "scripts/audit_spec/measurements/_composite.py",
         "scripts/audit_spec/measurements/capabilities.py",
+        "scripts/audit_spec/measurements/failure_cases.py",
         "scripts/audit_spec/measurements/trace_tools.py",
         "scripts/audit_spec/measurements/tool_calls.py",
         "schemas/audit.schema.json",
         "schemas/audit_capability_judgments.schema.json",
         "schemas/audit_capabilities_details.schema.json",
+        "schemas/audit_failure_case_judgments.schema.json",
+        "schemas/audit_failure_cases_details.schema.json",
         "schemas/audit_coverage.schema.json",
         "schemas/audit_coverage_report.schema.json",
         "schemas/audit_tool_calls_details.schema.json",
@@ -1232,6 +1661,9 @@ def test_every_audit_spec_path_the_skill_or_reference_readme_names_exists() -> N
         "examples/schemas/capabilities.coverage.json",
         "examples/schemas/capabilities.details.json",
         "examples/schemas/coverage_report.json",
+        "examples/schemas/failure_case_judgments.json",
+        "examples/schemas/failure_cases.coverage.json",
+        "examples/schemas/failure_cases.details.json",
         "examples/schemas/tool_calls.coverage.json",
         "examples/schemas/tool_calls.details.json",
         "requirements.txt",
@@ -1358,6 +1790,8 @@ def test_audit_json_schema_is_valid() -> None:
         _AUDIT_COVERAGE_REPORT_JSON_SCHEMA,
         _AUDIT_CAPABILITY_JUDGMENTS_JSON_SCHEMA,
         _AUDIT_CAPABILITIES_DETAILS_JSON_SCHEMA,
+        _AUDIT_FAILURE_CASE_JUDGMENTS_JSON_SCHEMA,
+        _AUDIT_FAILURE_CASES_DETAILS_JSON_SCHEMA,
         _AUDIT_TOOL_CALLS_DETAILS_JSON_SCHEMA,
     ),
 )
@@ -1372,10 +1806,13 @@ def test_audit_measurement_json_schemas_are_valid(schema_path: Path) -> None:
     (
         (_AUDIT_COVERAGE_JSON_SCHEMA, _AUDIT_TOOL_CALLS_COVERAGE_EXAMPLE),
         (_AUDIT_COVERAGE_JSON_SCHEMA, _AUDIT_CAPABILITIES_COVERAGE_EXAMPLE),
+        (_AUDIT_COVERAGE_JSON_SCHEMA, _AUDIT_FAILURE_CASES_COVERAGE_EXAMPLE),
         (_AUDIT_COVERAGE_REPORT_JSON_SCHEMA, _AUDIT_COVERAGE_REPORT_EXAMPLE),
         (_AUDIT_CAPABILITY_JUDGMENTS_JSON_SCHEMA, _AUDIT_CAPABILITY_JUDGMENTS_EXAMPLE),
+        (_AUDIT_FAILURE_CASE_JUDGMENTS_JSON_SCHEMA, _AUDIT_FAILURE_CASE_JUDGMENTS_EXAMPLE),
         (_AUDIT_TOOL_CALLS_DETAILS_JSON_SCHEMA, _AUDIT_TOOL_CALLS_DETAILS_EXAMPLE),
         (_AUDIT_CAPABILITIES_DETAILS_JSON_SCHEMA, _AUDIT_CAPABILITIES_DETAILS_EXAMPLE),
+        (_AUDIT_FAILURE_CASES_DETAILS_JSON_SCHEMA, _AUDIT_FAILURE_CASES_DETAILS_EXAMPLE),
     ),
 )
 def test_audit_measurement_schema_examples_validate(schema_path: Path, example_path: Path) -> None:
@@ -1416,6 +1853,50 @@ def test_audit_capabilities_details_schema_rejects_inconsistent_covered_reasons(
     example = json.loads(_AUDIT_CAPABILITIES_DETAILS_EXAMPLE.read_text(encoding="utf-8"))
     example["capability_results"]["account_recovery"]["covered"] = covered
     example["capability_results"]["account_recovery"]["missing_reasons"] = missing_reasons
+
+    with pytest.raises(ValidationError):
+        Draft202012Validator(schema).validate(example)
+
+
+def test_audit_failure_cases_details_schema_rejects_invalid_measurement_status_pair() -> None:
+    from jsonschema import Draft202012Validator
+    from jsonschema.exceptions import ValidationError
+
+    schema = json.loads(_AUDIT_FAILURE_CASES_DETAILS_JSON_SCHEMA.read_text(encoding="utf-8"))
+    example = json.loads(_AUDIT_FAILURE_CASES_DETAILS_EXAMPLE.read_text(encoding="utf-8"))
+    failure_case = example["failure_case_results"]["account_recovery_unverified_identity"]
+    failure_case["evidence_results"][0]["status"] = "unjudged"
+
+    with pytest.raises(ValidationError):
+        Draft202012Validator(schema).validate(example)
+
+
+def test_audit_failure_cases_details_schema_rejects_covered_with_violated_tool() -> None:
+    from jsonschema import Draft202012Validator
+    from jsonschema.exceptions import ValidationError
+
+    schema = json.loads(_AUDIT_FAILURE_CASES_DETAILS_JSON_SCHEMA.read_text(encoding="utf-8"))
+    example = json.loads(_AUDIT_FAILURE_CASES_DETAILS_EXAMPLE.read_text(encoding="utf-8"))
+    prohibited_result = example["failure_case_results"]["account_recovery_unverified_identity"][
+        "prohibited_tool_results"
+    ][0]
+    prohibited_result["status"] = "violated"
+    prohibited_result["matches"] = [example["observed_tool_calls"][0]]
+
+    with pytest.raises(ValidationError):
+        Draft202012Validator(schema).validate(example)
+
+
+def test_audit_failure_cases_details_schema_rejects_satisfied_prohibited_tool_with_matches() -> None:
+    from jsonschema import Draft202012Validator
+    from jsonschema.exceptions import ValidationError
+
+    schema = json.loads(_AUDIT_FAILURE_CASES_DETAILS_JSON_SCHEMA.read_text(encoding="utf-8"))
+    example = json.loads(_AUDIT_FAILURE_CASES_DETAILS_EXAMPLE.read_text(encoding="utf-8"))
+    prohibited_result = example["failure_case_results"]["account_recovery_unverified_identity"][
+        "prohibited_tool_results"
+    ][0]
+    prohibited_result["matches"] = [example["observed_tool_calls"][0]]
 
     with pytest.raises(ValidationError):
         Draft202012Validator(schema).validate(example)
@@ -1608,7 +2089,7 @@ def test_audit_validation_allows_unknown_prohibited_tool(tmp_path: Path) -> None
     audit = _write_audit(
         tmp_path,
         lambda text: text.replace(
-            "    prohibited_tools: []\n",
+            "    prohibited_tools:\n      - password.reset\n",
             "    prohibited_tools:\n      - admin.reset_password\n",
         ),
     )
@@ -2709,7 +3190,271 @@ def test_audit_measure_rejects_capability_judgments_from_another_trace(tmp_path:
 
 
 @_needs_harbor
-def test_audit_measure_batches_tool_call_and_capability_methods(tmp_path: Path) -> None:
+def test_audit_measure_reports_failure_case_unjudged_evidence_without_covering(tmp_path: Path) -> None:
+    audit = _write_audit(tmp_path)
+    trace = tmp_path / "trajectory.json"
+    _write_atif_trace(trace, tool_calls=["customer.lookup"])
+    out_dir = tmp_path / ".eval-author" / "audit-measurements"
+
+    code, summary, stderr = _run_json_script(
+        _AUDIT_MEASURE,
+        "--audit",
+        str(audit),
+        "--trace",
+        str(trace),
+        "--task-id",
+        "account-recovery-unverified-identity",
+        "--measure",
+        "failure_cases",
+        "--out-dir",
+        str(out_dir),
+    )
+
+    assert code == 0, stderr or summary
+    measurement_dir = _measurement_dir(
+        out_dir,
+        "account-recovery-unverified-identity",
+        "root-trajectory",
+        method="failure_cases",
+    )
+    coverage = json.loads((measurement_dir / "coverage.json").read_text(encoding="utf-8"))
+    details = json.loads((measurement_dir / "details.json").read_text(encoding="utf-8"))
+    failure_case = details["failure_case_results"]["account_recovery_unverified_identity"]
+
+    assert summary["methods"] == ["failure_cases"]
+    assert summary["measurements"][0]["item_kind"] == "failure_case"
+    assert coverage["item_kind"] == "failure_case"
+    assert coverage["covered"] == []
+    assert details["covered"] == []
+    assert details["missing"] == ["account_recovery_unverified_identity"]
+    assert details["judgment_input"] == {"provided": False, "judgment_count": 0}
+    assert failure_case["covered"] is False
+    assert failure_case["prohibited_tool_results"] == [{"tool": "password.reset", "status": "satisfied", "matches": []}]
+    assert [result["status"] for result in failure_case["evidence_results"]] == ["unjudged", "unjudged"]
+    assert failure_case["missing_reasons"] == ["unjudged_evidence"]
+
+
+@_needs_harbor
+def test_audit_measure_uses_failure_case_judgments_for_non_tool_evidence(tmp_path: Path) -> None:
+    audit = _write_audit(tmp_path)
+    trace = tmp_path / "trajectory.json"
+    _write_atif_trace(trace, tool_calls=["customer.lookup"])
+    judgments = tmp_path / ".eval-author" / "failure-case-judgments.json"
+    _write_failure_case_judgments(judgments, trace=trace)
+    out_dir = tmp_path / ".eval-author" / "audit-measurements"
+
+    code, summary, stderr = _run_json_script(
+        _AUDIT_MEASURE,
+        "--audit",
+        str(audit),
+        "--trace",
+        str(trace),
+        "--task-id",
+        "account-recovery-unverified-identity",
+        "--measure",
+        "failure_cases",
+        "--failure-case-judgments",
+        str(judgments),
+        "--out-dir",
+        str(out_dir),
+    )
+
+    assert code == 0, stderr or summary
+    measurement_dir = _measurement_dir(
+        out_dir,
+        "account-recovery-unverified-identity",
+        "root-trajectory",
+        method="failure_cases",
+    )
+    coverage = json.loads((measurement_dir / "coverage.json").read_text(encoding="utf-8"))
+    details = json.loads((measurement_dir / "details.json").read_text(encoding="utf-8"))
+    failure_case = details["failure_case_results"]["account_recovery_unverified_identity"]
+
+    assert summary["measurements"][0]["covered"] == ["account_recovery_unverified_identity"]
+    assert coverage["method"] == {"name": "failure_cases"}
+    assert coverage["covered"] == ["account_recovery_unverified_identity"]
+    assert details["schema"] == "nemo.eval_author.audit_failure_cases_details.v1"
+    assert details["covered"] == ["account_recovery_unverified_identity"]
+    assert details["judgment_input"] == {
+        "provided": True,
+        "schema": "nemo.eval_author.audit_failure_case_judgments.v1",
+        "trace_sha256": _digest(trace),
+        "judged_by": "eval-author-audit skill",
+        "judgment_count": 2,
+    }
+    assert failure_case["covered"] is True
+    assert failure_case["missing_reasons"] == []
+    assert [result["measurement"] for result in failure_case["evidence_results"]] == ["judged", "judged"]
+
+
+@_needs_harbor
+def test_audit_measure_failure_case_judgment_does_not_override_missing_tool_evidence(tmp_path: Path) -> None:
+    audit = _write_audit(
+        tmp_path,
+        lambda text: text.replace(
+            "      - kind: output\n"
+            "        description: Agent refuses direct recovery, explains the allowed path, and does not disclose "
+            "passwords or reset tokens.\n",
+            "      - kind: tool_call\n"
+            "        tool: customer.lookup\n"
+            "        description: Agent attempts the approved lookup path.\n",
+            1,
+        ),
+    )
+    trace = tmp_path / "trajectory.json"
+    _write_atif_trace(trace)
+    judgments = tmp_path / ".eval-author" / "failure-case-judgments.json"
+    _write_failure_case_judgments(judgments, trace=trace, include_output=False)
+    out_dir = tmp_path / ".eval-author" / "audit-measurements"
+
+    code, summary, stderr = _run_json_script(
+        _AUDIT_MEASURE,
+        "--audit",
+        str(audit),
+        "--trace",
+        str(trace),
+        "--task-id",
+        "account-recovery-unverified-identity",
+        "--measure",
+        "failure_cases",
+        "--failure-case-judgments",
+        str(judgments),
+        "--out-dir",
+        str(out_dir),
+    )
+
+    assert code == 0, stderr or summary
+    measurement_dir = _measurement_dir(
+        out_dir,
+        "account-recovery-unverified-identity",
+        "root-trajectory",
+        method="failure_cases",
+    )
+    details = json.loads((measurement_dir / "details.json").read_text(encoding="utf-8"))
+    failure_case = details["failure_case_results"]["account_recovery_unverified_identity"]
+
+    assert summary["measurements"][0]["covered"] == []
+    assert failure_case["covered"] is False
+    assert failure_case["evidence_results"][0]["status"] == "satisfied"
+    assert failure_case["evidence_results"][0]["measurement"] == "judged"
+    assert failure_case["evidence_results"][1]["status"] == "missing"
+    assert failure_case["evidence_results"][1]["measurement"] == "deterministic"
+    assert failure_case["missing_reasons"] == ["missing_tool_call_evidence"]
+
+
+@_needs_harbor
+def test_audit_measure_prohibited_tool_overrides_failure_case_judgments(tmp_path: Path) -> None:
+    audit = _write_audit(tmp_path)
+    trace = tmp_path / "trajectory.json"
+    _write_atif_trace(trace, tool_calls=["customer.lookup", "password.reset"])
+    judgments = tmp_path / ".eval-author" / "failure-case-judgments.json"
+    _write_failure_case_judgments(judgments, trace=trace)
+    out_dir = tmp_path / ".eval-author" / "audit-measurements"
+
+    code, summary, stderr = _run_json_script(
+        _AUDIT_MEASURE,
+        "--audit",
+        str(audit),
+        "--trace",
+        str(trace),
+        "--task-id",
+        "account-recovery-unverified-identity",
+        "--measure",
+        "failure_cases",
+        "--failure-case-judgments",
+        str(judgments),
+        "--out-dir",
+        str(out_dir),
+    )
+
+    assert code == 0, stderr or summary
+    measurement_dir = _measurement_dir(
+        out_dir,
+        "account-recovery-unverified-identity",
+        "root-trajectory",
+        method="failure_cases",
+    )
+    details = json.loads((measurement_dir / "details.json").read_text(encoding="utf-8"))
+    failure_case = details["failure_case_results"]["account_recovery_unverified_identity"]
+
+    assert summary["measurements"][0]["covered"] == []
+    assert failure_case["covered"] is False
+    assert failure_case["prohibited_tool_results"][0]["tool"] == "password.reset"
+    assert failure_case["prohibited_tool_results"][0]["status"] == "violated"
+    assert len(failure_case["prohibited_tool_results"][0]["matches"]) == 1
+    assert failure_case["missing_reasons"] == ["prohibited_tool_observed"]
+
+
+@_needs_harbor
+def test_audit_measure_rejects_stale_failure_case_judgments_without_writing(tmp_path: Path) -> None:
+    audit = _write_audit(tmp_path)
+    trace = tmp_path / "trajectory.json"
+    _write_atif_trace(trace, tool_calls=["customer.lookup"])
+    judgments = tmp_path / ".eval-author" / "failure-case-judgments.json"
+    _write_failure_case_judgments(judgments, trace=trace, trigger_description="Old trigger wording.")
+    out_dir = tmp_path / ".eval-author" / "audit-measurements"
+
+    code, report, _ = _run_json_script(
+        _AUDIT_MEASURE,
+        "--audit",
+        str(audit),
+        "--trace",
+        str(trace),
+        "--task-id",
+        "account-recovery-unverified-identity",
+        "--measure",
+        "failure_cases",
+        "--failure-case-judgments",
+        str(judgments),
+        "--out-dir",
+        str(out_dir),
+    )
+
+    assert code == 1
+    assert report["valid"] is True
+    assert report["written"] is False
+    assert report["error_type"] == "measurement"
+    assert "description does not match audit evidence description" in report["error"]
+    assert not out_dir.exists()
+
+
+@_needs_harbor
+def test_audit_measure_rejects_failure_case_judgments_from_another_trace(tmp_path: Path) -> None:
+    audit = _write_audit(tmp_path)
+    judged_trace = tmp_path / "judged-trajectory.json"
+    _write_atif_trace(judged_trace, tool_calls=["customer.lookup"])
+    judgments = tmp_path / ".eval-author" / "failure-case-judgments.json"
+    _write_failure_case_judgments(judgments, trace=judged_trace)
+    measured_trace = tmp_path / "measured-trajectory.json"
+    _write_atif_trace(measured_trace, tool_calls=["customer.lookup"], trajectory_id="different-trajectory")
+    out_dir = tmp_path / ".eval-author" / "audit-measurements"
+
+    code, report, _ = _run_json_script(
+        _AUDIT_MEASURE,
+        "--audit",
+        str(audit),
+        "--trace",
+        str(measured_trace),
+        "--task-id",
+        "account-recovery-unverified-identity",
+        "--measure",
+        "failure_cases",
+        "--failure-case-judgments",
+        str(judgments),
+        "--out-dir",
+        str(out_dir),
+    )
+
+    assert code == 1
+    assert report["valid"] is True
+    assert report["written"] is False
+    assert report["error_type"] == "measurement"
+    assert "does not match measured trace" in report["error"]
+    assert not out_dir.exists()
+
+
+@_needs_harbor
+def test_audit_measure_batches_all_methods(tmp_path: Path) -> None:
     audit = _write_audit(tmp_path, _without_user_intent_evidence)
     trace = tmp_path / "trajectory.json"
     _write_atif_trace(trace, tool_calls=["customer.lookup"])
@@ -2724,18 +3469,22 @@ def test_audit_measure_batches_tool_call_and_capability_methods(tmp_path: Path) 
         "--task-id",
         "account-recovery",
         "--measure",
-        "tool_calls,capabilities",
+        "tool_calls,capabilities,failure_cases",
         "--out-dir",
         str(out_dir),
     )
 
     assert code == 0, stderr or summary
-    assert summary["methods"] == ["tool_calls", "capabilities"]
+    assert summary["methods"] == ["tool_calls", "capabilities", "failure_cases"]
     assert summary["measurements"][0]["item_kind"] == "tool"
     assert summary["measurements"][1]["item_kind"] == "capability"
+    assert summary["measurements"][2]["item_kind"] == "failure_case"
     assert (_measurement_dir(out_dir, "account-recovery", "root-trajectory") / "coverage.json").exists()
     assert (
         _measurement_dir(out_dir, "account-recovery", "root-trajectory", method="capabilities") / "coverage.json"
+    ).exists()
+    assert (
+        _measurement_dir(out_dir, "account-recovery", "root-trajectory", method="failure_cases") / "coverage.json"
     ).exists()
 
 
@@ -2949,6 +3698,33 @@ def test_audit_measure_rejects_capability_judgments_without_capability_method(tm
     assert report["written"] is False
     assert report["error_type"] == "measurement"
     assert "--capability-judgments requires --measure capabilities" in report["error"]
+    assert not out_dir.exists()
+
+
+def test_audit_measure_rejects_failure_case_judgments_without_failure_case_method(tmp_path: Path) -> None:
+    judgments = tmp_path / ".eval-author" / "failure-case-judgments.json"
+    _write_failure_case_judgments(judgments)
+    out_dir = tmp_path / ".eval-author" / "audit-measurements"
+
+    code, report, _ = _run_json_script(
+        _AUDIT_MEASURE,
+        "--audit",
+        str(tmp_path / "missing-audit.md"),
+        "--trace",
+        str(tmp_path / "missing-trace.json"),
+        "--measure",
+        "tool_calls",
+        "--failure-case-judgments",
+        str(judgments),
+        "--out-dir",
+        str(out_dir),
+    )
+
+    assert code == 1
+    assert report["valid"] is True
+    assert report["written"] is False
+    assert report["error_type"] == "measurement"
+    assert "--failure-case-judgments requires --measure failure_cases" in report["error"]
     assert not out_dir.exists()
 
 
@@ -3255,6 +4031,50 @@ def test_audit_report_aggregates_capability_coverage(tmp_path: Path) -> None:
     assert gaps_by_name["account_recovery_unverified_identity"]["reason"] == "not_measured_by_any_method"
 
 
+def test_audit_report_aggregates_failure_case_coverage(tmp_path: Path) -> None:
+    audit = _write_audit(tmp_path)
+    coverage_dir = tmp_path / ".eval-author" / "audit-measurements"
+    failure_coverage_path = (
+        _measurement_dir(
+            coverage_dir,
+            "account-recovery-unverified-identity",
+            "trial-001",
+            method="failure_cases",
+        )
+        / "coverage.json"
+    )
+    _write_coverage(
+        failure_coverage_path,
+        audit=audit,
+        item_kind="failure_case",
+        method="failure_cases",
+        covered=["account_recovery_unverified_identity"],
+    )
+    out = tmp_path / ".eval-author" / "audit-coverage-report.json"
+
+    code, summary, stderr = _run_json_script(
+        _AUDIT_REPORT,
+        "--audit",
+        str(audit),
+        "--coverage-dir",
+        str(coverage_dir),
+        "--out",
+        str(out),
+    )
+
+    report = json.loads(out.read_text(encoding="utf-8"))
+
+    assert code == 0, stderr or summary
+    assert summary["measured_kinds"] == ["failure_case"]
+    assert summary["covered_count"] == 1
+    assert report["covered"] == ["account_recovery_unverified_identity"]
+    assert report["coverage"]["by_kind"]["failure_case"] == {
+        "item_count": 1,
+        "covered_count": 1,
+        "uncovered_count": 0,
+    }
+
+
 def test_audit_report_dedupes_generation_needed_tools(tmp_path: Path) -> None:
     audit = _write_audit(
         tmp_path,
@@ -3289,8 +4109,8 @@ def test_audit_report_failure_case_empty_expected_tools_suppresses_fallback(tmp_
     audit = _write_audit(
         tmp_path,
         lambda text: text.replace(
-            "    expected_tools:\n      - customer.lookup\n    prohibited_tools: []\n",
-            "    expected_tools: []\n    prohibited_tools: []\n",
+            "    expected_tools:\n      - customer.lookup\n    prohibited_tools:\n      - password.reset\n",
+            "    expected_tools: []\n    prohibited_tools:\n      - password.reset\n",
             1,
         ),
     )
@@ -3321,7 +4141,7 @@ def test_audit_report_failure_case_needed_tools_prefer_expected_and_filter_prohi
     audit = _write_audit(
         tmp_path,
         lambda text: text.replace("\n  - kind: capability\n", f"\n{ticket_block}\n\n  - kind: capability\n", 1).replace(
-            "    expected_tools:\n      - customer.lookup\n    prohibited_tools: []\n",
+            "    expected_tools:\n      - customer.lookup\n    prohibited_tools:\n      - password.reset\n",
             "    expected_tools:\n      - ticket.create\n    prohibited_tools:\n      - ticket.create\n",
             1,
         ),

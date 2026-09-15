@@ -10,17 +10,17 @@ responses that match built-in or custom injection rules.
 from collections.abc import Callable
 from typing import Any
 
-import nemo_platform
 import pytest
 from nemo_guardrails_plugin.constants import GUARDRAILS_PLUGIN_CONFIG_TYPE
-from nemo_platform.types.inference.middleware_call_param import MiddlewareCallParam
 from nmp.core.inference_gateway.testing.harness import IGWLoopbackHarness
 from nmp.testing.mock_chat_completions import ChatCompletion, chat_completion
 
 from .utils import (
     GUARDRAILS_PLUGIN_NAME,
+    EntityGuardrailsMiddlewareCall,
     GuardrailsTestDataNames,
-    detach_guardrail_config,
+    create_guardrail_config,
+    delete_guardrail_config_if_present,
     make_guardrails_test_data_names,
 )
 
@@ -45,7 +45,7 @@ class TestInjectionDetection:
     REFUSAL_PREFIX = "I'm sorry, the desired output triggered rule(s) designed to mitigate exploitation of"
 
     @staticmethod
-    def _middleware_call(workspace: str, config_name: str) -> MiddlewareCallParam:
+    def _middleware_call(workspace: str, config_name: str) -> EntityGuardrailsMiddlewareCall:
         return {
             "name": GUARDRAILS_PLUGIN_NAME,
             "config_type": GUARDRAILS_PLUGIN_CONFIG_TYPE,
@@ -56,11 +56,7 @@ class TestInjectionDetection:
     def _delete_config_if_present(harness: IGWLoopbackHarness, config_name: str) -> None:
         # The service refuses to delete a config a VirtualModel still applies; harness
         # cleanup removes those routes, but it runs after this teardown.
-        detach_guardrail_config(harness, config_name)
-        try:
-            harness.sdk.guardrail.configs.delete(name=config_name, workspace=harness.workspace)
-        except nemo_platform.NotFoundError:
-            pass
+        delete_guardrail_config_if_present(harness, config_name)
 
     @staticmethod
     def _builtin_injection_detection_config() -> dict[str, Any]:
@@ -116,8 +112,8 @@ class TestInjectionDetection:
             name=test_data_names.model_provider_name,
             served_models={test_data_names.main_model_served_name: test_data_names.main_model_served_name},
         )
-        harness.sdk.guardrail.configs.create(
-            workspace=harness.workspace,
+        create_guardrail_config(
+            harness,
             name=test_data_names.guardrail_config_name,
             description="Entity-backed injection detection config for integration tests",
             data=config_data,

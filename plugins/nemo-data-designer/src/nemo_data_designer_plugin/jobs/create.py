@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import ClassVar, cast
 
-from data_designer_nemo.context import create_data_designer_context
+from data_designer_nemo.context import create_validation_context
 from data_designer_nemo.errors import raise_if_errors
 from data_designer_nemo.runnable import resolve_runnable_config
 from nemo_data_designer_plugin.jobs.run import run_step_config_result
@@ -49,7 +49,7 @@ class CreateJob(NemoJob):
         async_sdk = cast(AsyncNeMoPlatform, async_sdk)
         input_spec = cast(DataDesignerJobConfig, input_spec)
 
-        dd_ctx = create_data_designer_context(async_sdk, workspace)
+        dd_ctx = create_validation_context(async_sdk, workspace)
         errors, model_configs, model_providers = await resolve_runnable_config(dd_ctx, input_spec.config)
         raise_if_errors(errors)
 

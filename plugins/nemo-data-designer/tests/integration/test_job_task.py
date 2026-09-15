@@ -154,7 +154,7 @@ async def test_exiting_with_error() -> None:
 
     with (
         capture_job_log_messages() as log_messages,
-        patch("nemo_data_designer_plugin.jobs.run.create_data_designer_context", side_effect=RuntimeError("Yuck")),
+        patch("nemo_data_designer_plugin.jobs.run.create_execution_context", side_effect=RuntimeError("Yuck")),
     ):
         async with u.task_context(job_config, job_name) as ctx:
             result = ctx.run_task()

@@ -22,24 +22,25 @@ from data_designer_nemo.model_provider import (
 )
 from data_designer_nemo.person_reader import FilesetsPersonReader
 from data_designer_nemo.person_sampling import ensure_nemotron_personas_filesets
-from data_designer_nemo.sdk_translation import sync_to_async_sdk
 from data_designer_nemo.secret_resolver import NMPSecretResolver
 from data_designer_nemo.seed import validate_seed
 from data_designer_nemo.tool_configs import validate_no_tool_configs
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 
 
-class DataDesignerContext:
-    def __init__(self, sdk: AsyncNeMoPlatform | NeMoPlatform, workspace: str):
-        self._sdk = sdk
+class DataDesignerValidationContext:
+    """Async-only context for remote config validation and provider resolution."""
+
+    def __init__(self, async_sdk: AsyncNeMoPlatform, workspace: str) -> None:
+        self._async_sdk = async_sdk
         self._workspace = workspace
         self._validated_filesystem_roots: set[str] = set()
 
-    def get_secret_resolver(self) -> SecretResolver:
-        return NMPSecretResolver(self._sdk, self._workspace)
+    @property
+    def validated_filesystem_roots(self) -> set[str]:
+        return set(self._validated_filesystem_roots)
 
     async def validate(self, config: dd.DataDesignerConfig) -> list[NDDError]:
-        async_sdk = self._async_sdk()
         errors: list[NDDError] = []
 
         try:
@@ -53,17 +54,47 @@ class DataDesignerContext:
             errors.append(e)
 
         try:
-            if validated_root := await validate_seed(config, self._workspace, async_sdk):
+            if validated_root := await validate_seed(config, self._workspace, self._async_sdk):
                 self._validated_filesystem_roots.add(validated_root)
         except NDDError as e:
             errors.append(e)
 
         try:
-            await ensure_nemotron_personas_filesets(config, async_sdk)
+            await ensure_nemotron_personas_filesets(config, self._async_sdk)
         except NDDError as e:
             errors.append(e)
 
         return errors
+
+    async def get_model_providers(self, model_configs: list[dd.ModelConfig]) -> list[dd.ModelProvider]:
+        if (
+            igw_registry := await make_model_provider_registry(
+                model_configs,
+                sdk=self._async_sdk,
+                default_workspace=self._workspace,
+            )
+        ) is not None:
+            return igw_registry.providers
+
+        return [make_noop_provider()]
+
+
+class DataDesignerExecutionContext:
+    """Sync-only context for the upstream Data Designer engine."""
+
+    def __init__(
+        self,
+        sdk: NeMoPlatform,
+        workspace: str,
+        *,
+        validated_roots: set[str] | None = None,
+    ) -> None:
+        self._sdk = sdk
+        self._workspace = workspace
+        self._validated_filesystem_roots = set(validated_roots or ())
+
+    def get_secret_resolver(self) -> SecretResolver:
+        return NMPSecretResolver(self._sdk, self._workspace)
 
     def get_seed_readers(self) -> list[SeedReader]:
         provider = FilesetFileSystemProvider(
@@ -81,25 +112,15 @@ class DataDesignerContext:
     def get_person_reader(self) -> PersonReader | None:
         return FilesetsPersonReader(self._sdk)
 
-    async def get_model_providers(self, model_configs: list[dd.ModelConfig]) -> list[dd.ModelProvider]:
-        sdk = self._async_sdk()
 
-        if (
-            igw_registry := await make_model_provider_registry(
-                model_configs,
-                sdk=sdk,
-                default_workspace=self._workspace,
-            )
-        ) is not None:
-            return igw_registry.providers
-
-        return [make_noop_provider()]
-
-    def _async_sdk(self) -> AsyncNeMoPlatform:
-        if isinstance(self._sdk, NeMoPlatform):
-            return sync_to_async_sdk(self._sdk)
-        return self._sdk
+def create_validation_context(async_sdk: AsyncNeMoPlatform, workspace: str) -> DataDesignerValidationContext:
+    return DataDesignerValidationContext(async_sdk, workspace)
 
 
-def create_data_designer_context(sdk: AsyncNeMoPlatform | NeMoPlatform, workspace: str) -> DataDesignerContext:
-    return DataDesignerContext(sdk, workspace)
+def create_execution_context(
+    sdk: NeMoPlatform,
+    workspace: str,
+    *,
+    validated_roots: set[str] | None = None,
+) -> DataDesignerExecutionContext:
+    return DataDesignerExecutionContext(sdk, workspace, validated_roots=validated_roots)

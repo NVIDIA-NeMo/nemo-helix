@@ -22,7 +22,9 @@ from uuid import uuid4
 import pytest
 from nemo_experimentalist_plugin.entities import ResourceRef, TrialResult
 from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import LocalExperimentalistBackend
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_platform_plugin.intake.client import AsyncIntakeClient
+from nemo_platform_plugin.intake.types import EvaluationCreateRequest, ExperimentCreateRequest
 
 pytestmark = pytest.mark.integration
 
@@ -66,20 +68,23 @@ def _otlp_trace(tmp_path: Path, span_name: str) -> tuple[ResourceRef, str]:
     return ref, trace_id
 
 
-async def _ensure_evaluation(platform: AsyncNeMoPlatform, name: str) -> None:
+async def _ensure_evaluation(platform: AsyncNemoClient, name: str) -> None:
     """Register the Evaluation these spans name, or Intake drops them."""
-    group = await platform.experiments.create(workspace=WORKSPACE, name=name)
-    await platform.evaluations.create(
+    intake = AsyncIntakeClient.from_client(platform)
+    group = (await intake.create_experiment(workspace=WORKSPACE, body=ExperimentCreateRequest(name=name))).data()
+    await intake.create_evaluation(
         workspace=WORKSPACE,
-        name=name,
-        experiment_ids=[group.id],
-        dataset_name=name,
-        dataset_version="v1",
+        body=EvaluationCreateRequest(
+            name=name,
+            experiment_ids=[group.id],
+            dataset_name=name,
+            dataset_version="v1",
+        ),
     )
 
 
 async def test_persist_trial_uploads_a_local_otlp_trace_and_repoints_it(
-    platform: AsyncNeMoPlatform, tmp_path: Path
+    platform: AsyncNemoClient, tmp_path: Path
 ) -> None:
     backend = LocalExperimentalistBackend(client=platform, path=tmp_path / "backend")
     trace, trace_id = _otlp_trace(tmp_path, "it-span")
@@ -90,8 +95,10 @@ async def test_persist_trial_uploads_a_local_otlp_trace_and_repoints_it(
     await backend._persist_trial(trial, workspace=WORKSPACE, evaluation_name=evaluation_name, agent_attrs={})
 
     # The span reached ClickHouse through the typed SDK and is readable back through it.
-    spans = await platform.intake.spans.list(workspace=WORKSPACE, filter={"trace_id": trace_id})
-    assert [span.name for span in spans.data] == ["it-span"]
+    response = await AsyncIntakeClient.from_client(platform).list_spans(
+        workspace=WORKSPACE, query_params={"filter": {"trace_id": trace_id}}
+    )
+    assert [span.name async for span in response.items()] == ["it-span"]
 
     # The trial now points at Intake, with the local file kept for reference.
     assert trial.trace is not None
@@ -100,7 +107,7 @@ async def test_persist_trial_uploads_a_local_otlp_trace_and_repoints_it(
 
 
 async def test_persist_trial_stamps_evaluation_identity_onto_the_uploaded_spans(
-    platform: AsyncNeMoPlatform, tmp_path: Path
+    platform: AsyncNemoClient, tmp_path: Path
 ) -> None:
     backend = LocalExperimentalistBackend(client=platform, path=tmp_path / "backend")
     trace, _ = _otlp_trace(tmp_path, "s")
@@ -113,5 +120,7 @@ async def test_persist_trial_stamps_evaluation_identity_onto_the_uploaded_spans(
 
     # evaluation_name is the attribute Intake indexes and the experiments rollup groups on,
     # so it has to survive the round trip rather than merely be sent.
-    spans = await platform.intake.spans.list(workspace=WORKSPACE, filter={"evaluation_name": evaluation_name})
-    assert [span.name for span in spans.data] == ["s"]
+    response = await AsyncIntakeClient.from_client(platform).list_spans(
+        workspace=WORKSPACE, query_params={"filter": {"evaluation_name": evaluation_name}}
+    )
+    assert [span.name async for span in response.items()] == ["s"]

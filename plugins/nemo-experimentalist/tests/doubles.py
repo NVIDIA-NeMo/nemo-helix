@@ -17,9 +17,8 @@ import tempfile
 import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from types import SimpleNamespace
-from typing import cast
 
+import httpx
 from nemo_experimentalist_plugin.config import CandidateStorageConfig
 from nemo_experimentalist_plugin.entities import (
     Candidate,
@@ -29,6 +28,7 @@ from nemo_experimentalist_plugin.entities import (
     MetricTarget,
     Proposal,
     ResourceRef,
+    RewardMap,
     RewardRecord,
     TrialResult,
 )
@@ -39,12 +39,19 @@ from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import 
 from nemo_experimentalist_plugin.experimentalist.reporting import RunReporter
 from nemo_experimentalist_plugin.experimentalist.result import ExperimentalistResult
 from nemo_insights_plugin.entities import Insight
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.client import AsyncNemoClient
 
 
-def fake_client() -> AsyncNeMoPlatform:
+def fake_client() -> AsyncNemoClient:
     """A stand-in platform client for paths that only check whether one is present."""
-    return cast(AsyncNeMoPlatform, SimpleNamespace())
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(500, request=request, json={"detail": "fake client"})
+    )
+    return AsyncNemoClient(
+        base_url="http://platform.test",
+        workspace="default",
+        http_client=httpx.AsyncClient(transport=transport),
+    )
 
 
 class RecordedEvaluation(dict):
@@ -63,11 +70,11 @@ class FakeBackend(ExperimentalistBackend):
     def __init__(
         self,
         *,
-        client: AsyncNeMoPlatform | None = None,
+        client: AsyncNemoClient | None = None,
         storage: CandidateStorageConfig | None = None,
         insight: Insight | None = None,
     ) -> None:
-        super().__init__(client, None, storage)
+        super().__init__(client or fake_client(), None, storage)
         self.candidates: dict[str, Candidate] = {}
         self.runs: list[ExperimentRun] = []
         self.evaluations: list[RecordedEvaluation] = []
@@ -210,7 +217,7 @@ def make_candidate(
         generated_from=proposal,
         description=text,
         artifact=ResourceRef(uri=artifact or _default_artifact(run_id, label)),
-        rewards=dict(rewards or {}),
+        rewards=RewardMap(rewards or {}),
         killed_generation=killed_generation,
         workspace=workspace,
     )

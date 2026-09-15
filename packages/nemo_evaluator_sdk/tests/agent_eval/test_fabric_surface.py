@@ -31,14 +31,20 @@ local ``uv sync --extra fabric`` (Fabric publishes a macOS arm64 wheel as of 0.1
 from __future__ import annotations
 
 import importlib.util
+import inspect
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 pytest.importorskip("nemo_fabric")
 
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric import _common
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric import container_runtime as crt
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric import runtime as fabric_runtime
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.container_runtime import FabricContainerRuntime
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
+from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.providers.docker import DockerSandboxProvider
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 
 # The ``fabric`` extra installs claude/codex/deepagents/hermes. Codex and hermes are both covered
@@ -126,13 +132,13 @@ def test_compose_config_enables_relay_via_current_signature(tmp_path: Path) -> N
     atif = observability.atif
     assert atif is not None and atif.enabled is True
     assert str(atif.output_directory) == relay_dir
-    assert atif.filename_template == fabric_runtime._ATIF_FILENAME_TEMPLATE
+    assert atif.filename_template == _common.ATIF_FILENAME_TEMPLATE
 
     atof = observability.atof
     assert atof is not None and atof.enabled is True
     (atof_sink,) = atof.sinks or []
     assert str(atof_sink.output_directory) == relay_dir
-    assert atof_sink.filename == fabric_runtime._ATOF_FILENAME
+    assert atof_sink.filename == _common.ATOF_FILENAME
 
 
 @requires_harness_adapters
@@ -232,3 +238,154 @@ def test_codex_also_routes_skills_natively_so_the_workspace_branch_is_a_fallback
         resolve_skill_mode(capability_plan=plan.capability_plan, adapter_id=plan.adapter.adapter_id)
         == SKILL_MODE_NATIVE
     )
+
+
+# --------------------------------------------------------------------------------------------------
+# FabricContainerRuntime. The host runtime composes a typed ``FabricConfig`` and so is checked by
+# Fabric's own validator on every call; the container runtime marshals a plain mapping across the
+# sandbox boundary, where nothing validates it. These bind that mapping, and the in-sandbox
+# entrypoint it names, back to the installed Fabric.
+# --------------------------------------------------------------------------------------------------
+
+_CONTAINER_CONFIG = {
+    "metadata": {"name": "fabric-surface-container"},
+    "harness": {"adapter_id": _HERMES_ADAPTER_ID, "resolution": "preinstalled"},
+    "runtime": {"input_schema": "chat", "output_schema": "message"},
+}
+
+
+def _composed_container_config() -> Any:
+    from nemo_fabric import FabricConfig  # ty: ignore[unresolved-import]
+
+    # A real provider, never used: composing the config touches no sandbox.
+    runtime = FabricContainerRuntime(_CONTAINER_CONFIG, provider=DockerSandboxProvider(), image="unused")
+    return FabricConfig.from_mapping(runtime._composed_config())
+
+
+def test_container_composed_config_enables_relay_for_installed_fabric() -> None:
+    """The composed mapping actually switches Relay on, by installed Fabric's own reading of it.
+
+    Fabric ignores telemetry keys it does not recognize rather than rejecting them, so a stale
+    envelope yields a container trial that runs to success and captures no trajectory at all — no
+    ATIF, no ATOF, and no error. Asserting through ``FabricConfig.from_mapping`` is what makes the
+    envelope Fabric's to define instead of ours to guess.
+    """
+    composed = _composed_container_config()
+
+    assert composed.telemetry is not None
+    assert "relay" in composed.telemetry.providers
+    assert composed.relay is not None and str(composed.relay.output_dir) == crt._RELAY_DIR
+
+    # As on the host: the exporters must land on the declared fields, not in Fabric's extras bag.
+    observability = composed.relay.observability
+    assert observability is not None
+    atif = observability.atif
+    assert atif is not None and atif.enabled is True
+    assert str(atif.output_directory) == crt._RELAY_DIR
+    assert atif.filename_template == _common.ATIF_FILENAME_TEMPLATE
+    atof = observability.atof
+    assert atof is not None and atof.enabled is True
+    (atof_sink,) = atof.sinks or []
+    assert str(atof_sink.output_directory) == crt._RELAY_DIR
+    assert atof_sink.filename == _common.ATOF_FILENAME
+
+
+def test_container_composed_config_keeps_caller_and_runtime_keys() -> None:
+    """Enabling Relay does not cost the caller's harness or the runtime's own /out wiring.
+
+    The telemetry keys are merged onto the composed mapping rather than replacing it, and both sets
+    have to survive: a container trial whose workspace is unset writes outside the retrievable tree.
+    """
+    composed = _composed_container_config()
+
+    assert composed.harness is not None and composed.harness.adapter_id == _HERMES_ADAPTER_ID
+    assert composed.environment is not None
+    assert str(composed.environment.workspace) == crt._WORKSPACE_DIR
+    assert str(composed.runtime.artifacts) == crt._ARTIFACTS_DIR
+
+
+def test_sandbox_driver_calls_an_api_installed_fabric_still_has() -> None:
+    """The seeded driver's Fabric calls exist, are async, and take the arguments it passes.
+
+    The driver is transported as source and only ever executed inside the sandbox, so nothing else
+    imports it and no other test would notice Fabric retiring what it calls. Fabric has already done
+    this once — ``FabricClient`` became ``Fabric`` and ``run`` became a coroutine — and the symptom is
+    a container trial that fails on a traceback from a file the host wrote.
+    """
+    # Importing the driver is itself the check: its module-level ``from nemo_fabric import Fabric,
+    # FabricConfig`` is the line a rename retires, and nothing else imports this module.
+    from nemo_evaluator_sdk.agent_eval.runtimes.fabric import sandbox_driver
+    from nemo_fabric import Fabric, RunResult  # ty: ignore[unresolved-import]
+
+    assert callable(sandbox_driver.main)
+    assert inspect.iscoroutinefunction(Fabric.run)
+    assert {"config", "input", "base_dir"} <= set(inspect.signature(Fabric.run).parameters)
+    assert callable(RunResult.to_mapping)
+
+
+def test_sandbox_dockerfile_smoke_check_imports_resolve() -> None:
+    """The image's build-time import check names symbols the pinned Fabric still exports.
+
+    It is the image build's only guard that the wheels are usable, and it runs where nobody sees it
+    until a trial fails; ``from nemo_fabric import FabricClient`` outlived that class by two releases.
+    """
+    dockerfile = Path(crt.__file__).with_name("sandbox.Dockerfile").read_text(encoding="utf-8")
+    (check,) = [
+        line.split('python -c "', 1)[1].rsplit('"', 1)[0]
+        for line in dockerfile.splitlines()
+        if line.startswith("RUN python -c ")
+    ]
+    exec(compile(check, "<sandbox.Dockerfile>", "exec"), {})  # noqa: S102 - the recipe is repo source
+
+
+def test_otlp_endpoint_lands_on_relays_declared_opentelemetry_field() -> None:
+    """A configured OTLP endpoint reaches Fabric's declared field, not its extras bag.
+
+    Both runtimes route their receiver's endpoint through ``relay_observability``. Fabric's relay
+    models allow extras, so a stale field name is accepted in silence and simply never exported —
+    and because the whole block is optional, dropping it entirely also leaves a trial that runs to
+    success with an ATIF trajectory and no OTLP at all.
+    """
+    from nemo_fabric import RelayOpenTelemetryConfig  # ty: ignore[unresolved-import]
+
+    observability = _common.relay_observability(
+        relay_dir="/out/relay",
+        agent_name="fabric_container",
+        agent_version=_common.FABRIC_AGENT_VERSION,
+        otlp_endpoint="http://127.0.0.1:4318/v1/traces",
+    )
+
+    opentelemetry = observability.opentelemetry
+    assert isinstance(opentelemetry, RelayOpenTelemetryConfig)
+    assert opentelemetry.enabled is True
+    (endpoint,) = opentelemetry.endpoints or []
+    assert str(endpoint.endpoint) == "http://127.0.0.1:4318/v1/traces"
+    assert endpoint.service_name == "fabric_container"
+
+    # Omitting it must leave the field unset rather than half-configured: Relay treats a disabled
+    # section and an absent one alike, but a populated-but-endpointless one fails at export.
+    assert (
+        _common.relay_observability(
+            relay_dir="/out/relay", agent_name="fabric_container", agent_version=_common.FABRIC_AGENT_VERSION
+        ).opentelemetry
+        is None
+    )
+
+
+def test_otlp_endpoint_survives_the_serialized_telemetry_fragment() -> None:
+    """The endpoint reaches the mapping that crosses the sandbox boundary, not just the typed model.
+
+    ``relay_telemetry_fragment`` is where a container runner's endpoint is handed to Fabric, and it
+    accepts ``otlp_endpoint`` as a keyword — so failing to forward it is invisible at the call site
+    and costs the container trial its whole OTLP trace while leaving ATIF intact.
+    """
+    fragment = _common.relay_telemetry_fragment(
+        _CONTAINER_CONFIG,
+        relay_dir="/out/relay",
+        agent_name="fabric_container",
+        agent_version=_common.FABRIC_AGENT_VERSION,
+        otlp_endpoint="http://127.0.0.1:4318/v1/traces",
+    )
+
+    (endpoint,) = fragment["relay"]["observability"]["opentelemetry"]["endpoints"]
+    assert endpoint["endpoint"] == "http://127.0.0.1:4318/v1/traces"

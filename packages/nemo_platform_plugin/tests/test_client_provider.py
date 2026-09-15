@@ -21,6 +21,7 @@ from nemo_platform_plugin.client_provider import (
     _build_headers,
     _read_principal_from_env,
     get_async_nemo_client,
+    get_forwarding_headers,
     get_nemo_client,
     set_nemo_client_provider,
 )
@@ -175,6 +176,24 @@ class TestDefaultNemoClientProvider:
         assert client.workspace == "team-a"
 
 
+class TestForwardingHeaders:
+    def test_returns_copy_of_sync_client_default_headers(self) -> None:
+        client = NemoClient(base_url="http://test:8000", default_headers={"traceparent": "00-platform"})
+
+        headers = get_forwarding_headers(client)
+        headers["traceparent"] = "mutated"
+
+        assert get_forwarding_headers(client) == {"traceparent": "00-platform"}
+
+    def test_returns_copy_of_async_client_default_headers(self) -> None:
+        client = AsyncNemoClient(base_url="http://test:8000", default_headers={"X-NMP-Internal": "true"})
+
+        headers = get_forwarding_headers(client)
+        headers["X-NMP-Internal"] = "false"
+
+        assert get_forwarding_headers(client) == {"X-NMP-Internal": "true"}
+
+
 # ---------------------------------------------------------------------------
 # Provider resolution
 # ---------------------------------------------------------------------------
@@ -327,13 +346,45 @@ class TestProviderResolution:
         captured: dict[str, object] = {}
 
         class _CapturingProvider:
-            def get_nemo_client(self, **kwargs):
+            def get_nemo_client(
+                self,
+                *,
+                as_service: str | None = None,
+                internal: bool = False,
+                on_behalf_of: str | None = None,
+                workspace: str | None = None,
+            ) -> NemoClient:
+                kwargs = {
+                    "as_service": as_service,
+                    "internal": internal,
+                    "on_behalf_of": on_behalf_of,
+                    "workspace": workspace,
+                }
                 captured.update(kwargs)
                 return NemoClient(base_url="http://x")
 
-            def get_async_nemo_client(self, **kwargs):
+            def get_async_nemo_client(
+                self,
+                *,
+                as_service: str | None = None,
+                internal: bool = False,
+                on_behalf_of: str | None = None,
+                workspace: str | None = None,
+            ) -> AsyncNemoClient:
+                kwargs = {
+                    "as_service": as_service,
+                    "internal": internal,
+                    "on_behalf_of": on_behalf_of,
+                    "workspace": workspace,
+                }
                 captured.update(kwargs)
                 return AsyncNemoClient(base_url="http://x")
+
+            def get_task_nemo_client(self, service_name: str, *, workspace: str | None = None) -> NemoClient:
+                return NemoClient(base_url="http://x", workspace=workspace)
+
+            def get_async_task_nemo_client(self, service_name: str, *, workspace: str | None = None) -> AsyncNemoClient:
+                return AsyncNemoClient(base_url="http://x", workspace=workspace)
 
         set_nemo_client_provider(_CapturingProvider())
         get_nemo_client(as_service="svc", internal=True, on_behalf_of="u@x", workspace="ws1")

@@ -9,24 +9,35 @@ the hand-off, and that the caller keeps ownership of its platform client.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
+import httpx
 import pytest
+from doubles import fake_client
 from nemo_experimentalist_plugin.entities import DatasetRef
 from nemo_experimentalist_plugin.experimentalist import run as experimentalist_run
 from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import LocalExperimentalistBackend
 from nemo_experimentalist_plugin.experimentalist.result import ExperimentalistResult
 from nemo_experimentalist_plugin.experimentalist.strategies.evolutionary import EvolutionaryOptimizerConfig
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.client import AsyncNemoClient
 from nemo_platform_plugin.nooa_model_client import ConfiguredModelRefs
 
 
-@dataclass
-class ClosingClient:
-    closed: bool = False
+class ClosingClient(AsyncNemoClient):
+    def __init__(self) -> None:
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(500, request=request, json={"detail": "fake client"})
+        )
+        super().__init__(
+            base_url="http://platform.test",
+            workspace="default",
+            http_client=httpx.AsyncClient(transport=transport),
+        )
+        self.closed = False
 
     async def close(self) -> None:
         self.closed = True
+        await super().close()
 
 
 @dataclass
@@ -63,7 +74,7 @@ class ExperimentRunPaths:
 
 @dataclass
 class BackendFactoryCall:
-    client: ClosingClient | None
+    client: AsyncNemoClient
     experiments_output: str
 
 
@@ -109,7 +120,7 @@ async def test_run_experimentalist_builds_and_runs_complete_local_contract(
 ) -> None:
     paths = _make_run_paths(tmp_path)
     client = ClosingClient()
-    backend = LocalExperimentalistBackend(path=tmp_path / "backend")
+    backend = LocalExperimentalistBackend(client=fake_client(), path=tmp_path / "backend")
     optimizer_config = EvolutionaryOptimizerConfig(max_rounds=2)
     strategy = object()
     runner = RecordingRunner()
@@ -118,7 +129,7 @@ async def test_run_experimentalist_builds_and_runs_complete_local_contract(
 
     def make_backend(
         *,
-        client: ClosingClient | None,
+        client: AsyncNemoClient,
         experiments_output: str,
         storage: object = None,
     ) -> LocalExperimentalistBackend:
@@ -149,7 +160,7 @@ async def test_run_experimentalist_builds_and_runs_complete_local_contract(
         validation_dataset=validation_dataset,
         experiment_dir=paths.experiment,
         workspace="workspace-a",
-        client=cast(AsyncNeMoPlatform, client),
+        client=client,
         config=optimizer_config,
     )
 
@@ -193,7 +204,7 @@ async def test_run_experimentalist_forwards_platform_insight_id_verbatim(
         task_template=DatasetRef(uri=str(paths.train)),
         experiment_dir=paths.experiment,
         workspace="workspace-a",
-        client=cast(AsyncNeMoPlatform, ClosingClient()),
+        client=ClosingClient(),
         config=EvolutionaryOptimizerConfig(),
     )
 
@@ -223,7 +234,7 @@ async def test_run_experimentalist_forwards_ethos_uri(
         validation_dataset=DatasetRef(uri=str(paths.validation)),
         experiment_dir=paths.experiment,
         workspace="default",
-        client=None,
+        client=ClosingClient(),
         config=EvolutionaryOptimizerConfig(),
     )
 
@@ -252,7 +263,7 @@ async def test_run_experimentalist_does_not_close_caller_client_when_backend_cre
             validation_dataset=DatasetRef(uri=str(paths.validation)),
             experiment_dir=paths.experiment,
             workspace="default",
-            client=cast(AsyncNeMoPlatform, client),
+            client=client,
             config=EvolutionaryOptimizerConfig(),
         )
 

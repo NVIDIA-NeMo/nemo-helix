@@ -18,9 +18,21 @@ from typing import Generator
 
 import pytest
 from nemo_platform import NeMoPlatform
-from nmp.core.models.schemas import ContainerExecutorConfig, ModelDeploymentConfigModelSpec, ModelType
+from nemo_platform_plugin.models.client import ModelsClient
 from nmp.core.models.service import ModelsService
 from nmp.testing import as_user, create_test_client, short_unique_name, unique_email
+
+from .conftest import (
+    create_deployment,
+    create_deployment_config,
+    create_provider,
+    get_deployment,
+    get_provider,
+    list_deployments,
+    list_providers,
+    models_client_from_sdk,
+    upsert_provider,
+)
 
 
 @pytest.fixture(scope="module")
@@ -33,9 +45,9 @@ def sdk() -> Generator[NeMoPlatform, None, None]:
         yield sdk
 
 
-def _as_service_principal(sdk: NeMoPlatform, service_name: str = "models-controller") -> NeMoPlatform:
+def _as_service_principal(sdk: NeMoPlatform, service_name: str = "models-controller") -> ModelsClient:
     """Create an SDK client authenticated as a service principal."""
-    return as_user(sdk, f"service:{service_name}")
+    return models_client_from_sdk(as_user(sdk, f"service:{service_name}"))
 
 
 def _create_deployment(
@@ -44,24 +56,19 @@ def _create_deployment(
     prefix: str = "test",
 ):
     """Create a deployment config + deployment, returning the deployment name."""
+    client = models_client_from_sdk(user_sdk)
     config_name = short_unique_name(f"{prefix}-config")
     deployment_name = short_unique_name(f"{prefix}-deploy")
-    user_sdk.inference.deployment_configs.create(
+    create_deployment_config(
+        client,
         workspace=workspace,
         name=config_name,
         engine="nim",
-        model_spec=ModelDeploymentConfigModelSpec(
-            model_type=ModelType.LLM,
-            model_namespace="nvidia",
-            model_name="test-model",
-        ),
-        executor_config=ContainerExecutorConfig(
-            image_name="nvcr.io/nvidia/nim/llm",
-            image_tag="latest",
-            gpu=0,
-        ),
+        model_spec={"model_type": "llm", "model_namespace": "nvidia", "model_name": "test-model"},
+        executor_config={"image_name": "nvcr.io/nvidia/nim/llm", "image_tag": "latest", "gpu": 0},
     )
-    return user_sdk.inference.deployments.create(
+    return create_deployment(
+        client,
         workspace=workspace,
         name=deployment_name,
         config=config_name,
@@ -77,17 +84,18 @@ class TestDeploymentAuthPropagation:
 
         # Create response
         assert deployment.auth_context is None, "create: regular user should not see auth_context"
+        creator_client = models_client_from_sdk(creator_sdk)
 
         # Retrieve response
-        retrieved = creator_sdk.inference.deployments.retrieve(
+        retrieved = get_deployment(
+            creator_client,
             workspace="default",
             name=deployment.name,
         )
         assert retrieved.auth_context is None, "retrieve: regular user should not see auth_context"
 
         # List response
-        result = creator_sdk.inference.deployments.list(workspace="default")
-        matching = [d for d in result.data if d.name == deployment.name]
+        matching = [d for d in list_deployments(creator_client, workspace="default") if d.name == deployment.name]
         assert len(matching) == 1
         assert matching[0].auth_context is None, "list: regular user should not see auth_context"
 
@@ -101,7 +109,8 @@ class TestDeploymentAuthPropagation:
         service_sdk = _as_service_principal(sdk)
 
         # Retrieve response
-        retrieved = service_sdk.inference.deployments.retrieve(
+        retrieved = get_deployment(
+            service_sdk,
             workspace="default",
             name=deployment.name,
         )
@@ -111,8 +120,7 @@ class TestDeploymentAuthPropagation:
         assert retrieved.auth_context.principal_groups == creator_groups
 
         # List response
-        result = service_sdk.inference.deployments.list(workspace="default")
-        matching = [d for d in result.data if d.name == deployment.name]
+        matching = [d for d in list_deployments(service_sdk, workspace="default") if d.name == deployment.name]
         assert len(matching) == 1
         assert matching[0].auth_context is not None, "list: service principal should see auth_context"
         assert matching[0].auth_context.principal_id == creator_email
@@ -127,7 +135,8 @@ class TestDeploymentAuthPropagation:
 
         # Different regular user should not see auth_context
         other_user = as_user(sdk, unique_email("admin"), groups=["admins"])
-        retrieved_by_user = other_user.inference.deployments.retrieve(
+        retrieved_by_user = get_deployment(
+            models_client_from_sdk(other_user),
             workspace="default",
             name=deployment.name,
         )
@@ -135,7 +144,8 @@ class TestDeploymentAuthPropagation:
 
         # Service principal should see the original creator's auth_context
         service_sdk = _as_service_principal(sdk)
-        retrieved_by_service = service_sdk.inference.deployments.retrieve(
+        retrieved_by_service = get_deployment(
+            service_sdk,
             workspace="default",
             name=deployment.name,
         )
@@ -152,9 +162,11 @@ class TestProviderAuthPropagation:
         provider_name = short_unique_name("auth-prov")
 
         creator_sdk = as_user(sdk, creator_email, groups=creator_groups)
+        creator_client = models_client_from_sdk(creator_sdk)
 
         # Regular user should not see auth_context in the create response
-        provider = creator_sdk.inference.providers.create(
+        provider = create_provider(
+            creator_client,
             workspace="default",
             name=provider_name,
             host_url="http://test.local:8000",
@@ -163,7 +175,8 @@ class TestProviderAuthPropagation:
 
         # Service principal should see it
         service_sdk = _as_service_principal(sdk)
-        retrieved = service_sdk.inference.providers.retrieve(
+        retrieved = get_provider(
+            service_sdk,
             workspace="default",
             name=provider_name,
         )
@@ -177,16 +190,17 @@ class TestProviderAuthPropagation:
         provider_name = short_unique_name("list-prov")
 
         creator_sdk = as_user(sdk, unique_email("creator"), groups=["team-gamma"])
+        creator_client = models_client_from_sdk(creator_sdk)
 
-        creator_sdk.inference.providers.create(
+        create_provider(
+            creator_client,
             workspace="default",
             name=provider_name,
             host_url="http://test.local:8000",
         )
 
         # List as regular user — auth_context should be stripped
-        result = creator_sdk.inference.providers.list(workspace="default")
-        matching = [p for p in result.data if p.name == provider_name]
+        matching = [p for p in list_providers(creator_client, workspace="default") if p.name == provider_name]
         assert len(matching) == 1
         assert matching[0].auth_context is None, "Regular user should not see auth_context in list"
 
@@ -197,9 +211,11 @@ class TestProviderAuthPropagation:
         provider_name = short_unique_name("upsert-prov")
 
         creator_sdk = as_user(sdk, creator_email, groups=creator_groups)
+        creator_client = models_client_from_sdk(creator_sdk)
 
         # Upsert creates a new provider
-        provider = creator_sdk.inference.providers.update(
+        provider = upsert_provider(
+            creator_client,
             workspace="default",
             name=provider_name,
             host_url="http://upsert.local:8000",
@@ -208,7 +224,8 @@ class TestProviderAuthPropagation:
 
         # Service principal should see auth_context after create
         service_sdk = _as_service_principal(sdk)
-        retrieved = service_sdk.inference.providers.retrieve(
+        retrieved = get_provider(
+            service_sdk,
             workspace="default",
             name=provider_name,
         )
@@ -217,7 +234,8 @@ class TestProviderAuthPropagation:
         assert retrieved.auth_context.principal_groups == creator_groups
 
         # Upsert updates the existing provider
-        updated = creator_sdk.inference.providers.update(
+        updated = upsert_provider(
+            creator_client,
             workspace="default",
             name=provider_name,
             host_url="http://upsert-updated.local:9000",
@@ -225,7 +243,8 @@ class TestProviderAuthPropagation:
         assert updated.auth_context is None, "Regular user should not see auth_context after update"
 
         # Service principal should still see auth_context after update
-        retrieved_after_update = service_sdk.inference.providers.retrieve(
+        retrieved_after_update = get_provider(
+            service_sdk,
             workspace="default",
             name=provider_name,
         )

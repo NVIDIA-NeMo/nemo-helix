@@ -17,29 +17,35 @@ download from.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Literal
 
+from nemo_platform_plugin.models.types import ModelSpec
 from nmp.customization_common.contributor.transform import generated_output_name
-from nmp.customization_common.service.platform_client import check_dataset_access, fetch_model_entity
+from nmp.customization_common.service.platform_client import (
+    AsyncCustomizationPlatformClients,
+    check_dataset_access,
+    fetch_model_entity,
+)
 from nmp.unsloth.schemas import OutputResponse, UnslothJobOutput
 
 from nemo_unsloth_plugin.schema import OutputRequest, UnslothJobInput
 
-if TYPE_CHECKING:
-    from nemo_platform import AsyncNeMoPlatform
 
-
-def _infer_output_type(output_request: OutputRequest) -> str:
+def _infer_output_type(output_request: OutputRequest) -> Literal["adapter", "model"]:
     """Adapter when saving the LoRA, model otherwise (merged or full)."""
     if output_request.save_method == "lora":
         return "adapter"
     return "model"
 
 
+def _is_encoder_model(model_spec: ModelSpec) -> bool:
+    return model_spec.head_type in {"embedding", "cross_encoder"} or model_spec.is_embedding_model
+
+
 async def transform_input_to_output(
     input_spec: UnslothJobInput,
     workspace: str,
-    sdk: "AsyncNeMoPlatform",
+    platform: AsyncCustomizationPlatformClients,
 ) -> UnslothJobOutput:
     """Enrich submitter input into a canonical :class:`UnslothJobOutput`.
 
@@ -47,7 +53,7 @@ async def transform_input_to_output(
         input_spec: Submitter-facing input shape.
         workspace: The job's workspace; used as the default for any bare
             entity / fileset refs.
-        sdk: Async platform SDK handle for validation.
+        platform: Typed async clients for validating platform references.
 
     Returns:
         Canonical :class:`UnslothJobOutput` with ``output.fileset``
@@ -59,17 +65,13 @@ async def transform_input_to_output(
         PermissionError: When access to the model or dataset is denied.
     """
     # Strict refs: both calls error if the entity / fileset is missing.
-    model_entity = await fetch_model_entity(input_spec.model.name, workspace, sdk)
-    await check_dataset_access(sdk, input_spec.dataset.path, workspace)
+    model_entity = await fetch_model_entity(input_spec.model.name, workspace, platform)
+    await check_dataset_access(platform, input_spec.dataset.path, workspace)
     if input_spec.dataset.validation_path:
-        await check_dataset_access(sdk, input_spec.dataset.validation_path, workspace)
+        await check_dataset_access(platform, input_spec.dataset.validation_path, workspace)
 
     model_spec = model_entity.spec
-    head_type = getattr(model_spec, "head_type", None) if model_spec else None
-    is_encoder = head_type in {"embedding", "cross_encoder"} or bool(
-        model_spec and getattr(model_spec, "is_embedding_model", False),
-    )
-    if is_encoder:
+    if model_spec is not None and _is_encoder_model(model_spec):
         raise ValueError(
             "Encoder-model SFT is not supported by the unsloth backend. Use a causal LM model entity instead.",
         )

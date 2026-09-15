@@ -53,10 +53,11 @@ import asyncio
 import logging
 import os
 import threading
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Literal, Mapping, Protocol
+from typing import Any, Literal, Protocol
 
 import httpx
 from nemo_platform import (
@@ -64,6 +65,7 @@ from nemo_platform import (
     DefaultHttpxClient,
     NeMoPlatform,
     NotGiven,
+    Omit,
     not_given,
 )
 from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
@@ -97,6 +99,12 @@ class _AccessTokenProvider(Protocol):
     async def get_access_token_async(self) -> str: ...
 
 
+_SyncRequestHook = Callable[[httpx.Request], None]
+_AsyncRequestHook = Callable[[httpx.Request], Awaitable[None]]
+_SyncHttpClientFactory = Callable[[_SyncRequestHook, str | Literal[True]], httpx.Client]
+_AsyncHttpClientFactory = Callable[[_AsyncRequestHook, str | Literal[True]], httpx.AsyncClient]
+
+
 @dataclass(frozen=True)
 class ClientInitConfig:
     """Everything the SDK client constructor needs after config resolution.
@@ -108,7 +116,7 @@ class ClientInitConfig:
 
     base_url: str
     workspace: str | None
-    default_headers: Mapping[str, str] | None = None
+    default_headers: Mapping[str, str | Omit] | None = None
     http_client: httpx.Client | httpx.AsyncClient | None = None
     client_verify: str | Literal[True] = True
 
@@ -119,7 +127,7 @@ class _ResolvedBootstrap:
 
     base_url: str
     workspace: str | None
-    default_headers: dict[str, str]
+    default_headers: dict[str, str | Omit]
     token_provider: _AccessTokenProvider | None  # None for non-OAuth users
     client_verify: str | Literal[True]
     certificate_authority: str | None = None
@@ -271,7 +279,7 @@ class _LazyWorkloadTokenExchangeProvider:
 # ---------------------------------------------------------------------------
 
 
-def _make_auth_event_hook(provider: _AccessTokenProvider):
+def _make_auth_event_hook(provider: _AccessTokenProvider) -> _SyncRequestHook:
     """Create a **sync** httpx request event hook that injects the Bearer token.
 
     Called before every SDK HTTP request.  ``provider.get_access_token()``
@@ -286,7 +294,7 @@ def _make_auth_event_hook(provider: _AccessTokenProvider):
     return inject_auth
 
 
-def _make_async_auth_event_hook(provider: _AccessTokenProvider):
+def _make_async_auth_event_hook(provider: _AccessTokenProvider) -> _AsyncRequestHook:
     """Create an **async** httpx request event hook for AsyncNeMoPlatform.
 
     The actual refresh still runs in a worker thread (via
@@ -300,7 +308,10 @@ def _make_async_auth_event_hook(provider: _AccessTokenProvider):
     return inject_auth
 
 
-def _headers_with_seeded_auth(headers: Mapping[str, str], provider: _AccessTokenProvider) -> dict[str, str]:
+def _headers_with_seeded_auth(
+    headers: Mapping[str, str | Omit],
+    provider: _AccessTokenProvider,
+) -> dict[str, str | Omit]:
     seeded_headers = dict(headers)
     if isinstance(provider, _LazyWorkloadTokenExchangeProvider):
         token = provider.get_cached_access_token()
@@ -502,7 +513,7 @@ def _resolve_bootstrap(
     base_url: str | httpx.URL | None,
     context_name: str | None,
     access_token: str | None,
-    extra_headers: Mapping[str, str] | None,
+    extra_headers: Mapping[str, str | Omit] | None,
 ) -> _ResolvedBootstrap:
     """Resolve the full client bootstrap: config, OIDC discovery, token provider.
 
@@ -529,7 +540,7 @@ def _resolve_bootstrap(
     base_url = str(resolved.cluster.base_url)
     certificate_authority = resolved.cluster.certificate_authority
     client_verify = client_verify_from_env(certificate_authority)
-    headers: dict[str, str] = dict(extra_headers) if extra_headers else {}
+    headers: dict[str, str | Omit] = dict(extra_headers) if extra_headers else {}
 
     workload_identity_token_file = _workload_identity_token_file_from_env()
     if workload_identity_token_file is not None and access_token is None and not os.environ.get("NMP_ACCESS_TOKEN"):
@@ -629,7 +640,8 @@ def build_client_init_kwargs(
     base_url: str | httpx.URL | None = None,
     context_name: str | None = None,
     access_token: str | None = None,
-    extra_headers: Mapping[str, str] | None = None,
+    extra_headers: Mapping[str, str | Omit] | None = None,
+    http_client_factory: _SyncHttpClientFactory | None = None,
 ) -> ClientInitConfig:
     """Build constructor kwargs for a **sync** NeMoPlatform client.
 
@@ -659,10 +671,14 @@ def build_client_init_kwargs(
     # The event hook will overwrite it with a fresh token on each request.
     headers = _headers_with_seeded_auth(bootstrap.default_headers, bootstrap.token_provider)
     hook = _make_auth_event_hook(bootstrap.token_provider)
-    http_client = DefaultHttpxClient(
-        event_hooks={"request": [hook], "response": []},
-        follow_redirects=True,
-        verify=bootstrap.client_verify,
+    http_client = (
+        http_client_factory(hook, bootstrap.client_verify)
+        if http_client_factory is not None
+        else DefaultHttpxClient(
+            event_hooks={"request": [hook], "response": []},
+            follow_redirects=True,
+            verify=bootstrap.client_verify,
+        )
     )
     return ClientInitConfig(
         base_url=bootstrap.base_url,
@@ -679,7 +695,8 @@ def build_async_client_init_kwargs(
     base_url: str | httpx.URL | None = None,
     context_name: str | None = None,
     access_token: str | None = None,
-    extra_headers: Mapping[str, str] | None = None,
+    extra_headers: Mapping[str, str | Omit] | None = None,
+    http_client_factory: _AsyncHttpClientFactory | None = None,
 ) -> ClientInitConfig:
     """Build constructor kwargs for an **async** AsyncNeMoPlatform client.
 
@@ -704,10 +721,14 @@ def build_async_client_init_kwargs(
 
     headers = _headers_with_seeded_auth(bootstrap.default_headers, bootstrap.token_provider)
     hook = _make_async_auth_event_hook(bootstrap.token_provider)
-    http_client = DefaultAsyncHttpxClient(
-        event_hooks={"request": [hook], "response": []},
-        follow_redirects=True,
-        verify=bootstrap.client_verify,
+    http_client = (
+        http_client_factory(hook, bootstrap.client_verify)
+        if http_client_factory is not None
+        else DefaultAsyncHttpxClient(
+            event_hooks={"request": [hook], "response": []},
+            follow_redirects=True,
+            verify=bootstrap.client_verify,
+        )
     )
     return ClientInitConfig(
         base_url=bootstrap.base_url,
@@ -726,7 +747,7 @@ def create_client(
     access_token: str | None = None,
     timeout: float | httpx.Timeout | None | NotGiven = not_given,
     max_retries: int = 2,
-    extra_headers: Mapping[str, str] | None = None,
+    extra_headers: Mapping[str, str | Omit] | None = None,
 ) -> NeMoPlatform:
     """Create a NeMoPlatform client from the nmp config.
 

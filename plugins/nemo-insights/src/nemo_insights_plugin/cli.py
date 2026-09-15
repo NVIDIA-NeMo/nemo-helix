@@ -23,7 +23,6 @@ from typing import Any, ClassVar, TypeVar
 import httpx
 import typer
 from nemo_insights_plugin.analyst.run import ClientConstructionError, run_analyst
-from nemo_insights_plugin.client import make_client
 from nemo_insights_plugin.contracts.checks import CheckResult, advisories, format_report, required_failures
 from nemo_insights_plugin.contracts.insights import InsightsFileError, validate_insights_file
 from nemo_insights_plugin.contracts.profile import (
@@ -34,6 +33,7 @@ from nemo_insights_plugin.contracts.profile import (
     load_env_file,
     resolve_base_url,
 )
+from nemo_insights_plugin.platform_client import make_client
 from nemo_insights_plugin.preflight import (
     AnalysisProbes,
     check_environment,

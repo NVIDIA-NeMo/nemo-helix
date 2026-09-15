@@ -47,6 +47,8 @@ from pathlib import Path
 from typing import Any
 
 from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import PlatformJobResults
@@ -235,7 +237,11 @@ def build_ctx_from_env(sdk: NeMoPlatform) -> JobContext:
             ephemeral=Path(ephemeral_str),
             persistent=Path(persistent_str) if persistent_str else None,
         ),
-        results=PlatformJobResults(job_name=job_id, workspace=workspace, sdk=sdk),
+        results=PlatformJobResults(
+            job_name=job_id,
+            workspace=workspace,
+            client=client_from_platform(sdk, NemoClient),
+        ),
         job_id=job_id,
     )
 

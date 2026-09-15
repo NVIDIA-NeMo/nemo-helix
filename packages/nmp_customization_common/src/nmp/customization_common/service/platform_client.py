@@ -8,6 +8,8 @@ handler / ``to_spec`` flow) to validate that the submitter's ``model`` and
 ``dataset`` references exist before the job moves on to compile / run.
 """
 
+from dataclasses import dataclass
+
 from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.errors import NotFoundError, PermissionDeniedError
@@ -19,8 +21,26 @@ from nmp.common.entities.utils import parse_entity_ref
 from nmp.customization_common.schemas.file_io import FileSetRef
 
 
+@dataclass(frozen=True, slots=True)
+class AsyncCustomizationPlatformClients:
+    """Typed async service clients needed while compiling customization jobs."""
+
+    files: AsyncFilesClient
+    models: AsyncModelsClient
+
+
+def async_customization_platform_clients_from_platform(
+    platform: AsyncNeMoPlatform,
+) -> AsyncCustomizationPlatformClients:
+    """Build the customization compile-time client bundle from the generated SDK."""
+    return AsyncCustomizationPlatformClients(
+        files=client_from_platform(platform, AsyncFilesClient),
+        models=client_from_platform(platform, AsyncModelsClient),
+    )
+
+
 async def check_fileset_access(
-    sdk: AsyncNeMoPlatform,
+    platform: AsyncCustomizationPlatformClients,
     fileset_uri: str,
     default_workspace: str,
     *,
@@ -29,9 +49,8 @@ async def check_fileset_access(
     """Verify the caller can access a fileset reference and return the fileset."""
     ref = FileSetRef.model_validate(fileset_uri)
     workspace = ref.workspace or default_workspace
-    files = client_from_platform(sdk, AsyncFilesClient)
     try:
-        return await files.get_fileset(workspace=workspace, name=ref.name)
+        return await platform.files.get_fileset(workspace=workspace, name=ref.name)
     except PermissionDeniedError:
         raise PermissionError(f"Access denied to {label} fileset '{workspace}/{ref.name}'") from None
     except NotFoundError:
@@ -41,25 +60,29 @@ async def check_fileset_access(
         ) from None
 
 
-async def check_dataset_access(sdk: AsyncNeMoPlatform, dataset_uri: str, default_workspace: str) -> None:
+async def check_dataset_access(
+    platform: AsyncCustomizationPlatformClients,
+    dataset_uri: str,
+    default_workspace: str,
+) -> None:
     """Verify the caller can access the dataset fileset.
 
     Raises:
         ValueError: If the fileset is not found.
         PermissionError: If access is denied.
     """
-    await check_fileset_access(sdk, dataset_uri, default_workspace, label="dataset")
+    await check_fileset_access(platform, dataset_uri, default_workspace, label="dataset")
 
 
 async def check_environment_access(
-    sdk: AsyncNeMoPlatform,
+    platform: AsyncCustomizationPlatformClients,
     environment_uri: str,
     default_workspace: str,
 ) -> None:
     """Verify the caller can access the environment fileset (GRPO)."""
     ref = FileSetRef.model_validate(environment_uri)
     workspace = ref.workspace or default_workspace
-    response = await check_fileset_access(sdk, environment_uri, default_workspace, label="environment")
+    response = await check_fileset_access(platform, environment_uri, default_workspace, label="environment")
 
     fs = response.data() if hasattr(response, "data") and callable(response.data) else response
     purpose = getattr(fs, "purpose", None)
@@ -74,16 +97,15 @@ async def check_environment_access(
 
 
 async def check_gym_dataset_layout(
-    sdk: AsyncNeMoPlatform,
+    platform: AsyncCustomizationPlatformClients,
     dataset_uri: str,
     default_workspace: str,
 ) -> None:
     """Ensure a GRPO Gym dataset fileset contains training.jsonl."""
     ref = FileSetRef.model_validate(dataset_uri)
     workspace = ref.workspace or default_workspace
-    files = client_from_platform(sdk, AsyncFilesClient)
     try:
-        listing = (await files.list_files(workspace=workspace, name=ref.name)).data()
+        listing = (await platform.files.list_files(workspace=workspace, name=ref.name)).data()
     except PermissionDeniedError:
         raise PermissionError(f"Access denied to dataset fileset '{workspace}/{ref.name}'") from None
     except NotFoundError:
@@ -102,13 +124,12 @@ async def check_gym_dataset_layout(
 async def fetch_model_entity(
     model_ref: str,
     default_workspace: str,
-    sdk: AsyncNeMoPlatform,
+    platform: AsyncCustomizationPlatformClients,
 ) -> ModelEntity:
     """Retrieve a model entity and verify its weights fileset is accessible."""
     resolved_ref = parse_entity_ref(model_ref, default_workspace)
-    models = client_from_platform(sdk, AsyncModelsClient)
     try:
-        response = await models.get_model(
+        response = await platform.models.get_model(
             name=resolved_ref.name,
             workspace=resolved_ref.workspace,
             query_params={"verbose": True},
@@ -123,7 +144,7 @@ async def fetch_model_entity(
 
     if model.fileset:
         await check_fileset_access(
-            sdk,
+            platform,
             model.fileset,
             resolved_ref.workspace,
             label=f"weights for model '{resolved_ref.workspace}/{resolved_ref.name}'",

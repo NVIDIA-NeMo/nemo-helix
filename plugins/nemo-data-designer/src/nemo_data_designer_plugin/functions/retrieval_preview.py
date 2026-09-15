@@ -9,12 +9,14 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import ClassVar, Literal
 
-from data_designer_nemo.context import create_data_designer_context
-from data_designer_nemo.sdk_translation import async_to_sync_sdk
+from data_designer_nemo.context import create_validation_context
+from data_designer_nemo.errors import NDDInvalidConfigError
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPreviewSpec
 from nemo_data_designer_plugin.retrieval.corpus import materialize_corpus
 from nemo_data_designer_plugin.retrieval.providers import build_retrieval_model_configs, resolve_retrieval_providers
+from nemo_data_designer_plugin.retrieval.secrets import resolve_hf_token
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_platform_plugin.client.errors import NemoClientError
 from nemo_platform_plugin.function import NemoFunction
 from nemo_platform_plugin.function_context import FunctionContext
 from nemo_platform_plugin.functions.frames import Done, Error
@@ -27,6 +29,18 @@ class RetrievalPreviewFrame(BaseModel):
     num_preview_records: int
 
 
+async def _resolve_hf_token_or_raise(
+    async_sdk: AsyncNeMoPlatform,
+    hf_token_secret: str | None,
+    workspace: str,
+) -> str | None:
+    """Resolve the spec's secret reference, reporting a bad reference as invalid config."""
+    try:
+        return await resolve_hf_token(async_sdk, hf_token_secret, workspace)
+    except NemoClientError as exc:
+        raise NDDInvalidConfigError(f"Could not access secret {hf_token_secret!r} named by hf_token_secret.") from exc
+
+
 class RetrievalPreviewFunction(NemoFunction[RetrievalPreviewSpec]):
     name: ClassVar[str] = "retrieval-preview"
     description: ClassVar[str] = "Preview retrieval SDG generation without publishing a full job fileset."
@@ -37,11 +51,12 @@ class RetrievalPreviewFunction(NemoFunction[RetrievalPreviewSpec]):
         self,
         spec: RetrievalPreviewSpec,
         ctx: FunctionContext,
+        sdk: NeMoPlatform,
         async_sdk: AsyncNeMoPlatform,
         is_local: bool = False,
     ) -> AsyncIterator[BaseModel]:
         job = spec.generate
-        dd_ctx = create_data_designer_context(async_sdk, ctx.workspace)
+        validation_ctx = create_validation_context(async_sdk, ctx.workspace)
         model_configs = build_retrieval_model_configs(
             provider=job.provider,
             chat_provider=job.chat_provider,
@@ -51,11 +66,11 @@ class RetrievalPreviewFunction(NemoFunction[RetrievalPreviewSpec]):
             quality_judge_model=job.quality_judge_model,
             embed_model=job.embed_model,
         )
-        try:
-            model_providers = await resolve_retrieval_providers(dd_ctx, model_configs)
-        except Exception as exc:
-            yield Error(message=str(exc), details={"type": type(exc).__name__})
-            return
+        # These can raise NDDInvalidConfigError or NDDInternalError, which map to
+        # appropriate error-coded responses rather than returning a 200 with a
+        # response stream that only holds an Error frame
+        model_providers = await resolve_retrieval_providers(validation_ctx, model_configs)
+        hf_token = await _resolve_hf_token_or_raise(async_sdk, job.hf_token_secret, ctx.workspace)
 
         def run_preview() -> BaseModel:
             from nemo_data_designer_plugin.retrieval.generation import (
@@ -63,7 +78,6 @@ class RetrievalPreviewFunction(NemoFunction[RetrievalPreviewSpec]):
                 execute_generation,
             )
 
-            sdk = async_sdk if isinstance(async_sdk, NeMoPlatform) else async_to_sync_sdk(async_sdk)
             with tempfile.TemporaryDirectory() as tmp:
                 tmp_path = Path(tmp)
                 corpus_dir = materialize_corpus(
@@ -71,6 +85,7 @@ class RetrievalPreviewFunction(NemoFunction[RetrievalPreviewSpec]):
                     dest=tmp_path / "corpus",
                     sdk=sdk,
                     workspace=ctx.workspace,
+                    hf_token=hf_token,
                     allow_local_path=is_local,
                 )
                 run_config = build_generation_run_config(
@@ -102,7 +117,7 @@ class RetrievalPreviewFunction(NemoFunction[RetrievalPreviewSpec]):
                     quality_judge_model=job.quality_judge_model,
                     embed_model=job.embed_model,
                 )
-                result = execute_generation(run_config, preview=True)
+                result = execute_generation(run_config, preview=True, num_records=spec.num_records)
                 return RetrievalPreviewFrame(
                     num_seed_records=getattr(result, "num_seed_records", 0),
                     num_preview_records=getattr(result, "num_preview_records", spec.num_records),

@@ -137,9 +137,13 @@ Step 2's requirements are unpinned on purpose (`wheelhouse_requirements`): the w
 |---|---|---|
 | `native-v1` | An index, per the server's `requirements.txt` | **Yes** |
 | `wheels-v1` | The package's `wheels/`, for whatever it vendors | **No**, if the closure covers step 1 as well |
-| `adapter-wheels-v1` | The package's `wheels/`, plus the agent harness's own requirements | **Yes** — see below |
+| `adapter-wheels-v1` | The package's complete `wheels/` closure, including the agent harness dependencies | **No** |
 
-**`adapter-wheels-v1` requires network at job start.** The wheelhouse covers the hub environment; the `verifiers_agent` harness builds its venv from its own `requirements.txt`, which carries `verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@<tag>`. A converted hub env needs egress to GitHub even with a complete FileSet. Do not promise an offline run.
+The converter resolves the hub environment and `verifiers_agent` together. Source-only
+releases are built into wheels on the internet-connected conversion host, and conversion
+fails if any pinned distribution is still missing from `wheels/`. The image-bundled agent
+harness uses the matching `verifiers` version pin, allowing Gym to resolve it from the
+FileSet with `UV_OFFLINE=1` instead of following a Git URL.
 
 Egress is operator config, never a job field: `NMP_RL_SANDBOX_ALLOW_INTERNET`, plus `NMP_RL_SANDBOX_PUBLIC_DNS_ALLOW` for hosts outside NeMo-RL's built-in `*.com` / `*.org` allowance (e.g. `hub.primeintellect.ai`). Check with the operator before committing a user to `native-v1` on a deny-default cluster. Details: `rl-kubernetes-runtime.md` § **Sandboxed Gym (GRPO)**.
 
@@ -351,20 +355,25 @@ Gym's in-tree rows omit `agent_ref` because the owning agent config supplies it.
 
 ## Path B — a Prime Intellect / verifiers env (`adapter-wheels-v1`)
 
-The automated path, and the only one with a converter. It downloads the hub package, vendors its full wheel closure, writes both configs and the manifest, and builds the prompt JSONL.
+The automated path, and the only one with a converter. It downloads the hub package, vendors its full wheel closure, writes both configs and the manifest, and snapshots the hub environment's Hugging Face dataset into the dataset FileSet so training does not call the Hub.
+
+That snapshot is two artifacts: `hub_environment.parquet`, with `vf_env_args.dataset_path` set to `/job/dataset/hub_environment.parquet`, and `.huggingface/`, the cache populated while converting. Loaders that honor `dataset_path` read the parquet; loaders that still call `load_dataset("org/name")` resolve from the cache, offline.
 
 **Run it on a host with internet.** Training clusters have no hub egress and consume uploaded FileSets only.
 
-`pi-to-gym-conversion` is a console script that ships with `nemo-rl-plugin`, so on an installed platform run it bare. The `uv run --package nmp-rl` prefix below is for a repo checkout.
+`pi-to-gym-conversion` is a console script that ships with `nemo-rl-plugin`, so on an installed platform run it bare. From a repo checkout, generating a dataset needs the `conversion` extra (verifiers), and it belongs in its own environment: the converter installs the untrusted hub wheel into whatever interpreter runs it, and a `uv sync` of the repo `.venv` prunes both that wheel and `verifiers` back out.
 
 ```bash
-uv run --package nmp-rl pi-to-gym-conversion \
+UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nmp-rl --extra conversion
+.venv-conversion/bin/pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree \
   --hub-version 0.1.5 \
   --out-dir ./ascii-tree-pkg \
   --dataset-dir ./ascii-tree-data \
   --validation-fraction 0.1
 ```
+
+`--validate-only` needs neither, so the plain `uv run --package nmp-rl pi-to-gym-conversion` used below for validation is fine from the repo `.venv`.
 
 | Flag | Use it for |
 |---|---|
@@ -391,6 +400,8 @@ ascii-tree-pkg/
 ascii-tree-data/
   training.jsonl
   validation.jsonl                ← only with --validation-fraction > 0
+  hub_environment.parquet         ← `vf_env_args.dataset_path` → `/job/dataset/hub_environment.parquet`
+  .huggingface/                   ← HF cache from conversion; Gym host copies to `/job/work/.huggingface`
 ```
 
 **`pi-to-gym-conversion` vendors `x86_64` wheels today.** On an `arm64` cluster, build the closure separately and pass `--wheels-dir`.
@@ -537,7 +548,7 @@ The converter can do both FileSets in one step:
 
 ```bash
 export NMP_BASE_URL=http://127.0.0.1:8080
-uv run --package nmp-rl pi-to-gym-conversion \
+.venv-conversion/bin/pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree --hub-version 0.1.5 \
   --out-dir ./ascii-tree-pkg --upload --workspace default
 ```

@@ -18,6 +18,7 @@ class LaunchSpec(BaseModel):
     evaluation_id: str
     benchmark_run_id: str | None = None
     name: str
+    task_slug: str | None = None
     framework: str
     framework_version: str | None = None
     runner_image_ref: str | None = None

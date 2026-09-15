@@ -17,8 +17,8 @@ import uuid
 import pytest
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.string_check import StringCheckMetric
-from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.sdk import NeMoPlatform
 from nemo_platform_plugin.workspaces.client import WorkspacesClient
 from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
 

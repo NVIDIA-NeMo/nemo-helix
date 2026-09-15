@@ -9,10 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from nemo_data_designer_plugin.config import get_config
+from nemo_data_designer_plugin.retrieval.corpus import HF_TOKEN_ENVVAR
 from nemo_platform_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
     EnvironmentVariable,
+    EnvironmentVariableFromSecret,
     GPUExecutionProviderSpec,
     PlatformJobStep,
 )
@@ -31,6 +33,22 @@ def _persistent_storage_environment() -> list[EnvironmentVariable]:
     return [EnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=DEFAULT_JOB_STORAGE_PATH)]
 
 
+def _hf_token_environment(hf_token_secret: str | None) -> list[EnvironmentVariable]:
+    """Project a ``hf_token_secret`` reference into the step env, never its plaintext.
+
+    The jobs service resolves ``from_secret`` against the job workspace, so an
+    unqualified secret name works the same way it does for every other job.
+    """
+    if not hf_token_secret:
+        return []
+    return [
+        EnvironmentVariable(
+            name=HF_TOKEN_ENVVAR,
+            from_secret=EnvironmentVariableFromSecret(name=hf_token_secret),
+        )
+    ]
+
+
 def cpu_retrieval_step(
     name: str,
     module: str,
@@ -38,6 +56,7 @@ def cpu_retrieval_step(
     profile: str | None,
     module_args: list[str] | None = None,
     image: str = "nmp-cpu-tasks",
+    hf_token_secret: str | None = None,
 ) -> PlatformJobStep:
     return PlatformJobStep(
         name=name,
@@ -51,7 +70,7 @@ def cpu_retrieval_step(
             ),
         ),
         config=spec.model_dump(mode="json"),
-        environment=_persistent_storage_environment(),
+        environment=[*_persistent_storage_environment(), *_hf_token_environment(hf_token_secret)],
     )
 
 
@@ -88,11 +107,13 @@ async def retrieval_step(
     profile: str | None,
     async_sdk: object,
     gpu: bool = False,
+    hf_token_secret: str | None = None,
 ) -> PlatformJobStep:
     del async_sdk
     if gpu:
+        # The GPU mining step runs with ``HF_HUB_OFFLINE``; it never reaches the Hub.
         return gpu_retrieval_step(name, module, spec, profile)
-    return cpu_retrieval_step(name, module, spec, profile)
+    return cpu_retrieval_step(name, module, spec, profile, hf_token_secret=hf_token_secret)
 
 
 async def model_download_step(

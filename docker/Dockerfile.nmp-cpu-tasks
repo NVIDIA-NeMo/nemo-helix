@@ -85,7 +85,13 @@ ENTRYPOINT ["/app/.venv/bin/nemo-platform"]
 CMD ["--help"]
 
 FROM runtime AS smoke-test
-RUN /app/.venv/bin/python -c \
-    'import nemo_evaluator.tasks.agent_evaluate, nemo_evaluator.tasks.evaluate, nemo_evaluator.tasks.stage_environment, uvicorn, yaml; from opensandbox.config import ConnectionConfig; from sandboxed_gym import SandboxedGymOrchestrator; print({"connection_config": ConnectionConfig.__name__, "orchestrator": SandboxedGymOrchestrator.__name__, "uvicorn": uvicorn.__version__, "yaml": yaml.__version__})'
+# Every job declaring `container = "cpu-tasks"` runs its task module in this
+# image, so a plugin missing from the cpu-tasks dependency group surfaces as an
+# import error at job runtime rather than at build time. The script verifies the
+# Evaluator/Gym imports, the `python -m` task entrypoints, the Fabric adapter
+# data files, and that the vendored claude/codex CLIs actually launch. It
+# reports every failure in one run rather than aborting at the first.
+RUN --mount=type=bind,source=docker/scripts/smoke-test-cpu-tasks.py,target=/tmp/smoke-test-cpu-tasks.py,readonly \
+    /app/.venv/bin/python /tmp/smoke-test-cpu-tasks.py
 
 FROM runtime

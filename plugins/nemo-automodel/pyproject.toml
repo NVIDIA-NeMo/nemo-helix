@@ -8,7 +8,6 @@ readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "nemo-platform-plugin",
-    "nemo-platform",
     "nmp-automodel",
     "nmp-customization-common",
     "pydantic>=2.10.6",
@@ -33,7 +32,6 @@ packages = ["src/nemo_automodel_plugin"]
 
 [tool.uv.sources]
 nemo-platform-plugin = { workspace = true }
-nemo-platform = { workspace = true }
 nmp-automodel = { workspace = true }
 nemo-customizer-plugin = { workspace = true }
 nmp-customization-common = { workspace = true }

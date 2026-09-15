@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from models import AsyncModelsResource, parse_workspace_name_ref
+from models import parse_workspace_name_ref
 from nemo_evaluator.api.schemas import MetricInline
 from nemo_evaluator.metric_refs import MetricRef, MetricRefOrInline, resolve_metric_specs
 from nemo_evaluator.shared.metric_bundles.bundles import (
@@ -27,11 +27,12 @@ from nemo_evaluator.shared.metric_bundles.bundles import (
 from nemo_evaluator_sdk.metrics.protocol import Metric, MetricWithModels
 from nemo_evaluator_sdk.resolver_protocols import ModelResolver
 from nemo_evaluator_sdk.values import Model, ModelRef
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform import NotFoundError as SDKNotFoundError
 from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.errors import NotFoundError
 from nemo_platform_plugin.entities import EntityClient
 from nemo_platform_plugin.files.client import AsyncFilesClient
+from nemo_platform_plugin.models.client import AsyncModelsClient
+from nemo_platform_plugin.sdk import AsyncNeMoPlatform
 
 
 def unresolved_model_refs(metrics: list[Metric]) -> list[str]:
@@ -71,19 +72,24 @@ def _model_not_found_error(model_ref: ModelRef, workspace: str, name: str) -> Va
 
 @dataclass(frozen=True)
 class PlatformMetricModelResolver(ModelResolver):
-    """Resolve evaluator metric ``ModelRef`` values through the platform Models resource."""
+    """Resolve evaluator metric ``ModelRef`` values through the typed Models client."""
 
-    models: AsyncModelsResource
+    models_client: AsyncModelsClient
 
     async def resolve_model(self, model_ref: ModelRef) -> Model:
         workspace, name = parse_workspace_name_ref(
             model_ref.root, label="ModelRef", expected_format="workspace/model_name"
         )
         try:
-            resolved = await self.models.resolve_model_reference(model_ref.root)
-        except SDKNotFoundError as exc:
+            resolved = await self.models_client.resolve_model_reference(model_ref.root)
+        except NotFoundError as exc:
             raise _model_not_found_error(model_ref, workspace, name) from exc
-        return Model(url=resolved.url, name=resolved.name, host_url=resolved.host_url)
+        return Model(
+            url=resolved.url,
+            name=resolved.name,
+            host_url=resolved.host_url,
+            served_model_name=resolved.served_model_name,
+        )
 
 
 async def resolve_metrics_to_inline(
@@ -100,7 +106,7 @@ async def resolve_metrics_to_inline(
     reference is present without a usable ``async_sdk`` connection.
 
     Stored-ref loading awaits real file I/O, so it uses the typed Files client
-    derived from the public SDK. Model-ref resolution uses the public SDK.
+    derived from the public SDK. Model-ref resolution uses the typed Models client.
     """
     has_metric_ref = any(isinstance(metric, MetricRef) for metric in metrics)
     files_client = (
@@ -121,7 +127,8 @@ async def resolve_metrics_to_inline(
                 "ModelRef metrics require a platform connection (models + inference) to resolve: "
                 + ", ".join(unresolved)
             )
-        resolver: ModelResolver = PlatformMetricModelResolver(async_sdk.models)
+        models_client = client_from_platform(async_sdk, AsyncModelsClient)
+        resolver: ModelResolver = PlatformMetricModelResolver(models_client)
         await asyncio.gather(
             *(metric.resolve_models(resolver) for metric in runtime_metrics if isinstance(metric, MetricWithModels))
         )

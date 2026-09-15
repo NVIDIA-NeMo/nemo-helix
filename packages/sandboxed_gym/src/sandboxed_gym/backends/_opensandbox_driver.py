@@ -17,9 +17,11 @@ so egress verification can still ask the sandbox what policy it actually applied
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from sandboxed_gym.backends.base import EpisodeBackendError, UnsupportedEpisodeOperationError
 from sandboxed_gym.sandbox_types import (
@@ -32,8 +34,13 @@ from sandboxed_gym.sandbox_types import (
 if TYPE_CHECKING:
     from opensandbox import Sandbox
 
+LOGGER = logging.getLogger(__name__)
+
 #: Provider name stamped onto handles.
 PROVIDER_NAME = "opensandbox"
+
+#: Correlates one create request with a resource whose response may have been lost.
+_SANDBOX_CREATE_ATTEMPT_ID_METADATA_KEY = "sandbox_create_attempt_id"
 
 #: Sandbox lifecycle names the SDK reports that do not match ours one-for-one.
 _STATUS_ALIASES = {
@@ -180,25 +187,43 @@ class OpenSandboxDriver:
         if spec.image is None:
             raise EpisodeBackendError("an episode image is required")
 
-        sandbox = await Sandbox.create(
-            spec.image,
-            timeout=timedelta(seconds=spec.ttl_s) if spec.ttl_s is not None else None,
-            ready_timeout=timedelta(seconds=spec.ready_timeout_s or 30.0),
-            env=dict(spec.env) or None,
-            metadata=dict(spec.metadata) or None,
-            resource_requests=_resource_requests(spec) or None,
-            network_policy=_network_policy(self._create_options),
-            entrypoint=list(spec.entrypoint) if spec.entrypoint else None,
-            volumes=_volumes(spec) or None,
-            # Large runtime images flake on the SDK's create-time probe, and the job host polls
-            # `/health` itself once routes resolve. The caller decides; the SDK default stands.
-            skip_health_check=bool(self._create_options.get("skip_health_check", False)),
-            connection_config=self._connection_config,
-        )
-        sandbox_id = getattr(sandbox, "sandbox_id", None) or (await sandbox.get_info()).id
-        if spec.workdir:
-            self._workdirs[sandbox_id] = spec.workdir
-        return SandboxHandle(sandbox_id=sandbox_id, provider_name=self.name, raw=sandbox)
+        create_attempt_id = uuid4().hex
+        metadata = {**spec.metadata, _SANDBOX_CREATE_ATTEMPT_ID_METADATA_KEY: create_attempt_id}
+        try:
+            sandbox = await Sandbox.create(
+                spec.image,
+                timeout=timedelta(seconds=spec.ttl_s) if spec.ttl_s is not None else None,
+                ready_timeout=timedelta(seconds=spec.ready_timeout_s or 30.0),
+                env=dict(spec.env) or None,
+                metadata=metadata,
+                resource_requests=_resource_requests(spec) or None,
+                network_policy=_network_policy(self._create_options),
+                entrypoint=list(spec.entrypoint) if spec.entrypoint else None,
+                volumes=_volumes(spec) or None,
+                # Large runtime images flake on the SDK's create-time probe, and the job host polls
+                # `/health` itself once routes resolve. The caller decides; the SDK default stands.
+                skip_health_check=bool(self._create_options.get("skip_health_check", False)),
+                connection_config=self._connection_config,
+            )
+            sandbox_id = getattr(sandbox, "sandbox_id", None) or (await sandbox.get_info()).id
+            if spec.workdir:
+                self._workdirs[sandbox_id] = spec.workdir
+            return SandboxHandle(sandbox_id=sandbox_id, provider_name=self.name, raw=sandbox)
+        except BaseException:
+            try:
+                removed = await self.destroy_sandboxes_matching(
+                    {_SANDBOX_CREATE_ATTEMPT_ID_METADATA_KEY: create_attempt_id}
+                )
+                if removed:
+                    LOGGER.warning(
+                        "destroyed sandboxes after create attempt %s failed: %s",
+                        create_attempt_id,
+                        ", ".join(removed),
+                    )
+            except BaseException:
+                # Preserve the create failure: it is the actionable cause.
+                LOGGER.exception("failed to reconcile sandbox create attempt %s", create_attempt_id)
+            raise
 
     def _sandbox(self, handle: SandboxHandle) -> Sandbox:
         return handle.raw  # ty: ignore[invalid-return-type] - provider-owned opaque state
@@ -267,6 +292,38 @@ class OpenSandboxDriver:
     async def close(self, handle: SandboxHandle) -> None:
         self._workdirs.pop(handle.sandbox_id, None)
         await self._sandbox(handle).destroy()
+
+    async def destroy_sandboxes_matching(self, metadata: Mapping[str, str]) -> tuple[str, ...]:
+        """Destroy every sandbox matching ``metadata``.
+
+        OpenSandbox creates the Kubernetes resource before waiting for it to become ready. If the
+        client loses that request, no ``SandboxHandle`` comes back, so normal handle-based cleanup
+        cannot reach the resource. A unique create-attempt ID makes metadata lookup an exact rollback.
+        """
+        if not metadata:
+            raise ValueError("sandbox cleanup requires at least one metadata selector")
+
+        from opensandbox.manager import SandboxManager
+        from opensandbox.models.sandboxes import SandboxFilter
+
+        manager = await SandboxManager.create(connection_config=self._connection_config)
+        try:
+            sandbox_ids: list[str] = []
+            page = 1
+
+            while True:
+                result = await manager.list_sandbox_infos(SandboxFilter(metadata=dict(metadata), page=page))
+                sandbox_ids.extend(info.id for info in result.sandbox_infos)
+                if not result.pagination.has_next_page:
+                    break
+                page += 1
+
+            for sandbox_id in sandbox_ids:
+                await manager.kill_sandbox(sandbox_id)
+
+            return tuple(sandbox_ids)
+        finally:
+            await manager.close()
 
     async def aclose(self) -> None:
         """No provider-scoped client to close: each sandbox owns its own SDK connection."""

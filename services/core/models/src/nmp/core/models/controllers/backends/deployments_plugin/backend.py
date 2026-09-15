@@ -8,11 +8,11 @@ from typing import Any
 
 from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, Prerequisite, Volume
 from nemo_platform import AsyncNeMoPlatform
-from nemo_platform.types.inference.model_deployment import ModelDeployment
 from nemo_platform_plugin.auth import AuthContext as DeploymentAuthContext
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.entities.client import AsyncEntitiesClient
 from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_platform_plugin.models.types import ModelDeployment, ModelDeploymentStatus
 from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
 from nmp.common.config import Runtime
 from nmp.core.models.app.constants import MODEL_MANAGED_BY_LABEL, MODEL_MANAGED_BY_MODELS_CONTROLLER
@@ -81,18 +81,19 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
         resolved = resolve_plugin_deployment(ctx, self._huggingface_model_puller)
         if resolved.runtime == Runtime.NONE:
             return DeploymentStatusUpdate(
-                status="UNKNOWN", status_message="Deployments plugin is unavailable for runtime none."
+                status=ModelDeploymentStatus.UNKNOWN,
+                status_message="Deployments plugin is unavailable for runtime none.",
             )
         teardown = await self.delete_model_deployment(resolved.deployment.workspace, resolved.deployment.name)
-        if teardown.status == "DELETING":
+        if teardown.status == ModelDeploymentStatus.DELETING:
             return DeploymentStatusUpdate(
-                status="PENDING",
+                status=ModelDeploymentStatus.PENDING,
                 status_message="Waiting for prior deployments-plugin substrate teardown before recreate.",
             )
         executor = executor_for_runtime(self._cfg, resolved.runtime)
         if executor is None:
             return DeploymentStatusUpdate(
-                status="ERROR",
+                status=ModelDeploymentStatus.ERROR,
                 status_message=(
                     "No deployments-plugin executor configured for the current runtime. "
                     "Set docker_executor, k8s_executor, or default_executor under "
@@ -142,11 +143,14 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
         except Exception as exc:
             await self._rollback_create(ctx)
             return DeploymentStatusUpdate(
-                status="ERROR",
+                status=ModelDeploymentStatus.ERROR,
                 status_message=f"Unable to create deployments-plugin entities: {exc}",
                 error_details={"error": str(exc)},
             )
-        return DeploymentStatusUpdate(status="PENDING", status_message="Created deployments-plugin entities.")
+        return DeploymentStatusUpdate(
+            status=ModelDeploymentStatus.PENDING,
+            status_message="Created deployments-plugin entities.",
+        )
 
     async def _rollback_create(self, ctx: ModelContext) -> None:
         """Best-effort controlled teardown after a partial create failure."""
@@ -171,12 +175,20 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
         ``pending_timeout_seconds`` when the deployment remains PENDING too long.
         """
         if ctx.model_deployment is None:
-            return DeploymentStatusUpdate(status="UNKNOWN", status_message="Model deployment unavailable.")
+            return DeploymentStatusUpdate(
+                status=ModelDeploymentStatus.UNKNOWN,
+                status_message="Model deployment unavailable.",
+            )
         names = entity_names(ctx.model_deployment.name)
         server = await self._get_optional(Deployment, ctx.model_deployment.workspace, names.server)
         puller = await self._get_optional(Deployment, ctx.model_deployment.workspace, names.puller)
         volume = await self._get_optional(Volume, ctx.model_deployment.workspace, names.volume)
-        result = aggregate_status(volume, puller, server, previously_ready=ctx.model_deployment.status == "READY")
+        result = aggregate_status(
+            volume,
+            puller,
+            server,
+            previously_ready=ctx.model_deployment.status == ModelDeploymentStatus.READY,
+        )
         elapsed = deployment_elapsed_seconds(ctx.model_deployment)
         return apply_pending_timeout(
             result,
@@ -187,7 +199,10 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
 
     async def update_model_deployment(self, ctx: ModelContext) -> DeploymentStatusUpdate:
         del ctx
-        return DeploymentStatusUpdate(status="ERROR", status_message="Update via recreate not yet supported.")
+        return DeploymentStatusUpdate(
+            status=ModelDeploymentStatus.ERROR,
+            status_message="Update via recreate not yet supported.",
+        )
 
     async def delete_model_deployment(
         self,
@@ -201,7 +216,8 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
         for deployment_name, config_name in ((names.server, names.server), (names.puller, names.puller)):
             if not await self._complete_deployment_delete(workspace, deployment_name, config_name):
                 result = DeploymentStatusUpdate(
-                    status="DELETING", status_message="Waiting for plugin deployment teardown."
+                    status=ModelDeploymentStatus.DELETING,
+                    status_message="Waiting for plugin deployment teardown.",
                 )
                 return apply_deleting_timeout(
                     result,
@@ -214,7 +230,10 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
                 await self._entity_client().delete(Volume, name=volume_name, workspace=workspace)
             except NemoEntityNotFoundError:
                 pass
-        return DeploymentStatusUpdate(status="DELETED", status_message="Deleted deployments-plugin entities.")
+        return DeploymentStatusUpdate(
+            status=ModelDeploymentStatus.DELETED,
+            status_message="Deleted deployments-plugin entities.",
+        )
 
     async def _complete_deployment_delete(self, workspace: str, deployment_name: str, config_name: str) -> bool:
         """Initiate plugin deployment stop and return True once config can be removed."""

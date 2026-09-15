@@ -139,7 +139,7 @@ async def test_retrieval_prepare_compile_uses_one_container_profile() -> None:
     dd_ctx = AsyncMock()
     dd_ctx.get_model_providers = AsyncMock(return_value=providers)
     with patch(
-        "nemo_data_designer_plugin.jobs.retrieval_generate.create_data_designer_context",
+        "nemo_data_designer_plugin.jobs.retrieval_generate.create_validation_context",
         return_value=dd_ctx,
     ):
         step = await RetrievalGenerateJob.to_spec(
@@ -346,7 +346,7 @@ async def test_retrieval_run_compile_chains_generate_then_prepare() -> None:
         prepare=RetrievalPrepareJobConfig(enable_mining=False),
     )
     with patch(
-        "nemo_data_designer_plugin.jobs.retrieval_generate.create_data_designer_context",
+        "nemo_data_designer_plugin.jobs.retrieval_generate.create_validation_context",
         return_value=dd_ctx,
     ):
         compiled = await RetrievalRunJob.compile(
@@ -488,3 +488,110 @@ def test_retrieval_cli_shell_quotes_workspace_and_spec() -> None:
     quoted = shlex.join(["--workspace", "team's-ws"])
     assert quoted in result.output
     assert "--spec" in result.output
+
+
+def _secret_env(step: PlatformJobStep) -> dict[str, str]:
+    return {
+        item["name"]: item["from_secret"]["name"] for item in step["environment"] if item.get("from_secret") is not None
+    }
+
+
+@pytest.mark.asyncio
+async def test_retrieval_generate_compile_projects_hf_token_secret() -> None:
+    spec = RetrievalGenerateStepConfig(
+        job_config=_generate_config(corpus="hf://example/private-corpus", hf_token_secret="default/hf-token"),
+        model_providers=[dd.ModelProvider(name="default/nvidia-build", endpoint="http://igw")],
+        chat_provider_name="default/nvidia-build",
+        embed_provider_name="default/nvidia-build",
+    )
+    compiled = await RetrievalGenerateJob.compile(
+        workspace="default",
+        spec=spec,
+        entity_client=Mock(),
+        job_name=None,
+        async_sdk=AsyncMock(),
+    )
+    step = _steps(compiled)[0]
+    assert _secret_env(step) == {"HF_TOKEN": "default/hf-token"}
+    # The reference travels as a secret ref, never as a plaintext value in the spec.
+    assert "default/hf-token" not in [item.get("value") for item in step["environment"]]
+
+
+@pytest.mark.asyncio
+async def test_retrieval_generate_compile_omits_hf_token_without_secret() -> None:
+    spec = RetrievalGenerateStepConfig(
+        job_config=_generate_config(),
+        model_providers=[dd.ModelProvider(name="default/nvidia-build", endpoint="http://igw")],
+        chat_provider_name="default/nvidia-build",
+        embed_provider_name="default/nvidia-build",
+    )
+    compiled = await RetrievalGenerateJob.compile(
+        workspace="default",
+        spec=spec,
+        entity_client=Mock(),
+        job_name=None,
+        async_sdk=AsyncMock(),
+    )
+    assert _secret_env(_steps(compiled)[0]) == {}
+
+
+@pytest.mark.asyncio
+async def test_retrieval_prepare_compile_projects_hf_token_secret_on_convert_only() -> None:
+    spec = RetrievalPrepareStepConfig(
+        job_config=RetrievalPrepareJobConfig(
+            sdg_input="hf://example/private-stage0",
+            enable_mining=True,
+            hf_token_secret="hf-token",
+        ),
+        phase="convert",
+        model_fileset="default/retrieval-model",
+    )
+    compiled = await RetrievalPrepareJob.compile(
+        workspace="default",
+        spec=spec,
+        entity_client=Mock(),
+        job_name=None,
+        async_sdk=AsyncMock(),
+    )
+    steps = _steps(compiled)
+    assert _secret_env(steps[0]) == {"HF_TOKEN": "hf-token"}
+    # Mining runs offline in the automodel image, so it gets no Hub credential.
+    assert _secret_env(steps[2]) == {}
+
+
+def test_retrieval_generate_run_forwards_hf_token_to_corpus_staging(tmp_path: Path, monkeypatch) -> None:
+    ctx = _ctx(tmp_path)
+    spec = RetrievalGenerateStepConfig(
+        job_config=_generate_config(corpus="hf://example/private-corpus", hf_token_secret="default/hf-token"),
+        model_providers=[dd.ModelProvider(name="default/nvidia-build", endpoint="http://igw")],
+        chat_provider_name="default/nvidia-build",
+        embed_provider_name="default/nvidia-build",
+    )
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    monkeypatch.setenv("HF_TOKEN", "hf_secret_value")
+    result = SimpleNamespace(dataset_name="retrieval_sdg", num_records=3, output_path=tmp_path / "out.jsonl")
+    with (
+        patch(
+            "nemo_data_designer_plugin.jobs.retrieval_generate.materialize_corpus",
+            return_value=corpus,
+        ) as materialize,
+        patch("nemo_data_designer_plugin.retrieval.generation.execute_generation", return_value=result),
+        patch("nemo_data_designer_plugin.retrieval.generation.build_generation_run_config") as build_cfg,
+    ):
+        build_cfg.return_value = SimpleNamespace()
+        RetrievalGenerateJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=Mock())
+
+    assert materialize.call_args.kwargs["hf_token"] == "hf_secret_value"
+
+
+def test_retrieval_prepare_materialize_input_forwards_hf_token(tmp_path: Path, monkeypatch) -> None:
+    ctx = _ctx(tmp_path)
+    monkeypatch.setenv("HF_TOKEN", "hf_secret_value")
+    with patch(
+        "nemo_data_designer_plugin.jobs.retrieval_prepare.materialize_corpus",
+        return_value=tmp_path / "staged",
+    ) as materialize:
+        _materialize_input("hf://example/private-stage0", tmp_path / "dest", ctx, Mock())
+
+    assert materialize.call_args.kwargs["hf_token"] == "hf_secret_value"

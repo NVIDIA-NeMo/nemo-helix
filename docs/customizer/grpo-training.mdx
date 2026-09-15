@@ -93,9 +93,10 @@ A `wheels-v1` job runs with no egress only when `wheels/` carries all of:
 
 The virtualenv is created empty, so nothing carries over from the image. Completeness of `wheels/` is what makes an offline run work, not the format name. Full detail: [GRPO Environment Packages](/documentation/customizer-reference/tutorials/grpo-environment-packages#dependencies).
 
-<Warning>
-`adapter-wheels-v1` requires network access when the job starts. The package `wheels/` directory covers the hub environment; `verifiers_agent` also installs `verifiers` from GitHub.
-</Warning>
+`adapter-wheels-v1` can run without network access at job start. Its converter builds
+source-only dependencies such as `verifiers` into wheels, and the image-bundled harness
+uses a version requirement that can resolve from that wheelhouse. Conversion still
+requires an internet-connected host.
 
 Egress is an operator setting, not a job field: `NMP_RL_SANDBOX_ALLOW_INTERNET`, plus `NMP_RL_SANDBOX_PUBLIC_DNS_ALLOW` for hosts outside the built-in `*.com` / `*.org` allowance. Ask your platform operator which is configured before choosing a format.
 
@@ -391,7 +392,8 @@ All GRPO knobs live under `training`, including `policy_backend` (a sibling of `
 | `overlong_filtering` | `false` | Zero the loss contribution of responses truncated at the generation cap. |
 | `ref_policy_kl_penalty` | `0.0` | KL coefficient against the reference policy. |
 | `val_at_start` | `false` | Run validation before the first step, so baseline and result come from one job. |
-| `policy_backend` | Follows `finetuning_type` | The NeMo-RL worker that trains the model. Set it on `training`, not under `training.parallelism`. **`lora` requires `automodel`**; **`all_weights` requires `dtensor`**. Leave it unset to get the supported one. `automodel` needs Transformer Engine (Hopper or newer) and is the only backend with `expert_parallel_size` above 1 and `automodel_kwargs`; `dtensor` runs stock HuggingFace on PyTorch FSDP2 and is the pre-Hopper option. Unsupported pairings are rejected at submit, every conflict at once. |
+| `policy_backend` | Follows `finetuning_type` | The NeMo-RL worker that trains the model. Set it on `training`, not under `training.parallelism`. **`lora` requires `automodel`**. **`all_weights` defaults to `dtensor`** and may be set to `automodel` for a consolidated HuggingFace export. MoE models that use expert parallelism also require `automodel`, because `dtensor` does not support `expert_parallel_size` above 1. Leave it unset to get the default. `automodel` needs Transformer Engine (Hopper or newer) and supports `automodel_kwargs`; `dtensor` runs stock HuggingFace on PyTorch FSDP2 and is the pre-Hopper option. `dtensor` plus LoRA, expert parallelism, or `automodel_kwargs` is rejected at submit, every conflict at once. |
+| `v4_compatible` | `true` | `GRPOTraining.v4_compatible`. On Automodel full-weight export, keep the base transformers-v4 `config.json` so the platform's vLLM can load the published model; the v5 config is written beside it as `config.v5.json`. Set `false` to export the v5 `config.json` instead. If the base checkpoint already uses transformers v5, the job logs warn you to set this to `false`. No effect on `dtensor` or LoRA jobs. |
 | `batching_strategy` | `dynamic` | How rollouts are grouped into training micro-batches. `dynamic` fills each micro-batch to a token budget, so short rollouts share a batch instead of each paying for a full-length pad. `static` puts one rollout per slot. `sequence_packing` concatenates rollouts, and is rejected for VLM, multimodal, and context-parallel runs. |
 | `train_mb_tokens` | Derived | Token budget per micro-batch, read by `dynamic` and `sequence_packing`. Defaults to `max_seq_length × micro_batch_size`. |
 | `sequence_length_round` | `64` | Round bucketed sequence lengths up to a multiple of this. Read only by `dynamic`. |

@@ -112,14 +112,15 @@ print(job["name"], job["status"])
 | `environment` | No | A `workspace/name` ref to a stored `AgentEnvironment`, or an inline environment. Supplies secrets, environment variables, tool settings, and compute. |
 | `workdir` | No | The [working directory](#working-directories) the agent starts from. |
 | `timeout_seconds` | No | Maximum time to wait for a result. Defaults to 3600 (one hour). |
+| `auto_telemetry` | No | Automatically configures supported ATIF telemetry to export to Intake. Defaults to `true`. |
 | `extension` | No | A trusted [execute extension](#execute-extensions) contributed by an installed plugin. |
 
 The CLI generates one flag per spec field (`--agent`, `--input`,
-`--environment`, `--workdir.base-workdir`, `--timeout-seconds`). Fields that do
-not reduce to a single flag — an inline agent, an inline environment,
-`workdir.artifact_mounts` — are supplied with `--spec` (a JSON string) or
-`--spec-file` (a YAML or JSON file). Individual flags override values from the
-supplied spec.
+`--environment`, `--workdir.base-workdir`, `--timeout-seconds`,
+`--auto-telemetry`). Fields that do not reduce to a single flag — an inline
+agent, an inline environment, `workdir.artifact_mounts` — are supplied with
+`--spec` (a JSON string) or `--spec-file` (a YAML or JSON file). Individual
+flags override values from the supplied spec.
 
 ## Track a Job and Fetch Its Results
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from nemo_platform_ext.cli.commands.api.jobs import tail_platform_job
+from nemo_platform_ext.cli.commands.jobs import tail_platform_job
 
 
 class _PlatformClient:
@@ -31,8 +31,8 @@ def test_jobs_tail_command_fetches_tail_page() -> None:
     jobs_client.list_job_logs.return_value = response
 
     with (
-        patch("nemo_platform_ext.cli.commands.api.jobs.client_from_platform", return_value=jobs_client),
-        patch("nemo_platform_ext.cli.commands.api.jobs.render_job_logs") as render_logs,
+        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        patch("nemo_platform_ext.cli.commands.jobs.render_job_logs") as render_logs,
     ):
         tail_platform_job(
             _ctx(client),
@@ -60,8 +60,8 @@ def test_jobs_tail_command_uses_explicit_workspace() -> None:
     jobs_client.list_job_logs.return_value = response
 
     with (
-        patch("nemo_platform_ext.cli.commands.api.jobs.client_from_platform", return_value=jobs_client),
-        patch("nemo_platform_ext.cli.commands.api.jobs.render_job_logs"),
+        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        patch("nemo_platform_ext.cli.commands.jobs.render_job_logs"),
     ):
         tail_platform_job(
             _ctx(client),

@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# BatchSandbox template for local minikube. Same ConfigMap name as
+# k8s/helm/examples/opensandbox/batchsandbox-template.yaml.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opensandbox-batchsandbox-template
+  namespace: opensandbox-system
+  labels:
+    app.kubernetes.io/part-of: opensandbox
+    opensandbox.nvidia.com/isolation-class: shared-kernel
+data:
+  batchsandbox-template.yaml: |
+    metadata:
+      labels:
+        opensandbox.nvidia.com/isolation-class: shared-kernel
+        opensandbox.nvidia.com/runtime: shared-kernel
+    spec:
+      replicas: 1
+      template:
+        spec:
+          restartPolicy: Never
+          terminationGracePeriodSeconds: 30
+          # Sandbox pods are built from this template by the OpenSandbox server,
+          # not by the jobs controller, so neither jobs executor_defaults
+          # image_pull_secrets nor the chart's top-level imagePullSecrets apply.
+          imagePullSecrets:
+            - name: nvcrimagepullsecret
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists

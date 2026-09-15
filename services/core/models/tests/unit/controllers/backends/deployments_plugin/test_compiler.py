@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 from nemo_deployments_plugin.entities import SecretRef
-from nemo_platform.types.inference.k8s_nim_operator_config import K8sNIMOperatorConfig
 from nemo_platform_plugin.auth import AuthContext
+from nemo_platform_plugin.models.types import K8sNIMOperatorConfig
 from nmp.common.config import Runtime
 from nmp.core.models.app import ModelWeightsType
 from nmp.core.models.controllers.backends.common import DeploymentConfigView

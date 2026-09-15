@@ -15,7 +15,6 @@ from zoneinfo import ZoneInfo
 from nemo_insights_plugin.analyst.analyst_backend import make_analyst_backend
 from nemo_insights_plugin.config import InsightsConfig
 from nemo_insights_plugin.entities import AnalysisConfig, AnalysisRunStatus
-from nemo_insights_plugin.jobs.analyze import AnalyzeSpec
 from nemo_insights_plugin.schedule import is_due
 from nemo_insights_plugin.sdk_resources.analysis_jobs import (
     AnalysisJob,
@@ -23,6 +22,7 @@ from nemo_insights_plugin.sdk_resources.analysis_jobs import (
     CreateAnalysisJobRequest,
     ListAnalysisJobsQueryParams,
 )
+from nemo_insights_plugin.types import AnalyzeSpec
 from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.config import get_nemo_config

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import data_designer.config as dd
 from data_designer.logging import _make_json_formatter
-from data_designer_nemo.context import create_data_designer_context
+from data_designer_nemo.context import create_execution_context
 from data_designer_nemo.fileset_file_seed_reader import workspace_cvar
 from nemo_data_designer_plugin._data_designer import create_data_designer
 from nemo_data_designer_plugin.jobs.result_manager import DataDesignerResultManager
@@ -60,7 +60,7 @@ def _run_step_config(
     workspace = ctx.workspace
     workspace_cvar.set(workspace)
 
-    dd_ctx = create_data_designer_context(sdk, workspace)
+    dd_ctx = create_execution_context(sdk, workspace)
 
     config_builder = dd.DataDesignerConfigBuilder.from_config(step_config.job_config.config.to_dict())
 

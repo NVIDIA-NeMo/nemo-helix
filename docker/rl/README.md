@@ -241,13 +241,12 @@ User environments therefore *do* add startup time, and cannot be prebaked. Two t
   installs: Gym's per-server venv build reads `wheels/` through `UV_FIND_LINKS` (a
   candidate pool — **an index is still enabled**, so a missing distribution is fetched
   from it), and only NeMo-RL's later `install_environment_wheels` uses `--no-index`.
-  **`wheels-v1` is the only format that can run under deny-default network policy**, and
-  only when `wheels/` also covers the venv build: the server's own closure plus
-  `nemo-gym` at the image version and Gym's pinned `ray[default]` / `openai`.
-  `native-v1` vendors nothing and always needs egress. `adapter-wheels-v1` also always
-  needs egress despite vendoring wheels — its `verifiers_agent` harness builds its own
-  venv from a `requirements.txt` that installs `verifiers` from GitHub, which no
-  environment wheelhouse can satisfy.
+  Both **`wheels-v1` and `adapter-wheels-v1` run under deny-default network policy**
+  when `wheels/` covers the venv build. For `adapter-wheels-v1`, the converter resolves
+  the environment and image-bundled agent harness together, builds source distributions
+  into wheels, and fails rather than emitting an incomplete closure. The image harness
+  pins `verifiers` by version so uv can select that vendored wheel instead of following
+  a Git URL. `native-v1` vendors nothing and always needs egress.
 - Platform bootstrap for all three formats lives in
   `nmp.rl.tasks.environment.bootstrap.bootstrap_environment_package` (validators +
   offline wheel install). The Gym host / RL image entrypoint should call that —

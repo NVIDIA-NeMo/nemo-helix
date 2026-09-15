@@ -60,7 +60,7 @@ from nemo_guardrails_plugin.benchmarks.processes import (
     wait_http,
 )
 from nemo_guardrails_plugin.benchmarks.seeding import SeededResources, seed_benchmark
-from nemo_platform import APIStatusError, NeMoPlatform
+from nemo_platform import APIConnectionError, APIStatusError, NeMoPlatform
 
 log = logging.getLogger("nemo_guardrails_plugin.benchmarks")
 
@@ -189,7 +189,7 @@ def _build_aiperf_shim_process(paths: RunPaths) -> SupervisedProcess:
     )
 
 
-def _smoke_test(client: NeMoPlatform, seeded: SeededResources) -> None:
+def _smoke_test(sdk: NeMoPlatform, seeded: SeededResources) -> None:
     """Verify the VirtualModel is reachable and returns a chat completion,
     before running the AIPerf sweep.
     """
@@ -203,7 +203,7 @@ def _smoke_test(client: NeMoPlatform, seeded: SeededResources) -> None:
 
     for attempt in range(60):
         try:
-            body = client.inference.gateway.openai.post(
+            body = sdk.inference.gateway.openai.post(
                 "v1/chat/completions",
                 workspace=WORKSPACE,
                 body=payload,
@@ -213,6 +213,9 @@ def _smoke_test(client: NeMoPlatform, seeded: SeededResources) -> None:
             last_error = f"response missing choices: {body}"
         except APIStatusError as exc:
             last_error = f"HTTP {exc.status_code}: {str(exc)[:500]}"
+            log.info("Smoke test attempt %d: %s; retrying", attempt + 1, last_error)
+        except APIConnectionError as exc:
+            last_error = f"transport error: {str(exc)[:500]}"
             log.info("Smoke test attempt %d: %s; retrying", attempt + 1, last_error)
         time.sleep(1.0)
 
@@ -441,15 +444,15 @@ def main(argv: list[str] | None = None) -> int:
 
         log.info(f"All services are ready. Seeding benchmark resources in workspace {WORKSPACE}...")
 
-        client = NeMoPlatform(base_url=NMP_BASE_URL)
+        sdk = NeMoPlatform(base_url=NMP_BASE_URL)
         seeded = seed_benchmark(
-            client,
+            sdk,
             nemoguardrails_repo_root=paths.nemoguardrails_repo_root,
             generated_dir=paths.generated_dir,
         )
 
         log.info("Waiting for VirtualModel %s to be ready...", seeded.vm_ref)
-        _smoke_test(client, seeded)
+        _smoke_test(sdk, seeded)
 
         # Variants run sequentially against the same NMP; only the targeted
         # VirtualModel differs, so the delta isolates middleware overhead.

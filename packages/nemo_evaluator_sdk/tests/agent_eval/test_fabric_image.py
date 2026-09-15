@@ -24,7 +24,7 @@ class _DockerRecorder:
         self.calls: list[list[str]] = []
         self._image_present = image_present
 
-        self.build_context: dict[str, bool] = {}
+        self.build_context: dict[str, str] = {}
 
     def __call__(self, argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         self.calls.append(argv)
@@ -32,27 +32,13 @@ class _DockerRecorder:
             code = 0 if self._image_present else 1
         else:  # docker build <ctx> — snapshot the staged context before it is torn down.
             ctx = Path(argv[-1])
-            self.build_context = {
-                "Dockerfile": (ctx / "Dockerfile").is_file(),
-                "nemo-fabric": (ctx / "nemo-fabric").is_dir(),
-            }
+            self.build_context = {path.name: path.read_text(encoding="utf-8") for path in ctx.iterdir()}
             code = 0
         return subprocess.CompletedProcess(argv, code, b"", b"")
 
     @property
     def build_calls(self) -> list[list[str]]:
         return [c for c in self.calls if c[1] == "build"]
-
-
-def _fabric_repo(tmp_path: Path) -> Path:
-    """A stub checkout with every build input _stage_source requires."""
-    repo = tmp_path / "NeMo-Fabric"
-    (repo / "crates").mkdir(parents=True)
-    (repo / "python").mkdir(parents=True)
-    (repo / "pyproject.toml").write_text("[project]\nname='nemo-fabric'\n", encoding="utf-8")
-    for name in ("Cargo.toml", "Cargo.lock", "README.md"):
-        (repo / name).write_text("x", encoding="utf-8")
-    return repo
 
 
 def test_tag_is_content_addressed_and_harness_agnostic() -> None:
@@ -62,31 +48,48 @@ def test_tag_is_content_addressed_and_harness_agnostic() -> None:
     assert fabric_image_tag() == tag  # deterministic
 
 
-def test_ensure_skips_build_when_image_present(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_ensure_skips_build_when_image_present(monkeypatch: pytest.MonkeyPatch) -> None:
     recorder = _DockerRecorder(image_present=True)
     monkeypatch.setattr(image_mod.subprocess, "run", recorder)
-    tag = ensure_fabric_image(fabric_repo=_fabric_repo(tmp_path))
+    tag = ensure_fabric_image()
     assert tag == fabric_image_tag()
     assert recorder.build_calls == []  # inspected, found, no build
 
 
-def test_ensure_builds_when_image_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_ensure_builds_when_image_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     recorder = _DockerRecorder(image_present=False)
     monkeypatch.setattr(image_mod.subprocess, "run", recorder)
-    tag = ensure_fabric_image(fabric_repo=_fabric_repo(tmp_path))
+    tag = ensure_fabric_image()
     (build,) = recorder.build_calls
-    assert build[:2] == ["docker", "build"]
-    assert ["--build-arg", "EXTRAS=hermes,relay"] == build[2:4]  # baked harness runtime deps
-    assert build[4:6] == ["-t", tag]
-    # The staged context had the Dockerfile + the copied fabric source.
-    assert recorder.build_context == {"Dockerfile": True, "nemo-fabric": True}
+    assert build[:4] == ["docker", "build", "-t", tag]
+    assert sorted(recorder.build_context) == ["Dockerfile", "requirements.txt"]
 
 
-def test_ensure_errors_when_fabric_source_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_image_pins_every_requirement_to_the_installed_fabric(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The sandbox installs the same Fabric the host composes its config against.
+
+    A sandbox on a different Fabric reads a config the host wrote to another schema, and Fabric drops
+    telemetry keys it does not recognize rather than rejecting them — so the drift shows up as a trial
+    with no trajectory rather than as an error.
+    """
     recorder = _DockerRecorder(image_present=False)
     monkeypatch.setattr(image_mod.subprocess, "run", recorder)
-    with pytest.raises(FabricImageError, match="NeMo-Fabric source not found"):
-        ensure_fabric_image(fabric_repo=tmp_path / "does-not-exist")
+    ensure_fabric_image()
+
+    version = image_mod.fabric_version()
+    requirements = recorder.build_context["requirements.txt"].split()
+    fabric_pins = [line for line in requirements if line.startswith("nemo-fabric")]
+    assert any(line.startswith("nemo-fabric[") for line in fabric_pins), requirements
+    assert all(line.endswith(f"=={version}") for line in fabric_pins), fabric_pins
+    # Everything else is pinned too, just not to Fabric's version — an unpinned harness would make
+    # the content-addressed tag name an image whose contents move underneath it.
+    assert all("==" in line or "~=" in line for line in requirements), requirements
+
+
+def test_tag_changes_with_the_fabric_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Fabric bump must not reuse the cached image built against the previous one."""
+    monkeypatch.setattr(image_mod, "fabric_version", lambda: "9.9.9")
+    assert fabric_image_tag() != fabric_image_tag(version="0.0.1")
 
 
 def test_image_exists_raises_when_daemon_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:

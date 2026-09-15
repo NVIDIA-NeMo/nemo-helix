@@ -30,7 +30,17 @@ from typing import Any, cast
 from nemo_experimentalist_plugin.entities import ResourceRef, Task, TrialResult
 from nemo_experimentalist_plugin.experimentalist.components.trace_analyzer import Diagnostic, TraceAnalyzer
 from nemo_experimentalist_plugin.experimentalist.components.trace_explorer import TraceExplorer
-from nemo_platform import APIConnectionError, APIStatusError, AsyncNeMoPlatform
+from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError
+from nemo_platform_plugin.intake.client import AsyncIntakeClient
+from nemo_platform_plugin.intake.types import (
+    ListSpanGroupsQueryParams,
+    ListSpansQueryParams,
+    ListTracesQueryParams,
+    SpanFilterParam,
+    TraceFilterParam,
+    TraceMode,
+)
 
 DEFAULT_ROW_LIMIT = 100
 MAX_ROW_LIMIT = 1000
@@ -48,7 +58,7 @@ class TraceQueryError(RuntimeError):
 
 def _explain(exc: Exception, *, doing: str, workspace: str) -> TraceQueryError:
     """Turn an SDK failure into an error that names a corrective action."""
-    if isinstance(exc, APIStatusError):
+    if isinstance(exc, NemoHTTPError):
         if exc.status_code in (401, 403):
             hint = (
                 "Credentials were rejected. Run `nemo auth login`, then confirm that NMP_BASE_URL "
@@ -64,7 +74,7 @@ def _explain(exc: Exception, *, doing: str, workspace: str) -> TraceQueryError:
         else:
             hint = f"Intake returned HTTP {exc.status_code}: {exc}"
         return TraceQueryError(f"{doing} failed. {hint}")
-    if isinstance(exc, APIConnectionError):
+    if isinstance(exc, NemoTransportError):
         return TraceQueryError(
             f"{doing} failed: the platform is unreachable. Check NMP_BASE_URL and that the services run."
         )
@@ -107,7 +117,7 @@ def _with_trace_ref(row: dict[str, Any]) -> dict[str, Any]:
 
 
 async def query_spans(
-    client: AsyncNeMoPlatform,
+    client: AsyncNemoClient,
     *,
     workspace: str,
     filter: dict[str, Any] | None = None,
@@ -170,17 +180,29 @@ async def query_spans(
         TraceQueryError: The Intake read failed.
     """
     limit = max(1, min(limit, MAX_ROW_LIMIT))
-    kwargs: dict[str, Any] = {"workspace": workspace, "page_size": _page_size(limit)}
-    if filter is not None:
-        kwargs["filter"] = cast(Any, filter)
-    kwargs["sort"] = sort or "-started_at"
+    intake = AsyncIntakeClient.from_client(client)
     try:
         if group_by is not None:
-            rows, truncated = await _drain(client.intake.spans.groups.list(by=group_by, **kwargs), limit=limit)
+            group_params: ListSpanGroupsQueryParams = {
+                "by": group_by,
+                "page_size": _page_size(limit),
+                "sort": sort or "-started_at",
+            }
+            if filter is not None:
+                group_params["filter"] = cast(SpanFilterParam, filter)
+            response = await intake.list_span_groups(workspace=workspace, query_params=group_params)
+            rows, truncated = await _drain(response.items(), limit=limit)
             groups = [_with_trace_ref(row) for row in rows]
             return {"groups": groups, "grouped_by": group_by, "count": len(groups), "truncated": truncated}
-        kwargs["mode"] = mode
-        rows, truncated = await _drain(client.intake.spans.list(**kwargs), limit=limit)
+        span_params: ListSpansQueryParams = {
+            "page_size": _page_size(limit),
+            "sort": sort or "-started_at",
+            "mode": cast(TraceMode, mode),
+        }
+        if filter is not None:
+            span_params["filter"] = cast(SpanFilterParam, filter)
+        response = await intake.list_spans(workspace=workspace, query_params=span_params)
+        rows, truncated = await _drain(response.items(), limit=limit)
         spans = [_with_trace_ref(row) for row in rows]
         return {"spans": spans, "count": len(spans), "truncated": truncated}
     except Exception as exc:
@@ -188,7 +210,7 @@ async def query_spans(
 
 
 async def query_traces(
-    client: AsyncNeMoPlatform,
+    client: AsyncNemoClient,
     *,
     workspace: str,
     filter: dict[str, Any] | None = None,
@@ -230,23 +252,25 @@ async def query_traces(
         TraceQueryError: The Intake read failed.
     """
     limit = max(1, min(limit, MAX_ROW_LIMIT))
-    kwargs: dict[str, Any] = {
-        "workspace": workspace,
-        "mode": mode,
+    query_params: ListTracesQueryParams = {
+        "mode": cast(TraceMode, mode),
         "sort": sort or "-started_at",
         "page_size": _page_size(limit),
     }
     if filter is not None:
-        kwargs["filter"] = cast(Any, filter)
+        query_params["filter"] = cast(TraceFilterParam, filter)
     try:
-        rows, truncated = await _drain(client.intake.traces.list(**kwargs), limit=limit)
+        response = await AsyncIntakeClient.from_client(client).list_traces(
+            workspace=workspace, query_params=query_params
+        )
+        rows, truncated = await _drain(response.items(), limit=limit)
     except Exception as exc:
         raise _explain(exc, doing="Querying traces", workspace=workspace) from exc
     return {"traces": rows, "count": len(rows), "truncated": truncated}
 
 
 async def find_agent_traces(
-    client: AsyncNeMoPlatform,
+    client: AsyncNemoClient,
     *,
     agent: str,
     workspace: str,
@@ -346,7 +370,7 @@ def _trace_entry(trace_id: str, summary: dict[str, Any] | None) -> dict[str, Any
     }
 
 
-async def read_trace(client: AsyncNeMoPlatform, ref: str, *, workspace: str) -> TraceExplorer:
+async def read_trace(client: AsyncNemoClient, ref: str, *, workspace: str) -> TraceExplorer:
     """Read one production trace in full.
 
     Args:
@@ -369,7 +393,7 @@ async def read_trace(client: AsyncNeMoPlatform, ref: str, *, workspace: str) -> 
 
 
 async def analyze_trace(
-    client: AsyncNeMoPlatform,
+    client: AsyncNemoClient,
     ref: str,
     *,
     workspace: str,

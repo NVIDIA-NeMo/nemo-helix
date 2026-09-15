@@ -48,14 +48,14 @@ const httpError = (status: number): Error =>
 
 const filesetMissing = () => vi.mocked(filesRetrieveFileset).mockRejectedValue(httpError(404));
 const filesetExists = () =>
-  vi.mocked(filesRetrieveFileset).mockResolvedValue({ name: 'calc-spec' } as never);
+  vi.mocked(filesRetrieveFileset).mockResolvedValue({ name: 'calc-ethos' } as never);
 const agentMissing = () => vi.mocked(agentsGetAgent).mockRejectedValue(httpError(404));
 const agentExists = () => vi.mocked(agentsGetAgent).mockResolvedValue({ name: 'calc' } as never);
 
 beforeEach(() => {
   filesetMissing();
   agentMissing();
-  vi.mocked(filesCreateFileset).mockResolvedValue({ name: 'calc-spec' } as never);
+  vi.mocked(filesCreateFileset).mockResolvedValue({ name: 'calc-ethos' } as never);
   vi.mocked(filesUploadFile).mockResolvedValue({ path: 'agent.yaml' } as never);
   vi.mocked(filesDeleteFileset).mockResolvedValue(undefined as never);
   vi.mocked(agentsCreateAgent).mockResolvedValue({ name: 'calc' } as never);
@@ -112,10 +112,10 @@ describe('createAgentFromUpload', () => {
 
     await createAgentFromUpload({ ...params(), replaceOrphanedFileset: true });
 
-    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'calc-spec');
+    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'calc-ethos');
     expect(filesCreateFileset).toHaveBeenCalledWith(
       'ws',
-      expect.objectContaining({ name: 'calc-spec' })
+      expect.objectContaining({ name: 'calc-ethos' })
     );
     expect(agentsCreateAgent).toHaveBeenCalled();
   });
@@ -136,14 +136,14 @@ describe('createAgentFromUpload', () => {
       .mockRejectedValueOnce(new Error('network down'));
 
     await expect(createAgentFromUpload(params())).rejects.toThrow('network down');
-    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'calc-spec');
+    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'calc-ethos');
   });
 
   it('deletes the fileset when creating the agent fails', async () => {
     vi.mocked(agentsCreateAgent).mockRejectedValue(new Error('409 conflict'));
 
     await expect(createAgentFromUpload(params())).rejects.toThrow('409 conflict');
-    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'calc-spec');
+    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'calc-ethos');
   });
 
   it('does not delete a fileset it failed to create', async () => {

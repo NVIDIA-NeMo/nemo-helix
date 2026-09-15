@@ -3,7 +3,7 @@
 
 """Adapter to create a :class:`NemoClient` from an existing :class:`NeMoPlatform`.
 
-This bridges the legacy ``NeMoPlatform`` SDK with the new typed client,
+This bridges the generated ``NeMoPlatform`` SDK with the new typed client,
 allowing plugins registered via ``NemoPluginSDKResources`` to use the
 new endpoint/client infrastructure internally.
 
@@ -28,6 +28,17 @@ SyncT = TypeVar("SyncT", bound=NemoClient)
 AsyncT = TypeVar("AsyncT", bound=AsyncNemoClient)
 
 
+def _platform_default_headers(platform: NeMoPlatform | AsyncNeMoPlatform) -> dict[str, str] | None:
+    # Prefer _custom_headers (set via with_options/set_default_headers),
+    # fall back to the httpx client's actual headers (set at construction,
+    # e.g. TestClient(headers={...})), filtering out httpx defaults.
+    headers = {key: value for key, value in platform._custom_headers.items() if isinstance(value, str)}
+    if not headers:
+        skip = {"accept", "accept-encoding", "connection", "user-agent", "host"}
+        headers = {key: value for key, value in platform._client.headers.items() if key.lower() not in skip}
+    return headers or None
+
+
 @overload
 def client_from_platform(platform: NeMoPlatform, client_cls: type[SyncT]) -> SyncT: ...
 @overload
@@ -40,16 +51,9 @@ def client_from_platform(
 ) -> NemoClient | AsyncNemoClient:
     """Create a typed client sharing a generated platform SDK's transport.
 
-    The overloads ensure callers get the correct concrete return type.
+    The overloads preserve the sync/async pairing between platform and client.
     """
-    # Prefer _custom_headers (set via with_options/set_default_headers),
-    # fall back to the httpx client's actual headers (set at construction,
-    # e.g. TestClient(headers={...})), filtering out httpx defaults.
-    headers = platform._custom_headers
-    if not headers:
-        _skip = {"accept", "accept-encoding", "connection", "user-agent", "host"}
-        headers = {k: v for k, v in platform._client.headers.items() if k.lower() not in _skip}
-
+    headers = _platform_default_headers(platform)
     retry = RetryPolicy(
         max_retries=platform.max_retries,
         retryable_status_codes=(408, 409, 429),
@@ -63,7 +67,7 @@ def client_from_platform(
     # httpx client keeps whatever timeout it was built with, so a caller's
     # ``platform.with_options(timeout=...)`` would otherwise be silently dropped
     # on the way to the typed client — the httpx client it hands over is the
-    # *same* object, with the *original* timeout still on it.
+    # *same* transport instance, with the *original* timeout still on it.
     timeout = platform.timeout
     if timeout is None:
         # ``None`` on the platform means "no timeout at all", but the typed
@@ -77,10 +81,11 @@ def client_from_platform(
         return client_cls(
             base_url=str(platform.base_url).rstrip("/"),
             workspace=platform.workspace,
-            default_headers=headers or None,
+            default_headers=headers,
             timeout=timeout,
             retry=retry,
             http_client=platform._client,
+            owns_http_client=False,
             url_resolver=url_resolver,
         )
 
@@ -89,9 +94,10 @@ def client_from_platform(
     return client_cls(
         base_url=str(platform.base_url).rstrip("/"),
         workspace=platform.workspace,
-        default_headers=headers or None,
+        default_headers=headers,
         timeout=timeout,
         retry=retry,
         http_client=platform._client,
+        owns_http_client=False,
         url_resolver=url_resolver,
     )

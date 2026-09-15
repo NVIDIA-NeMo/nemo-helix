@@ -27,20 +27,24 @@ export const getSortParam = (sortingState: DataView.TanstackTable.SortingState) 
 /**
  * Maps DataView sorting state to a sort query value when the API only allows specific fields.
  * Table columns often use client-only ids (e.g. model_name); URL bookmarking can also reference invalid ids.
+ *
+ * Pass a generated sort-field enum as `allowedFieldIds` to get that enum back rather than a bare
+ * `string`, so the result drops straight into the SDK params. Descending sort prefixes an allowed
+ * field with `-`; the enum is expected to carry both directions, as the generated ones do.
  */
-export const getSortParamWithWhitelist = (
+export const getSortParamWithWhitelist = <S extends string = string>(
   sortingState: DataView.TanstackTable.SortingState,
-  allowedFieldIds: readonly string[],
-  fallbackWhenEmptyOrInvalid: string
-): string => {
+  allowedFieldIds: readonly S[],
+  fallbackWhenEmptyOrInvalid: S
+): S => {
   if (sortingState.length === 0) {
     return fallbackWhenEmptyOrInvalid;
   }
   const { id, desc } = sortingState[0];
   const idStr = String(id);
-  if (!allowedFieldIds.includes(idStr)) {
+  if (!allowedFieldIds.includes(idStr as S)) {
     return fallbackWhenEmptyOrInvalid;
   }
   const prefix = desc ? '-' : '';
-  return `${prefix}${idStr}`;
+  return `${prefix}${idStr}` as S;
 };

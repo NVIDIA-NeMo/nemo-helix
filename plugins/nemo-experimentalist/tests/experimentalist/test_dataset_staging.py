@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -14,7 +14,7 @@ from nemo_experimentalist_plugin.experimentalist.components.dataset_staging impo
     stage_task_template,
 )
 from nemo_experimentalist_plugin.experimentalist.components.evaluator.harbor import HarborDataset
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.client import AsyncNemoClient
 
 
 def _write_tree(root: Path, content: str) -> None:
@@ -26,6 +26,42 @@ def _write_tree(root: Path, content: str) -> None:
 class _MemoryDataset(Dataset):
     def add_tasks(self, tasks: list[Task]) -> None:
         self.tasks.extend(tasks)
+
+
+@dataclass(frozen=True)
+class _FilesetItem:
+    path: str
+
+
+@dataclass(frozen=True)
+class _FilesetListing:
+    data: list[_FilesetItem]
+
+
+class _FilesetResponse:
+    def __init__(self, listing: _FilesetListing) -> None:
+        self._listing = listing
+
+    def data(self) -> _FilesetListing:
+        return self._listing
+
+
+class _FilesetDownload:
+    async def read(self) -> bytes:
+        return b"fileset content"
+
+
+class _RecordingFilesClient:
+    def __init__(self, paths: list[str]) -> None:
+        self._paths = paths
+        self.downloaded_paths: list[str] = []
+
+    async def list_files(self, *, workspace: str, name: str, query_params: object) -> _FilesetResponse:
+        return _FilesetResponse(_FilesetListing([_FilesetItem(path) for path in self._paths]))
+
+    async def download_file(self, *, workspace: str, name: str, path: str) -> _FilesetDownload:
+        self.downloaded_paths.append(path)
+        return _FilesetDownload()
 
 
 def test_distribute_insight_suite_tasks_uses_a_30_70_validation_train_split() -> None:
@@ -113,7 +149,7 @@ async def test_stage_eval_author_inputs_isolates_all_mutable_sources(tmp_path: P
         train_dataset=DatasetRef(uri=str(train), metadata={"id": "train"}),
         validation_dataset=DatasetRef(uri=str(validation), metadata={"id": "validation"}),
         task_template=DatasetRef(uri=template.as_uri(), metadata={"id": "template"}),
-        client=cast(AsyncNeMoPlatform, object()),
+        client=cast(AsyncNemoClient, object()),
         workspace="default",
     )
 
@@ -151,7 +187,7 @@ async def test_stage_eval_author_inputs_keeps_train_and_validation_isolated_when
         train_dataset=shared_ref,
         validation_dataset=shared_ref,
         task_template=DatasetRef(uri=str(template)),
-        client=cast(AsyncNeMoPlatform, object()),
+        client=cast(AsyncNemoClient, object()),
         workspace="default",
     )
     staged_train_test = Path(staged.train_dataset.uri) / "task-1" / "tests" / "test.sh"
@@ -174,7 +210,7 @@ async def test_stage_eval_author_inputs_reuses_dataset_destinations_but_refreshe
         train_dataset=DatasetRef(uri=str(source)),
         validation_dataset=DatasetRef(uri=str(source)),
         task_template=DatasetRef(uri=str(template)),
-        client=cast(AsyncNeMoPlatform, object()),
+        client=cast(AsyncNemoClient, object()),
         workspace="default",
     )
     (Path(staged.train_dataset.uri) / "task-1" / "tests" / "test.sh").write_text("curated", encoding="utf-8")
@@ -185,7 +221,7 @@ async def test_stage_eval_author_inputs_reuses_dataset_destinations_but_refreshe
         train_dataset=DatasetRef(uri=str(source)),
         validation_dataset=DatasetRef(uri=str(source)),
         task_template=DatasetRef(uri=str(template)),
-        client=cast(AsyncNeMoPlatform, object()),
+        client=cast(AsyncNemoClient, object()),
         workspace="default",
     )
 
@@ -196,17 +232,42 @@ async def test_stage_eval_author_inputs_reuses_dataset_destinations_but_refreshe
 
 
 @pytest.mark.asyncio
-async def test_stage_task_template_hydrates_and_refreshes_fileset_reference(tmp_path: Path) -> None:
-    calls: list[dict[str, str]] = []
+async def test_stage_task_template_hydrates_and_refreshes_fileset_reference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, object]] = []
     content = "first fileset template"
 
-    class FakeFiles:
-        async def download(self, *, remote_path: str, local_path: str, workspace: str) -> None:
-            assert Path(local_path).parent.is_dir()
-            calls.append({"remote_path": remote_path, "local_path": local_path, "workspace": workspace})
-            _write_tree(Path(local_path), content)
+    class _Response:
+        def __init__(self, body: object) -> None:
+            self._body = body
 
-    client = cast(AsyncNeMoPlatform, SimpleNamespace(files=FakeFiles()))
+        def data(self) -> object:
+            return self._body
+
+    class _Download:
+        async def read(self) -> bytes:
+            return content.encode()
+
+    class _File:
+        path = "task-1/tests/test.sh"
+
+    class _Files:
+        data = [_File()]
+
+    class FakeFiles:
+        async def list_files(self, *, workspace: str, name: str, query_params: object) -> _Response:
+            calls.append({"op": "list", "workspace": workspace, "name": name, "query_params": query_params})
+            return _Response(_Files())
+
+        async def download_file(self, *, workspace: str, name: str, path: str) -> _Download:
+            calls.append({"op": "download", "workspace": workspace, "name": name, "path": path})
+            return _Download()
+
+    from nemo_experimentalist_plugin.experimentalist.components import dataset_staging
+
+    monkeypatch.setattr(dataset_staging.AsyncFilesClient, "from_client", lambda _client: FakeFiles())
+    client = cast(AsyncNemoClient, object())
     ref = DatasetRef(uri="fileset://workspace-a/task-template", metadata={"id": "template-fileset"})
 
     first = await stage_task_template(tmp_path / "experiment", ref, client=client, workspace="workspace-a")
@@ -219,14 +280,119 @@ async def test_stage_task_template_hydrates_and_refreshes_fileset_reference(tmp_
     assert second.metadata == {"id": "template-fileset"}
     assert (expected_path / "task-1" / "tests" / "test.sh").read_text(encoding="utf-8") == content
     assert calls == [
-        {
-            "remote_path": ref.uri,
-            "local_path": str(expected_path),
-            "workspace": "workspace-a",
-        },
-        {
-            "remote_path": ref.uri,
-            "local_path": str(expected_path),
-            "workspace": "workspace-a",
-        },
+        {"op": "list", "workspace": "workspace-a", "name": "task-template", "query_params": None},
+        {"op": "download", "workspace": "workspace-a", "name": "task-template", "path": "task-1/tests/test.sh"},
+        {"op": "list", "workspace": "workspace-a", "name": "task-template", "query_params": None},
+        {"op": "download", "workspace": "workspace-a", "name": "task-template", "path": "task-1/tests/test.sh"},
     ]
+
+
+async def test_stage_task_template_honors_fileset_fragment_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class _Response:
+        def __init__(self, body: object) -> None:
+            self._body = body
+
+        def data(self) -> object:
+            return self._body
+
+    class _Download:
+        async def read(self) -> bytes:
+            return b"fragment-scoped template"
+
+    class _File:
+        path = "task-root/tests/test.sh"
+
+    class _Files:
+        data = [_File()]
+
+    class FakeFiles:
+        async def list_files(self, *, workspace: str, name: str, query_params: object) -> _Response:
+            calls.append({"op": "list", "workspace": workspace, "name": name, "query_params": query_params})
+            return _Response(_Files())
+
+        async def download_file(self, *, workspace: str, name: str, path: str) -> _Download:
+            calls.append({"op": "download", "workspace": workspace, "name": name, "path": path})
+            return _Download()
+
+    from nemo_experimentalist_plugin.experimentalist.components import dataset_staging
+
+    monkeypatch.setattr(dataset_staging.AsyncFilesClient, "from_client", lambda _client: FakeFiles())
+    client = AsyncNemoClient(base_url="http://test")
+    ref = DatasetRef(uri="fileset://workspace-a/task-template#task-root", metadata={"id": "template-fileset"})
+
+    try:
+        staged = await stage_task_template(tmp_path / "experiment", ref, client=client, workspace="workspace-a")
+    finally:
+        await client.close()
+
+    expected_path = tmp_path / "experiment" / "dataset" / "task-template"
+    assert staged.uri == str(expected_path)
+    assert staged.metadata == {"id": "template-fileset"}
+    assert (expected_path / "tests" / "test.sh").read_text(encoding="utf-8") == "fragment-scoped template"
+    assert calls == [
+        {"op": "list", "workspace": "workspace-a", "name": "task-template", "query_params": {"path": "task-root"}},
+        {"op": "download", "workspace": "workspace-a", "name": "task-template", "path": "task-root/tests/test.sh"},
+    ]
+
+
+async def test_stage_task_template_rejects_fileset_path_traversal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nemo_experimentalist_plugin.experimentalist.components import dataset_staging
+
+    files_client = _RecordingFilesClient(["../escape.txt"])
+    monkeypatch.setattr(dataset_staging.AsyncFilesClient, "from_client", lambda _client: files_client)
+    client = AsyncNemoClient(base_url="http://test")
+    ref = DatasetRef(uri="fileset://workspace-a/task-template", metadata={"id": "template-fileset"})
+
+    try:
+        with pytest.raises(ValueError, match="escapes staging destination"):
+            await stage_task_template(tmp_path / "experiment", ref, client=client, workspace="workspace-a")
+    finally:
+        await client.close()
+
+    assert files_client.downloaded_paths == []
+    assert not (tmp_path / "experiment" / "dataset" / "escape.txt").exists()
+
+
+async def test_stage_task_template_rejects_prefixed_fileset_path_traversal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nemo_experimentalist_plugin.experimentalist.components import dataset_staging
+
+    files_client = _RecordingFilesClient(["task-root/../../escape.txt"])
+    monkeypatch.setattr(dataset_staging.AsyncFilesClient, "from_client", lambda _client: files_client)
+    client = AsyncNemoClient(base_url="http://test")
+    ref = DatasetRef(uri="fileset://workspace-a/task-template#task-root", metadata={"id": "template-fileset"})
+
+    try:
+        with pytest.raises(ValueError, match="escapes staging destination"):
+            await stage_task_template(tmp_path / "experiment", ref, client=client, workspace="workspace-a")
+    finally:
+        await client.close()
+
+    assert files_client.downloaded_paths == []
+    assert not (tmp_path / "experiment" / "dataset" / "escape.txt").exists()
+
+
+async def test_stage_task_template_rejects_fileset_paths_outside_fragment_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nemo_experimentalist_plugin.experimentalist.components import dataset_staging
+
+    files_client = _RecordingFilesClient(["other-root/tests/test.sh"])
+    monkeypatch.setattr(dataset_staging.AsyncFilesClient, "from_client", lambda _client: files_client)
+    client = AsyncNemoClient(base_url="http://test")
+    ref = DatasetRef(uri="fileset://workspace-a/task-template#task-root", metadata={"id": "template-fileset"})
+
+    try:
+        with pytest.raises(ValueError, match="outside requested prefix"):
+            await stage_task_template(tmp_path / "experiment", ref, client=client, workspace="workspace-a")
+    finally:
+        await client.close()
+
+    assert files_client.downloaded_paths == []

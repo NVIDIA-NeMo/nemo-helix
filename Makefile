@@ -106,8 +106,7 @@ generate-cli-commands: ## Run generation of the CLI commands
 
 .PHONY: generate-cli-reference-docs
 generate-cli-reference-docs: ## Generate the CLI reference documentation
-	$(UV) run --frozen packages/nemo_platform_ext/scripts/docs_generator.py reference > docs/cli/reference.mdx
-	$(UV) run --frozen packages/nemo_platform_ext/scripts/docs_generator.py summary > docs/fern/snippets/_snippets/cli-summary.mdx
+	NMP_CONFIG_FILE_PATH="$(NMP_CONFIG_FILE_PATH)" $(UV) run --frozen packages/nemo_platform_ext/scripts/docs_generator.py all
 
 .PHONY: generate-config-reference-docs
 generate-config-reference-docs: ## Generate the platform config reference documentation
@@ -417,11 +416,11 @@ PYTEST_CI_OPTS := --cov=src --cov=packages \
 	--cov-report xml:coverage.xml \
 	--durations=25
 
-# Global wall-clock timeout for CI test runs to prevent infinite hangs when
-# a pytest-xdist worker crashes (e.g. SIGABRT from wasmtime) and doesn't exit.
-# timeout sends SIGTERM after PYTEST_CI_TIMEOUT seconds, then SIGKILL after 60s.
+# CI-only wall-clock timeout. Send SIGINT first so pytest can flush junit,
+# coverage, and crash artifacts; if cleanup hangs, SIGKILL follows later.
 PYTEST_CI_TIMEOUT ?= 1800
-PYTEST_CI_CMD = timeout --kill-after=60s $(PYTEST_CI_TIMEOUT)s $(PYTEST_CMD)
+PYTEST_CI_KILL_AFTER ?= 600
+PYTEST_CI_CMD = timeout --signal=INT --kill-after=$(PYTEST_CI_KILL_AFTER)s $(PYTEST_CI_TIMEOUT)s $(PYTEST_CMD)
 
 # Unit/default runs keep ``loadscope`` so tests from the same module/class stay
 # on one worker and reuse normal pytest fixtures efficiently. The integration

@@ -222,6 +222,7 @@ def test_jobs_resource_get_logs_uses_core_jobs_client() -> None:
         page_cursor="cursor-1",
         attempt_id=3,
         step_id="train",
+        tail=20,
         task_id="task-1",
     ).page()
 
@@ -230,7 +231,7 @@ def test_jobs_resource_get_logs_uses_core_jobs_client() -> None:
     assert len(captured) == 1
     assert str(captured[0].url) == (
         "http://nmp.test/apis/jobs/v2/workspaces/team-a/jobs/job-a/logs"
-        "?limit=50&page_cursor=cursor-1&attempt_id=3&step_id=train&task_id=task-1"
+        "?limit=50&page_cursor=cursor-1&attempt_id=3&step_id=train&tail=20&task_id=task-1"
     )
 
 

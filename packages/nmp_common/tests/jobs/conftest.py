@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from nemo_platform import AsyncNeMoPlatform
 from nmp.common.entities import DEFAULT_WORKSPACE
 from nmp.common.entities.utils import get_random_bytes
 from nmp.common.jobs.file_manager import FilesetFileManager
@@ -44,7 +45,7 @@ def mock_nmp_sdk():
 @pytest.fixture
 def mock_async_nmp_sdk():
     """Mock async NeMoPlatform SDK for jobs operations."""
-    m = AsyncMock()
+    m = AsyncMock(spec=AsyncNeMoPlatform)
 
     async def _create(**kwargs):
         return SimpleNamespace(id=f"jobresult-{get_random_bytes()}", **kwargs)
@@ -56,15 +57,16 @@ def mock_async_nmp_sdk():
 @pytest.fixture
 def mock_fileset_fs():
     """Mock FilesetFileSystem for testing."""
-    import fsspec.asyn
-
     fs = MagicMock()
+    fs.info = MagicMock(return_value={"name": "test", "size": 0, "type": "directory"})
+    fs.put_file = MagicMock()
+    fs.get = MagicMock()
+    fs.get_file = MagicMock()
     fs._info = AsyncMock(return_value={"name": "test", "size": 0, "type": "directory"})
     fs._put_file = AsyncMock()
     fs._get = AsyncMock()
     fs._get_file = AsyncMock()
-    # Provide the fsspec global event loop for sync-to-async bridging
-    fs.loop = fsspec.asyn.get_loop()
+    fs._client = MagicMock()
     return fs
 
 

@@ -53,10 +53,9 @@ from nemo_evaluator_sdk.values import (
     Model,
     ModelRef,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
-from nemo_platform_plugin.sdk import NemoPluginSDKResources
+from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform, NemoPluginSDKResources
 
 
 class Evaluator:

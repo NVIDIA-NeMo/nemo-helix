@@ -107,15 +107,16 @@ def build_generation_run_config(
 
 
 def execute_generation(
-    config: GenerationRunConfig, preview: bool = False
+    config: GenerationRunConfig, preview: bool = False, num_records: int = 1
 ) -> GenerationResult | GenerationPreviewResult:
+    """Run or preview generation. ``num_records`` sizes the preview and is ignored for a full run."""
     try:
         from data_designer_retrieval_sdg import preview_generation, run_generation
     except ImportError as exc:
         raise ImportError("Retrieval generate and preview requires nemo-data-designer-plugin[retrieval-sdg].") from exc
 
     if preview:
-        return preview_generation(config)
+        return preview_generation(config, num_records)
     result = run_generation(config)
     write_generation_manifest(
         output_dir=config.output_dir,

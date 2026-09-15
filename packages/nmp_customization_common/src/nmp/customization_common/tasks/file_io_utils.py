@@ -12,13 +12,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
-
-# https://docs.nvidia.com/nemo/microservices/latest/pysdk/index.html#handling-errors
-from nemo_platform import (
-    APIConnectionError,
-    APIStatusError,
-    APITimeoutError,
+from nemo_platform_plugin.client.errors import (
     AuthenticationError,
+    NemoHTTPError,
+    NemoTransportError,
     PermissionDeniedError,
 )
 from nmp.customization_common.schemas.file_io import (
@@ -28,6 +25,7 @@ from nmp.customization_common.schemas.file_io import (
     PathTraversalError,
     ProgressReportError,
 )
+from nmp.customization_common.service.path_utils import remap_job_storage_path
 
 logger = logging.getLogger(__name__)
 
@@ -123,19 +121,15 @@ def sdk_error_handler(
         yield
     except passthrough:
         raise
-    except APITimeoutError as e:
-        raise error_class(
-            f"Failed to {operation} due to request timeout error. Cause: {e.__cause__}. Error: {e}",
-        ) from e
-    except APIConnectionError as e:
-        raise error_class(f"Failed to {operation} due to connection error. Cause: {e.__cause__}. Error: {e}") from e
-    # AuthenticationError / PermissionDeniedError are subclasses of APIStatusError,
-    # so they must be caught before APIStatusError.
+    except NemoTransportError as e:
+        raise error_class(f"Failed to {operation} due to connection error. Cause: {e.error}. Error: {e}") from e
+    # AuthenticationError / PermissionDeniedError are subclasses of NemoHTTPError,
+    # so they must be caught before NemoHTTPError.
     except AuthenticationError as e:
         raise error_class(f"Failed to {operation} due to authentication error. Error: {e}") from e
     except PermissionDeniedError as e:
         raise error_class(f"Failed to {operation} due to permission denied error. Error: {e}") from e
-    except APIStatusError as e:
+    except NemoHTTPError as e:
         raise error_class(f"Failed to {operation} due to API error. Status code: {e.status_code}. Error: {e}") from e
     except Exception as e:
         raise error_class(f"Failed to {operation} due to unexpected error {type(e).__name__}: {e}") from e
@@ -166,7 +160,10 @@ def validate_safe_path(base_path: Path, user_path: str) -> Path:
         PathTraversalError: If the resolved path would escape base_path.
     """
     resolved_base = base_path.resolve()
-    resolved_path = (base_path / user_path).resolve()
+    candidate_path = remap_job_storage_path(base_path, user_path)
+    if not candidate_path.is_absolute():
+        candidate_path = base_path / candidate_path
+    resolved_path = candidate_path.resolve()
 
     if not resolved_path.is_relative_to(resolved_base):
         raise PathTraversalError(

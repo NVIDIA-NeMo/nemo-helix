@@ -15,10 +15,14 @@ from dataclasses import replace
 
 from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_platform_plugin.client.method import method
-from nemo_platform_plugin.client.response import NemoResponse
+from nemo_platform_plugin.client.response import AsyncNemoBinaryResponse, NemoBinaryResponse, NemoResponse
 from nemo_platform_plugin.client.types import PreparedRequest
 from nemo_platform_plugin.evaluator import endpoints
 from nemo_platform_plugin.evaluator.types import CreateMetricRequest, FlatQueryParams, Metric, ProjectQueryParams
+
+_AGGREGATE_SCORES_RESULT_NAME = "aggregate-scores"
+_ROW_SCORES_RESULT_NAME = "row-scores"
+_ARTIFACTS_RESULT_NAME = "artifacts"
 
 
 def _create_metric_request(
@@ -41,19 +45,40 @@ def _create_metric_request(
 
 class _EvaluatorMethods:
     get_health = method(endpoints.get_health)
+    hello = method(endpoints.hello)
 
     list_evaluate_jobs = method(endpoints.list_evaluate_jobs)
     submit_evaluate_job = method(endpoints.submit_evaluate_job)
     get_evaluate_job = method(endpoints.get_evaluate_job)
     get_evaluate_job_status = method(endpoints.get_evaluate_job_status)
-    download_evaluate_job_aggregate_scores = method(endpoints.download_evaluate_job_aggregate_scores)
-    download_evaluate_job_row_scores = method(endpoints.download_evaluate_job_row_scores)
-    download_evaluate_job_artifacts = method(endpoints.download_evaluate_job_artifacts)
+    delete_evaluate_job = method(endpoints.delete_evaluate_job)
+    cancel_evaluate_job = method(endpoints.cancel_evaluate_job)
+    list_evaluate_job_logs = method(endpoints.list_evaluate_job_logs)
+    list_evaluate_job_results = method(endpoints.list_evaluate_job_results)
+    get_evaluate_job_result = method(endpoints.get_evaluate_job_result)
+    download_evaluate_job_result = method(endpoints.download_evaluate_job_result)
 
     list_agent_eval_jobs = method(endpoints.list_agent_eval_jobs)
     submit_agent_eval_job = method(endpoints.submit_agent_eval_job)
     get_agent_eval_job = method(endpoints.get_agent_eval_job)
     get_agent_eval_job_status = method(endpoints.get_agent_eval_job_status)
+    delete_agent_eval_job = method(endpoints.delete_agent_eval_job)
+    cancel_agent_eval_job = method(endpoints.cancel_agent_eval_job)
+    list_agent_eval_job_logs = method(endpoints.list_agent_eval_job_logs)
+    list_agent_eval_job_results = method(endpoints.list_agent_eval_job_results)
+    get_agent_eval_job_result = method(endpoints.get_agent_eval_job_result)
+    download_agent_eval_job_result = method(endpoints.download_agent_eval_job_result)
+
+    list_retrieve_eval_jobs = method(endpoints.list_retrieve_eval_jobs)
+    submit_retrieve_eval_job = method(endpoints.submit_retrieve_eval_job)
+    get_retrieve_eval_job = method(endpoints.get_retrieve_eval_job)
+    get_retrieve_eval_job_status = method(endpoints.get_retrieve_eval_job_status)
+    delete_retrieve_eval_job = method(endpoints.delete_retrieve_eval_job)
+    cancel_retrieve_eval_job = method(endpoints.cancel_retrieve_eval_job)
+    list_retrieve_eval_job_logs = method(endpoints.list_retrieve_eval_job_logs)
+    list_retrieve_eval_job_results = method(endpoints.list_retrieve_eval_job_results)
+    get_retrieve_eval_job_result = method(endpoints.get_retrieve_eval_job_result)
+    download_retrieve_eval_job_result = method(endpoints.download_retrieve_eval_job_result)
 
     get_metric = method(endpoints.get_metric)
     list_metrics = method(endpoints.list_metrics)
@@ -88,6 +113,30 @@ class _EvaluatorMethods:
 class EvaluatorClient(_EvaluatorMethods, NemoClient):
     """Sync client for the Evaluator service API."""
 
+    def download_evaluate_job_aggregate_scores(self, *, workspace: str | None = None, name: str) -> NemoBinaryResponse:
+        """Download the aggregate-scores artifact for an evaluate job."""
+        return self.download_evaluate_job_result(
+            workspace=workspace,
+            job=name,
+            name=_AGGREGATE_SCORES_RESULT_NAME,
+        )
+
+    def download_evaluate_job_row_scores(self, *, workspace: str | None = None, name: str) -> NemoBinaryResponse:
+        """Download the row-scores artifact for an evaluate job."""
+        return self.download_evaluate_job_result(
+            workspace=workspace,
+            job=name,
+            name=_ROW_SCORES_RESULT_NAME,
+        )
+
+    def download_evaluate_job_artifacts(self, *, workspace: str | None = None, name: str) -> NemoBinaryResponse:
+        """Download the artifacts bundle for an evaluate job."""
+        return self.download_evaluate_job_result(
+            workspace=workspace,
+            job=name,
+            name=_ARTIFACTS_RESULT_NAME,
+        )
+
     def create_metric(
         self,
         *,
@@ -110,6 +159,36 @@ class EvaluatorClient(_EvaluatorMethods, NemoClient):
 
 class AsyncEvaluatorClient(_EvaluatorMethods, AsyncNemoClient):
     """Async client for the Evaluator service API."""
+
+    async def download_evaluate_job_aggregate_scores(
+        self, *, workspace: str | None = None, name: str
+    ) -> AsyncNemoBinaryResponse:
+        """Download the aggregate-scores artifact for an evaluate job."""
+        return await self.download_evaluate_job_result(
+            workspace=workspace,
+            job=name,
+            name=_AGGREGATE_SCORES_RESULT_NAME,
+        )
+
+    async def download_evaluate_job_row_scores(
+        self, *, workspace: str | None = None, name: str
+    ) -> AsyncNemoBinaryResponse:
+        """Download the row-scores artifact for an evaluate job."""
+        return await self.download_evaluate_job_result(
+            workspace=workspace,
+            job=name,
+            name=_ROW_SCORES_RESULT_NAME,
+        )
+
+    async def download_evaluate_job_artifacts(
+        self, *, workspace: str | None = None, name: str
+    ) -> AsyncNemoBinaryResponse:
+        """Download the artifacts bundle for an evaluate job."""
+        return await self.download_evaluate_job_result(
+            workspace=workspace,
+            job=name,
+            name=_ARTIFACTS_RESULT_NAME,
+        )
 
     async def create_metric(
         self,

@@ -36,9 +36,22 @@ class FakeBackend:
         return "REPORT"
 
 
+def _stub_model_adapter(monkeypatch: pytest.MonkeyPatch, seen: dict[str, object]) -> None:
+    models_client = object()
+    seen["adapted_model_client"] = models_client
+
+    def fake_client_from_platform(client: object, client_cls: object) -> object:
+        seen["platform_client"] = client
+        seen["models_client_cls"] = client_cls
+        return models_client
+
+    monkeypatch.setattr(run_module, "client_from_platform", fake_client_from_platform)
+
+
 def _stub_pipeline(monkeypatch: pytest.MonkeyPatch, seen: dict[str, object]) -> None:
     default = FakeModelClient()
     fast = FakeModelClient()
+    _stub_model_adapter(monkeypatch, seen)
     model_clients = ConfiguredModelClients(
         default=cast(Any, default),
         fast=cast(Any, fast),
@@ -92,7 +105,9 @@ async def test_injected_client_is_used_and_closed(monkeypatch: pytest.MonkeyPatc
     assert seen["backend_client"] is client
     build_kwargs = cast(dict[str, object], seen["build_kwargs"])
     assert cast(AnalystDeps, build_kwargs["deps"]).backend is not None
-    assert seen["model_client"] is client
+    assert seen["platform_client"] is client
+    assert seen["models_client_cls"] is run_module.AsyncModelsClient
+    assert seen["model_client"] is seen["adapted_model_client"]
     model_clients = cast(ConfiguredModelClients, seen["model_clients"])
     assert cast(FakeModelClient, model_clients.default).closed
     assert cast(FakeModelClient, model_clients.fast).closed
@@ -113,6 +128,7 @@ async def test_client_closed_when_backend_construction_raises(monkeypatch: pytes
     def raising_backend(*, client: FakeClient, insights_output: str | None, local_only: bool) -> FakeBackend:
         raise RuntimeError("backend failed")
 
+    _stub_model_adapter(monkeypatch, {})
     monkeypatch.setattr(run_module, "resolve_model_clients", fake_resolve_model_clients)
     monkeypatch.setattr(run_module, "make_analyst_backend", raising_backend)
 
@@ -135,6 +151,7 @@ async def test_client_closed_when_model_resolution_raises(monkeypatch: pytest.Mo
     async def raising_model_resolution(client: object, refs: object) -> ConfiguredModelClients:
         raise RuntimeError("model resolution failed")
 
+    _stub_model_adapter(monkeypatch, {})
     monkeypatch.setattr(run_module, "resolve_model_clients", raising_model_resolution)
 
     with pytest.raises(RuntimeError, match="model resolution failed"):
