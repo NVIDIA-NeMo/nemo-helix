@@ -216,6 +216,11 @@ Verify that the expected directory was created. Complete Harbor's generated
 `solution/solve.sh` using its installed schema. Keep solutions and verifier-only
 fixtures out of the agent's initial environment. Set executable permissions,
 realistic timeouts, and deterministic rewards; leave no scaffold placeholders.
+Before running, document each case's reward format, metric names and ranges,
+and expected NOP and Oracle acceptance criteria in its README. Derive these
+criteria from the intended outcome. For a binary completion metric, NOP should
+score 0 and Oracle 1. For named or graded metrics, specify the expected values
+or thresholds for each relevant metric instead of imposing a universal 0/1 pair.
 Add a README with the Ethos requirement, fixtures, verifier, and run commands.
 
 Teach each concept when it becomes concrete, using the files being created:
@@ -240,9 +245,14 @@ harbor run -p .eval-author/task-drafts/<slug> -a oracle \
   --jobs-dir .eval-author/jobs --job-name <slug>-oracle-1
 ```
 
-For each task, inspect Harbor trial results and recorded rewards. Require NOP
-reward 0 and Oracle reward 1 without exceptions: doing nothing should fail, and
-the reference solution should pass. These are basic wiring and verifier sanity
+For each task, inspect Harbor trial results and recorded rewards. Require both
+runs to complete without exceptions and meet the case's predeclared NOP/Oracle
+criteria, including the expected reward shape. The reference solution should
+satisfy the intended outcome; doing nothing should not earn completion credit
+when the case requires an answer or action. If inaction is itself correct, NOP
+success does not show that the verifier rejects incorrect behavior: exercise
+an explicit incorrect response or action as a negative control for that case.
+These are basic wiring and verifier sanity
 checks, not evidence of broad coverage or a robust benchmark. Do not add repeated
 proof runs or a separate negative-control campaign as an onboarding gate.
 Investigate obvious unconditional rewards or leaked answers. Fix broken tasks
@@ -300,7 +310,9 @@ a rule for judging the response. Translate observed sanity results into their
 meaning: doing nothing failed and the prepared reference solution passed, so
 these examples exercise the scoring rules successfully. Do not describe NOP as an empty
 answer unless that is what the task actually tested. These results do not prove
-the rules judge every answer correctly or measure the user's agent.
+the rules judge every answer correctly or measure the user's agent. For graded
+metrics or cases where inaction is correct, explain the actual acceptance
+criteria and observed control results instead of using the binary example.
 
 Then state whether the actual agent ran. If it did, summarize its observed
 results. If integration is missing, explain the concrete next step in everyday
