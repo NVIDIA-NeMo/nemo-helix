@@ -20,7 +20,7 @@ export interface UploadAgentEntry {
 }
 
 /** Which route into a new agent the modal is showing: an agent already seen in ingested traces, a
- *  prompt to hand off, a directory to upload, or a repository to import. */
+ *  prompt to hand off, files to upload, or a repository to import. */
 export type NewAgentTab = 'imported-traces' | 'coding-agent-prompt' | 'upload' | 'github';
 
 export interface NewAgentModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
