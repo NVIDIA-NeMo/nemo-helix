@@ -56,6 +56,12 @@ naming what to install.
 
 ## Before you start
 
+Use the core's **Show the path ahead** checklist and gather the relevant requirements
+and setup documentation alongside discovery. For discovery-only requests, scope
+the checklist to finding evals, checking readiness, and explaining the next action.
+When called from an ongoing workflow, carry forward its progress instead of
+restarting onboarding. Keep documentary findings distinct from Harbor's verdicts.
+
 Run the script with the interpreter that has Harbor installed. This is the one step
 people get wrong, and getting it wrong voids the whole report.
 
@@ -69,9 +75,20 @@ for py in .venv/bin/python ./venv/bin/python python3; do
 done
 ```
 
-Nothing prints a version when Harbor is not installed anywhere. Do not install it
-yourself; in the user's repository the missing environment is the finding. Tell
-them what you found and ask how they want to proceed.
+If these probes fail but a `harbor` executable exists, resolve that executable's
+symlink and inspect its launcher to locate the existing environment's Python
+(for example, an installed uv tool environment). Verify that interpreter with
+the same import check before using it. Do not assume that a project interpreter's
+failed import proves Harbor is absent everywhere, and do not run `uv tool run`
+to probe availability because it can install a tool.
+
+If no existing interpreter can import Harbor, read
+[Help the user get Harbor ready](references/harbor-setup.md). Explain the missing
+setup, provide supported installation instructions, and verify before resuming.
+Do not install automatically. Still run the inventory with an available Python 3.11+
+interpreter and continue the empty-scan conversation below when appropriate.
+Missing Harbor blocks readiness validation, not learning what evals they have.
+Mention this setup requirement even when the inventory also finds no Harbor evals.
 
 The report records which mode produced it either way, in `runtime.harbor_importable`
 and the top-level `proven` field.
@@ -154,11 +171,13 @@ sandbox denying access to the Docker socket or a different Docker context.
 Discovery changes none of the user's source, so verification means confirming the
 report describes the repository they meant:
 
-1. `proven` is `true`. When it is `false`, report only that Harbor is missing.
+1. `proven` is `true` for readiness claims. When it is `false`, keep the inventory
+   explicitly unvalidated; you can still ask about existing evals.
 2. `repo_root` is the repository they named.
-3. `configs` lists the suite they care about. An empty list on a repository they
-   described as having evals means the configs sit deeper than four directories, or
-   declare no `datasets` or `tasks` list.
+3. `configs` lists the suite they care about. An empty list may mean the configs
+   sit deeper than four directories, declare no `datasets` or `tasks` list, or
+   that the evals use another format. Follow supplied locations and the empty-scan
+   handoff below rather than assuming the suite is missing.
 4. `task_count` is in the range they expect. A count of zero with a passing `tasks`
    check means the config resolves tasks from a registry, not from disk.
 Keep `proven`, `runnable`, and check names in the evidence. When some configs pass
@@ -166,17 +185,30 @@ and others fail, identify the ready configs without calling the whole suite read
 
 ## Step 5: answer the user
 
-The user usually wants to know: "does this repo have evals, and how do I run
-them?" Use the bundled summary as the basis of the final assistant reply:
+For a discovery-only request, the user usually wants to know: "does this repo
+have evals, and how do I run them?" Use the bundled summary as the
+basis of the final assistant reply:
 
 ```bash
 <python> <skill_dir>/scripts/render_report.py --summary <discovery-json-path>
 ```
 
+For broader onboarding or conversion requests, this is an intermediate result.
+Save the report in Step 6, then continue to the core's selected sub-flow in the
+same turn when the user has identified the source and it is available. For
+non-Harbor material, that handoff starts with adaptation Step 1's explanation
+and question about proceeding; it does not immediately start conversion. If only
+possible eval material was found, use the conversation below and wait for the
+source-selection answer before conversion. When another sub-flow called
+discovery to validate its created config, return that config's checks to the
+caller; do not restart onboarding or require a new suite selection.
+
 Preserve its verdict, ready config choices, and next actions. Do not add internal
 check names, raw exceptions, `proven=true`, or git status to the reply. Mention the
 saved report after the verdict and next action. Do not run evals during discovery.
-If multiple configs are ready, ask which one the user wants; do not choose by filename.
+If multiple configs are ready and the user has not selected one, ask which one
+they want; do not choose a run configuration by filename. This selection rule
+does not govern which non-Harbor case to adapt first.
 Before asking, read each listed configuration and add one short description beside
 its path in the reply. Describe the differences that help someone choose: the
 dataset or task selection, configured agent and model, and explicit task limits
@@ -197,6 +229,70 @@ in a `Configuration Guide` section before `Configs` in the saved Markdown, leavi
 the generated diagnostics and evidence unchanged.
 An empty Harbor scan does not establish that the repo has no other kinds of evals.
 An `error` result means discovery did not complete, not that Harbor is missing.
+
+### When no Harbor evals were found
+
+Use this conversation only after a completed scan has no configs, task files, or
+dataset directories. Files that failed validation or tasks without a config stay
+on the existing-suite path. The inventory's depth and excluded directories limit
+what was inspected; a user-supplied location takes precedence over scan absence.
+The scanner also picks up configs by `tasks` or `datasets` keys. If source or
+documentation shows that a candidate belongs to another framework, explain that
+finding and use the source-selection conversation before adaptation; do not try
+to repair it as Harbor merely because Harbor rejected it. A schema failure alone
+does not identify its format.
+
+Lead the first substantive onboarding reply with the core's Harbor introduction
+and documentation link, even when an earlier progress message mentioned Harbor.
+Keep that opening focused on what Harbor does and why it helps. Successful
+installation belongs in saved findings. For an empty scan, explain the absence
+and possible source material without adding “readiness remains unproven.” Actual
+validation failures still need their explanation and next action. For example:
+
+> Eval Author uses [Harbor](https://www.harborframework.com/docs) to run evals.
+> It gives your agent a task, checks the result, and lets you repeat the same
+> test after changes to see how your agent is doing.
+>
+> It doesn't look like you have any Harbor evals in the locations I checked.
+> Do you already have evals in any form, such as tests, scripts, a dataset, a
+> notebook, or a manual checklist? Can you point me to them?
+
+If the user already supplied evals or said they have none, use that answer instead
+of asking again. If inspection found possible eval files, mention their concrete
+paths as candidates, without claiming they are a validated suite. Do not label
+ordinary software tests as agent evals without inspecting what they exercise.
+Inspection alone does not settle whether the user wants to use those files.
+When candidates were found but the user has not identified them as their evals,
+briefly explain what makes them look useful. After the Harbor introduction,
+the finding and question could be:
+
+> I didn't find Harbor evals in the locations I checked, but I did find reports
+> with example conversations and descriptions of what a good answer should look
+> like. Those could give us a useful starting point.
+>
+> Let's first make sure we're starting with the right material. Are these your
+> existing evals, or do you keep them somewhere else?
+
+Use actual source descriptions and links, without adopting the example's findings
+unless supported. Keep the shared checklist before the closing question. If no
+candidate material was found, use the open question about existing evals above.
+
+Keep **Find your starting point** current and wait for the answer before choosing
+a case, bulk extraction, or task creation. Do not replace this conversation with
+a checklist update. If the user already supplied the intended eval source or
+asked to convert it, carry that answer forward without repeating the question.
+
+Save discovery before handing off, even when Harbor is unavailable. Follow
+`eval-author`'s **Start with discovery** routing: user-identified non-Harbor evals go to
+`eval-author-adapt` for the Harbor explanation and choice about conversion;
+confirmed absence goes to the available first-eval flow;
+unknown or inaccessible inputs need clarification. An inventory-only request
+ends with the findings and an offered next step. Do not start audit or task-gap
+generation just because no Harbor config exists.
+
+Keep a continuation's user-facing question at the end of the reply. The summary
+formatter supplies the default empty-scan question; adapt it to answers already
+given while retaining the saved report's original diagnostics and JSON.
 
 For example, when Docker preflight fails and host access has not been verified:
 

@@ -4,7 +4,8 @@
 
 name: eval-author
 description: >-
-  Work on evaluation suites in a user's repository, derive an environment from
+  Work on evaluation suites in a user's repository, adapt existing non-Harbor
+  evals into Harbor, derive an environment from
   trace evidence, or understand an agent run from NeMo Intake. Owns the evidence
   standard that every Eval Author sub-flow
   follows. Use when the user asks "help me with my evals",
@@ -17,11 +18,13 @@ triggers:
   - what is the state of the eval suite here
   - I inherited a repo with Harbor tasks in it
   - work on my evaluation suite
+  - my evals do not use Harbor
   - what happened in this agent trace
   - create an evaluation environment from a trace
   - which eval author step do I need
 not-for:
   - eval-author-discover (use to run the discovery pass and get a runnable verdict)
+  - eval-author-adapt (use to adapt existing non-Harbor evaluations after discovery)
   - eval-author-audit (use to generate, validate, measure, or aggregate audit.md coverage)
   - eval-author-task-create (use to propose dataset improvements; when task creation is requested, create and prove an eligible Harbor task)
   - eval-author-inspect-trace (use after this skill selects the trace sub-flow)
@@ -57,6 +60,9 @@ The authority depends on the sub-flow:
 
 - For suite discovery, Harbor's validators judge runnability. A file's presence
   doesn't prove that Harbor accepts it.
+- For adapting existing evals, the original cases, fixtures, and scoring rules
+  establish what to preserve. Harbor validation and controlled task runs prove
+  the new wiring; they do not by themselves prove scoring equivalence.
 - For audit-spec validation, the bundled schema and validator judge the finite
   `audit.md` coverage denominator.
 - For task creation, Harbor's Oracle judges task solvability and verifier
@@ -92,6 +98,7 @@ and the boundaries; the sub-flow carries the steps.
 | Sub-flow | Use it to |
 |---|---|
 | `eval-author-discover` | Establish whether a repository's evaluations run, name the rung that fails, and get the exact command to run them |
+| `eval-author-adapt` | Convert existing non-Harbor material into task files, implement supported checks, and guide validation and execution when available |
 | `eval-author-audit` | Generate and validate a finite `audit.md` coverage denominator, measure and aggregate trace coverage, and report findings |
 | `eval-author-task-create` | Propose concrete dataset improvements from audit findings; when task creation is requested, create one eligible Harbor task and prove it with Oracle and repeated measured runs |
 | `eval-author-inspect-trace` | Understand one Intake trace without presuming that the trace contains a failure. Not user-invocable; this skill selects it |
@@ -107,6 +114,144 @@ tool gaps and uses Harbor's native task scaffolder rather than guessing a task
 layout. For a requested full workflow, proceed from audit to proposals even when
 there are no eligible tool gaps; an audit-only request ends with the findings.
 
+## Show the path ahead
+
+At the start of repository onboarding, lead with the Harbor introduction in
+Reporting, including its documentation link. Then show this checklist so the
+user knows what getting their evals working involves:
+
+- [ ] **Find your starting point** — existing evals, test cases, reports, examples, and documentation.
+- [ ] **Understand what success means** — requirements, expected behavior, and how results should be graded.
+- [ ] **Understand the setup** — agent connection, software and services, dependencies, supported operating systems, licenses, credentials, and starting/reset conditions.
+- [ ] **Prepare your Harbor evals** — turn the available material into tasks, grading checks, and environment configuration.
+- [ ] **Run and verify** — check that the setup and grading work, then evaluate the agent.
+- [ ] **Review the results** — explain outcomes, remaining gaps, and how to rerun.
+
+Use the checklist to orient the conversation. At each stage, explain what you
+learned, why it matters, and the next decision or action in ordinary language.
+Show one current stage; later stages remain ahead even if some background
+inspection overlaps. Merely listing statuses does not guide the user.
+
+Source selection establishes which evals the user has. The adaptation introduction
+then explains Harbor and asks whether they want to convert those evals. Wait for
+each needed answer; do not treat the checklist as an instruction to complete every
+stage without the user's input. Other milestones need no automatic approval.
+Tailor the preparation step after
+discovery: reuse or fix Harbor evals, adapt other material, or use the available
+first-eval flow. For narrower inventory, audit, or trace requests, show only the
+steps for that outcome; a checklist must not expand the requested work.
+
+Show the checklist when a user returns, using saved findings and inspection of
+the current artifacts to establish where they are. Reuse answers and completed
+work when still applicable; do not restart onboarding or assume old readiness
+evidence still applies after inputs change. Refresh it at meaningful milestones
+and in the final handoff, rather than with every tool call. Sub-flows carry
+forward the same checklist instead of starting their own.
+
+Use `[x]` only for completed milestones. Mark the current item **We're here**
+and explain what you are working out together. Leave future items unchecked;
+name a specific missing prerequisite only when it affects the work underway.
+An ordinary onboarding question does not need a **Needs input** status.
+Keep partial work unchecked
+and name its scope: task files may exist while grading or configuration remains
+unfinished. Identifying a dependency does not prove it is available, and loading
+task files does not prove an agent run works. A completed run may have low scores.
+Follow the checklist with the next action and any specific input needed from the
+user. Continue independent authorized work while other items need input.
+
+## Gather requirements and setup from evidence
+
+During discovery and source inspection, read relevant repository and supplied
+documentation before asking the user to reconstruct it. Follow references to
+requirements, rubrics, setup guides, dependency manifests and lockfiles, agent
+configs, runner scripts, and license or access instructions. Gather what applies:
+
+- **Purpose and success:** scenarios, expected behavior, grading rules, and relevant constraints.
+- **Inputs and documentation:** source cases, fixtures, example outputs, and instructions for using them.
+- **Execution:** the agent and how to invoke it, required software/services and versions, OS, hardware, and where each dependency runs.
+- **Access and licenses:** documented installation and execution requirements, license provisioning, required accounts and credential variable names. Do not request secret values in chat or copy them into reports.
+- **Repeatability:** starting data/state, session handling, reset procedure, and how results reach the grader.
+
+Distinguish documented requirements, user-confirmed information, verified
+availability, and unknowns. Cite the source and record what an unresolved item
+blocks: task preparation, a particular grading check, or live execution. A repo
+license does not establish the license or availability of its dependencies.
+Ask focused questions only about missing facts that affect the next work, and
+reuse earlier answers. Missing access or license provisioning can leave execution
+pending while task files and independent checks proceed.
+
+Keep the gathered requirements, progress, and next action in the selected
+sub-flow's existing human-readable findings or task README under `.eval-author/`.
+Do not overwrite generated evidence reports or require a new intake document
+before conversion. For read-only requests, explain findings in the reply within
+that sub-flow's reporting boundaries.
+
+## Start with discovery
+
+For repository eval onboarding, start with `eval-author-discover` for every user,
+including users who say they have no evals or already name another framework.
+Reuse a completed discovery pass from this session when its repository and inputs
+are unchanged. Do not repeat questions the user has already answered. Explicit
+audit, task-gap, and trace requests still use their own sub-flows.
+
+Discovery's empty-scan conversation introduces Harbor as the framework Eval
+Author uses to run eval cases and score results, then asks whether the user has
+evals in any form and where to find them. An empty Harbor scan is not proof that
+the user has no evals. Inspection can identify candidates, but only the user can
+settle whether those are the evals they want to work from. When this has not
+already been answered, explain what you found and ask before choosing a case,
+extracting the full collection, or creating adapted tasks. For example, when
+the inspected material supports it:
+
+> I didn't find Harbor evals in the locations I checked. I did find reports with
+> example conversations and written checks, which look like possible eval material.
+> Are these the evals you'd like us to work from, or do you have evals somewhere
+> else? If you don't have existing evals, we can start with your first one.
+
+Keep **Find your starting point** current while awaiting that answer. Save the
+discovery findings, but wait to begin conversion. A broad “Help me get my evals
+working” does not identify discovered candidates as the user's intended source.
+If the user already identified the material as their evals or explicitly asked
+to convert it, reuse that source answer without asking where their evals are again. Saying that
+evals exist without giving their location still requires locating them. Follow
+the answer:
+
+- **Harbor suite or standalone Harbor tasks:** continue discovery and resolve
+  the missing configuration or failed checks. Broken Harbor evals are existing
+  evals, not a reason to start over.
+- **The user identifies existing evals in another form:** read
+  [`eval-author-adapt`](../eval-author-adapt/SKILL.md). Use the supplied path or
+  artifact, including tests, scripts, notebooks, datasets, and manual rubrics.
+  If Harbor and other evals coexist, preserve both and follow the user's chosen
+  suite; do not silently ignore their request to adapt the non-Harbor evals.
+  A conversion request should produce Harbor task files from the available
+  material. App access and runtime verification can remain pending; they must
+  not redirect task creation into a specification-only interview. Written
+  criteria from reviews are usable inputs even if the evals have never run.
+  Once the source is identified, follow adaptation Step 1: explain Harbor, what
+  conversion will create, and what execution will require, then ask whether the
+  user wants to proceed. “Use these reports” settles the source; it does not
+  answer this informed choice. Wait before detailed requirements gathering,
+  choosing a case, bulk extraction, or task creation. Reuse an earlier acceptance
+  of this explained conversion path rather than asking again.
+  If the user points elsewhere, inspect that location and use those evals.
+  Let the adaptation flow choose a representative
+  case unless there is a material scope ambiguity; do not end at a scenario menu.
+- **The user confirms there are no existing evals:** use `eval-author-first-eval`
+  for the guided intent-to-starter-eval experience. This companion flow is
+  introduced in [PR #1943](https://github.com/NVIDIA-NeMo/nemo-platform/pull/1943).
+  Check that its `SKILL.md` is available before routing. If absent, explain that
+  this checkout needs the first-eval flow and link that PR; do not pretend it
+  ran or substitute audit-gap task creation. Carry forward discovery and any
+  answers already given when the flow becomes available.
+- **Unknown or inaccessible evals:** ask for the location or a representative
+  case and how it is scored. Do not treat an unanswered question, unreadable
+  path, or discovery error as confirmation that no evals exist.
+
+For an inventory-only request, report what was found and offer the appropriate
+next step. Creating or running evals requires that intent; discovery alone does
+not authorize either.
+
 ## Boundaries
 
 These hold for every sub-flow. They exist because the repository belongs to the
@@ -120,12 +265,20 @@ user, not to you.
   requested audit artifacts; `eval-author-task-create` writes only drafts,
   proposals, job outputs, and measurements there; `eval-author-trace-environment`
   writes only private, gitignored task workspaces there.
+  `eval-author-adapt` writes its mapping, task copies, configs, and job outputs
+  under `.eval-author/`; the original evals remain the source of truth.
 - **A missing tool is a finding, not a task.** When the provider is not installed,
   say so and stop short of proving anything. Report what you found regardless, and
-  do not install the provider into the user's environment.
+  do not install the provider automatically. Use discovery's Harbor setup guidance
+  to explain installation and verification. An explicit request to install is
+  authorization for that setup; a broad eval request alone is not.
+  Adapting evals can still proceed through source inspection and mapping without
+  Harbor; scaffolding and execution remain unproven until it is available.
 - **Do not run without approval.** Discovery proves an existing suite can run and
   hands over the command. Task creation may run Oracle locally, then starts
   real-agent jobs only when the user explicitly asked for or approved that spend.
+  Adapting evals may run local task sanity checks when task creation is requested;
+  real-agent or paid-judge runs require authorization for that execution and spend.
 - **Trusted repositories only.** Validating a config can execute repository code,
   because an agent named by import path gets imported. If the repository is not
   trusted, say so and stop.
@@ -136,16 +289,55 @@ user, not to you.
 
 ## Reporting
 
-Lead with the verdict or outcome, then the evidence.
+For validation and execution reports, lead with the verdict or outcome, then the
+evidence. First-time onboarding has a different opening: explain that this skill
+uses Harbor to run evals before presenting readiness or installation findings.
+Include this explanation in the first substantive discovery reply, even if an
+earlier progress message introduced Harbor. For example:
+
+> Eval Author uses [Harbor](https://www.harborframework.com/docs) to run evals.
+> It gives your agent a task, checks the result, and lets you repeat the same
+> test after changes to see how your agent is doing.
+
+Make clear that Harbor is needed for execution; users can bring existing work
+in other formats. Then explain what you found and why it looks useful in plain
+language. For example, describe “conversations and descriptions of what a good
+answer should look like” before discussing assertions, scores, or file formats.
+Keep the discovery scope accurate: say no Harbor evals were found in the locations
+checked, rather than asserting the whole repository has none.
+
+Keep that explanation together as its own opening paragraph. Successful tool
+installation is usually incidental to the source conversation; keep it in the
+saved findings. If a missing tool affects the next step, explain the effect
+briefly. When no Harbor evals were found, the source question does not need an
+additional “readiness remains unproven” verdict. Describe possible source material
+without treating its historical scores as verified results.
+
+Show the shared checklist, keeping **Find your starting point** current until
+the source is settled. Explain the immediate purpose: “Let's first make sure
+we're starting with the right material.” Follow with the source question.
+Put artifact links beside what they contain or after the explanation; an
+installation verdict, report link, or technical inventory should not replace
+the welcome and guidance. Tool versions and scan mechanics belong in saved
+findings unless needed to resolve a problem. Introduce Harbor filenames when
+they become useful. The later adaptation introduction explains the proposed
+conversion in more detail using the source the user has identified.
+Once the user has identified the eval source, follow `eval-author-adapt` Step 1
+to explain the conversion and ask whether to proceed. Begin conversion after that
+answer. Before source selection, use the discovery conversation. Use the task-explanation guidance
+when files have been created. Ask a question only when its answer is needed;
+an inventory and a scenario menu are not a completed conversion.
 
 For dataset proposals, follow `eval-author-task-create` Step 1: lead with concrete
 recommendations and their evidence, then supporting coverage counts and limits. An empty
 task-generation selection does not establish that the dataset needs no changes.
 
-State whether the findings are proven, whether the suite is ready, and the names
-of the checks that failed. Never describe a suite as ready while a required check
+In validation and execution reports, state whether findings are proven, whether
+the suite is ready, and the checks that failed. Never describe a suite as ready while a required check
 fails, and never present an observation as proof. When a sub-flow could not reach
-its provider, the only honest headline is that nothing was proven.
+its provider, its validation report must state that readiness was not proven.
+This does not block the empty-scan conversation or source-grounded adaptation
+planning when Harbor is unavailable.
 
 For a trace, use `success`, `failure`, or `unknown`. Tie key moments and findings
 to span IDs, evaluator result IDs, or source symbols. A healthy trace doesn't
