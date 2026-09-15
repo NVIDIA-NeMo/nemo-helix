@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "nemo-profiler-plugin"
+description = "Fileset profiler for NeMo Platform. Ships the dataset profiler today; model profiling is the expected next kind."
+requires-python = ">=3.11,<3.15"
+dependencies = [
+    "nemo-platform-plugin",
+    "nemo-platform-sdk",
+    "pyarrow>=19.0.1",
+    "pydantic>=2.10.3",
+]
+version = "0.1.0"
+
+[tool.uv.sources]
+nemo-platform-plugin = { workspace = true }
+nemo-platform-sdk = { workspace = true }
+
+# Deliberately contributes no `nemo.cli` entry point. The profiler runs as a job task
+# (`python -m nemo_profiler_plugin.tasks.profile`), which is invoked by the platform rather than
+# typed by a user, so its inputs can keep moving while the feature is new.
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nemo_profiler_plugin"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

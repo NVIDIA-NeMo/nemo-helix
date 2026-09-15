@@ -32,7 +32,6 @@
     #   nemo-anonymizer-plugin
     #   nemo-auditor-plugin
     #   nemo-automodel-plugin
-    #   nemo-customizer-plugin
     #   nemo-data-designer-plugin
     #   nemo-experimentalist-plugin
     #   nemo-guardrails-plugin
@@ -52,6 +51,7 @@
     #   nemo-automodel-plugin
     #   nemo-customizer-plugin
     #   nemo-data-designer-plugin
+    #   nemo-datasets-plugin
     #   nemo-deployments-plugin
     #   nemo-evaluator-plugin
     #   nemo-experimentalist-plugin
@@ -133,6 +133,7 @@
 -e ./plugins/nemo-automodel ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-customizer ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-data-designer ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+-e ./plugins/nemo-datasets ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-deployments ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   nemo-agents-plugin
@@ -159,6 +160,7 @@
 -e ./sdk/python/nemo-platform ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   models
+    #   nemo-datasets-plugin
     #   nemo-deployments-plugin
     #   nemo-evaluator-plugin
     #   nemo-platform
@@ -2829,6 +2831,7 @@ pyarrow==24.0.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or 
     #   data-designer-engine
     #   data-designer-retrieval-sdg
     #   datasets
+    #   nemo-datasets-plugin
     #   nemo-evaluator-sdk
 pyasn1==0.6.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:9c447d8431c947fe4c8febc4ed9e760bc29011a5b01e5c74b67025bd9fb8ce81 \
@@ -2872,6 +2875,7 @@ pydantic==2.13.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   nemo-auditor-plugin
     #   nemo-automodel-plugin
     #   nemo-customizer-plugin
+    #   nemo-datasets-plugin
     #   nemo-deployments-plugin
     #   nemo-evaluator-plugin
     #   nemo-evaluator-sdk

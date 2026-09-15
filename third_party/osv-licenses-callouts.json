@@ -487,6 +487,12 @@
                 "CVE-2026-32282",
                 "GO-2026-4864"
               ],
+              "experimental_analysis": {
+                "GO-2026-4864": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -498,6 +504,12 @@
                 "CVE-2026-32289",
                 "GO-2026-4865"
               ],
+              "experimental_analysis": {
+                "GO-2026-4865": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -509,6 +521,12 @@
                 "CVE-2026-32288",
                 "GO-2026-4869"
               ],
+              "experimental_analysis": {
+                "GO-2026-4869": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -520,6 +538,12 @@
                 "CVE-2026-32283",
                 "GO-2026-4870"
               ],
+              "experimental_analysis": {
+                "GO-2026-4870": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -531,6 +555,12 @@
                 "CVE-2026-33814",
                 "GO-2026-4918"
               ],
+              "experimental_analysis": {
+                "GO-2026-4918": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -542,6 +572,12 @@
                 "CVE-2026-32281",
                 "GO-2026-4946"
               ],
+              "experimental_analysis": {
+                "GO-2026-4946": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -553,6 +589,12 @@
                 "CVE-2026-32280",
                 "GO-2026-4947"
               ],
+              "experimental_analysis": {
+                "GO-2026-4947": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -564,6 +606,12 @@
                 "CVE-2026-39822",
                 "GO-2026-4970"
               ],
+              "experimental_analysis": {
+                "GO-2026-4970": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -575,6 +623,12 @@
                 "CVE-2026-39836",
                 "GO-2026-4971"
               ],
+              "experimental_analysis": {
+                "GO-2026-4971": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -586,6 +640,12 @@
                 "CVE-2026-39825",
                 "GO-2026-4976"
               ],
+              "experimental_analysis": {
+                "GO-2026-4976": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -597,6 +657,12 @@
                 "CVE-2026-42499",
                 "GO-2026-4977"
               ],
+              "experimental_analysis": {
+                "GO-2026-4977": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -608,6 +674,12 @@
                 "CVE-2026-39826",
                 "GO-2026-4980"
               ],
+              "experimental_analysis": {
+                "GO-2026-4980": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -619,6 +691,12 @@
                 "CVE-2026-33811",
                 "GO-2026-4981"
               ],
+              "experimental_analysis": {
+                "GO-2026-4981": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -630,6 +708,12 @@
                 "CVE-2026-39823",
                 "GO-2026-4982"
               ],
+              "experimental_analysis": {
+                "GO-2026-4982": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -641,6 +725,12 @@
                 "CVE-2026-39820",
                 "GO-2026-4986"
               ],
+              "experimental_analysis": {
+                "GO-2026-4986": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -651,6 +741,12 @@
                 "CVE-2026-39821",
                 "GO-2026-5026"
               ],
+              "experimental_analysis": {
+                "GO-2026-5026": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -662,6 +758,12 @@
                 "CVE-2026-27145",
                 "GO-2026-5037"
               ],
+              "experimental_analysis": {
+                "GO-2026-5037": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -673,6 +775,12 @@
                 "CVE-2026-42504",
                 "GO-2026-5038"
               ],
+              "experimental_analysis": {
+                "GO-2026-5038": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -684,6 +792,12 @@
                 "CVE-2026-42507",
                 "GO-2026-5039"
               ],
+              "experimental_analysis": {
+                "GO-2026-5039": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -695,6 +809,12 @@
                 "CVE-2026-42505",
                 "GO-2026-5856"
               ],
+              "experimental_analysis": {
+                "GO-2026-5856": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -706,6 +826,12 @@
                 "CVE-2026-33818",
                 "GO-2026-5972"
               ],
+              "experimental_analysis": {
+                "GO-2026-5972": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -717,6 +843,12 @@
                 "CVE-2026-56859",
                 "GO-2026-6088"
               ],
+              "experimental_analysis": {
+                "GO-2026-6088": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -728,6 +860,12 @@
                 "CVE-2026-56853",
                 "GO-2026-6089"
               ],
+              "experimental_analysis": {
+                "GO-2026-6089": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -739,6 +877,12 @@
                 "CVE-2026-56862",
                 "GO-2026-6090"
               ],
+              "experimental_analysis": {
+                "GO-2026-6090": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -750,6 +894,12 @@
                 "CVE-2026-56858",
                 "GO-2026-6091"
               ],
+              "experimental_analysis": {
+                "GO-2026-6091": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -761,6 +911,12 @@
                 "CVE-2026-56860",
                 "GO-2026-6218"
               ],
+              "experimental_analysis": {
+                "GO-2026-6218": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             }
           ],

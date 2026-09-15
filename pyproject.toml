@@ -201,6 +201,7 @@ enabled-plugins = [
   "nemo-switchyard",
   "nemo-agents-plugin",
   "nemo-deployments-plugin[docker,k8s]",
+  "nemo-profiler-plugin",
   "nemo-customizer-plugin",
   "nemo-automodel-plugin",
   "nemo-optimization-plugin",
@@ -261,6 +262,7 @@ cpu-tasks = [
   "nemo-anonymizer-plugin",
   "nemo-data-designer-plugin[retrieval-sdg]",
   "nemo-optimization-plugin",
+  "nemo-profiler-plugin",
   "nmp-hello-world",
 ]
 
@@ -438,6 +440,7 @@ nemo-safe-synthesizer-plugin = { workspace = true }
 nemo-switchyard = { workspace = true }
 nemo-agents-plugin = { workspace = true }
 nemo-deployments-plugin = { workspace = true }
+nemo-profiler-plugin = { workspace = true }
 nemo-agents-example-calculator = { workspace = true }
 nemo-agents-example-email-phishing = { workspace = true }
 nemo-agents-example-email-security = { workspace = true }
@@ -499,6 +502,7 @@ members = [
   "plugins/nemo-safe-synthesizer",
   "plugins/nemo-switchyard",
   "plugins/nemo-agents",
+  "plugins/nemo-profiler",
   "plugins/nemo-deployments",
   "plugins/nemo-insights",
   "plugins/nemo-eval-author",
@@ -625,6 +629,9 @@ extra-paths = [
   # example-plugin is not a workspace member; add its src so ty can
   # resolve nmp.example_plugin imports when checking plugin test files.
   "plugins/example-plugin/src",
+  # nemo-profiler plugin is a workspace member; add its src so ty can
+  # resolve nemo_profiler_plugin imports from plugin test files.
+  "plugins/nemo-profiler/src",
   # nemo-guardrails plugin is not a workspace member; add its src so ty can
   # resolve nemo_guardrails_plugin imports when checking plugin test files.
   "plugins/nemo-guardrails/src",
