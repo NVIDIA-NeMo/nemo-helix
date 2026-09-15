@@ -6,10 +6,16 @@ import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { getAgentsListAgentsQueryKey } from '@nemo/sdk/generated/agents/agents';
+import {
+  getAgentsListAgentsQueryKey,
+  useAgentsCreateAgent,
+} from '@nemo/sdk/generated/agents/agents';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import {
   Button,
+  Flex,
+  Label,
+  Select,
   Stack,
   TabsContent,
   TabsList,
@@ -42,6 +48,7 @@ import type {
   UploadAgentEntry,
   UploadAgentFormData,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
+import { useTraceAgentNames } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/useTraceAgentNames';
 import {
   agentNameFromConfig,
   collectAgentEntries,
@@ -87,6 +94,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   const [tab, setTab] = useState<NewAgentTab>('coding-agent-prompt');
   const [isSecretModalOpen, setSecretModalOpen] = useState(false);
   const [repoBlurred, setRepoBlurred] = useState(false);
+  const [tracedAgent, setTracedAgent] = useState('');
 
   const onAgentCreated = (agent: Agent) => {
     toast.success(`Agent "${agent.name}" created`);
@@ -112,6 +120,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   const isPending = isUploading || isImporting;
   const onUploadTab = tab === 'upload';
   const onGitHubTab = tab === 'github';
+  const onTracesTab = tab === 'imported-traces';
+  const onCreateTab = onUploadTab || onGitHubTab || onTracesTab;
 
   const {
     control,
@@ -125,6 +135,15 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     disabled: isPending,
     mode: 'onChange',
   });
+
+  const tracedAgents = useTraceAgentNames(workspace, open && tab === 'imported-traces');
+
+  const {
+    mutateAsync: createTracedAgent,
+    error: tracedCreateError,
+    isPending: isCreatingTraced,
+    reset: resetTracedMutation,
+  } = useAgentsCreateAgent({ mutation: { onSuccess: onAgentCreated } });
 
   // useWatch re-renders this modal on every keystroke; the summary depends only on entries.
   const entriesSummary = useMemo(
@@ -158,6 +177,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   const resetAndClose = () => {
     resetMutation();
     resetRepoMutation();
+    resetTracedMutation();
     resetForm({ name: '', repoUrl: '', secretKey: '' });
     setEntries([]);
     setSourceLabel('');
@@ -165,6 +185,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     setReplaceArmedFor(null);
     setRepoBlurred(false);
     setTab('coding-agent-prompt');
+    setTracedAgent('');
     onClose();
   };
 
@@ -304,14 +325,30 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     }
   };
 
+  // An agent seen only in telemetry has no config to register, and the platform defaults an
+  // empty one to nat-workflow-v1. It exists so its traces, evaluations and insights attach to a
+  // real agent; deploying or chatting with it still needs a config.
+  const createFromTraces = async () => {
+    if (!tracedAgent) return;
+    await createTracedAgent({ workspace, data: { name: tracedAgent, config: {} } }).catch(() => {
+      // Rendered through errorText.
+    });
+  };
+
   // No fallback argument: getErrorMessage prefers one over a plain Error's own message.
-  const failure = onGitHubTab ? repoError : (selectionError ?? createError);
+  const failure = onGitHubTab
+    ? repoError
+    : onTracesTab
+      ? tracedCreateError
+      : (selectionError ?? createError);
   const errorMessage =
     typeof failure === 'string'
       ? failure
       : failure
         ? getErrorMessage(failure) || 'Failed to create agent'
         : undefined;
+
+  const busy = isPending || isCreatingTraced;
 
   return (
     <>
@@ -322,13 +359,24 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
         title="Instrument an agent with NeMo Platform"
         instruction="Integrated agents allow users to evaluate, optimize, and deploy agents."
         submitButtonText={replaceOrphan ? 'Replace and create' : 'Create'}
-        onSubmit={handleSubmit(onSubmit)}
-        disabled={isPending}
-        loading={isPending}
-        submitDisabled={onGitHubTab ? !repoSource : entries.length === 0}
-        errorText={onUploadTab || onGitHubTab ? errorMessage : undefined}
+        onSubmit={(event) => {
+          // The traced-agent choice is not part of the upload form, so it submits on its own
+          // rather than through a resolver that would reject the empty name field.
+          if (onTracesTab) {
+            event.preventDefault();
+            void createFromTraces();
+            return;
+          }
+          handleSubmit(onSubmit)(event);
+        }}
+        disabled={busy}
+        loading={busy}
+        submitDisabled={
+          onGitHubTab ? !repoSource : onTracesTab ? !tracedAgent : entries.length === 0
+        }
+        errorText={onCreateTab ? errorMessage : undefined}
         slotFooterRight={
-          onUploadTab || onGitHubTab ? undefined : (
+          onCreateTab ? undefined : (
             <Button color="brand" type="button" onClick={resetAndClose}>
               Close
             </Button>
@@ -340,6 +388,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
             <TabsTrigger value="coding-agent-prompt">Coding agent prompt</TabsTrigger>
             <TabsTrigger value="upload">Upload agent</TabsTrigger>
             <TabsTrigger value="github">GitHub repository</TabsTrigger>
+            <TabsTrigger value="imported-traces">Create from traces</TabsTrigger>
           </TabsList>
 
           <TabsContent value="coding-agent-prompt" className="items-stretch p-0 pt-density-lg">
@@ -411,6 +460,37 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
                 formFieldProps={{ slotError: errors.name?.message }}
               />
             </Stack>
+          </TabsContent>
+
+          <TabsContent value="imported-traces" className="items-stretch p-0 pt-density-lg">
+            {!tracedAgents.isLoading && tracedAgents.names.length === 0 ? (
+              // The min-height gives the panel something to center within; the tab's content
+              // is otherwise only as tall as this sentence.
+              <Flex
+                direction="col"
+                align="center"
+                justify="center"
+                className="min-h-[220px] w-full text-center"
+                data-testid="no-traced-agents"
+              >
+                <Text kind="body/regular/md" color="subtle" className="max-w-[64ch]">
+                  No traces with agent.name parameter found. You can import traces with the intake
+                  trace import skill to get started.
+                </Text>
+              </Flex>
+            ) : (
+              <Stack gap="density-sm">
+                <Label>Unregistered agents that appear in ingested traces</Label>
+                <Select
+                  aria-label="Agent from imported traces"
+                  value={tracedAgent}
+                  onValueChange={setTracedAgent}
+                  disabled={isCreatingTraced || tracedAgents.isLoading}
+                  placeholder={tracedAgents.isLoading ? 'Loading...' : 'Select an agent'}
+                  items={tracedAgents.names.map((name) => ({ value: name, children: name }))}
+                />
+              </Stack>
+            )}
           </TabsContent>
         </TabsRoot>
       </FormModal>

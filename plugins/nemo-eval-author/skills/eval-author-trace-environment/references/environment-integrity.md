@@ -16,6 +16,13 @@ python <skill_dir>/scripts/trace_environment.py check-runtime
 python <skill_dir>/scripts/trace_environment.py check-runtime --task-dir <task-dir>
 ```
 
+For mock tool-call access, optionally add `--mock-agent <harbor-agent-name-or-module:Class>`
+to inspect the selected trusted harness's registration; no agent-name allowlist
+applies. Read `../../../docs/trace-derived-fixtures.md` for the independent
+registration and native execution statuses. Unknown writers are unverified, not
+unsupported. Neither a valid preflight nor NOP/Oracle proves native mock access;
+retain the selected harness's actual discovery/call evidence before claiming it.
+
 The first command probes provider-declared configuration and result fields; the
 second also makes Harbor validate the authored task and compute its checksum.
 Exit code 1 / `valid: false` means do not launch proof jobs with that runtime.

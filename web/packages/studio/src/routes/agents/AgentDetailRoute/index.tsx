@@ -19,6 +19,7 @@ import {
 import { agentSpecSource, useAgentSpecFileset } from '@studio/api/agents/useAgentSpecFileset';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
+import { ImportTracesModal } from '@studio/components/ImportTracesModal';
 import { AGENT_OPTIMIZATIONS_ENABLED, AGENT_OVERVIEW_ENABLED } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -60,6 +61,7 @@ export const AgentDetailRoute: FC = () => {
   const [logsDeploymentName, setLogsDeploymentName] = useState<string | undefined>();
   const [createDeploymentOpen, setCreateDeploymentOpen] = useState(false);
   const [submitEvalOpen, setSubmitEvalOpen] = useState(false);
+  const [importTracesOpen, setImportTracesOpen] = useState(false);
   const [deleteDeploymentTarget, setDeleteDeploymentTarget] = useState<AgentDeployment | null>(
     null
   );
@@ -194,6 +196,7 @@ export const AgentDetailRoute: FC = () => {
               deployButtonRef={deployButtonRef}
               onDeploy={() => setCreateDeploymentOpen(true)}
               onRunEvaluation={() => setSubmitEvalOpen(true)}
+              onImportTraces={() => setImportTracesOpen(true)}
             />
           }
         ></PageHeader>
@@ -298,6 +301,14 @@ export const AgentDetailRoute: FC = () => {
         workspace={workspace}
         agent={agentName}
       />
+      {agentName && importTracesOpen && (
+        <ImportTracesModal
+          open
+          onClose={() => setImportTracesOpen(false)}
+          workspace={workspace}
+          agent={agentName}
+        />
+      )}
       {createDeploymentOpen && (
         <CreateDeploymentModal
           open

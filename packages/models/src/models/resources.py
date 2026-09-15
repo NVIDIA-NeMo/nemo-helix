@@ -7,7 +7,6 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from datetime import datetime
 from typing import TypeVar
 
@@ -17,85 +16,19 @@ from nemo_platform.resources.models import ModelsResource as BaseModelsResource
 from nemo_platform.types.inference import ModelDeployment, ModelProvider
 from nemo_platform.types.inference.gateway.openai.v1 import OpenAIModelResp
 from nemo_platform.types.models import ModelEntity
+from nemo_platform_plugin.models.refs import (
+    ResolvedModelReference,
+    first_provider_ref,
+    model_entity_route_openai_url,
+    parse_workspace_name_ref,
+    resolved_model_reference,
+    served_model_name_for_entity,
+    warn_provider_host_url_resolution_failure,
+)
 
 _T = TypeVar("_T")
 _TRANSIENT_GATEWAY_STATUS_CODES = {429, 502, 503, 504}
 _logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class ResolvedModelReference:
-    """Inference route details for a workspace-qualified model reference."""
-
-    url: str
-    name: str
-    host_url: str | None
-    served_model_name: str | None = None
-
-
-def parse_workspace_name_ref(ref: str, *, label: str, expected_format: str = "workspace/name") -> tuple[str, str]:
-    """Parse a strict workspace-qualified reference."""
-    workspace, separator, name = ref.partition("/")
-    if separator != "/" or not workspace or not name or "/" in name:
-        raise ValueError(f"{label} must be in format '{expected_format}'")
-    return workspace, name
-
-
-def first_provider_ref(model_providers: list[str] | None) -> tuple[str, str, str] | None:
-    if not model_providers:
-        return None
-
-    provider_ref = model_providers[0]
-    try:
-        provider_workspace, provider_name = parse_workspace_name_ref(provider_ref, label="Provider reference")
-    except ValueError:
-        _logger.warning("Invalid provider reference format", extra={"provider_ref": provider_ref})
-        return None
-    return provider_ref, provider_workspace, provider_name
-
-
-def model_entity_route_openai_url(*, base_url: str, workspace: str, name: str) -> str:
-    """OpenAI SDK-compatible URL for a model-entity proxy route."""
-    return f"{base_url.rstrip('/')}/apis/inference-gateway/v2/workspaces/{workspace}/model/{name}/-/v1"
-
-
-def resolved_model_reference(
-    *,
-    base_url: str,
-    name: str,
-    route_workspace: str,
-    route_model_name: str,
-    host_url: str | None,
-    served_model_name: str | None = None,
-) -> ResolvedModelReference:
-    """Build route details for a resolved model entity."""
-    return ResolvedModelReference(
-        url=model_entity_route_openai_url(base_url=base_url, workspace=route_workspace, name=route_model_name),
-        name=name,
-        host_url=host_url,
-        served_model_name=served_model_name,
-    )
-
-
-def served_model_name_for_entity(provider: ModelProvider, model_entity: ModelEntity) -> str | None:
-    """Return the provider model id mapped to this Model Entity."""
-    entity_ref = f"{model_entity.workspace}/{model_entity.name}"
-    for mapping in getattr(provider, "served_models", None) or ():
-        if mapping.model_entity_id == entity_ref:
-            return mapping.served_model_name
-    return None
-
-
-def warn_provider_host_url_resolution_failure(
-    provider_ref: str,
-    exc: Exception,
-    *,
-    not_found_error_type: type[Exception],
-) -> None:
-    if isinstance(exc, not_found_error_type):
-        _logger.warning("Provider not found during host_url resolution", extra={"provider_ref": provider_ref})
-        return
-    _logger.warning("Failed to resolve provider host_url", extra={"provider_ref": provider_ref}, exc_info=True)
 
 
 def _seconds_since_creation(entry_timestamp: datetime | str | None, created_at: datetime | None) -> int | None:

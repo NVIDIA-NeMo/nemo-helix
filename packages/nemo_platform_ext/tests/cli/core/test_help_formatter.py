@@ -580,3 +580,18 @@ class TestAddWarningWithList:
         my_func()
         captured = capsys.readouterr()
         assert captured.err == ""
+
+
+def test_create_typer_app_does_not_add_completion_options():
+    """Groups (including plugin-hosted roots) leave shell completion to the root app."""
+    import typer.main
+    from nemo_platform_ext.cli.core.help_formatter import create_typer_app
+
+    app = create_typer_app(name="group", help="A group")
+
+    @app.command("noop")
+    def _noop() -> None:
+        pass
+
+    command = typer.main.get_command(app)
+    assert not any(param.name in {"install_completion", "show_completion"} for param in command.params)

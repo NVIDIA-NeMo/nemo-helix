@@ -61,9 +61,9 @@ Discovery scripts write no files. Audit scripts write only the requested
 contains instructions only.
 The trace-environment helper reports to stdout and writes only its documented
 artifacts under `.eval-author/`.
-Capability measurement can also consume a local skill-authored judgment sidecar
-for non-tool evidence; deterministic tool requirements still come from ATIF
-traces.
+Capability and failure-case measurement can also consume local skill-authored
+judgment sidecars for non-tool evidence; deterministic tool requirements and
+prohibited-tool checks still come from ATIF traces.
 
 ## Why skills instead of an agent
 

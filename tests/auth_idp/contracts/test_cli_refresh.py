@@ -136,9 +136,9 @@ def test_cli_api_command_auto_refreshes_expired_device_flow_token(
         device_authorization_endpoint=runtime_device_authorization_endpoint,
         token_endpoint=runtime_token_endpoint,
     )
-    monkeypatch.setattr("nemo_platform.client.factory.discover_nmp_config", lambda *_args, **_kwargs: runtime_oidc)
+    monkeypatch.setattr("nemo_platform.client.bootstrap.discover_nmp_config", lambda *_args, **_kwargs: runtime_oidc)
     monkeypatch.setattr(
-        "nemo_platform_ext.client.factory.discover_nmp_config",
+        "nemo_platform_ext.client.bootstrap.discover_nmp_config",
         lambda *_args, **_kwargs: runtime_oidc,
     )
 
