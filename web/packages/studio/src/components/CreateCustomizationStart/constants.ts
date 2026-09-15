@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { StartOption } from '@studio/components/CreateCustomizationStart/types';
-import { LayoutGrid, Plus } from 'lucide-react';
+import { Bookmark, LayoutGrid, Plus } from 'lucide-react';
 
 export const START_OPTIONS: StartOption[] = [
   {
@@ -11,6 +11,14 @@ export const START_OPTIONS: StartOption[] = [
     description:
       'Pick a ready-made NVIDIA recipe. It registers the model and loads the dataset for you, then opens the form filled in.',
     icon: LayoutGrid,
+    enabled: true,
+  },
+  {
+    id: 'saved',
+    title: 'Use a saved template',
+    description:
+      'Reuse a configuration you saved earlier. Opens the form filled in with everything it captured, including the dataset.',
+    icon: Bookmark,
     enabled: true,
   },
   {

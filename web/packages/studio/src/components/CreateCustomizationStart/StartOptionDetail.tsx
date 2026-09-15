@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Divider, Stack, Text } from '@nvidia/foundations-react-core';
+import { SavedTemplateGrid } from '@studio/components/CreateCustomizationStart/SavedTemplateGrid';
 import { TemplateGrid } from '@studio/components/CreateCustomizationStart/TemplateGrid';
 import type { StartOptionDetailProps } from '@studio/components/CreateCustomizationStart/types';
 import type { FC, ReactNode } from 'react';
@@ -9,6 +10,7 @@ import type { FC, ReactNode } from 'react';
 /** Whatever the chosen option still needs. "Build from scratch" needs nothing. */
 export const StartOptionDetail: FC<StartOptionDetailProps> = ({
   option,
+  workspace,
   selectedTemplateId,
   onSelectTemplate,
 }) => {
@@ -17,6 +19,16 @@ export const StartOptionDetail: FC<StartOptionDetailProps> = ({
   if (option.id === 'template') {
     content = (
       <TemplateGrid selectedTemplateId={selectedTemplateId} onSelectTemplate={onSelectTemplate} />
+    );
+  }
+
+  if (option.id === 'saved') {
+    content = (
+      <SavedTemplateGrid
+        workspace={workspace}
+        selectedTemplateId={selectedTemplateId}
+        onSelectTemplate={onSelectTemplate}
+      />
     );
   }
 

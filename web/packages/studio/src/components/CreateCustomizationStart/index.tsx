@@ -12,6 +12,11 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
+import {
+  getCustomizationJobTemplatesQueryKey,
+  listCustomizationJobTemplates,
+  templateToFormFields,
+} from '@studio/api/customization-job-templates/customizationJobTemplates';
 import { START_OPTIONS } from '@studio/components/CreateCustomizationStart/constants';
 import { StartOptionDetail } from '@studio/components/CreateCustomizationStart/StartOptionDetail';
 import type {
@@ -21,12 +26,14 @@ import type {
 import { useTemplateSetup } from '@studio/components/CreateCustomizationStart/useTemplateSetup';
 import { StartOptionCard } from '@studio/components/StartOptions/StartOptionCard';
 import { CUSTOMIZATION_TEMPLATES } from '@studio/constants/customizationTemplates';
+import { useQuery } from '@tanstack/react-query';
 import { ArrowRight } from 'lucide-react';
 import { useState, type FC } from 'react';
 
 /** Why Continue is unavailable, shown next to the disabled button. */
 const BLOCKED_HINT: Partial<Record<StartOptionId, string>> = {
   template: 'Pick a recipe to continue.',
+  saved: 'Pick a saved template to continue.',
 };
 
 export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
@@ -39,7 +46,28 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
   const { run: runTemplateSetup, statusLabel, error: templateError } = useTemplateSetup(workspace);
   const isSettingUp = statusLabel !== '';
 
+  // Same query key as the grid, so this reads the grid's cache rather than refetching.
+  const { data: savedPage } = useQuery({
+    queryKey: getCustomizationJobTemplatesQueryKey(workspace),
+    queryFn: ({ signal }) => listCustomizationJobTemplates(workspace, undefined, signal),
+    enabled: selectedId === 'saved',
+  });
+
   const selectedOption = START_OPTIONS.find((option) => option.id === selectedId) ?? null;
+
+  const selectedSavedTemplate =
+    selectedId === 'saved' && selectedTemplateId
+      ? savedPage?.data.find((template) => template.name === selectedTemplateId)
+      : undefined;
+
+  /**
+   * Form values for the picked saved template, or `undefined` when none is picked or its
+   * payload cannot be read — a template written by a newer Studio build, say. Continue stays
+   * disabled in that case rather than opening a form seeded with nothing.
+   */
+  const selectedSavedFields = selectedSavedTemplate
+    ? templateToFormFields(selectedSavedTemplate)
+    : undefined;
 
   const selectOption = (optionId: StartOptionId) => {
     // Provisioning registers models and uploads a dataset, which takes long enough that the
@@ -54,12 +82,20 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
   const canContinue =
     selectedOption !== null &&
     !isSettingUp &&
-    (selectedOption.id !== 'template' || selectedTemplateId !== null);
+    (selectedOption.id !== 'template' || selectedTemplateId !== null) &&
+    (selectedOption.id !== 'saved' || selectedSavedFields !== undefined);
 
   const handleContinue = async () => {
     if (!selectedOption) return;
     if (selectedOption.id === 'scratch') {
       onContinue({ optionId: 'scratch' });
+      return;
+    }
+    if (selectedOption.id === 'saved') {
+      // Saved templates only reference models and datasets that already exist, so unlike a
+      // curated recipe there is nothing to provision — hand the fields straight over.
+      if (selectedSavedFields)
+        onContinue({ optionId: 'saved', initialValues: selectedSavedFields });
       return;
     }
     if (selectedOption.id !== 'template' || !selectedTemplateId) return;
@@ -106,6 +142,7 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
           {selectedOption ? (
             <StartOptionDetail
               option={selectedOption}
+              workspace={workspace}
               selectedTemplateId={selectedTemplateId}
               onSelectTemplate={(id) => {
                 if (!isSettingUp) setSelectedTemplateId(id);

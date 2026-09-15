@@ -13,6 +13,7 @@ import {
 } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { agentOptimizeJobsHandlers } from '@studio/mocks/handlers/agentOptimizeJobs';
+import { customizationJobTemplatesHandlers } from '@studio/mocks/handlers/customizationJobTemplates';
 import { customizerHandlers } from '@studio/mocks/handlers/customizer';
 import { deploymentsHandlers } from '@studio/mocks/handlers/deployments';
 import { evaluatorHandlers } from '@studio/mocks/handlers/evaluator';
@@ -779,6 +780,7 @@ export const handlers = [
   ...guardrailsHandlers,
   ...insightsHandlers,
   ...agentOptimizeJobsHandlers,
+  ...customizationJobTemplatesHandlers,
 ];
 
 // Re-export EvaluateJob so consumers of this module that previously relied on

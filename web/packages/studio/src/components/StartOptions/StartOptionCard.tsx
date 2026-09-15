@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Badge, Flex, Text } from '@nvidia/foundations-react-core';
+import { SelectableCard } from '@studio/components/SelectableCard';
 import type { StartOptionCardProps } from '@studio/components/StartOptions/types';
 import type { FC } from 'react';
 
@@ -21,24 +22,14 @@ export const StartOptionCard: FC<StartOptionCardProps> = ({
   const Icon = option.icon;
   const interactive = option.enabled;
 
-  const stateClasses = !interactive
-    ? 'cursor-not-allowed border-base opacity-50'
-    : selected
-      ? 'cursor-pointer border-[#76b900]'
-      : 'cursor-pointer border-base hover:-translate-y-0.5 hover:border-[#76b900] hover:bg-surface-hover hover:shadow-md';
-
   return (
-    <button
-      type="button"
-      onClick={interactive ? onSelect : undefined}
-      aria-pressed={interactive ? selected : undefined}
-      aria-disabled={!interactive}
-      className={`flex w-full flex-col items-start rounded-md border bg-surface-raised text-left transition focus-visible:border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#76b900] ${
-        // `h-full` makes every tile match the tallest in the row (a two-line description
-        // otherwise leaves its neighbours short); the min-height keeps the row from
-        // collapsing when they all happen to be one-liners.
-        compact ? 'h-full min-h-[104px] gap-2 p-4' : 'h-[240px] gap-3 p-5'
-      } ${stateClasses}`}
+    <SelectableCard
+      selected={selected}
+      onSelect={onSelect}
+      disabled={!interactive}
+      // `h-full` makes every tile match the tallest in the row; the min-height keeps the
+      // row from collapsing when they are all one-liners.
+      className={compact ? 'h-full min-h-[104px] gap-2 p-4' : 'h-[240px] gap-3 p-5'}
     >
       {compact ? (
         <Flex align="center" gap="density-sm" className="w-full">
@@ -89,6 +80,6 @@ export const StartOptionCard: FC<StartOptionCardProps> = ({
           ) : null}
         </>
       )}
-    </button>
+    </SelectableCard>
   );
 };

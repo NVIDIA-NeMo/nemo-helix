@@ -19,6 +19,10 @@ export const CustomizationBackend = {
 } as const;
 export type CustomizationBackend = (typeof CustomizationBackend)[keyof typeof CustomizationBackend];
 
+/** Narrows opaque JSON (a saved template's payload, location state) to a known backend. */
+export const isCustomizationBackend = (value: unknown): value is CustomizationBackend =>
+  Object.values(CustomizationBackend).includes(value as CustomizationBackend);
+
 export type CustomizationJobSpec = AutomodelJobOutput | UnslothJobOutput | RlJobOutput;
 export type AutomodelJob = AutomodelJobsJob;
 export type UnslothJob = UnslothJobsJob;

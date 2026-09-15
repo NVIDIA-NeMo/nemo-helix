@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { CustomizationJobTemplateEntity } from '@studio/api/customization-job-templates/types';
 import type { StartOption as SharedStartOption } from '@studio/components/StartOptions/types';
 import type { CustomizationTemplate } from '@studio/constants/customizationTemplates';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
 
-export type StartOptionId = 'template' | 'scratch';
+export type StartOptionId = 'template' | 'saved' | 'scratch';
 
 export type StartOption = SharedStartOption<StartOptionId>;
 
@@ -13,6 +14,23 @@ export interface TemplateCardProps {
   template: CustomizationTemplate;
   selected: boolean;
   onSelect: () => void;
+}
+
+export interface SavedTemplateCardProps {
+  template: CustomizationJobTemplateEntity;
+  selected: boolean;
+  onSelect: () => void;
+  /** Disabled while a delete is in flight, so the card cannot be picked as it disappears. */
+  disabled: boolean;
+  onDelete: () => void;
+  isDeleting: boolean;
+}
+
+export interface SavedTemplateGridProps {
+  workspace: string;
+  /** Entity name of the picked template, or null while none is. */
+  selectedTemplateId: string | null;
+  onSelectTemplate: (id: string | null) => void;
 }
 
 export interface TemplateGridProps {
@@ -23,7 +41,8 @@ export interface TemplateGridProps {
 
 export interface StartOptionDetailProps {
   option: StartOption;
-  /** The picked recipe, when {@link option} is "template". */
+  workspace: string;
+  /** The picked recipe or saved template, when {@link option} calls for one. */
   selectedTemplateId: string | null;
   onSelectTemplate: (id: string | null) => void;
 }
@@ -34,7 +53,8 @@ export interface StartOptionDetailProps {
  */
 export type StartSelection =
   | { optionId: 'scratch' }
-  | { optionId: 'template'; initialValues: CustomizationFormFields };
+  | { optionId: 'template'; initialValues: CustomizationFormFields }
+  | { optionId: 'saved'; initialValues: CustomizationFormFields };
 
 export interface CreateCustomizationStartProps {
   /** Workspace the template option registers its models and datasets into. */
