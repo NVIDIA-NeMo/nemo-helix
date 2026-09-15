@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import pytest
-from nemo_deployments_plugin.backends.openshell.config import OpenShellExecutorConfig
+from nemo_deployments_plugin.backends.openshell.config import OpenShellExecutorConfig, OpenShellTLSConfig
 from pydantic import ValidationError
 
 
@@ -107,3 +107,40 @@ def test_serve_virtual_env_defaults_to_the_packaged_venv() -> None:
 def test_serve_virtual_env_is_overridable_and_can_be_disabled() -> None:
     assert OpenShellExecutorConfig.model_validate({"serve_virtual_env": "/opt/venv"}).serve_virtual_env == "/opt/venv"
     assert OpenShellExecutorConfig.model_validate({"serve_virtual_env": ""}).serve_virtual_env == ""
+
+
+def test_service_transport_defaults_to_the_gateway_endpoint_without_tls() -> None:
+    transport = OpenShellExecutorConfig(gateway_endpoint="http://127.0.0.1:17670").service_transport()
+    assert transport.connect_base == "http://127.0.0.1:17670"
+    assert transport.ca_cert is None
+    assert transport.client_cert is None
+
+
+def test_service_transport_prefers_service_router_endpoint() -> None:
+    config = OpenShellExecutorConfig(
+        gateway_endpoint="https://openshell.openshell.svc.cluster.local:8080",
+        service_router_endpoint="https://openshell-router.openshell.svc.cluster.local:8443",
+    )
+    assert config.service_transport().connect_base == "https://openshell-router.openshell.svc.cluster.local:8443"
+
+
+_TLS = OpenShellTLSConfig(ca_cert_path="/tls/ca.crt", client_cert_path="/tls/tls.crt", client_key_path="/tls/tls.key")
+
+
+def test_service_transport_carries_the_grpc_tls_material() -> None:
+    config = OpenShellExecutorConfig(gateway_endpoint="https://openshell.openshell.svc.cluster.local:8080", tls=_TLS)
+    transport = config.service_transport()
+    assert transport.ca_cert == "/tls/ca.crt"
+    assert transport.client_cert == ("/tls/tls.crt", "/tls/tls.key")
+
+
+def test_service_transport_ignores_tls_material_on_a_plaintext_channel() -> None:
+    config = OpenShellExecutorConfig(gateway_endpoint="https://gw:8080", insecure=True, tls=_TLS)
+    transport = config.service_transport()
+    assert transport.ca_cert is None
+    assert transport.client_cert is None
+
+
+def test_service_router_endpoint_must_be_a_url() -> None:
+    with pytest.raises(ValidationError, match="service_router_endpoint must be a URL"):
+        OpenShellExecutorConfig(service_router_endpoint="openshell:8080")

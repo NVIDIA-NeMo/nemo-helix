@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Literal
 from urllib.parse import urlparse
 
+from nemo_deployments_plugin.endpoint_transport import EndpointTransport
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -72,7 +73,19 @@ class OpenShellExecutorConfig(BaseModel):
         default="http://127.0.0.1:17670",
         description=(
             "OpenShell gateway endpoint as a URL (http://host:port or https://host:port). "
-            "The gRPC target is the same host:port; http implies plaintext, https implies TLS."
+            "The gRPC target is the same host:port; http implies plaintext, https implies TLS. "
+            "The serving URL a deployment advertises is minted by the gateway under its own "
+            "service-routing domain, not derived from this value."
+        ),
+    )
+    service_router_endpoint: str | None = Field(
+        default=None,
+        description=(
+            "URL the platform dials to reach exposed sandbox services (scheme://host:port). The "
+            "gateway routes those requests by Host header on the same listener it serves gRPC on, "
+            "so this defaults to gateway_endpoint and the sandbox service domain never has to "
+            "resolve from the platform. Set it only when the gateway's HTTP listener is reached "
+            "at a different address."
         ),
     )
     insecure: bool | None = Field(
@@ -143,9 +156,13 @@ class OpenShellExecutorConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_endpoint(self) -> OpenShellExecutorConfig:
-        parsed = urlparse(self.gateway_endpoint)
-        if parsed.scheme not in ("http", "https") or not parsed.hostname:
-            raise ValueError("gateway_endpoint must be a URL like http://host:port or https://host:port")
+        for name in ("gateway_endpoint", "service_router_endpoint"):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            parsed = urlparse(value)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname:
+                raise ValueError(f"{name} must be a URL like http://host:port or https://host:port")
         return self
 
     def grpc_target(self) -> str:
@@ -160,3 +177,16 @@ class OpenShellExecutorConfig(BaseModel):
         if self.insecure is not None:
             return self.insecure
         return urlparse(self.gateway_endpoint).scheme == "http"
+
+    def service_transport(self) -> EndpointTransport:
+        """How the platform dials this executor's exposed sandbox services."""
+        parsed = urlparse(self.service_router_endpoint or self.gateway_endpoint)
+        ca_cert: str | None = None
+        client_cert: tuple[str, str] | None = None
+        if not self.use_insecure() and self.tls is not None:
+            ca_cert = self.tls.ca_cert_path or None
+            if self.tls.client_cert_path and self.tls.client_key_path:
+                client_cert = (self.tls.client_cert_path, self.tls.client_key_path)
+        return EndpointTransport(
+            connect_base=f"{parsed.scheme}://{parsed.netloc}", ca_cert=ca_cert, client_cert=client_cert
+        )
