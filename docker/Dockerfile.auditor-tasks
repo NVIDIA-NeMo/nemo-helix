@@ -29,6 +29,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /bin/uv
 COPY docker/scripts/collect-python-sdists.py /usr/local/bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
+    UV_HTTP_TIMEOUT=120 \
     UV_LINK_MODE=copy
 
 WORKDIR /app
