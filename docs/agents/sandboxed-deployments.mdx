@@ -105,7 +105,7 @@ nemo agents package \
   --tag "$AGENT_NAME:0.1"
 ```
 
-The build takes a few minutes and produces an image of a few gigabytes. A long pause while the base image's default user is removed is normal.
+The build produces an image of a few gigabytes. A long pause while the base image's default user is removed is normal.
 
 Check the result:
 
@@ -144,7 +144,7 @@ nemo agents deploy \
   --timeout 600
 ```
 
-The command reports `pending`, then `starting`, then `running`, usually within a minute, and ends with a line like:
+The command reports `pending`, then `starting`, then `running`, and ends with a line like:
 
 ```
 Deployment 'sandbox-hello-sandbox' is running at http://default--nmp-d5936a3706f615--http.openshell.localhost:8080/
@@ -168,14 +168,15 @@ nemo agents invoke --agent-deployment "$AGENT_NAME-sandbox" \
   --input "In one sentence, where are you running?"
 ```
 
-The reply comes back in about ten seconds as a chat completion. The `content` should be a real sentence. If it is empty and you chose a reasoning model, switch to a chat model and redeploy.
+The reply is a chat completion. The `content` should be a real sentence. If it is empty and you chose a reasoning model, switch to a chat model and redeploy.
 
 ## Confirm the sandbox is closed
 
-The sandbox is named after the deployment. Get its name and run two commands inside it:
+The sandbox carries the deployment name as a label. Look it up by that label and run two commands inside it:
 
 ```sh
-export SBX=$(openshell sandbox list | grep -o 'nmp-[0-9a-f]*' | head -1)
+export SBX=$(openshell sandbox list --names \
+  --selector "nemo.nvidia.com/deployment-name=$AGENT_NAME-sandbox")
 
 openshell sandbox exec --name "$SBX" -- curl -sS -m 5 https://example.com
 openshell sandbox exec --name "$SBX" -- curl -sS -m 5 \
