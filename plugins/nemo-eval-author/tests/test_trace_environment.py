@@ -512,6 +512,7 @@ def _candidate(
     status: str = "candidate",
     ground_truth: dict[str, Any] | None = None,
     software_requirements: list[dict[str, Any]] | None = None,
+    state_basis: str | None = None,
 ) -> None:
     if ground_truth is None:
         ground_truth = {
@@ -555,6 +556,8 @@ def _candidate(
             "ground_truth": ground_truth,
             "software_requirements": software_requirements,
         }
+    if state_basis is not None:
+        payload["state_basis"] = state_basis
     _write_json(task_dir / "candidate.json", payload)
 
 
@@ -758,11 +761,14 @@ def _ready_environment(
     oracle_reward: float = 1.0,
     oracle_exception: object | None = None,
     record_validation: bool = True,
+    run_suffix: str = "",
+    check_rows: bool = True,
+    allow_aggregate: bool = False,
 ) -> None:
     task = task_dir / "task"
-    (task / "environment").mkdir(parents=True)
-    (task / "tests").mkdir()
-    (task / "solution").mkdir()
+    (task / "environment").mkdir(parents=True, exist_ok=True)
+    (task / "tests").mkdir(exist_ok=True)
+    (task / "solution").mkdir(exist_ok=True)
     verifier = f'\n[verifier]\nenvironment_mode = "{mode}"\n'
     if mode == "separate":
         verifier += 'network_mode = "no-network"\n\n[verifier.environment]\nnetwork_mode = "no-network"\n'
@@ -801,7 +807,15 @@ The human reviewer confirmed that this fixture accurately represents the recorde
 """,
         encoding="utf-8",
     )
-    (task / "tests" / "test.sh").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    (task / "tests" / "test.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "# Fixture check: in the task container this asserts /workspace/repaired exists.\n"
+        "status=FAIL\n"
+        "if test -f /workspace/repaired || test ! -e /logs; then status=PASS; fi\n"
+        "printf 'fixture-repaired\\t%s\\n' \"$status\">> /logs/verifier/results 2>/dev/null || true\n"
+        'test "$status" = PASS\n',
+        encoding="utf-8",
+    )
     if mode == "separate":
         (task / "tests" / "Dockerfile").write_text(
             "FROM scratch\nCOPY test.sh /tests/test.sh\n",
@@ -814,11 +828,11 @@ The human reviewer confirmed that this fixture accurately represents the recorde
     control_source = task_dir / "private" / "negative_agent.py"
     control_source.write_text("# Synthetic incomplete repair implementation.\n", encoding="utf-8")
     for job_number, arm, reward, exception in (
-        (1, "nop-1", nop_reward, None),
-        (2, "nop-2", nop_reward, None),
-        (3, "oracle-1", oracle_reward, oracle_exception),
-        (4, "oracle-2", oracle_reward, oracle_exception),
-        (5, "negative-1", 0.0, None),
+        (1, f"nop-1{run_suffix}", nop_reward, None),
+        (2, f"nop-2{run_suffix}", nop_reward, None),
+        (3, f"oracle-1{run_suffix}", oracle_reward, oracle_exception),
+        (4, f"oracle-2{run_suffix}", oracle_reward, oracle_exception),
+        (5, f"negative-1{run_suffix}", 0.0, None),
     ):
         proof_arm = arm.rsplit("-", 1)[0]
         if mode == "separate":
@@ -847,6 +861,10 @@ The human reviewer confirmed that this fixture accurately represents the recorde
             assert code == 0, result
         trial = task_dir / "private" / "jobs" / arm / "task__trial"
         trial.mkdir(parents=True)
+        check_status = "PASS" if reward == 1.0 and proof_arm == "oracle" else "FAIL"
+        if check_rows:
+            (trial / "verifier").mkdir()
+            (trial / "verifier" / "results").write_text(f"fixture-repaired\t{check_status}\n", encoding="utf-8")
         _write_json(
             trial / "result.json",
             {
@@ -855,7 +873,7 @@ The human reviewer confirmed that this fixture accurately represents the recorde
                 "verifier_result": {"rewards": {"reward": reward}},
                 "exception_info": exception,
                 "config": {
-                    "job_id": f"job-{job_number}",
+                    "job_id": f"job-{job_number}{run_suffix}",
                     "agent": {"name": proof_arm if proof_arm != "negative" else "negative_agent:IncompleteRepair"},
                 },
             },
@@ -866,17 +884,18 @@ The human reviewer confirmed that this fixture accurately represents the recorde
             "--task-dir",
             str(task_dir),
             "--nop-job-dir",
-            "private/jobs/nop-1",
+            f"private/jobs/nop-1{run_suffix}",
             "--nop-job-dir",
-            "private/jobs/nop-2",
+            f"private/jobs/nop-2{run_suffix}",
             "--oracle-job-dir",
-            "private/jobs/oracle-1",
+            f"private/jobs/oracle-1{run_suffix}",
             "--oracle-job-dir",
-            "private/jobs/oracle-2",
+            f"private/jobs/oracle-2{run_suffix}",
             "--negative-job-dir",
-            "private/jobs/negative-1",
+            f"private/jobs/negative-1{run_suffix}",
             "--harbor-version",
             "0.21.0",
+            *(["--allow-aggregate-only"] if allow_aggregate else []),
         )
         assert code == 0, result
 
@@ -1830,7 +1849,7 @@ def test_export_uses_a_strict_publication_whitelist(tmp_path: Path) -> None:
     assert not (output / "safe").exists()
     assert not (output / "private").exists()
     product = json.loads((output / "result.json").read_text(encoding="utf-8"))
-    assert product["schema"] == "nemo.eval_author.trace_environment_product.v3"
+    assert product["schema"] == "nemo.eval_author.trace_environment_product.v4"
     assert product["reproducibility"]["contamination_passed"] is True
     assert product["technical_validation"]["minimum_runs"] == {"negative": 1, "nop": 2, "oracle": 2}
     assert product["technical_validation"]["distinct_jobs"] is True
@@ -2474,3 +2493,446 @@ def test_init_rejects_unsafe_task_ids(tmp_path: Path, task_id: str) -> None:
         check=False,
     )
     assert result.returncode != 0
+
+
+def _adopt_probe_job(task_dir: Path, name: str, arm: str, reward: float) -> str:
+    job = task_dir / "private" / "adopted" / name / "task__trial"
+    job.mkdir(parents=True)
+    (job / "verifier").mkdir()
+    (job / "verifier" / "results").write_text(
+        f"fixture-repaired\t{'PASS' if reward == 1.0 else 'FAIL'}\n", encoding="utf-8"
+    )
+    _write_json(
+        job / "result.json",
+        {
+            "task_checksum": "0" * 64,
+            "verifier_environment_mode": "separate",
+            "verifier_result": {"rewards": {"reward": reward}},
+            "exception_info": None,
+            "config": {"job_id": f"probe-{name}", "agent": {"name": arm}},
+        },
+    )
+    return str((task_dir / "private" / "adopted" / name).relative_to(task_dir))
+
+
+def test_validate_task_reports_ok_for_a_compliant_task(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir)
+
+    code, result = _run("validate-task", "--task-dir", str(task_dir))
+
+    assert code == 0, result
+    assert result["ok"] is True
+    assert result["issues"] == []
+
+
+def test_validate_task_collects_contract_issues_with_hints(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    task = task_dir / "task"
+    (task / "environment").mkdir(parents=True)
+    (task / "tests").mkdir()
+    (task / "solution").mkdir()
+    (task / "task.toml").write_text('[verifier]\nenvironment_mode = "shared"\n', encoding="utf-8")
+    (task / "instruction.md").write_text("Repair the fixture.\n", encoding="utf-8")
+    (task / "tests" / "test.sh").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    (task / "solution" / "solve.sh").write_text("#!/usr/bin/env bash\ntrue\n", encoding="utf-8")
+
+    code, result = _run("validate-task", "--task-dir", str(task_dir))
+
+    assert code == 1
+    assert result["ok"] is False
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "missing_required_file" in codes  # README.md
+    assert "task_contract" in codes  # shared verifier fails fast; fixed files surface verifier_contract next pass
+    assert "missing_check_rows" in codes
+    assert all(issue["hint"] for issue in result["issues"])
+
+
+def test_validate_task_flags_copyable_literals_and_syntax_only_checks(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir)
+    instruction = "Repair the widget calibration fixture exactly as specified.\n"
+    (task_dir / "task" / "instruction.md").write_text(instruction, encoding="utf-8")
+    (task_dir / "task" / "tests" / "test.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "status=FAIL\n"
+        'if grep -q "Repair the widget calibration fixture exactly as specified." /workspace/out.txt; then status=PASS; fi\n'
+        "printf 'fixture-repaired\\t%s\\n' \"$status\" >> /logs/verifier/results\n"
+        'if sh -n /workspace/run.sh; then printf "parses-ok\\tPASS\\n" >> /logs/verifier/results; fi\n'
+        'test "$status" = PASS\n',
+        encoding="utf-8",
+    )
+
+    code, result = _run("validate-task", "--task-dir", str(task_dir))
+
+    assert code == 1
+    codes = [issue["code"] for issue in result["issues"]]
+    assert "copyable_literal" in codes
+    assert "syntax_only_check" in codes
+
+
+def test_probe_adopts_diagnostic_jobs_and_caches_by_task_digest(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir)
+    evidence = _adopt_probe_job(task_dir, "nop-a", "nop", 0.0)
+
+    code, result = _run("probe", "--task-dir", str(task_dir), "--arm", "nop", "--results-from", evidence)
+
+    assert code == 0, result
+    assert result["diagnostic_only"] is True
+    nop = result["results"][0]
+    assert nop["status"] == "recorded"
+    assert nop["reward"] == 0.0
+    assert nop["checks"] == [{"check_id": "fixture-repaired", "status": "FAIL"}]
+    assert nop["probes_remaining"] == 1
+
+    code, cached = _run("probe", "--task-dir", str(task_dir), "--arm", "nop")
+    assert code == 0, cached
+    assert cached["results"][0]["cached"] is True
+    ledger = json.loads((task_dir / "private" / "probes" / "probes.json").read_text(encoding="utf-8"))
+    assert len(ledger["entries"]) == 1
+
+
+def test_probe_budget_is_two_per_arm_revision(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir)
+    first = _adopt_probe_job(task_dir, "nop-a", "nop", 0.0)
+    second = _adopt_probe_job(task_dir, "nop-b", "nop", 0.0)
+    third = _adopt_probe_job(task_dir, "nop-c", "nop", 0.0)
+
+    for evidence in (first, second):
+        code, result = _run("probe", "--task-dir", str(task_dir), "--arm", "nop", "--results-from", evidence)
+        assert code == 0, result
+    code, result = _run("probe", "--task-dir", str(task_dir), "--arm", "nop", "--results-from", third)
+
+    assert code == 1
+    assert "probe budget exhausted" in result["error"]
+
+
+def test_probe_rejects_wrong_agent_and_stays_outside_proof(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir)
+    evidence = _adopt_probe_job(task_dir, "oracle-a", "oracle", 1.0)
+
+    code, result = _run("probe", "--task-dir", str(task_dir), "--arm", "nop", "--results-from", evidence)
+    assert code == 1
+    assert "must identify the nop agent" in result["error"]
+
+    code, result = _run(
+        "record-run-inputs",
+        "--task-dir",
+        str(task_dir),
+        "--job-dir",
+        "private/probes/jobs/sneaky-1",
+        "--arm",
+        "nop",
+    )
+    assert code == 1
+    assert "private/probes" in result["error"]
+
+
+def test_record_validation_requires_per_check_rows_by_default(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir, check_rows=False, record_validation=False)
+
+    code, result = _run(
+        "record-validation",
+        "--task-dir",
+        str(task_dir),
+        "--nop-job-dir",
+        "private/jobs/nop-1",
+        "--nop-job-dir",
+        "private/jobs/nop-2",
+        "--oracle-job-dir",
+        "private/jobs/oracle-1",
+        "--oracle-job-dir",
+        "private/jobs/oracle-2",
+        "--negative-job-dir",
+        "private/jobs/negative-1",
+        "--harbor-version",
+        "0.21.0",
+    )
+
+    assert code == 1
+    assert "missing_check_evidence" in result["error"]
+
+
+def test_record_validation_allows_historical_aggregate_only_proof(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir, check_rows=False, allow_aggregate=True)
+    _review_privacy(task_dir, reviewer_kind="human")
+
+    code, result = _run("finalize", "--task-dir", str(task_dir), "--status", "candidate", "--human-reviewed")
+
+    assert code == 0, result
+    validation = json.loads((task_dir / "validation.json").read_text(encoding="utf-8"))
+    assert validation["check_evidence"] == "aggregate_only"
+    code, check = _run("check", "--task-dir", str(task_dir))
+    assert code == 0, check
+
+
+def test_record_validation_rejects_mixed_check_evidence(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir, record_validation=False)
+    (task_dir / "private" / "jobs" / "oracle-1" / "task__trial" / "verifier" / "results").unlink()
+
+    code, result = _run(
+        "record-validation",
+        "--task-dir",
+        str(task_dir),
+        "--nop-job-dir",
+        "private/jobs/nop-1",
+        "--nop-job-dir",
+        "private/jobs/nop-2",
+        "--oracle-job-dir",
+        "private/jobs/oracle-1",
+        "--oracle-job-dir",
+        "private/jobs/oracle-2",
+        "--negative-job-dir",
+        "private/jobs/negative-1",
+        "--harbor-version",
+        "0.21.0",
+    )
+
+    assert code == 1
+    assert "every proof job or none" in result["error"]
+
+
+def test_record_validation_rejects_nop_passing_a_scored_check(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir, record_validation=False)
+    (task_dir / "private" / "jobs" / "nop-1" / "task__trial" / "verifier" / "results").write_text(
+        "fixture-repaired\tPASS\n", encoding="utf-8"
+    )
+
+    code, result = _run(
+        "record-validation",
+        "--task-dir",
+        str(task_dir),
+        "--nop-job-dir",
+        "private/jobs/nop-1",
+        "--nop-job-dir",
+        "private/jobs/nop-2",
+        "--oracle-job-dir",
+        "private/jobs/oracle-1",
+        "--oracle-job-dir",
+        "private/jobs/oracle-2",
+        "--negative-job-dir",
+        "private/jobs/negative-1",
+        "--harbor-version",
+        "0.21.0",
+    )
+
+    assert code == 1
+    assert "untouched environment passes scored checks" in result["error"]
+
+
+def test_record_validation_records_per_check_evidence(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir)
+
+    validation = json.loads((task_dir / "validation.json").read_text(encoding="utf-8"))
+
+    assert validation["check_evidence"] == "per_check"
+    assert validation["runs"]["oracle"][0]["checks"] == [{"check_id": "fixture-repaired", "status": "PASS"}]
+    assert validation["runs"]["nop"][0]["checks"] == [{"check_id": "fixture-repaired", "status": "FAIL"}]
+    code, check = _run("check", "--task-dir", str(task_dir))
+    assert code == 0, check
+
+
+def test_repair_archives_failed_proof_and_allows_fresh_proof(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir, oracle_reward=0.0, oracle_exception={"type": "RuntimeError"})
+    failed_validation = (task_dir / "validation.json").read_bytes()
+
+    code, result = _run(
+        "record-repair",
+        "--task-dir",
+        str(task_dir),
+        "--reason-code",
+        "oracle_failure",
+        "--note",
+        "The reference solution installed the wrong fixture variant.",
+    )
+
+    assert code == 0, result
+    assert result["repairs_remaining"] == 2
+    assert not (task_dir / "validation.json").exists()
+    assert not (task_dir / "reproducibility.json").exists()
+    archived = task_dir / "private" / "repairs" / "repair-1" / "validation.json"
+    assert archived.is_file() and archived.read_bytes() == failed_validation
+
+    # Fix the task, then re-prove with a fresh, distinct job set.
+    (task_dir / "task" / "solution" / "solve.sh").write_text(
+        "#!/usr/bin/env bash\ntouch repaired\n# fixed variant\n", encoding="utf-8"
+    )
+    _ready_environment(task_dir, run_suffix="b")
+    _review_privacy(task_dir, reviewer_kind="human")
+    code, result = _run("finalize", "--task-dir", str(task_dir), "--status", "candidate", "--human-reviewed")
+    assert code == 0, result
+    summary = json.loads((task_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["environment"]["status"] == "ready"
+    code, check = _run("check", "--task-dir", str(task_dir))
+    assert code == 0, check
+    assert check["repairs"] == 1
+
+
+def test_repair_requires_recorded_proof_and_refuses_after_finalize(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+
+    code, result = _run(
+        "record-repair",
+        "--task-dir",
+        str(task_dir),
+        "--reason-code",
+        "verifier_defect",
+        "--note",
+        "Nothing to repair yet.",
+    )
+    assert code == 1
+    assert "proof attempt" in result["error"]
+
+    _ready_environment(task_dir)
+    _review_privacy(task_dir)
+    code, result = _run("finalize", "--task-dir", str(task_dir), "--status", "candidate")
+    assert code == 0, result
+    code, result = _run(
+        "record-repair",
+        "--task-dir",
+        str(task_dir),
+        "--reason-code",
+        "verifier_defect",
+        "--note",
+        "Post-finalize repairs are not allowed.",
+    )
+    assert code == 1
+    assert "before finalize" in result["error"]
+
+
+def test_repair_budget_is_bounded(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir, oracle_reward=0.0)
+    for index, suffix in enumerate(("b", "c", "d"), start=1):
+        code, result = _run(
+            "record-repair",
+            "--task-dir",
+            str(task_dir),
+            "--reason-code",
+            "oracle_failure",
+            "--note",
+            f"Repair attempt {index}: adjust the reference fixture setup.",
+        )
+        assert code == 0, result
+        _ready_environment(task_dir, oracle_reward=0.0, run_suffix=suffix)
+
+    code, result = _run(
+        "record-repair",
+        "--task-dir",
+        str(task_dir),
+        "--reason-code",
+        "oracle_failure",
+        "--note",
+        "A fourth repair must be refused.",
+    )
+
+    assert code == 1
+    assert "repair budget exhausted" in result["error"]
+
+
+def test_repair_ledger_detects_tampered_archive(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir, oracle_reward=0.0)
+    code, result = _run(
+        "record-repair",
+        "--task-dir",
+        str(task_dir),
+        "--reason-code",
+        "oracle_failure",
+        "--note",
+        "The reference solution installed the wrong fixture variant.",
+    )
+    assert code == 0, result
+    archived = task_dir / "private" / "repairs" / "repair-1" / "validation.json"
+    archived.write_text("{}", encoding="utf-8")
+
+    code, check = _run("check", "--task-dir", str(task_dir))
+
+    assert code == 1
+    assert any("repair 1 archive" in error for error in check["errors"])
+
+
+def test_reconstructed_state_basis_flows_to_the_public_product(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir, state_basis="reconstructed")
+    _ready_environment(task_dir)
+    _review_privacy(task_dir, reviewer_kind="human")
+    code, result = _run("finalize", "--task-dir", str(task_dir), "--status", "candidate", "--human-reviewed")
+    assert code == 0, result
+    output = tmp_path / "product"
+    _review_publication(task_dir)
+    code, result = _run("export", "--task-dir", str(task_dir), "--output-dir", str(output))
+    assert code == 0, result
+
+    product = json.loads((output / "result.json").read_text(encoding="utf-8"))
+    assert product["schema"] == "nemo.eval_author.trace_environment_product.v4"
+    assert product["state_basis"] == "reconstructed"
+    assert product["repairs"] == 0
+    assert product["technical_validation"]["check_evidence"] == "per_check"
+    markdown = (task_dir / "summary.md").read_text(encoding="utf-8")
+    assert "State basis: `reconstructed`" in markdown
+
+
+def test_state_basis_rejects_unknown_values(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir, state_basis="imagined")
+    _ready_environment(task_dir)
+    _review_privacy(task_dir)
+
+    code, result = _run("finalize", "--task-dir", str(task_dir), "--status", "candidate")
+
+    assert code == 1
+    assert "state_basis" in result["error"]
+
+
+def test_batch_status_surfaces_repair_counts(tmp_path: Path) -> None:
+    task_dir, source = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir, oracle_reward=0.0)
+    code, result = _run(
+        "record-repair",
+        "--task-dir",
+        str(task_dir),
+        "--reason-code",
+        "oracle_failure",
+        "--note",
+        "The reference solution installed the wrong fixture variant.",
+    )
+    assert code == 0, result
+    manifest = tmp_path / "manifest.json"
+    _write_json(
+        manifest,
+        {
+            "schema": "nemo.eval_author.trace_environment_batch.v1",
+            "members": [{"task_id": task_dir.name, "atif": str(source), "source_kind": "atif"}],
+        },
+    )
+
+    code, result = _run("batch-status", "--root", str(task_dir.parent), "--manifest", str(manifest))
+
+    assert code == 0, result
+    assert result["members"][0]["repairs"] == 1

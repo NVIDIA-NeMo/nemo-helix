@@ -50,6 +50,56 @@ convenience. Record any evidence-backed generalization explicitly. If necessary
 dependencies or outputs cannot be supported within isolation, retain that
 limitation rather than silently substituting an easier task.
 
+## Authoring-time diagnostics
+
+Two commands support the authoring loop before formal proof. Both are
+**diagnostic only**: their output never appears in `validation.json`, and
+`record-run-inputs` refuses job directories under `private/probes/`, so
+probe jobs can never be cited as proof.
+
+```bash
+python <skill_dir>/scripts/trace_environment.py validate-task --task-dir <task-dir>
+python <skill_dir>/scripts/trace_environment.py probe --task-dir <task-dir> [--arm nop|oracle|both]
+```
+
+`validate-task` lints the task tree and reports machine-readable issues with
+remediation hints: missing files, the verifier isolation contract, README
+sections, the per-check grammar, and copyable literals (see
+`references/check-grammar.md`). Do not run `probe` while issues remain.
+
+`probe` runs one NOP and one Oracle Harbor job against the current tree (or
+adopts an existing job with `--results-from`), returning rewards and per-check
+rows. Probes are keyed by the task-tree digest: an unchanged tree replays the
+cached result, and each distinct revision allows two probes per arm — iterate
+on the task, not on repeated identical runs. A probe NOP failing every check
+and a probe Oracle passing every check is the expected shape of a fair task;
+anything else needs a task fix before formal proof. When Harbor or Docker is
+missing, `probe` reports `not_run` and candidacy is unaffected.
+
+## Bounded repair loop
+
+Failed proof remains technical evidence, but it no longer ends the task. When
+proof or probe evidence shows a fixable defect, classify it and record the
+repair before editing:
+
+```bash
+python <skill_dir>/scripts/trace_environment.py record-repair \
+  --task-dir <task-dir> --reason-code <code> --note "<what changes and why>"
+```
+
+Reason codes: `verifier_defect`, `environment_build_failure`,
+`instruction_ambiguity`, `oracle_failure`, `nop_contamination`,
+`negative_control_failure`, `probe_mismatch`, `runtime_incompatible`, `other`
+(with a concrete note). The command archives the superseded `validation.json`
+and `reproducibility.json` under `private/repairs/repair-<n>/` and requires a
+fresh `record-reproducibility` and a complete fresh proof set afterward. At
+most three repairs are recorded per task; beyond the budget, finalize the
+environment as failed instead of repairing further. Repairs apply before
+`finalize`: a finalized failed environment stays failed and becomes input to
+the next batch report, not to in-place editing. Never weaken the verifier to
+make Oracle pass; a repair that only loosens checks is itself a
+`verifier_defect`.
+
 ## Network isolation
 
 In addition to the separate no-network verifier contract, require the agent

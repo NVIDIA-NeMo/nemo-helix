@@ -151,6 +151,14 @@ def _not_for_names(frontmatter: dict) -> set[str]:
     return {entry.split("(", 1)[0].strip() for entry in frontmatter["not-for"]}
 
 
+def _allowed_tools(frontmatter: dict) -> set[str]:
+    """Normalize allowed-tools: a YAML list (legacy) or the agentskills.io string form."""
+    value = frontmatter["allowed-tools"]
+    if isinstance(value, str):
+        return set(value.replace(",", " ").split())
+    return set(value)
+
+
 def _frontmatter_and_body(skill_dir: Path) -> tuple[dict, str]:
     text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
     assert text.startswith("---\n"), f"{skill_dir.name}/SKILL.md must open with YAML frontmatter"

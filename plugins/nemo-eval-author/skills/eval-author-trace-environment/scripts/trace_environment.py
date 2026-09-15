@@ -16,6 +16,7 @@ import re
 import shlex
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -41,11 +42,13 @@ SCHEMA = "nemo.eval_author.trace_environment_summary.v2"
 CANDIDATE_SCHEMA = "nemo.eval_author.trace_environment_candidate.v2"
 VALIDATION_SCHEMA = "nemo.eval_author.trace_environment_validation.v5"
 RUN_INPUT_SCHEMA = "nemo.eval_author.trace_environment_run_input.v1"
+PROBE_SCHEMA = "nemo.eval_author.trace_environment_probes.v1"
+REPAIR_SCHEMA = "nemo.eval_author.trace_environment_repair.v1"
 PRIVACY_AUDIT_SCHEMA = "nemo.eval_author.trace_environment_privacy_audit.v1"
 PUBLICATION_REVIEW_SCHEMA = "nemo.eval_author.trace_environment_publication_review.v1"
 TOOL_CALL_GENERATION_SCHEMA = "nemo.eval_author.trace_environment_tool_call_generation.v1"
 REPRODUCIBILITY_SCHEMA = "nemo.eval_author.trace_environment_reproducibility.v3"
-EXPORT_SCHEMA = "nemo.eval_author.trace_environment_product.v3"
+EXPORT_SCHEMA = "nemo.eval_author.trace_environment_product.v4"
 BATCH_SCHEMA = "nemo.eval_author.trace_environment_batch.v1"
 TOOL_CALL_AUDIT_LOG = "/tmp/tool-call-fixture-audit.jsonl"  # nosec B108 - isolated task-container scratch data
 MAX_RAW_SOURCE_BYTES = 128 * 1024 * 1024
@@ -75,6 +78,27 @@ _ORGANIZATION = re.compile(
     r"(?:Corporation|Corp|Company|Inc|LLC|Ltd|University|Laboratories|Labs)\b"
 )
 _PERSON = re.compile(r"\b[A-Z][a-z]{2,20}\s+[A-Z][a-z]{2,20}\b")
+_CHECK_ROW = re.compile(r"([a-z0-9]+(?:-[a-z0-9]+)*)\t(PASS|FAIL)")
+_CHECK_WRITER = re.compile(r">>?\s*[\"']?/logs/verifier/results[\"']?")
+_CHECK_ID_IN_FORMAT = re.compile(r"\b([a-z0-9]+(?:-[a-z0-9]+)*)\\t")
+_SYNTAX_ONLY = re.compile(r"^(?:(?:ba)?sh\s+-n|node\s+--check|php\s+-l)\s+[^;|&]+$")
+_QUOTED_LITERAL = re.compile(r"'([^'\\]{16,})'" + '|"([^"\\\\]{16,})"')
+_RESULTS_PATH = "/logs/verifier/results"
+_REPAIR_REASON_CODES = frozenset(
+    {
+        "verifier_defect",
+        "environment_build_failure",
+        "instruction_ambiguity",
+        "oracle_failure",
+        "nop_contamination",
+        "negative_control_failure",
+        "probe_mismatch",
+        "runtime_incompatible",
+        "other",
+    }
+)
+_MAX_REPAIRS = 3
+_MAX_PROBES_PER_REVISION = 2
 _REDACTION_QUOTE = '<redacted>"'
 _IMAGE_OBJECT_START = re.compile(r'\{\s*"type"\s*:\s*"image"')
 _IDENTIFIER_KEYS = frozenset(
@@ -1444,10 +1468,13 @@ def _validate_software_requirements(value: Any, step_ids: set[int]) -> list[dict
 
 def _validate_candidate(task_dir: Path, status: str, step_ids: set[int]) -> dict[str, Any]:
     candidate = _load_object(task_dir / "candidate.json", label="candidate")
-    if set(candidate) != _CANDIDATE_KEYS:
+    if set(candidate) not in (_CANDIDATE_KEYS, _CANDIDATE_KEYS | {"state_basis"}):
         raise ContractError("candidate fields do not match the versioned contract")
     if candidate.get("schema") != CANDIDATE_SCHEMA:
         raise ContractError(f"candidate.schema must be {CANDIDATE_SCHEMA!r}")
+    state_basis = candidate.get("state_basis", "recorded")
+    if state_basis not in ("recorded", "reconstructed"):
+        raise ContractError("candidate.state_basis must be 'recorded' or 'reconstructed'")
     if candidate.get("status") != status:
         raise ContractError("candidate status does not match the requested summary status")
     if candidate.get("decision_basis") != "safe_atif_only":
@@ -1904,6 +1931,431 @@ def _validate_task(task_dir: Path) -> dict[str, Any]:
     }
 
 
+def _check_grammar_issues(task_dir: Path) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Static per-check grammar and triviality lint for task/tests/test.sh."""
+
+    issues: list[dict[str, str]] = []
+    advisories: list[dict[str, str]] = []
+    test_path = task_dir / "task" / "tests" / "test.sh"
+    if test_path.is_symlink() or not test_path.is_file():
+        return issues, advisories  # reported by the required-file lint
+    try:
+        text = test_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        issues.append(
+            {
+                "code": "test_not_utf8",
+                "path": "task/tests/test.sh",
+                "hint": "Write tests/test.sh as UTF-8 text.",
+            }
+        )
+        return issues, advisories
+    writer_lines = [line for line in text.splitlines() if _RESULTS_PATH in line]
+    if not any(_CHECK_WRITER.search(line) for line in writer_lines):
+        issues.append(
+            {
+                "code": "missing_check_rows",
+                "path": "task/tests/test.sh",
+                "hint": "Emit one '<check-id>\\tPASS|FAIL' row per scored check to /logs/verifier/results; see references/check-grammar.md.",
+            }
+        )
+    check_ids: list[str] = []
+    any_quoted = re.compile(r"'([^']*)'|\"([^\"]*)\"")
+    for line in writer_lines:
+        if not _CHECK_WRITER.search(line):
+            continue
+        for pair in any_quoted.findall(line):
+            value = next(group for group in pair if group)
+            check_ids.extend(_CHECK_ID_IN_FORMAT.findall(value))
+    duplicates = sorted({check_id for check_id in check_ids if check_ids.count(check_id) > 1})
+    if duplicates:
+        issues.append(
+            {
+                "code": "duplicate_check_id",
+                "path": "task/tests/test.sh",
+                "hint": f"Check IDs must be unique and stable; duplicates: {', '.join(duplicates)}.",
+            }
+        )
+    for match in re.finditer(r"(?m)^\s*if\s+([^;]+);\s*then", text):
+        if _SYNTAX_ONLY.fullmatch(match.group(1).strip()):
+            issues.append(
+                {
+                    "code": "syntax_only_check",
+                    "path": "task/tests/test.sh",
+                    "hint": "A syntax parse (sh -n, node --check, php -l) proves nothing about behavior; assert an observable outcome instead.",
+                }
+            )
+    # Triviality: a long expected literal the agent can copy verbatim from its
+    # own inputs is not evidence of work (the deterministic copy baseline).
+    # Only assertion-context lines are scanned; a runnable command the
+    # instruction names is a legitimate test target, not a leak.
+    assertion_line = re.compile(r"\b(?:grep|cmp|diff|sha256sum|assert|jq|test)\b|==|=~")
+    expected_literals: set[str] = set()
+    for line in text.splitlines():
+        if not assertion_line.search(line):
+            continue
+        for literal_pair in _QUOTED_LITERAL.findall(line):
+            value = next(group for group in literal_pair if group)
+            if value.startswith(("/", "task", "tests")) or value in check_ids or "\\t" in value:
+                continue
+            expected_literals.add(value)
+    searchable: list[tuple[str, str]] = []
+    for relative in ("task/instruction.md",):
+        path = task_dir / relative
+        if path.is_file() and not path.is_symlink():
+            searchable.append((relative, path.read_text(encoding="utf-8", errors="replace")))
+    environment = task_dir / "task" / "environment"
+    if environment.is_dir():
+        for path in sorted(environment.rglob("*")):
+            if path.is_file() and not path.is_symlink() and path.stat().st_size <= 1024 * 1024:
+                relative = f"task/environment/{path.relative_to(environment).as_posix()}"
+                searchable.append((relative, path.read_text(encoding="utf-8", errors="replace")))
+    for value in sorted(expected_literals):
+        for relative, content in searchable:
+            if value in content:
+                target = issues if len(value) >= 24 else advisories
+                target.append(
+                    {
+                        "code": "copyable_literal",
+                        "path": "task/tests/test.sh",
+                        "hint": (
+                            "An expected literal also appears verbatim in "
+                            f"{relative}; derive the expectation or keep it verifier-private so copying cannot pass."
+                        ),
+                    }
+                )
+                break
+    return issues, advisories
+
+
+def _validate_task_issues(task_dir: Path) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Collect authoring-stage issues without failing fast (validate-task)."""
+
+    issues: list[dict[str, str]] = []
+    root = task_dir / "task"
+    if root.is_symlink() or not root.is_dir():
+        return (
+            [
+                {
+                    "code": "missing_task_tree",
+                    "path": "task",
+                    "hint": "Create the Harbor task tree under <task-dir>/task before validating.",
+                }
+            ],
+            [],
+        )
+    for relative in ("task.toml", "instruction.md", "tests/test.sh", "solution/solve.sh", "README.md"):
+        path = root / relative
+        if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
+            issues.append(
+                {
+                    "code": "missing_required_file",
+                    "path": f"task/{relative}",
+                    "hint": f"Author a nonempty task/{relative}; see SKILL.md step 6.",
+                }
+            )
+    if not (root / "environment").is_dir() or (root / "environment").is_symlink():
+        issues.append(
+            {
+                "code": "missing_required_directory",
+                "path": "task/environment",
+                "hint": "Create task/environment/ (empty is allowed) holding task prerequisites.",
+            }
+        )
+    try:
+        _validate_task(task_dir)
+    except ContractError as error:
+        message = str(error)
+        code = "verifier_contract" if "network" in message or "verifier" in message else "task_contract"
+        hint = (
+            "Set [verifier].environment_mode='separate', both no-network tables, and [environment].network_mode "
+            "='no-network'; see SKILL.md step 6."
+            if code == "verifier_contract"
+            else "Fix the reported contract error; see SKILL.md step 6 and references/environment-integrity.md."
+        )
+        issues.append({"code": code, "path": "task", "hint": f"{message} — {hint}"})
+    grammar_issues, advisories = _check_grammar_issues(task_dir)
+    return issues + grammar_issues, advisories
+
+
+def _validate_task_cmd(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    issues, advisories = _validate_task_issues(task_dir)
+    return {
+        "task_dir": str(task_dir),
+        "ok": not issues,
+        "valid": not issues,
+        "issues": issues,
+        "advisories": advisories,
+    }
+
+
+def _job_check_rows(job_dir: Path) -> list[dict[str, str]] | None:
+    """Parse retained per-check rows from a Harbor job, when the verifier emitted them."""
+
+    paths = sorted(
+        path for path in job_dir.glob("task__*/verifier/results") if path.is_file() and not path.is_symlink()
+    )
+    if not paths:
+        return None
+    if len(paths) != 1:
+        raise ContractError(f"{job_dir.name} has ambiguous verifier results files")
+    try:
+        text = paths[0].read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise ContractError(f"{paths[0]} must be UTF-8 text") from error
+    rows: list[dict[str, str]] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        match = _CHECK_ROW.fullmatch(line.strip())
+        if match is None:
+            raise ContractError(f"malformed check row in {paths[0].name}: expected '<check-id>\\tPASS|FAIL'")
+        rows.append({"check_id": match.group(1), "status": match.group(2)})
+    if not rows:
+        raise ContractError(f"{paths[0].name} contains no check rows")
+    check_ids = [row["check_id"] for row in rows]
+    if len(check_ids) != len(set(check_ids)):
+        raise ContractError(f"{paths[0].name} repeats a check ID")
+    return rows
+
+
+def _probes_path(task_dir: Path) -> Path:
+    return task_dir / "private" / "probes" / "probes.json"
+
+
+def _load_probes(task_dir: Path) -> list[dict[str, Any]]:
+    path = _probes_path(task_dir)
+    if not path.is_file():
+        return []
+    payload = _load_object(path, label="probe ledger")
+    if set(payload) != {"schema", "entries"} or payload.get("schema") != PROBE_SCHEMA:
+        raise ContractError("probe ledger fields do not match the versioned contract")
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        raise ContractError("probe ledger entries must be a list")
+    return entries
+
+
+def _record_probe(
+    task_dir: Path,
+    arm: str,
+    task_digest: str,
+    job_dir: Path,
+    reward: Any,
+    checks: list[dict[str, str]] | None,
+) -> dict[str, Any]:
+    entries = _load_probes(task_dir)
+    revision = [entry for entry in entries if entry["arm"] == arm and entry["task_tree_sha256"] == task_digest]
+    if len(revision) >= _MAX_PROBES_PER_REVISION:
+        raise ContractError(
+            f"probe budget exhausted for this {arm} revision ({_MAX_PROBES_PER_REVISION}); "
+            "change the task or run the formal proof"
+        )
+    entry = {
+        "arm": arm,
+        "task_tree_sha256": task_digest,
+        "job_dir": job_dir.relative_to(task_dir).as_posix(),
+        "reward": reward,
+        "checks": checks,
+    }
+    entries.append(entry)
+    path = _probes_path(task_dir)
+    _mkdir_private(path.parent)
+    _write_json(path, {"schema": PROBE_SCHEMA, "entries": entries})
+    return {
+        "status": "recorded",
+        "entry": entry,
+        "probes_used": len(revision) + 1,
+        "probes_remaining": _MAX_PROBES_PER_REVISION - len(revision) - 1,
+        "cached": False,
+    }
+
+
+def _probe(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    try:
+        _validate_task(task_dir)
+    except ContractError as error:
+        raise ContractError(f"fix validate-task issues before probing: {error}") from error
+    digest = _task_tree_info(task_dir / "task")["task_tree_sha256"]
+    arms = ("nop", "oracle") if args.arm == "both" else (args.arm,)
+    results: list[dict[str, Any]] = []
+    for arm in arms:
+        existing = [
+            entry for entry in _load_probes(task_dir) if entry["arm"] == arm and entry["task_tree_sha256"] == digest
+        ]
+        if existing and args.results_from is None:
+            results.append({"arm": arm, "cached": True, **existing[-1]})
+            continue
+        if len(existing) >= _MAX_PROBES_PER_REVISION:
+            raise ContractError(
+                f"probe budget exhausted for this {arm} revision ({_MAX_PROBES_PER_REVISION}); "
+                "change the task or run the formal proof"
+            )
+        if args.results_from is not None:
+            job_dir, _result_path, result = _job_result(task_dir, args.results_from, arm=f"{arm} probe")
+            identity = _agent_identity((result.get("config") or {}).get("agent"))
+            if identity != arm:
+                raise ContractError(f"probe {arm} job must identify the {arm} agent")
+        else:
+            harbor = shutil.which("harbor")
+            if harbor is None:
+                results.append(
+                    {
+                        "arm": arm,
+                        "status": "not_run",
+                        "hint": "Install/use the existing Harbor environment to run diagnostic probes.",
+                    }
+                )
+                continue
+            total = len([entry for entry in _load_probes(task_dir) if entry["arm"] == arm])
+            job_name = f"probe-{arm}-{total + 1}"
+            jobs_root = task_dir / "private" / "probes" / "jobs"
+            _mkdir_private(jobs_root)
+            completed = subprocess.run(
+                [
+                    harbor,
+                    "run",
+                    "-p",
+                    str(task_dir / "task"),
+                    "-a",
+                    arm,
+                    "--jobs-dir",
+                    str(jobs_root),
+                    "--job-name",
+                    job_name,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            job_dir = jobs_root / job_name
+            if completed.returncode != 0 and not job_dir.is_dir():
+                raise ContractError(
+                    f"harbor probe run failed ({completed.returncode}): {completed.stderr.strip()[:500]}"
+                )
+            job_dir, _result_path, result = _job_result(task_dir, job_dir, arm=f"{arm} probe")
+        verifier_result = result.get("verifier_result")
+        rewards = verifier_result.get("rewards") if isinstance(verifier_result, dict) else None
+        reward = rewards.get("reward") if isinstance(rewards, dict) else None
+        recorded = _record_probe(
+            task_dir,
+            arm,
+            digest,
+            job_dir,
+            reward,
+            _job_check_rows(job_dir),
+        )
+        results.append(
+            {
+                "arm": arm,
+                **recorded["entry"],
+                "status": recorded["status"],
+                "probes_used": recorded["probes_used"],
+                "probes_remaining": recorded["probes_remaining"],
+            }
+        )
+    return {
+        "task_dir": str(task_dir),
+        "status": "not_run" if all(item.get("status") == "not_run" for item in results) else "recorded",
+        "diagnostic_only": True,
+        "proof_authority": "probes are never accepted as proof; use record-run-inputs + record-validation",
+        "results": results,
+    }
+
+
+_REPAIR_RECEIPT = re.compile(r"repair-(\d+)\.json")
+
+
+def _repairs(task_dir: Path) -> list[dict[str, Any]]:
+    root = task_dir / "private" / "repairs"
+    if not root.is_dir():
+        return []
+    receipts: list[tuple[int, dict[str, Any]]] = []
+    for path in sorted(root.glob("repair-*.json")):
+        match = _REPAIR_RECEIPT.fullmatch(path.name)
+        if match is None:
+            raise ContractError(f"unexpected file in repair ledger: {path.name}")
+        receipt = _load_object(path, label="repair receipt")
+        if (
+            set(receipt) != {"schema", "index", "reason_code", "note", "superseded"}
+            or receipt.get("schema") != REPAIR_SCHEMA
+        ):
+            raise ContractError("repair receipt fields do not match the versioned contract")
+        receipts.append((int(match.group(1)), receipt))
+    indexes = [index for index, _ in receipts]
+    if indexes != list(range(1, len(receipts) + 1)):
+        raise ContractError("repair ledger indexes must be contiguous from 1")
+    for index, receipt in receipts:
+        if receipt["index"] != index:
+            raise ContractError("repair receipt index does not match its file name")
+        superseded = receipt["superseded"]
+        for name in ("validation.json", "reproducibility.json"):
+            record = superseded.get(name)
+            archived = root / f"repair-{index}" / name
+            if record is None:
+                if archived.exists():
+                    raise ContractError(f"repair {index} archives an undeclared {name}")
+                continue
+            if not archived.is_file() or _sha256_file(archived) != record.get("sha256"):
+                raise ContractError(f"repair {index} archive of {name} is missing or changed")
+    return [receipt for _, receipt in receipts]
+
+
+def _record_repair(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    if args.reason_code not in _REPAIR_REASON_CODES:
+        raise ContractError(f"repair reason code must be one of: {', '.join(sorted(_REPAIR_REASON_CODES))}")
+    if args.reason_code == "other" and len(args.note.strip()) < 20:
+        raise ContractError("reason code 'other' requires a concrete note")
+    if not args.note.strip():
+        raise ContractError("repair note must be nonempty")
+    summary = _load_summary(task_dir)
+    if summary["status"] != "pending":
+        raise ContractError(
+            "repairs apply before finalize; a finalized failed environment stays failed as technical evidence"
+        )
+    validation_path = task_dir / "validation.json"
+    reproducibility_path = task_dir / "reproducibility.json"
+    if not validation_path.is_file() and not reproducibility_path.is_file():
+        raise ContractError("record a repair only in response to a recorded proof attempt or failed probe evidence")
+    receipts = _repairs(task_dir)
+    index = len(receipts) + 1
+    if index > _MAX_REPAIRS:
+        raise ContractError(
+            f"repair budget exhausted ({_MAX_REPAIRS}); finalize as failed instead of repairing further"
+        )
+    superseded: dict[str, Any] = {}
+    archive = task_dir / "private" / "repairs" / f"repair-{index}"
+    _mkdir_private(archive)
+    for name, path in (("validation.json", validation_path), ("reproducibility.json", reproducibility_path)):
+        if not path.is_file():
+            superseded[name] = None
+            continue
+        digest = _sha256_file(path)
+        shutil.move(str(path), archive / name)
+        superseded[name] = {"sha256": digest}
+    receipt = {
+        "schema": REPAIR_SCHEMA,
+        "index": index,
+        "reason_code": args.reason_code,
+        "note": args.note.strip(),
+        "superseded": superseded,
+    }
+    _write_bytes_once(
+        task_dir / "private" / "repairs" / f"repair-{index}.json",
+        (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode(),
+    )
+    return {
+        "task_dir": str(task_dir),
+        "repair": index,
+        "repairs_remaining": _MAX_REPAIRS - index,
+        "reason_code": args.reason_code,
+        "next": "record-reproducibility, then a fresh proof set; the archived reports remain private evidence",
+    }
+
+
 def _job_result(task_dir: Path, value: str | Path, *, arm: str) -> tuple[Path, Path, dict[str, Any]]:
     job_dir = Path(value)
     if not job_dir.is_absolute():
@@ -2123,6 +2575,8 @@ def _record_run_inputs(args: argparse.Namespace) -> dict[str, Any]:
     job_dir = job_dir.resolve()
     if not job_dir.is_relative_to(task_dir / "private") or job_dir == task_dir / "private":
         raise ContractError("future Harbor job directory must stay under private/")
+    if job_dir.is_relative_to(task_dir / "private" / "probes"):
+        raise ContractError("diagnostic probes can never serve as proof; choose a job directory outside private/probes")
     if job_dir.exists():
         raise ContractError("record run inputs before Harbor creates the job directory; use a fresh job name")
     output = _run_input_path(task_dir, job_dir)
@@ -2218,6 +2672,8 @@ def _validation_from_jobs(
     oracle_job_dirs: list[str | Path],
     negative_job_dirs: list[str | Path],
     harbor_version: str,
+    *,
+    allow_aggregate_only: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(harbor_version, str) or not harbor_version.strip():
         raise ContractError("Harbor version must be nonempty text")
@@ -2230,6 +2686,7 @@ def _validation_from_jobs(
             raise ContractError(f"validation requires at least {minimum} independent {arm} Harbor jobs")
     runs: dict[str, list[dict[str, Any]]] = {arm: [] for arm in inputs}
     trials: list[dict[str, Any]] = []
+    check_rows: list[list[dict[str, str]] | None] = []
     for arm, values in inputs.items():
         for index, value in enumerate(values, start=1):
             label = f"{arm} run {index}"
@@ -2238,7 +2695,37 @@ def _validation_from_jobs(
             run_inputs = _validate_run_inputs(
                 task_dir, job_dir, arm, result, reproducibility["task_tree_sha256"], checksum
             )
-            runs[arm].append({**_arm_from_result(task_dir, job_dir, result_path, result), **run_inputs})
+            checks = _job_check_rows(job_dir)
+            check_rows.append(checks)
+            run = {**_arm_from_result(task_dir, job_dir, result_path, result), **run_inputs}
+            if checks is not None:
+                run["checks"] = checks
+            runs[arm].append(run)
+    if any(rows is None for rows in check_rows):
+        if any(rows is not None for rows in check_rows):
+            raise ContractError("either every proof job or none must retain /logs/verifier/results check rows")
+        if not allow_aggregate_only:
+            raise ContractError(
+                "missing_check_evidence: proof jobs retain no per-check rows; author the per-check grammar "
+                "(references/check-grammar.md) and rerun, or record historical proof with --allow-aggregate-only"
+            )
+        check_evidence = "aggregate_only"
+    else:
+        check_evidence = "per_check"
+        expected_ids = [{row["check_id"] for row in rows} for rows in check_rows if rows is not None]
+        if any(ids != expected_ids[0] for ids in expected_ids):
+            raise ContractError("all proof jobs must report the same per-check ID set")
+        for run in runs["nop"]:
+            passed_checks = [row["check_id"] for row in run["checks"] if row["status"] == "PASS"]
+            if passed_checks:
+                raise ContractError(f"untouched environment passes scored checks: {', '.join(passed_checks)}")
+        for run in runs["oracle"]:
+            failed_checks = [row["check_id"] for row in run["checks"] if row["status"] != "PASS"]
+            if failed_checks and run["reward"] == 1:
+                raise ContractError(f"oracle reward 1 conflicts with failing checks: {', '.join(failed_checks)}")
+        for run in runs["negative"]:
+            if run["reward"] == 0 and all(row["status"] == "PASS" for row in run["checks"]):
+                raise ContractError("negative control reward 0 conflicts with all-passing checks")
     job_dirs = [run["job_dir"] for arm_runs in runs.values() for run in arm_runs]
     job_ids = [run["job_id"] for arm_runs in runs.values() for run in arm_runs]
     if len(job_dirs) != len(set(job_dirs)):
@@ -2274,6 +2761,7 @@ def _validation_from_jobs(
         "distinct_jobs": True,
         "container_freshness": "unverified",
         "minimum_runs": _MIN_VALIDATION_RUNS,
+        "check_evidence": check_evidence,
         "passed": passed,
         "runs": runs,
     }
@@ -2290,6 +2778,7 @@ def _record_validation(args: argparse.Namespace) -> dict[str, Any]:
         args.oracle_job_dir,
         args.negative_job_dir,
         args.harbor_version,
+        allow_aggregate_only=args.allow_aggregate_only,
     )
     _write_json(validation_path, validation)
     return {
@@ -2313,6 +2802,7 @@ def _validate_validation(task_dir: Path) -> dict[str, Any]:
         "distinct_jobs",
         "container_freshness",
         "minimum_runs",
+        "check_evidence",
         "passed",
         "runs",
     }
@@ -2324,6 +2814,7 @@ def _validate_validation(task_dir: Path) -> dict[str, Any]:
         recorded.get("minimum_runs") != _MIN_VALIDATION_RUNS
         or recorded.get("distinct_jobs") is not True
         or recorded.get("container_freshness") != "unverified"
+        or recorded.get("check_evidence") not in ("per_check", "aggregate_only")
     ):
         raise ContractError("validation repeat and job-evidence policy does not match the versioned contract")
     runs = recorded.get("runs")
@@ -2333,25 +2824,29 @@ def _validate_validation(task_dir: Path) -> dict[str, Any]:
         values = runs.get(arm)
         if not isinstance(values, list) or len(values) < minimum:
             raise ContractError(f"validation.runs.{arm} does not meet the minimum run count")
+        required_run_keys = {
+            "job_id",
+            "job_dir",
+            "result_path",
+            "result_sha256",
+            "reward",
+            "exception_present",
+            "agent",
+            "run_inputs_path",
+            "run_inputs_sha256",
+        }
         for value in values:
-            if not isinstance(value, dict) or set(value) != {
-                "job_id",
-                "job_dir",
-                "result_path",
-                "result_sha256",
-                "reward",
-                "exception_present",
-                "agent",
-                "run_inputs_path",
-                "run_inputs_sha256",
-            }:
+            if not isinstance(value, dict) or not required_run_keys.issubset(set(value)):
                 raise ContractError(f"validation.runs.{arm} fields do not match the versioned contract")
+            if not set(value).issubset(required_run_keys | {"checks"}):
+                raise ContractError(f"validation.runs.{arm} carries fields outside the versioned contract")
     derived = _validation_from_jobs(
         task_dir,
         [run["job_dir"] for run in runs["nop"]],
         [run["job_dir"] for run in runs["oracle"]],
         [run["job_dir"] for run in runs["negative"]],
         recorded["harbor_version"],
+        allow_aggregate_only=recorded["check_evidence"] == "aggregate_only",
     )
     if recorded != derived:
         raise ContractError("validation.json differs from the retained Harbor result evidence")
@@ -2379,6 +2874,7 @@ def _summary_markdown(summary: dict[str, Any]) -> str:
         f"## Status\n\n`{summary['status']}`\n\n"
         f"## Evidence\n\n"
         f"- Safe ATIF: `{summary['source']['safe_path']}`\n"
+        f"- State basis: `{candidate.get('state_basis', 'recorded')}`\n"
         f"- Evidence steps: {candidate.get('evidence_steps', [])}\n"
         f"- Environment: `{summary['environment']['status']}`\n"
         f"- Technical proof: `{summary['environment']['technical_status']}`\n"
@@ -2492,6 +2988,18 @@ def _check(args: argparse.Namespace) -> dict[str, Any]:
     task_dir = _ensure_task_dir(args.task_dir)
     summary = _load_summary(task_dir)
     errors: list[str] = []
+    try:
+        repairs = _repairs(task_dir)
+        if len(repairs) > _MAX_REPAIRS:
+            errors.append(f"repair ledger exceeds the {_MAX_REPAIRS}-repair budget")
+    except ContractError as error:
+        repairs = []
+        errors.append(str(error))
+    if repairs and summary.get("status") == "pending":
+        validation_path = task_dir / "validation.json"
+        reproducibility_path = task_dir / "reproducibility.json"
+        if validation_path.is_file() and not reproducibility_path.is_file():
+            errors.append("a post-repair proof set requires a fresh record-reproducibility first")
     source = summary.get("source")
     if isinstance(source, dict):
         for path_key, digest_key, size_key in (
@@ -2589,7 +3097,7 @@ def _check(args: argparse.Namespace) -> dict[str, Any]:
         _validate_tool_call_pipeline(task_dir, require_decisions=summary["status"] == "candidate")
     except ContractError as error:
         errors.append(str(error))
-    return {"task_dir": str(task_dir), "valid": not errors, "errors": errors}
+    return {"task_dir": str(task_dir), "valid": not errors, "errors": errors, "repairs": len(repairs)}
 
 
 def _load_batch_manifest(path: Path) -> list[dict[str, Any]]:
@@ -2685,7 +3193,16 @@ def _batch_status(args: argparse.Namespace) -> dict[str, Any]:
                 counts[status] = counts.get(status, 0) + 1
                 continue
         counts[status] = counts.get(status, 0) + 1
-        results.append({"task_id": member["task_id"], "status": status})
+        row: dict[str, Any] = {"task_id": member["task_id"], "status": status}
+        try:
+            repair_count = len(_repairs(task_dir))
+        except ContractError:
+            repair_count = 0
+        if repair_count:
+            row["repairs"] = repair_count
+            if repair_count >= _MAX_REPAIRS and status != "candidate_failed":
+                row["repair_budget"] = "exhausted"
+        results.append(row)
     return {
         "schema": BATCH_SCHEMA,
         "denominator": len(members),
@@ -2766,6 +3283,7 @@ def _write_publication(task_dir: Path, output_dir: Path) -> None:
             "distinct_jobs": validation["distinct_jobs"],
             "container_freshness": validation["container_freshness"],
             "minimum_runs": validation["minimum_runs"],
+            "check_evidence": validation["check_evidence"],
             "passed": validation["passed"],
             "runs": {
                 arm: [
@@ -2781,6 +3299,8 @@ def _write_publication(task_dir: Path, output_dir: Path) -> None:
         "status": summary["status"],
         "reason_codes": candidate["reason_codes"],
         "candidate_evidence_steps": candidate["evidence_steps"],
+        "state_basis": candidate.get("state_basis", "recorded"),
+        "repairs": len(_repairs(task_dir)),
         "ground_truth": {
             "availability": candidate["ground_truth"]["availability"],
             "use": candidate["ground_truth"]["use"],
@@ -3003,7 +3523,38 @@ def _parser() -> argparse.ArgumentParser:
     record.add_argument("--oracle-job-dir", required=True, action="append", type=Path)
     record.add_argument("--negative-job-dir", required=True, action="append", type=Path)
     record.add_argument("--harbor-version", required=True)
+    record.add_argument(
+        "--allow-aggregate-only",
+        action="store_true",
+        help="accept retained proof without per-check rows (historical tasks; labeled in the report)",
+    )
     record.set_defaults(run=_record_validation)
+
+    validate_task = subparsers.add_parser(
+        "validate-task", help="lint the authored task tree during authoring; exits 1 until every issue resolves"
+    )
+    validate_task.add_argument("--task-dir", required=True, type=Path)
+    validate_task.set_defaults(run=_validate_task_cmd)
+
+    probe = subparsers.add_parser(
+        "probe", help="run or adopt one diagnostic NOP/Oracle pair; probes are never accepted as proof"
+    )
+    probe.add_argument("--task-dir", required=True, type=Path)
+    probe.add_argument("--arm", choices=("nop", "oracle", "both"), default="both")
+    probe.add_argument(
+        "--results-from",
+        type=Path,
+        help="adopt an existing Harbor job directory as diagnostic evidence instead of executing",
+    )
+    probe.set_defaults(run=_probe)
+
+    repair = subparsers.add_parser(
+        "record-repair", help="record one bounded repair, archiving the superseded proof it responds to"
+    )
+    repair.add_argument("--task-dir", required=True, type=Path)
+    repair.add_argument("--reason-code", required=True, choices=sorted(_REPAIR_REASON_CODES))
+    repair.add_argument("--note", required=True)
+    repair.set_defaults(run=_record_repair)
 
     finalize = subparsers.add_parser("finalize", help="write the candidate decision and task summary")
     finalize.add_argument("--task-dir", required=True, type=Path)
