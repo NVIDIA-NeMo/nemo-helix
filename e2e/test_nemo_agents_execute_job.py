@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 from nemo_agents_plugin.entities import NEMO_AGENTS_SPEC_CONFIG_FORMAT
 from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.agents.client import AgentsClient
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.files.types import CreateFilesetRequest
@@ -49,10 +50,6 @@ _IMAGE_FAILURE_MARKERS = (
 )
 
 
-def _agents_url(sdk: NeMoPlatform, workspace: str, path: str) -> str:
-    return f"{str(sdk.base_url).rstrip('/')}/apis/agents/v2/workspaces/{workspace}/{path.lstrip('/')}"
-
-
 def _job_diagnostic_message(sdk: NeMoPlatform, job: Any, workspace: str, prefix: str) -> str:
     parts = [prefix]
     if job.status_details:
@@ -72,15 +69,20 @@ def _job_diagnostic_message(sdk: NeMoPlatform, job: Any, workspace: str, prefix:
 
 
 def _list_execute_job_results(sdk: NeMoPlatform, workspace: str, job_name: str) -> dict[str, Any]:
-    response = sdk._client.get(_agents_url(sdk, workspace, f"jobs/execute/{job_name}/results"))
-    assert response.status_code == 200, f"Failed to list execute job results for {job_name}: {response.text}"
-    return response.json()
+    return dict(sdk.agents.jobs.execute.list_results(job_name, workspace=workspace))
 
 
 def _download_execute_job_result(sdk: NeMoPlatform, workspace: str, job_name: str, result_name: str) -> bytes:
-    response = sdk._client.get(_agents_url(sdk, workspace, f"jobs/execute/{job_name}/results/{result_name}/download"))
-    assert response.status_code == 200, f"Failed to download result {result_name!r} for {job_name}: {response.text}"
-    return response.content
+    """Fetch one saved result's bytes.
+
+    Goes through the typed ``AgentsClient`` rather than ``nemo.agents.jobs``
+    because the SDK resource exposes ``list_results`` but no way to fetch one --
+    every other call in this module has an ``agents.jobs.execute`` equivalent.
+    """
+    client = client_from_platform(sdk, AgentsClient)
+    return client.download_agent_job_result(
+        workspace=workspace, collection="execute", job=job_name, name=result_name
+    ).read()
 
 
 def _result_names(results: dict[str, Any]) -> set[str]:
@@ -217,18 +219,15 @@ def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoPlatform, w
     )
 
     try:
-        response = sdk._client.post(
-            _agents_url(sdk, workspace, "jobs/execute"),
-            json={
-                "name": job_name,
-                "spec": {
-                    "agent": agent_name,
-                    "input": "Answer with the deterministic mock provider response.",
-                    "workdir": {"base_workdir": f"{fileset_name}#project/"},
-                },
+        sdk.agents.jobs.execute.create(
+            name=job_name,
+            workspace=workspace,
+            spec={
+                "agent": agent_name,
+                "input": "Answer with the deterministic mock provider response.",
+                "workdir": {"base_workdir": f"{fileset_name}#project/"},
             },
         )
-        assert response.status_code == 201, response.text
 
         completed_job = wait_for_platform_job(sdk, job_name, workspace, timeout=300)
         assert completed_job.status == "completed", _job_diagnostic_message(
@@ -338,18 +337,15 @@ def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs
     )
 
     try:
-        response = sdk._client.post(
-            _agents_url(sdk, workspace, "jobs/execute"),
-            json={
-                "name": job_name,
-                "spec": {
-                    "agent": agent_name,
-                    "input": "Write the partial file, then continue.",
-                    "workdir": {"base_workdir": f"{fileset_name}#project/"},
-                },
+        sdk.agents.jobs.execute.create(
+            name=job_name,
+            workspace=workspace,
+            spec={
+                "agent": agent_name,
+                "input": "Write the partial file, then continue.",
+                "workdir": {"base_workdir": f"{fileset_name}#project/"},
             },
         )
-        assert response.status_code == 201, response.text
 
         completed_job = wait_for_platform_job(sdk, job_name, workspace, timeout=300)
         assert completed_job.status == "error", _job_diagnostic_message(
@@ -466,18 +462,15 @@ def test_execute_job_fails_when_the_requested_image_cannot_be_pulled(
     _register_mock_backed_agent(sdk, workspace, agent_name=agent_name, model_name=model_name)
 
     try:
-        response = sdk._client.post(
-            _agents_url(sdk, workspace, "jobs/execute"),
-            json={
-                "name": job_name,
-                "spec": {
-                    "agent": agent_name,
-                    "input": "This agent never runs; the image cannot be pulled.",
-                    "image": _UNRESOLVABLE_IMAGE,
-                },
+        sdk.agents.jobs.execute.create(
+            name=job_name,
+            workspace=workspace,
+            spec={
+                "agent": agent_name,
+                "input": "This agent never runs; the image cannot be pulled.",
+                "image": _UNRESOLVABLE_IMAGE,
             },
         )
-        assert response.status_code == 201, response.text
 
         finished_job = wait_for_platform_job(sdk, job_name, workspace, timeout=300)
         diagnostics = _job_diagnostic_message(
