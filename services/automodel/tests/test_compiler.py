@@ -16,9 +16,10 @@ from nmp.automodel.adapter import automodel_spec_to_compiler_output
 from nmp.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
     DistillationTraining,
-    EmbeddingParams,
+    ExportParams,
     LoRAParams,
     OutputResponse,
+    RetrievalParams,
     SFTTraining,
 )
 from nmp.automodel.app.jobs.compiler import _build_file_download_config
@@ -140,7 +141,7 @@ def test_compile_training_step_carries_explicit_cross_encoder_recipe() -> None:
     assert cfg["training"]["recipe"] == "cross_encoder"
 
 
-def test_compile_training_step_carries_embedding_config() -> None:
+def test_compile_training_step_carries_retrieval_config() -> None:
     from nmp.automodel.app.jobs.training.compiler import compile_training_step
 
     job_output = CustomizationJobOutput(
@@ -151,11 +152,12 @@ def test_compile_training_step_carries_embedding_config() -> None:
             peft=None,
             batch_size=4,
             micro_batch_size=1,
-            embedding=EmbeddingParams(
+            retrieval=RetrievalParams(
                 train_n_passages=7,
                 query_prefix="query: ",
                 passage_prefix="passage: ",
                 query_max_length=256,
+                export=ExportParams(primary="hf", opset=18),
             ),
         ),
         output=_output(output_type=OutputNameType.MODEL),
@@ -164,10 +166,12 @@ def test_compile_training_step_carries_embedding_config() -> None:
     step = compile_training_step(job_output, base_env=[], me=_make_mock_model_entity())
     cfg = step.config if hasattr(step, "config") else step["config"]
 
-    assert cfg["embedding"]["train_n_passages"] == 7
-    assert cfg["embedding"]["query_prefix"] == "query: "
-    assert cfg["embedding"]["passage_prefix"] == "passage: "
-    assert cfg["embedding"]["query_max_length"] == 256
+    assert cfg["retrieval"]["train_n_passages"] == 7
+    assert cfg["retrieval"]["query_prefix"] == "query: "
+    assert cfg["retrieval"]["passage_prefix"] == "passage: "
+    assert cfg["retrieval"]["query_max_length"] == 256
+    assert cfg["retrieval"]["export"]["primary"] == "hf"
+    assert cfg["retrieval"]["export"]["opset"] == 18
 
 
 def test_sft_training_applies_nemotron_defaults_for_encoder_recipes() -> None:

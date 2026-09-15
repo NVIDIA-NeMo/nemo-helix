@@ -121,6 +121,8 @@ client.data_designer.retrieval_generate(
 
 ## Next Steps
 
+- Conduct the rest of the recipe with the `nemo-retrieval-recipes` skill (Automodel
+  `bi_encoder` / `cross_encoder`, then `nemo evaluator retrieve-eval` on frozen `eval_beir`).
 - See the [Data Designer CLI](/documentation/design-synthetic-data/cli) for configuration and command details.
-- Use the Stage 1 `training.jsonl` artifact as input to an embedding or
-  reranking customization job.
+- Stage 1 emits `training.jsonl` plus `eval_beir/` (`corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`).
+  Tiny corpora can leave the train split empty — generate with enough files (50+) before mining.

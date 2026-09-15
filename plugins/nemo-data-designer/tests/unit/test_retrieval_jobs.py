@@ -207,10 +207,15 @@ async def test_retrieval_prepare_resolves_model_fileset_for_mining() -> None:
         fileset="nvidia/nemotron-3-embed-1b-bf16",
         trust_remote_code=True,
     )
-    with patch(
-        "nemo_data_designer_plugin.jobs.retrieval_prepare.fetch_model_entity",
-        new=AsyncMock(return_value=model),
-    ) as fetch:
+    with (
+        patch(
+            "nemo_data_designer_plugin.jobs.retrieval_prepare.async_customization_platform_clients_from_platform",
+        ),
+        patch(
+            "nemo_data_designer_plugin.jobs.retrieval_prepare.fetch_model_entity",
+            new=AsyncMock(return_value=model),
+        ) as fetch,
+    ):
         step = await RetrievalPrepareJob.to_spec(
             RetrievalPrepareJobConfig(sdg_input="default/stage0", enable_mining=True),
             workspace="default",
@@ -298,6 +303,19 @@ def test_retrieval_prepare_convert_emits_eval_layout(tmp_path: Path) -> None:
     assert (staged / "eval_beir" / "corpus.jsonl").exists()
     assert (staged / "training.jsonl").exists()
     assert (staged / "train.json").exists()
+
+
+def test_retrieval_prepare_fails_on_empty_training_split(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    train_input = ctx.storage.persistent / "empty-train"
+    train_input.mkdir()
+    (train_input / "train.json").write_text(json.dumps({"corpus": {}, "data": []}), encoding="utf-8")
+    spec = RetrievalPrepareStepConfig(
+        job_config=RetrievalPrepareJobConfig(train_input_file="empty-train", enable_mining=False),
+        phase="convert",
+    )
+    with pytest.raises(RuntimeError, match="empty training split"):
+        RetrievalPrepareJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=Mock())
 
 
 def test_retrieval_prepare_rejects_mine_phase(tmp_path: Path) -> None:

@@ -10,15 +10,17 @@ This module handles:
 - Chat template preservation
 - FSDP2 architecture fix
 - HF export and format conversion
-- ONNX export for embedding models
+- ONNX export for embedding and cross-encoder models
 
-Supports both LLM and embedding (biencoder) models through unified functions.
+Supports LLM, embedding (biencoder), and cross-encoder models through unified functions.
 """
 
 import json
 import logging
 import re
 import shutil
+import sys
+from contextlib import contextmanager
 from enum import StrEnum
 from pathlib import Path
 
@@ -29,6 +31,7 @@ from nmp.automodel.tasks.training.chat_templates import (
 from nmp.automodel.tasks.training.schemas import (
     CheckpointFormat,
     CheckpointInfo,
+    ExportConfig,
     FinetuningType,
     Precision,
     TrainingStepConfig,
@@ -392,74 +395,249 @@ def merge_lora_cross_encoder_adapter(
         gc.collect()
 
 
+_EXPORT_SAMPLES = {
+    ModelType.EMBEDDING: ["query:hello world", "passage:an example sentence for tracing"],
+    ModelType.CROSS_ENCODER: [
+        "question:hello \n \n passage:world",
+        "question:example \n \n passage:sentence for tracing",
+    ],
+}
+
+_TORCH_DTYPES = {
+    "fp32": "float32",
+    "fp16": "float16",
+    "bf16": "bfloat16",
+}
+
+
+@contextmanager
+def _onnx_safe_bidirectional_mask():
+    """Replace transformers' SDPA bidirectional mask with an ONNX-traceable additive mask."""
+    import torch
+
+    def _mask(config=None, input_embeds=None, attention_mask=None, **kwargs):
+        dtype = input_embeds.dtype
+        batch_size, seq_length, _ = input_embeds.shape
+        mask = attention_mask[:, None, None, :].expand(batch_size, 1, seq_length, seq_length)
+        return (1.0 - mask.to(dtype)) * torch.finfo(dtype).min
+
+    patched: dict[str, object] = {}
+    for mod_name, mod in list(sys.modules.items()):
+        fn = getattr(mod, "create_bidirectional_mask", None)
+        if callable(fn):
+            patched[mod_name] = fn
+            setattr(mod, "create_bidirectional_mask", _mask)
+    try:
+        yield
+    finally:
+        for mod_name, orig in patched.items():
+            if mod_name in sys.modules:
+                setattr(sys.modules[mod_name], "create_bidirectional_mask", orig)
+
+
+def _build_export_module(inner, model_type: ModelType, cfg: ExportConfig):
+    """Pool embeddings or emit logits, matching the NIM graph contract."""
+    import torch
+    import torch.nn.functional as F
+    from torch import nn
+
+    class _CrossEncoderForExport(nn.Module):
+        def __init__(self, model):
+            super().__init__()
+            self.model = model
+
+        def forward(self, input_ids, attention_mask, token_type_ids=None):
+            kwargs = {"input_ids": input_ids, "attention_mask": attention_mask}
+            if token_type_ids is not None:
+                kwargs["token_type_ids"] = token_type_ids
+            return self.model(**kwargs).logits
+
+    class _EmbeddingForExport(nn.Module):
+        def __init__(self, model, pooling: str, normalize: bool):
+            super().__init__()
+            self.model = model
+            self.pooling = pooling
+            self.normalize = normalize
+
+        def _pool(self, hidden, attention_mask):
+            masked = hidden.masked_fill(~attention_mask[..., None].bool(), 0.0)
+            if self.pooling == "avg":
+                return masked.sum(dim=1) / (attention_mask.sum(dim=1)[..., None] + 1e-9)
+            if self.pooling == "cls":
+                return masked[:, 0]
+            # Last non-padded token (right-padded batches).
+            last_index = attention_mask.sum(dim=1).long() - 1
+            return masked[torch.arange(masked.shape[0], device=masked.device), last_index]
+
+        def forward(self, input_ids, attention_mask, dimensions=None):
+            outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+            hidden = outputs["last_hidden_state"]
+            embeddings = self._pool(hidden, attention_mask)
+            if dimensions is not None:
+                # Truncate to `dimensions`, then L2-renormalize.
+                keep = torch.arange(embeddings.shape[1], device=embeddings.device)[None, :] < dimensions[:, None]
+                embeddings = embeddings * keep.to(embeddings.dtype)
+            if self.normalize:
+                embeddings = F.normalize(embeddings, p=2, dim=1)
+            return embeddings
+
+    if model_type == ModelType.CROSS_ENCODER:
+        return _CrossEncoderForExport(inner)
+    return _EmbeddingForExport(inner, pooling=cfg.pooling, normalize=cfg.normalize)
+
+
 def export_onnx(
     model_path: Path,
     output_path: Path,
     tokenizer_path: str,
+    model_type: ModelType = ModelType.EMBEDDING,
+    cfg: ExportConfig | None = None,
 ) -> Path:
-    """Export an embedding model to ONNX format.
+    """Write ``model.onnx`` and ``tokenizer/``. Optionally verify against the traced module."""
+    import torch
+    from transformers import AutoModel, AutoModelForSequenceClassification, AutoTokenizer
 
-    Uses Automodel's export_to_onnx to export to ONNX format.
-    The resulting `model.onnx` is written into *output_path* alongside
-    the existing HuggingFace checkpoint files.
+    cfg = cfg or ExportConfig()
+    is_cross_encoder = model_type == ModelType.CROSS_ENCODER
+    logger.info("Exporting %s at %s to ONNX at %s", model_type.value, model_path, output_path)
+    output_path.mkdir(parents=True, exist_ok=True)
 
-    Args:
-        model_path: Path to the HuggingFace model directory (config.json + weights).
-        output_path: Directory where ``model.onnx`` will be written.
-        tokenizer_path: Fallback tokenizer location (base model path). Used when
-            the checkpoint directory does not contain tokenizer files.
+    torch_dtype = getattr(torch, _TORCH_DTYPES[cfg.precision])
+    loader = AutoModelForSequenceClassification if is_cross_encoder else AutoModel
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+    inner = loader.from_pretrained(
+        str(model_path),
+        torch_dtype=torch_dtype,
+        attn_implementation=cfg.attn_implementation,
+        trust_remote_code=True,
+    ).eval()
 
-    Returns:
-        Path to the exported ``model.onnx`` file.
-    """
-    # need to import here for the tests
-    # llama_bidirectional is Automodel's module path; export_to_onnx uses HF AutoModel and works for any encoder checkpoint.
-    from nemo_automodel.components.models.llama_bidirectional.export_onnx import export_to_onnx
+    export_model = _build_export_module(inner, model_type, cfg)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    export_model = export_model.to(device=device, dtype=torch_dtype)
 
-    logger.info(f"Exporting embedding model at path {model_path} to ONNX format at path {output_path}")
+    tokenized = tokenizer(_EXPORT_SAMPLES[model_type], return_tensors="pt", padding=True, truncation=True)
+    args = [tokenized["input_ids"].to(device), tokenized["attention_mask"].to(device)]
+    input_names = ["input_ids", "attention_mask"]
+    output_name = "logits" if is_cross_encoder else "embeddings"
+    dynamic_axes = {
+        "input_ids": {0: "batch_size", 1: "seq_length"},
+        "attention_mask": {0: "batch_size", 1: "seq_length"},
+        output_name: {0: "batch_size", 1: "num_labels" if is_cross_encoder else "embedding_dim"},
+    }
+
+    if is_cross_encoder and "token_type_ids" in getattr(tokenizer, "model_input_names", []):
+        token_type_ids = tokenized.get("token_type_ids")
+        if token_type_ids is None:
+            token_type_ids = torch.zeros_like(tokenized["input_ids"])
+        args.append(token_type_ids.to(device))
+        input_names.append("token_type_ids")
+        dynamic_axes["token_type_ids"] = {0: "batch_size", 1: "seq_length"}
+    elif not is_cross_encoder and cfg.dimensions:
+        hidden_size = int(getattr(inner.config, "hidden_size"))
+        args.append(torch.full((len(args[0]),), hidden_size, dtype=torch.int64, device=device))
+        input_names.append("dimensions")
+        dynamic_axes["dimensions"] = {0: "batch_size"}
+
+    onnx_path = output_path / "model.onnx"
+    export_kwargs = {
+        "model": export_model,
+        "args": tuple(args),
+        "f": str(onnx_path),
+        "input_names": input_names,
+        "output_names": [output_name],
+        "dynamic_axes": dynamic_axes,
+        "opset_version": cfg.opset,
+    }
 
     try:
-        onnx_path = export_to_onnx(
-            model_path=str(model_path),
-            output_dir=str(output_path),
-            tokenizer_path=tokenizer_path,
-            pooling="avg",
-            normalize=True,
-            opset=18,
-            export_dtype="fp16",
-            verify=True,
-        )
+        with torch.no_grad(), _onnx_safe_bidirectional_mask():
+            try:
+                torch.onnx.export(**export_kwargs, dynamo=False)
+            except TypeError:
+                # Older torch has no `dynamo` kwarg.
+                torch.onnx.export(**export_kwargs)
     except Exception:
-        logger.exception(f"ONNX export failed for model at {model_path}")
+        logger.exception("ONNX export failed for %s at %s", model_type.value, model_path)
         raise
 
-    logger.info(f"ONNX model exported to {onnx_path}")
-    return Path(onnx_path)
+    tokenizer_dir = output_path / "tokenizer"
+    tokenizer_dir.mkdir(parents=True, exist_ok=True)
+    tokenizer.save_pretrained(tokenizer_dir)
+
+    with torch.no_grad():
+        reference = export_model(*args)
+    verify_onnx_matches_reference(
+        onnx_path=onnx_path,
+        feed={name: tensor.cpu().numpy() for name, tensor in zip(input_names, args)},
+        reference=reference.float().cpu().numpy(),
+        atol=1e-3,
+    )
+
+    logger.info("ONNX %s exported to %s", model_type.value, onnx_path)
+    return onnx_path
 
 
-_ONNX_TOP_LEVEL_PATTERNS = {"model.onnx", "model.onnx.data", "tokenizer"}
+def verify_onnx_matches_reference(
+    onnx_path: Path,
+    feed: dict,
+    reference,
+    atol: float,
+) -> float:
+    """Return max abs diff. Raise ``ValueError`` on shape mismatch or diff > *atol*."""
+    import numpy as np
+    import onnxruntime
+
+    session = onnxruntime.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
+    expected_inputs = {inp.name for inp in session.get_inputs()}
+    missing = expected_inputs - feed.keys()
+    if missing:
+        raise ValueError(f"ONNX graph at {onnx_path} expects inputs not provided: {sorted(missing)}")
+
+    output_names = [out.name for out in session.get_outputs()]
+    actual = np.asarray(session.run(output_names, {k: v for k, v in feed.items() if k in expected_inputs})[0])
+    expected = np.asarray(reference)
+
+    if actual.shape != expected.shape:
+        raise ValueError(f"ONNX output shape {actual.shape} does not match HuggingFace output shape {expected.shape}.")
+
+    max_diff = float(np.max(np.abs(actual.astype("float64") - expected.astype("float64"))))
+    if max_diff > atol:
+        raise ValueError(
+            f"ONNX output diverges from the HuggingFace checkpoint: max abs diff {max_diff:.3e} > atol {atol:.3e}."
+        )
+    logger.info("ONNX verification passed (max abs diff %.3e <= atol %.3e)", max_diff, atol)
+    return max_diff
 
 
-def _restructure_embedding_output(output_path: Path) -> None:
-    """Move HF artifacts into ``alternates/hf/`` so the NIM selects the ONNX profile.
+def _resolve_export_config(customizer_config: TrainingStepConfig) -> ExportConfig:
+    """``retrieval.export``, or defaults if unset."""
+    retrieval = getattr(customizer_config, "retrieval", None)
+    export = getattr(retrieval, "export", None) if retrieval is not None else None
+    return export if isinstance(export, ExportConfig) else ExportConfig()
 
-    NIM scans the top-level directory to choose the model backend.  If it sees
-    ``.safetensors`` files it creates a PyTorch profile, which is unsupported
-    for custom models in many NIM versions.  The legacy customizer kept only
-    ``model.onnx`` (+ tokenizer/) at the root and placed HF weights under
-    ``alternates/hf/``.  This function reproduces that layout.
-    """
-    alternates_hf = output_path / "alternates" / "hf"
-    alternates_hf.mkdir(parents=True, exist_ok=True)
+
+_ONNX_ARTIFACTS = {"model.onnx", "model.onnx.data"}
+
+
+def _restructure_encoder_output(output_path: Path, primary: str) -> None:
+    """Keep *primary* at the fileset root; move the other artifact under ``alternates/``."""
+    is_onnx_primary = primary == "onnx"
+    alternates = output_path / "alternates" / ("hf" if is_onnx_primary else "onnx")
+    alternates.mkdir(parents=True, exist_ok=True)
 
     for entry in list(output_path.iterdir()):
-        if entry.name in _ONNX_TOP_LEVEL_PATTERNS or entry.name == "alternates":
+        if entry.name in {"alternates", "tokenizer"} or (entry.name in _ONNX_ARTIFACTS) == is_onnx_primary:
             continue
-        dest = alternates_hf / entry.name
+        dest = alternates / entry.name
         logger.info("Moving %s -> %s", entry, dest)
         shutil.move(str(entry), str(dest))
 
-    logger.info("Restructured embedding output: ONNX at top level, HF in alternates/hf/")
+    logger.info(
+        "Restructured encoder output: %s at top level, other artifact in %s",
+        primary,
+        alternates.relative_to(output_path),
+    )
 
 
 def process_checkpoint(
@@ -472,7 +650,7 @@ def process_checkpoint(
     """
     Process checkpoint to standard output format.
 
-    Works for both LLM and embedding (biencoder) models.
+    Works for LLM, embedding (biencoder), and cross-encoder models.
 
     Handles three scenarios:
     1. Full weights training: Copy checkpoint, fix FSDP2 arch, preserve chat template (LLM only)
@@ -483,7 +661,7 @@ def process_checkpoint(
         checkpoint_path: Path to the checkpoint directory (model files)
         output_path: Where to write the processed checkpoint
         customizer_config: Training configuration with model paths and settings
-        model_type: Type of model ("llm" or "embedding")
+        model_type: Type of model ("llm", "embedding", or "cross_encoder")
         resolved_chat_template: Pre-resolved chat template from training config (LLM only).
             If provided, this template is used. Otherwise, falls back to
             priority-based resolution using model.name and model.path.
@@ -518,7 +696,7 @@ def process_checkpoint(
 
     if finetuning_type == FinetuningType.LORA_MERGED:
         # LoRA merged: merge adapter weights into base model
-        # For embedding models, this produces a full-weight model compatible with ONNX export and NIM serving.
+        # Full-weight merge is required for ONNX export and embedding/ranking NIM serving.
         if is_embedding:
             merge_lora_embedding_adapter(
                 adapter_path=checkpoint_path,
@@ -566,13 +744,16 @@ def process_checkpoint(
         if chat_template:
             apply_chat_template_to_checkpoint(output_path, chat_template)
 
-    if is_embedding:
+    if (is_embedding or is_cross_encoder) and checkpoint_format != CheckpointFormat.HF_PEFT:
+        export_cfg = _resolve_export_config(customizer_config)
         export_onnx(
             model_path=output_path,
             output_path=output_path,
             tokenizer_path=base_model_path,
+            model_type=model_type,
+            cfg=export_cfg,
         )
-        _restructure_embedding_output(output_path)
+        _restructure_encoder_output(output_path, export_cfg.primary)
 
     # Determine precision: use explicit config value, or extract from base model
     precision = customizer_config.model.precision

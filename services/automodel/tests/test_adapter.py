@@ -52,10 +52,10 @@ def test_adapter_plumbs_previously_dropped_fields() -> None:
     assert spec.training.parallelism.sequence_parallel is True
     assert spec.training.peft is not None
     assert spec.training.peft.dropout == 0.1
-    assert spec.training.embedding is None
+    assert spec.training.retrieval is None
 
 
-def test_adapter_plumbs_embedding_spec() -> None:
+def test_adapter_plumbs_retrieval_spec() -> None:
     spec = automodel_spec_to_compiler_output(
         {
             "model": "meta/llama",
@@ -64,20 +64,45 @@ def test_adapter_plumbs_embedding_spec() -> None:
                 "training_type": "sft",
                 "recipe": "bi_encoder",
                 "finetuning_type": "all_weights",
-                "embedding": {
+                "retrieval": {
                     "train_n_passages": 7,
                     "query_prefix": "query:",
                     "passage_prefix": "passage:",
+                    "export": {"dimensions": True, "opset": 18},
                 },
             },
             "output": {"name": "out", "type": "model", "fileset": "out-fs"},
         },
     )
     assert isinstance(spec.training, SFTTraining)
-    assert spec.training.embedding is not None
-    assert spec.training.embedding.train_n_passages == 7
-    assert spec.training.embedding.query_prefix == "query:"
-    assert spec.training.embedding.passage_prefix == "passage:"
+    assert spec.training.retrieval is not None
+    assert spec.training.retrieval.train_n_passages == 7
+    assert spec.training.retrieval.query_prefix == "query:"
+    assert spec.training.retrieval.passage_prefix == "passage:"
+    assert spec.training.retrieval.export is not None
+    assert spec.training.retrieval.export.dimensions is True
+    assert spec.training.retrieval.export.opset == 18
+
+
+def test_adapter_accepts_legacy_embedding_block() -> None:
+    """Accept the pre-rename ``training.embedding`` key."""
+    spec = automodel_spec_to_compiler_output(
+        {
+            "model": "meta/llama",
+            "dataset": {"training": "default/train"},
+            "training": {
+                "training_type": "sft",
+                "recipe": "bi_encoder",
+                "finetuning_type": "all_weights",
+                "embedding": {"train_n_passages": 7, "query_prefix": "query:"},
+            },
+            "output": {"name": "out", "type": "model", "fileset": "out-fs"},
+        },
+    )
+    assert isinstance(spec.training, SFTTraining)
+    assert spec.training.retrieval is not None
+    assert spec.training.retrieval.train_n_passages == 7
+    assert spec.training.retrieval.query_prefix == "query:"
 
 
 def test_adapter_new_fields_default_when_omitted() -> None:

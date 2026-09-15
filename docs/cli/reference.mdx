@@ -9501,13 +9501,16 @@ nemo customization automodel.jobs run [OPTIONS]
 * `--training.distillation-ratio <FLOAT>`: Override `training.distillation_ratio` in the spec.
 * `--training.distillation-temperature <FLOAT>`: Override `training.distillation_temperature` in the spec.
 * `--training.offload-teacher`: Override `training.offload_teacher` in the spec.
-* `--training.embedding.train-n-passages <INTEGER>`: Override `training.embedding.train_n_passages` in the spec.
-* `--training.embedding.eval-negative-size <INTEGER>`: Override `training.embedding.eval_negative_size` in the spec.
-* `--training.embedding.do-gradient-checkpointing`: Override `training.embedding.do_gradient_checkpointing` in the spec.
-* `--training.embedding.query-max-length <INTEGER>`: Override `training.embedding.query_max_length` in the spec.
-* `--training.embedding.passage-max-length <INTEGER>`: Override `training.embedding.passage_max_length` in the spec.
-* `--training.embedding.query-prefix`: Collator-side prefix; BiEncoderCollator adds a space.
-* `--training.embedding.passage-prefix`: Collator-side prefix; BiEncoderCollator adds a space.
+* `--training.retrieval.train-n-passages <INTEGER>`: Override `training.retrieval.train_n_passages` in the spec.
+* `--training.retrieval.eval-negative-size <INTEGER>`: Override `training.retrieval.eval_negative_size` in the spec.
+* `--training.retrieval.do-gradient-checkpointing`: Override `training.retrieval.do_gradient_checkpointing` in the spec.
+* `--training.retrieval.query-max-length <INTEGER>`: Override `training.retrieval.query_max_length` in the spec.
+* `--training.retrieval.passage-max-length <INTEGER>`: Override `training.retrieval.passage_max_length` in the spec.
+* `--training.retrieval.query-prefix`: Collator-side prefix; BiEncoderCollator adds a space.
+* `--training.retrieval.passage-prefix`: Collator-side prefix; BiEncoderCollator adds a space.
+* `--training.retrieval.export.opset <INTEGER>`: Override `training.retrieval.export.opset` in the spec.
+* `--training.retrieval.export.normalize`: L2-normalize embeddings. Ignored for cross_encoder.
+* `--training.retrieval.export.dimensions`: Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.
 * `--schedule.epochs <INTEGER>`: Override `schedule.epochs` in the spec.
 * `--schedule.max-steps <INTEGER>`: Override `schedule.max_steps` in the spec.
 * `--schedule.val-check-interval <FLOAT>`: Override `schedule.val_check_interval` in the spec.
@@ -9551,7 +9554,7 @@ nemo customization automodel.jobs run [OPTIONS]
 
 Job Spec flags are generated from the AutomodelJobInput Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `integrations.wandb.tags`, `integrations.mlflow.tags`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.retrieval.export.pooling`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `integrations.wandb.tags`, `integrations.mlflow.tags`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 ##### nemo customization automodel.jobs submit
@@ -9586,13 +9589,16 @@ nemo customization automodel.jobs submit [OPTIONS]
 * `--training.distillation-ratio <FLOAT>`: Override `training.distillation_ratio` in the spec.
 * `--training.distillation-temperature <FLOAT>`: Override `training.distillation_temperature` in the spec.
 * `--training.offload-teacher`: Override `training.offload_teacher` in the spec.
-* `--training.embedding.train-n-passages <INTEGER>`: Override `training.embedding.train_n_passages` in the spec.
-* `--training.embedding.eval-negative-size <INTEGER>`: Override `training.embedding.eval_negative_size` in the spec.
-* `--training.embedding.do-gradient-checkpointing`: Override `training.embedding.do_gradient_checkpointing` in the spec.
-* `--training.embedding.query-max-length <INTEGER>`: Override `training.embedding.query_max_length` in the spec.
-* `--training.embedding.passage-max-length <INTEGER>`: Override `training.embedding.passage_max_length` in the spec.
-* `--training.embedding.query-prefix`: Collator-side prefix; BiEncoderCollator adds a space.
-* `--training.embedding.passage-prefix`: Collator-side prefix; BiEncoderCollator adds a space.
+* `--training.retrieval.train-n-passages <INTEGER>`: Override `training.retrieval.train_n_passages` in the spec.
+* `--training.retrieval.eval-negative-size <INTEGER>`: Override `training.retrieval.eval_negative_size` in the spec.
+* `--training.retrieval.do-gradient-checkpointing`: Override `training.retrieval.do_gradient_checkpointing` in the spec.
+* `--training.retrieval.query-max-length <INTEGER>`: Override `training.retrieval.query_max_length` in the spec.
+* `--training.retrieval.passage-max-length <INTEGER>`: Override `training.retrieval.passage_max_length` in the spec.
+* `--training.retrieval.query-prefix`: Collator-side prefix; BiEncoderCollator adds a space.
+* `--training.retrieval.passage-prefix`: Collator-side prefix; BiEncoderCollator adds a space.
+* `--training.retrieval.export.opset <INTEGER>`: Override `training.retrieval.export.opset` in the spec.
+* `--training.retrieval.export.normalize`: L2-normalize embeddings. Ignored for cross_encoder.
+* `--training.retrieval.export.dimensions`: Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.
 * `--schedule.epochs <INTEGER>`: Override `schedule.epochs` in the spec.
 * `--schedule.max-steps <INTEGER>`: Override `schedule.max_steps` in the spec.
 * `--schedule.val-check-interval <FLOAT>`: Override `schedule.val_check_interval` in the spec.
@@ -9645,7 +9651,7 @@ nemo customization automodel.jobs submit [OPTIONS]
 
 Job Spec flags are generated from the AutomodelJobInput Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `integrations.wandb.tags`, `integrations.mlflow.tags`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.retrieval.export.pooling`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `integrations.wandb.tags`, `integrations.mlflow.tags`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 ##### nemo customization automodel.jobs explain

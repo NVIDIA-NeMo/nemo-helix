@@ -188,6 +188,31 @@ When the resolved recipe is `bi_encoder` or `cross_encoder` (explicit, or `auto`
 
 `optimizer.optimizer: auto` still selects FusedAdam for these recipes and Adam for SFT.
 
+### Retrieval data from Stage 1
+
+Previous: Data Designer `retrieval-prepare` / `retrieval-run` fileset with Automodel `training.jsonl` (`query`, `pos_doc`, `neg_doc`). Next after a successful job: `nemo-retrieval-recipes` or `nemo evaluator retrieve-eval submit` on the **frozen** `eval_beir` fileset — not CHAT `evaluate`.
+
+```json
+{
+  "model": "default/nemotron-3-embed-1b",
+  "dataset": {"training": "default/stage1-prep"},
+  "training": {
+    "recipe": "bi_encoder",
+    "training_type": "sft",
+    "finetuning_type": "lora_merged"
+  },
+  "output": {"name": "nemotron-3-embed-1b-tuned"}
+}
+```
+
+Use `"recipe": "cross_encoder"` and the rerank model entity for ranking. Leave batch/LR unset to take the table above. `finetuning_type` must be `all_weights` or `lora_merged` (unmerged LoRA cannot be exported to ONNX for ranking NIM).
+
+### `training.retrieval`
+
+Dataset, collator, and export knobs for `bi_encoder` / `cross_encoder`. The old `training.embedding` key still validates.
+
+`retrieval.export` writes ONNX plus the HF checkpoint. `primary` (`onnx` by default, or `hf`) selects the fileset root; the other artifact goes under `alternates/`. Embeddings emit pooled `embeddings`; cross-encoders emit `logits`. Set `dimensions: true` for Matryoshka truncation. Unmerged LoRA is not exported.
+
 ### `parallelism`
 
 | Field | Default | Notes |
