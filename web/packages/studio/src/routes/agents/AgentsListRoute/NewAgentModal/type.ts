@@ -19,8 +19,9 @@ export interface UploadAgentEntry {
   readonly file: File;
 }
 
-/** Which route into a new agent the modal is showing: a prompt to hand off, or a directory to upload. */
-export type NewAgentTab = 'coding-agent-prompt' | 'upload';
+/** Which route into a new agent the modal is showing: an agent already seen in ingested traces, a
+ *  prompt to hand off, or a directory to upload. */
+export type NewAgentTab = 'imported-traces' | 'coding-agent-prompt' | 'upload';
 
 export interface NewAgentModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   workspace: string;
