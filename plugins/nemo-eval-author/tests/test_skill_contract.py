@@ -2325,10 +2325,13 @@ def test_audit_generate_explains_missing_ethos_with_docs_link(tmp_path: Path) ->
     assert "Missing file:" in result.stderr
     assert "Docs: https://docs.nvidia.com/nemo-platform/documentation/agents/optimize-agents/ethos" in result.stderr
     assert "Next steps:\n" in result.stderr
-    assert "- Create an Ethos, then rerun this command with --ethos <path>." in result.stderr
+    assert "rerun this command with --ethos <path>" in result.stderr
     assert "https://docs.nvidia.com/nemo-platform/documentation/agents/optimize-agents/ethos" in result.stderr
-    assert "nemo-explore followed by nemo-ethos" in result.stderr
-    assert "author ETHOS.md by hand" in result.stderr
+    assert "skills/eval-author/references/local-ethos.md" in result.stderr
+    assert "Save ETHOS.md in the repository and review its contents" in result.stderr
+    assert "No platform service or upload is required" in result.stderr
+    assert "nemo-explore" not in result.stderr
+    assert "nemo-ethos" not in result.stderr
     assert "Traceback" not in result.stderr
     assert not out.exists()
 

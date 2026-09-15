@@ -43,7 +43,8 @@ of truth. If the user provides `--ethos <path>`, validate and use that path as
 existing local Ethos at
 `agents/<name>-ethos/ETHOS.md` and use that path as `<ethos_path>`.
 
-If no Ethos file exists, stop the audit flow and ground the user first: Eval
+If no Ethos file exists, pause audit-item drafting and generation while completing
+the local Ethos prerequisite below. Explain why it is needed: Eval
 Author needs a source of truth for how the agent is supposed to behave before it
 can decide what `audit.md` should cover. Code shows what the agent does today;
 Ethos records intended behavior, mission, constraints, success and failure
@@ -52,7 +53,8 @@ criteria, and what may change. Link the user to
 for what Ethos is and how to create one.
 
 Follow [Local Ethos](../eval-author/references/local-ethos.md) to capture and
-validate intent locally, then resume with the exact saved path as `<ethos_path>`.
+validate intent locally. Save the document and wait for the user's review of its
+contents before resuming audit-item drafting with the exact path as `<ethos_path>`.
 The bundled procedure reuses saved interview answers and defaults to root
 `ETHOS.md`. It does not require installed NeMo skills, a running platform,
 a workspace, or any upload. Do not call the platform Ethos or model-selection
@@ -64,8 +66,9 @@ link above, and ask for the saved file's path. An unreachable NeMo service is
 not a blocker. A demo may explicitly use demo policies without airline approval;
 record that scope instead of inventing production guarantees.
 
-Do not create a placeholder Ethos inside the audit flow, and do not substitute
-other repository material for it. Contributor docs, operations docs, README
+The local Ethos handoff creates a real document from user-confirmed intent; an
+empty file or placeholder written merely to bypass this prerequisite does not
+qualify. Do not substitute other repository material for Ethos. Contributor docs, operations docs, README
 files, code, traces, or draft labels are not valid source-of-truth replacements
 for a missing Ethos. Do not synthesize an audit denominator from those materials,
 even if the output is marked as draft. First save and review the real local Ethos.

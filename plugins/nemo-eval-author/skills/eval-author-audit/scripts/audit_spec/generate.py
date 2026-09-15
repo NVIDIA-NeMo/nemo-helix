@@ -151,9 +151,10 @@ def _read_ethos(path: Path) -> bytes:
             "and what may change.\n\n"
             f"Docs: {ETHOS_DOCS_URL}\n\n"
             "Next steps:\n"
-            "- Create an Ethos, then rerun this command with --ethos <path>.\n"
-            "- If NeMo Platform skills are available, run nemo-explore followed by nemo-ethos.\n"
-            "- Otherwise, author ETHOS.md by hand from the documentation."
+            "- Use Eval Author's Local Ethos procedure "
+            "(skills/eval-author/references/local-ethos.md), or author ETHOS.md from the documentation.\n"
+            "- Save ETHOS.md in the repository and review its contents before generating audit items.\n"
+            "- Then rerun this command with --ethos <path>. No platform service or upload is required."
         ) from exc
     except OSError as exc:
         raise AuditSpecError(
