@@ -79,7 +79,7 @@ experimentalist = [
   "nemo-experimentalist-plugin ; python_full_version < '3.14'",
   "nemo-eval-author-plugin ; python_full_version < '3.14'",
 ]
-typecheck = ["transformers>=5.17.0"]
+typecheck = ["transformers>=5.5.0,<5.9.0"]
 # The scaled-evals plugin stays out of `enabled-plugins` so a platform install does not
 # pick it up. CI still has to see it, so the lint and pytest entry points ask for this
 # group by name; without it neither the plugin nor psycopg is importable there.
@@ -379,7 +379,6 @@ override-dependencies = [
   "nltk>=3.10.3",             # GHSA-8mgp-746c-j5xp and CVE-2026-7{1513,8680,8681,8682,9657,9674,9675} + CVE-2026-8{1722,1726,1727}
   "gitpython>=3.1.62",        # BDSA-2026-{30097,30098,31388}
   "accelerate>=1.15.0",       # CVE-2026-69112
-  "transformers>=5.17.0",     # GHSA-xrqw-3rrv-vx5w + BDSA-2026-25434; supersedes the typecheck group's own cap below
 
 ]
 
