@@ -20,6 +20,7 @@ import logging
 from typing import Any
 
 from nemo_platform_plugin.inference_middleware import (
+    ImmediateResponse,
     InferenceMiddlewareContext,
     InferenceMiddlewareError,
     InferenceRequest,
@@ -40,6 +41,15 @@ from nemo_switchyard._factory import (
     initialize_factory_map,
 )
 from nemo_switchyard._format import build_chat_request, vm_models_for_switchyard
+from nemo_switchyard._native_config import (
+    NATIVE_CONFIG_TYPES,
+    build_native_algorithm,
+    models_map_from_config,
+    native_model_categories,
+    require_native_rust,
+    validate_native_config,
+)
+from nemo_switchyard._native_host import IgwJudgeTransport, NativeBinding, run_native_stream
 from nmp.core.inference_gateway.api.typed_response import TypedResponseStream
 from switchyard.lib.proxy_context import (
     CTX_ORIGINAL_REQUEST,
@@ -72,8 +82,9 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
     async def on_startup(self) -> None:
         initialize_factory_map()
         logger.info(
-            "SwitchyardMiddleware loaded — supported config_types: %s",
+            "SwitchyardMiddleware loaded — May config_types: %s native config_types: %s",
             list(CONFIG_TYPE_TO_FACTORY_CLASS.keys()),
+            sorted(NATIVE_CONFIG_TYPES),
         )
 
     async def on_shutdown(self) -> None:
@@ -100,9 +111,14 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
         Raises InferenceMiddlewareError on unknown config_type so IGW rejects the
         VirtualModel upsert at create time rather than crashing on first request.
         """
+        if config_type in NATIVE_CONFIG_TYPES:
+            require_native_rust(config_type)
+            validate_native_config(config_type, config)
+            return {"config_type": config_type}
         if config_type not in CONFIG_TYPE_TO_FACTORY_CLASS:
+            supported = [*CONFIG_TYPE_TO_FACTORY_CLASS, *sorted(NATIVE_CONFIG_TYPES)]
             raise InferenceMiddlewareError(
-                f"Unknown config_type {config_type!r}. Supported: {list(CONFIG_TYPE_TO_FACTORY_CLASS.keys())}",
+                f"Unknown config_type {config_type!r}. Supported: {supported}",
                 status_code=400,
             )
         return {"config_type": config_type}
@@ -112,7 +128,7 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
         ctx: InferenceMiddlewareContext,
         request: InferenceRequest,
         middleware_config: dict[str, Any],
-    ) -> InferenceRequest:
+    ) -> InferenceRequest | ImmediateResponse:
         """Run the Switchyard request pipeline for this VM + middleware.
 
         IGW invokes this once per nemo-switchyard middleware in the VM's
@@ -120,6 +136,10 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
         ["config_type"] (set by validate_middleware_config) to look up the right
         factory.
         """
+        config_type = middleware_config.get("config_type")
+        if config_type in NATIVE_CONFIG_TYPES:
+            return await self._process_native_request(ctx, request, middleware_config)
+
         factory = self._lookup_factory(ctx, middleware_config, phase="request")
 
         # IGW must populate typed_body for all recognised API paths. If it is None,
@@ -214,6 +234,10 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
         - Streaming (``TypedResponseStream``): wrap via ``_wrap_streaming`` and
           run the pipeline asynchronously. Translation is lazy over the iterator.
         """
+        config_type = middleware_config.get("config_type")
+        if config_type in NATIVE_CONFIG_TYPES:
+            return response
+
         if response.typed_body is None:
             # A prior streaming switchyard pass clears typed_body and sets result
             # to the translated stream. Pass through rather than raising so chained
@@ -335,11 +359,14 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
         config_type = middleware_call.config_type
         config = middleware_call.config or {}
 
+        if config_type in NATIVE_CONFIG_TYPES:
+            return self._register_native_entry(vm_key, config_type, config, phase)
+
         factory_class = CONFIG_TYPE_TO_FACTORY_CLASS.get(config_type)
         if not factory_class:
             raise InferenceMiddlewareError(
                 f"Unknown config_type {config_type!r} for VM {vm_key}. "
-                f"Supported: {list(CONFIG_TYPE_TO_FACTORY_CLASS.keys())}",
+                f"Supported: {[*CONFIG_TYPE_TO_FACTORY_CLASS, *sorted(NATIVE_CONFIG_TYPES)]}",
                 status_code=400,
             )
 
@@ -417,6 +444,7 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
                 )
                 continue
 
+            _state.NATIVE_BY_CONFIG_HASH.pop(cfg_hash, None)
             factory_name = _state.FACTORIES_BY_CONFIG_HASH.get(cfg_hash)
             if not factory_name:
                 continue
@@ -491,3 +519,82 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
                 exc_info=True,
             )
             raise InferenceMiddlewareError(f"Factory {factory_name} missing from registry", status_code=500) from e
+
+    async def _process_native_request(
+        self,
+        ctx: InferenceMiddlewareContext,
+        request: InferenceRequest,
+        middleware_config: dict[str, Any],
+    ) -> InferenceRequest | ImmediateResponse:
+        binding = self._lookup_native_binding(ctx, middleware_config)
+        transport = IgwJudgeTransport(self)
+        try:
+            return await run_native_stream(
+                algorithm=binding.algorithm,
+                request=request,
+                models=binding.models,
+                headers=dict(request.headers),
+                transport=transport,
+            )
+        except InferenceMiddlewareError:
+            raise
+        except Exception as exc:
+            logger.error("Native Switchyard run_stream failed: %s", exc, exc_info=True)
+            raise InferenceMiddlewareError(str(exc), status_code=500) from exc
+
+    def _lookup_native_binding(
+        self,
+        ctx: InferenceMiddlewareContext,
+        middleware_config: dict[str, Any],
+    ) -> NativeBinding:
+        vm_key = f"{ctx.workspace}/{ctx.virtual_model_name}"
+        config_type = middleware_config.get("config_type")
+        if not config_type:
+            raise InferenceMiddlewareError(
+                f"middleware_config missing 'config_type' for VM {vm_key}",
+                status_code=500,
+            )
+        cfg_hash = _state.VM_NAME_TO_CONFIG_HASH.get((vm_key, config_type, "request"))
+        binding = _state.NATIVE_BY_CONFIG_HASH.get(cfg_hash) if cfg_hash else None
+        if binding is None:
+            raise InferenceMiddlewareError(
+                f"No native Algorithm registered for VM {vm_key} with config_type {config_type!r}",
+                status_code=400,
+            )
+        return binding
+
+    def _register_native_entry(
+        self,
+        vm_key: str,
+        config_type: str,
+        config: dict[str, Any],
+        phase: _state.Phase,
+    ) -> str:
+        validated = validate_native_config(config_type, config)
+        required = native_model_categories(config_type)
+        models = models_map_from_config(validated, required=required)
+        cfg_hash = _state.config_hash(validated, config_type)
+        _state.VM_NAME_TO_CONFIG_HASH[(vm_key, config_type, phase)] = cfg_hash
+        if cfg_hash in _state.NATIVE_BY_CONFIG_HASH:
+            return cfg_hash
+        try:
+            algorithm = build_native_algorithm(config_type, validated)
+        except InferenceMiddlewareError:
+            raise
+        except Exception as exc:
+            raise InferenceMiddlewareError(
+                f"Failed to build native {config_type!r} for VM {vm_key}: {exc}",
+                status_code=400,
+            ) from exc
+        _state.NATIVE_BY_CONFIG_HASH[cfg_hash] = NativeBinding(
+            algorithm=algorithm,
+            models=models,
+            config_type=config_type,
+        )
+        logger.info(
+            "SwitchyardMiddleware: Registered native %r for VM %r (hash=%s)",
+            config_type,
+            vm_key,
+            cfg_hash,
+        )
+        return cfg_hash

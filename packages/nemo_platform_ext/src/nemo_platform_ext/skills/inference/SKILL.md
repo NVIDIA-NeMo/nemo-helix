@@ -190,8 +190,15 @@ the VM name. The VM name is resolved via the URL path
 (`gateway model post v1/chat/completions <vm-name>`), not the body.
 
 Exception: VMs that **rewrite** `body["model"]` (random_routing,
-`ModelFormatLookupProcessor` in translate) — here the initial body model can be
-the VM name since the rewrite resolves it to the real entity.
+`ModelFormatLookupProcessor` in translate, native `stage_router` / `llm_classifier`)
+— here the initial body model can be the VM name since the rewrite resolves it
+to the real entity.
+
+Native `stage_router` and `llm_classifier` require `switchyard_rust` in the IGW
+process. Default platform images do not ship it; upsert is HTTP 400 until the
+native wheel is installed in an isolated environment (do not overlay it on the
+May `switchyard` vendor). Judge calls must use provider-direct URLs from
+`get_inference_url_and_model`, not the VirtualModel gateway URL.
 
 For VMs without a rewriting middleware: always send the real auto-discovered
 entity in the body.

@@ -50,8 +50,20 @@ Attach this middleware to a VirtualModel via `MiddlewareCall`:
 
 | Type | Purpose | Required Fields |
 |------|---------|-----------------|
-| `random_routing` | Distribute across models | `strong`, `weak`, `strong_probability` |
-| `translate` | Format translation | derived from VM `backend_format` |
+| `random_routing` | Distribute across models (May vendor in the default image) | `strong`, `weak`, `strong_probability` |
+| `translate` | Format translation (May vendor) | derived from VM `backend_format` |
+| `stage_router` | Native libsy stage routing | `confidence_threshold`, `models.capable`, `models.efficient` |
+| `llm_classifier` | Native libsy classifier routing | `base_threshold`, `models.judge`, `models.capable`, `models.efficient` |
+
+`stage_router` and `llm_classifier` require the native `switchyard_rust` bindings
+in the IGW process. The default platform venv and 0.7 image do **not** install
+them (May `switchyard.lib` would collide with upstream `nemo-switchyard`).
+VirtualModel upsert returns **HTTP 400** when those types are used without
+`switchyard_rust`. Do not `uv add` upstream `nemo-switchyard` into the platform
+venv; that replaces May `switchyard` and silently breaks `translate`.
+
+Judge / classifier HTTP uses `get_inference_url_and_model` (provider-direct).
+Do not point the judge at a VirtualModel id — that re-enters this middleware.
 
 ### Phases (request vs. response)
 
@@ -78,7 +90,7 @@ INFO: Switchyard random routing: selected 'workspace/model-b' from ['workspace/m
 
 ## Architecture
 
-The middleware imports Switchyard from the vendored snapshot at `plugins/nemo-switchyard/vendor/switchyard/`. Each config type maps to a Switchyard factory class that builds request/response pipelines.
+The middleware imports May Switchyard from the vendored snapshot at `plugins/nemo-switchyard/vendor/switchyard/` for `random_routing` and `translate`. Native `stage_router` / `llm_classifier` lazy-import `switchyard_rust.libsy` only when that package is installed.
 
 - Request flow: IGW → `process_request()` → routing/translation → backend model
 - Response flow: backend → `process_response()` → post-processing → IGW

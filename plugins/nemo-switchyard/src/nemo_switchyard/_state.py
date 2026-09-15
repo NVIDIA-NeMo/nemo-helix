@@ -41,6 +41,10 @@ VM_CONFIG_MAPPING: dict[str, list[str]] = {}
 # listed it under both request_middleware and response_middleware).
 VM_NAME_TO_CONFIG_HASH: dict[tuple[str, str, Phase], str] = {}
 
+# config_hash -> native Algorithm binding. In-process per IGW replica; not shared
+# across replicas. Cleared on shutdown and when the last VM using the hash is destroyed.
+NATIVE_BY_CONFIG_HASH: dict[str, Any] = {}
+
 
 def config_hash(config: dict[str, Any], config_type: str) -> str:
     """Compute a deterministic hash of (config_type, config) for factory dedup."""
@@ -53,3 +57,4 @@ def clear_all() -> None:
     FACTORIES_BY_CONFIG_HASH.clear()
     VM_CONFIG_MAPPING.clear()
     VM_NAME_TO_CONFIG_HASH.clear()
+    NATIVE_BY_CONFIG_HASH.clear()
