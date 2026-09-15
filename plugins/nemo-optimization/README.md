@@ -41,6 +41,7 @@ Golden-path agent shape: Fabric Hermes (``nvidia.fabric.hermes``). See
 * ``optimize-chatonly.yaml`` — chat-only Hermes smoke
 * ``optimize-chatonly-via-agent.yaml`` — same study with a platform ``--agent``
 * ``optimize-mcp.yaml`` — phishing analyzer via MCP (separate agent checkout)
+* ``optimize-mcp-mock.yaml`` — same study against a bundled mock analyzer
 
 Install and QA steps live in that directory's README.
 

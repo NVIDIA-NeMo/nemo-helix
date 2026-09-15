@@ -26,8 +26,9 @@ _EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "hermes-optimize"
 # Loaded from the bundle rather than imported: the bundle is a workspace member the platform venv
 # installs, but a test run synced without `--all-packages` must still exercise the fixture.
 _SERVER_PATH = _EXAMPLE / "phishing_analyzer_mcp" / "server.py"
-_CONFIG = yaml.safe_load((_EXAMPLE / "optimize-mcp.yaml").read_text(encoding="utf-8"))
-_LIVE_CONFIG = yaml.safe_load((_EXAMPLE / "optimize-mcp-live.yaml").read_text(encoding="utf-8"))
+# The example proper runs the real analyzer; the mock variant is what these tests can spawn.
+_CONFIG = yaml.safe_load((_EXAMPLE / "optimize-mcp-mock.yaml").read_text(encoding="utf-8"))
+_LIVE_CONFIG = yaml.safe_load((_EXAMPLE / "optimize-mcp.yaml").read_text(encoding="utf-8"))
 _DATASET = json.loads((_EXAMPLE / "dataset-mcp.json").read_text(encoding="utf-8"))
 
 
@@ -116,8 +117,8 @@ def test_fabric_accepts_the_example_agent_config() -> None:
     assert servers["email-phishing-analyzer"]["args"] == ["phishing_analyzer_mcp/server.py"]
 
 
-def test_the_live_variant_differs_from_the_mock_only_in_how_the_server_is_launched() -> None:
-    """Option 1 (real server) and option 2 (mock) must be the same study; only the tool changes."""
+def test_the_mock_variant_differs_from_the_example_only_in_how_the_server_is_launched() -> None:
+    """The example (real server) and its mock variant must be the same study; only the tool changes."""
     live_server = _LIVE_CONFIG["mcp"]["servers"]["email-phishing-analyzer"]
     assert live_server == {
         "transport": "stdio",
@@ -134,7 +135,7 @@ def test_the_live_variant_differs_from_the_mock_only_in_how_the_server_is_launch
     assert live_types == sorted(type(m).__name__ for m in _build_metrics(_CONFIG, _CONFIG["eval"]))
 
 
-def test_fabric_accepts_the_live_variant_with_its_credential_in_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fabric_accepts_the_example_with_its_credential_in_env(monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("nemo_fabric")
     import os
 

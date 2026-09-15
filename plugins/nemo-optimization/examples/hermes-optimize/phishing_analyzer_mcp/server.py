@@ -5,8 +5,8 @@
 
 The ``optimize-mcp.yaml`` study tunes the Hermes coordinator that calls this tool, not the analyzer,
 so the analyzer is a fixture: each row of ``dataset-mcp.json`` carries the ``analysis`` the real
-analyzer returned for that email (recorded with ``optimize-mcp-live.yaml``), and this server hands it
-back when the agent passes that email. To add a task, run the live variant on the new email once and
+analyzer returned for that email (recorded with ``optimize-mcp.yaml``), and this server hands it
+back when the agent passes that email. To add a task, run ``optimize-mcp.yaml`` on the new email once and
 store the analyzer's result in the row.
 
 Because the reply is keyed on the email text, an agent that edits, truncates or paraphrases the

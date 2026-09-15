@@ -17,8 +17,8 @@ bundle portable when the platform sees only the files you staged into a fileset.
 |---------|--------------|---------------------|-------|
 | **Chat-only** | Tunes temperature on a short Q&A agent (no tools) | [`optimize-chatonly.yaml`](optimize-chatonly.yaml) | [`dataset-chatonly.json`](dataset-chatonly.json) |
 | **Chat-only + `--agent`** | Same study; agent body from a platform entity | [`optimize-chatonly-via-agent.yaml`](optimize-chatonly-via-agent.yaml) | [`agents/chatonly/agent.yaml`](agents/chatonly/agent.yaml) |
-| **MCP** | Tunes temperature / top_p on a phishing agent that calls an MCP analyzer shipped in the bundle, scoring accuracy, exactly-one tool call, and verbatim tool input | [`optimize-mcp.yaml`](optimize-mcp.yaml) | [`dataset-mcp.json`](dataset-mcp.json), [`phishing_analyzer_mcp/`](phishing_analyzer_mcp/) |
-| **MCP, real analyzer** | The same study against the real analyzer MCP server from the `email-phishing-analyzer-harnesses` checkout, declared statically | [`optimize-mcp-live.yaml`](optimize-mcp-live.yaml) | `PHISHING_MCP_BIN` |
+| **MCP** | Tunes temperature / top_p on a phishing agent that calls the email-phishing-analyzer MCP server, scoring accuracy, exactly-one tool call, and verbatim tool input | [`optimize-mcp.yaml`](optimize-mcp.yaml) | [`dataset-mcp.json`](dataset-mcp.json), `PHISHING_MCP_BIN` |
+| **MCP, mock analyzer** | The same study against a bundled fixture that replays recorded analyzer results; needs no checkout or analyzer credential | [`optimize-mcp-mock.yaml`](optimize-mcp-mock.yaml) | [`phishing_analyzer_mcp/`](phishing_analyzer_mcp/) |
 
 Official docs: [Optimize Agents](../../../../docs/agents/optimization.mdx).
 
@@ -278,55 +278,59 @@ needs installed.
 ## Example 2 — MCP (phishing analyzer)
 
 Same optimize flow, but the agent calls an **MCP email-phishing analyzer** on
-each dataset row. The analyzer is a mock that ships in this bundle
-([`phishing_analyzer_mcp/server.py`](phishing_analyzer_mcp/server.py)). The
-config spawns it as `python3 phishing_analyzer_mcp/server.py`; the optimizer
-makes that bundle-relative path absolute for each trial, so the same bundle runs
-locally and as a platform job with no extra install and no analyzer credential.
-Any bundle can ship its own MCP server the same way. It replays the `analysis` stored on each row of `dataset-mcp.json`, keyed on the
-email text: an agent that passes the email verbatim gets the canned verdict, one
-that edits it gets `unknown`. The study tunes the Hermes coordinator that calls
-the tool, which is what a fixed LLM analyzer would have measured too.
-
-The stored `analysis` values were recorded from a run of
-[`optimize-mcp-live.yaml`](optimize-mcp-live.yaml) against the real analyzer
-(2026-09-15). To add an email to the eval set, run that variant on it once and
-store the analyzer's result as the row's `analysis` (the fixture reads
-`PHISHING_ANALYZER_DATASET` if you keep the dataset elsewhere).
-
-### Option 1: the real analyzer, statically configured
-
-[`optimize-mcp-live.yaml`](optimize-mcp-live.yaml) is the same study against the
-real analyzer MCP server. Only the server block differs: the analyzer's console
-script is the `url` and its credential rides in `env`, both expanded from the
-environment when the optimizer loads the config. No per-task binding, no hook.
-
-```bash
-export PHISHING_MCP_BIN="$HOME/workspace/email-phishing-analyzer-harnesses/.venv/bin/email-phishing-analyzer-mcp"
-export NVIDIA_API_KEY=...   # the analyzer's default config targets integrate.api.nvidia.com
-```
-
-Use this variant to bring a production MCP server under test; use the mock when
-the study should not depend on the tool's own model. The mock's recorded
-`analysis` per row comes from a run of this variant. Note the harness checkout's
-`configs/common.yaml` must name a live model: its default
-`nvidia/nemotron-3-nano-30b-a3b` on `integrate.api.nvidia.com` returns 410 Gone.
+each dataset row. The analyzer lives in a **separate** repo
+(`email-phishing-analyzer-harnesses`) with its own virtualenv, and
+[`optimize-mcp.yaml`](optimize-mcp.yaml) declares it the way any production MCP
+server is declared: its console script as the stdio `url`, its credential in
+`env`, both expanded from the environment when the optimizer loads the config.
+Nothing is configured per task and no hook runs; the study tunes the Hermes
+coordinator that calls the tool.
 
 Three evaluators score each trial: the judge compares the final classification
 with the dataset label (`average_score`); `tool_call_count` reads the ATIF
 trajectory to check the analyzer was called exactly once
 (`tool_call_count_matches`); and `tool_argument_matches_input` checks the
 `text` the agent passed to the tool equals the task instruction
-(`tool_argument_matches_input`), which is the "copy verbatim" requirement scored
-directly rather than inferred from the tool's answer. All three are study
-objectives in `optimizer.eval_metrics`.
+(`tool_argument_matches_input`), the "copy verbatim" requirement scored directly
+rather than inferred from the tool's answer. All three are study objectives in
+`optimizer.eval_metrics`.
 
 ### Extra setup (once)
 
-None beyond the common setup: `python3` must resolve to the platform `.venv`
-(activate it, as above) so the server can import `mcp`.
+```bash
+export PHISHING_AGENT_ROOT="${PHISHING_AGENT_ROOT:-$HOME/workspace/email-phishing-analyzer-harnesses}"
+(cd "$PHISHING_AGENT_ROOT" && uv sync)
+export PHISHING_MCP_BIN="$PHISHING_AGENT_ROOT/.venv/bin/email-phishing-analyzer-mcp"
+test -x "$PHISHING_MCP_BIN"
+```
 
-The dataset is 5 emails (3 phishing, 2 benign), each with its canned `analysis`.
+The analyzer reads `NVIDIA_API_KEY` from the `env` the config passes it and its
+model settings from that checkout's `configs/common.yaml`. That file must name a
+live model: as of 2026-09-15 its default `nvidia/nemotron-3-nano-30b-a3b` on
+`integrate.api.nvidia.com` returns 410 Gone, and every tool call fails with
+`analyzer request failed` until it is pointed at a current model (for example
+`nvidia/nvidia/nemotron-3-nano-30b-a3b` on `https://inference-api.nvidia.com/v1`).
+
+The dataset is 5 emails (3 phishing, 2 benign).
+
+### Variant: the mock analyzer
+
+[`optimize-mcp-mock.yaml`](optimize-mcp-mock.yaml) is the same study with the
+tool swapped for a fixture that ships in this bundle
+([`phishing_analyzer_mcp/server.py`](phishing_analyzer_mcp/server.py)). The
+config spawns it as `python3 phishing_analyzer_mcp/server.py`; the optimizer
+makes that bundle-relative path absolute for each trial, so it runs locally and
+as a platform job with no checkout and no analyzer credential, and CI exercises
+it. Any bundle can ship its own MCP server the same way.
+
+The fixture replays the `analysis` stored on each row of `dataset-mcp.json`,
+keyed on the email text: an agent that passes the email verbatim gets the
+recorded verdict, one that edits it gets `unknown`. Those values were recorded
+from a run of `optimize-mcp.yaml` against the real analyzer (2026-09-15). To add
+an email, run `optimize-mcp.yaml` on it once and store the analyzer's result as
+the row's `analysis` (the fixture reads `PHISHING_ANALYZER_DATASET` if you keep
+the dataset elsewhere). For the mock, `python3` must resolve to the platform
+`.venv` (activate it, as above) so the server can import `mcp`.
 
 ### Run
 
@@ -392,7 +396,8 @@ print(
 | `nemo: command not found` | `source .venv/bin/activate` after `uv sync --package nemo-agents-plugin` |
 | `No module named hermes_cli` | Re-run the `hermes-agent==0.19.0 --no-deps` install (needed after every fresh `uv sync`) |
 | `No module named 'nemo_fabric_adapters'` | `export ADAPTER_PYTHON="$REPO_ROOT/.venv/bin/python"` |
-| MCP server fails to start / `No module named mcp` | `python3` must be the platform `.venv` interpreter: `source .venv/bin/activate` before running |
+| Mock MCP server fails to start / `No module named mcp` | `python3` must be the platform `.venv` interpreter: `source .venv/bin/activate` before running |
+| Every tool call `analyzer request failed` | The harness checkout's `configs/common.yaml` names a retired model; point it at a live one (see Example 2 setup) |
 | LLM 401 | Confirm `NVIDIA_API_KEY` works on inference-api |
 | Dataset / config file not found | `cd "$BUNDLE"` — paths in the YAML are relative to the bundle, not the repo root |
 | `optimize` rejected with `optimize_config_fileset is required` | Stage the bundle with `prepare-fileset`, then pass the ref it prints |
@@ -403,7 +408,7 @@ print(
 | `delete` hangs / `Aborted!` | Pass `-y` (`nemo agents delete NAME -y`) |
 | Create `409 Conflict` / stale models | Delete with `-y`, then create again; optimize always uses the **stored** agent config |
 | Optional `--agent ...` rejected for `http://` / `file://` | Pass a workspace agent name (e.g. `hermes-optimize-chatonly`), or omit `--agent` and use `--optimize-config` only |
-| MCP: many samples `trial_status: failed` / `no completed trials` | Inspect `artifacts/.fabric/hermes/runtimes/*/logs/`. Empty finals or repeat tool calls do not fail a trial, they score low on `average_score` / `tool_call_count_matches`; a hard failure usually means the venv was not active (`python3` could not import `mcp`) or `max_turns` < 4 |
+| MCP: many samples `trial_status: failed` / `no completed trials` | Inspect `artifacts/.fabric/hermes/runtimes/*/logs/`. Empty finals or repeat tool calls do not fail a trial, they score low on `average_score` / `tool_call_count_matches`; a hard failure usually means `PHISHING_MCP_BIN` is unset, the analyzer's model is retired, or `max_turns` < 4 |
 | Judge / best scores look like `4.5` not `~1.0` | `tunable_rag_evaluator` with `default_scoring` can sum component scores; compare trials relative to each other |
 
 Trajectory capture (`capture_trajectory`) is off in the chat-only YAMLs so you

@@ -1,15 +1,15 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# --optimize-config: Hermes + a mock phishing-analyzer MCP server.
+# --optimize-config: Hermes + the phishing-analyzer MCP server (separate agent checkout).
 # Broader search space than chat-only — temperature + top_p, several trials.
-# The analyzer ships in this bundle (phishing_analyzer_mcp/server.py) and is
-# spawned with the venv's python3; the optimizer makes the bundle-relative path
-# absolute per trial. It replays the `analysis` stored on each dataset-mcp.json
-# row, so the study tunes the Hermes coordinator that calls it and scores the
+# The analyzer is declared statically: its console script as `url`, its
+# credential in `env`; nothing per task. Set PHISHING_MCP_BIN to the
+# email-phishing-analyzer-harnesses checkout's .venv/bin/email-phishing-analyzer-mcp;
+# the optimizer expands ${VAR} when it loads the config. Scores the
 # classification, that the tool was called exactly once, and that the email
-# reached it verbatim. To add a task, run a real analyzer once and store its
-# result on the row.
+# reached it verbatim. optimize-mcp-mock.yaml is the same study against a
+# bundled fixture that replays results recorded from this server.
 schema_version: fabric.agent/v1alpha1
 metadata:
   name: hermes-optimize-mcp
@@ -51,8 +51,9 @@ mcp:
   servers:
     email-phishing-analyzer:
       transport: stdio
-      url: python3
-      args: [phishing_analyzer_mcp/server.py]
+      url: ${PHISHING_MCP_BIN}
+      env:
+        NVIDIA_API_KEY: ${NVIDIA_API_KEY}
       exposure: harness_native
 tools:
   enabled:
