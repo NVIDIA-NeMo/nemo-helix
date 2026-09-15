@@ -94,3 +94,9 @@ class ListWorkspacesQueryParams(TypedDict, total=False):
 
 class CreateWorkspaceQueryParams(TypedDict, total=False):
     wait_role_propagation: NotRequired[bool]
+
+
+class WorkspaceMemberQueryParams(TypedDict, total=False):
+    """Query parameters shared by the member create/update/delete endpoints."""
+
+    wait_role_propagation: NotRequired[bool]

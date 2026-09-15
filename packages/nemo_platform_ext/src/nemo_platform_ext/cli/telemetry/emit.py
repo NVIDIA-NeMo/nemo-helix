@@ -61,9 +61,10 @@ def telemetry_opted_in() -> bool:
 
 def _client_version() -> str:
     try:
-        import nemo_platform
+        from nemo_platform_ext.cli.version import UNKNOWN_VERSION, client_version
 
-        return nemo_platform.__version__
+        resolved = client_version()
+        return "undefined" if resolved == UNKNOWN_VERSION else resolved
     except Exception:
         logger.debug("Could not resolve client version for telemetry", exc_info=True)
         return "undefined"

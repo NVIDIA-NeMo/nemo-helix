@@ -194,7 +194,7 @@ def test_get_platform_sdk_uses_workload_identity_when_token_file_configured(monk
     monkeypatch.setenv("NMP_PRINCIPAL", json.dumps({"id": "creator@example.com", "email": "creator@example.com"}))
     monkeypatch.delenv("NMP_ACCESS_TOKEN", raising=False)
     monkeypatch.setattr(
-        "nemo_platform_ext.client.factory.discover_nmp_config",
+        "nemo_platform_ext.client.bootstrap.discover_nmp_config",
         lambda _base_url, **_kwargs: _workload_oidc_config(),
     )
     monkeypatch.setattr("nemo_platform_ext.auth.workload_exchange.token_exchange_grant", token_exchange_grant)
@@ -383,7 +383,7 @@ def test_get_task_sdk_uses_workload_identity_when_token_file_configured(monkeypa
     monkeypatch.setenv("NMP_PRINCIPAL", json.dumps({"id": "creator@example.com", "email": "creator@example.com"}))
     monkeypatch.delenv("NMP_ACCESS_TOKEN", raising=False)
     monkeypatch.setattr(
-        "nemo_platform_ext.client.factory.discover_nmp_config",
+        "nemo_platform_ext.client.bootstrap.discover_nmp_config",
         lambda _base_url, **_kwargs: _workload_oidc_config(),
     )
     monkeypatch.setattr("nemo_platform_ext.auth.workload_exchange.token_exchange_grant", token_exchange_grant)

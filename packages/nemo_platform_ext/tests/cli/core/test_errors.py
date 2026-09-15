@@ -25,6 +25,7 @@ from nemo_platform._exceptions import (
 from nemo_platform_ext.cli.app import app
 from nemo_platform_ext.cli.core.errors import (
     InvalidSearchPatternError,
+    UnknownInputFieldsError,
     _format_api_error,
     handle_exception,
 )
@@ -542,3 +543,79 @@ def test_internal_server_error_hint(capsys, body_detail, has_list_cmd, expect_li
     else:
         assert "server-side issue" in captured.err
         assert "list" not in captured.err
+
+
+# ---------------------------------------------------------------------------
+# Typed-client error shapes
+# ---------------------------------------------------------------------------
+
+
+def _typed_http_error(error_class, status_code, body=None):
+    request = httpx.Request("GET", "http://test/apis/test/v2/things")
+    response = httpx.Response(
+        status_code, json=body, request=request, text=None if body is not None else "Error message"
+    )
+    return error_class(response)
+
+
+def test_format_api_error_uses_typed_http_error_detail():
+    error = _typed_http_error(plugin_errors.NotFoundError, 404, {"detail": "Workspace 'default' not found"})
+    assert _format_api_error(error) == "Workspace 'default' not found"
+
+
+def test_generic_typed_client_error_maps_to_remote_exit_code(capsys):
+    with pytest.raises(typer.Exit) as exc_info:
+        handle_exception(plugin_errors.NemoClientError("Generic API error"))
+
+    assert exc_info.value.exit_code == 3
+    assert "API error:" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Missing workspace argument",
+        "Missing path parameter 'workspace' for GET /apis/secrets/v2/workspaces/{workspace}/secrets",
+        "workspace must be provided when the client has no default workspace",
+    ],
+)
+def test_missing_workspace_value_error_is_usage_error(capsys, message):
+    """Both the generated SDK's and the typed client's unresolved-workspace ValueErrors map to exit 2."""
+    with pytest.raises(typer.Exit) as exc_info:
+        handle_exception(ValueError(message))
+
+    assert exc_info.value.exit_code == 2
+    captured = capsys.readouterr()
+    assert "Missing workspace:" in captured.err
+    assert "--workspace" in captured.err
+
+
+def test_pydantic_validation_error_is_usage_error(capsys):
+    """Client-side request-model validation failures are reported as invalid input with exit code 2."""
+    from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
+    from pydantic import ValidationError
+
+    try:
+        PlatformSecretCreateRequest(name="x", value="v")
+    except ValidationError as error:
+        with pytest.raises(typer.Exit) as exc_info:
+            handle_exception(error)
+    else:  # pragma: no cover - guards the test's own assumption
+        raise AssertionError("expected a validation error")
+
+    assert exc_info.value.exit_code == 2
+    captured = capsys.readouterr()
+    assert "Invalid input:" in captured.err
+    assert "name" in captured.err
+    assert "--help" in captured.err
+
+
+def test_unknown_input_fields_error_is_usage_error(capsys):
+    with pytest.raises(typer.Exit) as exc_info:
+        handle_exception(UnknownInputFieldsError(["descripton"], "things create", ["description", "name"]))
+
+    assert exc_info.value.exit_code == 2
+    captured = capsys.readouterr()
+    assert "Unknown input fields: descripton" in captured.err
+    assert "Accepted fields: description, name" in captured.err
+    assert "things create --help" in captured.err

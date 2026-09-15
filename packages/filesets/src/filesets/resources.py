@@ -7,15 +7,11 @@ These classes provide high-level file operations (upload, download, list, delete
 backed by the NemoClient typed HTTP client and fsspec filesystem access.
 """
 
-import uuid
 from collections.abc import AsyncIterator, Iterator
-from dataclasses import dataclass
 from functools import cached_property
-from pathlib import PurePath
 from typing import Any, Protocol, runtime_checkable
 
-from fsspec.callbacks import DEFAULT_CALLBACK, Callback
-from fsspec.core import has_magic
+from fsspec.callbacks import Callback
 from nemo_platform.resources.files.files import (
     AsyncFilesResource as GeneratedAsyncFilesResource,
 )
@@ -25,70 +21,17 @@ from nemo_platform.resources.files.files import (
 from nemo_platform.resources.files.filesets import AsyncFilesetsResource, FilesetsResource
 from nemo_platform.resources.files.otlp.otlp import AsyncOtlpResource, OtlpResource
 from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
-from nemo_platform_plugin.files.types import (
-    CacheStatus,
-    CreateFilesetRequest,
-    FilesetFileOutput,
-    FilesetOutput,
-    ListFilesQueryParams,
-)
+from nemo_platform_plugin.files.types import CreateFilesetRequest, FilesetOutput
 
+from filesets import transfer
 from filesets.filesystem.filesystem import (
     AsyncFilesetFileSystem,
     FilesetFileSystem,
     build_fileset_ref,
     parse_fileset_path,
 )
-
-
-@dataclass
-class ListFilesResponse:
-    """Response from listing files in a fileset.
-
-    Attributes:
-        data: List of files in the fileset.
-
-    Properties:
-        cache_status: Aggregate cache status of all files.
-            - "caching" if any file is actively being cached
-            - "not_cached" if any file is not cached (and none are caching)
-            - "cached" if all files are fully cached
-            - "not_cacheable" if all files cannot be cached
-            - None if no cache information is available
-    """
-
-    data: list[FilesetFileOutput]
-
-    @property
-    def cache_status(self) -> CacheStatus | None:
-        """Get aggregate cache status of all files.
-
-        Returns the most relevant status based on priority:
-        - "caching" if any file is actively being cached
-        - "not_cached" if any file is not cached (and none are caching)
-        - "cached" if all files are fully cached
-        - "not_cacheable" if all files cannot be cached
-        - None if no cache information is available
-        """
-        if not self.data:
-            return None
-
-        statuses = [f.cache_status for f in self.data if f.cache_status is not None]
-        if not statuses:
-            return None
-
-        # Priority: caching > not_cached > cached > not_cacheable
-        if "caching" in statuses:
-            return CacheStatus.CACHING
-        if "not_cached" in statuses:
-            return CacheStatus.NOT_CACHED
-        if all(s == "cached" for s in statuses):
-            return CacheStatus.CACHED
-        if all(s == "not_cacheable" for s in statuses):
-            return CacheStatus.NOT_CACHEABLE
-
-        # Mixed cached/not_cacheable - return cached since some files are cached
-        return CacheStatus.CACHED
+from filesets.transfer import ListFilesResponse as ListFilesResponse
+from filesets.transfer import generate_fileset_name as _generate_fileset_name
 
 
 @runtime_checkable
@@ -107,37 +50,6 @@ class AsyncReadable(Protocol):
 
 SyncContent = bytes | str | Readable | Iterator[bytes]
 AsyncContent = bytes | str | AsyncReadable | AsyncIterator[bytes]
-
-
-def _generate_fileset_name() -> str:
-    """Generate a unique fileset name using UUID."""
-    return f"fileset-{uuid.uuid4().hex[:8]}"
-
-
-def _matches_glob(filepath: str, pattern: str) -> bool:
-    """Match filepath against a glob pattern using pathlib.
-
-    Simple patterns (no /) only match top-level files.
-    Path patterns (with /) match the full relative path from the right.
-
-    Examples:
-        _matches_glob("train.json", "*.json") -> True
-        _matches_glob("subdir/nested.json", "*.json") -> False (nested file)
-        _matches_glob("subdir/nested.json", "subdir/*.json") -> True
-        _matches_glob("subdir/nested.json", "*/*.json") -> True
-
-    Args:
-        filepath: The file path to check (relative path within fileset).
-        pattern: Glob pattern to match against.
-
-    Returns:
-        True if the filepath matches the pattern.
-    """
-    if "/" not in pattern:
-        # Simple pattern - only matches top-level files
-        return "/" not in filepath and PurePath(filepath).match(pattern)
-    # Path pattern - match from the right
-    return PurePath(filepath).match(pattern)
 
 
 class FilesResource:
@@ -272,47 +184,16 @@ class FilesResource:
             ...         callback=cb
             ...     )
         """
-        # Handle list of paths
-        if isinstance(remote_path, list):
-            if not remote_path:
-                return
-            ws = workspace or self._client.workspace
-            if fileset is None:
-                raise ValueError("fileset must be provided when remote_path is a list.")
-            if ws is None:
-                raise ValueError("workspace must be provided when remote_path is a list.")
-            # Build list of (remote, local) path pairs preserving directory structure
-            rpaths = [build_fileset_ref(p, workspace=ws, fileset=fileset) for p in remote_path]
-            lpaths = [str(PurePath(local_path) / p) for p in remote_path]
-            self.fsspec.get(rpath=rpaths, lpath=lpaths, callback=callback or DEFAULT_CALLBACK)
-            return
-
-        ws, path_fileset, path = parse_fileset_path(
-            remote_path,
-            workspace_fallback=workspace or self._client.workspace,
+        transfer.download(
+            self._client,
+            remote_path=remote_path,
+            local_path=local_path,
+            fileset=fileset,
+            workspace=workspace,
+            callback=callback,
+            max_workers=max_workers,
+            filesystem=self.fsspec,
         )
-        fileset = fileset or path_fileset
-
-        if fileset is None:
-            raise ValueError("Fileset must be specified either as a parameter or in the remote_path.")
-
-        # Handle glob patterns by expanding to list of files first
-        if has_magic(path):
-            matching_files = self.list(remote_path=path, fileset=fileset, workspace=ws)
-            if not matching_files.data:
-                return
-            # Build list of (remote, local) path pairs preserving directory structure
-            rpaths = [build_fileset_ref(f.path, workspace=ws, fileset=fileset) for f in matching_files.data]
-            lpaths = [str(PurePath(local_path) / f.path) for f in matching_files.data]
-            self.fsspec.get(rpath=rpaths, lpath=lpaths, callback=callback or DEFAULT_CALLBACK)
-        else:
-            fileset_ref = build_fileset_ref(path, workspace=ws, fileset=fileset)
-            self.fsspec.get(
-                rpath=fileset_ref,
-                lpath=local_path,
-                recursive=True,
-                callback=callback or DEFAULT_CALLBACK,
-            )
 
     def upload(
         self,
@@ -383,32 +264,17 @@ class FilesResource:
             ... )
             >>> print(f"Uploaded to: {fileset.name}")  # e.g., "fileset-a1b2c3d4"
         """
-        ws, path_fileset, path = parse_fileset_path(
-            remote_path,
-            workspace_fallback=workspace or self._client.workspace,
+        return transfer.upload(
+            self._client,
+            local_path=local_path,
+            remote_path=remote_path,
+            fileset=fileset,
+            workspace=workspace,
+            callback=callback,
+            max_workers=max_workers,
+            fileset_auto_create=fileset_auto_create,
+            filesystem=self.fsspec,
         )
-        fileset = fileset or path_fileset
-
-        if fileset is None:
-            if fileset_auto_create:
-                fileset = _generate_fileset_name()
-            else:
-                raise ValueError(
-                    "Fileset must be specified either as a parameter or in the remote_path when fileset_auto_create is False."
-                )
-
-        fileset_ref = build_fileset_ref(path, workspace=ws, fileset=fileset)
-        if fileset_auto_create:
-            self._ensure_fileset_exists(ws, fileset)
-
-        self.fsspec.put(
-            lpath=local_path,
-            rpath=fileset_ref,
-            recursive=True,
-            callback=callback or DEFAULT_CALLBACK,
-        )
-
-        return self._client.get_fileset(name=fileset, workspace=ws).data()
 
     def upload_content(
         self,
@@ -617,37 +483,13 @@ class FilesResource:
             >>> for f in response.data:
             ...     print(f"{f.path}: {f.cache_status}")
         """
-        ws, path_fileset, path = parse_fileset_path(
-            remote_path,
-            workspace_fallback=workspace or self._client.workspace,
+        return transfer.list_files(
+            self._client,
+            remote_path=remote_path,
+            fileset=fileset,
+            workspace=workspace,
+            include_cache_status=include_cache_status,
         )
-        fileset = fileset or path_fileset
-
-        if fileset is None:
-            raise ValueError("Fileset must be specified either as a parameter or in the remote_path.")
-
-        # For glob patterns, list all files then filter client-side
-        # For path prefixes, the API handles filtering server-side
-        api_path = None if has_magic(path) else (path or None)
-
-        query_params: ListFilesQueryParams = {}
-        if api_path is not None:
-            query_params["path"] = api_path
-        if include_cache_status:
-            query_params["include_cache_status"] = True
-
-        response = self._client.list_files(
-            workspace=ws,
-            name=fileset,
-            query_params=query_params or None,
-        )
-        response = response.data()
-        files = list(response.data)
-
-        # Apply glob filtering if needed
-        if has_magic(path):
-            files = [f for f in files if _matches_glob(f.path, path)]
-        return ListFilesResponse(data=files)
 
     def delete(
         self,
@@ -676,17 +518,13 @@ class FilesResource:
             # Delete using full path
             >>> sdk.files.delete(remote_path="my-fileset#data/old-file.txt")
         """
-        ws, path_fileset, path = parse_fileset_path(
-            remote_path,
-            workspace_fallback=workspace or self._client.workspace,
+        transfer.delete(
+            self._client,
+            remote_path=remote_path,
+            fileset=fileset,
+            workspace=workspace,
+            filesystem=self.fsspec,
         )
-        fileset = fileset or path_fileset
-
-        if fileset is None:
-            raise ValueError("Fileset must be specified either as a parameter or in the remote_path.")
-
-        fileset_ref = build_fileset_ref(path, workspace=ws, fileset=fileset)
-        self.fsspec.rm(fileset_ref)
 
 
 class AsyncFilesResource:
@@ -801,48 +639,16 @@ class AsyncFilesResource:
             ...     local_path="./downloads/"
             ... )
         """
-        # Handle list of paths
-        if isinstance(remote_path, list):
-            if not remote_path:
-                return
-            ws = workspace or self._client.workspace
-            if fileset is None:
-                raise ValueError("fileset must be provided when remote_path is a list.")
-            if ws is None:
-                raise ValueError("workspace must be provided when remote_path is a list.")
-            # Build list of (remote, local) path pairs preserving directory structure
-            rpaths = [build_fileset_ref(p, workspace=ws, fileset=fileset) for p in remote_path]
-            lpaths = [str(PurePath(local_path) / p) for p in remote_path]
-            await self.fsspec._get(rpaths, lpaths, batch_size=max_workers, callback=callback or DEFAULT_CALLBACK)
-            return
-
-        ws, path_fileset, path = parse_fileset_path(
-            remote_path,
-            workspace_fallback=workspace or self._client.workspace,
+        await transfer.async_download(
+            self._client,
+            remote_path=remote_path,
+            local_path=local_path,
+            fileset=fileset,
+            workspace=workspace,
+            callback=callback,
+            max_workers=max_workers,
+            filesystem=self.fsspec,
         )
-        fileset = fileset or path_fileset
-
-        if fileset is None:
-            raise ValueError("Fileset must be specified either as a parameter or in the remote_path.")
-
-        # Handle glob patterns by expanding to list of files first
-        if has_magic(path):
-            matching_files = await self.list(remote_path=path, fileset=fileset, workspace=ws)
-            if not matching_files.data:
-                return
-            # Build list of (remote, local) path pairs preserving directory structure
-            rpaths = [build_fileset_ref(f.path, workspace=ws, fileset=fileset) for f in matching_files.data]
-            lpaths = [str(PurePath(local_path) / f.path) for f in matching_files.data]
-            await self.fsspec._get(rpaths, lpaths, batch_size=max_workers, callback=callback or DEFAULT_CALLBACK)
-        else:
-            fileset_ref = build_fileset_ref(path, workspace=ws, fileset=fileset)
-            await self.fsspec._get(
-                fileset_ref,
-                local_path,
-                recursive=True,
-                batch_size=max_workers,
-                callback=callback or DEFAULT_CALLBACK,
-            )
 
     async def upload(
         self,
@@ -907,30 +713,17 @@ class AsyncFilesResource:
             ... )
             >>> print(f"Uploaded to: {fileset.name}")  # e.g., "fileset-a1b2c3d4"
         """
-        ws, path_fileset, path = parse_fileset_path(
-            remote_path,
-            workspace_fallback=workspace or self._client.workspace,
+        return await transfer.async_upload(
+            self._client,
+            local_path=local_path,
+            remote_path=remote_path,
+            fileset=fileset,
+            workspace=workspace,
+            callback=callback,
+            max_workers=max_workers,
+            fileset_auto_create=fileset_auto_create,
+            filesystem=self.fsspec,
         )
-        fileset = fileset or path_fileset
-
-        if fileset is None:
-            if fileset_auto_create:
-                fileset = _generate_fileset_name()
-            else:
-                raise ValueError(
-                    "Fileset must be specified either as a parameter or in the remote_path when fileset_auto_create is False."
-                )
-
-        fileset_ref = build_fileset_ref(path, workspace=ws, fileset=fileset)
-        if fileset_auto_create:
-            await self._ensure_fileset_exists(ws, fileset)
-
-        kwargs: dict = {"lpath": local_path, "rpath": fileset_ref, "recursive": True, "batch_size": max_workers}
-        if callback is not None:
-            kwargs["callback"] = callback
-        await self.fsspec._put(**kwargs)
-
-        return (await self._client.get_fileset(name=fileset, workspace=ws)).data()
 
     async def upload_content(
         self,
@@ -1135,34 +928,13 @@ class AsyncFilesResource:
             >>> for f in response.data:
             ...     print(f"{f.path}: {f.cache_status}")
         """
-        ws, path_fileset, path = parse_fileset_path(remote_path, workspace_fallback=workspace or self._client.workspace)
-        fileset = fileset or path_fileset
-
-        if fileset is None:
-            raise ValueError("Fileset must be specified either as a parameter or in the remote_path.")
-
-        # For glob patterns, list all files then filter client-side
-        # For path prefixes, the API handles filtering server-side
-        api_path = None if has_magic(path) else (path or None)
-
-        query_params: ListFilesQueryParams = {}
-        if api_path is not None:
-            query_params["path"] = api_path
-        if include_cache_status:
-            query_params["include_cache_status"] = True
-
-        response = await self._client.list_files(
-            workspace=ws,
-            name=fileset,
-            query_params=query_params or None,
+        return await transfer.async_list_files(
+            self._client,
+            remote_path=remote_path,
+            fileset=fileset,
+            workspace=workspace,
+            include_cache_status=include_cache_status,
         )
-        response = response.data()
-        files = list(response.data)
-
-        # Apply glob filtering if needed
-        if has_magic(path):
-            files = [f for f in files if _matches_glob(f.path, path)]
-        return ListFilesResponse(data=files)
 
     async def delete(
         self,
@@ -1191,11 +963,10 @@ class AsyncFilesResource:
             # Delete using full path
             >>> await sdk.files.delete(remote_path="my-fileset#data/old-file.txt")
         """
-        ws, path_fileset, path = parse_fileset_path(remote_path, workspace_fallback=workspace or self._client.workspace)
-        fileset = fileset or path_fileset
-
-        if fileset is None:
-            raise ValueError("Fileset must be specified either as a parameter or in the remote_path.")
-
-        fileset_ref = build_fileset_ref(path, workspace=ws, fileset=fileset)
-        await self.fsspec._rm(fileset_ref)
+        await transfer.async_delete(
+            self._client,
+            remote_path=remote_path,
+            fileset=fileset,
+            workspace=workspace,
+            filesystem=self.fsspec,
+        )

@@ -30,19 +30,29 @@ def test_role_binding_endpoint_contracts() -> None:
     assert listed.query_params == {"filter[principal][$like]": "service:%"}
     assert get_origin(listed.response_type) is Paginated
     assert created.method == "POST"
-    assert created.query_params == {"wait_role_propagation": True}
+    assert created.query_params is None
     assert created.response_type is RoleBinding
     assert fetched.path_params == {"name": "rb-123"}
     assert fetched.response_type is RoleBinding
     assert revoked.method == "DELETE"
-    assert revoked.query_params == {"wait_role_propagation": True}
+    assert revoked.query_params is None
     assert revoked.response_type is RoleBindingDeleteResponse
 
 
-def test_list_role_bindings_uses_server_query_defaults() -> None:
-    prepared = endpoints.list_role_bindings()
-
-    assert prepared.query_params == {"page": 1, "page_size": 10, "sort": "created_at"}
+def test_role_binding_endpoints_send_only_supplied_query_params() -> None:
+    """Server-side defaults (page, page_size, sort, wait_role_propagation) are not replicated client-side."""
+    assert endpoints.list_role_bindings().query_params is None
+    assert endpoints.list_role_bindings(query_params={"page": 2, "filter": 'role:"Viewer"'}).query_params == {
+        "page": 2,
+        "filter": 'role:"Viewer"',
+    }
+    assert endpoints.create_role_binding(
+        body=RoleBindingInput(principal="user@example.com", role="Viewer"),
+        query_params={"wait_role_propagation": False},
+    ).query_params == {"wait_role_propagation": False}
+    assert endpoints.revoke_role_binding(name="rb-123", query_params={"wait_role_propagation": False}).query_params == {
+        "wait_role_propagation": False
+    }
 
 
 def test_authz_and_bundle_endpoint_contracts() -> None:

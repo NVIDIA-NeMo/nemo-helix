@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -230,16 +231,10 @@ def test_duration_uses_job_created_at_when_available() -> None:
         "completed",
         created_at=datetime.fromtimestamp(90.0, tz=timezone.utc),
     )
-    # Live snapshot and duration both call time.time(); extra snapshots must not
-    # exhaust the mock or emit_event is skipped (swallowed in the waiter).
-    time_calls = {"n": 0}
-
-    def fake_time() -> float:
-        time_calls["n"] += 1
-        return 100.0 if time_calls["n"] <= 2 else 130.0
-
+    # Elapsed display uses the monotonic clock; the duration compares the job's
+    # created_at against wall-clock time, which is what the event reports.
     with (
-        patch(f"{WAITERS_MODULE}.time.time", side_effect=fake_time),
+        patch(f"{WAITERS_MODULE}.time.time", return_value=130.0),
         patch(EMIT_TARGET) as emit_event,
     ):
         assert waiters.wait_for_platform_job(jobs, "job-a", workspace="default") is True
@@ -274,9 +269,14 @@ def test_timeout_emits_nothing_and_does_not_crash() -> None:
     jobs = MagicMock()
     jobs.get_job_status.return_value = _status_response("active")
 
+    watch_clock = iter([0.0, 0.0, 4.0, 5.0])
+
+    def monotonic() -> float:
+        caller = sys._getframe(1).f_globals["__name__"]
+        return next(watch_clock) if caller == WATCH_MODULE else 0.0
+
     with (
-        patch(f"{WAITERS_MODULE}.time.time", return_value=0.0),
-        patch(f"{WATCH_MODULE}.time.monotonic", side_effect=[0.0, 0.0, 4.0, 5.0]),
+        patch("time.monotonic", monotonic),
         patch(f"{WATCH_MODULE}.time.sleep"),
         patch(EMIT_TARGET) as emit_event,
     ):

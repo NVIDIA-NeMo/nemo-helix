@@ -94,7 +94,7 @@ _MOCK_WORKLOAD_NMP_CONFIG = NMPOIDCConfig(
 
 
 class TestCreateClientOAuth:
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     def test_creates_client_from_stored_oauth_tokens(self, _mock_discover, tmp_path):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
         config_path = _write_config(
@@ -108,7 +108,7 @@ class TestCreateClientOAuth:
         assert str(client.base_url).rstrip("/") == "http://localhost:8080"
         assert client.workspace == "test-workspace"
 
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     def test_event_hook_injects_fresh_token(self, _mock_discover, tmp_path):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
         config_path = _write_config(
@@ -126,7 +126,7 @@ class TestCreateClientOAuth:
         httpx_client._event_hooks["request"][0](request)
         assert request.headers["Authorization"] == f"Bearer {token}"
 
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     def test_oauth_uses_sdk_default_httpx_client(self, _mock_discover, tmp_path):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
         config_path = _write_config(
@@ -142,7 +142,7 @@ class TestCreateClientOAuth:
             client.close()
 
     @patch("nemo_platform_ext.client.factory.DefaultHttpxClient")
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     def test_oauth_uses_nemo_scoped_ca_bundle(self, _mock_discover, mock_default_httpx_client, tmp_path, monkeypatch):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
         config_path = _write_config(
@@ -163,7 +163,7 @@ class TestCreateClientOAuth:
         assert mock_default_httpx_client.call_args.kwargs["verify"] == "/tmp/nemo-ca.pem"
 
     @patch("nemo_platform_ext.client.factory.DefaultHttpxClient")
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     def test_oauth_uses_context_certificate_authority(
         self, _mock_discover, mock_default_httpx_client, tmp_path, monkeypatch
     ):
@@ -189,7 +189,7 @@ class TestCreateClientOAuth:
         assert _mock_discover.call_args.kwargs["certificate_authority"] == context_ca
 
     @patch("nemo_platform_ext.client.factory.DefaultHttpxClient")
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     def test_env_ca_bundle_overrides_context_certificate_authority(
         self, _mock_discover, mock_default_httpx_client, tmp_path, monkeypatch
     ):
@@ -213,7 +213,7 @@ class TestCreateClientOAuth:
         assert mock_default_httpx_client.call_args.kwargs["verify"] == "/tmp/env-ca.pem"
         assert _mock_discover.call_args.kwargs["certificate_authority"] == "/tmp/context-ca.pem"
 
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     @patch("nemo_platform_ext.auth.token_provider.httpx.post")
     def test_persist_refreshed_tokens_writes_to_config(self, mock_post, _mock_discover, tmp_path):
         expired_token = _make_jwt({"exp": int(time.time()) - 100, "sub": "user1"})
@@ -244,7 +244,7 @@ class TestCreateClientOAuth:
         assert saved_user["token"] == new_token
         assert saved_user["refresh_token"] == "new_refresh"
 
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     def test_explicit_access_token_overrides_config_auth(self, _mock_discover, tmp_path):
         config_path = _write_config(tmp_path, user_type="api-key", api_key="nvapi-test-key-123")
 
@@ -265,11 +265,11 @@ class TestCreateClientOAuthUserAuthDisabledCluster:
     """
 
     @patch(
-        "nemo_platform.client.factory.discover_nmp_config",
+        "nemo_platform.client.bootstrap.discover_nmp_config",
         return_value=NMPOIDCConfig(auth_enabled=False, client_id="", token_endpoint=""),
     )
     @patch(
-        "nemo_platform_ext.client.factory.discover_nmp_config",
+        "nemo_platform_ext.client.bootstrap.discover_nmp_config",
         return_value=NMPOIDCConfig(auth_enabled=False, client_id="", token_endpoint=""),
     )
     @patch("nemo_platform_ext.auth.token_provider.httpx.post")
@@ -290,11 +290,11 @@ class TestCreateClientOAuthUserAuthDisabledCluster:
         assert "Authorization" not in client._custom_headers
 
     @patch(
-        "nemo_platform.client.factory.discover_nmp_config",
+        "nemo_platform.client.bootstrap.discover_nmp_config",
         return_value=NMPOIDCConfig(auth_enabled=False, client_id="", token_endpoint=""),
     )
     @patch(
-        "nemo_platform_ext.client.factory.discover_nmp_config",
+        "nemo_platform_ext.client.bootstrap.discover_nmp_config",
         return_value=NMPOIDCConfig(auth_enabled=False, client_id="", token_endpoint=""),
     )
     def test_valid_token_on_auth_disabled_cluster_skips_token_provider(
@@ -313,7 +313,7 @@ class TestCreateClientOAuthUserAuthDisabledCluster:
         assert client._client._event_hooks["request"] == []
 
     @patch(
-        "nemo_platform_ext.client.factory.discover_nmp_config",
+        "nemo_platform_ext.client.bootstrap.discover_nmp_config",
         side_effect=Exception("network error"),
     )
     def test_discovery_failure_preserves_stored_token(self, _mock_discover, tmp_path):
@@ -330,7 +330,7 @@ class TestCreateClientOAuthUserAuthDisabledCluster:
 
 
 class TestCreateClientWorkloadIdentity:
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_WORKLOAD_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_WORKLOAD_NMP_CONFIG)
     @patch("nemo_platform_ext.auth.workload_exchange.token_exchange_grant")
     def test_exchanges_workload_identity_token_file(self, mock_exchange, _mock_discover, tmp_path, monkeypatch):
         subject_token_file = tmp_path / "workload-token"
@@ -362,7 +362,7 @@ class TestCreateClientWorkloadIdentity:
         assert mock_exchange.call_args.kwargs["scope"] == "openid email groups"
 
     @patch("nemo_platform_ext.client.factory.DefaultHttpxClient")
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_WORKLOAD_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_WORKLOAD_NMP_CONFIG)
     @patch("nemo_platform_ext.auth.workload_exchange.token_exchange_grant")
     def test_workload_identity_discovery_uses_context_certificate_authority(
         self, mock_exchange, _mock_discover, mock_default_httpx_client, tmp_path, monkeypatch
@@ -395,7 +395,7 @@ class TestCreateClientWorkloadIdentity:
         assert mock_default_httpx_client.call_args.kwargs["verify"] == context_ca
 
     @pytest.mark.asyncio
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_WORKLOAD_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_WORKLOAD_NMP_CONFIG)
     @patch("nemo_platform_ext.auth.workload_exchange.token_exchange_grant")
     async def test_async_exchanges_workload_identity_token_file_at_request_time(
         self, mock_exchange, _mock_discover, tmp_path, monkeypatch
@@ -428,7 +428,7 @@ class TestCreateClientWorkloadIdentity:
         assert mock_exchange.call_args.kwargs["audience"] == "nemo-platform"
         assert mock_exchange.call_args.kwargs["scope"] == "openid email groups"
 
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_WORKLOAD_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_WORKLOAD_NMP_CONFIG)
     def test_env_access_token_takes_precedence_over_workload_identity_file(self, _mock_discover, tmp_path, monkeypatch):
         subject_token_file = tmp_path / "workload-token"
         subject_token_file.write_text("subject-token-one\n", encoding="utf-8")
@@ -447,7 +447,7 @@ class TestCreateClientWorkloadIdentity:
 
 
 class TestCreateClientApiKey:
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     def test_creates_client_with_api_key(self, _mock_discover, tmp_path):
         config_path = _write_config(tmp_path, user_type="api-key", api_key="nvapi-test-key-123")
 
@@ -458,7 +458,7 @@ class TestCreateClientApiKey:
         assert "Authorization" in client._custom_headers
         assert client._custom_headers["Authorization"] == "Bearer nvapi-test-key-123"
 
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     def test_creates_client_with_email_api_key(self, _mock_discover, tmp_path):
         config_path = _write_config(tmp_path, user_type="api-key", api_key="admin@example.com")
 
@@ -524,8 +524,8 @@ class TestCreateClientTimeout:
 
 
 class TestCreateClientProviderReuse:
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
-    @patch("nemo_platform_ext.client.factory.OIDCTokenProvider")
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.OIDCTokenProvider")
     def test_reuses_oauth_provider_for_same_context(self, mock_provider_cls, _mock_discover, tmp_path):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
         config_path = _write_config(
@@ -547,9 +547,9 @@ class TestCreateClientProviderReuse:
         assert callable(provider_kwargs["load_tokens"])
         assert callable(provider_kwargs["refresh_lock"])
 
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     @patch("nemo_platform_ext.client.factory.DefaultHttpxClient")
-    @patch("nemo_platform_ext.client.factory.OIDCTokenProvider")
+    @patch("nemo_platform_ext.client.bootstrap.OIDCTokenProvider")
     def test_context_certificate_authority_participates_in_provider_cache_key(
         self, mock_provider_cls, mock_default_httpx_client, _mock_discover, tmp_path, monkeypatch
     ):
@@ -593,7 +593,7 @@ class TestCreateClientProviderReuse:
 
 
 class TestCreateClientOverrides:
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     def test_base_url_override_uses_explicit_url_with_context_auth(self, _mock_discover, tmp_path):
         config_path = _write_config(tmp_path, user_type="api-key", api_key="nvapi-test-key-123")
 
@@ -603,7 +603,7 @@ class TestCreateClientOverrides:
         assert client.workspace == "test-workspace"
         assert client._custom_headers["Authorization"] == "Bearer nvapi-test-key-123"
 
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     def test_context_override_uses_selected_context(self, _mock_discover, tmp_path):
         config = {
             "current_context": "default",
@@ -646,7 +646,7 @@ class TestCreateClientOverrides:
         with pytest.raises(ValueError, match="Context 'missing-context' not found"):
             create_client(config_path=config_path, context_name="missing-context")
 
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     def test_access_token_override_uses_bearer_token(self, _mock_discover, tmp_path):
         config_path = _write_config(tmp_path, user_type="api-key", api_key="nvapi-test-key-123")
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "override-user"})
@@ -665,7 +665,7 @@ class TestCreateClientBootstrapFailures:
         with pytest.raises(FileNotFoundError, match=f"Config file not found at {missing_config_path}"):
             create_client(config_path=missing_config_path)
 
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     def test_expired_oauth_token_without_refresh_token_fails(self, _mock_discover, tmp_path):
         expired_token = _make_jwt({"exp": int(time.time()) - 100, "sub": "user1"})
         config_path = _write_config(
@@ -677,7 +677,7 @@ class TestCreateClientBootstrapFailures:
         with pytest.raises(RuntimeError, match="no refresh token is available"):
             create_client(config_path=config_path)
 
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     @patch("nemo_platform_ext.auth.token_provider.httpx.post")
     def test_refresh_grant_failure_surfaces_clear_error(self, mock_post, _mock_discover, tmp_path):
         expired_token = _make_jwt({"exp": int(time.time()) - 100, "sub": "user1"})
@@ -1029,7 +1029,7 @@ class TestClientConstructorBootstrapBypass:
 
 class TestAsyncNeMoPlatformInit:
     @pytest.mark.asyncio
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     async def test_async_client_uses_config_for_api_key(self, _mock_discover, tmp_path):
         config_path = _write_config(tmp_path, user_type="api-key", api_key="nvapi-test-key-123")
 
@@ -1100,8 +1100,8 @@ class TestPluginSDKMounting:
             await client.close()
 
     @pytest.mark.asyncio
-    @patch("nemo_platform.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
-    @patch("nemo_platform_ext.client.factory.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
+    @patch("nemo_platform_ext.client.bootstrap.discover_nmp_config", return_value=_MOCK_NMP_CONFIG)
     async def test_async_client_oauth_hook_injects_fresh_token(self, _mock_ext_discover, _mock_sdk_discover, tmp_path):
         token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
         config_path = _write_config(

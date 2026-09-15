@@ -1,284 +1,208 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for code generation."""
+"""Tests for ``--output-format code`` generation against typed clients."""
 
 import pytest
 from nemo_platform_ext.cli.core.code_generator import generate_python_code
+from nemo_platform_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_platform_plugin.inference_gateway.types import JsonBody
+from nemo_platform_plugin.models.client import ModelsClient
+from nemo_platform_plugin.models.types import CreateModelDeploymentRequest
+from nemo_platform_plugin.secrets.client import SecretsClient
+from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
 
 
 def test_generate_python_code_simple_list():
-    """Test generating code for a simple list operation."""
-    code = generate_python_code(
-        resource_path=["models"],
-        method="list",
-        args={},
-        base_url=None,
-    )
+    code = generate_python_code(SecretsClient, "list_secrets", {}, result="list")
 
-    assert "from nemo_platform import NeMoPlatform" in code
-    assert "client = NeMoPlatform()" in code
-    assert "response = client.models.list()" in code
-    assert "print(response)" in code
+    assert "from nemo_platform_plugin.secrets.client import SecretsClient" in code
+    assert "client = SecretsClient.from_config()" in code
+    assert "response = client.list_secrets()" in code
+    assert "for item in response.page().items:" in code
+    assert "print(item)" in code
 
 
 def test_generate_python_code_with_base_url():
-    """Test generating code with base URL."""
+    code = generate_python_code(SecretsClient, "list_secrets", {}, base_url="http://test.example.com", result="list")
+
+    assert 'client = SecretsClient(base_url="http://test.example.com")' in code
+
+
+def test_generate_python_code_with_args_and_entity_result():
+    code = generate_python_code(SecretsClient, "get_secret", {"name": "my-secret", "workspace": "default"})
+
+    assert 'response = client.get_secret(name="my-secret", workspace="default")' in code
+    assert "print(response.data())" in code
+
+
+def test_generate_python_code_skips_none_args():
+    code = generate_python_code(SecretsClient, "get_secret", {"name": "my-secret", "workspace": None})
+
+    assert 'response = client.get_secret(name="my-secret")' in code
+
+
+def test_generate_python_code_renders_request_model_and_imports_it():
+    body = PlatformSecretCreateRequest(name="hf-token", value="s3cret", description="HF token")
+    code = generate_python_code(SecretsClient, "create_secret", {"workspace": "default", "body": body})
+
+    assert "from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest" in code
+    assert 'body=PlatformSecretCreateRequest(name="hf-token", description="HF token", value="***")' in code
+    assert "s3cret" not in code
+    assert code.index("from nemo_platform_plugin.secrets.client") < code.index("client = SecretsClient")
+
+
+def test_generate_python_code_renders_root_model_body_positionally():
+    body = JsonBody({"model": "default/llama", "messages": [{"role": "user", "content": "hi"}]})
     code = generate_python_code(
-        resource_path=["datasets"],
-        method="list",
-        args={},
-        base_url="http://test.example.com",
+        InferenceGatewayClient,
+        "provider_post",
+        {"name": "nvidia", "trailing_uri": "v1/chat/completions", "body": body},
     )
 
-    assert 'client = NeMoPlatform(base_url="http://test.example.com")' in code
+    assert "from nemo_platform_plugin.inference_gateway.types import JsonBody" in code
+    assert 'body=JsonBody({"model": "default/llama", "messages": [{"role": "user", "content": "hi"}]})' in code
+    compile(code, "<generated>", "exec")
 
 
-def test_generate_python_code_with_args():
-    """Test generating code with arguments."""
+def test_generate_python_code_renders_query_params_dict_and_lists():
     code = generate_python_code(
-        resource_path=["models"],
-        method="retrieve",
-        args={"model_name": "my-model", "namespace": "default"},
-        base_url=None,
+        SecretsClient,
+        "list_secrets",
+        {"query_params": {"page": 2, "page_size": 10, "sort": ["name", "-created_at"]}},
+        result="list",
     )
 
-    assert 'model_name="my-model"' in code
-    assert 'namespace="default"' in code
-    assert "client.models.retrieve" in code
+    assert 'query_params={"page": 2, "page_size": 10, "sort": ["name", "-created_at"]}' in code
 
 
-def test_generate_python_code_nested_resource():
-    """Test generating code for nested resources."""
+def test_generate_python_code_renders_datetimes_as_iso_strings():
+    from datetime import UTC, datetime
+
+    from pydantic import BaseModel
+
+    class Stamped(BaseModel):
+        started_at: datetime
+
+    body = Stamped(started_at=datetime(2026, 8, 14, tzinfo=UTC))
+    code = generate_python_code(SecretsClient, "create_secret", {"body": body})
+
+    assert 'Stamped(started_at="2026-08-14T00:00:00+00:00")' in code
+    assert "datetime.datetime" not in code
+
+
+def test_generate_python_code_renders_root_models_by_root_value():
+    from pydantic import RootModel
+
+    class Payload(RootModel[dict[str, object]]):
+        pass
+
+    body = Payload({"schema_version": "v1", "agent": {"name": "b"}})
+    code = generate_python_code(SecretsClient, "create_secret", {"body": body})
+
+    assert 'body=Payload({"schema_version": "v1", "agent": {"name": "b"}})' in code
+
+
+def test_generate_python_code_multiline_for_many_args():
     code = generate_python_code(
-        resource_path=["customization", "configs"],
-        method="list",
-        args={},
-        base_url=None,
+        SecretsClient,
+        "get_secret",
+        {"name": "a" * 50, "workspace": "default", "extra": 1, "more": 2},
     )
 
-    assert "client.customization.configs.list()" in code
+    assert "response = client.get_secret(\n" in code
+    assert '    workspace="default",' in code
 
 
-def test_generate_python_code_with_dict_args():
-    """Test generating code with dictionary arguments."""
-    code = generate_python_code(
-        resource_path=["models"],
-        method="list",
-        args={
-            "filter": {"namespace": "default", "name": "test"},
-            "page": 1,
-        },
-        base_url=None,
-    )
+def test_generate_python_code_no_result_block():
+    code = generate_python_code(SecretsClient, "delete_secret", {"name": "x"}, result="none")
 
-    assert "filter=" in code
-    assert "page=1" in code
-    assert '"namespace": "default"' in code or "'namespace': 'default'" in code
+    assert code.rstrip().endswith('response = client.delete_secret(name="x")')
 
 
-def test_generate_python_code_multiline_format():
-    """Test that code with many args is formatted multiline."""
-    code = generate_python_code(
-        resource_path=["models"],
-        method="create",
-        args={
-            "name": "my-model",
-            "namespace": "default",
-            "description": "A test model",
-            "files_url": "s3://bucket/path",
-        },
-        base_url=None,
-    )
+def test_generate_python_code_binary_result():
+    code = generate_python_code(SecretsClient, "download", {"name": "x"}, result="binary")
 
-    # Should be multiline with many args
-    lines = code.split("\n")
-    # Check that args are on separate lines
-    assert any("name=" in line and line.strip().startswith("name=") for line in lines)
-    assert any("namespace=" in line and line.strip().startswith("namespace=") for line in lines)
+    assert "with response.stream() as chunks:" in code
 
 
-def test_generate_python_code_with_platform_job_watch():
-    code = generate_python_code(
-        resource_path=["customization", "jobs"],
-        method="create",
-        args={"workspace": "default", "name": "job-a", "spec": {"training_type": "sft"}},
-        watch_config={"type": "platform_job", "resource_label": "customization job"},
-        watch_options={"timeout": 42, "poll_interval": 7},
-    )
-
-    assert "import time" not in code
-    assert "from nemo_platform.jobs.watch import watch_job" not in code
-    assert "from nemo_platform_plugin.client.adapter import client_from_platform" in code
-    assert "from nemo_platform_plugin.jobs.client import JobsClient" in code
-    assert "jobs_client = client_from_platform(client, JobsClient)" in code
-    assert "response = client.customization.jobs.create" in code
-    assert 'resource_name = getattr(response, "name", None) or "job-a"' in code
-    assert 'raise RuntimeError("Unable to determine created resource name for --watch")' in code
-    assert "jobs_client.watch_job(" in code
-    assert 'workspace="default"' in code
-    assert "timeout=42" in code
-    assert "poll_interval=7" in code
-    assert "print(event)" in code
-    assert "get_status" not in code
-    assert "time.sleep" not in code
-    assert "print(response)" not in code
-    compile(code, "<generated-code>", "exec")
-
-
-def test_generate_python_code_with_platform_job_watch_has_no_default_timeout():
-    code = generate_python_code(
-        resource_path=["customization", "jobs"],
-        method="create",
-        args={"workspace": "default", "name": "job-a", "spec": {"training_type": "sft"}},
-        watch_config={"type": "platform_job", "resource_label": "customization job"},
-        watch_options={"poll_interval": 7},
-    )
-
-    assert "timeout=None" in code
-    assert "deadline = time.monotonic()" not in code
-    assert "poll_interval=7" in code
-    compile(code, "<generated-code>", "exec")
-
-
-def test_generate_python_code_with_platform_job_wait():
-    code = generate_python_code(
-        resource_path=["jobs"],
-        method="create",
-        args={"workspace": "default", "name": "job-a", "spec": {"training_type": "sft"}},
-        wait_config={"type": "platform_job", "resource_label": "job"},
-        wait_options={"timeout": 42, "poll_interval": 7},
-    )
-
-    assert "import time" not in code
-    for symbol in ("JobStatusEvent", "JobWatchTimeoutError", "JobsClient", "NeMoPlatform"):
-        assert symbol in code
-    assert "from nemo_platform_plugin.jobs.watch_types import JobStatusEvent, JobWatchTimeoutError" in code
-    assert "jobs_client = client_from_platform(client, JobsClient)" in code
-    assert "APIConnectionError" not in code
-    assert "APIStatusError" not in code
-    assert "APITimeoutError" not in code
-    assert "NotFoundError" not in code
-    assert 'raise RuntimeError("Unable to determine created resource name for --wait")' in code
-    assert "deadline = time.monotonic()" not in code
-    assert "get_status" not in code
-    assert "jobs_client.watch_job(" in code
-    assert "include_logs=False" in code
-    assert 'resource_label = "job"' in code
-    assert "isinstance(event, JobStatusEvent)" in code
-    assert 'f"{resource_label.title()} {resource_name!r} ended with status {event.status!r}"' in code
-    assert "except JobWatchTimeoutError as exc:" in code
-    assert "time.sleep" not in code
-    assert "print(response)" not in code
-    compile(code, "<generated-code>", "exec")
-
-
-def test_generate_python_code_with_platform_job_wait_requires_timeout():
-    with pytest.raises(ValueError, match=r"wait 'platform_job' lifecycle code generation requires timeout"):
+def test_generate_python_code_rejects_wait_and_watch_together():
+    with pytest.raises(ValueError, match="Only one of wait_config or watch_config"):
         generate_python_code(
-            resource_path=["jobs"],
-            method="create",
-            args={"workspace": "default", "name": "job-a", "spec": {"training_type": "sft"}},
-            wait_config={"type": "platform_job", "resource_label": "job"},
-            wait_options={"poll_interval": 7},
+            ModelsClient,
+            "create_deployment",
+            {},
+            wait_config={"type": "inference_deployment"},
+            wait_options={"timeout": 10},
+            watch_config={"type": "inference_deployment"},
+            watch_options={"timeout": 10},
         )
 
 
-def test_generate_python_code_with_platform_job_wait_requires_resource_label():
-    with pytest.raises(
-        ValueError,
-        match=r"wait 'platform_job' lifecycle code generation requires a non-empty resource_label",
-    ):
+def test_generate_python_code_rejects_unknown_lifecycle():
+    with pytest.raises(ValueError, match="Unsupported lifecycle config type"):
+        generate_python_code(ModelsClient, "create_deployment", {}, wait_config={"type": "bogus"}, wait_options={})
+
+
+def test_generate_python_code_inference_deployment_wait_requires_timeout():
+    with pytest.raises(ValueError, match="requires timeout"):
         generate_python_code(
-            resource_path=["jobs"],
-            method="create",
-            args={"workspace": "default", "name": "job-a", "spec": {"training_type": "sft"}},
-            wait_config={"type": "platform_job"},
-            wait_options={"timeout": 42, "poll_interval": 7},
+            ModelsClient,
+            "create_deployment",
+            {},
+            wait_config={"type": "inference_deployment"},
+            wait_options={"poll_interval": 3},
         )
 
 
-def test_generate_python_code_with_inference_deployment_wait():
+def test_generate_python_code_inference_deployment_wait_block():
+    body = CreateModelDeploymentRequest(name="dep-a", config="cfg")
     code = generate_python_code(
-        resource_path=["inference", "deployments"],
-        method="create",
-        args={"workspace": "default", "name": "deployment-a", "config": "deployment-config"},
+        ModelsClient,
+        "create_deployment",
+        {"workspace": "default", "body": body},
+        base_url="http://localhost:8080",
         wait_config={"type": "inference_deployment", "resource_label": "deployment"},
-        wait_options={"timeout": 90, "poll_interval": 10},
+        wait_options={"timeout": 120, "poll_interval": 5},
     )
 
     assert "import time" in code
-    for symbol in ("APIConnectionError", "APIStatusError", "APITimeoutError", "NeMoPlatform", "NotFoundError"):
-        assert symbol in code
-    assert "deadline = time.monotonic() + 90" in code
-    assert 'resource_name = getattr(response, "name", None) or "deployment-a"' in code
-    assert 'raise RuntimeError("Unable to determine created resource name for --wait")' in code
-    assert 'client.inference.deployments.retrieve(resource_name, workspace="default")' in code
-    assert 'model_provider_id = getattr(deployment, "model_provider_id", None)' in code
-    assert 'provider_workspace, _, provider_name = model_provider_id.partition("/")' in code
-    assert "client.inference.gateway.provider.ready(provider_name, workspace=provider_workspace)" in code
-    assert "except NotFoundError:" in code
-    assert "except (APIConnectionError, APITimeoutError):" in code
-    assert "except APIStatusError as exc:" in code
-    assert "except Exception:" not in code
-    assert "response = deployment" in code
-    assert code.rindex("print(response)") > code.index("response = deployment")
-    assert "time.sleep(min(10, remaining))" in code
-    compile(code, "<generated-code>", "exec")
+    assert "from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError" in code
+    assert "from nemo_platform_plugin.inference_gateway.client import InferenceGatewayClient" in code
+    assert 'resource_name = getattr(response.data(), "name", None) or "dep-a"' in code
+    assert "deadline = time.monotonic() + 120" in code
+    assert 'client.get_deployment(name=resource_name, workspace="default").data()' in code
+    assert "gateway = InferenceGatewayClient.from_client(client)" in code
+    assert "gateway.provider_ready(name=provider_name, workspace=provider_workspace)" in code
+    assert "time.sleep(min(5, remaining))" in code
+    assert "--wait" in code
+    # No Stainless artefacts anywhere in the emitted snippet.
+    assert "NeMoPlatform" not in code
+    assert "from nemo_platform import" not in code
 
 
-def test_generate_python_code_with_inference_deployment_watch():
+def test_generate_python_code_watch_mode_mentions_watch_flag():
     code = generate_python_code(
-        resource_path=["inference", "deployments"],
-        method="create",
-        args={"workspace": "default", "name": "deployment-a", "config": "deployment-config"},
-        watch_config={"type": "inference_deployment", "resource_label": "deployment"},
-        watch_options={"timeout": 90, "poll_interval": 10},
+        ModelsClient,
+        "create_deployment",
+        {"workspace": "default"},
+        watch_config={"type": "inference_deployment"},
+        watch_options={"timeout": 10},
     )
 
-    assert "import time" in code
-    for symbol in ("APIConnectionError", "APIStatusError", "APITimeoutError", "NeMoPlatform", "NotFoundError"):
-        assert symbol in code
-    assert "deadline = time.monotonic() + 90" in code
-    assert 'resource_name = getattr(response, "name", None) or "deployment-a"' in code
-    assert 'raise RuntimeError("Unable to determine created resource name for --watch")' in code
-    assert 'client.inference.deployments.retrieve(resource_name, workspace="default")' in code
-    assert "client.inference.gateway.provider.ready(provider_name, workspace=provider_workspace)" in code
-    assert "response = deployment" in code
-    assert code.rindex("print(response)") > code.index("response = deployment")
-    assert "time.sleep(min(10, remaining))" in code
-    compile(code, "<generated-code>", "exec")
+    assert "--watch" in code
+    assert "--wait" not in code
 
 
-def test_generate_python_code_with_inference_deployment_wait_requires_timeout():
-    with pytest.raises(ValueError, match=r"wait 'inference_deployment' lifecycle code generation requires timeout"):
-        generate_python_code(
-            resource_path=["inference", "deployments"],
-            method="create",
-            args={"workspace": "default", "name": "deployment-a", "config": "deployment-config"},
-            wait_config={"type": "inference_deployment", "resource_label": "deployment"},
-            wait_options={"poll_interval": 10},
-        )
-
-
-def test_generate_python_code_with_platform_job_watch_ignores_label_formatting():
+def test_generated_snippet_is_valid_python():
+    body = CreateModelDeploymentRequest(name="dep-a", config="cfg")
     code = generate_python_code(
-        resource_path=["customization", "jobs"],
-        method="create",
-        args={"workspace": "default", "name": "job-a"},
-        watch_config={"type": "platform_job", "resource_label": 'customization "job" {label}'},
-        watch_options={"timeout": 42, "poll_interval": 7},
+        ModelsClient,
+        "create_deployment",
+        {"workspace": "default", "body": body},
+        base_url="http://localhost:8080",
+        wait_config={"type": "inference_deployment"},
+        wait_options={"timeout": 120},
     )
 
-    compile(code, "<generated-code>", "exec")
-    assert 'raise RuntimeError("Unable to determine created resource name for --watch")' in code
-
-
-def test_generate_python_code_rejects_unknown_lifecycle_type():
-    with pytest.raises(ValueError, match="Unsupported lifecycle config type: 'unknown'"):
-        generate_python_code(
-            resource_path=["customization", "jobs"],
-            method="create",
-            args={"workspace": "default", "name": "job-a"},
-            wait_config={"type": "unknown", "resource_label": "customization job"},
-        )
+    compile(code, "<generated>", "exec")

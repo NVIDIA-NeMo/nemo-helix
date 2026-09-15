@@ -11,13 +11,16 @@ from unittest.mock import patch
 
 import pytest
 from click import UsageError
+from nemo_platform_ext.cli.core.errors import UnknownInputFieldsError
 from nemo_platform_ext.cli.core.stdin_utils import (
+    build_request_body,
     is_stdin_available,
     merge_stdin_with_options,
     read_data_from_stdin,
     read_secret_from_file,
     resolve_secret_value,
 )
+from pydantic import BaseModel, ConfigDict, Field, RootModel, ValidationError
 
 
 class TestIsStdinAvailable:
@@ -206,3 +209,61 @@ class TestResolveSecretValue:
         """When --value is empty/whitespace, raises."""
         with pytest.raises(UsageError, match="Secret value cannot be empty"):
             resolve_secret_value(None, "  ", required=False)
+
+
+# ---------------------------------------------------------------------------
+# build_request_body
+# ---------------------------------------------------------------------------
+
+
+class _Body(BaseModel):
+    name: str
+    description: str | None = None
+    schema_: dict | None = Field(default=None, alias="schema")
+
+
+class _PassThroughBody(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    model: str
+
+
+class _RootBody(RootModel[dict]):
+    pass
+
+
+def test_build_request_body_marks_only_provided_keys_as_set() -> None:
+    body = build_request_body(_Body, {"name": "x", "workspace": "ws"}, exclude={"workspace"})
+
+    assert body.model_dump(exclude_unset=True) == {"name": "x"}
+
+
+def test_build_request_body_accepts_aliases() -> None:
+    body = build_request_body(_Body, {"name": "x", "schema": {"a": 1}})
+
+    assert body.schema_ == {"a": 1}
+
+
+def test_build_request_body_rejects_unknown_keys_with_accepted_list() -> None:
+    with pytest.raises(UnknownInputFieldsError) as excinfo:
+        build_request_body(_Body, {"name": "x", "descripton": "typo", "extra": 1}, command_name="things create")
+
+    assert excinfo.value.unknown_fields == ["descripton", "extra"]
+    assert excinfo.value.command_name == "things create"
+    assert excinfo.value.known_fields == ["description", "name", "schema"]
+
+
+def test_build_request_body_validates_types() -> None:
+    with pytest.raises(ValidationError):
+        build_request_body(_Body, {"name": ["not", "a", "string"]})
+
+
+def test_build_request_body_passes_extra_keys_through_for_extra_allow_models() -> None:
+    body = build_request_body(_PassThroughBody, {"model": "m", "seed": 3})
+
+    assert body.model_dump() == {"model": "m", "seed": 3}
+
+
+def test_build_request_body_leaves_unstructured_root_models_unconstrained() -> None:
+    body = build_request_body(_RootBody, {"anything": 1})
+
+    assert body.root == {"anything": 1}

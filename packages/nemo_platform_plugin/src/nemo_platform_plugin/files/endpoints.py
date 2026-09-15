@@ -23,6 +23,7 @@ from nemo_platform_plugin.files.types import (
     OtlpExportLogsResponse,
     OtlpLogQueryRequest,
     UpdateFilesetRequest,
+    UploadOtlpLogsQueryParams,
 )
 from nemo_platform_plugin.jobs.schemas import PlatformJobLogPage
 
@@ -102,7 +103,11 @@ def delete_file(*, workspace: str | None = None, name: str, path: str) -> Filese
 @post("/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs")
 @abstractmethod
 def upload_otlp_logs(
-    *, workspace: str | None = None, name: str, content: bytes | Iterable[bytes] | AsyncIterable[bytes]
+    *,
+    workspace: str | None = None,
+    name: str,
+    content: bytes | Iterable[bytes] | AsyncIterable[bytes],
+    query_params: UploadOtlpLogsQueryParams | None = None,
 ) -> OtlpExportLogsResponse: ...
 
 

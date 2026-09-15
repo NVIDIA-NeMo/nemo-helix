@@ -160,6 +160,10 @@ class ListFilesQueryParams(TypedDict, total=False):
     include_cache_status: NotRequired[bool]
 
 
+class UploadOtlpLogsQueryParams(TypedDict, total=False):
+    artifact_base_path: NotRequired[str]
+
+
 # ---------------------------------------------------------------------------
 # OTLP types
 # ---------------------------------------------------------------------------

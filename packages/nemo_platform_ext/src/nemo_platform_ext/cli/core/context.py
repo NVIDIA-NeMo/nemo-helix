@@ -11,6 +11,7 @@ import typing
 from dataclasses import dataclass, field
 
 import typer
+from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 
 from nemo_platform_ext.cli.core.types import ListOutputFormat as OutputFormat
 from nemo_platform_ext.cli.core.types import TimestampFormat
@@ -20,6 +21,9 @@ if typing.TYPE_CHECKING:
 
     from nemo_platform_ext.config.config import ConfigParams, Context
     from nemo_platform_ext.quickstart import QuickstartConfig
+
+TypedClientT = typing.TypeVar("TypedClientT", bound=NemoClient)
+AsyncTypedClientT = typing.TypeVar("AsyncTypedClientT", bound=AsyncNemoClient)
 
 logger = logging.getLogger("nemo_platform_ext.cli")
 
@@ -31,6 +35,10 @@ class CLIContext:
 
     Holds CLI overrides (via ConfigParams) and lazy-loads SDK config.
     Priority resolution is handled by SDK Config: CLI > env_var > config file > default.
+
+    Hand-written commands derive service clients from the platform client with
+    :meth:`typed_client` (for example ``state.typed_client(SecretsClient)``); the
+    typed client shares the CLI's auth and transport.
     """
 
     # CLI overrides passed to SDK Config.load()
@@ -156,6 +164,25 @@ class CLIContext:
                 **auth_config,
             )
         return self._async_client
+
+    def typed_client(self, client_cls: type[TypedClientT], timeout: float = 60.0) -> TypedClientT:
+        """Return a service client of *client_cls* sharing the CLI client's transport and auth."""
+        from nemo_platform_plugin.client.adapter import client_from_platform
+
+        return client_from_platform(self.get_client(timeout=timeout), client_cls)
+
+    def async_typed_client(self, client_cls: type[AsyncTypedClientT], timeout: float = 60.0) -> AsyncTypedClientT:
+        """Async twin of :meth:`typed_client`."""
+        from nemo_platform_plugin.client.adapter import client_from_platform
+
+        return client_from_platform(self.get_async_client(timeout=timeout), client_cls)
+
+    def get_workspace(self) -> str | None:
+        """Return the configured default workspace, if any."""
+        try:
+            return self.get_sdk_context().workspace
+        except Exception:
+            return None
 
     def get_output_format(
         self,

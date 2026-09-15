@@ -203,6 +203,39 @@ class TestExistOkViaSend:
         assert mock.request.call_count == 2
         assert mock.request.call_args_list[1].args[0] == "GET"
 
+    def test_409_with_exist_ok_is_not_retried_before_resolving(self) -> None:
+        """A retry policy that lists 409 must not replay the POST when the caller opted into exist_ok."""
+        mock = _mock_http(
+            _resp(409, {"detail": "Item 'alice' already exists"}),
+            _resp(200, {"id": 7, "name": "alice"}, http_method="GET", url=f"{BASE}/apis/test/v2/items/alice"),
+        )
+        client = NemoClient(
+            base_url=BASE,
+            http_client=mock,
+            retry=RetryPolicy(max_retries=2, retryable_status_codes=(409,), backoff_base=0.0),
+        )
+
+        resp = client.send(CREATE_ITEM(ItemRequest(name="alice"), exist_ok=True))
+
+        assert resp.body is not None and resp.body.id == 7
+        assert [call.args[0] for call in mock.request.call_args_list] == ["POST", "GET"]
+
+    def test_409_without_exist_ok_is_still_retried_when_the_policy_says_so(self) -> None:
+        mock = _mock_http(
+            _resp(409, {"detail": "Item 'alice' already exists"}),
+            _resp(201, {"id": 1, "name": "alice"}),
+        )
+        client = NemoClient(
+            base_url=BASE,
+            http_client=mock,
+            retry=RetryPolicy(max_retries=2, retryable_status_codes=(409,), backoff_base=0.0),
+        )
+
+        resp = client.send(CREATE_ITEM(ItemRequest(name="alice")))
+
+        assert resp.http_response.status_code == 201
+        assert [call.args[0] for call in mock.request.call_args_list] == ["POST", "POST"]
+
     def test_409_without_exist_ok_raises_conflict(self) -> None:
         mock = _mock_http(_resp(409, {"detail": "Item 'alice' already exists"}))
         client = NemoClient(base_url=BASE, http_client=mock)

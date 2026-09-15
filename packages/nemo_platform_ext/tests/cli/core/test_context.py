@@ -173,3 +173,32 @@ def test_get_async_client_uses_config_bootstrap_for_persisted_oauth_context_and_
     )
     assert client is mock_client_cls.return_value
     assert client is client2
+
+
+def test_typed_client_shares_the_platform_clients_transport_and_auth():
+    """typed_client derives a service client from the CLI's platform client, sharing its transport."""
+    from nemo_platform_plugin.secrets.client import SecretsClient
+
+    ctx = CLIContext(overrides={"base_url": "http://test.example.com", "access_token": "token-123"})
+    resolved_context = SimpleNamespace(
+        cluster=SimpleNamespace(base_url="http://test.example.com", certificate_authority=None),
+        context_name="dev",
+        workspace="test-workspace",
+        user=OAuthUser(name="dev-user", token="token-123"),
+    )
+
+    with patch("nemo_platform_ext.config.config.get_context", return_value=resolved_context):
+        secrets = ctx.typed_client(SecretsClient)
+        platform = ctx.get_client()
+
+    assert isinstance(secrets, SecretsClient)
+    assert secrets._http is platform._client
+    assert secrets.workspace == "test-workspace"
+    assert secrets.default_headers == {"Authorization": "Bearer token-123"}
+
+
+def test_get_workspace_returns_none_when_no_context_resolves():
+    ctx = CLIContext(overrides={})
+
+    with patch("nemo_platform_ext.config.config.get_context", side_effect=RuntimeError("no config")):
+        assert ctx.get_workspace() is None

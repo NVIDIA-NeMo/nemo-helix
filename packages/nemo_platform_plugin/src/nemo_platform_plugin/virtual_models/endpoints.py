@@ -8,7 +8,7 @@ from __future__ import annotations
 from abc import abstractmethod
 
 from nemo_platform_plugin.client.endpoint import delete, get, patch, post
-from nemo_platform_plugin.client.types import Paginated
+from nemo_platform_plugin.client.types import Paginated, PreparedRequest
 from nemo_platform_plugin.virtual_models.types import (
     CreateVirtualModelRequest,
     DeleteVirtualModelQueryParams,
@@ -20,9 +20,23 @@ from nemo_platform_plugin.virtual_models.types import (
 _VIRTUAL_MODELS = "/apis/inference-gateway/v2/workspaces/{workspace}/virtual-models"
 
 
-@post(_VIRTUAL_MODELS)
+@get(_VIRTUAL_MODELS + "/{name}")
 @abstractmethod
-def create_virtual_model(*, workspace: str | None = None, body: CreateVirtualModelRequest) -> VirtualModel: ...
+def get_virtual_model(*, workspace: str | None = None, name: str) -> VirtualModel: ...
+
+
+def _get_virtual_model_on_conflict(
+    body: CreateVirtualModelRequest, workspace: str | None
+) -> PreparedRequest[VirtualModel]:
+    """Retrieve request replayed when ``create_virtual_model(exist_ok=True)`` 409s."""
+    return get_virtual_model(name=body.name, workspace=workspace)
+
+
+@post(_VIRTUAL_MODELS, get_on_conflict=_get_virtual_model_on_conflict)
+@abstractmethod
+def create_virtual_model(
+    *, workspace: str | None = None, body: CreateVirtualModelRequest, exist_ok: bool = False
+) -> VirtualModel: ...
 
 
 @get(_VIRTUAL_MODELS)
@@ -30,11 +44,6 @@ def create_virtual_model(*, workspace: str | None = None, body: CreateVirtualMod
 def list_virtual_models(
     *, workspace: str | None = None, query_params: ListVirtualModelsQueryParams | None = None
 ) -> Paginated[VirtualModel]: ...
-
-
-@get(_VIRTUAL_MODELS + "/{name}")
-@abstractmethod
-def get_virtual_model(*, workspace: str | None = None, name: str) -> VirtualModel: ...
 
 
 @patch(_VIRTUAL_MODELS + "/{name}")

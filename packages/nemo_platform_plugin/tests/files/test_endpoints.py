@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import get_origin
 
 from nemo_platform_plugin.client.types import BinaryContent, Paginated, PreparedRequest
@@ -14,6 +15,8 @@ from nemo_platform_plugin.files.types import (
     FilesetFileOutput,
     FilesetOutput,
     ListFilesetFilesResponse,
+    OtlpExportLogsResponse,
+    OtlpLogQueryRequest,
     UpdateFilesetRequest,
 )
 
@@ -146,3 +149,33 @@ def test_update_fileset_excludes_unset_fields() -> None:
     assert content == {"description": "updated"}
     assert "purpose" not in content
     assert "metadata" not in content
+
+
+def test_upload_otlp_logs() -> None:
+    prepared = endpoints.upload_otlp_logs(workspace="default", name="my-fileset", content=b'{"resourceLogs": []}')
+
+    assert prepared.method == "POST"
+    assert prepared.path_template == "/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs"
+    assert prepared.path_params == {"workspace": "default", "name": "my-fileset"}
+    assert prepared.content == b'{"resourceLogs": []}'
+    assert prepared.query_params is None
+    assert prepared.response_type is OtlpExportLogsResponse
+
+
+def test_upload_otlp_logs_with_artifact_base_path() -> None:
+    prepared = endpoints.upload_otlp_logs(
+        workspace="default", name="my-fileset", content=b"{}", query_params={"artifact_base_path": "logs/run-1"}
+    )
+
+    assert prepared.query_params == {"artifact_base_path": "logs/run-1"}
+
+
+def test_query_otlp_logs() -> None:
+    body = OtlpLogQueryRequest(limit=10, artifact_base_path="logs/run-1")
+    prepared = endpoints.query_otlp_logs(workspace="default", name="my-fileset", body=body)
+
+    assert prepared.method == "POST"
+    assert prepared.path_template == "/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs/query"
+    assert prepared.path_params == {"workspace": "default", "name": "my-fileset"}
+    assert json.loads(prepared.content) == {"limit": 10, "artifact_base_path": "logs/run-1"}
+    assert prepared.content_type == "application/json"

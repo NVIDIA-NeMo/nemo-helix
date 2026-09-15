@@ -83,6 +83,7 @@ ListRoleBindingsQueryParams = TypedDict(
         "page": NotRequired[int],
         "page_size": NotRequired[int],
         "sort": NotRequired[str],
+        "filter": NotRequired[str],
         "filter[principal]": NotRequired[str],
         "filter[principal][$eq]": NotRequired[str],
         "filter[principal][$like]": NotRequired[str],

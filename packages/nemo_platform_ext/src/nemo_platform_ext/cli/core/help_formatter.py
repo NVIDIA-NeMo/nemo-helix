@@ -817,6 +817,9 @@ def create_typer_app(**kwargs) -> Typer:
 
     kwargs.setdefault("cls", NmpGroup)
     kwargs.setdefault("no_args_is_help", True)
+    # Shell completion is owned by the root ``nemo`` app; command groups (including
+    # plugin-hosted roots mounted by the lazy loader) must not advertise it again.
+    kwargs.setdefault("add_completion", False)
     kwargs["context_settings"] = _context_settings_with_help(kwargs.get("context_settings"))
     return typer.Typer(**kwargs)
 

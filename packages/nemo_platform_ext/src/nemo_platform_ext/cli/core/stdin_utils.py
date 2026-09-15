@@ -7,10 +7,14 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Any
+from collections.abc import Collection, Mapping
+from typing import Any, TypeVar
 
 import yaml
 from click import UsageError
+from pydantic import BaseModel, RootModel
+
+RequestModelT = TypeVar("RequestModelT", bound=BaseModel)
 
 
 def is_stdin_available() -> bool:
@@ -163,6 +167,67 @@ def validate_required_fields(
 
     if missing:
         raise MissingRequiredFieldsError(missing, command_name, field_help)
+
+
+def _field_model(model_cls: type[BaseModel]) -> type[BaseModel] | None:
+    """Return the model whose fields name the accepted payload keys, or None when keys are unconstrained."""
+    if issubclass(model_cls, RootModel):
+        root_type = model_cls.model_fields["root"].annotation
+        if not (isinstance(root_type, type) and issubclass(root_type, BaseModel)):
+            return None
+        model_cls = root_type
+    if model_cls.model_config.get("extra") == "allow":
+        return None
+    return model_cls
+
+
+def _accepted_field_names(model_cls: type[BaseModel]) -> list[str]:
+    names: list[str] = []
+    for name, field in model_cls.model_fields.items():
+        names.append(name)
+        if isinstance(field.alias, str):
+            names.append(field.alias)
+        if isinstance(field.validation_alias, str):
+            names.append(field.validation_alias)
+    return names
+
+
+def _accepted_input_names(model_cls: type[BaseModel]) -> list[str]:
+    """Return each field's accepted input name, preferring its alias.
+
+    The internal Pydantic field name may differ from what a caller types
+    (e.g. ``schema_`` with ``alias="schema"``), so the user-facing hint must
+    advertise the alias, not the field name.
+    """
+    return [field.alias or field.validation_alias or name for name, field in model_cls.model_fields.items()]
+
+
+def build_request_body(
+    model_cls: type[RequestModelT],
+    payload: Mapping[str, Any],
+    *,
+    exclude: Collection[str] = (),
+    command_name: str = "this command",
+) -> RequestModelT:
+    """Validate the user-supplied *payload* into a request body of *model_cls*.
+
+    Keys in *exclude* are CLI-only (workspace, exist_ok, ...) and dropped. Any
+    remaining key the model does not define is rejected instead of silently
+    ignored, so a typo in ``--input-data`` cannot degrade into a no-op. Models
+    that declare ``extra="allow"`` (pass-through request shapes) and root models
+    wrapping unstructured payloads accept any key. Only the
+    keys present in *payload* are marked set on the returned model, so
+    ``exclude_unset`` serialization sends exactly what the user provided.
+    """
+    from nemo_platform_ext.cli.core.errors import UnknownInputFieldsError
+
+    body = {key: value for key, value in payload.items() if key not in exclude}
+    field_model = _field_model(model_cls)
+    if field_model is not None:
+        unknown = sorted(set(body) - set(_accepted_field_names(field_model)))
+        if unknown:
+            raise UnknownInputFieldsError(unknown, command_name, sorted(_accepted_input_names(field_model)))
+    return model_cls.model_validate(body)
 
 
 def read_payload(field_name: str, field_value: str) -> Any:
