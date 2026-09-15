@@ -7,8 +7,21 @@ import pytest
 
 pytest.importorskip("scaled_evals")
 
+from click.testing import CliRunner
+from scaled_evals.cli import client as client_module
 from scaled_evals.cli.main import cli
-from test_cli import runner_with
+
+
+def runner_with(monkeypatch, handler) -> CliRunner:
+    """Create a CLI runner backed by an HTTPX mock transport."""
+    monkeypatch.setenv("SCALED_EVALS_BASE_URL", "https://api.example.com")
+    real = client_module.make_client
+
+    def patched(base_url, token, transport=None, **kwargs):
+        return real(base_url, token, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr("scaled_evals.cli.main.make_client", patched)
+    return CliRunner()
 
 
 def test_benchmark_download_queues_without_polling(monkeypatch, tmp_path) -> None:

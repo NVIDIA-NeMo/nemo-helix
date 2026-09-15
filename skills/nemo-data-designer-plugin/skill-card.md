@@ -25,7 +25,7 @@ Risk: Review before execution as proposals could introduce incorrect or misleadi
 Mitigation: Review and scan skill before deployment. <br>
 
 ## Reference(s): <br>
-- [NeMo Plugin Additions](references/nemo-platform-plugin-additions.md) <br>
+- [Platform Execution](references/platform-execution.md) <br>
 - [Retrieval SDG](references/retrieval-sdg.md) <br>
 - [Person Sampling Reference](references/person-sampling.md) <br>
 - [Seed Datasets](references/seed-datasets.md) <br>
