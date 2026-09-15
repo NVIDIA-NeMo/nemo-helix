@@ -55,7 +55,7 @@ A single invocation surfaces **every** problem it can detect (it doesn't short-c
 
 Flags:
 
-- `--workspace <name>` — workspace used to resolve Inference Gateway providers and Files-service seed sources. Defaults to the SDK's configured workspace, or `default`.
+- `--workspace <name>` — workspace used to resolve Inference Gateway providers and Files-service seed sources. Defaults to the workspace of the active CLI context (`nemo config current-context`), or `default`.
 - `--output {text,json}` — `json` emits a structured `ValidationReport` for CI / scripting use.
 
 ## Seed data
