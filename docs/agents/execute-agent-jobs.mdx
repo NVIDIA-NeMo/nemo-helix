@@ -113,14 +113,42 @@ print(job["name"], job["status"])
 | `workdir` | No | The [working directory](#working-directories) the agent starts from. |
 | `timeout_seconds` | No | Maximum time to wait for a result. Defaults to 3600 (one hour). |
 | `auto_telemetry` | No | Automatically configures supported ATIF telemetry to export to Intake. Defaults to `true`. |
+| `image` | No | The [container image](#execution-image) to run the agent in. Defaults to the platform's task image. |
 | `extension` | No | A trusted [execute extension](#execute-extensions) contributed by an installed plugin. |
 
 The CLI generates one flag per spec field (`--agent`, `--input`,
 `--environment`, `--workdir.base-workdir`, `--timeout-seconds`,
-`--auto-telemetry`). Fields that do not reduce to a single flag — an inline
-agent, an inline environment, `workdir.artifact_mounts` — are supplied with
-`--spec` (a JSON string) or `--spec-file` (a YAML or JSON file). Individual
+`--auto-telemetry`, `--image`). Fields that do not reduce to a single flag — an
+inline agent, an inline environment, `workdir.artifact_mounts` — are supplied
+with `--spec` (a JSON string) or `--spec-file` (a YAML or JSON file). Individual
 flags override values from the supplied spec.
+
+### Execution Image
+
+The job runs the agent inside a container image. That image must contain the
+Fabric adapter the agent's harness names, so the image you need depends on the
+harness:
+
+- **A first-party harness** (`claude`, `codex`, `hermes`, `deepagents`) needs no
+  image at all. Its adapter ships in the platform's task image, which is what
+  the job uses when you omit `image`.
+- **Your own Fabric adapter** needs an image that contains it. Build one with
+  `nemo agents package` and pass it as `image`; the packaged image carries both
+  the adapter and the execute task module.
+
+Resolution is, in order: the request's `image`; the
+`agents.jobs.default_image` platform setting; the execution profile's
+`default_task_image`; the platform CPU tasks image. Setting
+`agents.jobs.default_image` changes the default for every execute job on the
+install, and is unrelated to `agents.deployments.default_image`, which is the
+fallback for `AgentDeployment` images only.
+
+<Note>
+A custom image is pulled with the credentials the jobs runtime already has:
+the Docker daemon's for `docker` mode, and the platform's `image_pull_secrets`
+merged with the execution profile's for `k8s`. There is no per-job pull
+credential, so a private image has to be reachable with those.
+</Note>
 
 ## Track a Job and Fetch Its Results
 

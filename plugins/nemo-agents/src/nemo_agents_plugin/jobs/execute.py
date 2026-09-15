@@ -89,7 +89,6 @@ from nemo_platform_plugin.jobs.constants import (
     TASK_CONFIG_ENVVAR,
 )
 from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
-from nemo_platform_plugin.jobs.image import get_qualified_image
 from nemo_platform_plugin.refs import ENTITY_REF_PATTERN, parse_entity_ref
 from nemo_platform_plugin.sdk_provider import get_forwarding_headers
 from pydantic import BaseModel, Field, field_validator
@@ -109,7 +108,6 @@ FABRIC_RUN_RESULT_FILENAME = "fabric_run_result.json"
 FABRIC_ERROR_FILENAME = "fabric_error.json"
 SUCCESSFUL_FABRIC_STATUSES = {"succeeded"}
 DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS = 60 * 60
-DEFAULT_AGENT_EXECUTION_IMAGE_NAME = "nmp-api"
 
 # Name Fabric gives the agent process's captured stderr. It lives under a
 # runtime/invocation directory Fabric names itself, so it is found by search
@@ -213,6 +211,18 @@ class ExecuteAgentJobConfig(BaseModel):
             "say a run should not be traced."
         ),
     )
+    image: str = Field(
+        default="",
+        description=(
+            "Container image to execute the agent in. Mirrors "
+            "CreateDeploymentRequest.image. Typically the output of "
+            "`nemo agents package`, which contains both the agent's Fabric "
+            "adapter and the execute task module. Empty falls back to "
+            "agents.jobs.default_image, then to the jobs substrate's chain "
+            "(the execution profile's default_task_image, then the platform "
+            "CPU tasks image)."
+        ),
+    )
     extension: ExecuteAgentExtensionConfig | None = Field(
         default=None,
         description="Optional trusted plugin extension to run during the execute-agent lifecycle.",
@@ -238,6 +248,18 @@ class ExecuteAgentJobConfig(BaseModel):
         _validate_agent_config_format(value.config_format)
         if not value.config:
             raise ValueError("Inline agent definitions require a non-empty config.")
+        return value
+
+    @field_validator("image")
+    @classmethod
+    def _validate_image(cls, value: str) -> str:
+        """Reject a blank-but-present image.
+
+        Empty means "omitted" and is the documented way to inherit the fallback chain;
+        whitespace is a caller mistake that would otherwise resolve as if the field had been omitted.
+        """
+        if value and not value.strip():
+            raise ValueError("Image must not be blank; omit the field to inherit the configured default.")
         return value
 
 
@@ -272,8 +294,14 @@ class ExecuteAgentJob(NemoJob):
     spec_schema: ClassVar[type[BaseModel]] = ExecuteAgentStepConfig
 
     @staticmethod
-    def _execution_image() -> str:
-        return AgentsConfig.get().deployments.default_image or get_qualified_image(DEFAULT_AGENT_EXECUTION_IMAGE_NAME)
+    def _execution_image(request_image: str) -> str | None:
+        """Resolve the task image, or ``None`` to inherit the jobs substrate chain.
+
+        The third tier is deliberately not spelled here: ``ContainerSpec.image``
+        is optional precisely so a job can defer to the execution profile's
+        ``default_task_image`` and then the platform CPU tasks image.
+        """
+        return request_image or AgentsConfig.get().jobs.default_image or None
 
     @classmethod
     async def to_spec(
@@ -370,7 +398,7 @@ class ExecuteAgentJob(NemoJob):
             profile=profile or "default",
             provider="cpu",
             container=ContainerSpec(
-                image=cls._execution_image(),
+                image=cls._execution_image(step_config.request.image),
                 entrypoint=["python", "-m"],
                 command=["nemo_agents_plugin.tasks.execute"],
             ),

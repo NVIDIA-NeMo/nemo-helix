@@ -15,6 +15,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_agents_plugin.agent_config import AgentConfig
+from nemo_agents_plugin.config import AgentJobsConfig, AgentsConfig, DeploymentsRunnerConfig
 from nemo_agents_plugin.entities import (
     Agent,
     AgentComputeSpec,
@@ -59,6 +60,7 @@ from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
 from nemo_platform_plugin.jobs.routes import add_job_routes
+from pydantic import ValidationError
 
 
 class _TypedFilesResponse:
@@ -494,7 +496,7 @@ async def test_compile_produces_single_cpu_step_with_canonical_config() -> None:
     )
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
-        get_config.return_value.deployments.default_image = "registry.example/nmp-api:test"
+        get_config.return_value.jobs.default_image = "registry.example/nmp-cpu-tasks:test"
         platform_spec = await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -508,7 +510,7 @@ async def test_compile_produces_single_cpu_step_with_canonical_config() -> None:
     step = steps[0]
     assert step["name"] == "execute-agent"
     assert step["executor"]["provider"] == "cpu"
-    assert step["executor"]["container"]["image"] == "registry.example/nmp-api:test"
+    assert step["executor"]["container"]["image"] == "registry.example/nmp-cpu-tasks:test"
     assert step["executor"]["container"]["command"] == ["nemo_agents_plugin.tasks.execute"]
     assert step["config"] == spec.model_dump(mode="json")
     step_config = cast(dict[str, Any], step["config"])
@@ -516,18 +518,11 @@ async def test_compile_produces_single_cpu_step_with_canonical_config() -> None:
     assert step["environment"] == []
 
 
-@pytest.mark.asyncio
-async def test_compile_falls_back_to_qualified_api_image() -> None:
-    spec = ExecuteAgentStepConfig(
-        request=ExecuteAgentJobConfig(agent="calc", input="hello"),
-        agent=_resolved_agent(),
-    )
+async def _compiled_image(config: AgentsConfig, request: ExecuteAgentJobConfig) -> str | None:
+    """Compile a minimal job under ``config`` and return the step's container image."""
+    spec = ExecuteAgentStepConfig(request=request, agent=_resolved_agent())
 
-    with (
-        patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config,
-        patch("nemo_agents_plugin.jobs.execute.get_qualified_image", return_value="qualified/nmp-api:dev"),
-    ):
-        get_config.return_value.deployments.default_image = ""
+    with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get", return_value=config):
         platform_spec = await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -538,9 +533,56 @@ async def test_compile_falls_back_to_qualified_api_image() -> None:
 
     steps = list(platform_spec["steps"])
     assert len(steps) == 1
-    step = steps[0]
-    assert step["executor"]["provider"] == "cpu"
-    assert step["executor"]["container"]["image"] == "qualified/nmp-api:dev"
+    return cast(dict[str, Any], steps[0]["executor"]["container"]).get("image")
+
+
+@pytest.mark.asyncio
+async def test_request_image_wins_over_config_default() -> None:
+    image = await _compiled_image(
+        AgentsConfig(jobs=AgentJobsConfig(default_image="registry.example/config:test")),
+        ExecuteAgentJobConfig(agent="calc", input="hello", image="registry.example/request:test"),
+    )
+
+    assert image == "registry.example/request:test"
+
+
+@pytest.mark.asyncio
+async def test_config_default_used_when_request_image_omitted() -> None:
+    image = await _compiled_image(
+        AgentsConfig(jobs=AgentJobsConfig(default_image="registry.example/config:test")),
+        ExecuteAgentJobConfig(agent="calc", input="hello"),
+    )
+
+    assert image == "registry.example/config:test"
+
+
+@pytest.mark.asyncio
+async def test_compile_omits_image_to_inherit_substrate_chain() -> None:
+    """No request image and no configured default leaves ``ContainerSpec.image`` unset.
+
+    The job deliberately names no image of its own here: omitting it is what
+    lets the jobs substrate apply the execution profile's ``default_task_image``
+    and then the platform CPU tasks image, which the old ``nmp-api`` fallback
+    short-circuited.
+    """
+    image = await _compiled_image(AgentsConfig(), ExecuteAgentJobConfig(agent="calc", input="hello"))
+
+    assert image is None
+
+
+@pytest.mark.asyncio
+async def test_deployments_default_image_untouched_by_jobs_default() -> None:
+    """The two knobs do not cross-talk in either direction."""
+    deployments_only = AgentsConfig(deployments=DeploymentsRunnerConfig(default_image="registry.example/deploy:test"))
+    assert await _compiled_image(deployments_only, ExecuteAgentJobConfig(agent="calc", input="hello")) is None
+
+    jobs_only = AgentsConfig(jobs=AgentJobsConfig(default_image="registry.example/config:test"))
+    assert jobs_only.deployments.default_image == ""
+
+
+def test_blank_image_rejected() -> None:
+    with pytest.raises(ValidationError, match="Image must not be blank"):
+        ExecuteAgentJobConfig(agent="calc", input="hello", image="   ")
 
 
 # --- environment / compute / secrets wiring ------------------------------------
@@ -766,7 +808,7 @@ async def test_compile_injects_secret_env_and_compute_resources() -> None:
     )
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
-        get_config.return_value.deployments.default_image = "registry.example/nmp-api:test"
+        get_config.return_value.jobs.default_image = "registry.example/nmp-cpu-tasks:test"
         platform_spec = await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -794,7 +836,7 @@ async def test_compile_without_compute_omits_executor_resources() -> None:
     )
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
-        get_config.return_value.deployments.default_image = "registry.example/nmp-api:test"
+        get_config.return_value.jobs.default_image = "registry.example/nmp-cpu-tasks:test"
         platform_spec = await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -820,7 +862,7 @@ async def test_compile_rejects_unsupported_compute_resource_key() -> None:
         patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config,
         pytest.raises(PlatformJobCompilationError, match="Unsupported compute resource key"),
     ):
-        get_config.return_value.deployments.default_image = "registry.example/nmp-api:test"
+        get_config.return_value.jobs.default_image = "registry.example/nmp-cpu-tasks:test"
         await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -842,7 +884,7 @@ async def test_compile_rejects_secret_env_colliding_with_reserved_name() -> None
         patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config,
         pytest.raises(PlatformJobCompilationError, match="reserved job env var name"),
     ):
-        get_config.return_value.deployments.default_image = "registry.example/nmp-api:test"
+        get_config.return_value.jobs.default_image = "registry.example/nmp-cpu-tasks:test"
         await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -1283,6 +1325,7 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
         "workdir": {"base_workdir": "source#project", "artifact_mounts": []},
         "timeout_seconds": DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS,
         "auto_telemetry": True,
+        "image": "",
         "extension": None,
     }
     assert body.spec["workdir"] == {"base_workdir": "default/source#project/", "artifact_mounts": []}
@@ -1325,7 +1368,7 @@ def test_execute_job_create_route_maps_reserved_secret_env_to_422() -> None:
     app.dependency_overrides[get_sdk_client] = lambda: _sdk_with_files()
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
-        get_config.return_value.deployments.default_image = "registry.example/nmp-api:test"
+        get_config.return_value.jobs.default_image = "registry.example/nmp-cpu-tasks:test"
         response = TestClient(app, raise_server_exceptions=False).post(
             "/apis/agents/v2/workspaces/default/jobs/execute",
             json={"name": "execute-1", "spec": {"agent": "calc", "input": "hello", "environment": "default/prod"}},
