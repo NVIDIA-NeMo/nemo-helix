@@ -23,7 +23,6 @@ vi.mock('@nemo/sdk/generated/fetchers/platform', () => ({ customFetch: vi.fn() }
 const listMock = vi.mocked(filesListFilesetFiles);
 const fetchMock = vi.mocked(customFetch);
 
-
 /**
  * Real Parquet, decoded by the real `hyparquet` — only the bytes are canned, so the decode
  * under test still runs for real. Inline rather than generated at test time, to keep a
@@ -222,8 +221,9 @@ describe('fetchFilesetRows', () => {
     });
     fetchMock.mockResolvedValue(blobOf(PARQUET.twoRows));
 
-    await expect(fetchFilesetRows(params({ rowCount: 2 }), new AbortController().signal)).resolves
-      .toHaveLength(2);
+    await expect(
+      fetchFilesetRows(params({ rowCount: 2 }), new AbortController().signal)
+    ).resolves.toHaveLength(2);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -240,9 +240,7 @@ describe('fetchFilesetRows', () => {
 
   it('gives up once reading has walked more shards than the limit', async () => {
     listMock.mockResolvedValue({
-      data: Array.from({ length: 9 }, (_, i) =>
-        file(`data/train-0000${i}-of-00009-x.parquet`)
-      ),
+      data: Array.from({ length: 9 }, (_, i) => file(`data/train-0000${i}-of-00009-x.parquet`)),
     });
     fetchMock.mockResolvedValue(blobOf(PARQUET.twoRows));
 
