@@ -31,6 +31,7 @@ class TestAutomodelBackend:
         """ModelType should be EMBEDDING when model.is_embedding_model is True."""
         backend = AutomodelBackend(job_ctx=MagicMock())
         customizer_config = MagicMock()
+        customizer_config.model.checkpoint_head_type = "unknown"
         customizer_config.model.is_embedding_model = True
         customizer_config.model.name = "meta/llama-3.1-8b-instruct"
 
@@ -57,6 +58,7 @@ class TestAutomodelBackend:
         """ModelType should stay LLM when model.is_embedding_model is False."""
         backend = AutomodelBackend(job_ctx=MagicMock())
         customizer_config = MagicMock()
+        customizer_config.model.checkpoint_head_type = "unknown"
         customizer_config.model.is_embedding_model = False
         customizer_config.model.name = "nvidia/llama-nemotron-embed-1b-v2"
 

@@ -341,10 +341,16 @@ def _prepare_and_validate_dataset(
     workspace_dir: Path,
 ) -> PreparedDataset:
     """Discover, merge, and optionally split dataset files."""
+    split_kwargs = (
+        {}
+        if customizer_config.schedule.validation_split is None
+        else {"val_split_ratio": customizer_config.schedule.validation_split}
+    )
     prepared = prepare_dataset(
         dataset_path=Path(customizer_config.dataset.path),
         output_dir=workspace_dir / "dataset",
         seed=customizer_config.seed,
+        **split_kwargs,
     )
     logger.info(
         f"Prepared dataset: train={prepared.train_samples} samples, validation={prepared.validation_samples} samples, files: "

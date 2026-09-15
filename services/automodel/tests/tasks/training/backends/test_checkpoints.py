@@ -10,6 +10,7 @@ import pytest
 from nmp.automodel.entities.values import FinetuningType
 from nmp.automodel.tasks.training.backends.checkpoints import (
     ModelType,
+    _probe_bidirectional_mask,
     _restructure_encoder_output,
     process_checkpoint,
 )
@@ -68,36 +69,99 @@ class TestCrossEncoderCheckpoint:
         call = patched_checkpoint_io["export_onnx"].call_args.kwargs
         assert call["model_type"] == ModelType.CROSS_ENCODER
         assert call["model_path"] == output_path
-        assert call["output_path"] == output_path
+        assert call["output_path"] == output_path / "alternates" / "onnx"
         assert call["tokenizer_path"] == str(tmp_path / "base")
         assert call["cfg"] is export
         patched_checkpoint_io["restructure"].assert_called_once_with(output_path, "hf")
 
 
 class TestRestructureEncoderOutput:
-    @staticmethod
-    def _checkpoint(tmp_path: Path) -> Path:
+    HF_NAMES = frozenset(
+        {
+            "model.safetensors",
+            "config.json",
+            "tokenizer_config.json",
+            "modeling_nemotron.py",
+            "configuration_nemotron.py",
+            "custom_code",
+        }
+    )
+    ONNX_NAMES = frozenset(
+        {
+            "model.onnx",
+            "model.onnx.data",
+            "onnx__MatMul_4456",
+            "model.embed_tokens.weight",
+            "model.layers.1.input_layernorm.weight",
+            "encoder.layer.0.attention.self.query.bias",
+            "tokenizer",
+        }
+    )
+
+    @classmethod
+    def _checkpoint(cls, tmp_path: Path) -> Path:
+        """The layout ``process_checkpoint`` produces: HF at the root, ONNX in its own dir."""
         output = tmp_path / "output"
-        (output / "tokenizer").mkdir(parents=True)
-        for name in ("model.onnx", "model.safetensors", "config.json"):
+        output.mkdir()
+        (output / "custom_code").mkdir()
+        (output / "custom_code" / "modeling.py").write_text("code")
+        for name in cls.HF_NAMES - {"custom_code"}:
             (output / name).write_text(name)
+
+        onnx_dir = output / "alternates" / "onnx"
+        (onnx_dir / "tokenizer").mkdir(parents=True)
+        (onnx_dir / "tokenizer" / "tokenizer.json").write_text("tok")
+        for name in cls.ONNX_NAMES - {"tokenizer"}:
+            (onnx_dir / name).write_text(name)
         return output
 
-    def test_onnx_primary_moves_hf_weights_to_alternates(self, tmp_path: Path) -> None:
+    def test_onnx_primary_promotes_onnx_and_nests_hf(self, tmp_path: Path) -> None:
         output = self._checkpoint(tmp_path)
 
         _restructure_encoder_output(output, "onnx")
 
-        assert {e.name for e in output.iterdir()} == {"model.onnx", "tokenizer", "alternates"}
-        assert {e.name for e in (output / "alternates" / "hf").iterdir()} == {
-            "model.safetensors",
-            "config.json",
-        }
+        assert {e.name for e in output.iterdir()} == self.ONNX_NAMES | {"alternates"}
+        assert {e.name for e in (output / "alternates" / "hf").iterdir()} == self.HF_NAMES
+        assert not (output / "alternates" / "onnx").exists()
+        assert (output / "alternates" / "hf" / "custom_code" / "modeling.py").is_file()
 
-    def test_hf_primary_moves_onnx_to_alternates(self, tmp_path: Path) -> None:
+    def test_hf_primary_leaves_hf_at_root_and_onnx_nested(self, tmp_path: Path) -> None:
         output = self._checkpoint(tmp_path)
 
         _restructure_encoder_output(output, "hf")
 
-        assert {e.name for e in output.iterdir()} == {"model.safetensors", "config.json", "tokenizer", "alternates"}
-        assert {e.name for e in (output / "alternates" / "onnx").iterdir()} == {"model.onnx"}
+        assert {e.name for e in output.iterdir()} == self.HF_NAMES | {"alternates"}
+        assert {e.name for e in (output / "alternates" / "onnx").iterdir()} == self.ONNX_NAMES
+
+
+def test_probe_bidirectional_mask_survives_lazy_loader_modules() -> None:
+    """A PEP 562 loader that raises ModuleNotFoundError must read as "no mask"."""
+    import types
+
+    mod = types.ModuleType("fake_lazy_pkg")
+
+    def _raising_getattr(name: str):
+        raise ModuleNotFoundError(f"no submodule {name!r}")
+
+    setattr(mod, "__getattr__", _raising_getattr)
+
+    assert _probe_bidirectional_mask(mod) is None
+
+
+def test_probe_bidirectional_mask_returns_the_function() -> None:
+    import types
+
+    mod = types.ModuleType("fake_pkg")
+
+    def _mask() -> str:
+        return "original"
+
+    setattr(mod, "create_bidirectional_mask", _mask)
+
+    assert _probe_bidirectional_mask(mod) is _mask
+
+
+def test_probe_bidirectional_mask_missing_attribute_is_none() -> None:
+    import types
+
+    assert _probe_bidirectional_mask(types.ModuleType("bare_pkg")) is None

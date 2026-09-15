@@ -182,6 +182,7 @@ def compile_training_step(
             epochs=training.epochs,
             max_steps=training.max_steps,
             val_check_interval=training.val_check_interval,
+            validation_split=training.validation_split,
             progress_reporting=training.progress_reporting,
         ),
         batch=TrainingStepConfig.BatchConfig(

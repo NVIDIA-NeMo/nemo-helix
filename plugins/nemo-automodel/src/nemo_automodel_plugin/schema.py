@@ -147,8 +147,23 @@ class ScheduleSpec(AutomodelSchema):
     epochs: int = Field(default=1, gt=0)
     max_steps: int | None = Field(default=None, gt=0)
     val_check_interval: float | None = None
+    validation_split: float | None = Field(
+        default=0.1,
+        gt=0,
+        lt=1,
+        description="Validation split to use when a validation dataset is not provided.",
+    )
     seed: int | None = None
     progress_reporting: ProgressReportingConfig = Field(default_factory=ProgressReportingConfig)
+
+
+# (global_batch_size, micro_batch_size) per retrieval recipe. bi_encoder takes its
+# in-batch negatives from the micro batch, which accumulation does not widen, so
+# lowering micro costs retrieval quality; cross_encoder scores pairs independently.
+RETRIEVAL_BATCH_DEFAULTS: dict[str, tuple[int, int]] = {
+    "bi_encoder": (256, 8),
+    "cross_encoder": (128, 8),
+}
 
 
 class BatchSpec(AutomodelSchema):
@@ -236,16 +251,18 @@ class AutomodelJobInput(AutomodelSchema):
         training = self.training.model_copy(update={"recipe": recipe})
         if recipe == "bi_encoder":
             learning_rate, warmup_steps = 1e-5, 5
+            global_batch_size, micro_batch_size = RETRIEVAL_BATCH_DEFAULTS["bi_encoder"]
         elif recipe == "cross_encoder":
             learning_rate, warmup_steps = 3e-6, 100
+            global_batch_size, micro_batch_size = RETRIEVAL_BATCH_DEFAULTS["cross_encoder"]
         else:
             return self.model_copy(update={"training": training})
 
         batch_updates: dict[str, int] = {}
         if "global_batch_size" not in self.batch.model_fields_set:
-            batch_updates["global_batch_size"] = 128
+            batch_updates["global_batch_size"] = global_batch_size
         if "micro_batch_size" not in self.batch.model_fields_set:
-            batch_updates["micro_batch_size"] = 4
+            batch_updates["micro_batch_size"] = micro_batch_size
 
         optimizer_updates: dict[str, float | int] = {}
         if "learning_rate" not in self.optimizer.model_fields_set:

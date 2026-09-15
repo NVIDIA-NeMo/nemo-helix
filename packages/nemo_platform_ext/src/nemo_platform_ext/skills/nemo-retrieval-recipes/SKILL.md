@@ -6,9 +6,9 @@ name: nemo-retrieval-recipes
 description: >-
   End-to-end NeMo Platform recipe for domain embedding and reranking fine-tuning:
   Data Designer retrieval-generate/prepare, Automodel bi_encoder/cross_encoder,
-  Evaluator retrieve-eval on frozen eval_beir, then optional NIM deploy. Use when
-  the user has a document corpus, wants better retrieval nDCG/recall, or asks to
-  fine-tune Nemotron embed or rerank models on Platform.
+  Evaluator retrieve-eval on frozen eval_beir (NIM providers via Deployment
+  Manager). Use when the user has a document corpus, wants better retrieval
+  nDCG/recall, or asks to fine-tune Nemotron embed or rerank models on Platform.
 triggers:
   - fine-tune embedding
   - fine-tune rerank
@@ -22,6 +22,8 @@ triggers:
   - bi_encoder
   - cross_encoder
   - retrieval-sdg
+  - Retriever NIM
+  - Ranking NIM
 not-for:
   - nemo-customizer (chat/SFT/LoRA/DPO/GRPO on language models)
   - nemo-data-designer-plugin Autopilot create (tabular synthetic columns)
@@ -41,8 +43,8 @@ version: "0.1.0"
 
 # NeMo Platform retrieval recipes
 
-Conduct the Nemotron embed/rerank pipeline **on NeMo Platform plugin CLIs**. Do not
-run `uv run nemotron embed|rerank`. Do not use `nemo data-designer create`.
+Conduct the Nemotron embed/rerank pipeline **on NeMo Platform plugin CLIs**.
+Do not use `nemo data-designer create`.
 
 Plugin skills (`nemo-data-designer-plugin`, `nemo-customizer`, `nemo-evaluator-plugin`)
 are stage manuals. This skill owns family routing, artifact IDs, frozen eval, and
@@ -51,7 +53,10 @@ the 15% nDCG@10 / Recall@10 README bar.
 ## Resolve CLI
 
 Use `nemo`, or `uv run nemo` from the nemo-platform root. If neither works, route
-to `setup`. Confirm `http://localhost:8080/health/ready` before submitting jobs.
+to `setup`. The CLI defaults to `http://localhost:8080`; `NMP_BASE_URL` overrides
+it for a remote platform. Confirm `/health/ready` on the resolved base URL before
+submitting jobs, and recheck it before rereading a command that returned empty or
+non-JSON output — that is an unreachable platform, not a missing entity.
 
 ## Choose a family
 
@@ -61,9 +66,9 @@ Read only the matching recipe after this routing step:
 - Recall@100 OK but nDCG@10 poor, relevant docs buried in top-k → `references/rerank.md`
 - User asks both or a two-stage stack → embed first (candidate coverage), then rerank.
 
-Use one workspace. Stage 1 must produce `training.jsonl` and a frozen BEIR fileset
-whose root contains `corpus.jsonl`, `queries.jsonl`, and `qrels/test.tsv`. Keep
-`query:` / `passage:` prefixes for embed and
+Use one workspace. Stage 1 publishes one `artifacts` fileset holding `training.jsonl`
+and `eval_beir/`; Automodel and `retrieve-eval` both read that one fileset directly.
+Keep `query:` / `passage:` prefixes for embed and
 `question:{query} \n \n passage:{passage}` for rerank.
 
 ## Safe workflow
@@ -73,26 +78,38 @@ whose root contains `corpus.jsonl`, `queries.jsonl`, and `qrels/test.tsv`. Keep
    `embed_provider`, not `NVIDIA_API_KEY` on the job.
 2. Dry-run schemas first: `nemo data-designer retrieval-generate --help`,
    `nemo customization automodel explain`, `nemo evaluator retrieve-eval explain`.
-3. Prefer skip-SDG (`hf://nvidia/Retrieval-Synthetic-NVDocs-v1@<rev>` or an existing
-   `generation_result.json` fileset) for a first eval. Live SDG needs a corpus of
-   **50+ documents**; one file can dump every query into the test split and leave
-   train empty (mining then crashes).
-4. Run Stage 0+1 once (`retrieval-run` or generate then prepare). **Freeze**
-   `eval_beir`. Never regenerate it for base vs fine-tuned comparisons.
-5. Fine-tune with explicit `training.recipe: bi_encoder` or `cross_encoder` and
+3. Live SDG is the default for a user corpus; drive it through Stage 0 generation
+   knobs (see `references/sdg.md`). It needs **50+ documents**, since one file can
+   dump every query into the test split and leave train empty (mining then crashes).
+   Reach for a published Stage 0 dump only when the user has no corpus or wants a
+   fast first eval.
+4. Run Stage 0+1 once (`retrieval-run`, or generate then prepare). **Freeze** the
+   resulting `eval_beir`; never regenerate it for base vs tuned comparisons.
+5. Confirm the training model entity has a non-null `fileset`. Auto-discovered
+   Inference Gateway model entities are endpoints, not trainable checkpoints.
+6. Before Automodel, confirm `training.jsonl` has non-empty `neg_doc` lists
+   (`references/sdg.md`). Convert-only Stage 1 leaves `neg_doc: []`; the collator
+   then crashes sampling `train_n_passages - 1` negatives (default 4). Mine first
+   (`enable_mining: true`).
+7. Fine-tune with explicit `training.recipe: bi_encoder` or `cross_encoder` and
    `finetuning_type` `all_weights` or `lora_merged` only.
-6. Default stop after `retrieve-eval` with `baseline` + tuned target, `k: [1,5,10,100]`.
-7. Deploy is opt-in. Automodel writes ONNX at the fileset root (`alternates/hf/`
-   for the HF checkpoint) for both `bi_encoder` and `cross_encoder`. Embed: Retriever
-   NIM 2.2.0. Rerank: Ranking NIM `llama-nemotron-rerank-1b-v2:1.10.0`. Do not shell
-   out to `nemotron embed|rerank export`.
-8. Poll jobs at 60–300s. Parse JSON from **stdout only** (never `2>&1` into `json.load`).
+8. `retrieve-eval` needs IGW providers on every named model (`k: [1,5,10,100]`,
+   `baseline` + tuned). Fileset-backed Automodel entities have empty
+   `model_providers` until Deployment Manager serves them — follow
+   `references/deploy.md` before submit.
+9. Serving after eval is the same deploy contract. One GPU per NIM; Helm
+   `imagePullSecrets` must include the NGC dockerconfig or the pod cannot pull
+   `nvcr.io`.
+10. Poll jobs at 60–300s. Parse JSON from **stdout only** (never `2>&1` into `json.load`).
 
 Report absolute and relative nDCG@10, Recall@10, and Recall@100 on the same frozen
 eval set. Prefer at least 100 queries; warn below 50. Treat 15% relative nDCG@10
 and Recall@10 uplift as an indicative embed target, not a hard small-corpus gate.
 
-References: `references/embed.md`, `references/rerank.md`.
+References: `references/sdg.md` (Stage 0+1 corpus and generation control),
+`references/embed.md`, `references/rerank.md`, `references/deploy.md`
+(Retriever / Ranking NIM via Deployment Manager).
 
 For stage-specific failures, hand off to `nemo-data-designer-plugin`,
-`nemo-customizer`, `nemo-evaluator-plugin`, or `inference`.
+`nemo-customizer`, or `nemo-evaluator-plugin`. NIM serving for this recipe
+stays in `references/deploy.md`, not the `inference` skill.

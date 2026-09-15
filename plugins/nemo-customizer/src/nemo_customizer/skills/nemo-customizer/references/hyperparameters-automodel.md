@@ -150,8 +150,8 @@ LoRA block is auto-created when `finetuning_type` is `lora` or `lora_merged`.
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `global_batch_size` | `8` (schema) | Encoder recipes rewrite unset values to **128**. Effective batch across all GPUs; **≥48 GB LoRA tables → `batch-sizing.md`** |
-| `micro_batch_size` | `1` (schema) | Encoder recipes rewrite unset values to **4**. **Per GPU**; same SKILL tables for single- and multi-GPU (TP=1) |
+| `global_batch_size` | `8` (schema) | Encoder recipes rewrite unset values (**256** bi-encoder, **128** cross-encoder). Effective batch across all GPUs; **≥48 GB LoRA tables → `batch-sizing.md`** |
+| `micro_batch_size` | `1` (schema) | Encoder recipes rewrite unset values (**8** bi-encoder, **8** cross-encoder). **Per GPU**; same SKILL tables for single- and multi-GPU (TP=1) |
 | `sequence_packing` | `false` | Pack short sequences for throughput (needs compatible data) |
 | `sequence_packing_max_samples` | `1000` | Samples analyzed to estimate the optimal pack size (only when packing) |
 
@@ -181,21 +181,45 @@ When the resolved recipe is `bi_encoder` or `cross_encoder` (explicit, or `auto`
 
 | Field | Schema default | `bi_encoder` | `cross_encoder` |
 |-------|----------------|--------------|-----------------|
-| `batch.global_batch_size` | `8` | `128` | `128` |
-| `batch.micro_batch_size` | `1` | `4` | `4` |
+| `batch.global_batch_size` | `8` | `256` | `128` |
+| `batch.micro_batch_size` | `1` | `8` | `8` |
 | `optimizer.learning_rate` | `5e-6` | `1e-5` | `3e-6` |
 | `optimizer.warmup_steps` | `0` | `5` | `100` |
 
 `optimizer.optimizer: auto` still selects FusedAdam for these recipes and Adam for SFT.
 
+For `bi_encoder`, `micro_batch_size` also sets the in-batch negative pool, so
+lowering it costs retrieval quality rather than just speed — see
+**`batch-sizing.md` § Retrieval recipes** before overriding it. On 48 GB, `micro`
+12 / GBS 384 is the confirmed ceiling; prefer more data-parallel GPUs over a
+higher `micro` to widen negatives.
+
 ### Retrieval data from Stage 1
 
-Previous: Data Designer `retrieval-prepare` / `retrieval-run` fileset with Automodel `training.jsonl` (`query`, `pos_doc`, `neg_doc`). Next after a successful job: `nemo-retrieval-recipes` or `nemo evaluator retrieve-eval submit` on the **frozen** `eval_beir` fileset — not CHAT `evaluate`.
+Previous: the Data Designer `retrieval-prepare` / `retrieval-run` `artifacts`
+fileset, holding `training.jsonl` (`query`, `pos_doc`, `neg_doc`) and `eval_beir/`
+at the root. Wrapped `train.json`, corpus parquet, and mining caches live under
+`additional/`. Pass that fileset as `dataset.training`.
+
+**Pre-submit:** convert-only Stage 1 leaves `neg_doc: []`. The retrieval collator
+samples `train_n_passages - 1` negatives (default 4) and raises
+`neg_doc must contain at least 1 document to sample N negatives`. Count
+`len(neg_doc)` on a sample of `training.jsonl` (see `nemo-retrieval-recipes`
+`references/sdg.md`). If every row is empty, run `retrieval-prepare` with
+`enable_mining: true` before `automodel submit`. Do not paper over this by
+lowering `train_n_passages`.
+
+The base model must be a model entity with a non-null `fileset`. An Inference
+Gateway auto-discovered entity with only `api_endpoint` cannot be downloaded for
+training.
+
+Next after a successful job: `nemo-retrieval-recipes` or `nemo evaluator
+retrieve-eval submit` on the **frozen** `eval_beir` — not CHAT `evaluate`.
 
 ```json
 {
   "model": "default/nemotron-3-embed-1b",
-  "dataset": {"training": "default/stage1-prep"},
+  "dataset": {"training": "default/retrieval-stage1-artifacts"},
   "training": {
     "recipe": "bi_encoder",
     "training_type": "sft",

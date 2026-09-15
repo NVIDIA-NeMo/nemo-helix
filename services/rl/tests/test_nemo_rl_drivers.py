@@ -139,6 +139,79 @@ def test_for_schedule_keyword_detector_discriminates() -> None:
     assert _for_schedule_keywords("x = NemoRLLogger.other(run_facts=f)\n") == set()
 
 
+def _raises_value_error_after_best_checkpoint_lookup(source: str) -> bool:
+    """Whether the module looks up the best checkpoint and raises a ValueError."""
+    tree = ast.parse(source)
+    looks_up = any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get_best_checkpoint_path"
+        for node in ast.walk(tree)
+    )
+    raises_value_error = False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Raise) or node.exc is None:
+            continue
+        if isinstance(node.exc, ast.Call) and isinstance(node.exc.func, ast.Name) and node.exc.func.id == "ValueError":
+            raises_value_error = True
+    return looks_up and raises_value_error
+
+
+def test_postcondition_detector_discriminates() -> None:
+    """The tripwire is only worth having if it can actually trip."""
+    assert _raises_value_error_after_best_checkpoint_lookup("raise ValueError('x')\n") is False
+    assert _raises_value_error_after_best_checkpoint_lookup("checkpointer.get_best_checkpoint_path()\n") is False
+    assert (
+        _raises_value_error_after_best_checkpoint_lookup(
+            "if checkpointer.get_best_checkpoint_path() is None:\n    raise ValueError('x')\n"
+        )
+        is True
+    )
+
+
+def test_grpo_driver_fails_a_run_that_saved_no_checkpoint() -> None:
+    """Dynamic sampling can exhaust the dataloader and still let grpo_train return.
+
+    The driver is the last place that knows why, so it has to turn that into a
+    non-zero exit. Without the raise the backend sees exit 0, reports training
+    success, and the run dies later in publication with a missing checkpoint that
+    names no cause.
+    """
+    source = (DRIVERS / "grpo_driver.py").read_text()
+
+    assert _raises_value_error_after_best_checkpoint_lookup(source), (
+        "grpo_driver.py must raise when no checkpoint was saved; NeMo-RL exits 0 after "
+        "dynamic sampling finds no trainable group"
+    )
+    assert "non-zero reward standard deviation" in source
+    assert "Training finished without saving a checkpoint." in source
+
+
+@pytest.mark.parametrize(
+    "message,expected_type,expected_detail",
+    [
+        (
+            "Dynamic sampling found no prompt group with non-zero reward standard deviation, "
+            "so no training step ran and no checkpoint was saved.",
+            "TrainingConfigError",
+            "all generations for each prompt earned the same reward",
+        ),
+        (
+            "Training finished without saving a checkpoint.",
+            "CheckpointError",
+            "Training finished without saving any checkpoint",
+        ),
+    ],
+)
+def test_missing_checkpoint_messages_are_classified(message: str, expected_type: str, expected_detail: str) -> None:
+    """The driver raises these as ValueError; the rules must map them for the user."""
+    from nmp.rl.tasks.training.errors.converter import create_error_details
+
+    details = create_error_details(ValueError(message))
+    assert details["type"] == expected_type
+    assert expected_detail in details["message"]
+
+
 @pytest.mark.parametrize("driver", ["grpo_driver.py", "dpo_driver.py"])
 def test_driver_states_which_algorithm_it_is(driver: str) -> None:
     """`backend` is `nemo_rl` for both, so run_facts is the only thing telling them apart.

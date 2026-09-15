@@ -1,7 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
+
 import pytest
+from nemo_automodel_plugin.cli.inputs import load_job_json
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
 
@@ -106,10 +109,12 @@ def test_encoder_recipes_apply_nemotron_job_defaults() -> None:
         }
     ).with_resolved_recipe("cross_encoder")
 
-    assert embed.batch.global_batch_size == 128
-    assert embed.batch.micro_batch_size == 4
+    assert embed.batch.global_batch_size == 256
+    assert embed.batch.micro_batch_size == 8
     assert embed.optimizer.learning_rate == 1e-5
     assert embed.optimizer.warmup_steps == 5
+    assert rerank.batch.global_batch_size == 128
+    assert rerank.batch.micro_batch_size == 8
     assert rerank.optimizer.learning_rate == 3e-6
     assert rerank.optimizer.warmup_steps == 100
 
@@ -145,6 +150,46 @@ def test_auto_recipe_does_not_apply_retrieval_defaults_until_resolved() -> None:
     assert spec.training.recipe == "auto"
     assert spec.batch.global_batch_size == 8
     assert resolved.training.recipe == "bi_encoder"
-    assert resolved.batch.global_batch_size == 128
+    assert resolved.batch.global_batch_size == 256
     assert resolved.optimizer.learning_rate == 1e-5
     assert resolved.optimizer.warmup_steps == 5
+
+
+def test_cli_serialization_preserves_unset_fields_for_recipe_defaults(tmp_path) -> None:
+    """A full dump reports every field as set, which suppressed the encoder defaults."""
+    job = tmp_path / "job.json"
+    job.write_text(
+        json.dumps(
+            {
+                "model": "embed",
+                "dataset": {"training": "default/train"},
+                "training": {"training_type": "sft", "recipe": "bi_encoder", "finetuning_type": "all_weights"},
+            }
+        )
+    )
+
+    resolved = AutomodelJobInput.model_validate(json.loads(load_job_json(job))).with_resolved_recipe("embedding")
+
+    assert resolved.batch.global_batch_size == 256
+    assert resolved.batch.micro_batch_size == 8
+    assert resolved.optimizer.learning_rate == 1e-5
+    assert resolved.optimizer.warmup_steps == 5
+
+
+def test_cli_serialization_still_carries_explicit_fields(tmp_path) -> None:
+    job = tmp_path / "job.json"
+    job.write_text(
+        json.dumps(
+            {
+                "model": "embed",
+                "dataset": {"training": "default/train"},
+                "training": {"training_type": "sft", "recipe": "bi_encoder", "finetuning_type": "all_weights"},
+                "batch": {"micro_batch_size": 2},
+            }
+        )
+    )
+
+    resolved = AutomodelJobInput.model_validate(json.loads(load_job_json(job))).with_resolved_recipe("embedding")
+
+    assert resolved.batch.micro_batch_size == 2
+    assert resolved.batch.global_batch_size == 256

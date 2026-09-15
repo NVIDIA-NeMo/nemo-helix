@@ -212,6 +212,7 @@ class TrainingStepConfig(BaseModel):
         epochs: int = 1
         max_steps: Optional[int] = None
         val_check_interval: Optional[float] = None
+        validation_split: Optional[float] = Field(default=0.1, gt=0, lt=1)
         progress_reporting: ProgressReportingConfig = Field(default_factory=ProgressReportingConfig)
 
     class BatchConfig(BaseModel):

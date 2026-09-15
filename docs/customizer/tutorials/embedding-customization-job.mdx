@@ -797,6 +797,13 @@ For detailed information on all available hyperparameters, recommended values, a
 - Try more epochs: embedding models often need multiple passes
 - Lower learning rate: embedding models are sensitive to LR
 
+**Training fails immediately with `neg_doc must contain at least 1 document`:**
+- Convert-only retrieval Stage 1 left `neg_doc: []`. Sample `training.jsonl` and
+  count `len(neg_doc)` before submit. If every row is empty, run
+  `nemo data-designer retrieval-prepare` with `enable_mining: true` (see
+  [Retrieval SDG](/documentation/design-synthetic-data/retrieval-sdg)).
+- `neg_doc` must be a JSON list of strings, not a string and not `null`.
+
 **Training loss not decreasing:**
 - Check triplet format: ensure `neg_doc` is a list even for single negatives
 - Verify hard negative quality: negatives should be challenging but clearly non-relevant

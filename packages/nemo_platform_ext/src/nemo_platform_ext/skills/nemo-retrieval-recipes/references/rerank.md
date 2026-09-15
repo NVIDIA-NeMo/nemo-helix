@@ -15,16 +15,44 @@ Keep the first-stage retriever fixed while comparing base and tuned rerankers.
 | 4 | Automodel ONNX export (`logits`) + `alternates/hf/` | Ranking NIM layout |
 | 5 | Ranking NIM `llama-nemotron-rerank-1b-v2:1.10.0` `/v1/ranking` | Deploy the **output** model entity |
 
-Default stop at Stage 3 (checkpoint / IGW model-ref eval). Stage 4 is part of the Automodel job, not a separate Nemotron exporter.
+Default stop after `retrieve-eval` (checkpoint / IGW model-ref eval). Fileset-backed
+rerankers need the same Deployment Manager path (`deploy.md`) before submit.
+Stage 4 ONNX/HF layout is written by the Automodel job.
 
 ## Commands
+
+Stage 0+1 is identical to embed; see `sdg.md`. Run the `sdg.md` pre-submit
+`neg_doc` check before Stage 2 — convert-only JSONL makes `cross_encoder` fail
+the same way as `bi_encoder`. Both stages below read the Stage 1 `artifacts`
+fileset directly.
+
+Register a fileset-backed reranker checkpoint if it does not already exist; an
+Inference Gateway endpoint entity has no fileset and cannot be trained:
+
+```bash
+nemo files filesets create llama-nemotron-rerank-1b-v2 \
+  --workspace default --purpose model --exist-ok \
+  --storage '{
+    "type":"huggingface",
+    "repo_id":"nvidia/llama-nemotron-rerank-1b-v2",
+    "repo_type":"model",
+    "revision":"<model-revision>"
+  }'
+nemo models create llama-nemotron-rerank-1b-v2 \
+  --workspace default --exist-ok \
+  --fileset default/llama-nemotron-rerank-1b-v2 \
+  --custom-fields '{"hf_model_id":"nvidia/llama-nemotron-rerank-1b-v2"}'
+nemo models get llama-nemotron-rerank-1b-v2 --workspace default
+```
+
+Do not submit until the model entity reports a non-null fileset.
 
 Stage 2:
 
 ```json
 {
   "model": "default/llama-nemotron-rerank-1b-v2",
-  "dataset": {"training": "default/stage1-prep"},
+  "dataset": {"training": "default/retrieval-stage1-artifacts"},
   "training": {
     "recipe": "cross_encoder",
     "training_type": "sft",
@@ -34,13 +62,14 @@ Stage 2:
 }
 ```
 
-Prompt template must stay `question:{query} \n \n passage:{passage}` (Automodel collator). LoRA merge must use the cross-encoder merge path, not causal-LM merge.
+Prompt template must stay `question:{query} \n \n passage:{passage}`. Do not
+merge LoRA with a causal-LM merge path.
 
 Stage 3 (two-stage):
 
 ```bash
 nemo evaluator retrieve-eval submit --spec '{
-  "dataset": "default/eval-beir",
+  "dataset": "default/retrieval-stage1-artifacts",
   "target": {
     "embeddings": "default/llama-nemotron-embed-1b-v2",
     "reranker": "default/llama-nemotron-rerank-1b-v2-tuned",
@@ -56,13 +85,15 @@ nemo evaluator retrieve-eval submit --spec '{
 ```
 
 Do not change `first_stage_k` or the embedding model between baseline and target.
+Every embeddings and reranker ref in that spec needs an IGW provider (`deploy.md`)
+before submit.
 
 ## Stage 4 / deploy
 
-Automodel post-processing exports sequence-classification ONNX (`input_ids`,
-`attention_mask` → `logits`) and moves HF weights under `alternates/hf/`. Deploy
-the output entity with `nvcr.io/nim/nvidia/llama-nemotron-rerank-1b-v2:1.10.0`.
-Do not run `nemotron rerank export`. Unmerged LoRA cannot be served.
+Automodel post-processing exports ONNX at the fileset root and HF weights under
+`alternates/hf/`. Create Deployment Manager configs and wait for `READY` using
+`deploy.md` (Ranking NIM `llama-nemotron-rerank-1b-v2:1.10.0`).
+Unmerged LoRA cannot be served.
 
 ## Invariants
 

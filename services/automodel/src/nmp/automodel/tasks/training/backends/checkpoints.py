@@ -410,20 +410,37 @@ _TORCH_DTYPES = {
 }
 
 
+def _probe_bidirectional_mask(mod):
+    """Read ``create_bidirectional_mask`` off *mod*, or ``None`` if it has none.
+
+    ``getattr(mod, name, None)`` is not enough here. This sweeps every entry in
+    ``sys.modules``, and a package using PEP 562 lazy submodule loading decides
+    for itself what a miss raises -- ``nemo_automodel.components.models`` raises
+    ``ModuleNotFoundError``, which is an ``ImportError`` and so passes straight
+    through the ``getattr`` default. Any exception from a foreign ``__getattr__``
+    means the same thing for our purposes: this module does not have the mask.
+    """
+    try:
+        return getattr(mod, "create_bidirectional_mask", None)
+    except Exception:
+        return None
+
+
 @contextmanager
 def _onnx_safe_bidirectional_mask():
     """Replace transformers' SDPA bidirectional mask with an ONNX-traceable additive mask."""
     import torch
 
-    def _mask(config=None, input_embeds=None, attention_mask=None, **kwargs):
-        dtype = input_embeds.dtype
-        batch_size, seq_length, _ = input_embeds.shape
+    def _mask(config=None, inputs_embeds=None, attention_mask=None, input_embeds=None, **kwargs):
+        embeds = inputs_embeds if inputs_embeds is not None else input_embeds
+        dtype = embeds.dtype
+        batch_size, seq_length, _ = embeds.shape
         mask = attention_mask[:, None, None, :].expand(batch_size, 1, seq_length, seq_length)
         return (1.0 - mask.to(dtype)) * torch.finfo(dtype).min
 
     patched: dict[str, object] = {}
     for mod_name, mod in list(sys.modules.items()):
-        fn = getattr(mod, "create_bidirectional_mask", None)
+        fn = _probe_bidirectional_mask(mod)
         if callable(fn):
             patched[mod_name] = fn
             setattr(mod, "create_bidirectional_mask", _mask)
@@ -514,7 +531,7 @@ def export_onnx(
 
     export_model = _build_export_module(inner, model_type, cfg)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    export_model = export_model.to(device=device, dtype=torch_dtype)
+    export_model = export_model.to(device=device, dtype=torch_dtype).eval()
 
     tokenized = tokenizer(_EXPORT_SAMPLES[model_type], return_tensors="pt", padding=True, truncation=True)
     args = [tokenized["input_ids"].to(device), tokenized["attention_mask"].to(device)]
@@ -565,12 +582,15 @@ def export_onnx(
     tokenizer_dir.mkdir(parents=True, exist_ok=True)
     tokenizer.save_pretrained(tokenizer_dir)
 
+    # ORT verification uses CPUExecutionProvider; compare against a CPU forward
+    # so GPU/CPU kernel drift on 1B encoders does not fail a correct graph.
+    cpu_args = [tensor.detach().cpu() for tensor in args]
     with torch.no_grad():
-        reference = export_model(*args)
+        reference = export_model.to("cpu").eval()(*cpu_args)
     verify_onnx_matches_reference(
         onnx_path=onnx_path,
-        feed={name: tensor.cpu().numpy() for name, tensor in zip(input_names, args)},
-        reference=reference.float().cpu().numpy(),
+        feed={name: tensor.numpy() for name, tensor in zip(input_names, cpu_args)},
+        reference=reference.float().numpy(),
         atol=1e-3,
     )
 
@@ -617,27 +637,28 @@ def _resolve_export_config(customizer_config: TrainingStepConfig) -> ExportConfi
     return export if isinstance(export, ExportConfig) else ExportConfig()
 
 
-_ONNX_ARTIFACTS = {"model.onnx", "model.onnx.data"}
-
-
 def _restructure_encoder_output(output_path: Path, primary: str) -> None:
-    """Keep *primary* at the fileset root; move the other artifact under ``alternates/``."""
-    is_onnx_primary = primary == "onnx"
-    alternates = output_path / "alternates" / ("hf" if is_onnx_primary else "onnx")
-    alternates.mkdir(parents=True, exist_ok=True)
+    """Put *primary* at the fileset root; nest the other under ``alternates/``.
 
+    After export, HF is already at the root and ONNX is in ``alternates/onnx``.
+    ``primary="hf"`` is therefore a no-op; ``primary="onnx"`` swaps them.
+    """
+    onnx_dir = output_path / "alternates" / "onnx"
+    if primary != "onnx":
+        logger.info("Encoder output: hf at top level, onnx in %s", onnx_dir.relative_to(output_path))
+        return
+
+    hf_dir = output_path / "alternates" / "hf"
+    hf_dir.mkdir(parents=True, exist_ok=True)
     for entry in list(output_path.iterdir()):
-        if entry.name in {"alternates", "tokenizer"} or (entry.name in _ONNX_ARTIFACTS) == is_onnx_primary:
+        if entry.name == "alternates":
             continue
-        dest = alternates / entry.name
-        logger.info("Moving %s -> %s", entry, dest)
-        shutil.move(str(entry), str(dest))
+        shutil.move(str(entry), str(hf_dir / entry.name))
+    for entry in list(onnx_dir.iterdir()):
+        shutil.move(str(entry), str(output_path / entry.name))
+    onnx_dir.rmdir()
 
-    logger.info(
-        "Restructured encoder output: %s at top level, other artifact in %s",
-        primary,
-        alternates.relative_to(output_path),
-    )
+    logger.info("Encoder output: onnx at top level, hf in %s", hf_dir.relative_to(output_path))
 
 
 def process_checkpoint(
@@ -748,7 +769,7 @@ def process_checkpoint(
         export_cfg = _resolve_export_config(customizer_config)
         export_onnx(
             model_path=output_path,
-            output_path=output_path,
+            output_path=output_path / "alternates" / "onnx",
             tokenizer_path=base_model_path,
             model_type=model_type,
             cfg=export_cfg,

@@ -15,7 +15,8 @@
 | 4 Export | Automodel ONNX export (`embeddings`) + `alternates/hf/` | Retriever NIM layout |
 | 5 Deploy | ModelDeployment + Retriever NIM 2.2.0 | `/v1/embeddings` |
 
-Default stop at Stage 3. Stage 4 is part of the Automodel job, not a separate Nemotron exporter.
+Default stop after `retrieve-eval`. Fileset-backed models must be served first
+(`deploy.md`). Stage 4 ONNX/HF layout is written by the Automodel job.
 
 ## Commands
 
@@ -31,27 +32,48 @@ nemo data-designer retrieval-run --workspace default --spec '{
     "quality_judge_model": "nvidia/nemotron-3-nano-30b-a3b",
     "embed_model": "nvidia/nemotron-3-embed-1b"
   },
-  "prepare": {"enable_mining": false}
+  "prepare": {
+    "enable_mining": true,
+    "model": "default/nemotron-3-embed-1b"
+  }
 }'
 ```
 
-Skip SDG:
+Corpus, generation, and split control live in `sdg.md`, including how to reuse a published Stage 0 dump.
+
+Mining needs `enable_mining: true` and `model` as a platform entity with an encoder fileset. Do not mine when convert produced an empty train split. Convert-only filesets leave `neg_doc: []` and Automodel crashes sampling negatives — run the `sdg.md` pre-submit check before Stage 2.
+
+### Register the trainable base
+
+A model entity auto-discovered from Inference Gateway is an endpoint: its
+`fileset` is null and it cannot be trained. Register the checkpoint as a
+fileset-backed entity and confirm the fileset before submitting.
 
 ```bash
-nemo data-designer retrieval-prepare --spec '{
-  "sdg_input": "hf://nvidia/Retrieval-Synthetic-NVDocs-v1@<revision>",
-  "enable_mining": false
-}'
+nemo files filesets create nemotron-3-embed-1b \
+  --workspace default --purpose model --exist-ok \
+  --storage '{
+    "type":"huggingface",
+    "repo_id":"nvidia/Nemotron-3-Embed-1B-BF16",
+    "repo_type":"model",
+    "revision":"<model-revision>"
+  }'
+nemo models create nemotron-3-embed-1b \
+  --workspace default --exist-ok \
+  --fileset default/nemotron-3-embed-1b \
+  --custom-fields '{"hf_model_id":"nvidia/Nemotron-3-Embed-1B-BF16"}'
+nemo models get nemotron-3-embed-1b --workspace default
 ```
 
-Mining needs `enable_mining: true` and `model` as a platform entity with an encoder fileset. Do not mine when convert produced an empty train split.
+Do not submit until the last command reports
+`"fileset": "default/nemotron-3-embed-1b"`.
 
-Stage 2 (dataset fileset holds `training.jsonl` at the root):
+Stage 2 (`dataset.training` is the Stage 1 `artifacts` fileset):
 
 ```json
 {
   "model": "default/nemotron-3-embed-1b",
-  "dataset": {"training": "default/stage1-prep"},
+  "dataset": {"training": "default/retrieval-stage1-artifacts"},
   "training": {
     "recipe": "bi_encoder",
     "training_type": "sft",
@@ -62,12 +84,15 @@ Stage 2 (dataset fileset holds `training.jsonl` at the root):
 ```
 
 Leave batch/LR unset to take Nemotron retrieval defaults. Do not set `max_steps` with `epochs`.
+Pass the Stage 1 artifacts fileset as-is: `training.jsonl` and `eval_beir/` sit
+at the result root; wrapped `train.json` and mining caches are under `additional/`.
 
-Stage 3:
+Stage 3 reads the same fileset — the BEIR loader accepts a root containing `eval_beir`.
+Both `target` and `baseline` must already have IGW providers (`deploy.md`) before submit:
 
 ```bash
 nemo evaluator retrieve-eval submit --spec '{
-  "dataset": "default/eval-beir",
+  "dataset": "default/retrieval-stage1-artifacts",
   "target": "default/nemotron-3-embed-1b-tuned",
   "baseline": "default/nemotron-3-embed-1b",
   "k": [1, 5, 10, 100]
@@ -76,14 +101,14 @@ nemo evaluator retrieve-eval submit --spec '{
 
 ## Stage 4 / deploy
 
-Automodel post-processing exports embedding ONNX (`input_ids`, `attention_mask`
-→ `embeddings`, plus a Matryoshka `dimensions` input when
-`training.retrieval.export.dimensions: true`) and moves HF weights under
-`alternates/hf/`. Set
-`training.retrieval.export.primary: hf` when the target NIM loads PyTorch weights.
-Deploy the **output** model entity (full weights or merged LoRA) with
-`nvcr.io/nim/nvidia/nemotron-3-embed-1b:2.2.0`. Pass `input_type` query vs document.
-Do not run `nemotron embed export`. Unmerged LoRA cannot be served.
+Automodel post-processing exports ONNX at the fileset root and HF weights under
+`alternates/hf/`. Set `training.retrieval.export.primary: hf` when the target NIM
+loads PyTorch weights. Set `training.retrieval.export.dimensions: true` for
+Matryoshka.
+
+Create Deployment Manager configs and wait for `READY` using `deploy.md`
+(baked base `model_spec: {}`, tuned fileset mount, Retriever NIM 2.2.0).
+Unmerged LoRA cannot be served.
 
 ## Invariants
 

@@ -50,7 +50,14 @@ def retrieval_generate(
 @retrieval_app.command("prepare")
 def retrieval_prepare(
     sdg_input: str | None = typer.Option(
-        None, "--sdg-input", help="Stage 0 fileset, generation_result.json, or hf:// URI."
+        None,
+        "--sdg-input",
+        help="Stage 0 fileset, fileset#file, or hf:// URI (optionally /path to a file).",
+    ),
+    generation_file: str | None = typer.Option(
+        None,
+        "--generation-file",
+        help="Relative Stage 0 filename inside sdg_input when the ref is a directory.",
     ),
     train_input_file: str | None = typer.Option(None, "--train-input-file"),
     enable_mining: bool = typer.Option(
@@ -63,11 +70,19 @@ def retrieval_prepare(
     """Build a spec for the auto-generated ``retrieval-prepare`` job command."""
     if (sdg_input is None) == (train_input_file is None):
         raise typer.BadParameter("Provide exactly one of --sdg-input or --train-input-file.")
-    spec = RetrievalPrepareJobConfig(
-        sdg_input=sdg_input,
-        train_input_file=train_input_file,
-        enable_mining=enable_mining,
-    )
+    if generation_file is None:
+        spec = RetrievalPrepareJobConfig(
+            sdg_input=sdg_input,
+            train_input_file=train_input_file,
+            enable_mining=enable_mining,
+        )
+    else:
+        spec = RetrievalPrepareJobConfig(
+            sdg_input=sdg_input,
+            train_input_file=train_input_file,
+            enable_mining=enable_mining,
+            generation_file=generation_file,
+        )
     _echo_submit_command("retrieval-prepare", workspace, spec.model_dump(mode="json"))
 
 

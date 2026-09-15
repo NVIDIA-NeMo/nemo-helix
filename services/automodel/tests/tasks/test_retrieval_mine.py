@@ -61,10 +61,11 @@ def test_run_mine_launches_torchrun_then_unrolls(tmp_path: Path) -> None:
 
     mine.assert_called_once()
     assert result["exit_code"] == 0
-    assert (output_dir / "mining_config.yaml").exists()
-    assert (output_dir / "train_mined.automodel.json").exists()
-    assert (output_dir / "train_mined.automodel_unrolled.json").exists()
     assert (output_dir / "training.jsonl").exists()
+    assert (output_dir / "additional" / "train.json").exists()
+    assert (output_dir / "additional" / "train_mined.automodel.json").exists()
+    assert (output_dir / "additional" / "mining_config.yaml").exists()
+    assert not (output_dir / "train.json").exists()
     ctx.results.save.assert_called_once()
 
 
