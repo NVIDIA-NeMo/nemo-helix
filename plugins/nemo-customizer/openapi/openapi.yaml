@@ -3534,6 +3534,7 @@ components:
       properties:
         gpu:
           type: integer
+          exclusiveMinimum: 0.0
           title: Gpu
           description: Number of GPUs required for the deployment.
           default: 1

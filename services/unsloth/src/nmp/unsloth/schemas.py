@@ -335,7 +335,7 @@ class DeploymentParams(UnslothSchema):
     the model_entity task at compile time. When unset, no deployment is launched.
     """
 
-    gpu: int = Field(default=1, description="Number of GPUs required for the deployment.")
+    gpu: int = Field(default=1, gt=0, description="Number of GPUs required for the deployment.")
     additional_envs: dict[str, str] | None = Field(
         default=None,
         description="Additional environment variables for the deployment.",

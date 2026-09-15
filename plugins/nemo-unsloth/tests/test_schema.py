@@ -323,3 +323,18 @@ class TestSubSpecExtras:
     def test_output_extra_field_rejected(self) -> None:
         with pytest.raises(ValidationError):
             OutputRequest.model_validate({"junk": 1})
+
+
+class TestDeploymentConfigGpuBound:
+    @pytest.mark.parametrize("gpu", [0, -1])
+    def test_rejects_non_positive_gpu(self, gpu: int) -> None:
+        """Caught at submit, not at compile time where the task-side schema would reject it."""
+        with pytest.raises(ValidationError, match="greater than 0"):
+            UnslothJobInput.model_validate({**_minimal_payload(), "deployment_config": {"gpu": gpu}})
+
+    def test_accepts_a_positive_gpu_count(self) -> None:
+        spec = UnslothJobInput.model_validate({**_minimal_payload(), "deployment_config": {"gpu": 2}})
+
+        assert spec.deployment_config is not None
+        assert not isinstance(spec.deployment_config, str)
+        assert spec.deployment_config.gpu == 2
