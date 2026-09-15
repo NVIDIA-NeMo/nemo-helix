@@ -55,3 +55,17 @@ def test_with_options_isolates_the_cached_resource_set(monkeypatch) -> None:
     assert "other" in clone_a.__dict__["_cached_resources"]
     assert "other" not in client.__dict__.get("_cached_resources", set())
     assert "other" not in clone_b.__dict__.get("_cached_resources", set())
+
+
+def test_with_workspace_rebuilds_cached_plugin_resources(monkeypatch) -> None:
+    factory = MagicMock(side_effect=lambda _owner: object())
+    client = _make_client(factory, monkeypatch)
+
+    first = client.example
+    clone = client.with_workspace("other")
+
+    # A resource built for the original would still default to its workspace.
+    second = clone.example
+    assert second is not first
+    assert factory.call_args.args[0] is clone
+    assert client.example is first

@@ -526,15 +526,7 @@ class BaseNemoClient(Generic[HttpClientT]):
             client.with_headers({"Range": "bytes=0-99"}).download_file(...)
             client.with_options(timeout=300).update_fileset(...)
         """
-        clone = copy.copy(self)
-        clone._owns_http = False
-        # Cached plugin resources were built against the original transport and
-        # must be rebuilt against the clone's options.
-        cached = self.__dict__.get("_cached_resources")
-        if cached:
-            for name in cached:
-                clone.__dict__.pop(name, None)
-            clone.__dict__["_cached_resources"] = set(cached)
+        clone = self._clone()
         if headers:
             clone._default_headers = {**self._default_headers, **headers}
         if retry is not None:
@@ -549,9 +541,23 @@ class BaseNemoClient(Generic[HttpClientT]):
 
     def with_workspace(self, workspace: str) -> Self:
         """Return a copy of this client with *workspace* as the default workspace."""
+        clone = self._clone()
+        clone._workspace = workspace
+        return clone
+
+    def _clone(self) -> Self:
+        """Shallow-copy this client, sharing the transport but not cached plugin resources.
+
+        Cached resources hold a reference to the client they were built from, so
+        a clone with different options or workspace must rebuild them.
+        """
         clone = copy.copy(self)
         clone._owns_http = False
-        clone._workspace = workspace
+        cached = self.__dict__.get("_cached_resources")
+        if cached:
+            for name in cached:
+                clone.__dict__.pop(name, None)
+            clone.__dict__["_cached_resources"] = set(cached)
         return clone
 
     def with_retry(self, retry: RetryPolicy) -> Self:

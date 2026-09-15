@@ -195,9 +195,16 @@ def _field_model(model_cls: type[BaseModel]) -> type[BaseModel] | None:
 
 
 def _accepted_field_names(model_cls: type[BaseModel]) -> list[str]:
+    # An aliased field only accepts its Python name when the model populates by
+    # name; otherwise that key would pass this check and then be dropped.
+    by_name = bool(model_cls.model_config.get("populate_by_name")) or bool(
+        model_cls.model_config.get("validate_by_name")
+    )
     names: list[str] = []
     for name, field in model_cls.model_fields.items():
-        names.append(name)
+        aliased = isinstance(field.alias, str) or isinstance(field.validation_alias, str)
+        if by_name or not aliased:
+            names.append(name)
         if isinstance(field.alias, str):
             names.append(field.alias)
         if isinstance(field.validation_alias, str):

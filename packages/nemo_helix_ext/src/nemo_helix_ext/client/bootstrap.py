@@ -680,6 +680,7 @@ def build_nemo_client(
         timeout=resolved_timeout,
         retry=retry,
         http_client=http_client,
+        owns_http_client=True,
     )
 
 
@@ -718,6 +719,7 @@ def build_async_nemo_client(
         timeout=resolved_timeout,
         retry=retry,
         http_client=http_client,
+        owns_http_client=True,
     )
 
 
@@ -750,6 +752,7 @@ def build_direct_nemo_client(
         timeout=resolved_timeout,
         retry=retry,
         http_client=http_client,
+        owns_http_client=True,
     )
 
 
@@ -777,4 +780,5 @@ def build_direct_async_nemo_client(
         timeout=resolved_timeout,
         retry=retry,
         http_client=http_client,
+        owns_http_client=True,
     )
