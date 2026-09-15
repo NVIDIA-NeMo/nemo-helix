@@ -482,10 +482,7 @@ externalClickhouse:
 # It is usually recommended to use this config section instead of `basePlatformConfig` unless you need to use templating features.
 # For example, you can set the NIM default StorageClass via models.controller.backends.deployments_plugin.default_storage_class.
 # For full configuration reference, see https://docs.nvidia.com/nemo-platform
-platformConfig:
-  studio:
-    feature_flags:
-      assistant_studio_enabled: true
+platformConfig: {}
 
 # -- Base platform configuration settings
 # @default -- This object has the following default values for the base platform configuration.
