@@ -4,13 +4,14 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import TypeAlias
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, Volume
+from nemo_deployments_plugin.reconciler.volume_reconciler import VolumeReconciler
 from nemo_deployments_plugin.types import Endpoint
 from nemo_platform_plugin.auth import AuthContext as DeploymentAuthContext
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
+from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nmp.common.config import Runtime
 from nmp.core.models.app import ModelWeightsType
 from nmp.core.models.controllers.backends.backends import DeploymentStatusUpdate
@@ -210,10 +211,11 @@ async def test_docker_lora_creates_substrate() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_waits_when_prior_teardown_incomplete() -> None:
+async def test_create_retries_after_prior_teardown_completes() -> None:
     backend = DeploymentsPluginServiceBackend(AsyncMock(), {}, "puller:latest")
     backend.init()
     backend._entities = AsyncMock()
+    backend._entities.create = AsyncMock(side_effect=lambda entity: entity)
     with (
         patch(
             "nmp.core.models.controllers.backends.deployments_plugin.backend.resolve_plugin_deployment",
@@ -222,13 +224,26 @@ async def test_create_waits_when_prior_teardown_incomplete() -> None:
         patch.object(
             backend,
             "delete_model_deployment",
-            AsyncMock(return_value=DeploymentStatusUpdate(status="DELETING", status_message="waiting")),
+            AsyncMock(
+                side_effect=[
+                    DeploymentStatusUpdate(status="DELETING", status_message="waiting"),
+                    DeploymentStatusUpdate(status="DELETED", status_message="deleted"),
+                ]
+            ),
+        ),
+        patch(
+            "nmp.core.models.controllers.backends.deployments_plugin.backend.executor_for_runtime",
+            return_value="local-k8s",
         ),
     ):
-        result = await backend.create_model_deployment(_ctx())
-    assert result.status == "PENDING"
-    assert "teardown" in result.status_message.lower()
-    backend._entities.create.assert_not_called()
+        waiting = await backend.create_model_deployment(_ctx())
+        backend._entities.create.assert_not_called()
+        created = await backend.create_model_deployment(_ctx())
+
+    assert waiting.status == "CREATED"
+    assert "teardown" in waiting.status_message.lower()
+    assert created.status == "PENDING"
+    assert backend._entities.create.await_count == 5
 
 
 @pytest.mark.asyncio
@@ -381,6 +396,167 @@ async def test_delete_retries_on_next_call_when_deployment_still_exists() -> Non
 
 
 @pytest.mark.asyncio
+async def test_delete_marks_weights_and_scratch_volumes_deleting_and_waits() -> None:
+    backend = DeploymentsPluginServiceBackend(AsyncMock(), {}, "puller:latest")
+    backend.init()
+    backend._entities = AsyncMock()
+    volumes = {
+        "my-dep-weights": Volume(name="my-dep-weights", workspace="default", size="50Gi", status="BOUND"),
+        "my-dep-scratch": Volume(name="my-dep-scratch", workspace="default", size="10Gi", status="BOUND"),
+    }
+
+    async def _get(entity_type: type, name: str, workspace: str | None = None) -> Volume:
+        del workspace
+        if entity_type is Volume and name in volumes:
+            return volumes[name]
+        raise NemoEntityNotFoundError("missing")
+
+    backend._entities.get = AsyncMock(side_effect=_get)
+    backend._entities.update = AsyncMock(side_effect=lambda entity: entity)
+    backend._entities.delete = AsyncMock()
+    with patch(
+        "nmp.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
+        AsyncMock(return_value=[]),
+    ):
+        result = await backend.delete_model_deployment("default", "my-dep")
+
+    assert result.status == "DELETING"
+    assert {volume.status for volume in volumes.values()} == {"DELETING"}
+    assert {call.args[0].name for call in backend._entities.update.await_args_list} == {
+        "my-dep-scratch",
+        "my-dep-weights",
+    }
+    assert all(call.args[0] is not Volume for call in backend._entities.delete.await_args_list)
+
+    substrate_backend = AsyncMock()
+    registry = AsyncMock()
+    registry.resolve = Mock(return_value=substrate_backend)
+    volume_reconciler = VolumeReconciler(backend._entities, registry)
+    weights = volumes["my-dep-weights"]
+
+    await volume_reconciler.reconcile_one(weights)
+
+    substrate_backend.delete_volume.assert_awaited_once_with(
+        "default",
+        "my-dep-weights",
+        backend_config=weights.backend_config.model_dump(by_alias=True, exclude_none=True),
+    )
+    backend._entities.delete.assert_any_await(
+        Volume,
+        name="my-dep-weights",
+        workspace="default",
+        expected_db_version=weights.db_version,
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_preserves_volume_referenced_by_another_config() -> None:
+    backend = DeploymentsPluginServiceBackend(AsyncMock(), {}, "puller:latest")
+    backend.init()
+    backend._entities = AsyncMock()
+    weights = Volume(name="my-dep-weights", workspace="default", size="50Gi", status="BOUND")
+
+    async def _get(entity_type: type, name: str, workspace: str | None = None) -> Volume:
+        del workspace
+        if entity_type is Volume and name == weights.name:
+            return weights
+        raise NemoEntityNotFoundError("missing")
+
+    backend._entities.get = AsyncMock(side_effect=_get)
+    backend._entities.delete = AsyncMock()
+    with patch(
+        "nmp.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
+        AsyncMock(return_value=["shared-config"]),
+    ):
+        result = await backend.delete_model_deployment("default", "my-dep")
+
+    assert result.status == "DELETED"
+    assert weights.status == "BOUND"
+    backend._entities.update.assert_not_awaited()
+    assert all(call.args[0] is not Volume for call in backend._entities.delete.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_delete_already_deleting_volume_skips_reference_scan() -> None:
+    backend = DeploymentsPluginServiceBackend(AsyncMock(), {}, "puller:latest")
+    backend.init()
+    backend._entities = AsyncMock()
+    volume = Volume(name="my-dep-weights", workspace="default", size="50Gi", status="DELETING")
+    backend._entities.get = AsyncMock(return_value=volume)
+
+    with patch(
+        "nmp.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
+        AsyncMock(),
+    ) as references:
+        removed = await backend._complete_volume_delete("default", volume.name)
+
+    assert not removed
+    references.assert_not_awaited()
+    backend._entities.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_continues_with_weights_when_scratch_teardown_fails() -> None:
+    backend = DeploymentsPluginServiceBackend(AsyncMock(), {}, "puller:latest")
+    backend.init()
+    backend._entities = AsyncMock()
+
+    async def _complete_volume_delete(workspace: str, volume_name: str) -> bool:
+        del workspace
+        if volume_name == "my-dep-scratch":
+            raise RuntimeError("scratch teardown failed")
+        return True
+
+    with (
+        patch.object(backend, "_complete_deployment_delete", AsyncMock(return_value=True)),
+        patch.object(
+            backend, "_complete_volume_delete", AsyncMock(side_effect=_complete_volume_delete)
+        ) as delete_volume,
+    ):
+        result = await backend.delete_model_deployment("default", "my-dep")
+
+    assert result.status == "DELETING"
+    assert [call.args[1] for call in delete_volume.await_args_list] == ["my-dep-scratch", "my-dep-weights"]
+
+
+@pytest.mark.asyncio
+async def test_volume_delete_update_not_found_is_removed() -> None:
+    backend = DeploymentsPluginServiceBackend(AsyncMock(), {}, "puller:latest")
+    backend.init()
+    backend._entities = AsyncMock()
+    volume = Volume(name="my-dep-weights", workspace="default", size="50Gi", status="BOUND")
+    backend._entities.get = AsyncMock(return_value=volume)
+    backend._entities.update = AsyncMock(side_effect=NemoEntityNotFoundError("removed"))
+
+    with patch(
+        "nmp.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
+        AsyncMock(return_value=[]),
+    ):
+        removed = await backend._complete_volume_delete("default", volume.name)
+
+    assert removed
+
+
+@pytest.mark.asyncio
+async def test_volume_delete_update_conflict_remains_deleting() -> None:
+    backend = DeploymentsPluginServiceBackend(AsyncMock(), {}, "puller:latest")
+    backend.init()
+    backend._entities = AsyncMock()
+    volume = Volume(name="my-dep-weights", workspace="default", size="50Gi", status="BOUND")
+    backend._entities.get = AsyncMock(return_value=volume)
+    backend._entities.update = AsyncMock(side_effect=NemoEntityConflictError("changed"))
+
+    with patch(
+        "nmp.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
+        AsyncMock(return_value=[]),
+    ):
+        removed = await backend._complete_volume_delete("default", volume.name)
+
+    assert not removed
+    assert volume.status == "DELETING"
+
+
+@pytest.mark.asyncio
 async def test_delete_completes_when_plugin_deployment_failed() -> None:
     backend = DeploymentsPluginServiceBackend(AsyncMock(), {}, "puller:latest")
     backend.init()
@@ -392,7 +568,14 @@ async def test_delete_completes_when_plugin_deployment_failed() -> None:
         status="FAILED",
         desired_state="STOPPED",
     )
-    backend._entities.get = AsyncMock(return_value=server)
+
+    async def _get(entity_type: type, name: str, workspace: str | None = None) -> Deployment:
+        del workspace
+        if entity_type is Deployment and name == server.name:
+            return server
+        raise NemoEntityNotFoundError("missing")
+
+    backend._entities.get = AsyncMock(side_effect=_get)
     backend._entities.delete = AsyncMock()
 
     result = await backend.delete_model_deployment("default", "my-dep")
@@ -422,6 +605,25 @@ async def test_delete_escalates_to_error_after_deleting_timeout() -> None:
     backend._entities.update = AsyncMock(side_effect=lambda entity: entity)
 
     result = await backend.delete_model_deployment("default", "my-dep", deleting_elapsed_seconds=120)
+    assert result.status == "ERROR"
+    assert result.error_details is not None
+    assert result.error_details["reason"] == "deleting_timeout"
+    assert result.error_details["timeout_seconds"] == 60
+
+
+@pytest.mark.asyncio
+async def test_delete_escalates_to_error_after_volume_teardown_timeout() -> None:
+    backend = DeploymentsPluginServiceBackend(AsyncMock(), {}, "puller:latest")
+    backend.init()
+    backend._backend_config = DeploymentsPluginConfig(deleting_timeout_seconds=60)
+    backend._entities = AsyncMock()
+
+    with (
+        patch.object(backend, "_complete_deployment_delete", AsyncMock(return_value=True)),
+        patch.object(backend, "_complete_volume_delete", AsyncMock(return_value=False)),
+    ):
+        result = await backend.delete_model_deployment("default", "my-dep", deleting_elapsed_seconds=120)
+
     assert result.status == "ERROR"
     assert result.error_details is not None
     assert result.error_details["reason"] == "deleting_timeout"

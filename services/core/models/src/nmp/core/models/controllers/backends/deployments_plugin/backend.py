@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, Prerequisite, Volume
+from nemo_deployments_plugin.references import deployment_config_names_referencing_volume
 from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.auth import AuthContext as DeploymentAuthContext
 from nemo_platform_plugin.client.adapter import client_from_platform
@@ -87,7 +88,7 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
         teardown = await self.delete_model_deployment(resolved.deployment.workspace, resolved.deployment.name)
         if teardown.status == ModelDeploymentStatus.DELETING:
             return DeploymentStatusUpdate(
-                status=ModelDeploymentStatus.PENDING,
+                status=ModelDeploymentStatus.CREATED,
                 status_message="Waiting for prior deployments-plugin substrate teardown before recreate.",
             )
         executor = executor_for_runtime(self._cfg, resolved.runtime)
@@ -225,15 +226,24 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
                     timeout_seconds=self._cfg.deleting_timeout_seconds,
                     deployment_name=name,
                 )
+        volumes_removed = True
         for volume_name in (names.scratch, names.volume):
             try:
-                await self._entity_client().delete(Volume, name=volume_name, workspace=workspace)
-            except NemoEntityNotFoundError:
-                pass
-        return DeploymentStatusUpdate(
-            status=ModelDeploymentStatus.DELETED,
-            status_message="Deleted deployments-plugin entities.",
-        )
+                volume_removed = await self._complete_volume_delete(workspace, volume_name)
+            except Exception:
+                logger.exception("Failed to complete volume teardown for %s/%s", workspace, volume_name)
+                volume_removed = False
+            if not volume_removed:
+                volumes_removed = False
+        if not volumes_removed:
+            result = DeploymentStatusUpdate(status="DELETING", status_message="Waiting for plugin volume teardown.")
+            return apply_deleting_timeout(
+                result,
+                elapsed_seconds=deleting_elapsed_seconds or 0.0,
+                timeout_seconds=self._cfg.deleting_timeout_seconds,
+                deployment_name=name,
+            )
+        return DeploymentStatusUpdate(status="DELETED", status_message="Deleted deployments-plugin entities.")
 
     async def _complete_deployment_delete(self, workspace: str, deployment_name: str, config_name: str) -> bool:
         """Initiate plugin deployment stop and return True once config can be removed."""
@@ -265,6 +275,41 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
         except NemoEntityNotFoundError:
             pass
         return True
+
+    async def _complete_volume_delete(self, workspace: str, volume_name: str) -> bool:
+        """Request plugin volume teardown and return True once its entity is gone.
+
+        A volume still referenced by another deployment config is not owned
+        exclusively by this model deployment and must be preserved.
+        """
+        volume = await self._get_optional(Volume, workspace, volume_name)
+        if volume is None:
+            return True
+        if volume.status == "DELETING":
+            return False
+
+        referencing = await deployment_config_names_referencing_volume(
+            self._entity_client(),
+            workspace=workspace,
+            volume_name=volume_name,
+        )
+        if referencing:
+            logger.info(
+                "Preserving deployments-plugin volume %s/%s referenced by deployment configs: %s",
+                workspace,
+                volume_name,
+                ", ".join(referencing),
+            )
+            return True
+
+        volume.status = "DELETING"
+        try:
+            await self._entity_client().update(volume)
+        except NemoEntityNotFoundError:
+            return True
+        except NemoEntityConflictError:
+            return False
+        return False
 
     async def _get_optional(self, entity_type: type[Any], workspace: str, name: str) -> Any | None:
         try:

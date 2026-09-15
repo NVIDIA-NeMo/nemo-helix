@@ -8,7 +8,6 @@ from __future__ import annotations
 import io
 import json
 import tarfile
-import time
 from typing import Any
 
 import pytest
@@ -26,6 +25,7 @@ from e2e.agents_deploy_helpers import (
     delete_agent_if_exists,
     mock_backed_fabric_agent_config,
     unique_name,
+    wait_for_agent_spans,
 )
 
 pytestmark = [pytest.mark.timeout(600)]
@@ -43,9 +43,10 @@ def _job_diagnostic_message(sdk: NeMoPlatform, job: Any, workspace: str, prefix:
         parts.append(f"Error details: {job.error_details}")
     try:
         logs = client_from_platform(sdk, JobsClient).list_job_logs(workspace=workspace, name=job.name)
-        if logs.data:
-            parts.append(f"Job logs ({len(logs.data)} entries):")
-            for entry in logs.data:
+        entries = list(logs.items())
+        if entries:
+            parts.append(f"Job logs ({len(entries)} entries):")
+            for entry in entries:
                 parts.append(f"  - {entry.message}")
     except Exception as error:
         parts.append(f"Could not fetch job logs: {error}")
@@ -66,29 +67,6 @@ def _download_execute_job_result(sdk: NeMoPlatform, workspace: str, job_name: st
 
 def _result_names(results: dict[str, Any]) -> set[str]:
     return {str(result["name"]) for result in results.get("data", [])}
-
-
-def _wait_for_agent_spans(
-    sdk: NeMoPlatform,
-    *,
-    workspace: str,
-    agent_name: str,
-    timeout: float = 120.0,
-    poll_interval: float = 2.0,
-) -> list[Any]:
-    """Poll Intake for the agent's trajectory.
-
-    Ingest is asynchronous: Relay posts the trajectory as the run finishes, and
-    Intake writes it behind the API, so a job reporting ``completed`` does not
-    mean the spans are queryable yet.
-    """
-    deadline = time.monotonic() + timeout
-    while True:
-        page = sdk.intake.spans.list(workspace=workspace, filter={"agent_name": agent_name}, page_size=50)
-        spans = list(page.data or [])
-        if spans or time.monotonic() >= deadline:
-            return spans
-        time.sleep(poll_interval)
 
 
 def _tar_member_names(content: bytes) -> set[str]:
@@ -210,7 +188,7 @@ def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoPlatform, w
         name=fileset_name,
         workspace=workspace,
         path="project/context.txt",
-        content="This file proves the input workdir was staged.\n",
+        content=b"This file proves the input workdir was staged.\n",
     )
 
     sdk.agents.create(
@@ -286,7 +264,7 @@ def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoPlatform, w
         # Nobody configured an export: the job wires the agent's trajectory to
         # this workspace's Intake, using the platform URL reachable from the
         # task pod and the identity the platform gave the job.
-        spans = _wait_for_agent_spans(sdk, workspace=workspace, agent_name=agent_name)
+        spans = wait_for_agent_spans(sdk, workspace=workspace, agent_name=agent_name)
         assert spans, "the agent ran but no trajectory reached Intake"
     finally:
         delete_agent_if_exists(sdk, workspace=workspace, name=agent_name)
@@ -331,7 +309,7 @@ def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs
         name=fileset_name,
         workspace=workspace,
         path="project/context.txt",
-        content="This file proves the failed invocation still saves the input snapshot.\n",
+        content=b"This file proves the failed invocation still saves the input snapshot.\n",
     )
 
     sdk.agents.create(

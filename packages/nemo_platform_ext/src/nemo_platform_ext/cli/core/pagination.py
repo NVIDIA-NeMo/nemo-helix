@@ -1,16 +1,26 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Pagination utilities for the NeMo CLI."""
+"""Pagination helpers for CLI list commands.
+
+Typed clients return a :class:`~nemo_platform_plugin.client.response.NemoPaginatedResponse`
+for list endpoints. The helpers here turn that into the page objects the
+formatters render: a single page keeps the server's pagination metadata, and
+``--all-pages`` collects every page into one synthetic response with the same
+shape.
+"""
 
 from __future__ import annotations
 
 import logging
 import typing
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from enum import Enum
-from typing import Any, Callable, Iterator
+from types import SimpleNamespace, TracebackType
+from typing import Any, cast
 
+from nemo_platform_plugin.client.response import NemoPaginatedResponse
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from nemo_platform_ext.cli.core.help_formatter import add_warning
@@ -41,6 +51,19 @@ class PaginationType(str, Enum):
     NOT_PAGINATED = "not_paginated"  # List operation without pagination support
 
 
+def _envelope_with_sort(envelope: dict[str, Any] | None) -> dict[str, Any]:
+    """Return the envelope fields with ``sort`` always present.
+
+    List output has always carried a ``sort`` key (``null`` when the server did
+    not echo one); callers without an envelope keep that shape, and a server
+    envelope keeps its own field order.
+    """
+    fields = dict(envelope or {})
+    if "sort" not in fields:
+        fields = {"sort": None, **fields}
+    return fields
+
+
 class AllPagesResponse:
     """
     A response object that mimics a single-page response but contains all items.
@@ -49,9 +72,17 @@ class AllPagesResponse:
     Used for page-number based pagination which has total_pages and total_results.
     """
 
-    def __init__(self, data: list[Any], total_items: int, total_pages: int, page_size: int | None = None):
+    def __init__(
+        self,
+        data: list[Any],
+        total_items: int,
+        total_pages: int,
+        page_size: int | None = None,
+        envelope: dict[str, Any] | None = None,
+    ):
         self.data = data
-        self.sort = None
+        self.envelope = _envelope_with_sort(envelope)
+        self.sort = self.envelope.get("sort")
 
         # Create pagination info for all items
         self.pagination = type(
@@ -80,7 +111,7 @@ class AllPagesResponse:
 
         return {
             "data": serialized_data,
-            "sort": self.sort,
+            **self.envelope,
             "pagination": {
                 "page": self.pagination.page,
                 "page_size": self.pagination.page_size,
@@ -122,6 +153,163 @@ class AllCursorPagesResponse:
             "data": serialized_data,
             "next_page": self.next_page,
         }
+
+
+def _model_dump_item(item: Any, *, mode: str) -> Any:
+    if hasattr(item, "model_dump"):
+        return item.model_dump(mode=mode)
+    if isinstance(item, list):
+        return [_model_dump_item(child, mode=mode) for child in item]
+    if isinstance(item, dict):
+        return {key: _model_dump_item(value, mode=mode) for key, value in item.items()}
+    return item
+
+
+def _envelope_fields(response: NemoPaginatedResponse[Any, Any]) -> dict[str, Any]:
+    """Return the first page's non-item envelope fields (``sort``, ``filter``, ``grouped_by``, ...) in wire order."""
+    http_response = getattr(response, "http_response", None)
+    if http_response is None:
+        return {}
+    try:
+        body = http_response.json()
+    except ValueError:
+        return {}
+    if not isinstance(body, dict):
+        return {}
+    return {key: value for key, value in body.items() if key not in {"data", "pagination"}}
+
+
+class OffsetPageResponse:
+    """One page of an offset-paginated list, keeping the server's envelope and pagination block."""
+
+    def __init__(self, items: list[Any], metadata: dict[str, Any], envelope: dict[str, Any] | None = None) -> None:
+        self.data = items
+        self.envelope = _envelope_with_sort(envelope)
+        self.sort = self.envelope.get("sort")
+        self.pagination = SimpleNamespace(**metadata)
+
+    def model_dump(self, mode: str = "json") -> dict[str, Any]:
+        return {
+            "data": [_model_dump_item(item, mode=mode) for item in self.data],
+            **self.envelope,
+            "pagination": vars(self.pagination),
+        }
+
+
+class CursorPageResponse:
+    """One page of a cursor-paginated list, keeping ``total`` and the page cursors."""
+
+    def __init__(self, items: list[Any], metadata: dict[str, Any]) -> None:
+        self.data = items
+        self.total = metadata.get("total", len(items))
+        self.next_page = metadata.get("next_page")
+        self.prev_page = metadata.get("prev_page")
+
+    def model_dump(self, mode: str = "json") -> dict[str, Any]:
+        return {
+            "data": [_model_dump_item(item, mode=mode) for item in self.data],
+            "total": self.total,
+            "next_page": self.next_page,
+            "prev_page": self.prev_page,
+        }
+
+
+def collect_offset_pages(
+    response: NemoPaginatedResponse[Any, Any],
+    *,
+    all_pages: bool,
+    show_progress: bool = True,
+) -> OffsetPageResponse | AllPagesResponse:
+    """Return the first page, or every page merged when *all_pages* is set."""
+    envelope = _envelope_fields(response)
+    if not all_pages:
+        page = response.page()
+        return OffsetPageResponse(list(page.items), dict(page.metadata), envelope)
+
+    items: list[Any] = []
+    total_results = 0
+    total_pages = 0
+    page_size: int | None = None
+    with _progress(show_progress) as (progress, task):
+        for page in response.pages():
+            items.extend(page.items)
+            metadata = dict(page.metadata)
+            total_results = int(metadata.get("total_results") or total_results)
+            total_pages = int(metadata.get("total_pages") or total_pages)
+            page_size = cast(int | None, metadata.get("page_size") or page_size)
+            current = int(metadata.get("page") or 0)
+            progress.update(
+                task,
+                total=total_pages or None,
+                completed=current,
+                description=f"Fetching pages... (page {current}/{total_pages})",
+            )
+
+    return AllPagesResponse(
+        data=items,
+        total_items=total_results or len(items),
+        total_pages=total_pages or 1,
+        page_size=page_size,
+        envelope=envelope,
+    )
+
+
+def collect_cursor_pages(
+    response: NemoPaginatedResponse[Any, Any],
+    *,
+    all_pages: bool,
+    limit: int | None = None,
+    show_progress: bool = True,
+) -> CursorPageResponse | AllCursorPagesResponse:
+    """Return the first page, or every page merged when *all_pages* is set."""
+    if not all_pages:
+        page = response.page()
+        return CursorPageResponse(list(page.items), dict(page.metadata))
+
+    items: list[Any] = []
+    with _progress(show_progress) as (progress, task):
+        for page_num, page in enumerate(response.pages(), start=1):
+            items.extend(page.items)
+            progress.update(task, completed=page_num, description=f"Fetching pages... (page {page_num})")
+    return AllCursorPagesResponse(data=items, limit=limit)
+
+
+def collect_pages(
+    response: NemoPaginatedResponse[Any, Any],
+    *,
+    all_pages: bool,
+    pagination_type: PaginationType = PaginationType.PAGE_NUMBER,
+    limit: int | None = None,
+    show_progress: bool = True,
+) -> OffsetPageResponse | CursorPageResponse | AllPagesResponse | AllCursorPagesResponse:
+    """Dispatch to the offset or cursor collector based on *pagination_type*."""
+    if pagination_type == PaginationType.CURSOR:
+        return collect_cursor_pages(response, all_pages=all_pages, limit=limit, show_progress=show_progress)
+    return collect_offset_pages(response, all_pages=all_pages, show_progress=show_progress)
+
+
+class _progress:
+    """Context manager yielding ``(progress, task)`` for page-fetch feedback."""
+
+    def __init__(self, show_progress: bool) -> None:
+        self._progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            transient=True,
+            disable=not show_progress,
+        )
+
+    def __enter__(self) -> tuple[Progress, Any]:
+        progress = self._progress.__enter__()
+        return progress, progress.add_task("Fetching pages...", total=None)
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self._progress.__exit__(exc_type, exc_value, traceback)
 
 
 def _fetch_all_pages_page_number(
