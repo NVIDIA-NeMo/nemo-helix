@@ -352,7 +352,7 @@ describe('NewCustomizationForm', () => {
       expect(await screen.findByText('Deployment')).toBeInTheDocument();
     });
 
-    it('hides the Deployment section for lora_merged, whose output is full weights', async () => {
+    it('targets the output model for lora_merged, whose output is full weights', async () => {
       const values = validAutomodelValues();
       values.automodel.training = {
         ...values.automodel.training,
@@ -360,16 +360,17 @@ describe('NewCustomizationForm', () => {
       };
       renderRoute(<NewCustomizationForm workspace="default" initialValues={values} />);
 
-      await screen.findByText('Compute Resources');
-      expect(screen.queryByText('Deployment')).not.toBeInTheDocument();
+      expect(await screen.findByText(/This run produces my-adapter/)).toBeInTheDocument();
+      expect(screen.queryByText(/A LoRA adapter is served by/)).not.toBeInTheDocument();
     });
 
     // Unsloth's merge is a save_method, not a finetuning_type, so `finetuning_type`
     // alone would call this an adapter and offer a base-model deployment for output
     // that is full weights.
-    it('hides the Deployment section for a merged unsloth save', async () => {
+    it('targets the output model for a merged unsloth save', async () => {
       const values: CustomizationFormFields = {
         ...FORM_DEFAULTS,
+        outputName: 'merged-model',
         backend: 'unsloth',
         unsloth: {
           ...FORM_DEFAULTS.unsloth,
@@ -380,16 +381,19 @@ describe('NewCustomizationForm', () => {
       };
       renderRoute(<NewCustomizationForm workspace="default" initialValues={values} />);
 
-      await screen.findByText('Compute Resources');
-      expect(screen.queryByText('Deployment')).not.toBeInTheDocument();
+      expect(await screen.findByText(/This run produces merged-model/)).toBeInTheDocument();
+      expect(screen.queryByText(/A LoRA adapter is served by/)).not.toBeInTheDocument();
     });
 
-    it('hides the Deployment section for DPO, which is always full-weight', async () => {
-      const values: CustomizationFormFields = { ...FORM_DEFAULTS, backend: 'rl' };
+    it('targets the output model for DPO, which is always full-weight', async () => {
+      const values: CustomizationFormFields = {
+        ...FORM_DEFAULTS,
+        outputName: 'dpo-model',
+        backend: 'rl',
+      };
       renderRoute(<NewCustomizationForm workspace="default" initialValues={values} />);
 
-      await screen.findByText('Compute Resources');
-      expect(screen.queryByText('Deployment')).not.toBeInTheDocument();
+      expect(await screen.findByText(/This run produces dpo-model/)).toBeInTheDocument();
     });
 
     it('offers no deployment controls when the base already serves LoRA', async () => {
@@ -538,6 +542,77 @@ describe('NewCustomizationForm', () => {
 
       await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
       expect(mockCreateDeploymentConfig).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('output model deployment', () => {
+    /** A full-weight run: its output is a standalone model, not an adapter. */
+    const fullWeightValues = (): CustomizationFormFields => {
+      const values = validAutomodelValues();
+      values.outputName = 'my-model';
+      values.automodel.training = {
+        ...values.automodel.training,
+        finetuning_type: 'all_weights',
+      };
+      return values;
+    };
+
+    // Opt-out here too, so the switch is not touched before submitting.
+    it('does not start the job when the user opts out', async () => {
+      const user = userEvent.setup();
+      renderRoute(<NewCustomizationForm workspace="default" initialValues={fullWeightValues()} />);
+
+      await user.click(await screen.findByRole('switch', { name: /Deploy the model/ }));
+      await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+
+      await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
+      expect(mockCreateDeploymentConfig).not.toHaveBeenCalled();
+      expect(mutateAutomodel.mock.calls[0][0].data.spec.deployment_config).toBeUndefined();
+    });
+
+    // The config is named after the run's output, not the base model — which is also
+    // why repeated runs cannot collide the way the adapter flow can.
+    it('names the config after the output model and hands the job its name', async () => {
+      const user = userEvent.setup();
+      renderRoute(<NewCustomizationForm workspace="default" initialValues={fullWeightValues()} />);
+
+      await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+
+      await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
+      expect(mockCreateDeploymentConfig).toHaveBeenCalledWith(
+        'default',
+        // Forward reference: the output entity does not exist until the job finishes.
+        expect.objectContaining({ modelRef: 'default/my-model' }),
+        'my-model-config',
+        expect.any(Function)
+      );
+      expect(mutateAutomodel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            spec: expect.objectContaining({ deployment_config: 'my-model-config' }),
+          }),
+        })
+      );
+    });
+
+    it('does not start the job when the config is rejected', async () => {
+      mockCreateDeploymentConfig.mockRejectedValue(new Error('image pull denied'));
+      const user = userEvent.setup();
+      renderRoute(<NewCustomizationForm workspace="default" initialValues={fullWeightValues()} />);
+
+      await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+
+      expect(await screen.findByText(/image pull denied/i)).toBeInTheDocument();
+      await waitFor(() => expect(mutateAutomodel).not.toHaveBeenCalled());
+    });
+
+    // Nothing is serving a model that does not exist yet, so the adapter flow's
+    // four-state readiness question does not arise.
+    it('never consults base model readiness', async () => {
+      renderRoute(<NewCustomizationForm workspace="default" initialValues={fullWeightValues()} />);
+
+      await screen.findByText(/This run produces my-model/);
+      expect(mockReadiness).toHaveBeenCalledWith(expect.anything(), { enabled: false });
     });
   });
 });
