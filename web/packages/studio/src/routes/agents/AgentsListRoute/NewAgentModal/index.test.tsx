@@ -6,6 +6,7 @@ import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentModal';
+import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import { getAgentsListRoute } from '@studio/routes/utils';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import { fireEvent, within } from '@testing-library/react';
@@ -73,6 +74,8 @@ interface Scenario {
 const mockPlatform = ({ filesetExists = false, agentExists = false }: Scenario = {}) => {
   const uploaded: string[] = [];
   const created: { name?: string }[] = [];
+  const filesets: { storage?: unknown }[] = [];
+  const deleted: string[] = [];
 
   server.use(
     http.get(FILESET_URL, ({ params }) =>
@@ -85,8 +88,15 @@ const mockPlatform = ({ filesetExists = false, agentExists = false }: Scenario =
         ? HttpResponse.json({ name: params['name'], workspace })
         : HttpResponse.json({ detail: 'not found' }, { status: 404 })
     ),
-    http.delete(FILESET_URL, () => HttpResponse.json({ name: 'deleted' })),
-    http.post(FILESETS_URL, async ({ request }) => HttpResponse.json(await request.json())),
+    http.delete(FILESET_URL, ({ params }) => {
+      deleted.push(String(params['name']));
+      return HttpResponse.json({ name: 'deleted' });
+    }),
+    http.post(FILESETS_URL, async ({ request }) => {
+      const body = (await request.json()) as { storage?: unknown };
+      filesets.push(body);
+      return HttpResponse.json(body);
+    }),
     http.put(UPLOAD_URL, ({ request }) => {
       uploaded.push(decodeURIComponent(new URL(request.url).pathname.split('/-/')[1] ?? ''));
       return HttpResponse.json({ path: 'ok' });
@@ -98,7 +108,7 @@ const mockPlatform = ({ filesetExists = false, agentExists = false }: Scenario =
     })
   );
 
-  return { uploaded, created };
+  return { uploaded, created, filesets, deleted };
 };
 
 const renderModal = () =>
@@ -117,6 +127,11 @@ const renderModal = () =>
 const openUploadTab = async (dialog: HTMLElement) => {
   fireEvent.click(within(dialog).getByRole('tab', { name: 'Upload agent' }));
   await screen.findByTestId('agent-directory-input');
+};
+
+const openGitHubTab = async (dialog: HTMLElement) => {
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'GitHub repository' }));
+  await within(dialog).findByRole('textbox', { name: 'Repository' });
 };
 
 const pickDirectory = (dialog: HTMLElement, files: File[] = DEFAULT_FILES) => {
@@ -353,6 +368,126 @@ describe('NewAgentModal oversized pick', () => {
   });
 });
 
+describe('NewAgentModal GitHub import', () => {
+  const typeRepo = async (
+    dialog: HTMLElement,
+    user: ReturnType<typeof userEvent.setup>,
+    spec = 'github.com/owner/repo'
+  ) => {
+    await user.type(within(dialog).getByRole('textbox', { name: 'Repository' }), spec);
+    await user.tab();
+  };
+
+  it('does not let a typed repository submit from the upload tab', async () => {
+    const user = userEvent.setup();
+    mockPlatform();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Create' })).toBeEnabled()
+    );
+
+    await openUploadTab(dialog);
+
+    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+  });
+
+  it('backs the spec fileset with the repository instead of uploading files', async () => {
+    const user = userEvent.setup();
+    const { uploaded, created, filesets } = mockPlatform();
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(FABRIC_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user, 'github.com/owner/repo@v2#agents/calc');
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+    await submit(dialog, user);
+
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(uploaded).toHaveLength(0);
+    expect(filesets[0]?.storage).toEqual({
+      type: 'github',
+      owner: 'owner',
+      repo: 'repo',
+      revision: 'v2',
+      path: 'agents/calc',
+    });
+  });
+
+  it('leaves the repository import for the new agent, not sitting on the open modal', async () => {
+    const user = userEvent.setup();
+    mockPlatform();
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(FABRIC_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('repo')).toBeInTheDocument());
+    await submit(dialog, user);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(await screen.findByText(/Agent "repo" created/)).toBeInTheDocument();
+  });
+
+  it('names the agent after the repository so the fileset name is settled up front', async () => {
+    const user = userEvent.setup();
+    mockPlatform();
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(FABRIC_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user, 'github.com/owner/my-repo');
+
+    await waitFor(() => expect(within(dialog).getByDisplayValue('my-repo')).toBeInTheDocument());
+  });
+
+  it('says why a repository it cannot read is not accepted, once the field is left', async () => {
+    const user = userEvent.setup();
+    mockPlatform();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await user.type(
+      within(dialog).getByRole('textbox', { name: 'Repository' }),
+      'https://gitlab.com/owner/repo'
+    );
+
+    expect(within(dialog).queryByText(/is not a GitHub repository/)).not.toBeInTheDocument();
+
+    await user.tab();
+
+    expect(await within(dialog).findByText(/is not a GitHub repository/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+  });
+
+  it('rolls the fileset back when the repository has no agent.yaml', async () => {
+    const user = userEvent.setup();
+    const { created, deleted } = mockPlatform();
+    server.use(
+      http.get(UPLOAD_URL, () => HttpResponse.json({ detail: 'not found' }, { status: 404 }))
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('repo')).toBeInTheDocument());
+
+    await submit(dialog, user);
+
+    expect(await within(dialog).findByText(/Could not read agent\.yaml/)).toBeInTheDocument();
+    expect(created).toHaveLength(0);
+    await waitFor(() => expect(deleted).toContain(agentSpecFilesetName('repo')));
+  });
+});
+
 describe('NewAgentModal folder drop', () => {
   const dirEntry = (name: string, fullPath: string, children: FileSystemEntry[]) =>
     ({
@@ -498,6 +633,27 @@ describe('NewAgentModal imported traces tab', () => {
     // Offering it would hand the user a create that collides if it is in fact registered.
     expect(await screen.findByRole('option', { name: 'billing-agent' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'research-agent' })).not.toBeInTheDocument();
+  });
+
+  it('drops a failed create once another agent is chosen', async () => {
+    const user = userEvent.setup();
+    mockPlatform();
+    mockTraces(['billing-agent', 'research-agent']);
+    server.use(http.post(AGENTS_URL, () => HttpResponse.json({ detail: 'nope' }, { status: 500 })));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openTracesTab(dialog, user);
+
+    await user.click(await within(dialog).findByRole('combobox', { name: /imported traces/i }));
+    await user.click(await screen.findByRole('option', { name: 'billing-agent' }));
+    await submit(dialog, user);
+    expect(await within(dialog).findByText(/nope|failed/i)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('combobox', { name: /imported traces/i }));
+    await user.click(await screen.findByRole('option', { name: 'research-agent' }));
+
+    await waitFor(() => expect(within(dialog).queryByText(/nope|failed/i)).not.toBeInTheDocument());
   });
 
   it('creates the chosen agent and cannot submit before one is chosen', async () => {
