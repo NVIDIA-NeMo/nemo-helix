@@ -15,7 +15,7 @@ Person sampling reads locale data from a NeMo Platform fileset named `system/nem
 
 Supported locales: `en_IN`, `en_SG`, `en_US`, `fr_FR`, `hi_Deva_IN`, `hi_Latn_IN`, `ja_JP`, `ko_KR`, `pt_BR`.
 
-`nemo data-designer validate <path>` checks that every locale your config samples from has a reachable fileset. If one is missing, validation fails and the fileset has to be created once, per locale, by someone with an NGC API key secret registered in the platform:
+`nemo data-designer validate <path>` checks that every locale your config samples from via `PersonSamplerParams` (`sampler_type="person"`) has a reachable fileset. If one is missing, validation fails and the fileset has to be created once, per locale, by someone with an NGC API key secret registered in the platform:
 
 ```bash
 nemo data-designer personas make-fileset \
@@ -23,7 +23,7 @@ nemo data-designer personas make-fileset \
   --api-key-secret <workspace>/<secret-name>
 ```
 
-This is a one-time administrative step, not something to run per dataset. If the fileset is missing and you cannot create it, switch the column to `"person_from_faker"` and tell the user what they lost.
+This is a one-time administrative step, not something to run per dataset. If the fileset is missing and you cannot create it, switch the column to `PersonFromFakerSamplerParams` (`sampler_type="person_from_faker"`) and tell the user what they lost.
 
 ## Usage
 
