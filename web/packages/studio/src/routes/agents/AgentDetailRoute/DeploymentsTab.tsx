@@ -32,7 +32,10 @@ interface DeploymentsTabProps {
 /** A commit, linked to GitHub when the source it came from is still known. */
 const CommitLink: FC<{ source?: AgentSpecSource; revision: string }> = ({ source, revision }) =>
   source ? (
-    <ExternalLink href={githubCommitUrl(source.owner, source.repo, revision)} textKind="body/regular/xs">
+    <ExternalLink
+      href={githubCommitUrl(source.owner, source.repo, revision)}
+      textKind="body/regular/xs"
+    >
       {shortRevision(revision)}
     </ExternalLink>
   ) : (
