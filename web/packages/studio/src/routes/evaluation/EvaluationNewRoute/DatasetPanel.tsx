@@ -39,7 +39,7 @@ export const DatasetPanel: FC = () => {
   const dataset = useWatch({ control, name: 'dataset' });
   const fieldMapping = useWatch({ control, name: 'fieldMapping' });
   // Row 0 on purpose: key extraction describes the file's shape, not whichever
-  // row the Dry Run is pointed at.
+  // row the Live Test is pointed at.
   const { row, keyOptions, messagesColumn, messageSelectors, isLoading, error } = useDatasetPreview(
     dataset ?? null
   );

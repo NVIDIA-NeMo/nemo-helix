@@ -46,7 +46,7 @@ export const lastSelectorForRole = (selectors: MessageSelector[], role: string):
   selectors.filter((entry) => entry.role === role).at(-1)?.selector ?? null;
 
 export interface DatasetPreview {
-  /** The row at ``rowIndex``. Row 0 is also the row the dry run scores. */
+  /** The row at ``rowIndex``. Row 0 is also the row the live test scores. */
   row: Record<string, unknown> | null;
   /** Rows reachable in the fetched head -- the range the pager can page over.
    *  Not the file's total unless ``isPartial`` is false. */

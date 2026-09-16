@@ -47,7 +47,7 @@ export function useWizardProgress(): WizardProgress {
     Boolean(values?.body?.judgeModel && values?.body?.scores?.length);
   const metrics = metricTypes.length > 0 && judgeReady;
 
-  // Dry Run is deliberately absent: it is optional, always available, and
+  // Live Test is deliberately absent: it is optional, always available, and
   // validates on click rather than being gated.
   return {
     model: statusOf(true, model),
