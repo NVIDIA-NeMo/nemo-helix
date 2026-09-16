@@ -474,12 +474,17 @@ def test_grpo_accepts_max_new_tokens_up_to_the_context() -> None:
     assert t.max_new_tokens == 2048
 
 
-def _grpo_job(training: GRPOTraining, out_type: OutputNameType = OutputNameType.MODEL) -> RlJobOutput:
+def _grpo_job(
+    training: GRPOTraining,
+    out_type: OutputNameType = OutputNameType.MODEL,
+    integrations: Any = None,
+) -> RlJobOutput:
     return RlJobOutput(
         model="default/base",
         dataset="default/gym-data",
         environment="default/env",
         training=training,
+        integrations=integrations,
         output=_make_output(out_type=out_type),
     )
 
@@ -589,3 +594,25 @@ def test_job_output_does_not_train_lora_adapter_for_dpo() -> None:
 
 def test_job_output_deployment_config_defaults_to_none() -> None:
     assert _make_job_output(DPOTraining(type="dpo")).deployment_config is None
+
+
+def test_full_result_tables_default_off() -> None:
+    """NeMo-RL's own reference configs ship it false; the payloads are large."""
+    assert GRPOTraining(type="grpo").log_nemo_gym_full_result_tables is False
+
+
+def test_full_result_tables_require_the_wandb_integration() -> None:
+    """NeMo-RL gates on ``wandb_enabled AND the flag``, so without it this is a no-op."""
+    job = _grpo_job(GRPOTraining(type="grpo", log_nemo_gym_full_result_tables=True))
+    with pytest.raises(ValueError, match="requires the W&B integration"):
+        job.validate_for_training()
+
+
+def test_full_result_tables_accepted_with_the_wandb_integration() -> None:
+    from nemo_helix_plugin.integrations import IntegrationsSpec, WandbIntegration
+
+    job = _grpo_job(
+        GRPOTraining(type="grpo", log_nemo_gym_full_result_tables=True),
+        integrations=IntegrationsSpec(wandb=WandbIntegration(project="p")),
+    )
+    job.validate_for_training()

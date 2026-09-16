@@ -40,6 +40,8 @@ def _transformers_module(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 from nhx.automodel.tasks.training.backends.config import (  # noqa: E402
+    _build_base_model,
+    _build_peft,
     _configure_chat_dataset,
     _configure_moe_backend,
     _configure_retrieval_dataset,
@@ -315,7 +317,34 @@ class TestConfigureMoeBackend:
 
         assert cfg["model"]["backend"] == {
             "_target_": "nemo_automodel.components.models.common.utils.BackendConfig",
-            "enable_deepep": False,
+            "dispatcher": "torch",
+        }
+
+    @patch(MODEL_REGISTRY_PATCH)
+    @patch(AUTOCONFIG_PATCH)
+    def test_requested_backend_settings_survive_the_moe_default(self, mock_autoconfig_cls, mock_registry) -> None:
+        """The torch-dispatcher default sits under whatever the job spec asked for."""
+        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
+            architectures=["NemotronHForCausalLM"],
+            num_local_experts=8,
+        )
+        mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
+        cfg: dict[str, Any] = {
+            "model": {
+                "backend": {
+                    "_target_": "nemo_automodel.components.models.common.utils.BackendConfig",
+                    "dispatcher": "deepep",
+                    "experts": "gmm",
+                }
+            }
+        }
+
+        _configure_moe_backend(cfg, self._make_config(num_gpus_per_node=8, expert_parallel_size=8))
+
+        assert cfg["model"]["backend"] == {
+            "_target_": "nemo_automodel.components.models.common.utils.BackendConfig",
+            "dispatcher": "deepep",
+            "experts": "gmm",
         }
 
     @patch(MODEL_REGISTRY_PATCH)
@@ -489,6 +518,62 @@ class TestEstimateStepsPerEpoch:
             )
             == 10
         )
+
+
+def _lora_step_config(**training: Any) -> TrainingStepConfig:
+    fixture = (
+        Path(__file__).parents[3] / "contract" / "input_configs" / "llama-3.2-1b" / "llama_3_2_1b_lora_packing.json"
+    )
+    raw = json.loads(fixture.read_text())
+    raw.pop("backend")
+    raw["training"].update(training)
+    return TrainingStepConfig.model_validate(raw)
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [(None, "absent"), (False, False), (True, True)],
+    ids=["unset-keeps-automodel-default", "explicit-false-is-sent", "explicit-true-is-sent"],
+)
+def test_peft_forwards_use_memory_efficient_lora_only_when_set(requested: bool | None, expected: object) -> None:
+    """Automodel defaults this to on, so an explicit False has to reach it to turn it off."""
+    base = _lora_step_config()
+    assert base.training.lora is not None
+    lora = base.training.lora.model_copy(update={"use_memory_efficient_lora": requested})
+    config = base.model_copy(update={"training": base.training.model_copy(update={"lora": lora})})
+    cfg: dict[str, Any] = {}
+
+    _build_peft(cfg, config)
+
+    if expected == "absent":
+        assert "use_memory_efficient_lora" not in cfg["peft"]
+    else:
+        assert cfg["peft"]["use_memory_efficient_lora"] is expected
+
+
+@pytest.mark.parametrize(
+    ("mtp", "expected"),
+    [
+        (None, {}),
+        ({}, {}),
+        ({"num_nextn_predict_layers": 2}, {"num_nextn_predict_layers": 2}),
+        (
+            {"num_nextn_predict_layers": 2, "use_repeated_layer": True, "loss_scaling_factor": 0.3},
+            {"num_nextn_predict_layers": 2, "mtp_use_repeated_layer": True, "mtp_loss_scaling_factor": 0.3},
+        ),
+    ],
+    ids=["no-mtp", "empty-mtp", "only-depth", "all-three"],
+)
+def test_base_model_forwards_only_the_mtp_fields_that_were_set(
+    mtp: dict[str, Any] | None, expected: dict[str, Any]
+) -> None:
+    """Support differs per model, so an unset field must not reach one that rejects it."""
+    cfg: dict[str, Any] = {}
+
+    _build_base_model(cfg, _lora_step_config(mtp=mtp))
+
+    mtp_keys = {"num_nextn_predict_layers", "mtp_use_repeated_layer", "mtp_loss_scaling_factor"}
+    assert {k: v for k, v in cfg["model"].items() if k in mtp_keys} == expected
 
 
 def test_compile_uses_fallback_packing_factor_for_schedule(tmp_path: Path) -> None:
@@ -742,3 +827,34 @@ def test_optimizer_selection_is_explicit_after_auto_resolution(
     config.optimizer.optimizer_name = optimizer_name
 
     assert _resolve_optimizer_target(config, recipe) == expected_target
+
+
+class TestBackendSettings:
+    """`training.backend` is typed, and only explicitly set fields reach the recipe."""
+
+    @staticmethod
+    def _explicit(backend: Any) -> dict[str, Any]:
+        from nhx.automodel.tasks.training.backends.config import _explicit_backend_settings
+
+        cfg = MagicMock()
+        cfg.training.backend = backend
+        return _explicit_backend_settings(cfg)
+
+    def test_unset_fields_are_not_forwarded(self) -> None:
+        """Automodel picks backend defaults from the node's hardware; ours would override blindly."""
+        from nhx.automodel.app.jobs.training.schemas import BackendConfig
+
+        explicit = self._explicit(BackendConfig(experts="gmm"))
+
+        assert explicit == {"experts": "gmm"}
+
+    def test_no_backend_block_yields_nothing(self) -> None:
+        assert self._explicit(None) == {}
+
+    def test_false_is_forwarded_but_none_is_not(self) -> None:
+        """False is a deliberate choice; only None means "unset"."""
+        from nhx.automodel.app.jobs.training.schemas import BackendConfig
+
+        explicit = self._explicit(BackendConfig(rope_fusion=False))
+
+        assert explicit == {"rope_fusion": False}

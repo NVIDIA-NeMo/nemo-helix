@@ -185,6 +185,20 @@ class _TrainingBase(RlSchema):
         description="Optimizer + LR-scheduler combination (AdamW/Adam × cosine-annealing/flat-LR). "
         "Defaults to AdamW with cosine annealing.",
     )
+    optimizer_name: str | None = Field(
+        default=None,
+        description="Import path of the optimizer class, overriding the one implied by optimizer_type "
+        "(e.g. 'transformer_engine.pytorch.optimizers.fused_adam.FusedAdam'). optimizer_type still "
+        "selects the LR schedule. Unset uses torch.optim.AdamW / Adam.",
+    )
+    optimizer_kwargs: dict[str, Any] | None = Field(
+        default=None,
+        description="Additional keyword arguments for the optimizer, merged over the generated ones. "
+        "Use it to configure options the job schema does not model directly, for example "
+        "{'master_weights': true, 'store_param_remainders': true, 'exp_avg_dtype': 'torch.bfloat16'} "
+        "to keep FusedAdam's state in half precision. Values given here take precedence over the "
+        "generated arguments and are forwarded to the optimizer as supplied.",
+    )
     learning_rate: float = Field(default=1e-4, gt=0.0, description="Peak learning rate.")
     min_learning_rate: float | None = Field(default=None, ge=0.0, description="Minimum LR for cosine decay.")
     weight_decay: float = Field(default=0.01, ge=0.0, description="Weight decay coefficient.")
@@ -229,6 +243,11 @@ class _TrainingBase(RlSchema):
     seed: int | None = Field(default=None, description="Random seed for reproducibility.")
 
     # --- Infrastructure ---
+    env_vars: dict[str, str] | None = Field(
+        default=None,
+        description="Environment variables for the training workers, merged over the platform's own "
+        "(e.g. {'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:True'} to cut memory fragmentation).",
+    )
     parallelism: ParallelismParams = Field(default_factory=ParallelismParams)
     execution_profile: str | None = Field(
         default=None,
@@ -505,6 +524,23 @@ class GRPOTraining(_TrainingBase):
         "are preserved, so this reaches models that namespace their config, e.g. "
         '`{"text_config": {"router_aux_loss_coef": 0.0}}` for Qwen3.5.',
     )
+    logprob_chunk_size: int | None = Field(
+        default=None,
+        gt=0,
+        description="Tokens scored at once when the trainer re-reads its own generated text. "
+        "Lower it to cut memory at long context. Unset uses the platform default (2048).",
+    )
+    vllm_kwargs: dict[str, Any] | None = Field(
+        default=None,
+        description="Additional arguments for the vLLM rollout engine, for example "
+        "{'moe_backend': 'triton'}. Forwarded to vLLM as supplied.",
+    )
+    moe_parallelizer: dict[str, Any] | None = Field(
+        default=None,
+        description="Merged over policy.dtensor_cfg.moe_parallelizer, which controls how MoE experts "
+        "are sharded and checkpointed. The platform already sets ignore_router_for_ac when expert "
+        "parallelism and activation checkpointing are both on; this reaches the rest.",
+    )
     vllm_tensor_parallel_size: int | None = Field(
         default=None,
         gt=0,
@@ -517,6 +553,16 @@ class GRPOTraining(_TrainingBase):
         le=1.0,
         description="Fraction of each GPU vLLM reserves for weights plus KV cache. Raise toward 0.7 "
         "for large models; the rest is left for the colocated policy.",
+    )
+
+    # --- Rollout logging ---
+    log_nemo_gym_full_result_tables: bool = Field(
+        default=False,
+        description="Log each rollout's full NeMo-Gym payload to your own W&B as a Table "
+        "(`<agent>/full_result`). The only place generated text is readable — the per-step JSONL "
+        "carries token ids and an empty `content`. Each row is one JSON blob, so W&B cannot sort or "
+        "filter on fields inside it. Payloads are large; enable for short debugging runs. Requires "
+        "`integrations.wandb`.",
     )
 
     @model_validator(mode="after")
@@ -770,6 +816,16 @@ class RlJobOutput(RlSchema):
         if isinstance(training, GRPOTraining):
             if not self.environment:
                 raise ValueError("GRPO jobs require an environment fileset reference.")
+            # NeMo-RL gates the Tables on `wandb_enabled AND the flag`, so without the
+            # integration this is a silent no-op.
+            if training.log_nemo_gym_full_result_tables and (
+                self.integrations is None or self.integrations.wandb is None
+            ):
+                raise ValueError(
+                    "log_nemo_gym_full_result_tables=true requires the W&B integration: the "
+                    "rollout Tables are written to your own W&B project, and NeMo-RL skips them "
+                    "entirely when W&B is disabled. Set integrations.wandb, or turn the flag off."
+                )
             # The rollout engine meshes over the same GPUs under its own rule: vllm_generation.py
             # asserts world_size % tp == 0, and one engine does not span nodes.
             vllm_tp = training.vllm_tensor_parallel_size

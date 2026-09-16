@@ -28,9 +28,12 @@ from nhx.automodel.app.constants import (
     V4_MODEL_FOR_CAUSAL_LM_MAPPING_NAMES,
 )
 from nhx.automodel.app.jobs.training.schemas import (
+    BackendConfig,
     DistillationConfig,
     LoRAConfig,
     ModelConfig,
+    MTPConfig,
+    PipelineConfig,
     RetrievalConfig,
     TrainingRecipe,
     TrainingStepConfig,
@@ -176,6 +179,7 @@ def compile_training_step(
         ),
         dataset=TrainingStepConfig.DatasetConfig(
             path=DEFAULT_DATASET_PATH,
+            shuffle=training.shuffle,
         ),
         training=_translate_training_config(training, me, teacher_me=teacher_me, recipe=training_recipe),
         schedule=TrainingStepConfig.ScheduleConfig(
@@ -191,6 +195,7 @@ def compile_training_step(
             micro_batch_size=training.micro_batch_size,
             sequence_packing=training.sequence_packing,
             sequence_packing_max_samples=training.sequence_packing_max_samples,
+            packed_sequence_size=training.packed_sequence_size,
         ),
         optimizer=TrainingStepConfig.OptimizerConfig(
             optimizer_name=training.optimizer,
@@ -211,6 +216,7 @@ def compile_training_step(
             context_parallel_size=p.context_parallel_size,
             expert_parallel_size=p.expert_parallel_size,
             sequence_parallel=p.sequence_parallel,
+            pipeline=PipelineConfig.model_validate(p.pipeline.model_dump(mode="python")) if p.pipeline else None,
         ),
         integrations=job_spec.integrations,
         output_model=job_spec.output.name,
@@ -325,6 +331,9 @@ def _translate_training_config(
         finetuning_type=training.finetuning_type,
         lora=lora,
         kd=kd,
+        activation_checkpointing=training.activation_checkpointing,
+        mtp=MTPConfig.model_validate(training.mtp.model_dump(mode="python")) if training.mtp else None,
+        backend=BackendConfig.model_validate(training.backend.model_dump(mode="python")) if training.backend else None,
     )
 
 
@@ -348,7 +357,11 @@ def _translate_lora_config(api_lora: LoRAParams, me: ModelEntity) -> LoRAConfig:
         use_triton=api_lora.use_triton,
     )
 
-    if not lora.target_modules:
+    # Only backfill when the caller named neither list. Automodel's PeftConfig rejects
+    # target_modules and exclude_modules together, so defaulting target_modules on top of
+    # a caller-supplied exclude_modules would make that field unusable -- the conflict
+    # surfaces as a training-time error, after the job already holds GPUs.
+    if not lora.target_modules and not lora.exclude_modules:
         if me.spec and me.spec.checkpoint_model_name == "NemotronHForCausalLM":
             # Need to remove out_proj from the list of target modules
             modules = set()

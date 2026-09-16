@@ -97,7 +97,7 @@ def _build_dtensor_cfg(
         "tensor_parallel_size": parallelism.tensor_parallel_size,
         "context_parallel_size": parallelism.context_parallel_size,
         "custom_parallel_plan": None,
-        "env_vars": {"PYTORCH_CUDA_ALLOC_CONF": ""},
+        "env_vars": {"PYTORCH_CUDA_ALLOC_CONF": "", **(parallelism.env_vars or {})},
     }
     # Optional keys stay absent when unset so NeMo-RL's defaults apply.
     if expert_parallel_size > 1:
@@ -113,6 +113,13 @@ def _build_dtensor_cfg(
             # There is no case where recomputing it is what a caller wants, so this is not
             # a knob: NeMo-RL's own MoE recipes set it wherever AC is on.
             dtensor_cfg["moe_parallelizer"] = {"ignore_router_for_ac": True}
+    if grpo_hp.moe_parallelizer:
+        # Merged rather than replaced so a caller reaching for another parallelizer knob
+        # does not silently drop ignore_router_for_ac and hit the recompute crash.
+        dtensor_cfg["moe_parallelizer"] = {
+            **dtensor_cfg.get("moe_parallelizer", {}),
+            **grpo_hp.moe_parallelizer,
+        }
     if automodel_kwargs:
         dtensor_cfg["automodel_kwargs"] = dict(automodel_kwargs)
     if lora_cfg["enabled"]:
@@ -559,7 +566,7 @@ def compile_grpo_config(
         "logprob_batch_size": micro_batch_size,
         "max_total_sequence_length": customizer_config.model.max_seq_length,
         "precision": precision,
-        "logprob_chunk_size": 2048,
+        "logprob_chunk_size": grpo_hp.logprob_chunk_size or 2048,
         "offload_optimizer_for_logprob": False,
         "max_grad_norm": grpo_hp.max_grad_norm,
         "dtensor_cfg": _build_dtensor_cfg(customizer_config, grpo_hp, lora_cfg),
@@ -600,6 +607,9 @@ def compile_grpo_config(
                 "expose_http_server": True,
             },
             "colocated": {"enabled": True, "resources": {"gpus_per_node": None, "num_nodes": None}},
+            # Sibling of vllm_cfg, not nested in it: NeMo-RL forwards this dict straight to
+            # the vLLM engine constructor, so it reaches options vllm_cfg does not name.
+            **({"vllm_kwargs": dict(grpo_hp.vllm_kwargs)} if grpo_hp.vllm_kwargs else {}),
         },
         "sequence_packing": sequence_packing_cfg,
         "dynamic_batching": dynamic_batching_cfg,
@@ -632,6 +642,10 @@ def compile_grpo_config(
 
     cfg["env"] = _build_nemo_gym_env_config(customizer_config, job_ctx)
     cfg["logger"] = _build_logger_config(customizer_config, job_ctx, workspace_dir)
+    # GRPO-only, so layered on here rather than in the shared DPO/GRPO helper. With W&B
+    # off, `logger.wandb` is an inert placeholder NeMo-RL never reads.
+    if cfg["logger"]["wandb_enabled"] and grpo_hp.log_nemo_gym_full_result_tables:
+        cfg["logger"]["wandb"]["log_nemo_gym_full_result_tables"] = True
     cfg["cluster"] = {
         "gpus_per_node": parallelism.num_gpus_per_node,
         "num_nodes": parallelism.num_nodes,
