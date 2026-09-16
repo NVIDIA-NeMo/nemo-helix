@@ -70,9 +70,7 @@ class ScaledEvalsService(NemoService):
     """Mount scaled-evals ``/v1`` routers under ``/apis/scaled-evals``."""
 
     name: ClassVar[str] = "scaled-evals"
-    # The plugin owns its Postgres and object store instead of the platform's, so it
-    # declares no platform service dependencies.
-    dependencies: ClassVar[list[str]] = []
+    dependencies: ClassVar[list[str]] = ["jobs"]
 
     def get_routers(self) -> list[RouterSpec]:
         health = APIRouter()

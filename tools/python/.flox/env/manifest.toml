@@ -4,7 +4,7 @@
 schema-version = "1.14.0"
 
 [install]
-uv = { pkg-path = "uv", version = "0.9.14", pkg-group = "uv" }
+uv = { pkg-path = "uv", version = "0.10.10", pkg-group = "uv" }
 
 [vars]
 UV_VENV_SEED="1"

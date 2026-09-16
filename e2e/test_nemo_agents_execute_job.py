@@ -30,9 +30,23 @@ from e2e.agents_deploy_helpers import (
 
 pytestmark = [pytest.mark.timeout(600)]
 
+# A well-formed reference that can never resolve: ``.invalid`` is reserved by
+# RFC 2606 and guaranteed not to exist, so the node fails the pull immediately
+# on NXDOMAIN rather than burning the test timeout on registry retries.
+_UNRESOLVABLE_IMAGE = "registry.invalid/nmp-e2e/no-such-image:missing"
 
-def _agents_url(sdk: NeMoPlatform, workspace: str, path: str) -> str:
-    return f"{str(sdk.base_url).rstrip('/')}/apis/agents/v2/workspaces/{workspace}/{path.lstrip('/')}"
+# Evidence that the failure was about the image. The first three are the
+# waiting-state reasons the Kubernetes backend maps to a job error
+# (``kubernetes/common.py``); the last two are fragments of the ref itself,
+# which the Docker backend's pull error embeds. Matching any one of them keeps
+# the assertion specific to the image without pinning either backend's wording.
+_IMAGE_FAILURE_MARKERS = (
+    "imagepullbackoff",
+    "errimagepull",
+    "invalidimagename",
+    "registry.invalid",
+    "no-such-image",
+)
 
 
 def _job_diagnostic_message(sdk: NeMoPlatform, job: Any, workspace: str, prefix: str) -> str:
@@ -54,15 +68,11 @@ def _job_diagnostic_message(sdk: NeMoPlatform, job: Any, workspace: str, prefix:
 
 
 def _list_execute_job_results(sdk: NeMoPlatform, workspace: str, job_name: str) -> dict[str, Any]:
-    response = sdk._client.get(_agents_url(sdk, workspace, f"jobs/execute/{job_name}/results"))
-    assert response.status_code == 200, f"Failed to list execute job results for {job_name}: {response.text}"
-    return response.json()
+    return dict(sdk.agents.jobs.execute.list_results(job_name, workspace=workspace))
 
 
 def _download_execute_job_result(sdk: NeMoPlatform, workspace: str, job_name: str, result_name: str) -> bytes:
-    response = sdk._client.get(_agents_url(sdk, workspace, f"jobs/execute/{job_name}/results/{result_name}/download"))
-    assert response.status_code == 200, f"Failed to download result {result_name!r} for {job_name}: {response.text}"
-    return response.content
+    return sdk.agents.jobs.execute.download_result(result_name, job=job_name, workspace=workspace)
 
 
 def _result_names(results: dict[str, Any]) -> set[str]:
@@ -199,18 +209,15 @@ def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoPlatform, w
     )
 
     try:
-        response = sdk._client.post(
-            _agents_url(sdk, workspace, "jobs/execute"),
-            json={
-                "name": job_name,
-                "spec": {
-                    "agent": agent_name,
-                    "input": "Answer with the deterministic mock provider response.",
-                    "workdir": {"base_workdir": f"{fileset_name}#project/"},
-                },
+        sdk.agents.jobs.execute.create(
+            name=job_name,
+            workspace=workspace,
+            spec={
+                "agent": agent_name,
+                "input": "Answer with the deterministic mock provider response.",
+                "workdir": {"base_workdir": f"{fileset_name}#project/"},
             },
         )
-        assert response.status_code == 201, response.text
 
         completed_job = wait_for_platform_job(sdk, job_name, workspace, timeout=300)
         assert completed_job.status == "completed", _job_diagnostic_message(
@@ -320,18 +327,15 @@ def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs
     )
 
     try:
-        response = sdk._client.post(
-            _agents_url(sdk, workspace, "jobs/execute"),
-            json={
-                "name": job_name,
-                "spec": {
-                    "agent": agent_name,
-                    "input": "Write the partial file, then continue.",
-                    "workdir": {"base_workdir": f"{fileset_name}#project/"},
-                },
+        sdk.agents.jobs.execute.create(
+            name=job_name,
+            workspace=workspace,
+            spec={
+                "agent": agent_name,
+                "input": "Write the partial file, then continue.",
+                "workdir": {"base_workdir": f"{fileset_name}#project/"},
             },
         )
-        assert response.status_code == 201, response.text
 
         completed_job = wait_for_platform_job(sdk, job_name, workspace, timeout=300)
         assert completed_job.status == "error", _job_diagnostic_message(
@@ -373,5 +377,101 @@ def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs
         error_message = run_result["error"]["message"]
         assert "InternalServerError" in error_message
         assert "Error code: 500" in error_message
+    finally:
+        delete_agent_if_exists(sdk, workspace=workspace, name=agent_name)
+
+
+# ---------------------------------------------------------------------------
+# Per-job execution image
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def container_backed_execute(sdk: NeMoPlatform) -> None:
+    """Skip unless ``agents.execute`` actually runs in a container.
+
+    The jobs API rewrites a ``cpu``/``default`` container step into a host
+    subprocess whenever a subprocess executor is registered at that profile
+    (``translate_cpu_container_steps_to_subprocess``), and that rewrite drops
+    ``container.image`` on the floor. Every assertion about which image a job
+    ran on is vacuous in that mode, so gate on the precise condition rather
+    than on the harness shape: ``container_only`` only proves ``NMP_BASE_URL``
+    is set, which an already-running local (subprocess) platform also satisfies.
+    """
+    profiles = client_from_platform(sdk, JobsClient).list_execution_profiles()
+    if any(profile.provider == "subprocess" and profile.profile == "default" for profile in profiles):
+        pytest.skip("cpu/default is diverted to the subprocess backend, which discards container.image")
+
+
+def _register_mock_backed_agent(sdk: NeMoPlatform, workspace: str, *, agent_name: str, model_name: str) -> None:
+    """Register a deterministic agent whose single model is served by the mock provider."""
+    add_mock_provider(
+        sdk,
+        workspace=workspace,
+        name=unique_name("image-provider"),
+        mock_response_body_by_model={
+            f"{workspace}/{model_name}": [
+                MockProviderResponse(response_body=_final_chat_completion_response(TEST_AGENT_RESPONSE, model_name)),
+            ],
+        },
+        served_models={model_name: model_name},
+    )
+    sdk.agents.create(
+        workspace=workspace,
+        name=agent_name,
+        config=mock_backed_fabric_agent_config(agent_name, f"{workspace}/{model_name}"),
+        config_format=NEMO_AGENTS_SPEC_CONFIG_FORMAT,
+    )
+
+
+@pytest.mark.container_only
+def test_execute_job_fails_when_the_requested_image_cannot_be_pulled(
+    sdk: NeMoPlatform,
+    workspace: str,
+    container_backed_execute: None,
+) -> None:
+    """``spec.image`` reaches the container runtime.
+
+    Failure is the only outcome that can prove this today. A job that silently
+    ignored ``image`` would run on the inherited task image and succeed, so a
+    passing run says nothing -- and every image this test could legitimately
+    ask for is the one it would have inherited anyway. Because this ref cannot
+    resolve anywhere, an error whose diagnostics name the image or a pull
+    failure can only happen if the string travelled from the request through
+    ``compile`` into the pod/container spec.
+
+    The discriminating *positive* test needs an image that holds something the
+    default image does not -- a ``nemo agents package`` build carrying its own
+    Fabric adapter.
+    """
+    del container_backed_execute
+    agent_name = unique_name("image-agent")
+    job_name = unique_name("image-job")
+    model_name = unique_name("image-model")
+
+    _register_mock_backed_agent(sdk, workspace, agent_name=agent_name, model_name=model_name)
+
+    try:
+        sdk.agents.jobs.execute.create(
+            name=job_name,
+            workspace=workspace,
+            spec={
+                "agent": agent_name,
+                "input": "This agent never runs; the image cannot be pulled.",
+                "image": _UNRESOLVABLE_IMAGE,
+            },
+        )
+
+        finished_job = wait_for_platform_job(sdk, job_name, workspace, timeout=300)
+        diagnostics = _job_diagnostic_message(
+            sdk,
+            finished_job,
+            workspace,
+            f"Execute job with an unresolvable image finished as: {finished_job.status}",
+        )
+        assert finished_job.status == "error", diagnostics
+        assert any(marker in diagnostics.lower() for marker in _IMAGE_FAILURE_MARKERS), (
+            f"Job failed, but not demonstrably because of the requested image.\n{diagnostics}"
+        )
     finally:
         delete_agent_if_exists(sdk, workspace=workspace, name=agent_name)

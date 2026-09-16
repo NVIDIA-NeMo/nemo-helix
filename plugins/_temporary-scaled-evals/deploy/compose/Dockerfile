@@ -22,6 +22,14 @@ ARG KUBECTL_VERSION=v1.33.2
 
 FROM ${BUILDKIT_IMAGE} AS buildkit
 
+FROM --platform=$BUILDPLATFORM golang:1.26.7 AS jobs-launcher
+ARG TARGETOS
+ARG TARGETARCH
+COPY services/core/jobs/jobs-launcher /app/jobs-launcher
+WORKDIR /app/jobs-launcher
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -a -installsuffix cgo -ldflags="-s -w -extldflags '-static'" -trimpath -o jobs-launcher ./main.go
+
 # =============================================================================
 # Harbor runner — the thing that actually executes an evaluation.
 #
@@ -110,6 +118,7 @@ FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim
 
 # Both the API (`GET /v1/readyz`) and the build worker shell out to buildctl.
 COPY --from=buildkit /usr/bin/buildctl /usr/local/bin/buildctl
+COPY --from=jobs-launcher /app/jobs-launcher/jobs-launcher /tools/jobs-launcher
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
@@ -130,11 +139,20 @@ COPY . /app
 # using, but does not declare nmp-entities as a dependency. A full `uv sync`
 # hides that, so it only shows up in a scoped install like this one. 28 packages.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev \
+    apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends build-essential \
+    && uv sync --frozen --no-dev \
         --package nemo-scaled-evals-plugin \
         --package nmp-platform-runner \
         --package nemo-platform-ext \
-        --package nmp-entities
+        --package nmp-auth \
+        --package nmp-entities \
+        --package nmp-files \
+        --package nmp-jobs \
+        --package nmp-secrets \
+    && apt-get purge -y build-essential \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/app/.venv/bin:$PATH"
 
@@ -155,6 +173,7 @@ RUN apt-get update -qq \
 # SANDBOX_K8S_CONFIG_PATH and TASK_PATH point into.
 COPY --from=harbor /opt/harbor /opt/harbor
 COPY plugins/_temporary-scaled-evals/examples/tasks /harness/tasks
+COPY plugins/_temporary-scaled-evals/deploy/k8s/sandbox.env /harness/sandbox.env
 # 0777 because the runtime picks the uid; the k8s manifests mount a writable
 # volume over this path anyway, so this only matters for bare `docker run`.
 RUN mkdir -p /var/lib/scaled-evals/harbor-jobs \

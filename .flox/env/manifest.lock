@@ -65,7 +65,7 @@
       "uv": {
         "pkg-path": "uv",
         "pkg-group": "uv",
-        "version": "0.9.14"
+        "version": "0.10.10"
       },
       "yq-go": {
         "pkg-path": "yq-go"
@@ -825,96 +825,6 @@
       "priority": 5
     },
     {
-      "attr_path": "uv",
-      "broken": false,
-      "derivation": "/nix/store/5xdn711qjgkkady64ywrxq6mhbi9nz9h-uv-0.9.14.drv",
-      "description": "Extremely fast Python package installer and resolver, written in Rust",
-      "install_id": "uv",
-      "license": "[ Apache-2.0, MIT ]",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=418468ac9527e799809c900eda37cbff999199b6",
-      "name": "uv-0.9.14",
-      "pname": "uv",
-      "rev": "418468ac9527e799809c900eda37cbff999199b6",
-      "rev_count": 905402,
-      "rev_date": "2025-12-02T09:27:49Z",
-      "scrape_date": "2025-12-04T02:56:01.692648Z",
-      "stabilities": [
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.9.14",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/zbg4ksfcdcmqbw8x0f0xlla16g2lhxgy-uv-0.9.14"
-      },
-      "system": "aarch64-darwin",
-      "group": "uv",
-      "priority": 5
-    },
-    {
-      "attr_path": "uv",
-      "broken": false,
-      "derivation": "/nix/store/8z6dv3xfq2mc9hw87w37sw2hs1jlchyg-uv-0.9.14.drv",
-      "description": "Extremely fast Python package installer and resolver, written in Rust",
-      "install_id": "uv",
-      "license": "[ Apache-2.0, MIT ]",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=418468ac9527e799809c900eda37cbff999199b6",
-      "name": "uv-0.9.14",
-      "pname": "uv",
-      "rev": "418468ac9527e799809c900eda37cbff999199b6",
-      "rev_count": 905402,
-      "rev_date": "2025-12-02T09:27:49Z",
-      "scrape_date": "2025-12-04T03:05:28.971221Z",
-      "stabilities": [
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.9.14",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/2k74mawzpjihb1jpyxlmbhaz7wflbhyb-uv-0.9.14"
-      },
-      "system": "aarch64-linux",
-      "group": "uv",
-      "priority": 5
-    },
-    {
-      "attr_path": "uv",
-      "broken": false,
-      "derivation": "/nix/store/16j8ajlaksqd7pv1pnp12v22bb79wsl8-uv-0.9.14.drv",
-      "description": "Extremely fast Python package installer and resolver, written in Rust",
-      "install_id": "uv",
-      "license": "[ Apache-2.0, MIT ]",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=418468ac9527e799809c900eda37cbff999199b6",
-      "name": "uv-0.9.14",
-      "pname": "uv",
-      "rev": "418468ac9527e799809c900eda37cbff999199b6",
-      "rev_count": 905402,
-      "rev_date": "2025-12-02T09:27:49Z",
-      "scrape_date": "2025-12-04T03:23:20.097970Z",
-      "stabilities": [
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.9.14",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/483pf97g9l0l3rh0988ghffcppm4001a-uv-0.9.14"
-      },
-      "system": "x86_64-linux",
-      "group": "uv",
-      "priority": 5
-    },
-    {
       "attr_path": "diffutils",
       "broken": false,
       "derivation": "/nix/store/7lxvn9pyy7nz2s8qj0bdzqjj31nph3mw-diffutils-3.12.drv",
@@ -1548,6 +1458,96 @@
       "system": "x86_64-linux",
       "group": "toplevel",
       "priority": 5
+    },
+    {
+      "attr_path": "uv",
+      "broken": false,
+      "derivation": "/nix/store/ca4c5p52xg20k2ygh212fjl0sj027cns-uv-0.10.10.drv",
+      "description": "Extremely fast Python package installer and resolver, written in Rust",
+      "install_id": "uv",
+      "license": "[ Apache-2.0, MIT ]",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=b40629efe5d6ec48dd1efba650c797ddbd39ace0",
+      "name": "uv-0.10.10",
+      "pname": "uv",
+      "rev": "b40629efe5d6ec48dd1efba650c797ddbd39ace0",
+      "rev_count": 964859,
+      "rev_date": "2026-03-18T08:17:15Z",
+      "scrape_date": "2026-03-20T00:42:40.851800Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.10.10",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/ak82pfbm5lz4n4bgdqw4vi2mz2yjhzva-uv-0.10.10"
+      },
+      "system": "aarch64-darwin",
+      "group": "uv",
+      "priority": 5
+    },
+    {
+      "attr_path": "uv",
+      "broken": false,
+      "derivation": "/nix/store/9wlmkw8d5azyg2skikr8d51adp86k2dg-uv-0.10.10.drv",
+      "description": "Extremely fast Python package installer and resolver, written in Rust",
+      "install_id": "uv",
+      "license": "[ Apache-2.0, MIT ]",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=b40629efe5d6ec48dd1efba650c797ddbd39ace0",
+      "name": "uv-0.10.10",
+      "pname": "uv",
+      "rev": "b40629efe5d6ec48dd1efba650c797ddbd39ace0",
+      "rev_count": 964859,
+      "rev_date": "2026-03-18T08:17:15Z",
+      "scrape_date": "2026-03-20T01:15:03.366659Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.10.10",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/25wyj6wz00gr09kiv2gszh11j2ka2p26-uv-0.10.10"
+      },
+      "system": "aarch64-linux",
+      "group": "uv",
+      "priority": 5
+    },
+    {
+      "attr_path": "uv",
+      "broken": false,
+      "derivation": "/nix/store/z31wwa66jhm52hnvisy4lmqh9y5bx4dm-uv-0.10.10.drv",
+      "description": "Extremely fast Python package installer and resolver, written in Rust",
+      "install_id": "uv",
+      "license": "[ Apache-2.0, MIT ]",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=b40629efe5d6ec48dd1efba650c797ddbd39ace0",
+      "name": "uv-0.10.10",
+      "pname": "uv",
+      "rev": "b40629efe5d6ec48dd1efba650c797ddbd39ace0",
+      "rev_count": 964859,
+      "rev_date": "2026-03-18T08:17:15Z",
+      "scrape_date": "2026-03-20T02:20:00.125246Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.10.10",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/lsifgwpalj0dgnjh6raal9gmvcn6m6s5-uv-0.10.10"
+      },
+      "system": "x86_64-linux",
+      "group": "uv",
+      "priority": 5
     }
   ],
   "compose": {
@@ -1695,7 +1695,7 @@
             "uv": {
               "pkg-path": "uv",
               "pkg-group": "uv",
-              "version": "0.9.14"
+              "version": "0.10.10"
             }
           },
           "vars": {

@@ -482,7 +482,7 @@ class Dispatcher:
         ``SKIP LOCKED`` so multiple workers can scale out safely.
         """
         did_work = False
-        if settings.dispatch_kubernetes_jobs_enabled:
+        if settings.dispatch_kubernetes_jobs_enabled and not settings.platform_evaluation_jobs_enabled:
             reconciler = self.job_reconciler
             if reconciler is None:
                 from scaled_evals.dispatch.kubernetes_job import (
@@ -497,6 +497,7 @@ class Dispatcher:
                 did_work = reconciler() or did_work
             except Exception:  # noqa: BLE001 - reconciliation must not stop queue dispatch
                 LOG.exception("Kubernetes evaluation Job reconciliation failed")
+        if settings.dispatch_kubernetes_jobs_enabled or settings.platform_evaluation_jobs_enabled:
             execution_cleanup = self.claim_next_execution_cleanup()
             if execution_cleanup is not None:
                 self.cleanup_failed_execution(execution_cleanup)
@@ -522,7 +523,7 @@ class Dispatcher:
             self.delete_switchyard_campaign(campaign)
             return True
 
-        evaluation_id = self.claim_next()
+        evaluation_id = None if settings.platform_evaluation_jobs_enabled else self.claim_next()
         if evaluation_id is not None:
             if settings.dispatch_kubernetes_jobs_enabled:
                 launcher = self.job_launcher

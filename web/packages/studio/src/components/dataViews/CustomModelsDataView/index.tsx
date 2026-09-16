@@ -35,7 +35,7 @@ import {
   FINETUNING_TYPE_FILTER_OPTIONS,
   HAS_ADAPTERS,
 } from '@studio/components/dataViews/CustomModelsDataView/constants';
-import { DeploymentIndicator } from '@studio/components/dataViews/CustomModelsDataView/DeploymentIndicator';
+import { DeploymentStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/DeploymentStatusBadge';
 import { KindTag } from '@studio/components/dataViews/CustomModelsDataView/KindTag';
 import { BaseModelSearchFilterField } from '@studio/components/FilterFields';
 import type { ModelPanelTab } from '@studio/components/sidePanels/ModelPanels/ModelPanel';
@@ -232,156 +232,155 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
     }
   };
 
-  const makeColumns: ComponentProps<typeof DataView.Root<ModelTableRow>>['makeColumns'] = (
-    { accessor },
-    { rowSelectionColumn, rowActionsColumn, rowExpansionColumn }
-  ) => [
-    rowExpansionColumn({ size: ROW_SELECTION_COLUMN_SIZE }),
-    rowSelectionColumn({ size: ROW_SELECTION_COLUMN_SIZE }),
-    accessor('id', {
-      id: 'deployment-status',
-      header: () => <span data-fixed-width aria-label="Deployment status" />,
-      enableSorting: false,
-      enableResizing: false,
-      cell: ({ row }) => (
-        <span data-fixed-width>
-          {row.depth === 0 && (
-            <DeploymentIndicator
-              workspace={workspace}
-              providerIds={row.original.model_providers}
-              modelName={row.original.name ?? ''}
-            />
-          )}
-        </span>
-      ),
-      size: 30,
-      minSize: 30,
-      maxSize: 30,
-    }),
-    accessor('name', {
-      header: 'Name',
-      enableSorting: true,
-      cell: ({ row }) => <Text className="truncate">{row.original.name}</Text>,
-    }),
-    accessor((row) => row.base_model || '-', {
-      id: 'base_model',
-      header: 'Base Model',
-      enableSorting: false,
-      meta: {
-        filter: {
-          type: 'custom',
-          label: 'Base Model',
-          renderFilter: ({ setValue, value }) => (
-            <BaseModelSearchFilterField
-              dataTestId="customizations-base-model-filter"
-              workspace={workspace}
-              value={value as string | undefined}
-              onValueChange={(models: string[]) => setValue(models[0] || undefined)}
-              singleSelect
+  const makeColumns: ComponentProps<typeof DataView.Root<ModelTableRow>>['makeColumns'] =
+    useCallback<NonNullable<ComponentProps<typeof DataView.Root<ModelTableRow>>['makeColumns']>>(
+      ({ accessor }, { rowSelectionColumn, rowActionsColumn, rowExpansionColumn }) => [
+        rowExpansionColumn({ size: ROW_SELECTION_COLUMN_SIZE }),
+        rowSelectionColumn({ size: ROW_SELECTION_COLUMN_SIZE }),
+        accessor('name', {
+          header: 'Name',
+          enableSorting: true,
+          cell: ({ row }) => <Text className="truncate">{row.original.name}</Text>,
+        }),
+        accessor((row) => row.base_model || '-', {
+          id: 'base_model',
+          header: 'Base Model',
+          enableSorting: false,
+          meta: {
+            filter: {
+              type: 'custom',
+              label: 'Base Model',
+              renderFilter: ({ setValue, value }) => (
+                <BaseModelSearchFilterField
+                  dataTestId="customizations-base-model-filter"
+                  workspace={workspace}
+                  value={value as string | undefined}
+                  onValueChange={(models: string[]) => setValue(models[0] || undefined)}
+                  singleSelect
+                />
+              ),
+            },
+          },
+          cell: ({ row }) => <Text className="truncate">{row.original.base_model || '-'}</Text>,
+        }),
+        accessor((row) => row.finetuning_type, {
+          id: 'finetuning_type',
+          header: 'Type',
+          enableSorting: false,
+          meta: {
+            filter: {
+              type: 'single-select',
+              label: 'Finetuning Type',
+              options: FINETUNING_TYPE_FILTER_OPTIONS,
+            },
+          },
+          cell: ({ row }) =>
+            row.original.finetuning_type ? (
+              <KindTag finetuningType={row.original.finetuning_type} onClick={handleKindClick} />
+            ) : (
+              <Text>-</Text>
+            ),
+        }),
+        accessor('id', {
+          id: 'deployment-status',
+          header: 'Status',
+          // Derived client-side per row (providers → served_models → deployment), so
+          // there is nothing for the API to sort or filter on.
+          enableSorting: false,
+          size: 150,
+          cell: ({ row }) => (
+            <DeploymentStatusBadge
+              model={row.original._parentModel ?? row.original}
+              adapter={
+                row.original._parentModel
+                  ? adapterMap.get(row.original._parentModel.id)?.get(row.original.name)
+                  : undefined
+              }
             />
           ),
-        },
-      },
-      cell: ({ row }) => <Text className="truncate">{row.original.base_model || '-'}</Text>,
-    }),
-    accessor((row) => row.finetuning_type, {
-      id: 'finetuning_type',
-      header: 'Type',
-      enableSorting: false,
-      meta: {
-        filter: {
-          type: 'single-select',
-          label: 'Finetuning Type',
-          options: FINETUNING_TYPE_FILTER_OPTIONS,
-        },
-      },
-      cell: ({ row }) =>
-        row.original.finetuning_type ? (
-          <KindTag finetuningType={row.original.finetuning_type} onClick={handleKindClick} />
-        ) : (
-          <Text>-</Text>
-        ),
-    }),
-    accessor('created_at', {
-      id: 'created_at',
-      header: 'Created',
-      enableSorting: true,
-      size: 150,
-      meta: {
-        filter: dateTimeFilter('Created At'),
-      },
-      cell: ({ row }) =>
-        row.original?.created_at ? <RelativeTime datetime={row.original.created_at} /> : null,
-    }),
-    accessor('updated_at', {
-      id: 'updated_at',
-      header: 'Updated',
-      enableSorting: false,
-      meta: {
-        filter: dateTimeFilter('Updated At'),
-      },
-      cell: ({ row }) =>
-        row.original?.updated_at ? <RelativeTime datetime={row.original.updated_at} /> : null,
-    }),
-    rowActionsColumn({
-      size: ROW_ACTIONS_COLUMN_SIZE,
-      enableResizing: false,
-      rowActions: (row: ModelTableRow): DropdownEntry[] => {
-        const isAdapter = Boolean(row._parentModel);
-        const parentModel = row._parentModel;
-
-        if (isAdapter && parentModel) {
-          return [
-            {
-              children: 'Model details',
-              onSelect: () => {
-                const adapter = adapterMap.get(parentModel.id)?.get(row.name);
-                onRowClick?.(parentModel, 'model-details', adapter);
-              },
-            },
-            { kind: 'divider' as const },
-            {
-              children: 'Delete Adapter',
-              danger: true,
-              onSelect: () =>
-                setDeleteTarget({
-                  kind: 'adapter',
-                  adapterName: row.name,
-                  modelName: parentModel.name,
-                }),
-            },
-          ];
-        }
-
-        return [
-          {
-            children: 'Model details',
-            onSelect: () => onRowClick?.(row, 'model-details'),
+        }),
+        accessor('created_at', {
+          id: 'created_at',
+          header: 'Created',
+          enableSorting: true,
+          size: 150,
+          meta: {
+            filter: dateTimeFilter('Created At'),
           },
-          {
-            children: 'Chat Playground',
-            onSelect: () => onRowClick?.(row, 'chat-playground'),
+          cell: ({ row }) =>
+            row.original?.created_at ? <RelativeTime datetime={row.original.created_at} /> : null,
+        }),
+        accessor('updated_at', {
+          id: 'updated_at',
+          header: 'Updated',
+          enableSorting: false,
+          meta: {
+            filter: dateTimeFilter('Updated At'),
           },
-          ...(INTAKE_ENABLED
-            ? [
+          cell: ({ row }) =>
+            row.original?.updated_at ? <RelativeTime datetime={row.original.updated_at} /> : null,
+        }),
+        rowActionsColumn({
+          size: ROW_ACTIONS_COLUMN_SIZE,
+          enableResizing: false,
+          rowActions: (row: ModelTableRow): DropdownEntry[] => {
+            const isAdapter = Boolean(row._parentModel);
+            const parentModel = row._parentModel;
+
+            if (isAdapter && parentModel) {
+              return [
                 {
-                  children: 'View Intake',
+                  children: 'Model details',
                   onSelect: () => {
-                    navigate(getIntakeTracesRoute(workspace));
+                    const adapter = adapterMap.get(parentModel.id)?.get(row.name);
+                    onRowClick?.(parentModel, 'model-details', adapter);
                   },
                 },
-              ]
-            : []),
-          { kind: 'divider' as const },
-          {
-            children: 'Delete',
-            danger: true,
-            onSelect: () => setDeleteTarget({ kind: 'model', name: row.name }),
+                { kind: 'divider' as const },
+                {
+                  children: 'Delete Adapter',
+                  danger: true,
+                  onSelect: () =>
+                    setDeleteTarget({
+                      kind: 'adapter',
+                      adapterName: row.name,
+                      modelName: parentModel.name,
+                    }),
+                },
+              ];
+            }
+
+            return [
+              {
+                children: 'Model details',
+                onSelect: () => onRowClick?.(row, 'model-details'),
+              },
+              {
+                children: 'Chat Playground',
+                onSelect: () => onRowClick?.(row, 'chat-playground'),
+              },
+              ...(INTAKE_ENABLED
+                ? [
+                    {
+                      children: 'View Intake',
+                      onSelect: () => {
+                        navigate(getIntakeTracesRoute(workspace));
+                      },
+                    },
+                  ]
+                : []),
+              { kind: 'divider' as const },
+              {
+                children: 'Delete',
+                danger: true,
+                onSelect: () => setDeleteTarget({ kind: 'model', name: row.name }),
+              },
+            ];
           },
-        ];
-      },
-    }),
-  ];
+        }),
+      ],
+      [adapterMap, handleKindClick, navigate, onRowClick, workspace]
+    );
 
   const hasActiveFilters =
     Boolean(dataViewState.debouncedSearchBar) || dataViewState.debouncedColumnFilters.length > 0;

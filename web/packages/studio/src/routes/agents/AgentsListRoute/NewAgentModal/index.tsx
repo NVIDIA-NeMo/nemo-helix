@@ -56,6 +56,7 @@ import {
   parseAgentConfig,
   pickedFromDataTransfer,
   pickedFromFileList,
+  selectionRootName,
   tooManyPickedFiles,
   totalEntryBytes,
   validateAgentEntries,
@@ -81,9 +82,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const inputRef = useRef<HTMLInputElement>(null);
-  const setDirectoryInput = useCallback((node: HTMLInputElement | null) => {
-    inputRef.current = node;
+  const filesInputRef = useRef<HTMLInputElement>(null);
+  const setFolderInput = useCallback((node: HTMLInputElement | null) => {
     // webkitdirectory is absent from React's input attribute types.
     node?.setAttribute('webkitdirectory', '');
   }, []);
@@ -146,13 +146,11 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   } = useAgentsCreateAgent({ mutation: { onSuccess: onAgentCreated } });
 
   // useWatch re-renders this modal on every keystroke; the summary depends only on entries.
-  const entriesSummary = useMemo(
-    () =>
-      entries.length === 0
-        ? undefined
-        : `${sourceLabel} — ${entries.length} files, ${Math.max(1, Math.round(totalEntryBytes(entries) / 1000))} KB`,
-    [sourceLabel, entries]
-  );
+  const entriesSummary = useMemo(() => {
+    if (entries.length === 0) return undefined;
+    const size = `${entries.length} ${entries.length === 1 ? 'file' : 'files'}, ${Math.max(1, Math.round(totalEntryBytes(entries) / 1000))} KB`;
+    return sourceLabel ? `${sourceLabel} — ${size}` : size;
+  }, [sourceLabel, entries]);
 
   const watchedName = useWatch({ control, name: 'name' });
   const watchedRepoUrl = useWatch({ control, name: 'repoUrl' });
@@ -189,7 +187,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     onClose();
   };
 
-  // Directory reads finish out of order, so the newest selection has to win.
+  // Selection reads finish out of order, so the newest selection has to win.
   const selectionSeq = useRef(0);
   const beginSelection = (): (() => boolean) => {
     const selection = ++selectionSeq.current;
@@ -245,11 +243,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   };
 
   const acceptPicked = (picked: PickedFile[], superseded: () => boolean) =>
-    acceptEntries(
-      collectAgentEntries(picked),
-      picked[0]?.relativePath.split('/')[0] ?? '',
-      superseded
-    );
+    acceptEntries(collectAgentEntries(picked), selectionRootName(picked), superseded);
 
   const onRepoUrlBlur = () => {
     setRepoBlurred(true);
@@ -266,7 +260,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     return true;
   };
 
-  const onDirectoryPicked: ChangeEventHandler<HTMLInputElement> = async (event) => {
+  const onFilesPicked: ChangeEventHandler<HTMLInputElement> = async (event) => {
     const fileList = event.target.files;
     const pickedCount = fileList?.length ?? 0;
     if (pickedCount === 0) return;
@@ -282,7 +276,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     await acceptPicked(picked, superseded);
   };
 
-  const onDirectoryDropped: DragEventHandler<HTMLLabelElement> = async (event) => {
+  const onFilesDropped: DragEventHandler<HTMLLabelElement> = async (event) => {
     event.preventDefault();
     event.stopPropagation();
     if (isPending) return;
@@ -404,18 +398,38 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
                 <UploadTrigger
                   className="w-full"
                   data-testid="agent-directory-dropzone"
-                  onDrop={onDirectoryDropped}
-                  slotAnchor={sourceLabel ? 'Choose a different directory' : 'Choose a directory'}
-                  slotHeaderText=" containing agent.yaml."
+                  onDrop={onFilesDropped}
+                  slotAnchor={sourceLabel ? 'Choose a different folder' : 'Choose a folder'}
+                  slotHeaderText=" containing agent.yaml, or drop it here."
                 >
                   <UploadInputElement
-                    ref={setDirectoryInput}
+                    ref={setFolderInput}
                     data-testid="agent-directory-input"
                     multiple
-                    onChange={onDirectoryPicked}
+                    onChange={onFilesPicked}
                   />
                 </UploadTrigger>
               </UploadRoot>
+              <Flex justify="end">
+                {/* A native picker offers files or directories, never both, so the file pick is its own control. */}
+                <Button
+                  kind="tertiary"
+                  size="small"
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => filesInputRef.current?.click()}
+                >
+                  Choose files instead
+                </Button>
+                <input
+                  ref={filesInputRef}
+                  data-testid="agent-files-input"
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={onFilesPicked}
+                />
+              </Flex>
               {entriesSummary ? <Text kind="body/regular/sm">{entriesSummary}</Text> : null}
               <ControlledTextInput
                 useControllerProps={{ control, name: 'name' }}

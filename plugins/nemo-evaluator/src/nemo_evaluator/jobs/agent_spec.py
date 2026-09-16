@@ -25,6 +25,7 @@ from nemo_evaluator.jobs.metric_resolution import to_runtime_bundle, unresolved_
 from nemo_evaluator.jobs.publication_spec import PublicationSpec
 from nemo_evaluator.metric_refs import MetricRefOrInline
 from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
+from nemo_evaluator_sdk.agent_eval.runtimes.provenance import require_no_plaintext_credentials
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
 from nemo_evaluator_sdk.values import Agent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
@@ -125,8 +126,8 @@ class HarborRunnerTarget(BaseModel):
     agent_kwargs: dict[str, JsonValue] = Field(
         default_factory=dict,
         description="Keyword arguments forwarded to the Harbor agent's constructor, the equivalent of Harbor's "
-        "`--ak key=value`. Not for secrets: Harbor persists them unredacted in the job dir's `config.json`; "
-        "use `env_secrets` instead.",
+        "`--ak key=value`. Not for secrets: Harbor persists these unredacted across the job dir. "
+        "Credential-shaped plaintext is rejected, but that check is a heuristic — use `env_secrets` regardless.",
     )
     env_secrets: dict[str, SecretRef] = Field(
         default_factory=dict,
@@ -146,6 +147,11 @@ class HarborRunnerTarget(BaseModel):
     reward_key: str = Field(
         default="reward", description="Key read from Harbor's per-trial rewards mapping to score against."
     )
+
+    @model_validator(mode="after")
+    def _agent_kwargs_carry_no_credentials(self) -> Self:
+        require_no_plaintext_credentials(self.agent_kwargs, field="agent_kwargs", alternative="env_secrets")
+        return self
 
 
 class GymRunnerTarget(BaseModel):

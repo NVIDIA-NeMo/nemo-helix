@@ -275,6 +275,36 @@ uv sync ${UV_SYNC_MODE} --extra modelopt  --no-install-project   # quantization 
 uv sync ${UV_SYNC_MODE} --extra nemo_gym  --no-install-project   # NeMo-Gym (uv workspace member)
 uv sync ${UV_SYNC_MODE} --all-groups      --no-install-project   # build/test/etc groups
 
+# CVE GHSA-mqqc-3gqh-h2x8: drop ray's bundled old aiohttp from the uv cache.
+find "${UV_CACHE_DIR}" -type d -path "*ray/_private/runtime_env/agent/thirdparty_files/aiohttp*" -exec rm -rf {} + || true
+
+# jackson-databind / jackson-core CVEs: drop ray's bundled ray_dist.jar, which only backs Ray's Java
+# worker support (unused - no JVM here). Removed before the prefetch so no venv symlinks to it.
+find "${UV_CACHE_DIR}" -type d -path "*/ray/jars" -exec rm -rf {} + || true
+
+# FFmpeg CVEs (CVE-2026-8461 + CVE-2026-64830..64835): PyNvVideoCodec bundles FFmpeg 8.1.1 shared
+# libraries, which the scan reports as `ffmpeg` whatever the Python package version is. vLLM pins it
+# so it cannot leave the lock, but nothing on the DPO/GRPO path reaches it: vLLM defaults to the
+# `opencv` video backend and imports PyNvVideoCodec inside decode_frames_pynvvideocodec(), so only
+# the opt-in `pynvvideocodec` backend breaks. Upgrading does not help - 2.2.0 ships FFmpeg 8.1.2,
+# which fixes only one of the seven. The second pattern is the wheel's vendored FFmpeg source
+# tarball. Removed before the prefetch so no venv symlinks into it; only these two directories go,
+# so uv still sees the package as cached and does not re-download it.
+find "${UV_CACHE_DIR}" -type d \
+    \( -name PyNvVideoCodec -o -name 'pynvvideocodec-*.data' \) -exec rm -rf {} + || true
+EOF
+
+# Everything above is ~80 minutes of compiling; this is seconds. Docker keys a RUN on its whole
+# script, so while they shared one, editing a pin here rebuilt Transformer Engine there. The CVE
+# removals stay above: `nmp-rl-base` is `FROM builder`, so a file deleted in a later layer is still
+# present in the earlier one and a layer-aware scan still finds it.
+#
+# These run after the removals rather than before, as they did when the blocks were one. None of
+# them reaches ray or PyNvVideoCodec, so there is nothing for them to reintroduce.
+RUN <<"EOF" bash -exu
+umask 022
+export UV_LINK_MODE=symlink
+
 # Gym sandbox CLIENT SDK (OpenSandbox provider). The OpenSandbox SERVER is deployed separately on
 # the cluster; this is the client the Gym stack imports to call it. Source-independent, so it stays
 # in this cached compile layer (the editable ROOT install moves below, after the full-source COPY).
@@ -299,24 +329,6 @@ uv pip install --python /opt/nemo_rl_venv/bin/python \
 # pydantic (already present). Resolving Gym's full dependency set here could move RL's pinned stack.
 uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps \
     -e /opt/nemo-rl/3rdparty/Gym-workspace/Gym
-
-# CVE GHSA-mqqc-3gqh-h2x8: drop ray's bundled old aiohttp from the uv cache.
-find "${UV_CACHE_DIR}" -type d -path "*ray/_private/runtime_env/agent/thirdparty_files/aiohttp*" -exec rm -rf {} + || true
-
-# jackson-databind / jackson-core CVEs: drop ray's bundled ray_dist.jar, which only backs Ray's Java
-# worker support (unused - no JVM here). Removed before the prefetch so no venv symlinks to it.
-find "${UV_CACHE_DIR}" -type d -path "*/ray/jars" -exec rm -rf {} + || true
-
-# FFmpeg CVEs (CVE-2026-8461 + CVE-2026-64830..64835): PyNvVideoCodec bundles FFmpeg 8.1.1 shared
-# libraries, which the scan reports as `ffmpeg` whatever the Python package version is. vLLM pins it
-# so it cannot leave the lock, but nothing on the DPO/GRPO path reaches it: vLLM defaults to the
-# `opencv` video backend and imports PyNvVideoCodec inside decode_frames_pynvvideocodec(), so only
-# the opt-in `pynvvideocodec` backend breaks. Upgrading does not help - 2.2.0 ships FFmpeg 8.1.2,
-# which fixes only one of the seven. The second pattern is the wheel's vendored FFmpeg source
-# tarball. Removed before the prefetch so no venv symlinks into it; only these two directories go,
-# so uv still sees the package as cached and does not re-download it.
-find "${UV_CACHE_DIR}" -type d \
-    \( -name PyNvVideoCodec -o -name 'pynvvideocodec-*.data' \) -exec rm -rf {} + || true
 EOF
 
 # Full RL source (Automodel + Gym). Copied AFTER the heavy uv sync so a source-only RL bump is a

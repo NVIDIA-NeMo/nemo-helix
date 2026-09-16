@@ -6,6 +6,7 @@ import {
   ModelDeploymentStatus,
   type ModelEntity,
   type ModelEntitysPage,
+  type ModelProvider,
 } from '@nemo/sdk/generated/platform/schema';
 import type { Meta, StoryObj } from '@storybook/react';
 import { CustomModelsDataView } from '@studio/components/dataViews/CustomModelsDataView';
@@ -213,6 +214,200 @@ export const WithData: Story = {
           HttpResponse.json(customModelsPage)
         ),
         deploymentHandler,
+      ],
+    },
+  },
+};
+
+/* -------------------------------------------------------------------------- */
+/* Status column                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One row per Status badge. Several of these states cannot be produced by real
+ * data on demand -- Not served needs a base redeployed with LoRA disabled, and
+ * Unknown needs a provider request to fail -- so this story is the only place they
+ * can be reviewed side by side.
+ *
+ * Status resolves through models -> `model_providers` -> provider `served_models`
+ * -> deployment, so each row below needs a provider mock as well as a deployment.
+ */
+const PROVIDER_API = '/apis/models/v2/workspaces/:workspace/providers/:name';
+
+const statusModel = (name: string, overrides: Partial<ModelEntity> = {}): ModelEntity =>
+  ({
+    id: `model-${name}`,
+    name,
+    workspace: 'default',
+    created_at: '2025-06-01T00:00:00.000000',
+    updated_at: '2025-06-01T00:00:00.000000',
+    base_model: 'meta/llama-3.1-8b-instruct',
+    finetuning_type: 'all_weights',
+    model_providers: [`default/provider-${name}`],
+    ...overrides,
+  }) as ModelEntity;
+
+const LORA_HOST = 'lora-host-model';
+
+const statusModels: ModelEntity[] = [
+  statusModel('ready-deployment'),
+  // Parent reads Deployed; its two adapters read Served and Not served.
+  statusModel(LORA_HOST, {
+    base_model: undefined,
+    finetuning_type: undefined,
+    adapters: [
+      {
+        name: 'adapter-loaded',
+        workspace: 'default',
+        fileset: 'default/adapter-loaded-fileset',
+        finetuning_type: 'lora',
+      },
+      {
+        name: 'adapter-not-loaded',
+        workspace: 'default',
+        fileset: 'default/adapter-not-loaded-fileset',
+        finetuning_type: 'lora',
+      },
+    ],
+  }),
+  statusModel('pending-deployment'),
+  statusModel('created-deployment'),
+  statusModel('error-deployment'),
+  statusModel('deleting-deployment'),
+  statusModel('lost-deployment'),
+  // Served by a provider that names no deployment, e.g. build.nvidia.com.
+  statusModel('external-provider'),
+  // Its provider request fails, so whether it is served is genuinely unknown.
+  statusModel('unreadable-provider'),
+  // No providers at all: nothing serves it, and we know that for certain.
+  statusModel('no-providers', { model_providers: [] }),
+];
+
+const statusModelsPage: ModelEntitysPage = {
+  data: statusModels,
+  pagination: {
+    page: 1,
+    page_size: 10,
+    current_page_size: statusModels.length,
+    total_pages: 1,
+    total_results: statusModels.length,
+  },
+};
+
+const makeProvider = (
+  name: string,
+  servedEntityIds: string[],
+  deploymentName: string | null
+): ModelProvider =>
+  ({
+    id: `provider-${name}`,
+    name: `provider-${name}`,
+    workspace: 'default',
+    created_at: '2025-06-01T00:00:00.000000',
+    updated_at: '2025-06-01T00:00:00.000000',
+    host_url: 'http://localhost:8000',
+    status: 'READY',
+    model_deployment_id: deploymentName ? `default/${deploymentName}` : undefined,
+    served_models: servedEntityIds.map((id) => ({
+      model_entity_id: id,
+      served_model_name: id.replace(/\//g, '--'),
+    })),
+  }) as ModelProvider;
+
+const statusProvidersByName: Record<string, ModelProvider> = {
+  'provider-ready-deployment': makeProvider(
+    'ready-deployment',
+    ['default/ready-deployment'],
+    'dep-ready'
+  ),
+  [`provider-${LORA_HOST}`]: makeProvider(
+    LORA_HOST,
+    [
+      `default/${LORA_HOST}`,
+      // Only the loaded adapter is registered by the running backend.
+      `default/${LORA_HOST}&adapters/default/adapter-loaded`,
+    ],
+    'dep-lora'
+  ),
+  'provider-pending-deployment': makeProvider(
+    'pending-deployment',
+    ['default/pending-deployment'],
+    'dep-pending'
+  ),
+  'provider-created-deployment': makeProvider(
+    'created-deployment',
+    ['default/created-deployment'],
+    'dep-created'
+  ),
+  'provider-error-deployment': makeProvider(
+    'error-deployment',
+    ['default/error-deployment'],
+    'dep-error'
+  ),
+  'provider-deleting-deployment': makeProvider(
+    'deleting-deployment',
+    ['default/deleting-deployment'],
+    'dep-deleting'
+  ),
+  'provider-lost-deployment': makeProvider(
+    'lost-deployment',
+    ['default/lost-deployment'],
+    'dep-lost'
+  ),
+  'provider-external-provider': makeProvider(
+    'external-provider',
+    ['default/external-provider'],
+    null
+  ),
+};
+
+const statusDeploymentsByName: Record<string, ModelDeployment> = {
+  'dep-ready': makeDeployment('dep-ready', ModelDeploymentStatus.READY),
+  'dep-lora': makeDeployment('dep-lora', ModelDeploymentStatus.READY),
+  'dep-pending': makeDeployment('dep-pending', ModelDeploymentStatus.PENDING),
+  'dep-created': makeDeployment('dep-created', ModelDeploymentStatus.CREATED),
+  'dep-error': makeDeployment('dep-error', ModelDeploymentStatus.ERROR),
+  'dep-deleting': makeDeployment('dep-deleting', ModelDeploymentStatus.DELETING),
+  'dep-lost': makeDeployment('dep-lost', ModelDeploymentStatus.LOST),
+};
+
+/**
+ * Expected badges, top to bottom (expand the LoRA host row for its adapters):
+ *
+ * | Row                   | Status       |
+ * | --------------------- | ------------ |
+ * | ready-deployment      | Deployed     |
+ * | lora-host-model       | Deployed     |
+ * |   adapter-loaded      | Served       |
+ * |   adapter-not-loaded  | Not served   |
+ * | pending-deployment    | Deploying    |
+ * | created-deployment    | Deploying    |
+ * | error-deployment      | Failed       |
+ * | deleting-deployment   | Deleting     |
+ * | lost-deployment       | Unavailable  |
+ * | external-provider     | Available    |
+ * | unreadable-provider   | Unknown      |
+ * | no-providers          | Not deployed |
+ */
+export const AllDeploymentStatuses: Story = {
+  parameters: {
+    msw: {
+      handlers: [
+        http.get<never, never, ModelEntitysPage>(MODELS_API, () =>
+          HttpResponse.json(statusModelsPage)
+        ),
+        http.get<{ name: string }>(PROVIDER_API, ({ params }) => {
+          const provider = statusProvidersByName[params.name];
+          // `provider-unreadable-provider` is deliberately absent: the request
+          // fails, which must read as Unknown rather than Not deployed.
+          if (!provider) return new HttpResponse(null, { status: 500 });
+          return HttpResponse.json(provider);
+        }),
+        http.get<{ name: string }>(DEPLOYMENT_API, ({ params }) => {
+          const deployment = statusDeploymentsByName[params.name];
+          if (!deployment) return new HttpResponse(null, { status: 404 });
+          return HttpResponse.json(deployment);
+        }),
       ],
     },
   },

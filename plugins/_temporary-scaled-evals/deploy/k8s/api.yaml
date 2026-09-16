@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# The NeMo Platform API serving the scaled-evals plugin. No command override:
-# the image's own CMD is `nemo services run --services scaled-evals`.
+# The NeMo Platform API serving the scaled-evals plugin and the core services
+# needed by its Platform Jobs controller.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,6 +21,18 @@ spec:
       containers:
         - name: api
           image: scaled-evals-app
+          command: ["nemo"]
+          args:
+            - services
+            - run
+            - --services
+            - scaled-evals,jobs,entities,auth,secrets,files
+            - --controllers
+            - jobs,scaled-evals-jobs
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8080"
           envFrom:
             - configMapRef:
                 name: scaled-evals-env
@@ -32,10 +44,27 @@ spec:
             # whatever uid we run as.
             - name: HOME
               value: /tmp
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             # libpq reads the password from PGPASSWORD, so the DSN below carries no
             # credential and the secret stays out of the ConfigMap and out of any log
             # or provenance record that echoes the DSN.
             - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: scaled-evals-postgres
+                  key: password
+            # Platform Jobs, Files, Secrets, and Entity Store keep their own
+            # tables in public while scaled-evals uses its dedicated schema.
+            - name: DATABASE_HOST
+              value: postgres
+            - name: DATABASE_NAME
+              value: scaled_evals
+            - name: DATABASE_USER
+              value: scaled_evals
+            - name: DATABASE_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: scaled-evals-postgres
