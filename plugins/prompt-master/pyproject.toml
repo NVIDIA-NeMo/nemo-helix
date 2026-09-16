@@ -16,8 +16,8 @@ dependencies = [
   "typer>=0.20.0",
 ]
 
-[project.entry-points."nemo.optimization-strategy"]
-prompt-master = "prompt_master_plugin.strategy:PromptMasterStrategy"
+[project.entry-points."nemo.jobs"]
+"prompt-master.agent_optimize" = "prompt_master_plugin.jobs.optimize:PromptMasterOptimizeJob"
 
 [project.entry-points."nemo.skills"]
 prompt-master = "prompt_master_plugin.skills:skills_dir"
