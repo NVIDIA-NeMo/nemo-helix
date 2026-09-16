@@ -24,6 +24,12 @@ class CustomizationRouterError(CustomizationContributorDiscoveryError):
 
 
 _ROUTER_BASE_DEPENDENCIES = ("entities", "auth", "jobs", "secrets", "files", "models")
+_JOB_TEMPLATE_ROUTER_SPEC = RouterSpec(
+    router=templates.router,
+    tag="Customization Job Templates",
+    description="Saved customization job inputs.",
+    prefix="/v2/workspaces/{workspace}",
+)
 
 
 def merge_router_dependencies(contributors: dict[str, object]) -> list[str]:
@@ -33,6 +39,27 @@ def merge_router_dependencies(contributors: dict[str, object]) -> list[str]:
         contrib_deps = getattr(type(contributor), "dependencies", None) or []
         deps.update(contrib_deps)
     return sorted(deps)
+
+
+def _record_router_spec_routes(
+    seen: dict[tuple[str, str], str],
+    *,
+    owner: str,
+    specs: list[RouterSpec],
+) -> None:
+    for spec in specs:
+        prefix = spec.prefix.rstrip("/")
+        for route in spec.router.routes:
+            methods = getattr(route, "methods", None) or {"*"}
+            path = getattr(route, "path", "")
+            full_path = f"{prefix}{path}"
+            for method in methods:
+                op = (method, full_path)
+                if op in seen:
+                    raise CustomizationRouterError(
+                        f"Route collision: routers {seen[op]!r} and {owner!r} both handle {method} {full_path}",
+                    )
+                seen[op] = owner
 
 
 def _assert_no_route_collisions(contributors: dict[str, object]) -> None:
@@ -46,20 +73,9 @@ def _assert_no_route_collisions(contributors: dict[str, object]) -> None:
     """
     # Map (method, full_path) -> contributor key
     seen: dict[tuple[str, str], str] = {}
+    _record_router_spec_routes(seen, owner="customization job templates", specs=[_JOB_TEMPLATE_ROUTER_SPEC])
     for key, contributor in contributors.items():
-        for spec in contributor.get_routers():
-            prefix = spec.prefix.rstrip("/")
-            for route in spec.router.routes:
-                methods = getattr(route, "methods", None) or {"*"}
-                path = getattr(route, "path", "")
-                full_path = f"{prefix}{path}"
-                for method in methods:
-                    op = (method, full_path)
-                    if op in seen:
-                        raise CustomizationRouterError(
-                            f"Route collision: contributors {seen[op]!r} and {key!r} both handle {method} {full_path}",
-                        )
-                    seen[op] = key
+        _record_router_spec_routes(seen, owner=key, specs=contributor.get_routers())
 
 
 class CustomizationRouterService(NemoService):
@@ -98,12 +114,7 @@ class CustomizationRouterService(NemoService):
                 description="Customization router health.",
                 prefix="/v2",
             ),
-            RouterSpec(
-                router=templates.router,
-                tag="Customization Job Templates",
-                description="Saved customization job inputs.",
-                prefix="/v2/workspaces/{workspace}",
-            ),
+            _JOB_TEMPLATE_ROUTER_SPEC,
         ]
 
         for key in sorted(self._contributors.keys()):

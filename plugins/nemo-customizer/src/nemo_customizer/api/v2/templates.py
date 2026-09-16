@@ -30,6 +30,7 @@ from nemo_platform_plugin.entity_client import (
     NemoEntityNotFoundError,
     get_entity_client,
 )
+from nemo_platform_plugin.log_utils import sanitize_for_log
 from nemo_platform_plugin.schema import PaginationData
 
 router = APIRouter()
@@ -87,7 +88,7 @@ async def create_job_template(
             detail=f"Job template '{body.name}' already exists in workspace '{workspace}'.",
         ) from exc
     except Exception as exc:
-        logger.exception("Failed to create job template '%s'", body.name)
+        logger.exception("Failed to create job template '%s'", sanitize_for_log(body.name))
         raise HTTPException(status_code=500, detail="Failed to create job template.") from exc
 
 
@@ -111,7 +112,7 @@ async def list_job_templates(
             sort=sort,
         )
     except Exception as exc:
-        logger.exception("Failed to list job templates in workspace '%s'", workspace)
+        logger.exception("Failed to list job templates in workspace '%s'", sanitize_for_log(workspace))
         raise HTTPException(status_code=500, detail="Failed to list job templates.") from exc
     pagination = PaginationData.model_validate(result.pagination.model_dump()) if result.pagination else None
     return CustomizationJobTemplatePage(data=result.data, pagination=pagination, sort=sort)
@@ -162,7 +163,7 @@ async def update_job_template(
             ),
         ) from exc
     except Exception as exc:
-        logger.exception("Failed to update job template '%s'", name)
+        logger.exception("Failed to update job template '%s'", sanitize_for_log(name))
         raise HTTPException(status_code=500, detail="Failed to update job template.") from exc
 
 
@@ -184,5 +185,5 @@ async def delete_job_template(
             detail=f"Job template '{name}' not found in workspace '{workspace}'.",
         ) from exc
     except Exception as exc:
-        logger.exception("Failed to delete job template '%s'", name)
+        logger.exception("Failed to delete job template '%s'", sanitize_for_log(name))
         raise HTTPException(status_code=500, detail="Failed to delete job template.") from exc
