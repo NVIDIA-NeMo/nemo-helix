@@ -77,7 +77,8 @@ def _enabled_required_check(
 
 
 @router.get("/healthz", response_model=HealthStatus)
-def healthz() -> HealthStatus:
+async def healthz() -> HealthStatus:
+    # A saturated request thread pool must not prevent the liveness response.
     return HealthStatus(status="ok")
 
 

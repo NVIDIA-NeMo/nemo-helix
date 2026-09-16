@@ -32,7 +32,7 @@ import httpx
 from botocore.client import Config
 from botocore.exceptions import ClientError
 
-from scaled_evals.api.redaction import redact_secret_text
+from scaled_evals.api.redaction import redact_json_text, redact_secret_text
 from scaled_evals.api.settings import settings
 
 # s3v4: universal modern signing standard (boto3's default; pinned defensively).
@@ -662,7 +662,11 @@ def _redacted_text_body(path: Path) -> bytes | None:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
         return None
-    redacted = redact_secret_text(text)
+    redacted = (
+        redact_json_text(text, lines=path.suffix.lower() == ".jsonl")
+        if path.suffix.lower() in {".json", ".jsonl"}
+        else redact_secret_text(text)
+    )
     if redacted == text:
         return None
     return redacted.encode("utf-8")
