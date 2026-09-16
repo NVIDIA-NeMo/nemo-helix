@@ -215,3 +215,31 @@ async def test_cleanup_failure_does_not_mask_create_failure(
             await driver.create(SandboxSpec(image="img:1"))
 
     assert "failed to reconcile sandbox create attempt" in caplog.text
+
+
+@requires_opensandbox
+async def test_create_passes_the_configured_cap_and_the_episode_requests_separately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # What this guards is the wiring, not the translation `_resource_limits` already covers.
+    # `resource` is the operator's hard cap and `resource_requests` is what the episode is
+    # scheduled with; they are separate SDK arguments. Pinning only the cap would still pass if
+    # the two were collapsed back into one, which is the shape the original bug took.
+    from types import SimpleNamespace
+
+    Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
+
+    driver = OpenSandboxDriver(create={"resource": {"cpu": 4, "memory": "12Gi"}})
+    captured: dict[str, object] = {}
+
+    async def capture_create(image: str, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return SimpleNamespace(sandbox_id="sandbox-1")
+
+    monkeypatch.setattr(Sandbox, "create", staticmethod(capture_create))
+
+    handle = await driver.create(spec_with(cpu=0.5))
+
+    assert handle.sandbox_id == "sandbox-1"
+    assert captured["resource"] == {"cpu": "4", "memory": "12Gi"}
+    assert captured["resource_requests"] == {"cpu": "500m"}
