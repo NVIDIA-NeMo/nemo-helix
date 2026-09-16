@@ -56,11 +56,19 @@ def resolve_sdk_version(
     release_label: str,
     nightly_timestamp: str,
     source_root: Path,
+    wheel_version: str = "",
 ) -> str:
+    if wheel_version and cadence != "nightly":
+        raise StampError("wheel-version can only be used for nightly builds")
+
     if cadence == "nightly":
-        base_version = latest_release_core(source_root) or "0.0.0"
         if not re.fullmatch(r"\d{14}", nightly_timestamp):
             raise StampError("nightly timestamp must be YYYYMMDDHHMMSS")
+        if wheel_version:
+            if not re.fullmatch(rf"{SEMVER_CORE_PATTERN}\.dev{nightly_timestamp}", wheel_version):
+                raise StampError("wheel-version must be MAJOR.MINOR.PATCH.dev followed by the nightly timestamp")
+            return wheel_version
+        base_version = latest_release_core(source_root) or "0.0.0"
         return f"{base_version}.dev{nightly_timestamp}"
 
     if cadence == "rc":
@@ -83,6 +91,7 @@ def stamp_sdk_version(
     cadence: Cadence,
     release_label: str,
     nightly_timestamp: str,
+    wheel_version: str = "",
 ) -> str:
     safe_sdk_id(sdk_id)
     return resolve_sdk_version(
@@ -90,6 +99,7 @@ def stamp_sdk_version(
         release_label=release_label,
         nightly_timestamp=nightly_timestamp,
         source_root=source_root,
+        wheel_version=wheel_version,
     )
 
 
@@ -102,6 +112,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     # in resolve_sdk_version() rejects empty/missing labels for rc and release.
     parser.add_argument("--release-label", default="")
     parser.add_argument("--nightly-timestamp", default="")
+    parser.add_argument("--wheel-version", default="", help="Exact planned nightly version; overrides tag discovery.")
     parser.add_argument(
         "--print-version",
         action="store_true",
@@ -119,6 +130,7 @@ def main(argv: list[str]) -> int:
             cadence=args.cadence,
             release_label=args.release_label,
             nightly_timestamp=args.nightly_timestamp,
+            wheel_version=args.wheel_version,
         )
     except StampError as error:
         print(error, file=sys.stderr)
