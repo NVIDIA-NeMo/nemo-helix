@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { Button, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
 import { AgentsTable, type AgentTableRow } from '@studio/components/dataViews/AgentsDataView';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -17,14 +18,13 @@ import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentMod
 import { getAgentDetailRoute } from '@studio/routes/utils';
 import { CircleAlert } from 'lucide-react';
 import { type FC, useState } from 'react';
-import { useNavigate } from 'react-router';
 
 export const AgentsListRoute: FC = () => {
   const pluginsLoaded = usePluginsLoaded();
   const pluginsError = usePluginsError();
   const agentsInstalled = usePluginInstalled('agents');
   const workspace = useWorkspaceFromPath();
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const [createDeploymentAgent, setCreateDeploymentAgent] = useState<string | null>(null);
   const [isNewAgentOpen, setNewAgentOpen] = useState(false);
   const [cloneSource, setCloneSource] = useState<AgentTableRow | null>(null);
@@ -33,8 +33,8 @@ export const AgentsListRoute: FC = () => {
     items: [{ slotLabel: 'Agents' }],
   });
 
-  const handleOpenDetails = (agent: AgentTableRow) =>
-    navigate(getAgentDetailRoute(workspace, agent.name));
+  const handleOpenDetails = (agent: AgentTableRow, event?: React.MouseEvent) =>
+    openRow(event, getAgentDetailRoute(workspace, agent.name));
 
   if (!pluginsLoaded && !pluginsError) {
     return null;

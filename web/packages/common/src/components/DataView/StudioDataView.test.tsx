@@ -156,9 +156,11 @@ vi.mock('@nemo/common/src/components/DataView/internal', () => ({
   TableContent: ({
     className,
     onClick,
+    onAuxClick,
   }: {
     className?: string;
     onClick?: React.MouseEventHandler;
+    onAuxClick?: React.MouseEventHandler;
   }) => (
     // ref (not JSX onClick) so jsx-a11y doesn't flag the test-only <table>
     <table
@@ -166,6 +168,7 @@ vi.mock('@nemo/common/src/components/DataView/internal', () => ({
       ref={(el) => {
         if (el) {
           el.onclick = onClick ? (onClick as unknown as (e: MouseEvent) => void) : null;
+          el.onauxclick = onAuxClick ? (onAuxClick as unknown as (e: MouseEvent) => void) : null;
         }
       }}
     >
@@ -199,6 +202,12 @@ vi.mock('@nemo/common/src/components/DataView/internal', () => ({
 }));
 
 type TestData = { id: string; name: string; subRows?: TestData[] };
+
+function middleClick(element: Element) {
+  const event = new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 });
+  fireEvent(element, event);
+  return event;
+}
 
 const testData: TestData[] = [
   { id: '1', name: 'Alice' },
@@ -275,7 +284,7 @@ describe('StudioDataView', () => {
 
       fireEvent.click(screen.getByText('Alice'));
 
-      expect(onRowClick).toHaveBeenCalledWith(testData[0], 0);
+      expect(onRowClick).toHaveBeenCalledWith(testData[0], 0, expect.anything());
     });
 
     it('should call onRowClick with correct row for second row', () => {
@@ -284,7 +293,7 @@ describe('StudioDataView', () => {
 
       fireEvent.click(screen.getByText('Bob'));
 
-      expect(onRowClick).toHaveBeenCalledWith(testData[1], 1);
+      expect(onRowClick).toHaveBeenCalledWith(testData[1], 1, expect.anything());
     });
 
     it('should NOT call onRowClick when a button is clicked', () => {
@@ -357,7 +366,7 @@ describe('StudioDataView', () => {
       targets[0].focus();
       await user.keyboard('{Enter}');
 
-      expect(onRowClick).toHaveBeenCalledWith(testData[0], 0);
+      expect(onRowClick).toHaveBeenCalledWith(testData[0], 0, expect.anything());
     });
 
     it('should call onRowClick when Space is pressed on a keyboard target', async () => {
@@ -369,7 +378,7 @@ describe('StudioDataView', () => {
       targets[1].focus();
       await user.keyboard(' ');
 
-      expect(onRowClick).toHaveBeenCalledWith(testData[1], 1);
+      expect(onRowClick).toHaveBeenCalledWith(testData[1], 1, expect.anything());
     });
 
     it('should NOT call onRowClick for non-activation keys', () => {
@@ -467,7 +476,7 @@ describe('StudioDataView', () => {
 
       fireEvent.click(screen.getByText('Sibling'));
 
-      expect(onRowClick).toHaveBeenCalledWith(dataWithSubRows[1], 1);
+      expect(onRowClick).toHaveBeenCalledWith(dataWithSubRows[1], 1, expect.anything());
     });
 
     it('should resolve a sub-row correctly on click', () => {
@@ -477,7 +486,7 @@ describe('StudioDataView', () => {
       fireEvent.click(screen.getByText('Child-1'));
 
       // Index is the parent's top-level data position (0), not the visual row position
-      expect(onRowClick).toHaveBeenCalledWith(dataWithSubRows[0].subRows![0], 0);
+      expect(onRowClick).toHaveBeenCalledWith(dataWithSubRows[0].subRows![0], 0, expect.anything());
     });
 
     it('should resolve a sub-row correctly on keyboard activation', async () => {
@@ -490,7 +499,7 @@ describe('StudioDataView', () => {
       await user.keyboard('{Enter}');
 
       // Same index semantic as click: parent's top-level data position
-      expect(onRowClick).toHaveBeenCalledWith(dataWithSubRows[0].subRows![0], 0);
+      expect(onRowClick).toHaveBeenCalledWith(dataWithSubRows[0].subRows![0], 0, expect.anything());
     });
 
     it('should resolve the second sub-row correctly on click', () => {
@@ -499,7 +508,81 @@ describe('StudioDataView', () => {
 
       fireEvent.click(screen.getByText('Child-2'));
 
-      expect(onRowClick).toHaveBeenCalledWith(dataWithSubRows[0].subRows![1], 0);
+      expect(onRowClick).toHaveBeenCalledWith(dataWithSubRows[0].subRows![1], 0, expect.anything());
+    });
+
+    it('should forward the event for sub-rows too', () => {
+      const onRowClick = vi.fn();
+      render(<StudioDataView {...subRowProps} onRowClick={onRowClick} />);
+
+      fireEvent.click(screen.getByText('Child-2'), { metaKey: true });
+
+      expect(onRowClick).toHaveBeenCalledWith(dataWithSubRows[0].subRows![1], 0, expect.anything());
+      expect(onRowClick.mock.calls[0][2].metaKey).toBe(true);
+    });
+  });
+
+  describe('event forwarding for new-tab navigation', () => {
+    it('should forward a plain click with no modifiers', () => {
+      const onRowClick = vi.fn();
+      render(<StudioDataView {...defaultProps} onRowClick={onRowClick} />);
+
+      fireEvent.click(screen.getByText('Bob'));
+
+      const event = onRowClick.mock.calls[0][2];
+      expect(onRowClick).toHaveBeenCalledWith(testData[1], 1, expect.anything());
+      expect(event.metaKey).toBe(false);
+      expect(event.ctrlKey).toBe(false);
+      expect(event.button).toBe(0);
+    });
+
+    it('should forward the meta key so callers can open a new tab', () => {
+      const onRowClick = vi.fn();
+      render(<StudioDataView {...defaultProps} onRowClick={onRowClick} />);
+
+      fireEvent.click(screen.getByText('Bob'), { metaKey: true });
+
+      expect(onRowClick).toHaveBeenCalledWith(testData[1], 1, expect.anything());
+      expect(onRowClick.mock.calls[0][2].metaKey).toBe(true);
+    });
+
+    it('should forward the ctrl key', () => {
+      const onRowClick = vi.fn();
+      render(<StudioDataView {...defaultProps} onRowClick={onRowClick} />);
+
+      fireEvent.click(screen.getByText('Bob'), { ctrlKey: true });
+
+      expect(onRowClick.mock.calls[0][2].ctrlKey).toBe(true);
+    });
+
+    it('should forward a middle click via onAuxClick', () => {
+      const onRowClick = vi.fn();
+      render(<StudioDataView {...defaultProps} onRowClick={onRowClick} />);
+
+      middleClick(screen.getByText('Bob'));
+
+      expect(onRowClick).toHaveBeenCalledWith(testData[1], 1, expect.anything());
+      expect(onRowClick.mock.calls[0][2].button).toBe(1);
+    });
+
+    it('should not fire on a middle click of an opted-out element', () => {
+      const onRowClick = vi.fn();
+      render(<StudioDataView {...defaultProps} onRowClick={onRowClick} />);
+
+      const event = middleClick(screen.getByRole('button', { name: 'Delete Alice' }));
+
+      expect(onRowClick).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+    });
+
+    it('should suppress the row default on a middle click of a plain cell', () => {
+      const onRowClick = vi.fn();
+      render(<StudioDataView {...defaultProps} onRowClick={onRowClick} />);
+
+      const event = middleClick(screen.getByText('Bob'));
+
+      expect(onRowClick).toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(true);
     });
   });
 

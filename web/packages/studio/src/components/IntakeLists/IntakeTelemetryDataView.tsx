@@ -7,7 +7,7 @@ import { FilterPanelToggle } from '@nemo/common/src/components/DataView/FilterPa
 import * as DataView from '@nemo/common/src/components/DataView/internal';
 import '@nemo/common/src/components/DataView/StudioDataView.css';
 import { StudioAppliedFilters } from '@nemo/common/src/components/DataView/StudioAppliedFilters';
-import { useRowClick } from '@nemo/common/src/components/DataView/useRowClick';
+import { RowClickHandler, useRowClick } from '@nemo/common/src/components/DataView/useRowClick';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { DEFAULT_PAGE_SIZE_OPTIONS } from '@nemo/common/src/constants/pagination';
 import {
@@ -119,7 +119,7 @@ const IntakeTelemetryToolbar = <DataType,>({
 export interface IntakeTelemetryDataViewProps<DataType> {
   dataViewState: DataView.DataViewState;
   makeColumns: ComponentProps<typeof DataView.Root<DataType>>['makeColumns'];
-  onRowClick?: (row: DataType, index: number) => void;
+  onRowClick?: RowClickHandler<DataType>;
   maxTwoLines?: boolean;
   searchField?: string;
   renderBulkActions?: (props: {
@@ -162,6 +162,7 @@ export const IntakeTelemetryDataView = <DataType,>({
   const {
     wrapColumns,
     onClick: rowClickHandler,
+    onAuxClick: rowAuxClickHandler,
     className: rowClickClassName,
   } = useRowClick(onRowClick, data);
 
@@ -227,6 +228,7 @@ export const IntakeTelemetryDataView = <DataType,>({
               <DataView.TableContent
                 stickyTableHeader={attributes?.DataViewTableContent?.stickyTableHeader ?? true}
                 onClick={rowClickHandler}
+                onAuxClick={rowAuxClickHandler}
                 renderEmptyState={() => (
                   <Block className="h-full">
                     <TableEmptyState
