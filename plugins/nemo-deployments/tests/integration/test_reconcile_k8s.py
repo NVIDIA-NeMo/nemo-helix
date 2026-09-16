@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -36,6 +37,7 @@ from nemo_deployments_plugin.entities import (
 )
 from nemo_deployments_plugin.reconciler.deployment_reconciler import DeploymentReconciler
 from nemo_deployments_plugin.reconciler.volume_reconciler import VolumeReconciler
+from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 
 pytestmark = [
     pytest.mark.skipif("k8s" not in BACKEND_CLASSES, reason="Requires K8sDeploymentBackend (AIRCORE-757)"),
@@ -66,14 +68,45 @@ def _backend(k8s_registry: ExecutorRegistry) -> K8sDeploymentBackend:
     return backend
 
 
+class _InMemoryVolumeStore:
+    """Minimal persistent store for the volume lifecycle exercised in this module."""
+
+    def __init__(self, volume: Volume) -> None:
+        self._volumes = {(volume.workspace, volume.name): volume}
+
+    async def get(self, entity_type: type[Volume], *, name: str, workspace: str) -> Volume:
+        assert entity_type is Volume
+        try:
+            return self._volumes[(workspace, name)]
+        except KeyError as exc:
+            raise NemoEntityNotFoundError(f"{workspace}/{name}") from exc
+
+    async def update(self, volume: Volume, *, original_name: str | None = None) -> Volume:
+        assert original_name is None
+        self._volumes[(volume.workspace, volume.name)] = volume
+        return volume
+
+    async def delete(
+        self,
+        entity_type: type[Volume],
+        name: str,
+        *,
+        workspace: str,
+        expected_db_version: int | None = None,
+    ) -> None:
+        assert entity_type is Volume
+        volume = await self.get(entity_type, name=name, workspace=workspace)
+        assert expected_db_version == volume.db_version
+        del self._volumes[(workspace, name)]
+
+
 @pytest.mark.asyncio
 async def test_volume_delete_reconciliation_removes_pvc(k8s_registry: ExecutorRegistry) -> None:
     """A DELETING Volume is retained until its real Kubernetes PVC delete succeeds."""
-    entities = AsyncMock()
-    entities.update = AsyncMock(side_effect=lambda entity: entity)
     volume_name = f"delete-{uuid.uuid4().hex[:8]}"
     volume = Volume(name=volume_name, workspace="itest-pvc", size="1Gi", status="PENDING")
-    reconciler = VolumeReconciler(entities, k8s_registry)
+    entities = _InMemoryVolumeStore(volume)
+    reconciler = VolumeReconciler(cast(NemoEntitiesClient, entities), k8s_registry)
     backend = _backend(k8s_registry)
     pvc_name = k8s_volume_resource_name(volume.workspace, volume.name)
     core_v1 = backend.clients.core_v1
@@ -85,12 +118,8 @@ async def test_volume_delete_reconciliation_removes_pvc(k8s_registry: ExecutorRe
         volume.status = "DELETING"
         await reconciler.reconcile_one(volume)
 
-        entities.delete.assert_awaited_once_with(
-            Volume,
-            name=volume.name,
-            workspace=volume.workspace,
-            expected_db_version=volume.db_version,
-        )
+        with pytest.raises(NemoEntityNotFoundError):
+            await entities.get(Volume, name=volume.name, workspace=volume.workspace)
 
         for _ in range(POLL_ATTEMPTS):
             try:
