@@ -133,6 +133,9 @@ runs:
             - 'tools/nodejs/**'
           github-scripts:
             - '.github/scripts/**/*.cjs'
+            - '.github/scripts/stamp_sdk_version.py'
+            - '.github/scripts/tests/test_stamp_sdk_version.py'
+            - '.github/actions/build-nemo-platform-wheel/action.yaml'
             - '.github/eslint.config.mjs'
             - '.github/workflows/release.yaml'
             - '.github/workflows/ci.yaml'
