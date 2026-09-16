@@ -105,6 +105,7 @@ async def test_to_spec_forwards_retrieval_pipeline_fields() -> None:
             first_stage_k=50,
             truncate_long_documents=None,
             batch_size=16,
+            embedding_in_flight=3,
             embedding_dimensions=1024,
         ),
     )
@@ -121,6 +122,7 @@ async def test_to_spec_forwards_retrieval_pipeline_fields() -> None:
     assert canonical.target.first_stage_k == 50
     assert canonical.target.truncate_long_documents is None
     assert canonical.target.batch_size == 16
+    assert canonical.target.embedding_in_flight == 3
     assert canonical.target.embedding_dimensions == 1024
 
 

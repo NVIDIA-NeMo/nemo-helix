@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
 import json
 import math
 from pathlib import Path
@@ -252,6 +253,46 @@ async def test_dense_search_ranks_documents_and_uses_passage_then_query(tmp_path
     assert input_types == ["passage", "query"]
     assert list(results["q1"]) == ["d1", "d2"]
     assert results["q1"]["d1"] > results["q1"]["d2"]
+
+
+@pytest.mark.asyncio
+async def test_dense_search_pipelines_two_embedding_requests(tmp_path: Path) -> None:
+    (tmp_path / "qrels").mkdir()
+    (tmp_path / "corpus.jsonl").write_text(
+        '{"_id":"d1","text":"a"}\n{"_id":"d2","text":"b"}\n{"_id":"d3","text":"c"}\n{"_id":"d4","text":"d"}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "queries.jsonl").write_text('{"_id":"q1","text":"a?"}\n', encoding="utf-8")
+    (tmp_path / "qrels" / "test.tsv").write_text("query-id\tcorpus-id\tscore\nq1\td1\t1\n", encoding="utf-8")
+
+    in_flight = 0
+    max_in_flight = 0
+    lock = asyncio.Lock()
+
+    class PipelinedTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            nonlocal in_flight, max_in_flight
+            payload = json.loads(request.content)
+            async with lock:
+                in_flight += 1
+                max_in_flight = max(max_in_flight, in_flight)
+            await asyncio.sleep(0.05)
+            vectors = [[1.0, 0.0] for _ in payload["input"]]
+            async with lock:
+                in_flight -= 1
+            return _response(request, vectors)
+
+    async with httpx.AsyncClient(transport=PipelinedTransport()) as client:
+        results = await dense_search(
+            BeirDataset.from_path(tmp_path),
+            NimEmbeddingClient(model=_model(), dimensions=2),
+            batch_size=1,
+            in_flight=2,
+            client=client,
+        )
+
+    assert max_in_flight == 2
+    assert list(results["q1"])[0] == "d1"
 
 
 def _write_beir(tmp_path: Path, *, title: str = "", text: str = "alpha") -> BeirDataset:

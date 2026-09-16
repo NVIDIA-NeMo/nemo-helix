@@ -77,6 +77,11 @@ class RetrievalInputSpec(BaseModel):
         json_schema_extra={"nullable": True},
     )
     batch_size: int = Field(default=32, ge=1, description="Embedding HTTP batch size.")
+    embedding_in_flight: int = Field(
+        default=2,
+        ge=1,
+        description="Concurrent embedding POSTs to one NIM so the GPU is not idle between batches.",
+    )
     embedding_dimensions: int | None = Field(
         default=None,
         gt=0,
@@ -342,6 +347,7 @@ async def _resolve_retrieval(
         first_stage_k=value.first_stage_k,
         truncate_long_documents=value.truncate_long_documents,
         batch_size=value.batch_size,
+        embedding_in_flight=value.embedding_in_flight,
         embedding_dimensions=value.embedding_dimensions,
     )
 
