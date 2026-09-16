@@ -13,7 +13,7 @@
 # =============================================================================
 ARG PYTHON_VERSION=3.13
 ARG PYTHON_IMAGE=python:${PYTHON_VERSION}-slim-trixie
-ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.9.30
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.10.10
 ARG SAFE_SYNTHESIZER_RUNTIME_PACKAGE="nemo-safe-synthesizer[engine,cu129]==0.1.7"
 ARG FLASHINFER_CU129_INDEX_URL="https://flashinfer.ai/whl/cu129"
 ARG PYTORCH_CU129_INDEX_URL="https://download.pytorch.org/whl/cu129"
