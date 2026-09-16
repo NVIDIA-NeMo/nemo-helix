@@ -765,13 +765,10 @@ nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 "data-designer.retrieval-generate" = "nemo_data_designer_plugin.jobs.retrieval_generate:RetrievalGenerateJob"
 "data-designer.retrieval-prepare" = "nemo_data_designer_plugin.jobs.retrieval_prepare:RetrievalPrepareJob"
 "data-designer.retrieval-run" = "nemo_data_designer_plugin.jobs.retrieval_run:RetrievalRunJob"
-
-# Generated from [tool.bundle-package]; do not edit this table by hand.
-[project.entry-points."nemo.optimization-strategy"]
-nat = "nemo_optimization.optimization_strategy:NatOptimizationStrategy"
-prompt-master = "prompt_master_plugin.strategy:PromptMasterStrategy"
-experimentalist = "nemo_experimentalist_plugin.optimization_strategy:ExperimentalistOptimizationStrategy"
-switchyard = "nemo_switchyard.optimization_strategy:SwitchyardOptimizationStrategy"
+"optimization.agent_optimize" = "nemo_optimization.jobs.agent_optimize:NatAgentOptimizeJob"
+"prompt-master.agent_optimize" = "prompt_master_plugin.jobs.optimize:PromptMasterOptimizeJob"
+"switchyard.agent_optimize" = "nemo_switchyard.jobs.optimize:SwitchyardOptimizeJob"
+"experimentalist.agent_optimize" = "nemo_experimentalist_plugin.jobs.optimize:ExperimentalistOptimizeJob"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.optimization.backends"]
@@ -897,7 +894,8 @@ nemo-evaluator-plugin = { source = "../../plugins/nemo-evaluator/src/nemo_evalua
 nemo-experimentalist-plugin = { source = "../../plugins/nemo-experimentalist/src/nemo_experimentalist_plugin", module = "nemo_experimentalist_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-insights-plugin = { source = "../../plugins/nemo-insights/src/nemo_insights_plugin", module = "nemo_insights_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 # Required by agents.optimize: nemo-agent-optimization-plugin owns OptimizeJob and dispatches to
-# the nemo.optimization-strategy plugins, of which this package supplies the `nat` strategy.
+# the AgentOptimizeJob subclasses registered under nemo.jobs, of which this package supplies the
+# `nat` strategy.
 nemo-optimization-plugin = { source = "../../plugins/nemo-optimization/src/nemo_optimization", module = "nemo_optimization", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-guardrails-plugin = { source = "../../plugins/nemo-guardrails/src/nemo_guardrails_plugin", module = "nemo_guardrails_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-rl-plugin = { source = "../../plugins/nemo-rl/src/nemo_rl_plugin", module = "nemo_rl_plugin", inherit = { "entry-points" = ["nemo.*"] } }
