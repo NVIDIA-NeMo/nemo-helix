@@ -25,8 +25,8 @@ nemo agents optimize prepare-fileset \
 nemo agents optimize \
   --strategy nat \
   --agent <name> \
-  --config-fileset default/hermes-optimize-chatonly \
-  --config optimize-chatonly.yaml \
+  --optimize-config-fileset default/hermes-optimize-chatonly \
+  --optimize-config optimize-chatonly.yaml \
   --output-agent <new-agent-name> \
   --workspace default
 ```
@@ -34,9 +34,9 @@ nemo agents optimize \
 ``prepare-fileset`` validates a bundle directory
 (:mod:`nemo_optimization.bundle`) and uploads it. ``optimize`` hands the study
 to the platform, which cannot read the client's filesystem, so CLI submissions
-require ``--config-fileset``: a fileset holding the whole bundle (config,
+require ``--optimize-config-fileset``: a fileset holding the whole bundle (config,
 Agent under Test, dataset, ``eval.fabric.base_dir`` tree, hooks and MCP
-configs) with ``--config`` given relative to its root. ``--agent`` (the
+configs) with ``--optimize-config`` given relative to its root. ``--agent`` (the
 platform agent under test) and ``--output-agent`` (the name for the new,
 optimized agent entity the run creates) are both required.
 

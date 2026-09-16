@@ -13,8 +13,8 @@ from pydantic import ValidationError
 def _valid() -> dict:
     return {
         "agent": "my-ws/my-agent",
-        "config_fileset": "my-ws/bundle",
-        "config": "configs/optimize.yaml",
+        "optimize_config_fileset": "my-ws/bundle",
+        "optimize_config": "configs/optimize.yaml",
         "output_agent": "my-agent-opt",
     }
 
@@ -25,7 +25,7 @@ def test_agent_optimize_spec_accepts_a_minimal_valid_payload() -> None:
     assert spec.workspace == "default"
 
 
-@pytest.mark.parametrize("missing", ["agent", "config_fileset", "config", "output_agent"])
+@pytest.mark.parametrize("missing", ["agent", "optimize_config_fileset", "optimize_config", "output_agent"])
 def test_every_normalized_field_is_required(missing: str) -> None:
     payload = _valid()
     del payload[missing]
@@ -35,13 +35,13 @@ def test_every_normalized_field_is_required(missing: str) -> None:
 
 @pytest.mark.parametrize("bad", ["/abs/optimize.yaml", "../escape.yaml", "~/optimize.yaml", "D:opt.yml"])
 def test_config_must_stay_inside_the_bundle(bad: str) -> None:
-    payload = _valid() | {"config": bad}
+    payload = _valid() | {"optimize_config": bad}
     with pytest.raises(ValidationError, match="relative to the fileset root"):
         AgentOptimizeSpec.model_validate(payload)
 
 
 def test_config_fileset_must_be_an_entity_ref() -> None:
-    payload = _valid() | {"config_fileset": "not/a/valid/ref"}
+    payload = _valid() | {"optimize_config_fileset": "not/a/valid/ref"}
     with pytest.raises(ValidationError, match="must be 'name' or 'workspace/name'"):
         AgentOptimizeSpec.model_validate(payload)
 

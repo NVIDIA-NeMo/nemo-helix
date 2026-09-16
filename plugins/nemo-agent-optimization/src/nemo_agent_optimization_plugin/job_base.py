@@ -245,14 +245,14 @@ def _staged_bundle(spec: AgentOptimizeSpec, *, ctx: JobContext, sdk: NeMoPlatfor
     from nemo_agents_plugin.jobs.fileset_io import resolve_staged_config
 
     with resolve_staged_config(
-        spec.config,
-        spec.config_fileset,
+        spec.optimize_config,
+        spec.optimize_config_fileset,
         workspace=spec.workspace,
         ctx=ctx,
         sdk=sdk,
         kind="optimize-config",
     ) as config_path:
-        yield config_path, _bundle_root_of(config_path, spec.config)
+        yield config_path, _bundle_root_of(config_path, spec.optimize_config)
 
 
 def _bundle_root_of(config_path: Path, config_rel_path: str) -> Path:

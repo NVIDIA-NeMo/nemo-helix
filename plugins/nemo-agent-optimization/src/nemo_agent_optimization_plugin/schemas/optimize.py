@@ -42,13 +42,13 @@ class AgentOptimizeSpec(BaseModel):
         min_length=1,
         description="Platform agent to optimize: 'name' or 'workspace/name'.",
     )
-    config_fileset: str = Field(
+    optimize_config_fileset: str = Field(
         min_length=1,
         description="Fileset holding the optimization bundle: the config named by "
-        "'config' plus every asset it references. Stage one with "
+        "'optimize_config' plus every asset it references. Stage one with "
         "`nemo agents optimize prepare-fileset`.",
     )
-    config: str = Field(
+    optimize_config: str = Field(
         min_length=1,
         description="Path to the strategy configuration YAML, relative to the fileset root.",
     )
@@ -60,14 +60,14 @@ class AgentOptimizeSpec(BaseModel):
 
     @model_validator(mode="after")
     def _validate(self) -> AgentOptimizeSpec:
-        if not re.match(ENTITY_REF_PATTERN, self.config_fileset):
+        if not re.match(ENTITY_REF_PATTERN, self.optimize_config_fileset):
             raise ValueError(
-                f"config_fileset must be 'name' or 'workspace/name'; got {self.config_fileset!r}."
+                f"optimize_config_fileset must be 'name' or 'workspace/name'; got {self.optimize_config_fileset!r}."
             )
-        if not is_fileset_relative(self.config):
+        if not is_fileset_relative(self.optimize_config):
             raise ValueError(
-                "config must be a path relative to the fileset root (no leading '/', no '..' "
-                f"segments); got {self.config!r}."
+                "optimize_config must be a path relative to the fileset root (no leading '/', no '..' "
+                f"segments); got {self.optimize_config!r}."
             )
         return self
 
@@ -83,6 +83,6 @@ class OptimizeSubmitSpec(BaseModel):
 
     strategy: str = Field(min_length=1, description="Installed optimization strategy, e.g. 'nat'.")
     agent: str = Field(min_length=1, description="Platform agent to optimize.")
-    config_fileset: str = Field(min_length=1, description="Fileset holding the optimization bundle.")
-    config: str = Field(min_length=1, description="Config YAML path, relative to the fileset root.")
+    optimize_config_fileset: str = Field(min_length=1, description="Fileset holding the optimization bundle.")
+    optimize_config: str = Field(min_length=1, description="Config YAML path, relative to the fileset root.")
     output_agent: str = Field(min_length=1, description="Name for the new optimized agent entity.")

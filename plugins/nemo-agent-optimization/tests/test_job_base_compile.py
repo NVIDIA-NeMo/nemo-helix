@@ -28,8 +28,8 @@ def _spec() -> Any:
     return AgentOptimizeSpec.model_validate(
         {
             "agent": "my-ws/my-agent",
-            "config_fileset": "my-ws/bundle",
-            "config": "configs/optimize.yaml",
+            "optimize_config_fileset": "my-ws/bundle",
+            "optimize_config": "configs/optimize.yaml",
             "output_agent": "my-agent-opt",
             "workspace": "my-ws",
         }

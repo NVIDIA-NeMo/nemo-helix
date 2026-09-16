@@ -29,9 +29,10 @@ To add a strategy:
 2. Implement `optimize(self, *, source_agent_config, config, ctx, workspace, sdk) -> dict`,
    returning an optimized `nemo-agents-spec-v1` config dict. The base class
    already resolved the Agent under Test (`source_agent_config`), staged the
-   bundle referenced by `--config-fileset`/`--config` into the process working
-   directory, and will register whatever this method returns as a new agent
-   entity — `optimize()` only has to do the strategy-specific transform.
+   bundle referenced by `--optimize-config-fileset`/`--optimize-config` into
+   the process working directory, and will register whatever this method
+   returns as a new agent entity — `optimize()` only has to do the
+   strategy-specific transform.
 3. Ship a task entry point, `tasks/agent_optimize.py`, that calls
    `nemo_platform_plugin.tasks.dispatcher.run_task` with your job class (see
    any of the installed strategies for the ~20-line pattern).
@@ -43,13 +44,21 @@ To add a strategy:
    "my-strategy.agent_optimize" = "my_plugin.jobs.agent_optimize:MyAgentOptimizeJob"
    ```
 
-Every strategy shares the same submission spec
-(`nemo_agent_optimization_plugin.schemas.optimize.OptimizeSubmitSpec`):
-`strategy`, `agent`, `config_fileset`, `config`, and `output_agent` are all
-required. `agent` is the platform agent under test; `config_fileset` +
-`config` locate the strategy's own bundle (stage one with
+Every strategy job's `spec_schema` is the same normalized
+`nemo_agent_optimization_plugin.schemas.optimize.AgentOptimizeSpec`:
+`agent`, `optimize_config_fileset`, `optimize_config`, `output_agent`, and
+`workspace` are all required (`workspace` defaults to `"default"`). `agent`
+is the platform agent under test; `optimize_config_fileset` +
+`optimize_config` locate the strategy's own bundle (stage one with
 `nemo agents optimize prepare-fileset`); `output_agent` names the new agent
 entity the run creates.
+
+`nemo agents optimize` itself (the router, `OptimizeJob`) is CLI-facing and
+takes one extra field, `strategy`, via its own
+`OptimizeSubmitSpec` — that's where `--strategy` comes from. `OptimizeJob`
+strips `strategy` back off and re-validates the rest as `AgentOptimizeSpec`
+(`_child_spec()`) before delegating to the resolved strategy job, so a
+strategy's `optimize()` never sees `strategy` on its spec.
 
 ## Discover the installed strategies
 

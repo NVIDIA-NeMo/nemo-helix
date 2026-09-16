@@ -54,8 +54,8 @@ class _RecordingJob(AgentOptimizeJob):
 def _spec(**overrides: Any) -> dict[str, Any]:
     return {
         "agent": "my-ws/my-agent",
-        "config_fileset": "my-ws/bundle",
-        "config": "configs/optimize.yaml",
+        "optimize_config_fileset": "my-ws/bundle",
+        "optimize_config": "configs/optimize.yaml",
         "output_agent": "my-agent-opt",
         "workspace": "my-ws",
         **overrides,

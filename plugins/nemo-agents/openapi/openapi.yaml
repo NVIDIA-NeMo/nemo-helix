@@ -6490,17 +6490,17 @@ components:
           minLength: 1
           title: Agent
           description: 'Platform agent to optimize: ''name'' or ''workspace/name''.'
-        config_fileset:
+        optimize_config_fileset:
           type: string
           minLength: 1
-          title: Config Fileset
+          title: Optimize Config Fileset
           description: 'Fileset holding the optimization bundle: the config named
-            by ''config'' plus every asset it references. Stage one with `nemo agents
-            optimize prepare-fileset`.'
-        config:
+            by ''optimize_config'' plus every asset it references. Stage one with
+            `nemo agents optimize prepare-fileset`.'
+        optimize_config:
           type: string
           minLength: 1
-          title: Config
+          title: Optimize Config
           description: Path to the strategy configuration YAML, relative to the fileset
             root.
         output_agent:
@@ -6521,8 +6521,8 @@ components:
       type: object
       required:
       - agent
-      - config_fileset
-      - config
+      - optimize_config_fileset
+      - optimize_config
       - output_agent
       - strategy
       title: OptimizeSpec
@@ -6539,15 +6539,15 @@ components:
           minLength: 1
           title: Agent
           description: Platform agent to optimize.
-        config_fileset:
+        optimize_config_fileset:
           type: string
           minLength: 1
-          title: Config Fileset
+          title: Optimize Config Fileset
           description: Fileset holding the optimization bundle.
-        config:
+        optimize_config:
           type: string
           minLength: 1
-          title: Config
+          title: Optimize Config
           description: Config YAML path, relative to the fileset root.
         output_agent:
           type: string
@@ -6558,8 +6558,8 @@ components:
       required:
       - strategy
       - agent
-      - config_fileset
-      - config
+      - optimize_config_fileset
+      - optimize_config
       - output_agent
       title: OptimizeSubmitSpec
       description: Client-submitted router fields (workspace is added server-side).

@@ -6965,7 +6965,8 @@ nemo agents optimize [OPTIONS] [COMMAND] [ARGS]...
 
 * `--strategy`: Installed optimization strategy, e.g. 'nat'.
 * `--agent`: Platform agent to optimize.
-* `--config-fileset`: Fileset holding the optimization bundle.
+* `--optimize-config-fileset`: Fileset holding the optimization bundle.
+* `--optimize-config`: Config YAML path, relative to the fileset root.
 * `--output-agent`: Name for the new optimized agent entity.
 
 **Spec Source:**
@@ -6983,8 +6984,6 @@ nemo agents optimize [OPTIONS] [COMMAND] [ARGS]...
 * `--workspace`: Workspace scope for the submission. [default: default]
 
 Job Spec flags are generated from the OptimizeSubmitSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
-
-Some spec fields cannot be represented as CLI flags: `config`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**
@@ -7004,7 +7003,7 @@ nemo agents optimize prepare-fileset [OPTIONS]
 **Options:**
 
 * `--source <DIRECTORY>`: Directory holding the optimize config and every asset it references.
-* `--optimize-config`: Optimize YAML, as a path relative to --source. This is the value to pass to `optimize --config`.
+* `--optimize-config`: Optimize YAML, as a path relative to --source. This is the value to pass to `optimize --optimize-config`.
 * `--fileset`: Fileset to upload into ('name' or 'workspace/name'). Created if missing.
 * `--workspace`: Workspace for the fileset and for agent / model preflight. [default: default]
 * `--agent`: Platform agent supplying the Agent under Test, for configs that carry only the optimizer and eval overlay.

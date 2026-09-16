@@ -76,7 +76,7 @@ export ADAPTER_PYTHON="$REPO_ROOT/.venv/bin/python"
 - **`prepare-fileset` reads the bundle from your filesystem; `optimize` reads it
   from a fileset.** Paths inside the YAML are bundle-relative, so `cd "$BUNDLE"`
   first when validating examples locally. The platform command requires
-  `--config-fileset` and resolves paths against the downloaded bundle
+  `--optimize-config-fileset` and resolves paths against the downloaded bundle
   root; see [Platform submission](#platform-submission) below.
 - **`--agent` and `--output-agent` are both required on every `optimize`
   submission.** The job always resolves `--agent` against the platform (there
@@ -110,8 +110,8 @@ nemo agents optimize prepare-fileset \
 nemo agents optimize \
   --strategy nat \
   --agent hermes-optimize-chatonly \
-  --config-fileset default/hermes-optimize-chatonly \
-  --config optimize-chatonly.yaml \
+  --optimize-config-fileset default/hermes-optimize-chatonly \
+  --optimize-config optimize-chatonly.yaml \
   --output-agent hermes-optimize-chatonly-optimized \
   --workspace default
 ```
@@ -146,8 +146,8 @@ print(
         {
             "strategy": "nat",
             "agent": "hermes-optimize-chatonly",
-            "config_fileset": "default/hermes-optimize-chatonly",
-            "config": "optimize-chatonly.yaml",
+            "optimize_config_fileset": "default/hermes-optimize-chatonly",
+            "optimize_config": "optimize-chatonly.yaml",
             "output_agent": "hermes-optimize-chatonly-optimized",
             "workspace": WORKSPACE,
         },
@@ -212,8 +212,8 @@ nemo agents optimize prepare-fileset \
 nemo agents optimize \
   --strategy nat \
   --agent hermes-optimize-chatonly \
-  --config-fileset default/hermes-optimize-chatonly-via-agent \
-  --config optimize-chatonly-via-agent.yaml \
+  --optimize-config-fileset default/hermes-optimize-chatonly-via-agent \
+  --optimize-config optimize-chatonly-via-agent.yaml \
   --output-agent hermes-optimize-chatonly-via-agent-optimized \
   --workspace default
 ```
@@ -265,15 +265,15 @@ resolving the config's models against the platform.
 
 ### 2. Launch the study
 
-The command that `prepare-fileset` prints, with `--config` now relative
+The command that `prepare-fileset` prints, with `--optimize-config` now relative
 to the fileset root, plus the always-required `--agent` and `--output-agent`:
 
 ```bash
 nemo agents optimize \
   --strategy nat \
   --agent hermes-optimize-chatonly \
-  --config-fileset default/hermes-optimize-chatonly \
-  --config optimize-chatonly.yaml \
+  --optimize-config-fileset default/hermes-optimize-chatonly \
+  --optimize-config optimize-chatonly.yaml \
   --output-agent hermes-optimize-chatonly-optimized \
   --workspace default
 ```
@@ -360,8 +360,8 @@ nemo agents optimize prepare-fileset \
 nemo agents optimize \
   --strategy nat \
   --agent <phishing-agent-name> \
-  --config-fileset default/hermes-optimize-mcp \
-  --config optimize-mcp.yaml \
+  --optimize-config-fileset default/hermes-optimize-mcp \
+  --optimize-config optimize-mcp.yaml \
   --output-agent hermes-optimize-mcp-optimized \
   --workspace default
 ```
@@ -404,8 +404,8 @@ print(
         {
             "strategy": "nat",
             "agent": "<phishing-agent-name>",
-            "config_fileset": "default/hermes-optimize-mcp",
-            "config": "optimize-mcp.yaml",
+            "optimize_config_fileset": "default/hermes-optimize-mcp",
+            "optimize_config": "optimize-mcp.yaml",
             "output_agent": "hermes-optimize-mcp-optimized",
             "workspace": WORKSPACE,
         },
@@ -427,9 +427,9 @@ print(
 | Missing `PHISHING_AGENT_SRC` / MCP binary | Sync the phishing agent checkout; export both env vars before staging the optimize bundle |
 | Analyzer / LLM 401 | Confirm `NVIDIA_API_KEY` works on inference-api; keep using `analyzer-inference-api.yaml` |
 | Dataset / config file not found | `cd "$BUNDLE"` — paths in the YAML are relative to the bundle, not the repo root |
-| `optimize` rejected as missing `config_fileset` / `agent` / `output_agent` | All three are required now, along with `--strategy` and `--config`; stage the bundle with `prepare-fileset`, then pass `--agent`, the fileset ref `prepare-fileset` prints, and a not-yet-used `--output-agent` name |
+| `optimize` rejected as missing `optimize_config_fileset` / `agent` / `output_agent` | All three are required now, along with `--strategy` and `--optimize-config`; stage the bundle with `prepare-fileset`, then pass `--agent`, the fileset ref `prepare-fileset` prints, and a not-yet-used `--output-agent` name |
 | `prepare-fileset` reports an absolute path | Move the file into `--source` and make the YAML entry relative to the bundle root |
-| `optimize` fails with `... was not found in fileset` | `--config` must be relative to the fileset root (e.g. `optimize-chatonly.yaml`), not an absolute path |
+| `optimize` fails with `... was not found in fileset` | `--optimize-config` must be relative to the fileset root (e.g. `optimize-chatonly.yaml`), not an absolute path |
 | `No 'subprocess' or 'cpu' execution profile named 'default'` | The platform registered neither backend under that profile; check `nemo jobs list-execution-profiles` with your operator |
 | Agent create fails on fileset size / too many files | Pass `--agent-config` to `agents/chatonly/agent.yaml` (slim dir), not the parent examples folder |
 | `delete` hangs / `Aborted!` | Pass `-y` (`nemo agents delete NAME -y`) |

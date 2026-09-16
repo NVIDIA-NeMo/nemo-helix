@@ -285,7 +285,7 @@ After `uv sync --package nemo-agents-plugin` (and activating `.venv`), invoke
 `nemo` directly.
 
 Keep the config and everything it references in one directory — an *optimize
-bundle* — stage that bundle with `prepare-fileset`, and pass `--config` as a
+bundle* — stage that bundle with `prepare-fileset`, and pass `--optimize-config` as a
 path relative to the staged fileset root. `--agent` (the platform agent under
 test) and `--output-agent` (the name for the new, optimized agent entity the
 run creates) are both required — the job always resolves `--agent` against
@@ -324,8 +324,8 @@ nemo agents optimize prepare-fileset \
 nemo agents optimize \
   --strategy nat \
   --agent hermes-optimize-chatonly \
-  --config-fileset default/hermes-optimize-chatonly \
-  --config optimize-chatonly.yaml \
+  --optimize-config-fileset default/hermes-optimize-chatonly \
+  --optimize-config optimize-chatonly.yaml \
   --output-agent hermes-optimize-chatonly-optimized \
   --workspace default
 ```
@@ -379,8 +379,8 @@ result = NemoJobScheduler().run_local(
     {
         "strategy": "nat",
         "agent": "hermes-optimize-chatonly",
-        "config_fileset": "default/hermes-optimize-chatonly",
-        "config": "optimize-chatonly.yaml",
+        "optimize_config_fileset": "default/hermes-optimize-chatonly",
+        "optimize_config": "optimize-chatonly.yaml",
         "output_agent": "hermes-optimize-chatonly-optimized",
         "workspace": WORKSPACE,
     },
@@ -425,8 +425,8 @@ nemo agents optimize prepare-fileset \
 nemo agents optimize \
   --strategy nat \
   --agent <phishing-agent-name> \
-  --config-fileset default/hermes-optimize-mcp \
-  --config optimize-mcp.yaml \
+  --optimize-config-fileset default/hermes-optimize-mcp \
+  --optimize-config optimize-mcp.yaml \
   --output-agent hermes-optimize-mcp-optimized \
   --workspace default
 ```
@@ -469,8 +469,8 @@ result = NemoJobScheduler().run_local(
     {
         "strategy": "nat",
         "agent": "<phishing-agent-name>",
-        "config_fileset": "default/hermes-optimize-mcp",
-        "config": "optimize-mcp.yaml",
+        "optimize_config_fileset": "default/hermes-optimize-mcp",
+        "optimize_config": "optimize-mcp.yaml",
         "output_agent": "hermes-optimize-mcp-optimized",
         "workspace": WORKSPACE,
     },
@@ -538,13 +538,13 @@ the bundle before staging.
 nemo agents optimize \
   --strategy nat \
   --agent hermes-optimize-chatonly \
-  --config-fileset default/hermes-optimize-chatonly \
-  --config optimize-chatonly.yaml \
+  --optimize-config-fileset default/hermes-optimize-chatonly \
+  --optimize-config optimize-chatonly.yaml \
   --output-agent hermes-optimize-chatonly-optimized \
   --workspace default
 ```
 
-`--config-fileset` is required: passing an absolute host path fails at
+`--optimize-config-fileset` is required: passing an absolute host path fails at
 compile time with a pointer back to `prepare-fileset`. `--agent` and
 `--output-agent` are required too — there is no separate artifacts fileset or
 directory to publish to; the study's result *is* the new `--output-agent`

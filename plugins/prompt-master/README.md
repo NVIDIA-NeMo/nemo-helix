@@ -53,12 +53,12 @@ uv run nemo agents create \
 uv run nemo files filesets create prompt-master-bundle
 uv run nemo files upload plugins/prompt-master/examples/ prompt-master-bundle
 
-# 3. Optimize. --config is relative to the fileset root.
+# 3. Optimize. --optimize-config is relative to the fileset root.
 uv run nemo agents optimize \
   --strategy prompt-master \
   --agent calculator-agent \
-  --config-fileset default/prompt-master-bundle \
-  --config prompt-master.yaml \
+  --optimize-config-fileset default/prompt-master-bundle \
+  --optimize-config prompt-master.yaml \
   --output-agent calculator-agent-optimized \
   --workspace default
 

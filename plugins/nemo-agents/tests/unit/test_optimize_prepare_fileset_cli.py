@@ -92,8 +92,9 @@ def test_uploads_the_bundle_and_prints_the_submit_command(app: typer.Typer, bund
     assert record["auto_create"] is True
     # Trailing slash uploads the directory's contents, not the directory itself.
     assert record["local_path"].endswith("/")
-    assert "--config-fileset default/my-opt-fs" in result.output
-    assert "--config optimize.yml" in result.output
+    assert "--agent <agent-name>" in result.output
+    assert "--optimize-config-fileset default/my-opt-fs" in result.output
+    assert "--optimize-config optimize.yml" in result.output
     assert "--output-agent <new-agent-name>" in result.output
 
 
