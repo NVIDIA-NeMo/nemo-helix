@@ -582,12 +582,30 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
             )
         cfg_hash = _state.VM_NAME_TO_CONFIG_HASH.get((vm_key, config_type, "request"))
         binding = _state.NATIVE_BY_CONFIG_HASH.get(cfg_hash) if cfg_hash else None
+        if binding is not None:
+            return binding
+        self._rebuild_native_binding(vm_key, config_type)
+        cfg_hash = _state.VM_NAME_TO_CONFIG_HASH.get((vm_key, config_type, "request"))
+        binding = _state.NATIVE_BY_CONFIG_HASH.get(cfg_hash) if cfg_hash else None
         if binding is None:
             raise InferenceMiddlewareError(
                 f"No native Algorithm registered for VM {vm_key} with config_type {config_type!r}",
                 status_code=400,
             )
         return binding
+
+    def _rebuild_native_binding(self, vm_key: str, config_type: str) -> None:
+        """Rebuild from the live VM when IGW cache refresh dropped in-memory Algorithms."""
+        vm = self.get_virtual_model(vm_key)
+        if vm is None:
+            return
+        for call in getattr(vm, "request_middleware", None) or []:
+            if getattr(call, "name", None) != "nemo-switchyard":
+                continue
+            if getattr(call, "config_type", None) != config_type:
+                continue
+            self._register_native_entry(vm_key, config_type, call.config or {}, "request")
+            return
 
     def _register_native_entry(
         self,

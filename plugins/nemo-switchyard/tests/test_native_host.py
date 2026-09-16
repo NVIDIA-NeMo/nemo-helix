@@ -20,7 +20,7 @@ from nemo_platform_plugin.inference_middleware import (
     InferenceResponse,
     ModelProviderInferenceTarget,
 )
-from nemo_platform_plugin.inference_middleware_models import VirtualModel
+from nemo_platform_plugin.inference_middleware_models import MiddlewareCall, VirtualModel
 from nemo_switchyard import _state
 from nemo_switchyard._native_config import map_random_routing_config, models_map_from_config
 from nemo_switchyard._native_host import (
@@ -318,12 +318,15 @@ async def test_igw_judge_http_error_fail_closed() -> None:
     mw.get_inference_url_and_model = MagicMock(return_value=_provider_target())
     mw.get_model_entity = MagicMock(return_value=None)
     response = MagicMock()
-    response.status_code = 503
+    response.status_code = 400
+    response.text = "model does not exist"
     client = _async_http_client(post=AsyncMock(return_value=response))
     with patch("nemo_switchyard._native_host.httpx.AsyncClient", return_value=client):
         with pytest.raises(InferenceMiddlewareError) as exc:
             await IgwJudgeTransport(mw).complete("ws/judge", {}, {})
     assert exc.value.status_code == 502
+    assert "400" in str(exc.value)
+    assert "model does not exist" in str(exc.value)
 
 
 @pytest.mark.asyncio
@@ -349,6 +352,56 @@ async def test_process_request_native_binding_and_streaming_identity() -> None:
     response = InferenceResponse(result=body, headers={})
     routed = await mw.process_response(_ctx(), response, {"config_type": "stage_router"})
     assert routed.result is body
+    await mw.on_shutdown()
+
+
+def _stage_router_vm() -> VirtualModel:
+    return VirtualModel(
+        id="vm-lazy",
+        workspace="ws",
+        name="router",
+        models=[],
+        request_middleware=[
+            MiddlewareCall(
+                name="nemo-switchyard",
+                config_type="stage_router",
+                config={
+                    "confidence_threshold": 0.5,
+                    "models": {"capable": "workspace/strong", "efficient": "workspace/weak"},
+                },
+            )
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_request_rebuilds_native_binding_from_virtual_model() -> None:
+    mw = SwitchyardMiddleware()
+    await mw.on_startup()
+    algorithm = CountingAlgorithm(selected="workspace/weak", calls=0)
+    mw.get_virtual_model = MagicMock(return_value=_stage_router_vm())
+    request = _openai_request()
+    with (
+        patch("nemo_switchyard._native_config.native_rust_available", return_value=True),
+        patch("nemo_switchyard.middleware.build_native_algorithm", return_value=algorithm),
+    ):
+        out = await mw.process_request(_ctx(request), request, {"config_type": "stage_router"})
+    assert out is request
+    assert request.body["model"] == "workspace/weak"
+    mw.get_virtual_model.assert_called_once_with("ws/router")
+    await mw.on_shutdown()
+
+
+@pytest.mark.asyncio
+async def test_process_request_native_miss_without_virtual_model_stays_400() -> None:
+    mw = SwitchyardMiddleware()
+    await mw.on_startup()
+    mw.get_virtual_model = MagicMock(return_value=None)
+    request = _openai_request()
+    with pytest.raises(InferenceMiddlewareError) as exc:
+        await mw.process_request(_ctx(request), request, {"config_type": "stage_router"})
+    assert exc.value.status_code == 400
+    assert "No native Algorithm registered" in str(exc.value)
     await mw.on_shutdown()
 
 

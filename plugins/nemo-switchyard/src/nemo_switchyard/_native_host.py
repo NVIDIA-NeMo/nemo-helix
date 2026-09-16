@@ -116,8 +116,10 @@ class IgwJudgeTransport:
         except httpx.HTTPError as exc:
             raise InferenceMiddlewareError(f"Switchyard judge request failed: {exc}", status_code=502) from exc
         if response.status_code >= 400:
+            detail = " ".join((response.text or "").split())[:500]
+            suffix = f": {detail}" if detail else ""
             raise InferenceMiddlewareError(
-                f"Switchyard judge returned HTTP {response.status_code}",
+                f"Switchyard judge returned HTTP {response.status_code}{suffix}",
                 status_code=502,
             )
         data = response.json()
