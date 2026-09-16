@@ -30,6 +30,12 @@ from nemo_fabric import (
     Runtime,
 )
 
+# Defined in the plugin contract package so an extension author can read a result
+# without depending on this package. Re-exported here for convenience.
+from nemo_platform_plugin.agents.execute_extensions import (
+    FabricRuntimeResult as FabricRuntimeResult,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class FabricInvocationRequest:
@@ -57,27 +63,6 @@ class FabricOneShotRequest:
     caller_context: dict[str, Any] = field(default_factory=dict)
     overrides: dict[str, Any] | None = None
     timeout_seconds: float | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class FabricRuntimeResult:
-    """Platform-normalized result for one Fabric runtime invocation.
-
-    This internal shape preserves Fabric's correlation IDs separately so it can
-    later map cleanly into Platform's ``AgentRun.output`` / ``RunOutput``.
-    """
-
-    status: str
-    output: Any = None
-    response: Any | None = None
-    error: Any | None = None
-    artifacts: Any | None = None
-    telemetry: list[Any] = field(default_factory=list)
-    events: list[Any] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
-    runtime_id: str | None = None
-    invocation_id: str | None = None
-    request_id: str | None = None
 
 
 class FabricRuntimeStream:
