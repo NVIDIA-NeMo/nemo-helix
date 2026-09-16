@@ -43,6 +43,8 @@ FEEDBACK_FUNCTIONS: dict[str, str] = {
 }
 assert set(FEEDBACK_FUNCTIONS) == set(GPA_METRICS)
 
+_LIMIT = asyncio.Semaphore(1)  # one judge call at a time: build.nvidia.com allows little concurrency
+
 
 def nvidia_provider(model: str, api_key_env: str = "NVIDIA_API_KEY") -> Any:
     """TruLens's OpenAI provider, pointed at build.nvidia.com."""
@@ -50,6 +52,13 @@ def nvidia_provider(model: str, api_key_env: str = "NVIDIA_API_KEY") -> Any:
 
     options: dict[str, Any] = {"model_engine": model, "base_url": NVIDIA_BASE_URL, "api_key": os.environ[api_key_env]}
     return OpenAI(**options)
+
+
+def _reason_text(item: Any) -> str:
+    """Groundedness returns one dict per claim; keep its written evidence, not the dict's repr."""
+    if isinstance(item, dict):
+        return str(item.get("supporting_evidence") or item.get("reason") or item.get("criteria") or item)
+    return str(item)
 
 
 class TruLensGpaMetric:
@@ -92,10 +101,15 @@ class TruLensGpaMetric:
             call = lambda: feedback(trace=render_trajectory(trajectory))  # noqa: E731
 
         try:
-            score, reasons = await asyncio.to_thread(call)  # TruLens providers are synchronous
+            async with _LIMIT:
+                score, reasons = await asyncio.to_thread(call)  # TruLens providers are synchronous
         except Exception as error:
             return MetricResult(outputs=[], diagnostics=[MetricDiagnostic(message=str(error))])
-        reason = reasons.get("reason") or "\n".join(map(str, reasons.get("reasons", []))) or str(reasons)
+        reason = (
+            reasons.get("reason")
+            or "\n".join(_reason_text(item) for item in reasons.get("reasons", []))
+            or str(reasons)
+        )
         return MetricResult(
             outputs=[MetricOutput(name="score", value=float(score)), MetricOutput(name="reason", value=reason)]
         )

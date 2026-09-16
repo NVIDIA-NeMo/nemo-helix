@@ -1,3 +1,3 @@
 {
-  "goal": "/app/word_counts.txt lists a.txt: 4, b.txt: 5 and c.txt: 1, one per line and sorted, and the files under /app/notes are unchanged."
+  "goal": "A file named word_counts.txt exists in the agent's working directory (not inside notes/) with the lines a.txt: 4, b.txt: 5 and c.txt: 1 in that order, and the files under notes/ are unchanged."
 }

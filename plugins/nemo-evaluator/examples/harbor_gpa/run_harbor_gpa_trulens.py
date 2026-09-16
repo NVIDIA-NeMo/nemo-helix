@@ -28,7 +28,7 @@ from trulens_metrics import nvidia_provider, trulens_gpa_metrics
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 parser.add_argument("--model", default="nvidia/nemotron-3.5-lightning-30b-a3b", help="Model the agent runs on.")
-parser.add_argument("--judge-model", default="nvidia/nemotron-3.5-lightning-30b-a3b", help="Model TruLens judges with.")
+parser.add_argument("--judge-model", default="nvidia/nemotron-3-super-120b-a12b", help="Model TruLens judges with.")
 parser.add_argument("--jobs-dir", type=Path, default=Path("./harbor-jobs"), help="Where Harbor writes results.")
 parser.add_argument("--work-dir", type=Path, default=Path("./harbor-gpa-out"), help="Where the run bundle lands.")
 args = parser.parse_args()
@@ -71,6 +71,8 @@ result = asyncio.run(
 # 4. Report.
 print("\nAggregates:")
 for aggregate in result.summary.scores.scores:
+    if aggregate.name.endswith(".reason") or ".pass@" in aggregate.name:
+        continue  # text labels have no mean; pass@k repeats the score rows
     mean = "unmeasured" if aggregate.mean is None else f"{aggregate.mean:.3f}"
     print(f"  {aggregate.name:<32} {mean:>10}  measured={aggregate.count} unmeasured={aggregate.nan_count}")
 

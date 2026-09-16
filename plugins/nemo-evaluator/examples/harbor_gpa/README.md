@@ -45,7 +45,9 @@ Three things worth noticing:
 
 - **The trajectory comes from evidence.** `input.candidate.evidence.trace(format="atif")` gives
   the agent's steps, tool calls, and tool results. Any runner that records an ATIF trace feeds
-  this metric: Harbor here, the Fabric runner, a deployed agent with `trajectory_path`.
+  this metric: Harbor here, the Fabric runner, a deployed agent with `trajectory_path`. See
+  [Trace limitations](#trace-limitations-of-the-harbor-fabric-route) for what Harbor actually
+  hands you today.
 - **Outputs are optional.** `required=False` means a missing output is "could not measure". A
   trial with no trajectory shows up as `unmeasured` in the aggregates instead of dragging the mean
   to zero. A judge that returns garbage becomes a diagnostic on that score, for the same reason.
@@ -56,6 +58,36 @@ Three things worth noticing:
 `attach_gpa` then gives each discovered Harbor task its goal from `gpa.json`, appends the nine
 metrics after the verifier's `HarborRewardMetric`, and adds a `gpa` view: the mean of the nine
 `score` outputs, reported per trial and aggregated as `view.gpa`.
+
+## Trace limitations of the Harbor + Fabric route
+
+Read this before relying on the trajectory scores from this example.
+
+- **Relay's ATIF for deepagents is one step.** With `fabric_telemetry="relay"`, Relay records
+  every LLM turn and tool call in its ATOF event stream, but its ATIF projection for the LangGraph
+  integration collapses the whole run into a single `LangGraph` step (nemo-relay 0.7). That is
+  the trace the Harbor runner promotes to `trace:atif`, and on its own it is useless to a
+  trajectory judge.
+- **This example works around it.** When the ATIF trace has one step, `read_trajectory` rebuilds
+  the steps from the message list in Fabric's `fabric-result-*.json`, which the Harbor runner also
+  exposes as evidence. You get user, assistant, tool-call, and tool-result steps, which is enough
+  for these judges. You do not get per-step token usage, timing, or tool definitions.
+- **No OTLP from this route.** The Fabric bridge inside Harbor configures Relay for ATIF and ATOF
+  only. Collecting OTLP would mean running a receiver inside the task container and pointing
+  Relay at it, which is more plumbing than an example should carry.
+
+**If you want richer traces, run the Fabric runner directly.** `FabricAgentRuntime` and
+`FabricContainerRuntime` run the same deepagents harness without Harbor, start an OTLP receiver
+for Relay, and register both `trace:atif` and `trace:otlp` on every trial. The OTLP spans carry
+`gen_ai.*` attributes for each LLM call and tool call, which is the input TruLens's span-aware
+`Trace` selectors were designed for. Trade: you lose Harbor's per-task Docker image and verifier
+reward, so tasks are plain `AgentEvalTask` rows and outcome checks are SDK metrics over the final
+workspace. See the
+[Fabric runner](../../../../docs/evaluator/agent-eval/fabric-runner.mdx) docs.
+
+Pick by what you are scoring. For verifier-backed Harbor suites where the GPA scores are a second
+opinion, this route is fine. For trajectory-first evaluation, or to reuse TruLens's own trace
+selectors rather than a rendered string, use the Fabric runner and read the OTLP trace.
 
 ## Running it
 
@@ -75,21 +107,46 @@ into the trial, which is what the metrics read. The first trial takes a few minu
 install. Then the report:
 
 ```
-Aggregates (mean over trials the metric could measure):
-  harbor_reward.reward                  1.000  measured=3 unmeasured=0
-  answer_correctness.score              ...
-  ...
-  view.gpa                              ...
+Aggregates:
+  answer_correctness.score              0.556  measured=3 unmeasured=0
+  answer_relevance.score                0.667  measured=3 unmeasured=0
+  execution_efficiency.score            0.889  measured=3 unmeasured=0
+  groundedness.score                    0.667  measured=3 unmeasured=0
+  harbor_reward.reward                  0.667  measured=3 unmeasured=0
+  logical_consistency.score             0.889  measured=3 unmeasured=0
+  plan_adherence.score                  0.500  measured=2 unmeasured=1
+  plan_quality.score                    0.667  measured=3 unmeasured=0
+  tool_calling.score                    1.000  measured=2 unmeasured=1
+  tool_selection.score                  0.556  measured=3 unmeasured=0
+  view.gpa                              1.000  measured=1 unmeasured=2
 
 Per trial:
   gpa/count-words (completed)
+    harbor_reward: {'reward': 0.0}
+    answer_correctness: 0.67  The agent correctly counted words in each file (a.txt: 4, b.txt: 5, c.txt: 1) ... However, the output file was written to /notes/word_counts.txt instead of the required location ...
+    groundedness: 0.00  The final answer asserts that the files in the notes directory were not modified, but the agent observed writing a new file /notes/word_counts.txt (step 7 and 9) ...
+    plan_adherence: 0.00  The agent wrote the word counts to /notes/word_counts.txt (step 7) instead of the working directory ... no explanation for the deviation is provided.
+    tool_calling: UNMEASURED  Error code: 503 - Service temporarily overloaded
+    ...
+  gpa/fix-bug (completed)
     harbor_reward: {'reward': 1.0}
-    answer_correctness: 1.00  step 6 writes word_counts.txt with the three expected lines ...
-    plan_quality: 0.67  the agent listed the directory before reading, but read b.txt twice ...
+    answer_correctness: 1.00  The agent identified the bug in stats.py where mean divided by len(values)-1, corrected it to divide by len(values), and verified that check.py now passes ...
+    execution_efficiency: 1.00  The agent performed each necessary action exactly once: listed directory contents, read stats.py and check.py, identified the bug ... edited stats.py ... ran a verification task ...
     ...
 ```
 
-Flags: `--model` (the agent's model), `--judge-model`, `--jobs-dir`, `--work-dir`.
+That is a real run (Lightning agent, Super judge, September 2026), trimmed. Two things it shows that a
+verifier alone would not: count-words *failed* its verifier because the agent wrote the file inside
+`notes/`, and the judges say so in words while also catching the final answer's false claim that
+`notes/` was untouched. And two judge calls hit a `503` from build.nvidia.com; those scores are
+unmeasured with the error attached, which is why `view.gpa` is measured on only one trial here. A
+view needs every one of its signals, so one unmeasured metric leaves the whole view unmeasured for
+that trial.
+
+Flags: `--model` (the agent's model, Lightning by default), `--judge-model` (Super by default: it
+answers a judge prompt in about two seconds on build.nvidia.com, where Lightning reasons for 15 to
+50 seconds), `--jobs-dir`, `--work-dir`. Judge calls run one at a time; build.nvidia.com allows
+little concurrency and retries only slow things down.
 
 ### With TruLens as the judge
 

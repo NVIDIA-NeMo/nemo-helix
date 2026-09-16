@@ -17,6 +17,7 @@ async ``compute_scores(input)``. Nothing here is Harbor-specific.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from collections.abc import Sequence
@@ -31,12 +32,13 @@ from nemo_evaluator_sdk.metrics.protocol import (
     MetricOutputSpec,
     MetricResult,
 )
-from nemo_evaluator_sdk.values.atif import Trajectory
-from nemo_evaluator_sdk.values.evidence import EVIDENCE_TRACE
+from nemo_evaluator_sdk.values.atif import Agent, Observation, ObservationResult, Step, ToolCall, Trajectory
+from nemo_evaluator_sdk.values.evidence import EVIDENCE_TRACE, CandidateEvidence
 from openai import AsyncOpenAI
 
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
-DEFAULT_JUDGE_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
+# Super answers a judge prompt in ~2s on build.nvidia.com; Lightning takes 15-50s because it reasons at length.
+DEFAULT_JUDGE_MODEL = "nvidia/nemotron-3-super-120b-a12b"
 
 # What a perfect (3) and a failing (0) trajectory look like, per dimension. The judge sees the
 # whole trial every time; the rubric tells it what to look at.
@@ -88,15 +90,57 @@ GPA_METRICS = tuple(RUBRICS)
 
 
 async def read_trajectory(input: MetricInput) -> Trajectory | None:
-    """The trial's ATIF trajectory, or ``None`` when the runner recorded none."""
+    """The trial's trajectory, or ``None`` when the runner recorded none.
+
+    The ATIF trace is the primary source. Relay's ATIF projection for deepagents currently
+    collapses the whole run into one ``LangGraph`` step (nemo-relay 0.7), so when that is all the
+    trace holds, the steps are rebuilt from the message list in Fabric's result file instead.
+    """
     evidence = input.candidate.evidence
-    if evidence is None or evidence.get(EVIDENCE_TRACE) is None:
+    if evidence is None:
         return None
-    try:
-        handle = await evidence.trace(EVIDENCE_TRACE, format="atif")
-    except KeyError:
+    trajectory = None
+    if evidence.get(EVIDENCE_TRACE) is not None:
+        try:
+            trajectory = await (await evidence.trace(EVIDENCE_TRACE, format="atif")).trace()
+        except KeyError:
+            pass
+    if trajectory is None or len(trajectory.steps) <= 1:
+        return trajectory_from_fabric_result(evidence) or trajectory
+    return trajectory
+
+
+def trajectory_from_fabric_result(evidence: CandidateEvidence) -> Trajectory | None:
+    """Rebuild ATIF steps from the ``messages`` list in Fabric's ``fabric-result-*.json`` artifact."""
+    name = next((n for n in evidence.names() if "fabric-result-" in n and n.endswith(".json")), None)
+    descriptor = evidence.get(name) if name else None
+    if descriptor is None or descriptor.ref is None:
         return None
-    return await handle.trace()
+    output = json.loads(Path(descriptor.ref).read_text()).get("output", {})
+    steps: list[Step] = []
+    for message in output.get("messages", []):
+        role, content = message.get("role"), str(message.get("content") or "")
+        if role == "human":
+            steps.append(Step(source="user", message=content))
+        elif role == "ai":
+            calls = [
+                ToolCall(tool_call_id=c.get("id"), function_name=c["name"], arguments=c.get("args"))
+                for c in message.get("tool_calls") or []
+            ]
+            steps.append(Step(source="agent", message=content, tool_calls=calls or None))
+        elif role == "tool" and steps:
+            step = steps[-1]
+            step.observation = step.observation or Observation()
+            step.observation.results.append(ObservationResult(content=content))
+    if not steps:
+        return None
+    for number, step in enumerate(steps, start=1):
+        step.step_id = number
+    return Trajectory(
+        schema_version="ATIF-v1.7",
+        agent=Agent(name="deepagents", version="fabric-result", model_name=output.get("model")),
+        steps=steps,
+    )
 
 
 def render_trajectory(trajectory: Trajectory, max_chars: int = 600) -> str:
@@ -156,6 +200,7 @@ class Judge:
     ):
         self.model = model
         self.client = AsyncOpenAI(base_url=base_url, api_key=os.environ[api_key_env])
+        self.limit = asyncio.Semaphore(1)  # one judge call at a time: build.nvidia.com allows little concurrency
 
     async def score(self, best: str, worst: str, trial: str) -> tuple[float, str]:
         """Return the score normalized to 0-1 and the judge's reason."""
@@ -164,12 +209,13 @@ class Judge:
             f"Score 3 means: {best}\nScore 0 means: {worst}\nUse 1 and 2 for partial satisfaction.\n"
             'Reply with JSON only: {"score": <0-3>, "reason": "<your reasoning, citing trace steps>"}'
         )
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": trial}],
-            temperature=0.0,
-            max_tokens=4096,
-        )
+        async with self.limit:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": trial}],
+                temperature=0.0,
+                max_tokens=4096,
+            )
         text = response.choices[0].message.content or ""
         start = text.find("{")
         if start == -1:
