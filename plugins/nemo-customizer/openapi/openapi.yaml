@@ -1739,6 +1739,13 @@ components:
         val_check_interval:
           title: Val Check Interval
           type: number
+        validation_split:
+          title: Validation Split
+          description: Validation split to use when a validation dataset is not provided.
+          default: 0.1
+          type: number
+          exclusiveMaximum: 1.0
+          exclusiveMinimum: 0.0
         seed:
           title: Seed
           type: integer

@@ -1498,8 +1498,8 @@ contents cannot shift under a deployment. This re-resolves that same ref and
 repoints the fileset at whatever it names now. Everything else about the storage
 config, including the repository and directory, is left alone.
 
-Deployments stage the fileset when they are created, so existing deployments
-keep serving the revision they were staged from.
+A running deployment keeps serving the revision it staged. It moves to this one
+when the runner next stages the fileset, and records the revision it staged.
 
 **Usage:**
 
@@ -7616,7 +7616,8 @@ nemo data-designer retrieval prepare [OPTIONS]
 
 **Options:**
 
-* `--sdg-input`: Stage 0 fileset, generation_result.json, or hf:// URI.
+* `--sdg-input`: Stage 0 fileset, fileset#file, or hf:// URI (optionally /path to a file).
+* `--generation-file`: Relative Stage 0 filename inside sdg_input when the ref is a directory.
 * `--train-input-file`
 * `--mine, --no-mine`: Run GPU hard-negative mining after conversion. Conversion-only is the default.
 * `--workspace, -w`: [default: default]
@@ -7875,7 +7876,8 @@ nemo data-designer retrieval-prepare [OPTIONS]
 
 **Job Spec:**
 
-* `--sdg-input`: Fileset or hf:// URI to Stage 0 output or generation_result.json.
+* `--sdg-input`: Fileset or hf:// URI to Stage 0 output. Name a file with fileset#path or hf://org/dataset[@revision]/path; otherwise generation_file is used inside the directory.
+* `--generation-file`: Relative path to the Stage 0 file inside sdg_input when the ref is a directory. Live generate writes generation_result.json. Skip-SDG dumps set this (e.g. nv_pp_dd_sdg.json) or put the filename on sdg_input.
 * `--train-input-file`: Fileset containing a pre-converted wrapped train.json; skips conversion.
 * `--corpus-id`: Override `corpus_id` in the spec.
 * `--quality-threshold <FLOAT>`: Override `quality_threshold` in the spec.
@@ -7962,7 +7964,8 @@ nemo data-designer retrieval-run [OPTIONS]
 * `--generate.quality-judge-model`: Chat model for quality judging.
 * `--generate.embed-model`: Embedding model for retrieval SDG.
 * `--generate.hf-token-secret`: Override `generate.hf_token_secret` in the spec.
-* `--prepare.sdg-input`: Fileset or hf:// URI to Stage 0 output or generation_result.json.
+* `--prepare.sdg-input`: Fileset or hf:// URI to Stage 0 output. Name a file with fileset#path or hf://org/dataset[@revision]/path; otherwise generation_file is used inside the directory.
+* `--prepare.generation-file`: Relative path to the Stage 0 file inside sdg_input when the ref is a directory. Live generate writes generation_result.json. Skip-SDG dumps set this (e.g. nv_pp_dd_sdg.json) or put the filename on sdg_input.
 * `--prepare.train-input-file`: Fileset containing a pre-converted wrapped train.json; skips conversion.
 * `--prepare.corpus-id`: Override `prepare.corpus_id` in the spec.
 * `--prepare.quality-threshold <FLOAT>`: Override `prepare.quality_threshold` in the spec.
@@ -9514,6 +9517,7 @@ nemo customization automodel.jobs run [OPTIONS]
 * `--schedule.epochs <INTEGER>`: Override `schedule.epochs` in the spec.
 * `--schedule.max-steps <INTEGER>`: Override `schedule.max_steps` in the spec.
 * `--schedule.val-check-interval <FLOAT>`: Override `schedule.val_check_interval` in the spec.
+* `--schedule.validation-split <FLOAT>`: Validation split to use when a validation dataset is not provided.
 * `--schedule.seed <INTEGER>`: Override `schedule.seed` in the spec.
 * `--schedule.progress-reporting.min-report-interval-seconds <FLOAT>`: Least number of seconds between progress reports reaching the Jobs service. Every metric the training library logs is still recorded at full resolution -- this only buffers them in memory and decides how often the accumulated set is sent, which is what the reporting actually costs. 0 sends a report for every step the library logs. Raising it reduces the time training spends blocked on reporting, at the cost of a progress bar and charts that update less often.
 * `--batch.global-batch-size <INTEGER>`: Override `batch.global_batch_size` in the spec.
@@ -9602,6 +9606,7 @@ nemo customization automodel.jobs submit [OPTIONS]
 * `--schedule.epochs <INTEGER>`: Override `schedule.epochs` in the spec.
 * `--schedule.max-steps <INTEGER>`: Override `schedule.max_steps` in the spec.
 * `--schedule.val-check-interval <FLOAT>`: Override `schedule.val_check_interval` in the spec.
+* `--schedule.validation-split <FLOAT>`: Validation split to use when a validation dataset is not provided.
 * `--schedule.seed <INTEGER>`: Override `schedule.seed` in the spec.
 * `--schedule.progress-reporting.min-report-interval-seconds <FLOAT>`: Least number of seconds between progress reports reaching the Jobs service. Every metric the training library logs is still recorded at full resolution -- this only buffers them in memory and decides how often the accumulated set is sent, which is what the reporting actually costs. 0 sends a report for every step the library logs. Raising it reduces the time training spends blocked on reporting, at the cost of a progress bar and charts that update less often.
 * `--batch.global-batch-size <INTEGER>`: Override `batch.global_batch_size` in the spec.
