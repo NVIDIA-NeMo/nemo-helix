@@ -1,0 +1,179 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Bring Your Own NOOA Agent"
+description: ""
+---
+<a id="nooa-agents"></a>
+
+NeMo Platform ships adapters for a fixed set of harnesses — Claude, Codex,
+DeepAgents, Hermes. If you have written your own agent with
+[NOOA](https://github.com/NVIDIA-NeMo/nooa), none of those describe it.
+
+The `nvidia.nemo-platform.nooa` adapter is the way in. You export one async
+callable, name it in `agent.yaml`, and the platform runs it like any other
+agent: deployable, executable as a job, observable, and optimizable.
+
+NOOA has no standardized entrypoint, which is why Fabric ships no generic NOOA
+adapter. This is not Fabric standardizing NOOA — it is the *platform* declaring
+a calling convention over it, which you opt into.
+
+## The Contract
+
+One async callable, one argument, one return type:
+
+```python
+# my_agent/entrypoint.py
+from nemo_fabric_adapter_contract import models as contract
+from nemo_platform_plugin.agents.nooa_contract import NooaInvocation
+
+
+async def run(invocation: NooaInvocation) -> contract.AgentRunResult:
+    prompt = invocation.request.input
+    ...
+    return contract.AgentRunResult(
+        status=contract.AgentRunStatus.SUCCEEDED,
+        output={"response": "..."},
+    )
+```
+
+`NooaInvocation` carries everything the platform knows about one invocation:
+
+| Field | What it is |
+|---|---|
+| `request` | The invocation's input, as Fabric received it. `request.input` is the prompt; `request.context` carries job metadata such as `job_workspace`. |
+| `context` | Fabric's per-invocation runtime context: correlation ids and the telemetry handle. |
+| `settings` | Your agent's `harness.settings` bag, verbatim — your configuration, whatever shape you gave it. |
+| `models` | Your agent config's `models:` mapping. |
+
+You do not have to catch exceptions. Raise, and the adapter records a failed
+`AgentRunResult` with your traceback in the run's logs.
+
+<Note>
+`NooaInvocation` lives in `nemo-platform-plugin`, not in the agents plugin, so
+writing an agent against this contract does not pull in the shipped harnesses
+and their bundled CLI binaries.
+</Note>
+
+### Stability
+
+Fields may be **added** to `NooaInvocation` — that is why it is one object
+rather than positional arguments, and why it is keyword-only. Fields will not be
+removed or repurposed silently. The underlying Fabric adapter contract is
+`fabric.adapter/v1alpha2` and is pre-1.0.
+
+## Declaring It
+
+```yaml
+# agent.yaml
+config_format: nemo-agents-spec-v1
+name: my-agent
+default_harness: main
+harnesses:
+  main:
+    kind: nvidia.nemo-platform.nooa
+    settings:
+      entrypoint: my_agent.entrypoint:run
+      # Anything else here is yours; it arrives as `invocation.settings`.
+      max_depth: 3
+models:
+  default:
+    provider: platform
+    model: default/my-model
+environment:
+  provider: local
+```
+
+`entrypoint` is `module.path:callable`. It is resolved when the agent starts,
+not on first invocation, so a typo fails immediately rather than after the
+platform has reported the agent healthy.
+
+## Using Platform Models
+
+The adapter deliberately does **not** resolve model clients for you. The
+platform's default/fast pair is a two-slot shape, and an agent wanting three
+models, a judge model, or no platform model at all should not have to work
+around an interface imposed on it.
+
+When you do want the platform pair, one helper does the whole sequence:
+
+```python
+from nemo_platform_plugin.nooa_model_client import (
+    ConfiguredModelRefs,
+    get_default_model,
+    platform_model_clients,
+)
+from nemo_platform_plugin.sdk_provider import get_async_task_sdk
+
+
+async def run(invocation: NooaInvocation) -> contract.AgentRunResult:
+    refs = ConfiguredModelRefs(
+        default=invocation.models["default"].model,
+        fast=invocation.models["fast"].model,
+    )
+    async with get_async_task_sdk("my-agent") as client:
+        async with platform_model_clients(client, refs):
+            result = await do_the_work()   # get_default_model() is live in here
+    ...
+```
+
+Do not reach for `configured_model_refs()`: it reads the CLI context
+(`NEMO_DEFAULT_MODEL` / `NEMO_FAST_MODEL`), which is not meaningfully set inside
+a job container.
+
+## Packaging and Running It
+
+Your callable has to be importable in the environment that runs the agent, which
+means packaging your project into the image:
+
+```bash
+nemo agents package --agent agent.yaml --pyproject pyproject.toml
+```
+
+Without `--pyproject` the build refuses, because the resulting image could not
+import your entrypoint.
+
+Then run it as a job, pointing at the image you just built:
+
+```python
+job = client.agents.jobs.execute.create(
+    spec={
+        "agent": {"config": agent_config},
+        "input": "Summarize yesterday's failures.",
+        "image": "my-agent:latest",
+    }
+)
+```
+
+See [Execute Agents as Jobs](/documentation/agents/execute-agent-jobs) for the
+full job lifecycle, and [Deploy Agents](/documentation/agents/deploy-agents) to
+run the same agent as a long-lived service instead.
+
+## Telemetry
+
+When the platform wires up observability, the adapter activates Relay for the
+duration of your invocation. Your callable can tell whether that happened by
+reading `invocation.context.telemetry`, which is `None` when Relay is off.
+
+If your agent uses NOOA's Relay middleware, open its scope inside your own run —
+the scope needs the agent object, which only you have.
+
+## Limitations
+
+- **Streaming is not supported.** The adapter declares `streaming: false`: the
+  convention is one callable returning one result. The execute-job path is
+  one-shot regardless.
+- **There is no cancellation.** Fabric's lifecycle protocol has no cancel
+  operation. An execute job bounds itself with `timeout_seconds`, but your
+  callable may be killed without warning — do not rely on graceful shutdown to
+  release resources.
+- **One invocation at a time.** The runtime is long-lived and serves many
+  invocations, but serially.
+
+## Writing a Whole Fabric Adapter Instead
+
+If you need your own harness lifecycle rather than a single callable — your own
+`start`/`invoke`/`stop`, your own descriptor — you can author a full Fabric
+adapter and ship it inside your own packaged image. That is a heavier path and a
+separate topic; this page covers the common case.

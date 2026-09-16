@@ -47,6 +47,9 @@ navigation:
             slug: add-guardrails
           - page: Execute Agents as Jobs
             path: ../../agents/execute-agent-jobs.mdx
+          - page: Bring Your Own NOOA Agent
+            path: ../../agents/nooa-agents.mdx
+            slug: nooa-agents
           - page: Observe Agents
             path: ../../agents/observability.mdx
           - page: Scan Trace Data

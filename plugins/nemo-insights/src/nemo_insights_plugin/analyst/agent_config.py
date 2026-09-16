@@ -17,7 +17,10 @@ from datetime import datetime
 from typing import Any
 
 ANALYST_AGENT_NAME = "insights-analyst"
-ANALYST_ADAPTER_ID = "nvidia.fabric.insights-analyst"
+# The Analyst runs on the platform's generic NOOA adapter rather than an
+# adapter of its own; `entrypoint` below is what makes it the Analyst.
+ANALYST_ADAPTER_ID = "nvidia.nemo-platform.nooa"
+ANALYST_ENTRYPOINT = "nemo_insights_plugin.fabric_adapter:run"
 ANALYST_HARNESS_NAME = "insights"
 AGENT_CONFIG_FORMAT = "nemo-agents-spec-v1"
 
@@ -59,7 +62,11 @@ def build_analyst_agent_config(
     Returns:
         A config dict suitable for ``AgentInline.config``.
     """
-    settings: dict[str, Any] = {"agent": agent, "workspace": workspace}
+    settings: dict[str, Any] = {
+        "entrypoint": ANALYST_ENTRYPOINT,
+        "agent": agent,
+        "workspace": workspace,
+    }
     if ethos is not None:
         settings["ethos"] = ethos
     if since is not None:

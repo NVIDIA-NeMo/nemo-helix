@@ -9,8 +9,11 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
   "fastapi>=0.115",
   "httpx",
+  # The Analyst runs on the generic nvidia.nemo-platform.nooa adapter, whose
+  # descriptor and runtime ship in this extra. Fabric resolves the descriptor
+  # from disk at run time, so there is no import to express this.
+  "nemo-agents-plugin[platform-nooa]",
   "nemo-fabric-adapter-contract>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-common>=0.3.0,<0.4.0",
   "nemo-platform",
   "nemo-platform-plugin",
   "nemo-relay>=0.7,<0.8",
@@ -55,9 +58,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nemo_insights_plugin"]
-
-[tool.hatch.build.targets.wheel.shared-data]
-"insights-analyst.fabric-adapter.json" = "share/nemo-fabric/adapters/insights-analyst/insights-analyst.fabric-adapter.json"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

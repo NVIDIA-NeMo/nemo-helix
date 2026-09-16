@@ -23,13 +23,26 @@ HARNESS_ADAPTER_IDS = {
     "hermes": "nvidia.fabric.hermes",
 }
 
-# A harness kind carrying this prefix is already a fully-qualified Fabric
-# adapter id and is passed through verbatim. Plugin-owned adapters ship their
-# own descriptor to <sys.prefix>/share/nemo-fabric/adapters/ and are resolved
-# there by Fabric at runtime, so nemo-agents does not need a short-name entry
-# for each one. A bad id therefore surfaces as a Fabric resolution error rather
-# than a translation error here.
-FABRIC_ADAPTER_ID_PREFIX = "nvidia.fabric."
+# A harness kind carrying one of these prefixes is already a fully-qualified
+# Fabric adapter id and is passed through verbatim. Plugin-owned adapters ship
+# their own descriptor to <sys.prefix>/share/nemo-fabric/adapters/ and are
+# resolved there by Fabric at runtime, so nemo-agents does not need a short-name
+# entry for each one. A bad id therefore surfaces as a Fabric resolution error
+# rather than a translation error here.
+#
+# `nvidia.fabric.` is Fabric's own namespace, which upstream keeps adding to;
+# platform-owned adapters take `nvidia.nemo-platform.` instead. A duplicate
+# adapter_id is not resolved by precedence -- Fabric refuses the id outright,
+# environment-wide -- and nemo-agents-plugin depends on nemo-fabric, so both
+# descriptors would land in the same environment. Minting platform adapters
+# under `nvidia.fabric.` would make us a hard break away from an upstream
+# naming choice.
+#
+# AIRCORE-1169 Workstream C promotes this to an AgentsConfig setting so an
+# operator can sanction their own prefix for in-house adapters. It is a naming
+# convention, not a security boundary: the adapter lives inside an image the
+# caller already chose.
+FABRIC_ADAPTER_ID_PREFIXES = ("nvidia.fabric.", "nvidia.nemo-platform.")
 
 PLATFORM_RUNTIME_ENV_VARS = ("NEMO_BASE_URL", "NMP_BASE_URL", "NMP_WORKSPACE")
 
@@ -116,14 +129,15 @@ def _select_harness(config: AgentConfig, harness_name: str | None) -> tuple[str,
 
 
 def _adapter_id_for_harness(harness: HarnessConfig) -> str:
-    if harness.kind.startswith(FABRIC_ADAPTER_ID_PREFIX):
+    if harness.kind.startswith(FABRIC_ADAPTER_ID_PREFIXES):
         return harness.kind
     adapter_id = HARNESS_ADAPTER_IDS.get(harness.kind)
     if adapter_id is None:
         available = ", ".join(sorted(HARNESS_ADAPTER_IDS))
+        prefixes = ", ".join(repr(prefix) for prefix in FABRIC_ADAPTER_ID_PREFIXES)
         raise FabricTranslationError(
             f"Unsupported harness kind {harness.kind!r}. Supported harness kinds: {available}; "
-            f"or a fully-qualified Fabric adapter id starting with {FABRIC_ADAPTER_ID_PREFIX!r}."
+            f"or a fully-qualified Fabric adapter id starting with one of: {prefixes}."
         )
     return adapter_id
 

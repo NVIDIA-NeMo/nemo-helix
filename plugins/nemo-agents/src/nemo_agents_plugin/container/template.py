@@ -254,7 +254,7 @@ COPY ./ /workspace
 RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
     uv venv --python ${PYTHON_VERSION} /workspace/.venv && \\
     . /workspace/.venv/bin/activate && \\
-    uv pip install --no-sources --prerelease=allow {% if wheel_filename %}"/workspace/{{ wheel_filename }}[nemo-agents-plugin]"{% else %}"nemo-platform[nemo-agents-plugin]=={{ contract_version }}"{% endif %} \\
+    uv pip install --no-sources --prerelease=allow {% if wheel_filename %}"/workspace/{{ wheel_filename }}[nemo-agents-plugin,platform-nooa]"{% else %}"nemo-platform[nemo-agents-plugin,platform-nooa]=={{ contract_version }}"{% endif %} \\
       "nemo-relay=={{ pinned_nemo_relay_cli_version }}" . && \\
     chmod -R a+rX /opt/uv /workspace/.venv
 {% else %}
@@ -262,7 +262,7 @@ RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
 RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
     uv venv --python ${PYTHON_VERSION} /workspace/.venv && \\
     . /workspace/.venv/bin/activate && \\
-    uv pip install --no-sources --prerelease=allow {% if wheel_filename %}"/workspace/{{ wheel_filename }}[nemo-agents-plugin]"{% else %}"nemo-platform[nemo-agents-plugin]=={{ contract_version }}"{% endif %} \\
+    uv pip install --no-sources --prerelease=allow {% if wheel_filename %}"/workspace/{{ wheel_filename }}[nemo-agents-plugin,platform-nooa]"{% else %}"nemo-platform[nemo-agents-plugin,platform-nooa]=={{ contract_version }}"{% endif %} \\
       "nemo-relay=={{ pinned_nemo_relay_cli_version }}" && \\
     chmod -R a+rX /opt/uv /workspace/.venv
 {% endif %}

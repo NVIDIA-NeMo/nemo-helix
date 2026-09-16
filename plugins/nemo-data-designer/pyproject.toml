@@ -72,6 +72,7 @@ nemo-platform-plugin = [
   "fastapi>=0.115.4",
   "jsonschema>=4.0.0",
   "lark>=1.1.0",
+  "nemo-fabric-adapter-contract>=0.3.0,<0.4.0",
   "openai>=1.109.1",
   "pydantic>=2.12.0",
   "pydantic-settings>=2.8.1",

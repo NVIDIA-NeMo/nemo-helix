@@ -10,8 +10,8 @@ public plugin contract.
 """
 
 import inspect
-from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator, Mapping
+from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
@@ -332,3 +332,39 @@ def get_configured_model_refs() -> ConfiguredModelRefs:
     if refs is None:
         raise RuntimeError("Configured model references are unavailable for this agent run")
     return refs
+
+
+def model_clients_active() -> bool:
+    """Report whether configured model clients are live in this context.
+
+    Exposed so a caller can avoid resolving a second pair when something further
+    out has already activated one. ``_active_model_clients`` raises when unset,
+    which makes it useless as a probe.
+    """
+    return _ACTIVE_MODEL_CLIENTS.get() is not None
+
+
+@asynccontextmanager
+async def platform_model_clients(
+    client: AsyncNemoClient | AsyncModelsClient,
+    refs: ConfiguredModelRefs | None = None,
+) -> AsyncIterator[ConfiguredModelClients]:
+    """Resolve, activate, and close a default/fast model pair for one run.
+
+    ``resolve`` + ``activate`` + ``aclose`` is hand-rolled in several plugins
+    today. This is that sequence, once::
+
+        async with platform_model_clients(sdk, refs):
+            result = await do_the_work()   # get_default_model() is live here
+
+    Deliberately a helper a caller invokes rather than something the NOOA
+    adapter does on its behalf: the default/fast pair is a two-slot shape, and
+    an agent wanting three models, a judge model, or no platform model at all
+    should not have to work around an interface imposed on it.
+    """
+    model_clients = await resolve_model_clients(client, refs)
+    try:
+        with activate_model_clients(model_clients):
+            yield model_clients
+    finally:
+        await model_clients.aclose()

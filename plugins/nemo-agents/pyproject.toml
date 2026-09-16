@@ -40,6 +40,10 @@ dependencies = [
     "anthropic>=0.88.0",
     "rich>=13.7.1",
     "nemo-fabric[claude,codex,relay]>=0.3.0,<0.4.0",
+    # Imported directly by the platform NOOA adapter: the contract models it
+    # exchanges, and the lifecycle server it runs inside.
+    "nemo-fabric-adapter-contract>=0.3.0,<0.4.0",
+    "nemo-fabric-adapters-common>=0.3.0,<0.4.0",
     "nemo-fabric-adapters-deepagents>=0.3.0,<0.4.0",
     # Platform owns the security-required DeepAgents harness version instead of
     # inheriting Fabric's optional harness extra, which is capped below 0.7.
@@ -82,6 +86,14 @@ nemo_agents_files_telemetry = "nemo_agents_plugin.telemetry.files_service_export
 [project.optional-dependencies]
 # Moved to [project] dependencies; kept so older install instructions resolve.
 container = []
+# The platform's calling convention over NOOA: the nvidia.nemo-platform.nooa
+# adapter and the `nooa` runtime it invokes user callables inside. An extra
+# because nothing else in nemo-agents knows about NOOA, and because `nooa`
+# pulls litellm. Anything that runs a platform NOOA agent -- including the
+# Insights analyst -- must install it.
+platform-nooa = [
+    "nooa>=0.0.9",
+]
 test = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -98,6 +110,12 @@ build-backend = "hatchling.build"
 packages = [
     "src/nemo_agents_plugin",
 ]
+
+# Fabric resolves adapter descriptors from <sys.prefix>/share/nemo-fabric/adapters
+# at runtime. Mirrored in [tool.bundle-package] in packages/nemo_platform/pyproject.toml,
+# which is what a packaged agent image installs -- keep the two in step.
+[tool.hatch.build.targets.wheel.shared-data]
+"nemo-platform-nooa.fabric-adapter.json" = "share/nemo-fabric/adapters/nemo-platform-nooa/nemo-platform-nooa.fabric-adapter.json"
 
 
 [tool.uv.sources]

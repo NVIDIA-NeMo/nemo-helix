@@ -23,6 +23,11 @@ dependencies = [
     "fastapi>=0.115.4",
     "jsonschema>=4.0.0",
     "lark>=1.1.0",
+    # Types for the platform's NOOA calling convention
+    # (nemo_platform_plugin.agents.nooa_contract). A ~40 KB pure-Python package
+    # whose only dependency is an optional pydantic extra, so plugin authors can
+    # write an agent against the contract without installing a Fabric runtime.
+    "nemo-fabric-adapter-contract>=0.3.0,<0.4.0",
     "nemo-platform-sdk",
     "openai>=1.109.1",
     "pydantic>=2.12.0",

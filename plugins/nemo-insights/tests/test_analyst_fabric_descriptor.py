@@ -1,11 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The Insights analyst Fabric adapter descriptor and the config built for it.
+"""The config the Insights analyst builds, and the adapter it plans against.
 
-These exercise the real Fabric planner rather than a hand-rolled schema copy,
-so an invalid ``config.accepts`` key or an untranslatable harness kind fails
-here instead of inside a running job.
+The analyst no longer ships a descriptor of its own: it runs on the generic
+``nvidia.nemo-platform.nooa`` adapter, which lives in nemo-agents. These
+exercise the real Fabric planner rather than a hand-rolled schema copy, so an
+invalid ``config.accepts`` key or an untranslatable harness kind fails here
+instead of inside a running job.
 """
 
 from __future__ import annotations
@@ -20,25 +22,30 @@ from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.fabric.translator import translate_agent_config
 from nemo_fabric_adapter_contract import models as contract
 from nemo_insights_plugin import fabric_adapter
-from nemo_insights_plugin.analyst.agent_config import ANALYST_ADAPTER_ID, build_analyst_agent_config
+from nemo_insights_plugin.analyst.agent_config import (
+    ANALYST_ADAPTER_ID,
+    ANALYST_ENTRYPOINT,
+    build_analyst_agent_config,
+)
 
-_PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-DESCRIPTOR = _PLUGIN_ROOT / "insights-analyst.fabric-adapter.json"
+_AGENTS_PLUGIN_ROOT = Path(__file__).resolve().parents[2] / "nemo-agents"
+DESCRIPTOR = _AGENTS_PLUGIN_ROOT / "nemo-platform-nooa.fabric-adapter.json"
+DESCRIPTOR_DIR_NAME = "nemo-platform-nooa"
 
 
-_REINSTALL_HINT = "Refresh it with: uv sync --reinstall-package nemo-insights-plugin"
+_REINSTALL_HINT = "Refresh it with: uv sync --reinstall-package nemo-agents-plugin"
 
 
 def _installed_descriptor() -> Path:
     """Where Fabric's default InstalledPackage discovery looks for the descriptor.
 
-    The wheel ships it as shared-data (see ``pyproject.toml``), so this is the
-    path Fabric names in its own ``FabricConfigError`` when a setting is missing
-    from the schema.
+    The nemo-agents wheel ships it as shared-data (see its ``pyproject.toml``),
+    so this is the path Fabric names in its own ``FabricConfigError`` when a
+    setting is missing from the schema.
     """
     import sys
 
-    return Path(sys.prefix) / "share" / "nemo-fabric" / "adapters" / "insights-analyst" / DESCRIPTOR.name
+    return Path(sys.prefix) / "share" / "nemo-fabric" / "adapters" / DESCRIPTOR_DIR_NAME / DESCRIPTOR.name
 
 
 def _require_installed_descriptor() -> Path:
@@ -125,7 +132,14 @@ def test_analyst_adapter_resolves_the_forwarded_pair() -> None:
 def test_optional_read_settings_are_omitted_when_unset() -> None:
     settings = _built_config()["harnesses"]["insights"]["settings"]
 
-    assert set(settings) == {"agent", "workspace"}
+    assert set(settings) == {"entrypoint", "agent", "workspace"}
+
+
+def test_built_config_names_the_analyst_entrypoint() -> None:
+    """`entrypoint` is what makes the generic adapter run the analyst."""
+    settings = _built_config()["harnesses"]["insights"]["settings"]
+
+    assert settings["entrypoint"] == ANALYST_ENTRYPOINT == "nemo_insights_plugin.fabric_adapter:run"
 
 
 def test_optional_read_settings_are_carried_when_set() -> None:
@@ -142,14 +156,18 @@ def test_optional_read_settings_are_carried_when_set() -> None:
     assert settings["enable_observability"] is False
 
 
-def test_descriptor_declares_the_ethos_setting() -> None:
-    """The adapter reads ``ethos``; an undeclared key is rejected by the closed schema."""
+def test_descriptor_requires_an_entrypoint_and_is_otherwise_open() -> None:
+    """The generic adapter cannot know an arbitrary agent's settings.
+
+    The analyst's own settings -- ``ethos``, ``since``, ``evaluation_id`` -- are
+    validated by the typed builder that writes them and by the entrypoint that
+    reads them, not by a third schema layer that would have to enumerate every
+    consumer's keys.
+    """
     settings_schema = json.loads(DESCRIPTOR.read_text(encoding="utf-8"))["settings_schema"]
 
-    assert "ethos" in settings_schema["properties"]
-    assert settings_schema["additionalProperties"] is False
-    # The pre-rename name of the same field; nothing reads it any more.
-    assert "agent_spec" not in settings_schema["properties"]
+    assert settings_schema["required"] == ["entrypoint"]
+    assert settings_schema["additionalProperties"] is True
 
 
 def test_descriptor_declares_relay_telemetry_support() -> None:

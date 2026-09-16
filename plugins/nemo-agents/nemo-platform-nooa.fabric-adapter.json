@@ -1,9 +1,9 @@
 {
   "contract_version": "fabric.adapter/v1alpha2",
-  "adapter_id": "nvidia.fabric.insights-analyst",
+  "adapter_id": "nvidia.nemo-platform.nooa",
   "adapter_kind": "python",
   "runner": {
-    "module": "nemo_insights_plugin.fabric_adapter"
+    "module": "nemo_agents_plugin.nooa.fabric_adapter"
   },
   "model_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -27,22 +27,15 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
-      "agent": {"type": "string", "minLength": 1},
-      "target_agent": {"type": "string", "minLength": 1},
-      "ethos": {"type": "string", "minLength": 1},
-      "workspace": {"type": "string", "minLength": 1},
-      "base_url": {"type": "string", "minLength": 1},
-      "since": {"type": "string", "format": "date-time"},
-      "evaluation_id": {"type": "string", "minLength": 1},
-      "enable_observability": {"type": "boolean", "default": true},
-      "default_model": {"type": "string", "minLength": 1},
-      "fast_model": {"type": "string", "minLength": 1}
+      "entrypoint": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$",
+        "description": "The agent's async callable, as module.path:callable."
+      }
     },
-    "oneOf": [
-      {"required": ["agent"]},
-      {"required": ["target_agent"]}
-    ],
-    "additionalProperties": false
+    "required": ["entrypoint"],
+    "additionalProperties": true
   },
   "telemetry": {
     "providers": {

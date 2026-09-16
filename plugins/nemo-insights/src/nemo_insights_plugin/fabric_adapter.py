@@ -1,28 +1,30 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Fabric adapter for running the Insights analyst without persistence side effects."""
+"""The Insights analyst as a platform NOOA agent.
+
+This used to be a Fabric adapter of its own — a runtime class, a descriptor, and
+a closed settings schema — whose only analyst-specific behaviour was one call to
+``run_analyst_change_set``. It is now an entrypoint for the generic
+``nvidia.nemo-platform.nooa`` adapter, which owns the lifecycle, the Relay
+activation, and the error mapping.
+
+The Analyst is the generic adapter's first consumer. A calling convention with
+no first-party consumer is one nobody exercises.
+"""
 
 from __future__ import annotations
 
-import json
-import logging
 import os
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import Mapping
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from nemo_fabric_adapter_contract import models as contract
-from nemo_fabric_adapters.common import lifecycle
 from nemo_insights_plugin.analyst.run import run_analyst_change_set
+from nemo_platform_plugin.agents.nooa_contract import NooaInvocation
 from nemo_platform_plugin.nooa_model_client import ConfiguredModelRefs
 from nemo_platform_plugin.sdk_provider import get_async_task_sdk
-from nemo_platform_plugin.tasks.logging_setup import configure_task_logging
-from nemo_relay import plugin as relay_plugin
-
-logger = logging.getLogger(__name__)
 
 ANALYST_RELAY_SCOPE = "insights-analyst"
 
@@ -31,149 +33,71 @@ class AnalystAdapterConfigError(ValueError):
     """The Fabric-projected analyst adapter configuration is invalid."""
 
 
-class InsightsAnalystRuntime:
-    """Adapter-owned runtime for one Fabric-managed analyst process."""
+async def run(invocation: NooaInvocation) -> contract.AgentRunResult:
+    """Run one Insights analysis and return its change set.
 
-    def __init__(self) -> None:
-        self._settings: dict[str, Any] = {}
-        self._models: dict[str, contract.AgentModelConfig] = {}
-
-    async def start(self, payload: dict[str, Any]) -> None:
-        config: contract.AgentConfig = payload["config"]
-        self._settings = dict(config.harness.settings if config.harness else {})
-        self._models = dict(config.models)
-
-    async def invoke(
-        self,
-        request: contract.AgentRunRequest,
-        context: contract.RuntimeContext,
-    ) -> contract.AgentRunResult:
-        try:
-            result = await self._run_with_telemetry(request, context)
-        except Exception as error:
-            # Log the full exception so it reaches this process's stderr, which
-            # is where the job reads a failed run's diagnostics from.
-            logger.exception("Insights analyst run failed.")
-            return contract.AgentRunResult(
-                status=contract.AgentRunStatus.FAILED,
-                output={"response": str(error)},
-                error=contract.AgentRunError(
-                    code="insights_analyst_failed",
-                    message=str(error),
-                    retryable=False,
-                ),
-            )
-
-        return contract.AgentRunResult(
-            status=contract.AgentRunStatus.SUCCEEDED,
-            output={
-                "response": result.summary,
-                "analyst_result": result.model_dump(mode="json"),
-            },
-        )
-
-    async def _run_with_telemetry(
-        self,
-        request: contract.AgentRunRequest,
-        context: contract.RuntimeContext,
-    ):
-        """Run the analysis, instrumented by Relay when Fabric asked for it.
-
-        Fabric resolves the whole export -- endpoint, credentials, agent name --
-        into a config file and points at it through ``telemetry.env``. Nothing
-        about the destination is decided here; the adapter's job is to activate
-        the config and let Relay carry the trajectory.
-        """
-        telemetry = context.telemetry
-        if telemetry is None or not telemetry.relay_enabled:
-            return await self._run_analysis(request)
-
-        # Relay reads credentials for the export from the environment Fabric
-        # names, so apply it before the exporter is built -- and only for this
-        # invocation. The runtime is long-lived and serves many; a leftover
-        # FABRIC_RELAY_CONFIG_PATH is the ambient-config hazard the bundled
-        # adapters have a named guard against.
-        with _applied_environment(telemetry.env):
-            async with relay_plugin.plugin(_relay_plugin_config(telemetry)):
-                return await self._run_analysis(request, relay_scope_name=ANALYST_RELAY_SCOPE)
-
-    async def _run_analysis(self, request: contract.AgentRunRequest, *, relay_scope_name: str | None = None):
-        target_agent = _string_setting(self._settings, "agent") or _string_setting(self._settings, "target_agent")
-        if target_agent is None:
-            raise AnalystAdapterConfigError("harness.settings.agent is required for the Insights analyst adapter")
-
-        workspace = (
-            _string_setting(self._settings, "workspace")
-            or _string_context(request.context, "job_workspace")
-            or os.environ.get("NMP_WORKSPACE")
-            or "default"
-        )
-        base_url = (
-            _string_setting(self._settings, "base_url")
-            or os.environ.get("NMP_BASE_URL")
-            or os.environ.get("NEMO_BASE_URL")
-        )
-        # Every settings read can raise, so resolve them before opening the
-        # client: nothing is worth a live SDK handle that no one closes.
-        ethos = _string_setting(self._settings, "ethos")
-        since = _datetime_setting(self._settings, "since")
-        evaluation_id = _string_setting(self._settings, "evaluation_id")
-        enable_observability = bool(self._settings.get("enable_observability", True))
-        model_refs = ConfiguredModelRefs(
-            default=_default_model_ref(self._settings, self._models),
-            fast=_fast_model_ref(self._settings, self._models),
-        )
-        async with get_async_task_sdk("insights") as client:
-            result, _backend = await run_analyst_change_set(
-                agent=target_agent,
-                ethos=ethos,
-                workspace=workspace,
-                base_url=base_url,
-                client=client,
-                since=since,
-                evaluation_id=evaluation_id,
-                enable_observability=enable_observability,
-                relay_scope_name=relay_scope_name,
-                model_refs=model_refs,
-            )
-        return result
-
-    async def stop(self) -> None:
-        self.__init__()
-
-
-@contextmanager
-def _applied_environment(env: dict[str, str]) -> Iterator[None]:
-    """Apply *env* for the duration of one invocation, then put it back."""
-    previous = {name: os.environ.get(name) for name in env}
-    os.environ.update(env)
-    try:
-        yield
-    finally:
-        for name, value in previous.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
-
-
-def _relay_plugin_config(telemetry: contract.RuntimeTelemetryContext) -> dict[str, Any]:
-    """Read the Relay plugin config Fabric resolved for this invocation.
-
-    ``nemo_fabric_adapters.common.load_relay_plugin_config`` does the same from
-    a raw invocation payload, which a lifecycle adapter never sees -- it is
-    handed the typed context instead, and ``config_path`` points at the same
-    file. The helper additionally rebases ATOF file-sink directories, which
-    matters only for configs this path does not produce: the agents plugin
-    wires ATIF over HTTP.
+    The generic adapter maps a raised exception onto a failed ``AgentRunResult``
+    and logs it, so nothing here catches broadly.
     """
-    if not telemetry.config_path:
-        raise AnalystAdapterConfigError("Relay is enabled but Fabric supplied no config path")
-    wrapper = json.loads(Path(telemetry.config_path).read_text(encoding="utf-8"))
-    config = (wrapper.get("relay") or {}).get("config") or {}
-    if not config.get("components"):
-        raise AnalystAdapterConfigError(f"Relay config at {telemetry.config_path} declares no components")
-    return config
+    result = await _run_analysis(invocation)
+    return contract.AgentRunResult(
+        status=contract.AgentRunStatus.SUCCEEDED,
+        output={
+            "response": result.summary,
+            "analyst_result": result.model_dump(mode="json"),
+        },
+    )
+
+
+async def _run_analysis(invocation: NooaInvocation):
+    settings = dict(invocation.settings)
+    target_agent = _string_setting(settings, "agent")
+    if target_agent is None:
+        raise AnalystAdapterConfigError("harness.settings.agent is required for the Insights analyst")
+
+    workspace = (
+        _string_setting(settings, "workspace")
+        or _string_context(invocation.request.context, "job_workspace")
+        or os.environ.get("NMP_WORKSPACE")
+        or "default"
+    )
+    base_url = (
+        _string_setting(settings, "base_url") or os.environ.get("NMP_BASE_URL") or os.environ.get("NEMO_BASE_URL")
+    )
+    # Every settings read can raise, so resolve them before opening the
+    # client: nothing is worth a live SDK handle that no one closes.
+    ethos = _string_setting(settings, "ethos")
+    since = _datetime_setting(settings, "since")
+    evaluation_id = _string_setting(settings, "evaluation_id")
+    enable_observability = bool(settings.get("enable_observability", True))
+    model_refs = ConfiguredModelRefs(
+        default=_default_model_ref(settings, invocation.models),
+        fast=_fast_model_ref(settings, invocation.models),
+    )
+    # The generic adapter activates Relay when Fabric asked for it, but opening
+    # the *scope* needs the agent object, which only exists inside the run --
+    # so the scope name is passed down, and must be None when Relay is off.
+    # Fabric says which through the context the adapter hands us verbatim. The
+    # name stays `insights-analyst` so exported telemetry keeps its identity
+    # across the move off a bespoke adapter.
+    telemetry = invocation.context.telemetry
+    relay_scope = None
+    if telemetry is not None and telemetry.relay_enabled:
+        relay_scope = _string_setting(settings, "relay_scope") or ANALYST_RELAY_SCOPE
+    async with get_async_task_sdk("insights") as client:
+        result, _backend = await run_analyst_change_set(
+            agent=target_agent,
+            ethos=ethos,
+            workspace=workspace,
+            base_url=base_url,
+            client=client,
+            since=since,
+            evaluation_id=evaluation_id,
+            enable_observability=enable_observability,
+            relay_scope_name=relay_scope,
+            model_refs=model_refs,
+        )
+    return result
 
 
 def _string_setting(settings: dict[str, Any], key: str) -> str | None:
@@ -201,7 +125,7 @@ def _datetime_setting(settings: dict[str, Any], key: str) -> datetime | None:
 
 def _default_model_ref(
     settings: dict[str, Any],
-    models: dict[str, contract.AgentModelConfig],
+    models: Mapping[str, contract.AgentModelConfig],
 ) -> str:
     configured = _string_setting(settings, "default_model")
     if configured is not None:
@@ -214,7 +138,7 @@ def _default_model_ref(
 
 def _fast_model_ref(
     settings: dict[str, Any],
-    models: dict[str, contract.AgentModelConfig],
+    models: Mapping[str, contract.AgentModelConfig],
 ) -> str:
     configured = _string_setting(settings, "fast_model")
     if configured is not None:
@@ -223,17 +147,3 @@ def _fast_model_ref(
     if model is not None:
         return model.model
     return _default_model_ref(settings, models)
-
-
-def main() -> None:
-    """Serve the persistent local-host lifecycle protocol."""
-    # Fabric spawns this as its own process and redirects its streams to the
-    # run's stdout/stderr artifacts. Nothing configures logging here, so
-    # without this the analyst's and Nooa's INFO output is dropped and those
-    # artifacts hold only bare WARNING+ lines from ``logging.lastResort``.
-    configure_task_logging()
-    lifecycle.serve(InsightsAnalystRuntime, config_loader=contract.AgentConfig.from_mapping)
-
-
-if __name__ == "__main__":
-    main()

@@ -446,7 +446,7 @@ class TestRenderFabricDockerfile:
         install_line = next(line for line in result.splitlines() if "uv pip install" in line)
         assert "--no-sources" in install_line
         assert "--prerelease=allow" in install_line
-        assert f'"nemo-platform[nemo-agents-plugin]=={get_contract_version()}"' in install_line
+        assert f'"nemo-platform[nemo-agents-plugin,platform-nooa]=={get_contract_version()}"' in install_line
         assert '" .' not in install_line
         assert "ENV AGENT_CONFIG_PATH=/workspace/agent.yaml" in result
         assert "NAT_VERSION" not in result
@@ -499,7 +499,7 @@ class TestRenderFabricDockerfile:
         install_line = next(line for line in result.splitlines() if "uv pip install" in line)
         assert "--no-sources" in install_line
         assert "--prerelease=allow" in install_line
-        assert f'"nemo-platform[nemo-agents-plugin]=={get_contract_version()}"' in install_line
+        assert f'"nemo-platform[nemo-agents-plugin,platform-nooa]=={get_contract_version()}"' in install_line
         assert f'"nemo-relay=={PINNED_NEMO_RELAY_CLI_VERSION}" .' in result
         assert "ENV AGENT_CONFIG_PATH=/workspace/configs/agent.yaml" in result
 
@@ -2745,8 +2745,8 @@ class TestFabricWheelInstall:
 
         result = render_fabric_dockerfile(fabric_agent_config, wheel_filename="nemo_platform-0.4.0-py3-none-any.whl")
 
-        assert '"/workspace/nemo_platform-0.4.0-py3-none-any.whl[nemo-agents-plugin]"' in result
-        assert "nemo-platform[nemo-agents-plugin]==" not in result
+        assert '"/workspace/nemo_platform-0.4.0-py3-none-any.whl[nemo-agents-plugin,platform-nooa]"' in result
+        assert "nemo-platform[nemo-agents-plugin,platform-nooa]==" not in result
 
     def test_a_wheel_lifts_the_unpublished_version_guard(
         self, fabric_agent_config: Path, monkeypatch: pytest.MonkeyPatch

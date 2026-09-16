@@ -74,19 +74,40 @@ def test_bundled_shared_data_is_carried_into_the_wrapper_wheel() -> None:
             assert path.is_file()
 
 
-def test_insights_analyst_fabric_descriptor_ships_in_the_wrapper_wheel() -> None:
-    """Fabric resolves ``nvidia.fabric.insights-analyst`` from the install prefix."""
+def test_platform_nooa_fabric_descriptor_ships_in_the_wrapper_wheel() -> None:
+    """Fabric resolves ``nvidia.nemo-platform.nooa`` from the install prefix.
+
+    A packaged agent image installs ``nemo-platform[nemo-agents-plugin,...]``,
+    not the plugin wheel, so the bundle entry has to mirror the plugin's own
+    ``shared-data``. Nothing generates this mapping -- ``make vendor`` writes
+    dependency lists, not shared data -- and a miss is invisible until a
+    packaged NOOA agent fails to resolve its adapter at run time.
+    """
     pyproject_path = ROOT / "packages/nemo_platform/pyproject.toml"
     with open(pyproject_path, "rb") as pyproject:
-        bundle = tomllib.load(pyproject)["tool"]["bundle-package"]["nemo-insights-plugin"]
+        bundle = tomllib.load(pyproject)["tool"]["bundle-package"]["nemo-agents-plugin"]
 
     source = (pyproject_path.parent / bundle["source"]).resolve()
     shared_data = {(source / key).resolve(): value for key, value in bundle["shared_data"].items()}
 
-    descriptor = (ROOT / "plugins/nemo-insights/insights-analyst.fabric-adapter.json").resolve()
+    descriptor = (ROOT / "plugins/nemo-agents/nemo-platform-nooa.fabric-adapter.json").resolve()
+    assert descriptor.is_file()
     assert shared_data[descriptor] == (
-        "share/nemo-fabric/adapters/insights-analyst/insights-analyst.fabric-adapter.json"
+        "share/nemo-fabric/adapters/nemo-platform-nooa/nemo-platform-nooa.fabric-adapter.json"
     )
+
+
+def test_platform_nooa_extra_reaches_the_wrapper_wheel() -> None:
+    """The adapter's `nooa` runtime must follow its descriptor into the wrapper.
+
+    Shipping the descriptor without the extra yields an adapter Fabric can
+    resolve and then fails to run.
+    """
+    pyproject_path = ROOT / "packages/nemo_platform/pyproject.toml"
+    with open(pyproject_path, "rb") as pyproject:
+        bundle = tomllib.load(pyproject)["tool"]["bundle-package"]["nemo-agents-plugin"]
+
+    assert "platform-nooa" in bundle["inherit"]["optional-dependencies"]
 
 
 def _owning_pyproject(source: Path) -> Path | None:
