@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 import typer
-from nemo_agent_optimization_plugin.strategies import discover_optimization_strategies
+from nemo_agent_optimization_plugin.discovery import discover_agent_optimize_jobs
 from nemo_platform_plugin.cli import NemoCLI
 
 
@@ -28,7 +28,7 @@ class OptimizationStrategiesCLI(NemoCLI):
         @app.command("list")
         def list_strategies() -> None:
             """Print every installed nemo.optimization-strategy name."""
-            strategies = discover_optimization_strategies()
+            strategies = discover_agent_optimize_jobs()
             if not strategies:
                 typer.echo("No optimization strategies are installed.")
                 raise typer.Exit(code=0)

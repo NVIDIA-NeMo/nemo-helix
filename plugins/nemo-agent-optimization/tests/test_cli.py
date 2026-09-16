@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import pytest
 from nemo_agent_optimization_plugin.cli import OptimizationStrategiesCLI
-from nemo_agent_optimization_plugin.strategies import discover_optimization_strategies
 from typer.testing import CliRunner
 
 
@@ -21,9 +20,8 @@ class _FakeStrategy:
 
 
 def test_lists_installed_strategies(monkeypatch: pytest.MonkeyPatch) -> None:
-    discover_optimization_strategies.cache_clear()
     monkeypatch.setattr(
-        "nemo_agent_optimization_plugin.cli.discover_optimization_strategies",
+        "nemo_agent_optimization_plugin.cli.discover_agent_optimize_jobs",
         lambda: {"fake": _FakeStrategy()},
     )
     runner = CliRunner()
