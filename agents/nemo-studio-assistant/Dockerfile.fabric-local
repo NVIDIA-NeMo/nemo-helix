@@ -46,7 +46,7 @@ RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \
     . /workspace/.venv/bin/activate && \
     uv pip install --no-sources --constraint /workspace/constraints.fabric-local.txt \
       "/workspace/wheelhouse/nemo_platform-0.4.0.post37.dev0+154a3933d-py3-none-any.whl[nemo-agents-plugin]" \
-      "nemo-fabric==0.2.0" . && \
+      "nemo-fabric==0.3.0" . && \
     chmod -R a+rX /opt/uv /workspace/.venv
 
 

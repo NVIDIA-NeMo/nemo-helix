@@ -18,7 +18,7 @@
         {
           "package": {
             "name": "accelerate",
-            "version": "1.14.0",
+            "version": "1.15.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -1112,7 +1112,7 @@
         {
           "package": {
             "name": "gitpython",
-            "version": "3.1.58",
+            "version": "3.1.62",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -2062,7 +2062,7 @@
         {
           "package": {
             "name": "nemo-fabric",
-            "version": "0.2.0",
+            "version": "0.3.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -2072,7 +2072,7 @@
         {
           "package": {
             "name": "nemo-fabric-adapter-contract",
-            "version": "0.2.0",
+            "version": "0.3.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -2082,7 +2082,7 @@
         {
           "package": {
             "name": "nemo-fabric-adapters-claude",
-            "version": "0.2.0",
+            "version": "0.3.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -2092,7 +2092,7 @@
         {
           "package": {
             "name": "nemo-fabric-adapters-codex",
-            "version": "0.2.0",
+            "version": "0.3.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -2102,7 +2102,7 @@
         {
           "package": {
             "name": "nemo-fabric-adapters-common",
-            "version": "0.2.0",
+            "version": "0.3.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -2112,7 +2112,7 @@
         {
           "package": {
             "name": "nemo-fabric-adapters-deepagents",
-            "version": "0.2.0",
+            "version": "0.3.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -2122,7 +2122,7 @@
         {
           "package": {
             "name": "nemo-fabric-adapters-hermes",
-            "version": "0.2.0",
+            "version": "0.3.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -2132,7 +2132,7 @@
         {
           "package": {
             "name": "nemo-fabric-runtime",
-            "version": "0.2.0",
+            "version": "0.3.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -2222,11 +2222,201 @@
         {
           "package": {
             "name": "nltk",
-            "version": "3.10.2",
+            "version": "3.10.3",
             "ecosystem": "PyPI"
           },
+          "groups": [
+            {
+              "ids": [
+                "GHSA-8mgp-746c-j5xp"
+              ],
+              "aliases": [
+                "CVE-2026-81726",
+                "GHSA-8mgp-746c-j5xp",
+                "PYSEC-2026-3740"
+              ],
+              "max_severity": "8.3"
+            }
+          ],
           "licenses": [
             "Apache-2.0"
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-8mgp-746c-j5xp/GHSA-8mgp-746c-j5xp.json"
+                  },
+                  "package": {
+                    "ecosystem": "PyPI",
+                    "name": "nltk",
+                    "purl": "pkg:pypi/nltk"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "last_affected": "3.10.3"
+                        }
+                      ],
+                      "type": "ECOSYSTEM"
+                    }
+                  ],
+                  "versions": [
+                    "0.8",
+                    "0.9",
+                    "0.9.3",
+                    "0.9.4",
+                    "0.9.5",
+                    "0.9.6",
+                    "0.9.7",
+                    "0.9.8",
+                    "0.9.9",
+                    "2.0.1",
+                    "2.0.1rc1",
+                    "2.0.1rc2-git",
+                    "2.0.1rc3",
+                    "2.0.1rc4",
+                    "2.0.2",
+                    "2.0.3",
+                    "2.0.4",
+                    "2.0.5",
+                    "2.0b4",
+                    "2.0b5",
+                    "2.0b6",
+                    "2.0b7",
+                    "2.0b8",
+                    "2.0b9",
+                    "3.0.0",
+                    "3.0.0b1",
+                    "3.0.0b2",
+                    "3.0.1",
+                    "3.0.2",
+                    "3.0.3",
+                    "3.0.4",
+                    "3.0.5",
+                    "3.1",
+                    "3.10.0",
+                    "3.10.1",
+                    "3.10.2",
+                    "3.10.3",
+                    "3.2",
+                    "3.2.1",
+                    "3.2.2",
+                    "3.2.3",
+                    "3.2.4",
+                    "3.2.5",
+                    "3.3",
+                    "3.4",
+                    "3.4.1",
+                    "3.4.2",
+                    "3.4.3",
+                    "3.4.4",
+                    "3.4.5",
+                    "3.5",
+                    "3.5b1",
+                    "3.6",
+                    "3.6.1",
+                    "3.6.2",
+                    "3.6.3",
+                    "3.6.4",
+                    "3.6.5",
+                    "3.6.6",
+                    "3.6.7",
+                    "3.7",
+                    "3.8",
+                    "3.8.1",
+                    "3.9",
+                    "3.9.1",
+                    "3.9.2",
+                    "3.9.3",
+                    "3.9.4",
+                    "3.9b1"
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-81726",
+                "PYSEC-2026-3740"
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-22",
+                  "CWE-59",
+                  "CWE-73"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2026-09-02T14:35:04Z",
+                "nvd_published_at": null,
+                "severity": "HIGH"
+              },
+              "details": "### Summary\n\nSeveral model-artifact APIs still treat caller-controlled model paths as ordinary filenames even when NLTK path security is enforced. The same outside-root paths are rejected by guarded helpers, but these public read and write flows still use raw file APIs.\n\n### Details\n\n- **Vulnerability type:** File sandbox bypass\n- **Affected component:** `TransitionParser.train`, `TransitionParser.parse`, `AveragedPerceptron.save`, `AveragedPerceptron.load`, `PerceptronTagger.save_to_json`, `save_maxent_params`\n- **Affected versions:** Published `3.9.4` and current source `v3.10.0-rc2` both reproduced.\n- **Patched versions:** Not yet patched\n- **Root cause:** Model import and export helpers use built-in `open()` on caller-controlled paths instead of pathsec-aware helpers.\n\n`TransitionParser.train()` writes outside allowed roots, `TransitionParser.parse()` reads outside allowed roots, `AveragedPerceptron` bypasses the sandbox in both directions, and adjacent read-side helpers in the same family already show the intended guarded behavior. I confirmed outside-root reads and writes while `pathsec.open()` or the guarded sibling helpers rejected the same paths.\n\n### PoC\n\n**Preconditions**\n- The application enables `pathsec` enforcement and lets untrusted workflows choose model import or export paths.\n\n**Steps**\n1. Enable `pathsec.ENFORCE=True` and restrict allowed roots to a dedicated sandbox directory.\n2. Use public model import or export APIs with paths that point outside that root.\n3. Observe the same paths are rejected by negative-control guarded helpers such as `pathsec.open()`, `PerceptronTagger.load_from_json()`, or `load_maxent_params()`.\n4. Observe the vulnerable APIs still read or write outside-root files successfully.\n\n**Minimal reproducible excerpt**\n\n```text\ntransition_train_exists True\ntransition_parse_loader_read_bytes 13\naveraged_load_keys ['bias']\nmaxent_save wrote ['alwayson.tab', 'labels.txt']\n```\n\n### Impact\n\nConsumers that rely on `pathsec` for local containment can be tricked into reading or overwriting files outside approved roots through normal model persistence and loading APIs.\n\n### Remediation\n\nRoute all model-path file access through `nltk.pathsec.open()` or existing pathsec-aware helpers, and add regression tests that pair each vulnerable API with a negative control on the same path.",
+              "id": "GHSA-8mgp-746c-j5xp",
+              "modified": "2026-09-02T14:45:06.878867805Z",
+              "published": "2026-09-02T14:35:04Z",
+              "references": [
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/nltk/nltk/security/advisories/GHSA-8mgp-746c-j5xp"
+                },
+                {
+                  "type": "ADVISORY",
+                  "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-81726"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/nltk/nltk/pull/3757"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/nltk/nltk/pull/3759"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/nltk/nltk/pull/3813"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/nltk/nltk/commit/2a92b71827d754ae8920261e7ed0c4bb283ab2d7"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/nltk/nltk/commit/a44a7af69bca87e92d9c4a701fcbbe4512e8d450"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/nltk/nltk/commit/cbc98458b43de5f792f0382583c16df39e5c5117"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/nltk/nltk"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/pypa/advisory-database/tree/main/vulns/nltk/PYSEC-2026-3740.yaml"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://www.vulncheck.com/advisories/nltk-through-3.10.3-path-traversal-via-model-artifact-apis"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "severity": [
+                {
+                  "score": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:L/A:L",
+                  "type": "CVSS_V3"
+                },
+                {
+                  "score": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:H/VI:L/VA:L/SC:N/SI:N/SA:N",
+                  "type": "CVSS_V4"
+                }
+              ],
+              "summary": "NLTK: Model-artifact APIs bypass pathsec and touch files outside allowed roots"
+            }
           ]
         },
         {
@@ -2567,6 +2757,16 @@
           },
           "licenses": [
             "Apache-2.0"
+          ]
+        },
+        {
+          "package": {
+            "name": "opensandbox",
+            "version": "0.1.16",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "non-standard"
           ]
         },
         {
@@ -3241,6 +3441,16 @@
         },
         {
           "package": {
+            "name": "pytrec-eval-terrier",
+            "version": "0.5.10",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "MIT"
+          ]
+        },
+        {
+          "package": {
             "name": "pytz",
             "version": "2026.3.post1",
             "ecosystem": "PyPI"
@@ -3505,7 +3715,7 @@
                   "url": "https://vuldb.com/vuln/358222/cti"
                 }
               ],
-              "schema_version": "1.7.5",
+              "schema_version": "1.9.0",
               "severity": [
                 {
                   "score": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
@@ -4093,7 +4303,7 @@
         {
           "package": {
             "name": "tomlkit",
-            "version": "0.15.1",
+            "version": "0.15.0",
             "ecosystem": "PyPI"
           },
           "licenses": [
@@ -4217,7 +4427,7 @@
               },
               "details": "A vulnerability classified as critical has been found in PyTorch 2.6.0. This affects the function torch.jit.script. The manipulation leads to memory corruption. It is possible to launch the attack on the local host. The exploit has been disclosed to the public and may be used.",
               "id": "GHSA-rrmf-rvhw-rf47",
-              "modified": "2026-07-17T17:15:51.452848951Z",
+              "modified": "2026-09-10T03:49:48.419046410Z",
               "published": "2025-03-31T15:30:48Z",
               "references": [
                 {
@@ -4257,10 +4467,7 @@
                   "url": "https://vuldb.com/?submit.524197"
                 }
               ],
-              "related": [
-                "CGA-hjpf-wwv2-49v4"
-              ],
-              "schema_version": "1.7.5",
+              "schema_version": "1.9.0",
               "severity": [
                 {
                   "score": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
@@ -4301,8 +4508,620 @@
             "version": "6.5.7",
             "ecosystem": "PyPI"
           },
+          "groups": [
+            {
+              "ids": [
+                "PYSEC-2026-3928",
+                "GHSA-mpf4-983q-p7j4"
+              ],
+              "aliases": [
+                "CVE-2026-82397",
+                "GHSA-mpf4-983q-p7j4",
+                "PYSEC-2026-3928"
+              ],
+              "max_severity": "7.5"
+            },
+            {
+              "ids": [
+                "GHSA-8423-8fgw-73vq"
+              ],
+              "aliases": [
+                "CVE-2026-91990",
+                "GHSA-8423-8fgw-73vq"
+              ],
+              "max_severity": "6.9"
+            },
+            {
+              "ids": [
+                "GHSA-wwv5-g3v4-889x"
+              ],
+              "aliases": [
+                "CVE-2026-91991",
+                "GHSA-wwv5-g3v4-889x"
+              ],
+              "max_severity": "2.3"
+            }
+          ],
           "licenses": [
             "Apache-2.0"
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://github.com/pypa/advisory-database/blob/main/vulns/tornado/PYSEC-2026-3928.yaml"
+                  },
+                  "package": {
+                    "ecosystem": "PyPI",
+                    "name": "tornado",
+                    "purl": "pkg:pypi/tornado"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "6.5.8"
+                        }
+                      ],
+                      "type": "ECOSYSTEM"
+                    }
+                  ],
+                  "versions": [
+                    "0.2",
+                    "1.0",
+                    "1.1",
+                    "1.1.1",
+                    "1.2",
+                    "1.2.1",
+                    "2.0",
+                    "2.1",
+                    "2.1.1",
+                    "2.2",
+                    "2.2.1",
+                    "2.3",
+                    "2.4",
+                    "2.4.1",
+                    "3.0",
+                    "3.0.1",
+                    "3.0.2",
+                    "3.1",
+                    "3.1.1",
+                    "3.2",
+                    "3.2.1",
+                    "3.2.2",
+                    "4.0",
+                    "4.0.1",
+                    "4.0.2",
+                    "4.1",
+                    "4.1b2",
+                    "4.2",
+                    "4.2.1",
+                    "4.2b1",
+                    "4.3",
+                    "4.3b1",
+                    "4.3b2",
+                    "4.4",
+                    "4.4.1",
+                    "4.4.2",
+                    "4.4.3",
+                    "4.4b1",
+                    "4.5",
+                    "4.5.1",
+                    "4.5.2",
+                    "4.5.3",
+                    "4.5b1",
+                    "4.5b2",
+                    "5.0",
+                    "5.0.1",
+                    "5.0.2",
+                    "5.0a1",
+                    "5.0b1",
+                    "5.1",
+                    "5.1.1",
+                    "5.1b1",
+                    "6.0",
+                    "6.0.1",
+                    "6.0.2",
+                    "6.0.3",
+                    "6.0.4",
+                    "6.0a1",
+                    "6.0b1",
+                    "6.1",
+                    "6.1b1",
+                    "6.1b2",
+                    "6.2",
+                    "6.2b1",
+                    "6.2b2",
+                    "6.3",
+                    "6.3.1",
+                    "6.3.2",
+                    "6.3.3",
+                    "6.3b1",
+                    "6.4",
+                    "6.4.1",
+                    "6.4.2",
+                    "6.4b1",
+                    "6.5",
+                    "6.5.1",
+                    "6.5.2",
+                    "6.5.3",
+                    "6.5.4",
+                    "6.5.5",
+                    "6.5.6",
+                    "6.5.7",
+                    "6.5b1"
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-82397",
+                "GHSA-mpf4-983q-p7j4"
+              ],
+              "details": "## Summary\n\nTornado parses `application/x-www-form-urlencoded` bodies with `urllib.parse.parse_qs` and does not pass `max_num_fields`. A body made almost entirely of separators produces tens of millions of fields, and the parse happens on the event loop before the handler runs, so a single request stalls the whole server.\n\n## Where it is\n\n`tornado/escape.py`, at HEAD `e530031405e2154654dedc4c84d5656b557ea310`:\n\n```python\nresult = urllib.parse.parse_qs(\n    qs, keep_blank_values, strict_parsing, encoding=\"latin1\", errors=\"strict\"\n)\n```\n\n`max_num_fields` is the parameter CPython added for exactly this, and it is absent.\n\nThe path to it is entirely server-side and pre-dispatch. `RequestHandler._execute` parses the body at `tornado/web.py:1821`, which reaches `HTTPServerRequest._parse_body` at `tornado/httputil.py:636`, and the urlencoded branch of `parse_body_arguments` calls `parse_qs_bytes` at `tornado/httputil.py:1030`.\n\nThe size that reaches it is bounded only by the body cap, which defaults to the stream's `max_buffer_size` of 104857600 at `tornado/iostream.py:239`, applied as the request body default at `tornado/http1connection.py:136-140`. A 100 MB body of separators is around fifty million fields.\n\n## Impact\n\nDenial of service against the whole process, not one request. Tornado is single-threaded and the parse is synchronous on the event loop, so every other connection waits. No authentication is needed if any route accepts a form post, which is the normal case.\n\n## Suggested fix\n\nPass a bound:\n\n```python\nresult = urllib.parse.parse_qs(\n    qs, keep_blank_values, strict_parsing, encoding=\"latin1\", errors=\"strict\",\n    max_num_fields=max_num_fields,\n)\n```\n\nwith a conservative default and a way for applications to raise it. CPython raises `ValueError` when the limit is exceeded, which maps cleanly onto a 400.\n\nLowering the default body cap for urlencoded specifically would help too, since 100 MB of form fields is not a shape any real client sends.\n\n## Why I do not think this is a duplicate\n\nThe published tornado advisories cover out-of-bounds access in the C extension, unbounded accumulation of decompressed chunks in `AsyncHTTPClient`, the Authorization header surviving cross-origin redirects, credential leakage on curl handle reuse, and cookie attribute validation. The decompression one is the nearest in spirit and is on the client side; this is the server parsing a request body. The call is unchanged at HEAD.",
+              "id": "PYSEC-2026-3928",
+              "modified": "2026-09-10T12:15:15.559565535Z",
+              "published": "2026-09-10T09:44:59.496635Z",
+              "references": [
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/security/advisories/GHSA-mpf4-983q-p7j4"
+                },
+                {
+                  "type": "ADVISORY",
+                  "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-82397"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/pull/3704"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/commit/8d6363ed7b69d5f0da806efe34d256627a2191de"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/tornadoweb/tornado"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/releases/tag/v6.5.8"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://pypi.org/project/tornado"
+                },
+                {
+                  "type": "ADVISORY",
+                  "url": "https://github.com/advisories/GHSA-mpf4-983q-p7j4"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "severity": [
+                {
+                  "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                  "type": "CVSS_V3"
+                }
+              ],
+              "summary": " Tornado: Urlencoded body parsing omits max_num_fields, so one request can stall the event loop"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "last_known_affected_version_range": "<= 6.5.7",
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-8423-8fgw-73vq/GHSA-8423-8fgw-73vq.json"
+                  },
+                  "package": {
+                    "ecosystem": "PyPI",
+                    "name": "tornado",
+                    "purl": "pkg:pypi/tornado"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "6.5.8"
+                        }
+                      ],
+                      "type": "ECOSYSTEM"
+                    }
+                  ],
+                  "versions": [
+                    "0.2",
+                    "1.0",
+                    "1.1",
+                    "1.1.1",
+                    "1.2",
+                    "1.2.1",
+                    "2.0",
+                    "2.1",
+                    "2.1.1",
+                    "2.2",
+                    "2.2.1",
+                    "2.3",
+                    "2.4",
+                    "2.4.1",
+                    "3.0",
+                    "3.0.1",
+                    "3.0.2",
+                    "3.1",
+                    "3.1.1",
+                    "3.2",
+                    "3.2.1",
+                    "3.2.2",
+                    "4.0",
+                    "4.0.1",
+                    "4.0.2",
+                    "4.1",
+                    "4.1b2",
+                    "4.2",
+                    "4.2.1",
+                    "4.2b1",
+                    "4.3",
+                    "4.3b1",
+                    "4.3b2",
+                    "4.4",
+                    "4.4.1",
+                    "4.4.2",
+                    "4.4.3",
+                    "4.4b1",
+                    "4.5",
+                    "4.5.1",
+                    "4.5.2",
+                    "4.5.3",
+                    "4.5b1",
+                    "4.5b2",
+                    "5.0",
+                    "5.0.1",
+                    "5.0.2",
+                    "5.0a1",
+                    "5.0b1",
+                    "5.1",
+                    "5.1.1",
+                    "5.1b1",
+                    "6.0",
+                    "6.0.1",
+                    "6.0.2",
+                    "6.0.3",
+                    "6.0.4",
+                    "6.0a1",
+                    "6.0b1",
+                    "6.1",
+                    "6.1b1",
+                    "6.1b2",
+                    "6.2",
+                    "6.2b1",
+                    "6.2b2",
+                    "6.3",
+                    "6.3.1",
+                    "6.3.2",
+                    "6.3.3",
+                    "6.3b1",
+                    "6.4",
+                    "6.4.1",
+                    "6.4.2",
+                    "6.4b1",
+                    "6.5",
+                    "6.5.1",
+                    "6.5.2",
+                    "6.5.3",
+                    "6.5.4",
+                    "6.5.5",
+                    "6.5.6",
+                    "6.5.7",
+                    "6.5b1"
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-91990"
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-770"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2026-09-01T20:17:38Z",
+                "nvd_published_at": null,
+                "severity": "MODERATE"
+              },
+              "details": "## Description\n\n### Summary\n\n`parse_multipart_form_data` (httputil.py:34) calls\n`data.split(b\"--\"+boundary+b\"\\r\\n\")` **before** the `max_parts` check (:35).\nA 600KB body with 100k parts creates a 100k-element transient list first,\nthen rejects   transient memory amplification (each split element is a copy).\nPre-auth HTTP DoS.\n\n### Root cause\n\n```python\nparts = data[:final_boundary_index].split(b\"--\" + boundary + b\"\\r\\n\")  # :34  huge list first\nif len(parts) > config.max_parts:                                       # :35  check after\n    raise HTTPInputError(\"multipart/form-data has too many parts\")\n```\n\n### PoC\n\ngist: https://gist.github.com/afldl/649861f25d39b53b7edbe0298e171617\n`poc.py` + `output.txt` (100k parts from 600KB   transient list).\n\n### Fix\n\nCount separators without materializing the list (e.g. `data.count(b\"--\"+boundary)` first).\n\n### Credit\n\nReported by afldl, 2026-07.",
+              "id": "GHSA-8423-8fgw-73vq",
+              "modified": "2026-09-16T03:56:01.992806508Z",
+              "published": "2026-09-01T20:17:38Z",
+              "references": [
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/security/advisories/GHSA-8423-8fgw-73vq"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/pull/3704"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/commit/de85b3f87446e323e881bbaa3d5a74f4b76e5f05"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://gist.github.com/afldl/649861f25d39b53b7edbe0298e171617"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/tornadoweb/tornado"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/releases/tag/v6.5.8"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "severity": [
+                {
+                  "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:L/SC:N/SI:N/SA:N",
+                  "type": "CVSS_V4"
+                }
+              ],
+              "summary": "tornado: multipart split() creates huge temp list before max_parts check -> memory amplification DoS (httputil.py:34)"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "last_known_affected_version_range": "<= 6.5.7",
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-mpf4-983q-p7j4/GHSA-mpf4-983q-p7j4.json"
+                  },
+                  "package": {
+                    "ecosystem": "PyPI",
+                    "name": "tornado",
+                    "purl": "pkg:pypi/tornado"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "6.5.8"
+                        }
+                      ],
+                      "type": "ECOSYSTEM"
+                    }
+                  ],
+                  "versions": [
+                    "0.2",
+                    "1.0",
+                    "1.1",
+                    "1.1.1",
+                    "1.2",
+                    "1.2.1",
+                    "2.0",
+                    "2.1",
+                    "2.1.1",
+                    "2.2",
+                    "2.2.1",
+                    "2.3",
+                    "2.4",
+                    "2.4.1",
+                    "3.0",
+                    "3.0.1",
+                    "3.0.2",
+                    "3.1",
+                    "3.1.1",
+                    "3.2",
+                    "3.2.1",
+                    "3.2.2",
+                    "4.0",
+                    "4.0.1",
+                    "4.0.2",
+                    "4.1",
+                    "4.1b2",
+                    "4.2",
+                    "4.2.1",
+                    "4.2b1",
+                    "4.3",
+                    "4.3b1",
+                    "4.3b2",
+                    "4.4",
+                    "4.4.1",
+                    "4.4.2",
+                    "4.4.3",
+                    "4.4b1",
+                    "4.5",
+                    "4.5.1",
+                    "4.5.2",
+                    "4.5.3",
+                    "4.5b1",
+                    "4.5b2",
+                    "5.0",
+                    "5.0.1",
+                    "5.0.2",
+                    "5.0a1",
+                    "5.0b1",
+                    "5.1",
+                    "5.1.1",
+                    "5.1b1",
+                    "6.0",
+                    "6.0.1",
+                    "6.0.2",
+                    "6.0.3",
+                    "6.0.4",
+                    "6.0a1",
+                    "6.0b1",
+                    "6.1",
+                    "6.1b1",
+                    "6.1b2",
+                    "6.2",
+                    "6.2b1",
+                    "6.2b2",
+                    "6.3",
+                    "6.3.1",
+                    "6.3.2",
+                    "6.3.3",
+                    "6.3b1",
+                    "6.4",
+                    "6.4.1",
+                    "6.4.2",
+                    "6.4b1",
+                    "6.5",
+                    "6.5.1",
+                    "6.5.2",
+                    "6.5.3",
+                    "6.5.4",
+                    "6.5.5",
+                    "6.5.6",
+                    "6.5.7",
+                    "6.5b1"
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-82397",
+                "PYSEC-2026-3928"
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-1284",
+                  "CWE-400"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2026-09-02T14:38:43Z",
+                "nvd_published_at": "2026-08-31T22:17:22Z",
+                "severity": "HIGH"
+              },
+              "details": "## Summary\n\nTornado parses `application/x-www-form-urlencoded` bodies with `urllib.parse.parse_qs` and does not pass `max_num_fields`. A body made almost entirely of separators produces tens of millions of fields, and the parse happens on the event loop before the handler runs, so a single request stalls the whole server.\n\n## Where it is\n\n`tornado/escape.py`, at HEAD `e530031405e2154654dedc4c84d5656b557ea310`:\n\n```python\nresult = urllib.parse.parse_qs(\n    qs, keep_blank_values, strict_parsing, encoding=\"latin1\", errors=\"strict\"\n)\n```\n\n`max_num_fields` is the parameter CPython added for exactly this, and it is absent.\n\nThe path to it is entirely server-side and pre-dispatch. `RequestHandler._execute` parses the body at `tornado/web.py:1821`, which reaches `HTTPServerRequest._parse_body` at `tornado/httputil.py:636`, and the urlencoded branch of `parse_body_arguments` calls `parse_qs_bytes` at `tornado/httputil.py:1030`.\n\nThe size that reaches it is bounded only by the body cap, which defaults to the stream's `max_buffer_size` of 104857600 at `tornado/iostream.py:239`, applied as the request body default at `tornado/http1connection.py:136-140`. A 100 MB body of separators is around fifty million fields.\n\n## Impact\n\nDenial of service against the whole process, not one request. Tornado is single-threaded and the parse is synchronous on the event loop, so every other connection waits. No authentication is needed if any route accepts a form post, which is the normal case.\n\n## Suggested fix\n\nPass a bound:\n\n```python\nresult = urllib.parse.parse_qs(\n    qs, keep_blank_values, strict_parsing, encoding=\"latin1\", errors=\"strict\",\n    max_num_fields=max_num_fields,\n)\n```\n\nwith a conservative default and a way for applications to raise it. CPython raises `ValueError` when the limit is exceeded, which maps cleanly onto a 400.\n\nLowering the default body cap for urlencoded specifically would help too, since 100 MB of form fields is not a shape any real client sends.\n\n## Why I do not think this is a duplicate\n\nThe published tornado advisories cover out-of-bounds access in the C extension, unbounded accumulation of decompressed chunks in `AsyncHTTPClient`, the Authorization header surviving cross-origin redirects, credential leakage on curl handle reuse, and cookie attribute validation. The decompression one is the nearest in spirit and is on the client side; this is the server parsing a request body. The call is unchanged at HEAD.",
+              "id": "GHSA-mpf4-983q-p7j4",
+              "modified": "2026-09-10T12:25:33.492830390Z",
+              "published": "2026-09-02T14:38:43Z",
+              "references": [
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/security/advisories/GHSA-mpf4-983q-p7j4"
+                },
+                {
+                  "type": "ADVISORY",
+                  "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-82397"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/pull/3704"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/commit/8d6363ed7b69d5f0da806efe34d256627a2191de"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/tornadoweb/tornado"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/releases/tag/v6.5.8"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "severity": [
+                {
+                  "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                  "type": "CVSS_V3"
+                }
+              ],
+              "summary": " Tornado: Urlencoded body parsing omits max_num_fields, so one request can stall the event loop"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-wwv5-g3v4-889x/GHSA-wwv5-g3v4-889x.json"
+                  },
+                  "package": {
+                    "ecosystem": "PyPI",
+                    "name": "tornado",
+                    "purl": "pkg:pypi/tornado"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "6.5.5"
+                        },
+                        {
+                          "fixed": "6.5.8"
+                        }
+                      ],
+                      "type": "ECOSYSTEM"
+                    }
+                  ],
+                  "versions": [
+                    "6.5.5",
+                    "6.5.6",
+                    "6.5.7"
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-91991"
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-74"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2026-09-01T20:17:23Z",
+                "nvd_published_at": null,
+                "severity": "LOW"
+              },
+              "details": "## Summary\nThe CVE-2026-35536 fix added a validation loop that rejects `[\\x00-\\x20\\x3b\\x7f]`, but only for the\nhardcoded **lowercase** keys `name`/`domain`/`path`/`samesite`. The still-live deprecated `**kwargs` path\nwrites attacker-supplied attribute values straight into the `Morsel` with no validation, and because\n`Morsel.__setitem__` is case-insensitive, a capitalized kwarg (`Domain=`, `Path=`, `SameSite=`, `Max-Age=`)\nroutes to the same reserved attribute while bypassing the loop \u2014 re-opening `;`-delimited attribute injection.\n\n```python\nself.set_cookie(\"sid\", \"abc\", Domain=\"evil.com; Secure; SameSite=None\")\n#  -> Set-Cookie: sid=abc; Domain=evil.com; Secure; SameSite=None; Path=/\n# Sanity (the canonical lowercase named arg IS blocked):\nself.set_cookie(\"sid\", \"abc\", domain=\"evil.com; Secure\")   # -> http.cookies.CookieError\n```\n\nThe patch's regression test (`SetCookieForbiddenCharHandler`) only exercises the four named params, never the\n`**kwargs` path, so the gap is not regression-covered.\n\n## Affected code\n- `tornado/web.py` \u2192 `RequestHandler.set_cookie`: the validation loop covers only the lowercase named args;\n  the trailing `if kwargs:` loop does `morsel[k] = v` with no character validation.\n\n## Steps to reproduce\n`GET /upper` (uses `Domain=` kwarg) emits `Set-Cookie: c_upper=v; Domain=evil.com; Secure; SameSite=None; Path=/`; `GET /lower` (uses lowercase\n`domain=`) returns a `CookieError`.\n\n## Impact\nInjection of independent cookie attributes (force/drop `Secure`/`HttpOnly`/`SameSite`, rebind `Domain`/`Path`)\n\u2014 the same impact CVE-2026-35536 closed, via the sibling path the patch missed. Conditional on the app using\na capitalized/legacy keyword.\n\n## Suggested remediation\nApply the same `[\\x00-\\x20\\x3b\\x7f]` validation to every entry in the `**kwargs` loop (after normalizing the\nkey case), or remove the deprecated kwargs path; add a regression test for capitalized kwargs.\n\n## Credit\nReported as part of an incomplete-patch measurement study (responsible disclosure).",
+              "id": "GHSA-wwv5-g3v4-889x",
+              "modified": "2026-09-16T03:56:00.367681644Z",
+              "published": "2026-09-01T20:17:23Z",
+              "references": [
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/security/advisories/GHSA-wwv5-g3v4-889x"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/pull/3704"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/pull/3706"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/commit/6ef836e43e1278530041376adb32504daa977b91"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/commit/da284767eae8e1f0484f123b8c3225f6465b09c7"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/tornadoweb/tornado"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/releases/tag/v6.5.8"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "severity": [
+                {
+                  "score": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:P/VC:L/VI:L/VA:N/SC:N/SI:N/SA:N",
+                  "type": "CVSS_V4"
+                }
+              ],
+              "summary": "Tornado: Incomplete fix for CVE-2026-35536: cookie attribute injection re-opened via the legacy case-insensitive `**kwargs` path in `set_cookie`"
+            }
           ]
         },
         {
@@ -4321,8 +5140,627 @@
             "version": "5.5.0",
             "ecosystem": "PyPI"
           },
+          "groups": [
+            {
+              "ids": [
+                "PYSEC-2026-3929",
+                "GHSA-xrqw-3rrv-vx5w"
+              ],
+              "aliases": [
+                "CVE-2026-9856",
+                "GHSA-xrqw-3rrv-vx5w",
+                "PYSEC-2026-3929"
+              ],
+              "max_severity": "7.1"
+            }
+          ],
           "licenses": [
             "Apache-2.0"
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://github.com/pypa/advisory-database/blob/main/vulns/transformers/PYSEC-2026-3929.yaml"
+                  },
+                  "package": {
+                    "ecosystem": "PyPI",
+                    "name": "transformers",
+                    "purl": "pkg:pypi/transformers"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "5.10.0"
+                        }
+                      ],
+                      "type": "ECOSYSTEM"
+                    }
+                  ],
+                  "versions": [
+                    "0.1",
+                    "2.0.0",
+                    "2.1.0",
+                    "2.1.1",
+                    "2.10.0",
+                    "2.11.0",
+                    "2.2.0",
+                    "2.2.1",
+                    "2.2.2",
+                    "2.3.0",
+                    "2.4.0",
+                    "2.4.1",
+                    "2.5.0",
+                    "2.5.1",
+                    "2.6.0",
+                    "2.7.0",
+                    "2.8.0",
+                    "2.9.0",
+                    "2.9.1",
+                    "3.0.0",
+                    "3.0.1",
+                    "3.0.2",
+                    "3.1.0",
+                    "3.2.0",
+                    "3.3.0",
+                    "3.3.1",
+                    "3.4.0",
+                    "3.5.0",
+                    "3.5.1",
+                    "4.0.0",
+                    "4.0.0rc1",
+                    "4.0.1",
+                    "4.1.0",
+                    "4.1.1",
+                    "4.10.0",
+                    "4.10.1",
+                    "4.10.2",
+                    "4.10.3",
+                    "4.11.0",
+                    "4.11.1",
+                    "4.11.2",
+                    "4.11.3",
+                    "4.12.0",
+                    "4.12.1",
+                    "4.12.2",
+                    "4.12.3",
+                    "4.12.4",
+                    "4.12.5",
+                    "4.13.0",
+                    "4.14.0",
+                    "4.14.1",
+                    "4.15.0",
+                    "4.16.0",
+                    "4.16.1",
+                    "4.16.2",
+                    "4.17.0",
+                    "4.18.0",
+                    "4.19.0",
+                    "4.19.1",
+                    "4.19.2",
+                    "4.19.3",
+                    "4.19.4",
+                    "4.2.0",
+                    "4.2.1",
+                    "4.2.2",
+                    "4.20.0",
+                    "4.20.1",
+                    "4.21.0",
+                    "4.21.1",
+                    "4.21.2",
+                    "4.21.3",
+                    "4.22.0",
+                    "4.22.1",
+                    "4.22.2",
+                    "4.23.0",
+                    "4.23.1",
+                    "4.24.0",
+                    "4.25.0",
+                    "4.25.1",
+                    "4.26.0",
+                    "4.26.1",
+                    "4.27.0",
+                    "4.27.1",
+                    "4.27.2",
+                    "4.27.3",
+                    "4.27.4",
+                    "4.28.0",
+                    "4.28.1",
+                    "4.29.0",
+                    "4.29.1",
+                    "4.29.2",
+                    "4.3.0",
+                    "4.3.0rc1",
+                    "4.3.1",
+                    "4.3.2",
+                    "4.3.3",
+                    "4.30.0",
+                    "4.30.1",
+                    "4.30.2",
+                    "4.31.0",
+                    "4.32.0",
+                    "4.32.1",
+                    "4.33.0",
+                    "4.33.1",
+                    "4.33.2",
+                    "4.33.3",
+                    "4.34.0",
+                    "4.34.1",
+                    "4.35.0",
+                    "4.35.1",
+                    "4.35.2",
+                    "4.36.0",
+                    "4.36.1",
+                    "4.36.2",
+                    "4.37.0",
+                    "4.37.1",
+                    "4.37.2",
+                    "4.38.0",
+                    "4.38.1",
+                    "4.38.2",
+                    "4.39.0",
+                    "4.39.1",
+                    "4.39.2",
+                    "4.39.3",
+                    "4.4.0",
+                    "4.4.1",
+                    "4.4.2",
+                    "4.40.0",
+                    "4.40.1",
+                    "4.40.2",
+                    "4.41.0",
+                    "4.41.1",
+                    "4.41.2",
+                    "4.42.0",
+                    "4.42.1",
+                    "4.42.2",
+                    "4.42.3",
+                    "4.42.4",
+                    "4.43.0",
+                    "4.43.1",
+                    "4.43.2",
+                    "4.43.3",
+                    "4.43.4",
+                    "4.44.0",
+                    "4.44.1",
+                    "4.44.2",
+                    "4.45.0",
+                    "4.45.1",
+                    "4.45.2",
+                    "4.46.0",
+                    "4.46.1",
+                    "4.46.2",
+                    "4.46.3",
+                    "4.47.0",
+                    "4.47.1",
+                    "4.48.0",
+                    "4.48.1",
+                    "4.48.2",
+                    "4.48.3",
+                    "4.49.0",
+                    "4.5.0",
+                    "4.5.1",
+                    "4.50.0",
+                    "4.50.1",
+                    "4.50.2",
+                    "4.50.3",
+                    "4.51.0",
+                    "4.51.1",
+                    "4.51.2",
+                    "4.51.3",
+                    "4.52.0",
+                    "4.52.1",
+                    "4.52.2",
+                    "4.52.3",
+                    "4.52.4",
+                    "4.53.0",
+                    "4.53.1",
+                    "4.53.2",
+                    "4.53.3",
+                    "4.54.0",
+                    "4.54.1",
+                    "4.55.0",
+                    "4.55.1",
+                    "4.55.2",
+                    "4.55.3",
+                    "4.55.4",
+                    "4.56.0",
+                    "4.56.1",
+                    "4.56.2",
+                    "4.57.0",
+                    "4.57.1",
+                    "4.57.2",
+                    "4.57.3",
+                    "4.57.4",
+                    "4.57.5",
+                    "4.57.6",
+                    "4.6.0",
+                    "4.6.1",
+                    "4.7.0",
+                    "4.8.0",
+                    "4.8.1",
+                    "4.8.2",
+                    "4.9.0",
+                    "4.9.1",
+                    "4.9.2",
+                    "5.0.0",
+                    "5.0.0rc0",
+                    "5.0.0rc1",
+                    "5.0.0rc2",
+                    "5.0.0rc3",
+                    "5.1.0",
+                    "5.2.0",
+                    "5.3.0",
+                    "5.4.0",
+                    "5.5.0",
+                    "5.5.1",
+                    "5.5.2",
+                    "5.5.3",
+                    "5.5.4",
+                    "5.6.0",
+                    "5.6.1",
+                    "5.6.2",
+                    "5.7.0",
+                    "5.8.0",
+                    "5.8.1",
+                    "5.9.0"
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-9856",
+                "GHSA-xrqw-3rrv-vx5w"
+              ],
+              "details": "A vulnerability in huggingface/transformers versions < 5.10.0 allows an attacker to perform arbitrary file writes via path traversal. The issue resides in the `save_pretrained()` methods of `PreTrainedTokenizerBase` and `ProcessorMixin`, where keys from the `chat_template` dictionary are used directly as filenames without proper validation. An attacker can exploit this by publishing a malicious Hugging Face Hub repository with a crafted `tokenizer_config.json` file. When a victim downloads and saves the tokenizer or processor, the attacker-controlled keys can escape the intended save directory, enabling arbitrary file writes with attacker-controlled content. This vulnerability affects multiple processors inheriting from `ProcessorMixin`, including Idefics, Florence, Gemma, Phi, and Qwen-VL.",
+              "id": "PYSEC-2026-3929",
+              "modified": "2026-09-10T12:15:13.263552340Z",
+              "published": "2026-09-10T09:44:51.053247Z",
+              "references": [
+                {
+                  "type": "ADVISORY",
+                  "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-9856"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/huggingface/transformers/pull/46191"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/huggingface/transformers/commit/eaaaf8494dd5386634ae37d1d122212fdc315be5"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/huggingface/transformers"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://huntr.com/bounties/362824d5-fe18-40e8-a6cf-62277f97a170"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://pypi.org/project/transformers"
+                },
+                {
+                  "type": "ADVISORY",
+                  "url": "https://github.com/advisories/GHSA-xrqw-3rrv-vx5w"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "severity": [
+                {
+                  "score": "CVSS:3.0/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:L",
+                  "type": "CVSS_V3"
+                }
+              ],
+              "summary": "Transformers save_pretrained path traversal allows arbitrary file writes through chat template names"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/08/GHSA-xrqw-3rrv-vx5w/GHSA-xrqw-3rrv-vx5w.json"
+                  },
+                  "package": {
+                    "ecosystem": "PyPI",
+                    "name": "transformers",
+                    "purl": "pkg:pypi/transformers"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "5.10.0"
+                        }
+                      ],
+                      "type": "ECOSYSTEM"
+                    }
+                  ],
+                  "versions": [
+                    "0.1",
+                    "2.0.0",
+                    "2.1.0",
+                    "2.1.1",
+                    "2.10.0",
+                    "2.11.0",
+                    "2.2.0",
+                    "2.2.1",
+                    "2.2.2",
+                    "2.3.0",
+                    "2.4.0",
+                    "2.4.1",
+                    "2.5.0",
+                    "2.5.1",
+                    "2.6.0",
+                    "2.7.0",
+                    "2.8.0",
+                    "2.9.0",
+                    "2.9.1",
+                    "3.0.0",
+                    "3.0.1",
+                    "3.0.2",
+                    "3.1.0",
+                    "3.2.0",
+                    "3.3.0",
+                    "3.3.1",
+                    "3.4.0",
+                    "3.5.0",
+                    "3.5.1",
+                    "4.0.0",
+                    "4.0.0rc1",
+                    "4.0.1",
+                    "4.1.0",
+                    "4.1.1",
+                    "4.10.0",
+                    "4.10.1",
+                    "4.10.2",
+                    "4.10.3",
+                    "4.11.0",
+                    "4.11.1",
+                    "4.11.2",
+                    "4.11.3",
+                    "4.12.0",
+                    "4.12.1",
+                    "4.12.2",
+                    "4.12.3",
+                    "4.12.4",
+                    "4.12.5",
+                    "4.13.0",
+                    "4.14.0",
+                    "4.14.1",
+                    "4.15.0",
+                    "4.16.0",
+                    "4.16.1",
+                    "4.16.2",
+                    "4.17.0",
+                    "4.18.0",
+                    "4.19.0",
+                    "4.19.1",
+                    "4.19.2",
+                    "4.19.3",
+                    "4.19.4",
+                    "4.2.0",
+                    "4.2.1",
+                    "4.2.2",
+                    "4.20.0",
+                    "4.20.1",
+                    "4.21.0",
+                    "4.21.1",
+                    "4.21.2",
+                    "4.21.3",
+                    "4.22.0",
+                    "4.22.1",
+                    "4.22.2",
+                    "4.23.0",
+                    "4.23.1",
+                    "4.24.0",
+                    "4.25.0",
+                    "4.25.1",
+                    "4.26.0",
+                    "4.26.1",
+                    "4.27.0",
+                    "4.27.1",
+                    "4.27.2",
+                    "4.27.3",
+                    "4.27.4",
+                    "4.28.0",
+                    "4.28.1",
+                    "4.29.0",
+                    "4.29.1",
+                    "4.29.2",
+                    "4.3.0",
+                    "4.3.0rc1",
+                    "4.3.1",
+                    "4.3.2",
+                    "4.3.3",
+                    "4.30.0",
+                    "4.30.1",
+                    "4.30.2",
+                    "4.31.0",
+                    "4.32.0",
+                    "4.32.1",
+                    "4.33.0",
+                    "4.33.1",
+                    "4.33.2",
+                    "4.33.3",
+                    "4.34.0",
+                    "4.34.1",
+                    "4.35.0",
+                    "4.35.1",
+                    "4.35.2",
+                    "4.36.0",
+                    "4.36.1",
+                    "4.36.2",
+                    "4.37.0",
+                    "4.37.1",
+                    "4.37.2",
+                    "4.38.0",
+                    "4.38.1",
+                    "4.38.2",
+                    "4.39.0",
+                    "4.39.1",
+                    "4.39.2",
+                    "4.39.3",
+                    "4.4.0",
+                    "4.4.1",
+                    "4.4.2",
+                    "4.40.0",
+                    "4.40.1",
+                    "4.40.2",
+                    "4.41.0",
+                    "4.41.1",
+                    "4.41.2",
+                    "4.42.0",
+                    "4.42.1",
+                    "4.42.2",
+                    "4.42.3",
+                    "4.42.4",
+                    "4.43.0",
+                    "4.43.1",
+                    "4.43.2",
+                    "4.43.3",
+                    "4.43.4",
+                    "4.44.0",
+                    "4.44.1",
+                    "4.44.2",
+                    "4.45.0",
+                    "4.45.1",
+                    "4.45.2",
+                    "4.46.0",
+                    "4.46.1",
+                    "4.46.2",
+                    "4.46.3",
+                    "4.47.0",
+                    "4.47.1",
+                    "4.48.0",
+                    "4.48.1",
+                    "4.48.2",
+                    "4.48.3",
+                    "4.49.0",
+                    "4.5.0",
+                    "4.5.1",
+                    "4.50.0",
+                    "4.50.1",
+                    "4.50.2",
+                    "4.50.3",
+                    "4.51.0",
+                    "4.51.1",
+                    "4.51.2",
+                    "4.51.3",
+                    "4.52.0",
+                    "4.52.1",
+                    "4.52.2",
+                    "4.52.3",
+                    "4.52.4",
+                    "4.53.0",
+                    "4.53.1",
+                    "4.53.2",
+                    "4.53.3",
+                    "4.54.0",
+                    "4.54.1",
+                    "4.55.0",
+                    "4.55.1",
+                    "4.55.2",
+                    "4.55.3",
+                    "4.55.4",
+                    "4.56.0",
+                    "4.56.1",
+                    "4.56.2",
+                    "4.57.0",
+                    "4.57.1",
+                    "4.57.2",
+                    "4.57.3",
+                    "4.57.4",
+                    "4.57.5",
+                    "4.57.6",
+                    "4.6.0",
+                    "4.6.1",
+                    "4.7.0",
+                    "4.8.0",
+                    "4.8.1",
+                    "4.8.2",
+                    "4.9.0",
+                    "4.9.1",
+                    "4.9.2",
+                    "5.0.0",
+                    "5.0.0rc0",
+                    "5.0.0rc1",
+                    "5.0.0rc2",
+                    "5.0.0rc3",
+                    "5.1.0",
+                    "5.2.0",
+                    "5.3.0",
+                    "5.4.0",
+                    "5.5.0",
+                    "5.5.1",
+                    "5.5.2",
+                    "5.5.3",
+                    "5.5.4",
+                    "5.6.0",
+                    "5.6.1",
+                    "5.6.2",
+                    "5.7.0",
+                    "5.8.0",
+                    "5.8.1",
+                    "5.9.0"
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-9856",
+                "PYSEC-2026-3929"
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-22"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2026-09-01T18:58:08Z",
+                "nvd_published_at": "2026-08-02T16:16:25Z",
+                "severity": "HIGH"
+              },
+              "details": "A vulnerability in huggingface/transformers versions < 5.10.0 allows an attacker to perform arbitrary file writes via path traversal. The issue resides in the `save_pretrained()` methods of `PreTrainedTokenizerBase` and `ProcessorMixin`, where keys from the `chat_template` dictionary are used directly as filenames without proper validation. An attacker can exploit this by publishing a malicious Hugging Face Hub repository with a crafted `tokenizer_config.json` file. When a victim downloads and saves the tokenizer or processor, the attacker-controlled keys can escape the intended save directory, enabling arbitrary file writes with attacker-controlled content. This vulnerability affects multiple processors inheriting from `ProcessorMixin`, including Idefics, Florence, Gemma, Phi, and Qwen-VL.",
+              "id": "GHSA-xrqw-3rrv-vx5w",
+              "modified": "2026-09-10T12:25:36.528730268Z",
+              "published": "2026-08-02T18:30:20Z",
+              "references": [
+                {
+                  "type": "ADVISORY",
+                  "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-9856"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/huggingface/transformers/pull/46191"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/huggingface/transformers/commit/eaaaf8494dd5386634ae37d1d122212fdc315be5"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/huggingface/transformers"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://huntr.com/bounties/362824d5-fe18-40e8-a6cf-62277f97a170"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "severity": [
+                {
+                  "score": "CVSS:3.0/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:L",
+                  "type": "CVSS_V3"
+                }
+              ],
+              "summary": "Transformers save_pretrained path traversal allows arbitrary file writes through chat template names"
+            }
           ]
         },
         {
@@ -4994,7 +6432,7 @@
         {
           "package": {
             "name": "google.golang.org/grpc",
-            "version": "1.83.1",
+            "version": "1.83.2",
             "ecosystem": "Go"
           },
           "licenses": [
@@ -5404,7 +6842,7 @@
         {
           "package": {
             "name": "golang.org/x/net",
-            "version": "0.56.0",
+            "version": "0.58.0",
             "ecosystem": "Go"
           },
           "licenses": [
@@ -5414,7 +6852,7 @@
         {
           "package": {
             "name": "golang.org/x/sys",
-            "version": "0.46.0",
+            "version": "0.47.0",
             "ecosystem": "Go"
           },
           "licenses": [
@@ -5424,152 +6862,11 @@
         {
           "package": {
             "name": "golang.org/x/text",
-            "version": "0.38.0",
+            "version": "0.41.0",
             "ecosystem": "Go"
           },
-          "groups": [
-            {
-              "ids": [
-                "GO-2026-5970"
-              ],
-              "aliases": [
-                "CVE-2026-56852",
-                "GO-2026-5970"
-              ],
-              "max_severity": ""
-            }
-          ],
           "licenses": [
             "BSD-3-Clause"
-          ],
-          "vulnerabilities": [
-            {
-              "affected": [
-                {
-                  "database_specific": {
-                    "source": "https://vuln.go.dev/ID/GO-2026-5970.json"
-                  },
-                  "ecosystem_specific": {
-                    "imports": [
-                      {
-                        "path": "golang.org/x/text/unicode/norm",
-                        "symbols": [
-                          "Form.Append",
-                          "Form.AppendString",
-                          "Form.Bytes",
-                          "Form.FirstBoundary",
-                          "Form.FirstBoundaryInString",
-                          "Form.IsNormal",
-                          "Form.IsNormalString",
-                          "Form.LastBoundary",
-                          "Form.NextBoundary",
-                          "Form.NextBoundaryInString",
-                          "Form.Properties",
-                          "Form.PropertiesString",
-                          "Form.QuickSpan",
-                          "Form.QuickSpanString",
-                          "Form.Span",
-                          "Form.SpanString",
-                          "Form.String",
-                          "Form.Transform",
-                          "Iter.Init",
-                          "Iter.InitString",
-                          "Iter.Next",
-                          "Iter.Seek",
-                          "nextComposed",
-                          "normReader.Read",
-                          "normWriter.Write"
-                        ]
-                      }
-                    ]
-                  },
-                  "package": {
-                    "ecosystem": "Go",
-                    "name": "golang.org/x/text",
-                    "purl": "pkg:golang/golang.org/x/text"
-                  },
-                  "ranges": [
-                    {
-                      "events": [
-                        {
-                          "introduced": "0"
-                        },
-                        {
-                          "fixed": "0.39.0"
-                        }
-                      ],
-                      "type": "SEMVER"
-                    }
-                  ]
-                }
-              ],
-              "aliases": [
-                "CVE-2026-56852"
-              ],
-              "credits": [
-                {
-                  "name": "Viky Choi (\"vikychoi\" on GitHub)"
-                }
-              ],
-              "database_specific": {
-                "review_status": "REVIEWED",
-                "url": "https://pkg.go.dev/vuln/GO-2026-5970"
-              },
-              "details": "A norm.Iter can enter an infinite loop when handling input containing invalid UTF-8 bytes.",
-              "id": "GO-2026-5970",
-              "modified": "2026-08-14T10:42:20.494473428Z",
-              "published": "2026-07-14T17:29:56Z",
-              "references": [
-                {
-                  "type": "REPORT",
-                  "url": "https://go.dev/issue/80142"
-                },
-                {
-                  "type": "FIX",
-                  "url": "https://go.dev/cl/794100"
-                }
-              ],
-              "related": [
-                "CGA-jjqc-qfr4-frh9",
-                "RHSA-2026:40964",
-                "RHSA-2026:41020",
-                "RHSA-2026:42083",
-                "RHSA-2026:42230",
-                "RHSA-2026:42241",
-                "RHSA-2026:43015",
-                "RHSA-2026:43119",
-                "RHSA-2026:43311",
-                "RHSA-2026:43554",
-                "RHSA-2026:43581",
-                "RHSA-2026:43716",
-                "RHSA-2026:43797",
-                "RHSA-2026:43799",
-                "RHSA-2026:43801",
-                "RHSA-2026:43803",
-                "RHSA-2026:43852",
-                "RHSA-2026:43866",
-                "RHSA-2026:43873",
-                "RHSA-2026:43906",
-                "RHSA-2026:44151",
-                "RHSA-2026:44152",
-                "RHSA-2026:44162",
-                "RHSA-2026:44430",
-                "RHSA-2026:44451",
-                "RHSA-2026:44479",
-                "RHSA-2026:46953",
-                "RHSA-2026:46960",
-                "RHSA-2026:46988",
-                "RHSA-2026:48306",
-                "RHSA-2026:49317",
-                "RHSA-2026:49360",
-                "RHSA-2026:51065",
-                "RHSA-2026:52912",
-                "RHSA-2026:54364",
-                "RHSA-2026:54549"
-              ],
-              "schema_version": "1.8.0",
-              "summary": "Infinite loop on invalid input in golang.org/x/text"
-            }
           ]
         },
         {
@@ -5595,7 +6892,7 @@
         {
           "package": {
             "name": "google.golang.org/grpc",
-            "version": "1.83.0",
+            "version": "1.83.2",
             "ecosystem": "Go"
           },
           "licenses": [
@@ -5651,6 +6948,12 @@
                 "CVE-2026-32282",
                 "GO-2026-4864"
               ],
+              "experimental_analysis": {
+                "GO-2026-4864": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5662,6 +6965,12 @@
                 "CVE-2026-32289",
                 "GO-2026-4865"
               ],
+              "experimental_analysis": {
+                "GO-2026-4865": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5673,6 +6982,12 @@
                 "CVE-2026-32288",
                 "GO-2026-4869"
               ],
+              "experimental_analysis": {
+                "GO-2026-4869": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5684,6 +6999,12 @@
                 "CVE-2026-32283",
                 "GO-2026-4870"
               ],
+              "experimental_analysis": {
+                "GO-2026-4870": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5695,6 +7016,12 @@
                 "CVE-2026-33814",
                 "GO-2026-4918"
               ],
+              "experimental_analysis": {
+                "GO-2026-4918": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5706,6 +7033,12 @@
                 "CVE-2026-32281",
                 "GO-2026-4946"
               ],
+              "experimental_analysis": {
+                "GO-2026-4946": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5717,6 +7050,12 @@
                 "CVE-2026-32280",
                 "GO-2026-4947"
               ],
+              "experimental_analysis": {
+                "GO-2026-4947": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5728,6 +7067,12 @@
                 "CVE-2026-39822",
                 "GO-2026-4970"
               ],
+              "experimental_analysis": {
+                "GO-2026-4970": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5739,6 +7084,12 @@
                 "CVE-2026-39836",
                 "GO-2026-4971"
               ],
+              "experimental_analysis": {
+                "GO-2026-4971": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5750,6 +7101,12 @@
                 "CVE-2026-39825",
                 "GO-2026-4976"
               ],
+              "experimental_analysis": {
+                "GO-2026-4976": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5761,6 +7118,12 @@
                 "CVE-2026-42499",
                 "GO-2026-4977"
               ],
+              "experimental_analysis": {
+                "GO-2026-4977": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5772,6 +7135,12 @@
                 "CVE-2026-39826",
                 "GO-2026-4980"
               ],
+              "experimental_analysis": {
+                "GO-2026-4980": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5783,6 +7152,12 @@
                 "CVE-2026-33811",
                 "GO-2026-4981"
               ],
+              "experimental_analysis": {
+                "GO-2026-4981": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5794,6 +7169,12 @@
                 "CVE-2026-39823",
                 "GO-2026-4982"
               ],
+              "experimental_analysis": {
+                "GO-2026-4982": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5805,6 +7186,12 @@
                 "CVE-2026-39820",
                 "GO-2026-4986"
               ],
+              "experimental_analysis": {
+                "GO-2026-4986": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5815,6 +7202,12 @@
                 "CVE-2026-39821",
                 "GO-2026-5026"
               ],
+              "experimental_analysis": {
+                "GO-2026-5026": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5826,6 +7219,12 @@
                 "CVE-2026-27145",
                 "GO-2026-5037"
               ],
+              "experimental_analysis": {
+                "GO-2026-5037": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5837,6 +7236,12 @@
                 "CVE-2026-42504",
                 "GO-2026-5038"
               ],
+              "experimental_analysis": {
+                "GO-2026-5038": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5848,6 +7253,12 @@
                 "CVE-2026-42507",
                 "GO-2026-5039"
               ],
+              "experimental_analysis": {
+                "GO-2026-5039": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5859,6 +7270,12 @@
                 "CVE-2026-42505",
                 "GO-2026-5856"
               ],
+              "experimental_analysis": {
+                "GO-2026-5856": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5870,6 +7287,12 @@
                 "CVE-2026-33818",
                 "GO-2026-5972"
               ],
+              "experimental_analysis": {
+                "GO-2026-5972": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5881,6 +7304,12 @@
                 "CVE-2026-56859",
                 "GO-2026-6088"
               ],
+              "experimental_analysis": {
+                "GO-2026-6088": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5892,6 +7321,12 @@
                 "CVE-2026-56853",
                 "GO-2026-6089"
               ],
+              "experimental_analysis": {
+                "GO-2026-6089": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5903,6 +7338,12 @@
                 "CVE-2026-56862",
                 "GO-2026-6090"
               ],
+              "experimental_analysis": {
+                "GO-2026-6090": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5914,6 +7355,12 @@
                 "CVE-2026-56858",
                 "GO-2026-6091"
               ],
+              "experimental_analysis": {
+                "GO-2026-6091": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             },
             {
@@ -5925,6 +7372,12 @@
                 "CVE-2026-56860",
                 "GO-2026-6218"
               ],
+              "experimental_analysis": {
+                "GO-2026-6218": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
               "max_severity": ""
             }
           ],
@@ -5992,7 +7445,7 @@
               },
               "details": "On Linux, if the target of Root.Chmod is replaced with a symlink while the chmod operation is in progress, Chmod can operate on the target of the symlink, even when the target lies outside the root.\n\nThe Linux fchmodat syscall silently ignores the AT_SYMLINK_NOFOLLOW flag, which Root.Chmod uses to avoid symlink traversal. Root.Chmod checks its target before acting and returns an error if the target is a symlink lying outside the root, so the impact is limited to cases where the target is replaced with a symlink between the check and operation.",
               "id": "GO-2026-4864",
-              "modified": "2026-08-14T10:42:12.639761490Z",
+              "modified": "2026-09-15T10:41:37.100206213Z",
               "published": "2026-04-07T22:53:49Z",
               "references": [
                 {
@@ -6009,7 +7462,6 @@
                 }
               ],
               "related": [
-                "CGA-3x3m-j3x7-3f6w",
                 "RHSA-2026:10217",
                 "RHSA-2026:10219",
                 "RHSA-2026:10704",
@@ -6090,6 +7542,8 @@
                 "RHSA-2026:49600",
                 "RHSA-2026:54191",
                 "RHSA-2026:54757",
+                "RHSA-2026:66401",
+                "RHSA-2026:67319",
                 "RHSA-2026:7291",
                 "RHSA-2026:7385"
               ],
@@ -6354,7 +7808,7 @@
               },
               "details": "If one side of the TLS connection sends multiple key update messages post-handshake in a single record, the connection can deadlock, causing uncontrolled consumption of resources. This can lead to a denial of service.\n\nThis only affects TLS 1.3.",
               "id": "GO-2026-4870",
-              "modified": "2026-08-27T10:40:55.556559918Z",
+              "modified": "2026-09-15T10:41:36.872871265Z",
               "published": "2026-04-07T22:53:49Z",
               "references": [
                 {
@@ -6371,7 +7825,6 @@
                 }
               ],
               "related": [
-                "CGA-w7vv-7vph-696h",
                 "RHSA-2026:10217",
                 "RHSA-2026:10219",
                 "RHSA-2026:10704",
@@ -6476,6 +7929,8 @@
                 "RHSA-2026:54191",
                 "RHSA-2026:54757",
                 "RHSA-2026:56910",
+                "RHSA-2026:66401",
+                "RHSA-2026:67319",
                 "RHSA-2026:7291",
                 "RHSA-2026:7385"
               ],
@@ -6605,7 +8060,7 @@
               },
               "details": "When processing HTTP/2 SETTINGS frames, transport will enter an infinite loop of writing CONTINUATION frames if it receives a SETTINGS_MAX_FRAME_SIZE with a value of 0.",
               "id": "GO-2026-4918",
-              "modified": "2026-08-26T10:42:13.935325149Z",
+              "modified": "2026-09-16T10:41:36.686823140Z",
               "published": "2026-05-07T19:21:40Z",
               "references": [
                 {
@@ -6626,7 +8081,6 @@
                 }
               ],
               "related": [
-                "CGA-v7v4-9r6p-x7fc",
                 "RHSA-2026:22112",
                 "RHSA-2026:22120",
                 "RHSA-2026:22121",
@@ -6635,7 +8089,14 @@
                 "RHSA-2026:49702",
                 "RHSA-2026:49712",
                 "RHSA-2026:57649",
-                "RHSA-2026:57845"
+                "RHSA-2026:57845",
+                "RHSA-2026:60668",
+                "RHSA-2026:61253",
+                "RHSA-2026:63091",
+                "RHSA-2026:63636",
+                "RHSA-2026:63637",
+                "RHSA-2026:63639",
+                "RHSA-2026:66350"
               ],
               "schema_version": "1.7.5",
               "summary": "Infinite loop in HTTP/2 transport when given bad SETTINGS_MAX_FRAME_SIZE in net/http/internal/http2 in golang.org/x/net"
@@ -6698,7 +8159,7 @@
               },
               "details": "Validating certificate chains which use policies is unexpectedly inefficient when certificates in the chain contain a very large number of policy mappings, possibly causing denial of service.\n\nThis only affects validation of otherwise trusted certificate chains, issued by a root CA in the VerifyOptions.Roots CertPool, or in the system certificate pool.",
               "id": "GO-2026-4946",
-              "modified": "2026-08-18T10:44:11.281425070Z",
+              "modified": "2026-09-15T10:41:36.958722196Z",
               "published": "2026-04-07T22:53:49Z",
               "references": [
                 {
@@ -6715,7 +8176,6 @@
                 }
               ],
               "related": [
-                "CGA-mhq6-cw97-rcc6",
                 "RHSA-2026:10217",
                 "RHSA-2026:10219",
                 "RHSA-2026:16021",
@@ -6786,6 +8246,14 @@
                 "RHSA-2026:49944",
                 "RHSA-2026:51288",
                 "RHSA-2026:54757",
+                "RHSA-2026:61906",
+                "RHSA-2026:61907",
+                "RHSA-2026:65534",
+                "RHSA-2026:65886",
+                "RHSA-2026:67148",
+                "RHSA-2026:67149",
+                "RHSA-2026:67287",
+                "RHSA-2026:67319",
                 "RHSA-2026:7291",
                 "RHSA-2026:7385"
               ],
@@ -6850,7 +8318,7 @@
               },
               "details": "During chain building, the amount of work that is done is not correctly limited when a large number of intermediate certificates are passed in VerifyOptions.Intermediates, which can lead to a denial of service. This affects both direct users of crypto/x509 and users of crypto/tls.",
               "id": "GO-2026-4947",
-              "modified": "2026-08-27T10:40:55.503365235Z",
+              "modified": "2026-09-15T10:41:37.159908438Z",
               "published": "2026-04-07T22:53:49Z",
               "references": [
                 {
@@ -6867,7 +8335,6 @@
                 }
               ],
               "related": [
-                "CGA-crmm-287q-6v8j",
                 "RHSA-2026:10217",
                 "RHSA-2026:10219",
                 "RHSA-2026:10704",
@@ -6967,7 +8434,15 @@
                 "RHSA-2026:56785",
                 "RHSA-2026:56852",
                 "RHSA-2026:56910",
-                "RHSA-2026:57482"
+                "RHSA-2026:57482",
+                "RHSA-2026:59830",
+                "RHSA-2026:60018",
+                "RHSA-2026:61906",
+                "RHSA-2026:61907",
+                "RHSA-2026:65534",
+                "RHSA-2026:65886",
+                "RHSA-2026:66401",
+                "RHSA-2026:67319"
               ],
               "schema_version": "1.7.5",
               "summary": "Unexpected work during chain building in crypto/x509"
@@ -7046,7 +8521,7 @@
               },
               "details": "On Unix systems, opening a file in an os.Root improperly follows symlinks to locations outside of the Root when the final path component of the a path is a symbolic link and the path ends in /.\n\nFor example, 'root.Open(\"symlink/\")' will open \"symlink\" even when \"symlink\" is a symbolic link pointing outside of the root.",
               "id": "GO-2026-4970",
-              "modified": "2026-08-26T10:42:12.359696413Z",
+              "modified": "2026-09-16T10:41:36.578014904Z",
               "published": "2026-07-07T21:34:47Z",
               "references": [
                 {
@@ -7063,7 +8538,6 @@
                 }
               ],
               "related": [
-                "CGA-8r5h-83c2-4rxw",
                 "RHSA-2026:36477",
                 "RHSA-2026:36510",
                 "RHSA-2026:37435",
@@ -7076,7 +8550,10 @@
                 "RHSA-2026:49702",
                 "RHSA-2026:49712",
                 "RHSA-2026:57361",
-                "RHSA-2026:57649"
+                "RHSA-2026:57649",
+                "RHSA-2026:61253",
+                "RHSA-2026:66350",
+                "RHSA-2026:66375"
               ],
               "schema_version": "1.7.5",
               "summary": "Root escape via symlink plus trailing slash in os"
@@ -7249,7 +8726,7 @@
               },
               "details": "ReverseProxy can forward queries containing parameters not visible to Rewrite functions.\n\nWhen used with a Rewrite function, or a Director function which parses query parameters, ReverseProxy sanitizes the forwarded request to remove query parameters which are not parsed by url.ParseQuery. ReverseProxy does not take ParseQuery's limit on the total number of query parameters (controlled by GODEBUG=urlmaxqueryparams=N) into account. This can permit ReverseProxy to forward a request containing a query parameter that is not visible to the Rewrite function.\n\nFor example, the query \"a1=x&a2=x&...&a10000=x&hidden=y\" can forward the parameter \"hidden=y\" while hiding it from the proxy's Rewrite function.",
               "id": "GO-2026-4976",
-              "modified": "2026-08-26T10:42:13.613573145Z",
+              "modified": "2026-08-31T10:25:58.969613045Z",
               "published": "2026-05-07T19:21:40Z",
               "references": [
                 {
@@ -7274,7 +8751,8 @@
                 "RHSA-2026:23264",
                 "RHSA-2026:49702",
                 "RHSA-2026:49712",
-                "RHSA-2026:57649"
+                "RHSA-2026:57649",
+                "RHSA-2026:61253"
               ],
               "schema_version": "1.7.5",
               "summary": "ReverseProxy forwards queries with more than urlmaxqueryparams parameters in net/http/httputil"
@@ -7336,7 +8814,7 @@
               },
               "details": "Pathological inputs could cause DoS through consumePhrase when parsing an email address according to RFC 5322.",
               "id": "GO-2026-4977",
-              "modified": "2026-08-27T10:40:56.254046158Z",
+              "modified": "2026-09-16T10:41:36.353713322Z",
               "published": "2026-05-07T19:21:40Z",
               "references": [
                 {
@@ -7353,7 +8831,6 @@
                 }
               ],
               "related": [
-                "CGA-m28j-j59g-3rp3",
                 "RHSA-2026:17713",
                 "RHSA-2026:17714",
                 "RHSA-2026:22112",
@@ -7361,6 +8838,9 @@
                 "RHSA-2026:22121",
                 "RHSA-2026:49702",
                 "RHSA-2026:49712",
+                "RHSA-2026:50319",
+                "RHSA-2026:50336",
+                "RHSA-2026:51112",
                 "RHSA-2026:54552",
                 "RHSA-2026:56785",
                 "RHSA-2026:56852",
@@ -7368,7 +8848,31 @@
                 "RHSA-2026:57482",
                 "RHSA-2026:57649",
                 "RHSA-2026:57845",
-                "RHSA-2026:57914"
+                "RHSA-2026:57914",
+                "RHSA-2026:59830",
+                "RHSA-2026:60018",
+                "RHSA-2026:61253",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62753",
+                "RHSA-2026:62754",
+                "RHSA-2026:62803",
+                "RHSA-2026:63022",
+                "RHSA-2026:63163",
+                "RHSA-2026:63332",
+                "RHSA-2026:63636",
+                "RHSA-2026:64818",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65335",
+                "RHSA-2026:65336",
+                "RHSA-2026:65534",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:66327",
+                "RHSA-2026:67148",
+                "RHSA-2026:67517"
               ],
               "schema_version": "1.7.5",
               "summary": "Quadratic string concatenation in consumePhrase in net/mail"
@@ -7432,7 +8936,7 @@
               },
               "details": "If a trusted template author were to write a <script> tag containing an empty 'type' attribute or a 'type' attribute with an ASCII whitespace, the execution of the template would incorrectly escape any data passed into the <script> block.",
               "id": "GO-2026-4980",
-              "modified": "2026-08-26T10:42:12.936338833Z",
+              "modified": "2026-08-31T10:25:58.429372080Z",
               "published": "2026-05-07T19:21:40Z",
               "references": [
                 {
@@ -7457,7 +8961,8 @@
                 "RHSA-2026:23264",
                 "RHSA-2026:49702",
                 "RHSA-2026:49712",
-                "RHSA-2026:57649"
+                "RHSA-2026:57649",
+                "RHSA-2026:61253"
               ],
               "schema_version": "1.7.5",
               "summary": "Escaper bypass leads to XSS in html/template"
@@ -7521,7 +9026,7 @@
               },
               "details": "When using LookupCNAME with the cgo DNS resolver, a very long CNAME response can trigger a double-free of C memory and a crash.",
               "id": "GO-2026-4981",
-              "modified": "2026-08-27T10:40:56.084810179Z",
+              "modified": "2026-09-15T10:41:36.847701947Z",
               "published": "2026-05-07T19:21:40Z",
               "references": [
                 {
@@ -7538,7 +9043,6 @@
                 }
               ],
               "related": [
-                "CGA-xr8m-473w-fvfq",
                 "RHSA-2026:22112",
                 "RHSA-2026:22120",
                 "RHSA-2026:22121",
@@ -7581,7 +9085,15 @@
                 "RHSA-2026:56852",
                 "RHSA-2026:56910",
                 "RHSA-2026:57482",
-                "RHSA-2026:57649"
+                "RHSA-2026:57649",
+                "RHSA-2026:60018",
+                "RHSA-2026:61253",
+                "RHSA-2026:61313",
+                "RHSA-2026:65534",
+                "RHSA-2026:65886",
+                "RHSA-2026:67149",
+                "RHSA-2026:67287",
+                "RHSA-2026:67319"
               ],
               "schema_version": "1.7.5",
               "summary": "Crash when handling long CNAME response in net"
@@ -7645,7 +9157,7 @@
               },
               "details": "CVE-2026-27142 fixed a vulnerability in which URLs were not correctly escaped inside of a <meta> tag's <content> attribute. If the URL content were to insert ASCII whitespaces around the '=' rune inside of the <content> attribute, the escaper would fail to similarly escape it, leading to XSS.",
               "id": "GO-2026-4982",
-              "modified": "2026-08-26T10:42:13.543888394Z",
+              "modified": "2026-08-31T10:25:58.456781741Z",
               "published": "2026-05-07T19:21:40Z",
               "references": [
                 {
@@ -7670,7 +9182,8 @@
                 "RHSA-2026:23264",
                 "RHSA-2026:49702",
                 "RHSA-2026:49712",
-                "RHSA-2026:57649"
+                "RHSA-2026:57649",
+                "RHSA-2026:61253"
               ],
               "schema_version": "1.7.5",
               "summary": "Bypass of meta content URL escaping causes XSS in html/template"
@@ -7739,7 +9252,7 @@
               },
               "details": "Well-crafted inputs reaching ParseAddress, ParseAddressList, and ParseDate were able to trigger excessive CPU exhaustion and memory allocations.",
               "id": "GO-2026-4986",
-              "modified": "2026-08-27T10:40:55.531671412Z",
+              "modified": "2026-09-16T10:41:36.329016522Z",
               "published": "2026-05-07T19:21:40Z",
               "references": [
                 {
@@ -7756,7 +9269,6 @@
                 }
               ],
               "related": [
-                "CGA-h3rh-hg4q-4x4p",
                 "RHSA-2026:22112",
                 "RHSA-2026:22120",
                 "RHSA-2026:22121",
@@ -7764,6 +9276,9 @@
                 "RHSA-2026:23264",
                 "RHSA-2026:49702",
                 "RHSA-2026:49712",
+                "RHSA-2026:50319",
+                "RHSA-2026:50336",
+                "RHSA-2026:51112",
                 "RHSA-2026:54552",
                 "RHSA-2026:54883",
                 "RHSA-2026:56852",
@@ -7771,7 +9286,27 @@
                 "RHSA-2026:57482",
                 "RHSA-2026:57649",
                 "RHSA-2026:57845",
-                "RHSA-2026:57914"
+                "RHSA-2026:57914",
+                "RHSA-2026:59830",
+                "RHSA-2026:60018",
+                "RHSA-2026:61253",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62753",
+                "RHSA-2026:62754",
+                "RHSA-2026:62803",
+                "RHSA-2026:63022",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65335",
+                "RHSA-2026:65336",
+                "RHSA-2026:65534",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:66016",
+                "RHSA-2026:66327",
+                "RHSA-2026:67517"
               ],
               "schema_version": "1.7.5",
               "summary": "Quadratic string concatentation in consumeComment in net/mail"
@@ -7906,7 +9441,7 @@
               },
               "details": "The ToASCII and ToUnicode functions incorrectly accept Punycode-encoded labels that decode to an ASCII-only label. For example, ToUnicode(\"xn--example-.com\") incorrectly returns the name \"example.com\" rather than an error.\n\nThis behavior can lead to privilege escalation in programs using the idna package. For example, a program which performs privilege checks on the ASCII hostname may reject \"example.com\" but permit \"xn--example-.com\". If that program subsequently converts the ASCII hostname to Unicode, it will inadvertently permits access to the Unicode name \"example.com\".",
               "id": "GO-2026-5026",
-              "modified": "2026-08-27T10:40:55.701358857Z",
+              "modified": "2026-09-16T10:41:36.661751090Z",
               "published": "2026-05-22T02:46:43Z",
               "references": [
                 {
@@ -7927,7 +9462,6 @@
                 }
               ],
               "related": [
-                "CGA-frmm-xgw5-xmhr",
                 "RHSA-2026:23262",
                 "RHSA-2026:23264",
                 "RHSA-2026:30853",
@@ -7981,7 +9515,23 @@
                 "RHSA-2026:59549",
                 "RHSA-2026:59562",
                 "RHSA-2026:60315",
-                "RHSA-2026:60354"
+                "RHSA-2026:60354",
+                "RHSA-2026:61245",
+                "RHSA-2026:61253",
+                "RHSA-2026:63134",
+                "RHSA-2026:65153",
+                "RHSA-2026:65359",
+                "RHSA-2026:65534",
+                "RHSA-2026:65886",
+                "RHSA-2026:66016",
+                "RHSA-2026:66350",
+                "RHSA-2026:66432",
+                "RHSA-2026:67149",
+                "RHSA-2026:67159",
+                "RHSA-2026:67160",
+                "RHSA-2026:67287",
+                "RHSA-2026:67319",
+                "RHSA-2026:67517"
               ],
               "schema_version": "1.9.0",
               "summary": "Invoking failure to reject ASCII-only Punycode-encoded labels in golang.org/x/net/idna"
@@ -8046,7 +9596,7 @@
               },
               "details": "(*x509.Certificate).VerifyHostname previously called matchHostnames in a loop over all DNS Subject Alternative Name (SAN) entries. This caused strings.Split(host, \".\") to execute repeatedly on the same input hostname.\n\nWith a large DNS SAN list, verification costs scaled quadratically based on the number of SAN entries multiplied by the hostname's label count. Because x509.Verify validates hostnames before building the certificate chain, this overhead occurred even for untrusted certificates.",
               "id": "GO-2026-5037",
-              "modified": "2026-08-27T10:40:55.774191231Z",
+              "modified": "2026-08-31T10:25:59.049614921Z",
               "published": "2026-06-02T21:39:47Z",
               "references": [
                 {
@@ -8102,7 +9652,8 @@
                 "RHSA-2026:57482",
                 "RHSA-2026:57649",
                 "RHSA-2026:60315",
-                "RHSA-2026:60354"
+                "RHSA-2026:60354",
+                "RHSA-2026:61253"
               ],
               "schema_version": "1.7.5",
               "summary": "Inefficient candidate hostname parsing in crypto/x509"
@@ -8164,7 +9715,7 @@
               },
               "details": "Decoding a maliciously-crafted MIME header containing many invalid encoded-words can consume excessive CPU.",
               "id": "GO-2026-5038",
-              "modified": "2026-08-27T10:40:55.670011028Z",
+              "modified": "2026-09-16T10:41:36.606607531Z",
               "published": "2026-06-02T21:39:47Z",
               "references": [
                 {
@@ -8181,15 +9732,38 @@
                 }
               ],
               "related": [
-                "CGA-434v-wc8g-cmvq",
                 "RHSA-2026:23262",
                 "RHSA-2026:23264",
                 "RHSA-2026:29980",
                 "RHSA-2026:29981",
                 "RHSA-2026:38995",
+                "RHSA-2026:49712",
+                "RHSA-2026:50319",
+                "RHSA-2026:50336",
                 "RHSA-2026:57361",
                 "RHSA-2026:57456",
-                "RHSA-2026:57482"
+                "RHSA-2026:57482",
+                "RHSA-2026:57649",
+                "RHSA-2026:60018",
+                "RHSA-2026:61253",
+                "RHSA-2026:61882",
+                "RHSA-2026:62577",
+                "RHSA-2026:62631",
+                "RHSA-2026:63091",
+                "RHSA-2026:63119",
+                "RHSA-2026:63124",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65534",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:66327",
+                "RHSA-2026:66350",
+                "RHSA-2026:66375",
+                "RHSA-2026:67148",
+                "RHSA-2026:67159",
+                "RHSA-2026:67160"
               ],
               "schema_version": "1.7.5",
               "summary": "Quadratic complexity in WordDecoder.DecodeHeader in mime"
@@ -8251,7 +9825,7 @@
               },
               "details": "When returning errors, functions in the net/textproto package would include its input as part of the error. This might allow an attacker to inject misleading content to errors that are printed or logged.",
               "id": "GO-2026-5039",
-              "modified": "2026-08-26T10:42:13.995378464Z",
+              "modified": "2026-08-31T10:25:58.939163086Z",
               "published": "2026-06-02T21:39:47Z",
               "references": [
                 {
@@ -8276,7 +9850,8 @@
                 "RHSA-2026:38995",
                 "RHSA-2026:49702",
                 "RHSA-2026:49712",
-                "RHSA-2026:57649"
+                "RHSA-2026:57649",
+                "RHSA-2026:61253"
               ],
               "schema_version": "1.7.5",
               "summary": "Arbitrary inputs are included in errors without any escaping in net/textproto"
@@ -8448,7 +10023,7 @@
               },
               "details": "Enforce a recursion limit in Unmarshal to prevent stack exhaustion when parsing deeply-nested, recursive structures.",
               "id": "GO-2026-5972",
-              "modified": "2026-08-27T10:40:56.331317121Z",
+              "modified": "2026-09-16T10:41:36.217819171Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -8465,12 +10040,66 @@
                 }
               ],
               "related": [
-                "CGA-qffm-j2p3-c942",
                 "RHSA-2026:54835",
                 "RHSA-2026:54836",
                 "RHSA-2026:60304",
                 "RHSA-2026:60305",
-                "RHSA-2026:60306"
+                "RHSA-2026:60306",
+                "RHSA-2026:61882",
+                "RHSA-2026:62404",
+                "RHSA-2026:62405",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62577",
+                "RHSA-2026:62578",
+                "RHSA-2026:62602",
+                "RHSA-2026:62631",
+                "RHSA-2026:62753",
+                "RHSA-2026:62754",
+                "RHSA-2026:62803",
+                "RHSA-2026:63022",
+                "RHSA-2026:63119",
+                "RHSA-2026:63124",
+                "RHSA-2026:63127",
+                "RHSA-2026:63130",
+                "RHSA-2026:63136",
+                "RHSA-2026:63163",
+                "RHSA-2026:63332",
+                "RHSA-2026:64777",
+                "RHSA-2026:64786",
+                "RHSA-2026:64788",
+                "RHSA-2026:64818",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65335",
+                "RHSA-2026:65336",
+                "RHSA-2026:65359",
+                "RHSA-2026:65534",
+                "RHSA-2026:65880",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:65918",
+                "RHSA-2026:66016",
+                "RHSA-2026:66327",
+                "RHSA-2026:66350",
+                "RHSA-2026:66356",
+                "RHSA-2026:66364",
+                "RHSA-2026:66375",
+                "RHSA-2026:66459",
+                "RHSA-2026:67128",
+                "RHSA-2026:67132",
+                "RHSA-2026:67149",
+                "RHSA-2026:67153",
+                "RHSA-2026:67159",
+                "RHSA-2026:67160",
+                "RHSA-2026:67161",
+                "RHSA-2026:67287",
+                "RHSA-2026:67313",
+                "RHSA-2026:67319",
+                "RHSA-2026:67464",
+                "RHSA-2026:67517",
+                "RHSA-2026:67518"
               ],
               "schema_version": "1.9.0",
               "summary": "Enforce maximum recursion depth in encoding/asn1"
@@ -8542,7 +10171,7 @@
               },
               "details": "Previously, DecodeElement would reset the depth counter causing it to never fire; this could lead to stack exhaustion.",
               "id": "GO-2026-6088",
-              "modified": "2026-08-27T10:40:55.859602845Z",
+              "modified": "2026-09-16T10:41:36.424981577Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -8559,12 +10188,47 @@
                 }
               ],
               "related": [
-                "CGA-6mxx-fmwg-96cr",
                 "RHSA-2026:54835",
                 "RHSA-2026:54836",
+                "RHSA-2026:57415",
                 "RHSA-2026:60304",
                 "RHSA-2026:60305",
-                "RHSA-2026:60306"
+                "RHSA-2026:60306",
+                "RHSA-2026:61882",
+                "RHSA-2026:62404",
+                "RHSA-2026:62405",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62602",
+                "RHSA-2026:62631",
+                "RHSA-2026:62753",
+                "RHSA-2026:62754",
+                "RHSA-2026:62803",
+                "RHSA-2026:63022",
+                "RHSA-2026:63163",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65335",
+                "RHSA-2026:65336",
+                "RHSA-2026:65359",
+                "RHSA-2026:65534",
+                "RHSA-2026:65880",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:65918",
+                "RHSA-2026:66016",
+                "RHSA-2026:66327",
+                "RHSA-2026:66350",
+                "RHSA-2026:66356",
+                "RHSA-2026:66375",
+                "RHSA-2026:67128",
+                "RHSA-2026:67153",
+                "RHSA-2026:67313",
+                "RHSA-2026:67319",
+                "RHSA-2026:67464",
+                "RHSA-2026:67517",
+                "RHSA-2026:67518"
               ],
               "schema_version": "1.9.0",
               "summary": "Add recursion depth guard during decode in encoding/xml"
@@ -8636,7 +10300,7 @@
               },
               "details": "When a server is configured to support unencrypted HTTP/2, it reads a few bytes from each new connection to see if they contain the HTTP/2 client preface. ReadHeaderTimeout is unexpectedly not being applied when doing this.",
               "id": "GO-2026-6089",
-              "modified": "2026-08-27T10:40:56.117338024Z",
+              "modified": "2026-09-16T10:41:36.592832763Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -8653,12 +10317,53 @@
                 }
               ],
               "related": [
-                "CGA-gx4x-f625-2c45",
                 "RHSA-2026:54835",
                 "RHSA-2026:54836",
                 "RHSA-2026:60304",
                 "RHSA-2026:60305",
-                "RHSA-2026:60306"
+                "RHSA-2026:60306",
+                "RHSA-2026:61882",
+                "RHSA-2026:62404",
+                "RHSA-2026:62405",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62578",
+                "RHSA-2026:62602",
+                "RHSA-2026:62631",
+                "RHSA-2026:62753",
+                "RHSA-2026:62754",
+                "RHSA-2026:62803",
+                "RHSA-2026:63022",
+                "RHSA-2026:63119",
+                "RHSA-2026:63124",
+                "RHSA-2026:63163",
+                "RHSA-2026:63332",
+                "RHSA-2026:64777",
+                "RHSA-2026:64786",
+                "RHSA-2026:64818",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65335",
+                "RHSA-2026:65336",
+                "RHSA-2026:65359",
+                "RHSA-2026:65534",
+                "RHSA-2026:65880",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:65918",
+                "RHSA-2026:66016",
+                "RHSA-2026:66327",
+                "RHSA-2026:66459",
+                "RHSA-2026:67128",
+                "RHSA-2026:67132",
+                "RHSA-2026:67153",
+                "RHSA-2026:67159",
+                "RHSA-2026:67160",
+                "RHSA-2026:67313",
+                "RHSA-2026:67464",
+                "RHSA-2026:67517",
+                "RHSA-2026:67518"
               ],
               "schema_version": "1.9.0",
               "summary": "Apply ReadHeaderTimeout when doing unencrypted HTTP/2 check in net/http"
@@ -8736,7 +10441,7 @@
               },
               "details": "Handshake messages, such as KeyUpdate, are always considered as state-advancing, regardless of whether a handshake has been completed or not. As a result, a malicious client can keep sending KeyUpdate messages to force the server to keep performing key derivation operations indefinitely.",
               "id": "GO-2026-6090",
-              "modified": "2026-08-27T10:40:56.009119218Z",
+              "modified": "2026-09-16T10:41:36.630862163Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -8753,12 +10458,66 @@
                 }
               ],
               "related": [
-                "CGA-j6x6-9m4j-6xmr",
                 "RHSA-2026:54835",
                 "RHSA-2026:54836",
                 "RHSA-2026:60304",
                 "RHSA-2026:60305",
-                "RHSA-2026:60306"
+                "RHSA-2026:60306",
+                "RHSA-2026:61882",
+                "RHSA-2026:62404",
+                "RHSA-2026:62405",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62577",
+                "RHSA-2026:62578",
+                "RHSA-2026:62602",
+                "RHSA-2026:62631",
+                "RHSA-2026:62753",
+                "RHSA-2026:62754",
+                "RHSA-2026:62803",
+                "RHSA-2026:63022",
+                "RHSA-2026:63119",
+                "RHSA-2026:63124",
+                "RHSA-2026:63127",
+                "RHSA-2026:63130",
+                "RHSA-2026:63136",
+                "RHSA-2026:63163",
+                "RHSA-2026:63332",
+                "RHSA-2026:64777",
+                "RHSA-2026:64786",
+                "RHSA-2026:64788",
+                "RHSA-2026:64818",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65335",
+                "RHSA-2026:65336",
+                "RHSA-2026:65359",
+                "RHSA-2026:65534",
+                "RHSA-2026:65880",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:65918",
+                "RHSA-2026:66016",
+                "RHSA-2026:66327",
+                "RHSA-2026:66350",
+                "RHSA-2026:66356",
+                "RHSA-2026:66364",
+                "RHSA-2026:66375",
+                "RHSA-2026:66459",
+                "RHSA-2026:67128",
+                "RHSA-2026:67132",
+                "RHSA-2026:67149",
+                "RHSA-2026:67153",
+                "RHSA-2026:67159",
+                "RHSA-2026:67160",
+                "RHSA-2026:67161",
+                "RHSA-2026:67287",
+                "RHSA-2026:67313",
+                "RHSA-2026:67319",
+                "RHSA-2026:67464",
+                "RHSA-2026:67517",
+                "RHSA-2026:67518"
               ],
               "schema_version": "1.9.0",
               "summary": "Limit handshake messages we are willing to accept post-handshake in crypto/tls"
@@ -8828,7 +10587,7 @@
               },
               "details": "Previously, pathological inputs could close an unescaped '/' early, allowing for attack-controlled data to inject arbitrary content, potentially leading to XSS.",
               "id": "GO-2026-6091",
-              "modified": "2026-08-27T10:40:55.687979669Z",
+              "modified": "2026-09-16T10:41:36.518081248Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -8845,12 +10604,53 @@
                 }
               ],
               "related": [
-                "CGA-rch4-p96c-xj2v",
                 "RHSA-2026:54835",
                 "RHSA-2026:54836",
                 "RHSA-2026:60304",
                 "RHSA-2026:60305",
-                "RHSA-2026:60306"
+                "RHSA-2026:60306",
+                "RHSA-2026:61882",
+                "RHSA-2026:62404",
+                "RHSA-2026:62405",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62602",
+                "RHSA-2026:62753",
+                "RHSA-2026:62754",
+                "RHSA-2026:62803",
+                "RHSA-2026:63022",
+                "RHSA-2026:63119",
+                "RHSA-2026:63124",
+                "RHSA-2026:63130",
+                "RHSA-2026:63136",
+                "RHSA-2026:63163",
+                "RHSA-2026:63332",
+                "RHSA-2026:64777",
+                "RHSA-2026:64818",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65335",
+                "RHSA-2026:65336",
+                "RHSA-2026:65359",
+                "RHSA-2026:65534",
+                "RHSA-2026:65880",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:65918",
+                "RHSA-2026:66016",
+                "RHSA-2026:66327",
+                "RHSA-2026:66356",
+                "RHSA-2026:66375",
+                "RHSA-2026:66459",
+                "RHSA-2026:67128",
+                "RHSA-2026:67132",
+                "RHSA-2026:67153",
+                "RHSA-2026:67159",
+                "RHSA-2026:67160",
+                "RHSA-2026:67313",
+                "RHSA-2026:67517",
+                "RHSA-2026:67518"
               ],
               "schema_version": "1.9.0",
               "summary": "Fix Javascript regexp context tracking in html/template"
@@ -8915,7 +10715,7 @@
               },
               "details": "Previously, resolving relative paths containing parent directory ('..') segments performed string conversions and buffer rewrites on each step, resulting in quadratic time complexity and high memory allocation overhead.\n\nNow, path resolution operates on a byte buffer using index-based backtracking for '..' segments, eliminating the quadratic time complexity and significantly reducing memory allocations.",
               "id": "GO-2026-6218",
-              "modified": "2026-08-27T10:40:55.715603469Z",
+              "modified": "2026-09-16T10:41:36.534505934Z",
               "published": "2026-08-13T21:43:54Z",
               "references": [
                 {
@@ -8932,12 +10732,66 @@
                 }
               ],
               "related": [
-                "CGA-9mpc-jg3h-hrj4",
                 "RHSA-2026:54835",
                 "RHSA-2026:54836",
                 "RHSA-2026:60304",
                 "RHSA-2026:60305",
-                "RHSA-2026:60306"
+                "RHSA-2026:60306",
+                "RHSA-2026:61882",
+                "RHSA-2026:62404",
+                "RHSA-2026:62405",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62577",
+                "RHSA-2026:62578",
+                "RHSA-2026:62602",
+                "RHSA-2026:62631",
+                "RHSA-2026:62753",
+                "RHSA-2026:62754",
+                "RHSA-2026:62803",
+                "RHSA-2026:63022",
+                "RHSA-2026:63119",
+                "RHSA-2026:63124",
+                "RHSA-2026:63127",
+                "RHSA-2026:63130",
+                "RHSA-2026:63136",
+                "RHSA-2026:63163",
+                "RHSA-2026:63332",
+                "RHSA-2026:64777",
+                "RHSA-2026:64786",
+                "RHSA-2026:64788",
+                "RHSA-2026:64818",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65335",
+                "RHSA-2026:65336",
+                "RHSA-2026:65359",
+                "RHSA-2026:65534",
+                "RHSA-2026:65880",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:65918",
+                "RHSA-2026:66016",
+                "RHSA-2026:66327",
+                "RHSA-2026:66350",
+                "RHSA-2026:66356",
+                "RHSA-2026:66364",
+                "RHSA-2026:66375",
+                "RHSA-2026:66459",
+                "RHSA-2026:67128",
+                "RHSA-2026:67132",
+                "RHSA-2026:67149",
+                "RHSA-2026:67153",
+                "RHSA-2026:67159",
+                "RHSA-2026:67160",
+                "RHSA-2026:67161",
+                "RHSA-2026:67287",
+                "RHSA-2026:67313",
+                "RHSA-2026:67319",
+                "RHSA-2026:67464",
+                "RHSA-2026:67517",
+                "RHSA-2026:67518"
               ],
               "schema_version": "1.9.0",
               "summary": "Avoid quadratic complexity in resolvePath in net/url"
@@ -8956,7 +10810,7 @@
   "license_summary": [
     {
       "name": "MIT",
-      "count": 169
+      "count": 170
     },
     {
       "name": "Apache-2.0",
@@ -8968,7 +10822,7 @@
     },
     {
       "name": "non-standard",
-      "count": 70
+      "count": 71
     },
     {
       "name": "UNKNOWN",
