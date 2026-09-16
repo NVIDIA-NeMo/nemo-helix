@@ -20,9 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import httpx
 import pytest
-from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.models.client import ModelsClient
 from nemo_platform_plugin.models.types import (
@@ -59,17 +57,6 @@ def _make_runner(models: ModelsClient, files: FilesClient):
     from nmp.customization_common.tasks.model_entity.run import ModelEntityRunner
 
     return ModelEntityRunner(models=models, files=files, job_ctx=_make_job_ctx())
-
-
-def _async_platform() -> AsyncNeMoPlatform:
-    """A real async SDK over a mock transport.
-
-    The compiler adapts the SDK into the typed client bundle before calling
-    ``fetch_model_entity``, so a bare mock no longer stands in for it. Tests that
-    use this patch ``fetch_model_entity`` itself, so no request is ever sent.
-    """
-    transport = httpx.MockTransport(lambda request: httpx.Response(200, request=request, json={}))
-    return AsyncNeMoPlatform(base_url="http://test", http_client=httpx.AsyncClient(transport=transport))
 
 
 def _make_clients() -> tuple[MagicMock, MagicMock]:
@@ -585,7 +572,7 @@ class TestCompilerDeploymentConfigPlumbing:
             job_spec = await platform_job_config_compiler(
                 workspace="default",
                 job_spec=spec,
-                sdk=_async_platform(),
+                platform=MagicMock(),
             )
         finally:
             compiler_mod.fetch_model_entity = original_fetch
@@ -630,7 +617,7 @@ class TestCompilerDeploymentConfigPlumbing:
             job_spec = await platform_job_config_compiler(
                 workspace="default",
                 job_spec=spec,
-                sdk=_async_platform(),
+                platform=MagicMock(),
             )
         finally:
             compiler_mod.fetch_model_entity = original_fetch

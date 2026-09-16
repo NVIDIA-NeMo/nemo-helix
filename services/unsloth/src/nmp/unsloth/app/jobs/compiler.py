@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import logging
 
-from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
@@ -38,7 +37,7 @@ from nmp.customization_common.schemas.file_io import (
 )
 from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
 from nmp.customization_common.service.platform_client import (
-    async_customization_platform_clients_from_platform,
+    AsyncCustomizationPlatformClients,
     fetch_model_entity,
 )
 from nmp.customization_common.tasks.file_io_metadata import build_output_fileset_metadata_from_model_entity
@@ -210,7 +209,7 @@ def _build_model_entity_config(
 async def platform_job_config_compiler(
     workspace: str,
     job_spec: UnslothJobOutput,
-    sdk: AsyncNeMoPlatform,
+    platform: AsyncCustomizationPlatformClients,
     *,
     job_name: str | None = None,
     profile: str | None = None,
@@ -220,11 +219,7 @@ async def platform_job_config_compiler(
 
     logger.info(f"Compiling Unsloth job to PlatformJobSpec: {job_spec.model_dump_json(indent=2)}")
 
-    # fetch_model_entity wants the typed client bundle, not the generated SDK.
-    # automodel and RL already compile against the bundle; adapt at the boundary here too.
-    me = await fetch_model_entity(
-        job_spec.model.name, workspace, async_customization_platform_clients_from_platform(sdk)
-    )
+    me = await fetch_model_entity(job_spec.model.name, workspace, platform)
 
     cpu_resources = _get_cpu_resources()
     base_env = _get_base_environment()
