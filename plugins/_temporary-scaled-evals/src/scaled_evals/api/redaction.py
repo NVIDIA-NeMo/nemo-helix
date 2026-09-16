@@ -15,9 +15,10 @@ _SECRET_NAMES = (
     r"authorization|database_url|secret|password"
 )
 _SECRET_KEY_RE = re.compile(rf"(?i)(?:{_SECRET_NAMES})")
+_ENV_REFERENCE_RE = re.compile(r"(?:\$[A-Z_][A-Z0-9_]*|\$\{[A-Z_][A-Z0-9_]*\})")
 _ASSIGNMENT_RE = re.compile(
     rf"(?i)(\b(?:{_SECRET_NAMES})\b\s*[:=]\s*)"
-    r"([^,\s'\"}]+)"
+    r"(\$\{[A-Z_][A-Z0-9_]*\}|[^,\s'\"}]+)"
 )
 _TOKEN_RE = re.compile(
     r"\b(?:sk-[A-Za-z0-9_-]{8,}|nvapi-[A-Za-z0-9._-]{8,}|"
@@ -70,9 +71,7 @@ def _redact_json_value(value: Any) -> Any:
                     candidate = f"{redacted_key}#{collision_suffix}"
             result[candidate] = (
                 "<redacted>"
-                if _SECRET_KEY_RE.fullmatch(key)
-                and item is not None
-                and not (isinstance(item, str) and item.startswith("$"))
+                if _SECRET_KEY_RE.fullmatch(key) and item is not None and not _is_environment_reference(item)
                 else _redact_json_value(item)
             )
         return result
@@ -83,6 +82,10 @@ def _redact_json_value(value: Any) -> Any:
 
 def _redact_assignment(match: re.Match[str]) -> str:
     value = match.group(2)
-    if value.startswith("$"):
+    if _is_environment_reference(value):
         return match.group(0)
     return f"{match.group(1)}<redacted>"
+
+
+def _is_environment_reference(value: Any) -> bool:
+    return isinstance(value, str) and _ENV_REFERENCE_RE.fullmatch(value) is not None

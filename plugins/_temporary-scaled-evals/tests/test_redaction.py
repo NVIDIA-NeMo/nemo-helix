@@ -21,6 +21,8 @@ def test_redact_secret_text_masks_assignments_and_known_token_shapes() -> None:
 
 def test_redact_secret_text_preserves_environment_references() -> None:
     assert redact_secret_text("api_key=$OPENAI_API_KEY") == "api_key=$OPENAI_API_KEY"
+    assert redact_secret_text("api_key=${OPENAI_API_KEY}") == "api_key=${OPENAI_API_KEY}"
+    assert redact_secret_text("api_key=$uperSecret") == "api_key=<redacted>"
 
 
 def test_redact_secret_text_masks_openshift_jwt_and_database_credentials() -> None:
@@ -56,13 +58,18 @@ def test_json_redaction_covers_secret_fields_and_preserves_nonsecret_values() ->
     source = {
         "nested": [{"API_KEY": "synthetic-value", "password": "another-value"}],
         "reference": {"api_key": "$OPENAI_API_KEY"},
+        "literal": {"api_key": "$uperSecret"},
         "credential_id": "cred_example",
         "enabled": True,
         "count": 123456789012345678901234567890,
         "message": 'literal \\"quote\\" and unicode café',
     }
     result = json.loads(redact_json_text(json.dumps(source)))
-    assert result == {**source, "nested": [{"API_KEY": "<redacted>", "password": "<redacted>"}]}
+    assert result == {
+        **source,
+        "nested": [{"API_KEY": "<redacted>", "password": "<redacted>"}],
+        "literal": {"api_key": "<redacted>"},
+    }
 
 
 def test_json_redaction_preserves_unchanged_bytes_and_jsonl_records() -> None:
