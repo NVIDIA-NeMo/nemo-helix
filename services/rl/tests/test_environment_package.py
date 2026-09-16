@@ -574,6 +574,8 @@ def test_download_hub_wheels_requirements_in_lists_env_and_verifiers(tmp_path: P
         convert_mod.DEFAULT_VERIFIERS_SPEC,
         "ascii_tree",
         "some-extra",
+        # Resolved with the environment so the offline closure stays self-consistent.
+        "pip",
     ]
 
 
@@ -618,6 +620,150 @@ def test_validate_package_layout_warns_on_duplicate_wheels(tmp_path: Path, caplo
         )
 
     assert "2 versions of xxhash" in caplog.text
+
+
+def test_download_hub_wheels_vendors_venv_seed_packages(tmp_path: Path, monkeypatch) -> None:
+    """`uv venv --seed` resolves pip before any requirement, so the closure must carry it."""
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    compiled: list[list[str]] = []
+
+    def fake_compile(work_dir, packages, *, extra_index_url=None):
+        compiled.append(list(packages))
+        pinned = Path(work_dir) / "requirements.txt"
+        pinned.parent.mkdir(parents=True, exist_ok=True)
+        pinned.write_text("ascii-tree==0.1.5\nverifiers==0.1.14\npip==25.2\n", encoding="utf-8")
+        return pinned
+
+    def fake_download(wheels_dir, *, requirements_file, extra_index_url=None):
+        wheels_dir.mkdir(parents=True, exist_ok=True)
+        for name in (
+            "ascii_tree-0.1.5-py3-none-any.whl",
+            "verifiers-0.1.14-py3-none-any.whl",
+            "pip-25.2-py3-none-any.whl",
+        ):
+            (wheels_dir / name).write_bytes(b"PK\x03\x04")
+
+    monkeypatch.setattr(convert_mod, "_compile_pinned_requirements", fake_compile)
+    monkeypatch.setattr(convert_mod, "_run_pip_download", fake_download)
+    monkeypatch.setattr(convert_mod, "_build_downloaded_sdists", lambda wheels_dir: None)
+
+    wheels = convert_mod.download_hub_wheels(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            hub_version="0.1.5",
+            out_dir=tmp_path / "env",
+        ),
+        work_dir=tmp_path / "work",
+    )
+
+    assert "pip" in compiled[0]
+    assert (wheels / "pip-25.2-py3-none-any.whl").is_file()
+
+
+def test_wheels_dir_gets_seed_packages_vendored(tmp_path: Path, monkeypatch) -> None:
+    """--wheels-dir is resolved for the environment, so pip has to be added for it."""
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    src = tmp_path / "prebuilt"
+    src.mkdir()
+    (src / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+
+    requested: list[list[str]] = []
+
+    def fake_compile(work_dir, packages, *, extra_index_url=None):
+        requested.append(list(packages))
+        pinned = Path(work_dir) / "requirements.txt"
+        pinned.parent.mkdir(parents=True, exist_ok=True)
+        pinned.write_text("pip==25.2\n", encoding="utf-8")
+        return pinned
+
+    def fake_download(dest, *, requirements_file, extra_index_url=None):
+        (dest / "pip-25.2-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+
+    monkeypatch.setattr(convert_mod, "_compile_pinned_requirements", fake_compile)
+    monkeypatch.setattr(convert_mod, "_run_pip_download", fake_download)
+
+    wheels = convert_mod.download_hub_wheels(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            out_dir=tmp_path / "env",
+            wheels_dir=src,
+        ),
+        work_dir=tmp_path / "work",
+    )
+
+    assert requested == [["pip"]]
+    assert (wheels / "pip-25.2-py3-none-any.whl").is_file()
+    assert (wheels / "ascii_tree-0.1.5-py3-none-any.whl").is_file()
+
+
+def test_wheels_dir_already_carrying_seed_packages_is_untouched(tmp_path: Path, monkeypatch) -> None:
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    src = tmp_path / "prebuilt"
+    src.mkdir()
+    (src / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+    (src / "pip-25.2-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+
+    def boom(*args, **kwargs):
+        raise AssertionError("must not reach the network when the closure is already complete")
+
+    monkeypatch.setattr(convert_mod, "_compile_pinned_requirements", boom)
+    monkeypatch.setattr(convert_mod, "_run_pip_download", boom)
+
+    wheels = convert_mod.download_hub_wheels(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            out_dir=tmp_path / "env",
+            wheels_dir=src,
+        ),
+        work_dir=tmp_path / "work",
+    )
+    assert sorted(p.name for p in wheels.glob("*.whl")) == [
+        "ascii_tree-0.1.5-py3-none-any.whl",
+        "pip-25.2-py3-none-any.whl",
+    ]
+
+
+def test_validate_package_layout_warns_on_missing_seed_packages(tmp_path: Path, caplog) -> None:
+    """A closure without pip cannot build a venv on a deny-default sandbox."""
+    import logging
+
+    from nmp.rl.tasks.environment.package import write_adapter_wheels_package
+
+    src = tmp_path / "prebuilt"
+    src.mkdir()
+    (src / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+
+    with caplog.at_level(logging.WARNING):
+        write_adapter_wheels_package(
+            out_dir=tmp_path / "env",
+            hub_id="primeintellect/ascii-tree",
+            wheels_src=src,
+        )
+
+    assert "does not vendor pip" in caplog.text
+
+
+def test_validate_package_layout_quiet_when_seed_packages_present(tmp_path: Path, caplog) -> None:
+    import logging
+
+    from nmp.rl.tasks.environment.package import write_adapter_wheels_package
+
+    src = tmp_path / "prebuilt"
+    src.mkdir()
+    (src / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+    (src / "pip-25.2-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+
+    with caplog.at_level(logging.WARNING):
+        write_adapter_wheels_package(
+            out_dir=tmp_path / "env",
+            hub_id="primeintellect/ascii-tree",
+            wheels_src=src,
+        )
+
+    assert "does not vendor" not in caplog.text
 
 
 @pytest.mark.parametrize(
