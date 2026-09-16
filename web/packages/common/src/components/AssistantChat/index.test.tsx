@@ -205,7 +205,10 @@ describe('AssistantChat', () => {
 
       await waitFor(() =>
         expect(mocks.createChatCompletion).toHaveBeenCalledWith(
-          expect.objectContaining({ reasoning_effort: undefined })
+          expect.objectContaining({
+            reasoning_effort: undefined,
+            chat_template_kwargs: undefined,
+          })
         )
       );
     },
@@ -213,7 +216,7 @@ describe('AssistantChat', () => {
   );
 
   it(
-    'asks the model to skip reasoning when reasoning is disabled',
+    'sends both reasoning-off conventions when reasoning is disabled',
     async () => {
       renderAssistantChat(
         <AssistantChat model="test-model" workspace="default" reasoningEnabled={false} />
@@ -224,7 +227,10 @@ describe('AssistantChat', () => {
 
       await waitFor(() =>
         expect(mocks.createChatCompletion).toHaveBeenCalledWith(
-          expect.objectContaining({ reasoning_effort: 'none' })
+          expect.objectContaining({
+            reasoning_effort: 'none',
+            chat_template_kwargs: { enable_thinking: false },
+          })
         )
       );
     },

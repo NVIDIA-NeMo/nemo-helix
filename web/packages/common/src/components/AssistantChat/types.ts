@@ -72,8 +72,9 @@ export interface AssistantChatProps {
    */
   promptData?: PromptData;
   /**
-   * When false, the request asks the model not to reason (`reasoning_effort: 'none'`).
-   * A model that does not support the parameter keeps reasoning as usual.
+   * When false, the request asks the model not to reason, in both conventions:
+   * `reasoning_effort: 'none'` and `chat_template_kwargs: { enable_thinking: false }`.
+   * A model that reads neither keeps reasoning as usual.
    */
   reasoningEnabled?: boolean;
   /**
