@@ -129,7 +129,7 @@ def _preflight_models(config: dict[str, Any], *, workspace: str, agent: str | No
     is not a reason to refuse to stage the bundle: the model may be created between staging and
     submit, and ``--no-check-models`` should not be the price of an offline `prepare-fileset`.
     """
-    from nemo_optimization.agents import resolve_agent_config
+    from nemo_agent_optimization_plugin.agents import resolve_agent_config
     from nemo_optimization.preflight import preflight_validate_llm_models
 
     try:
