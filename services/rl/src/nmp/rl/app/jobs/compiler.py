@@ -37,7 +37,7 @@ from nemo_platform_plugin.jobs.api_factory import (
 )
 from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
 from nemo_platform_plugin.models.types import ModelDeploymentConfig, ModelEntity
-from nmp.common.auth import AuthClient, auth_client_context
+from nmp.common.auth import auth_client_context
 from nmp.common.entities.utils import parse_entity_ref
 from nmp.common.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nmp.customization_common.integrations import (
@@ -213,11 +213,28 @@ async def _resolve_deployment_config_ref(
         raise PlatformJobCompilationError(f"Failed to resolve deployment_config '{config_ref}': {e}") from e
 
 
+async def _require_tool_call_plugin_permission(workspace: str) -> None:
+    """Gate ``tool_call_plugin``, the one deployment field that needs a permission check.
+
+    Auth is resolved here rather than up front: every other deployment_config
+    shape validates without it, so demanding an auth context for all of them
+    would fail compilation for jobs that never consult it.
+    """
+    auth_client = auth_client_context.get()
+    if auth_client is None:
+        raise PlatformJobCompilationError(
+            "No auth context available; cannot validate the tool_call_plugin permission.",
+        )
+    if not await auth_client.has_permissions(workspace, ["models.tool-call-plugin.set"]):
+        raise PlatformJobCompilationError(
+            "Insufficient permissions to set tool_call_plugin. Requires the models.tool-call-plugin.set permission."
+        )
+
+
 async def _validate_deployment_config(
     workspace: str,
     job_spec: RlJobOutput,
     platform: AsyncCustomizationPlatformClients,
-    auth_client: AuthClient,
 ) -> None:
     """Validate deployment_config consistency before training starts.
 
@@ -232,11 +249,7 @@ async def _validate_deployment_config(
     if isinstance(dc, DeploymentParams):
         tcc = dc.tool_call_config
         if tcc and tcc.tool_call_plugin:
-            if not await auth_client.has_permissions(workspace, ["models.tool-call-plugin.set"]):
-                raise PlatformJobCompilationError(
-                    "Insufficient permissions to set tool_call_plugin. "
-                    "Requires the models.tool-call-plugin.set permission."
-                )
+            await _require_tool_call_plugin_permission(workspace)
         return
 
     resolved_config = await _resolve_deployment_config_ref(dc, workspace, platform)
@@ -636,12 +649,7 @@ async def platform_job_config_compiler(
     trust_remote_code = me.trust_remote_code or False
 
     if job_spec.deployment_config is not None:
-        auth_client = auth_client_context.get()
-        if auth_client is None:
-            raise PlatformJobCompilationError(
-                "No auth context available; cannot validate deployment config permissions.",
-            )
-        await _validate_deployment_config(workspace, job_spec, platform, auth_client)
+        await _validate_deployment_config(workspace, job_spec, platform)
 
     cpu_resources = _get_cpu_resources()
     base_env = _base_environment()

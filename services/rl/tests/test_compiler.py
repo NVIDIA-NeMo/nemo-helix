@@ -542,7 +542,25 @@ def authorized(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
 
 
 @pytest.mark.asyncio
-async def test_compiler_requires_auth_context_to_validate_deployment_config(
+async def test_inline_deployment_config_compiles_without_an_auth_context(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+) -> None:
+    """Only tool_call_plugin is permission-gated; plain params must not demand auth."""
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    monkeypatch.setattr("nmp.rl.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
+    job = _make_job_output().model_copy(update={"deployment_config": DeploymentParams(gpu=2)})
+
+    spec = await platform_job_config_compiler("default", job, platform_clients)
+
+    assert _steps(spec)[3]["config"]["deployment_config"]["gpu"] == 2
+
+
+@pytest.mark.asyncio
+async def test_string_deployment_config_compiles_without_an_auth_context(
     monkeypatch: pytest.MonkeyPatch,
     platform_clients: AsyncCustomizationPlatformClients,
 ) -> None:
@@ -551,7 +569,34 @@ async def test_compiler_requires_auth_context_to_validate_deployment_config(
         AsyncMock(return_value=_make_model_entity()),
     )
     monkeypatch.setattr("nmp.rl.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
-    job = _make_job_output().model_copy(update={"deployment_config": DeploymentParams()})
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(data=lambda: _make_deployment_config())
+    )
+    platform_clients.models.get_model = AsyncMock(
+        return_value=SimpleNamespace(data=lambda: SimpleNamespace(workspace="default", name="my-dpo"))
+    )
+    job = _make_job_output().model_copy(update={"deployment_config": "shared/some-cfg"})
+
+    spec = await platform_job_config_compiler("default", job, platform_clients)
+
+    assert _steps(spec)[3]["config"]["deployment_config"] == "shared/some-cfg"
+
+
+@pytest.mark.asyncio
+async def test_tool_call_plugin_without_an_auth_context_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    monkeypatch.setattr("nmp.rl.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
+    job = _make_job_output().model_copy(
+        update={
+            "deployment_config": DeploymentParams(tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin"))
+        }
+    )
 
     with pytest.raises(PlatformJobCompilationError, match="No auth context available"):
         await platform_job_config_compiler("default", job, platform_clients)
