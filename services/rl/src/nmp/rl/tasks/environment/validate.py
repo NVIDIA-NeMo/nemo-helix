@@ -29,6 +29,12 @@ class EnvironmentPackageValidationError(ValueError):
     """Raised when an environment package fails validation."""
 
 
+# Gym builds each per-server venv with ``uv venv --seed``, which installs these before any
+# requirement is resolved. uv resolves them like any other package, so on a deny-default
+# sandbox the vendored wheelhouse is their only source. Python 3.13 seeds pip alone.
+VENV_SEED_PACKAGES = ("pip",)
+
+
 def duplicate_wheel_distributions(wheels_dir: Path) -> dict[str, list[str]]:
     """Return ``{normalized distribution: [versions]}`` for anything vendored twice.
 
@@ -99,6 +105,20 @@ def validate_manifest_against_listing(manifest: EnvironmentManifest, paths: Iter
         non_wheels = sorted(p for p in wheels if not p.endswith(".whl"))
         if non_wheels:
             raise EnvironmentPackageValidationError(f"Non-wheel files in wheels/: {', '.join(non_wheels)}")
+
+        # Warn, not raise: without these a package still installs wherever the sandbox can
+        # reach an index, and rejecting would invalidate packages already uploaded. But on a
+        # deny-default sandbox it surfaces as a 900s readiness timeout, so name it here.
+        vendored = {re.sub(r"[-_.]+", "-", Path(name).name.split("-")[0]).lower() for name in wheels}
+        missing_seed = [name for name in VENV_SEED_PACKAGES if name not in vendored]
+        if missing_seed:
+            logger.warning(
+                "wheels/ does not vendor %s. Gym creates every per-server venv with "
+                "`uv venv --seed`, which resolves these before any requirement, so a sandbox "
+                "without egress would fail. Add the wheel(s) to wheels/; packages built by "
+                "pi-to-gym-conversion carry them already.",
+                ", ".join(missing_seed),
+            )
 
     if isinstance(manifest, AdapterWheelsV1Manifest) and manifest.adapter.agent not in IMAGE_ADAPTER_ALLOWLIST:
         raise EnvironmentPackageValidationError(
