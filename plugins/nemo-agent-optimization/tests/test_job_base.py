@@ -80,8 +80,16 @@ def staged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def registered(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
 
-    def fake_register(optimized, *, name, source_agent_config, workspace, sdk):
-        calls.append({"optimized": optimized, "name": name, "workspace": workspace})
+    def fake_register(optimized, *, name, source_agent, source_workspace, workspace, sdk):
+        calls.append(
+            {
+                "optimized": optimized,
+                "name": name,
+                "workspace": workspace,
+                "source_agent": source_agent,
+                "source_workspace": source_workspace,
+            }
+        )
         return {"agent": f"{workspace}/{name}"}
 
     monkeypatch.setattr(job_base, "register_optimized_agent", fake_register)
@@ -113,6 +121,21 @@ def test_run_registers_the_subclass_output_as_the_named_agent(ctx, staged, regis
     assert result == {"agent": "my-ws/my-agent-opt"}
     assert registered[0]["name"] == "my-agent-opt"
     assert registered[0]["optimized"]["description"] == "optimized"
+
+
+def test_run_passes_the_source_agent_identity_to_registration(ctx, staged, registered) -> None:
+    """Registration stages the *source* agent's ETHOS.md, so it needs its name+workspace."""
+    _RecordingJob().run(_spec(agent="other-ws/my-agent"), ctx=ctx, sdk=object())
+
+    assert registered[0]["source_agent"] == "my-agent"
+    assert registered[0]["source_workspace"] == "other-ws"
+
+
+def test_run_defaults_the_source_workspace_to_the_run_workspace(ctx, staged, registered) -> None:
+    _RecordingJob().run(_spec(agent="my-agent"), ctx=ctx, sdk=object())
+
+    assert registered[0]["source_agent"] == "my-agent"
+    assert registered[0]["source_workspace"] == "my-ws"
 
 
 def test_run_requires_an_sdk(ctx, staged, registered) -> None:

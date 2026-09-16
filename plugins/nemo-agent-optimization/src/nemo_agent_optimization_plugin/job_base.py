@@ -126,6 +126,7 @@ class AgentOptimizeJob(NemoJob):
                 "NemoJobScheduler.run_local(sdk=...)."
             )
 
+        source_workspace, source_agent = split_agent_ref(spec.agent, workspace=spec.workspace)
         with _staged_bundle(spec, ctx=ctx, sdk=sdk) as (config_path, bundle_root):
             optimize_config = _load_yaml(config_path)
             source_agent_config = fetch_agent_config(spec.agent, workspace=spec.workspace, sdk=sdk)
@@ -142,7 +143,8 @@ class AgentOptimizeJob(NemoJob):
         return register_optimized_agent(
             optimized,
             name=spec.output_agent,
-            source_agent_config=source_agent_config,
+            source_agent=source_agent,
+            source_workspace=source_workspace,
             workspace=spec.workspace,
             sdk=sdk,
         )
@@ -226,10 +228,15 @@ async def _resolve_executor(*, profile: str, async_sdk: object, task_module: str
     )
 
 
+def split_agent_ref(agent: str, *, workspace: str) -> tuple[str, str]:
+    """Split an ``agent`` ref into ``(workspace, name)``, defaulting to *workspace*."""
+    ws, _, name = agent.rpartition("/")
+    return ws or workspace, name
+
+
 def fetch_agent_config(agent: str, *, workspace: str, sdk: NeMoPlatform) -> dict[str, Any]:
     """Fetch a platform agent's stored ``nemo-agents-spec-v1`` config."""
-    ws, _, name = agent.rpartition("/")
-    ws = ws or workspace
+    ws, name = split_agent_ref(agent, workspace=workspace)
     stored = sdk.agents.get(name, workspace=ws)
     config = stored["config"] if isinstance(stored, dict) else getattr(stored, "config", {})
     if not isinstance(config, dict) or not config:

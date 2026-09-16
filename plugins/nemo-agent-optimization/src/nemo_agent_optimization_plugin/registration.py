@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,8 @@ def register_optimized_agent(
     optimized: dict[str, Any],
     *,
     name: str,
-    source_agent_config: dict[str, Any],
+    source_agent: str,
+    source_workspace: str,
     workspace: str,
     sdk: NeMoPlatform,
 ) -> dict[str, Any]:
@@ -38,7 +40,6 @@ def register_optimized_agent(
         from nemo_agents_plugin.agent_config import AgentConfig
         from nemo_agents_plugin.entities import (
             AGENT_CONFIG_FILENAME,
-            ETHOS_FILENAME,
             NEMO_AGENTS_SPEC_CONFIG_FORMAT,
             ethos_fileset_name,
         )
@@ -75,12 +76,8 @@ def register_optimized_agent(
     try:
         with tempfile.TemporaryDirectory(prefix=f".ethos-{name}-") as staging:
             staged = Path(staging)
-            (staged / AGENT_CONFIG_FILENAME).write_text(
-                yaml.safe_dump(payload, sort_keys=False), encoding="utf-8"
-            )
-            ethos = source_agent_config.get("_ethos_markdown")
-            if isinstance(ethos, str) and ethos.strip():
-                (staged / ETHOS_FILENAME).write_text(ethos, encoding="utf-8")
+            (staged / AGENT_CONFIG_FILENAME).write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+            _stage_source_ethos(staged, source_agent=source_agent, source_workspace=source_workspace, sdk=sdk)
             upload_to_fileset(staged, fileset=fileset, workspace=workspace, sdk=sdk)
     except Exception as exc:
         try:
@@ -97,3 +94,59 @@ def register_optimized_agent(
 
     logger.info("Registered optimized agent %s/%s", workspace, name)
     return {"agent": f"{workspace}/{name}"}
+
+
+def _stage_source_ethos(
+    staged: Path,
+    *,
+    source_agent: str,
+    source_workspace: str,
+    sdk: NeMoPlatform,
+) -> None:
+    """Copy the source agent's ``ETHOS.md`` in beside the optimized ``agent.yaml``.
+
+    The optimized agent is a new entity with its own ``<name>-ethos`` fileset, and the
+    tuned ``agent.yaml`` belongs next to the ethos it was built from — an optimized
+    agent whose "why" is missing reads as if it never had one.
+
+    A source agent with no ethos fileset, or one that holds no ``ETHOS.md``, is a clean
+    skip: plenty of agents are registered straight from an ``agent.yaml``, and the
+    optimized agent is complete without it.
+    """
+    from nemo_agents_plugin.entities import ETHOS_FILENAME, ethos_fileset_name
+
+    source_fileset = ethos_fileset_name(source_agent)
+    with tempfile.TemporaryDirectory(prefix=f".source-ethos-{source_agent}-") as download_dir:
+        downloaded = Path(download_dir)
+        try:
+            sdk.files.download(
+                remote_path=ETHOS_FILENAME,
+                local_path=str(downloaded),
+                fileset=source_fileset,
+                workspace=source_workspace,
+            )
+        except Exception as exc:
+            # "No ethos" reaches us in several shapes (missing fileset, missing file,
+            # empty match) depending on the files client and transport, and none of
+            # them is fatal here — so treat any failure to fetch as "there isn't one".
+            logger.info(
+                "No %s staged for the optimized agent: %s/%s could not be read (%s)",
+                ETHOS_FILENAME,
+                source_workspace,
+                source_fileset,
+                exc,
+            )
+            return
+
+        source_ethos = downloaded / ETHOS_FILENAME
+        if not source_ethos.is_file():
+            logger.info(
+                "No %s staged for the optimized agent: fileset %s/%s holds none",
+                ETHOS_FILENAME,
+                source_workspace,
+                source_fileset,
+            )
+            return
+
+        shutil.copyfile(source_ethos, staged / ETHOS_FILENAME)
+        logger.info("Staged %s from source agent fileset %s/%s", ETHOS_FILENAME, source_workspace, source_fileset)

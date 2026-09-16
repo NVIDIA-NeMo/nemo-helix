@@ -23,10 +23,18 @@ def _config(name: str = "my-agent") -> dict[str, Any]:
 
 
 class _FakeFiles:
-    def __init__(self) -> None:
+    def __init__(self, ethos: str | None = None) -> None:
         self.uploads: list[dict[str, Any]] = []
+        self.downloads: list[dict[str, Any]] = []
         self.fail = False
+        self.ethos = ethos
         self._temp_copies: list[Path] = []
+
+    def download(self, **kwargs: Any) -> None:
+        self.downloads.append(kwargs)
+        if self.ethos is None:
+            raise FileNotFoundError(f"fileset {kwargs['workspace']}/{kwargs['fileset']} does not exist")
+        (Path(kwargs["local_path"]) / kwargs["remote_path"]).write_text(self.ethos, encoding="utf-8")
 
     def upload(self, **kwargs: Any) -> Any:
         if self.fail:
@@ -65,17 +73,25 @@ class _FakeAgents:
 
 
 class _FakeSdk:
-    def __init__(self, conflict: bool = False) -> None:
+    def __init__(self, conflict: bool = False, ethos: str | None = None) -> None:
         self.agents = _FakeAgents(conflict=conflict)
-        self.files = _FakeFiles()
+        self.files = _FakeFiles(ethos=ethos)
+
+
+def _register(sdk: _FakeSdk, optimized: dict[str, Any] | None = None, name: str = "my-agent-opt") -> Any:
+    return register_optimized_agent(
+        optimized if optimized is not None else _config(name),
+        name=name,
+        source_agent="my-agent",
+        source_workspace="my-ws",
+        workspace="my-ws",
+        sdk=sdk,
+    )
 
 
 def test_creates_the_agent_entity_as_nemo_agents_spec_v1() -> None:
     sdk = _FakeSdk()
-    result = register_optimized_agent(
-        _config("my-agent-opt"), name="my-agent-opt",
-        source_agent_config=_config(), workspace="my-ws", sdk=sdk,
-    )
+    result = _register(sdk)
 
     assert result == {"agent": "my-ws/my-agent-opt"}
     created = sdk.agents.created[0]
@@ -86,10 +102,7 @@ def test_creates_the_agent_entity_as_nemo_agents_spec_v1() -> None:
 
 def test_uploads_the_optimized_agent_yaml_to_the_ethos_fileset() -> None:
     sdk = _FakeSdk()
-    register_optimized_agent(
-        _config("my-agent-opt"), name="my-agent-opt",
-        source_agent_config=_config(), workspace="my-ws", sdk=sdk,
-    )
+    _register(sdk)
 
     upload = sdk.files.uploads[0]
     assert upload["fileset"] == "my-agent-opt-ethos"
@@ -98,13 +111,35 @@ def test_uploads_the_optimized_agent_yaml_to_the_ethos_fileset() -> None:
     assert yaml.safe_load(staged.read_text(encoding="utf-8"))["name"] == "my-agent-opt"
 
 
+def test_stages_the_source_agents_ethos_alongside_the_optimized_config() -> None:
+    """The optimized agent's fileset is meant to hold both halves of the contract."""
+    sdk = _FakeSdk(ethos="# Ethos\n\nBe helpful.\n")
+    _register(sdk)
+
+    (download,) = sdk.files.downloads
+    assert download["fileset"] == "my-agent-ethos"
+    assert download["workspace"] == "my-ws"
+    assert download["remote_path"] == "ETHOS.md"
+    staged = Path(sdk.files.uploads[0]["local_path"].rstrip("/")) / "ETHOS.md"
+    assert staged.read_text(encoding="utf-8") == "# Ethos\n\nBe helpful.\n"
+
+
+def test_a_source_agent_without_an_ethos_fileset_is_a_clean_skip() -> None:
+    """Agents registered straight from an agent.yaml have no ethos; the optimized agent
+    is still valid, so a missing source ethos must not fail the run."""
+    sdk = _FakeSdk(ethos=None)
+    result = _register(sdk)
+
+    assert result == {"agent": "my-ws/my-agent-opt"}
+    staged_dir = Path(sdk.files.uploads[0]["local_path"].rstrip("/"))
+    assert (staged_dir / "agent.yaml").is_file()
+    assert not (staged_dir / "ETHOS.md").exists()
+
+
 def test_a_name_conflict_fails_without_overwriting() -> None:
     sdk = _FakeSdk(conflict=True)
     with pytest.raises(LocalRunError, match="already exists"):
-        register_optimized_agent(
-            _config(), name="taken", source_agent_config=_config(),
-            workspace="my-ws", sdk=sdk,
-        )
+        _register(sdk, _config(), name="taken")
     assert sdk.files.uploads == []
 
 
@@ -112,19 +147,12 @@ def test_a_failed_ethos_upload_rolls_the_agent_back() -> None:
     sdk = _FakeSdk()
     sdk.files.fail = True
     with pytest.raises(LocalRunError, match="rolled back"):
-        register_optimized_agent(
-            _config(), name="my-agent-opt", source_agent_config=_config(),
-            workspace="my-ws", sdk=sdk,
-        )
+        _register(sdk, _config())
     assert sdk.agents.deleted == ["my-agent-opt"]
 
 
 def test_an_invalid_optimized_config_fails_before_any_entity_is_created() -> None:
     sdk = _FakeSdk()
     with pytest.raises(LocalRunError, match="is not a valid nemo-agents-spec-v1"):
-        register_optimized_agent(
-            {"config_format": "nemo-agents-spec-v1", "name": "x"},
-            name="my-agent-opt", source_agent_config=_config(),
-            workspace="my-ws", sdk=sdk,
-        )
+        _register(sdk, {"config_format": "nemo-agents-spec-v1", "name": "x"})
     assert sdk.agents.created == []
