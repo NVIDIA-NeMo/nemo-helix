@@ -380,7 +380,8 @@ print(result)
 The agent calls the email-phishing-analyzer MCP server from the
 `email-phishing-analyzer-harnesses` checkout, declared statically like any
 production MCP server: its console script as `url` and its key in `env`
-(`PHISHING_MCP_BIN`, `NVIDIA_API_KEY`). Trials are scored on the judged
+(`PHISHING_MCP_BIN`, `PHISHING_ANALYZER_API_KEY`; the analyzer calls
+`integrate.api.nvidia.com` while the coordinator uses `inference-api.nvidia.com`). Trials are scored on the judged
 classification, on the analyzer being called exactly once, and on the email
 reaching the tool verbatim; the last two are read from the ATIF trajectory.
 `optimize-mcp-mock.yaml` runs the same study against a fixture shipped in the

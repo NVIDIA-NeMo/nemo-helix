@@ -8,14 +8,15 @@
     "analysis": {
       "is_likely_phishing": true,
       "label": "phishing",
-      "confidence": 0.92,
+      "confidence": 0.95,
       "indicators": [
-        "request for personal information (shipping address)",
-        "suspicious link (http://malicious-link.example.com/claim)",
-        "urgent/limited offer language",
-        "free prize claim to create urgency"
+        "urgent_or_limited_time_offer",
+        "impersonation_or_false_claim",
+        "suspicious_link",
+        "request_for_personal_information",
+        "too_good_to_be_true"
       ],
-      "explanation": "The message uses a classic phishing pattern: it offers a free high‑value item, creates a sense of urgency, and asks the recipient to click a suspicious link and provide personal details, all hallmarks of malicious intent."
+      "explanation": "The email exhibits classic phishing characteristics: it promises a valuable prize (free iPhone) to entice the recipient, creates a false sense of urgency with 'limited time' language, and contains a suspicious link (http://malicious-link.example.com/claim). The request for a shipping address is a request for personal information. The claim of being 'selected' is a common impersonation tactic used to lower the recipient's guard."
     }
   },
   {
@@ -27,15 +28,14 @@
     "analysis": {
       "is_likely_phishing": true,
       "label": "phishing",
-      "confidence": 0.96,
+      "confidence": 0.95,
       "indicators": [
-        "Urgent language",
-        "Request for credentials",
-        "Suspicious link",
-        "Threat of account suspension",
-        "Impersonation of support"
+        "urgent_or_threatening_tone",
+        "impersonation",
+        "credential_request",
+        "suspicious_link"
       ],
-      "explanation": "The email uses urgent, threatening language and a fake support claim to trick the recipient into clicking a malicious link and entering credentials."
+      "explanation": "The email exhibits classic phishing characteristics: it creates a false sense of urgency by claiming the account will be suspended within 24 hours, impersonates a support team, requests the recipient to enter credentials via a provided link, and uses a generic greeting. The link 'http://verify-account.example.com' is suspicious and likely leads to a credential harvesting page."
     }
   },
   {
@@ -47,14 +47,13 @@
     "analysis": {
       "is_likely_phishing": true,
       "label": "phishing",
-      "confidence": 0.65,
+      "confidence": 0.75,
       "indicators": [
-        "Suspicious link to external domain (http://invoice-example.com)",
-        "Unsolicited request to view invoice via link",
-        "Generic greeting and lack of specific details",
-        "Potential impersonation of customer service"
+        "Suspicious link: http://invoice-example.com/view?invoice=12345",
+        "Generic greeting: Hi there",
+        "Unexpected invoice attachment"
       ],
-      "explanation": "The email contains a link to an external domain with no context, uses a generic greeting, and asks the recipient to click to view an invoice, which are common phishing tactics."
+      "explanation": "The email contains a suspicious link to an external domain (invoice-example.com) with invoice parameters, which is a common phishing tactic. The generic greeting and unexpected invoice attachment further support a phishing classification."
     }
   },
   {
@@ -66,9 +65,9 @@
     "analysis": {
       "is_likely_phishing": false,
       "label": "benign",
-      "confidence": 0.02,
+      "confidence": 0.95,
       "indicators": [],
-      "explanation": "The email is a straightforward reminder about a project meeting, contains no requests for personal data, credentials, urgent threats, impersonation, suspicious links, or unusual payment requests."
+      "explanation": "The email is a benign project meeting reminder from 'Bob' with no suspicious elements. It contains no requests for personal information, no credential demands, no urgent or threatening tone, no impersonation attempts, no suspicious links, and no unusual payment requests. The content is straightforward and legitimate in nature."
     }
   },
   {
@@ -80,9 +79,9 @@
     "analysis": {
       "is_likely_phishing": false,
       "label": "benign",
-      "confidence": 0.96,
+      "confidence": 0.95,
       "indicators": [],
-      "explanation": "The message is a straightforward invoice follow-up with no requests for personal data, credentials, urgent language, impersonation, suspicious links, or unusual payment requests."
+      "explanation": "The email is a benign invoice follow-up with no suspicious elements. It contains a standard invoice reference, a polite tone, and a legitimate-looking sender name. There are no requests for personal information, urgent demands, suspicious links, or impersonation indicators."
     }
   }
 ]

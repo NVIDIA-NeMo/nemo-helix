@@ -123,7 +123,7 @@ def test_the_mock_variant_differs_from_the_example_only_in_how_the_server_is_lau
     assert live_server == {
         "transport": "stdio",
         "url": "${PHISHING_MCP_BIN}",
-        "env": {"NVIDIA_API_KEY": "${NVIDIA_API_KEY}"},
+        "env": {"NVIDIA_API_KEY": "${PHISHING_ANALYZER_API_KEY}"},
         "exposure": "harness_native",
     }
     strip = {"metadata", "mcp"}
@@ -143,7 +143,7 @@ def test_fabric_accepts_the_example_with_its_credential_in_env(monkeypatch: pyte
 
     # The optimizer expands ${VAR} on load; do the same here with placeholder values.
     monkeypatch.setenv("PHISHING_MCP_BIN", "/opt/analyzer/.venv/bin/email-phishing-analyzer-mcp")
-    monkeypatch.setenv("NVIDIA_API_KEY", "placeholder")
+    monkeypatch.setenv("PHISHING_ANALYZER_API_KEY", "placeholder")
     agent = json.loads(
         os.path.expandvars(json.dumps({k: v for k, v in _LIVE_CONFIG.items() if k not in {"optimizer", "eval"}}))
     )

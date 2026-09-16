@@ -53,7 +53,9 @@ mcp:
       transport: stdio
       url: ${PHISHING_MCP_BIN}
       env:
-        NVIDIA_API_KEY: ${NVIDIA_API_KEY}
+        # The analyzer calls integrate.api.nvidia.com (build.nvidia.com keys); the coordinator and
+        # judge above use inference-api.nvidia.com, so the analyzer gets its own key variable.
+        NVIDIA_API_KEY: ${PHISHING_ANALYZER_API_KEY}
       exposure: harness_native
 tools:
   enabled:

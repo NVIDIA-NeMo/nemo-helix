@@ -312,14 +312,21 @@ rather than inferred from the tool's answer. All three are study objectives in
    test -x "$PHISHING_MCP_BIN"
    ```
 
-`optimize-mcp.yaml` reads that variable and passes `NVIDIA_API_KEY` to the
-analyzer through the server's `env`. The analyzer takes its model settings from
-the checkout's `configs/common.yaml`, which must name a live model: as of
-2026-09-15 its default `nvidia/nemotron-3-nano-30b-a3b` on
-`integrate.api.nvidia.com` returns 410 Gone and every tool call fails with
-`analyzer request failed` until it points at a current one (for example
-`nvidia/nvidia/nemotron-3-nano-30b-a3b` on `https://inference-api.nvidia.com/v1`).
-The dataset is the agent's full eval set (5 emails: 3 phishing, 2 benign).
+`optimize-mcp.yaml` reads that variable. The analyzer calls
+`integrate.api.nvidia.com` (a build.nvidia.com key), while the coordinator and
+judge in this config call `inference-api.nvidia.com`, so the analyzer's key is
+passed separately as `PHISHING_ANALYZER_API_KEY` and reaches it as
+`NVIDIA_API_KEY` through the server's `env`:
+
+```bash
+export PHISHING_ANALYZER_API_KEY=...   # build.nvidia.com key for the analyzer
+```
+
+The analyzer's model comes from the checkout's `configs/common.yaml`. Its
+original default `nvidia/nemotron-3-nano-30b-a3b` was renamed and now returns
+410 Gone; the checkout must name `nvidia/nemotron-3.5-lightning-30b-a3b`
+(fixed in the harness repo's Fabric MR). The dataset is the agent's full eval
+set (5 emails: 3 phishing, 2 benign).
 
 ### Variant: the mock analyzer
 
@@ -334,7 +341,7 @@ it. Any bundle can ship its own MCP server the same way.
 The fixture replays the `analysis` stored on each row of `dataset-mcp.json`,
 keyed on the email text: an agent that passes the email verbatim gets the
 recorded verdict, one that edits it gets `unknown`. Those values were recorded
-from a run of `optimize-mcp.yaml` against the real analyzer (2026-09-15). To add
+from a run of `optimize-mcp.yaml` against the real analyzer (2026-09-16, `nvidia/nemotron-3.5-lightning-30b-a3b`). To add
 an email, run `optimize-mcp.yaml` on it once and store the analyzer's result as
 the row's `analysis` (the fixture reads `PHISHING_ANALYZER_DATASET` if you keep
 the dataset elsewhere). For the mock, `python3` must resolve to the platform
@@ -349,6 +356,7 @@ cd "$BUNDLE"
 # Re-export if this is a new shell:
 export PHISHING_AGENT_ROOT="${PHISHING_AGENT_ROOT:-$HOME/work/email-phishing-analyzer-harnesses}"
 export PHISHING_MCP_BIN="$PHISHING_AGENT_ROOT/.venv/bin/email-phishing-analyzer-mcp"
+export PHISHING_ANALYZER_API_KEY=...   # build.nvidia.com key
 
 nemo agents optimize prepare-fileset \
   --source "$BUNDLE" \
@@ -414,7 +422,7 @@ print(
 | `No module named hermes_cli` | Re-run the `hermes-agent==0.19.0 --no-deps` install (needed after every fresh `uv sync`) |
 | `No module named 'nemo_fabric_adapters'` | `export ADAPTER_PYTHON="$REPO_ROOT/.venv/bin/python"` |
 | Mock MCP server fails to start / `No module named mcp` | `python3` must be the platform `.venv` interpreter: `source .venv/bin/activate` before running |
-| Every tool call `analyzer request failed` | The harness checkout's `configs/common.yaml` names a retired model; point it at a live one (see Example 2 setup) |
+| Every tool call `analyzer request failed` | `PHISHING_ANALYZER_API_KEY` is unset or not a build.nvidia.com key, or the harness checkout's `configs/common.yaml` still names the retired `nvidia/nemotron-3-nano-30b-a3b` (see Example 2 setup) |
 | LLM 401 | Confirm `NVIDIA_API_KEY` works on inference-api |
 | Dataset / config file not found | `cd "$BUNDLE"` — paths in the YAML are relative to the bundle, not the repo root |
 | `optimize` rejected with `optimize_config_fileset is required` | Stage the bundle with `prepare-fileset`, then pass the ref it prints |
