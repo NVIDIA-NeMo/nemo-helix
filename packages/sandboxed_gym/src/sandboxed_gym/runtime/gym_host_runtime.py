@@ -14,6 +14,7 @@ import asyncio
 import concurrent.futures
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -41,6 +42,7 @@ GYM_GLOBAL_CONFIG_ENV_KEY = "NMP_GYM_GLOBAL_CONFIG"
 #: FileSet error instead of a silent fallback to the image-shipped environment.
 ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY = "NMP_ENVIRONMENT_PACKAGE_REQUIRED"
 ENVIRONMENT_OFFLINE_ENV_KEY = "NMP_ENVIRONMENT_OFFLINE"
+HF_CACHE_DIRNAME = ".huggingface"
 UV_CACHE_DIR_KEY = "uv_cache_dir"
 UV_VENV_DIR_KEY = "uv_venv_dir"
 # Writable /job/work subdirectory where wheels are installed for the running Gym host.
@@ -224,6 +226,50 @@ def _environment_package_required() -> bool:
 
 def _environment_offline() -> bool:
     return os.environ.get(ENVIRONMENT_OFFLINE_ENV_KEY, "").strip().lower() in {"1", "true", "yes"}
+
+
+def _apply_huggingface_offline_policy() -> None:
+    """Pin the Hugging Face libraries offline when the job forbids egress.
+
+    Independent of whether a cache was staged: an offline job with no snapshot should
+    fail on a missing file rather than on a blocked network. An online job is left
+    alone, so a caller that set the flags deliberately keeps them.
+    """
+    if not _environment_offline():
+        return
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["HF_DATASETS_OFFLINE"] = "1"
+
+
+def _install_huggingface_cache_fallback(dataset_path: str, work_path: str) -> None:
+    """Copy a vendored Hugging Face cache off the read-only dataset mount into writable work.
+
+    ``datasets`` writes lock files beside the cache, so the caches cannot point at the
+    mount itself.
+    """
+    if not dataset_path or not work_path:
+        return
+    source = os.path.join(dataset_path, HF_CACHE_DIRNAME)
+    if not os.path.isdir(source):
+        return
+
+    destination = os.path.join(work_path, HF_CACHE_DIRNAME)
+    # lexists, not exists: a dangling symlink is invisible to exists() and would survive to
+    # fail copytree. Work is a writable PVC the environment also gets, so it can hold anything.
+    if os.path.lexists(destination):
+        if os.path.islink(destination) or not os.path.isdir(destination):
+            os.unlink(destination)
+        else:
+            shutil.rmtree(destination)
+    # symlinks=True: the hub cache links snapshots/<rev>/* at blobs/<sha>, and dereferencing
+    # writes every blob twice. The links are relative, so they still land inside the copy.
+    shutil.copytree(source, destination, symlinks=True)
+
+    os.environ["HF_HOME"] = destination
+    # An explicit leaf variable wins over HF_HOME, and nemo_gym claims HF_DATASETS_CACHE
+    # under its own tree at import time when it is unset.
+    os.environ["HF_DATASETS_CACHE"] = os.path.join(destination, "datasets")
+    os.environ["HF_HUB_CACHE"] = os.path.join(destination, "hub")
 
 
 def _load_runtime_environment_package(
@@ -429,6 +475,12 @@ def bootstrap_gym_host() -> tuple[Any, Any, Any]:
     # Apply writable uv locations before Gym creates per-component environments.
     _apply_uv_dirs(global_config)
     _apply_model_call_capture(global_config, os.environ.get("NMP_WORK_PATH", "/job/work"))
+    # Before RunHelper.start() so Gym's child processes inherit the cache paths.
+    _apply_huggingface_offline_policy()
+    _install_huggingface_cache_fallback(
+        os.environ.get("NMP_DATASET_PATH", ""),
+        os.environ.get("NMP_WORK_PATH", "/job/work"),
+    )
     environment_package = _load_runtime_environment_package(
         os.environ.get("NMP_ENVIRONMENT_PATH", ""),
         required=_environment_package_required(),

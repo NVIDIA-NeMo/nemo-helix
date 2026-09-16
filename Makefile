@@ -23,7 +23,7 @@ PYTEST_EXTRA ?=
 # Default development toolchain versions. Keep these aligned with Flox; the
 # version-consistency checks validate them in pre-commit and CI.
 PYTHON_VERSION ?= 3.12
-UV_VERSION := 0.9.14
+UV_VERSION := 0.10.10
 NODE_VERSION := 22.23.2
 PNPM_VERSION := 10.34.5
 GO_VERSION := 1.26.7

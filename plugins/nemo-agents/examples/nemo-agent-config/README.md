@@ -133,8 +133,8 @@ install it with the Fabric adapter in a separate Python 3.12 environment:
 uvx uv@0.9.14 venv --python 3.12 .venv-hermes
 uvx uv@0.9.14 --no-config pip install \
   --python .venv-hermes/bin/python \
-  "nemo-fabric[relay]==0.3.0b1" \
-  "nemo-fabric-adapters-hermes==0.3.0b1" \
+  "nemo-fabric[relay]>=0.3.0,<0.4.0" \
+  "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0" \
   "hermes-agent==0.19.0"
 
 export ADAPTER_PYTHON="$PWD/.venv-hermes/bin/python"

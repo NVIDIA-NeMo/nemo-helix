@@ -5,7 +5,6 @@
 # The final image copies BusyBox shell utilities for parity with the task runtime.
 
 ARG AUDITOR_PYTHON_IMAGE=python:3.13.15-slim-trixie
-ARG AUDITOR_RUNTIME_BASE=python:3.13.15-slim-trixie
 
 ARG CACHE_HOME=/tmp/.cache
 
@@ -25,10 +24,11 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.10.10 /uv /bin/uv
 COPY docker/scripts/collect-python-sdists.py /usr/local/bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
+    UV_HTTP_TIMEOUT=120 \
     UV_LINK_MODE=copy
 
 WORKDIR /app
@@ -116,7 +116,7 @@ ARG USER_GID=1000
 ARG NMP_COLLECT_SOURCES=0
 ENV NMP_COLLECT_SOURCES=${NMP_COLLECT_SOURCES}
 WORKDIR /app
-COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.10.10 /uv /bin/uv
 COPY docker/scripts/collect-apt-sources.sh \
     docker/scripts/collect-cpython-source.py \
     /usr/local/bin/
@@ -176,11 +176,8 @@ COPY --from=root-busybox /bin/kill /usr/bin/kill
 COPY --from=root-busybox /bin/netstat /usr/bin/netstat
 COPY --from=root-busybox /bin/wc /usr/bin/wc
 
-FROM ${AUDITOR_RUNTIME_BASE} AS core-final
+FROM base AS core-final
 
-COPY --from=base /etc/passwd /etc/passwd
-COPY --from=base /etc/group /etc/group
-COPY --from=base --chown=nvs:nvs /home/nvs /home/nvs
 COPY --from=auditor-runtime-tools /usr/bin/ /usr/bin/
 
 WORKDIR /app/plugins/nemo-auditor

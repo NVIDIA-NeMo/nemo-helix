@@ -279,7 +279,7 @@ generate-config-docs = "script.generate_config_docs:main"
 [tool.uv]
 prerelease = "if-necessary-or-explicit"
 index-strategy = "unsafe-best-match"
-required-version = ">=0.9.14"
+required-version = ">=0.10.10"
 cache-keys = [{ file = "pyproject.toml" }]
 # Keep uv's implicit dev default and also install enabled plugins on bare `uv sync`.
 default-groups = ["dev", "enabled-plugins"]
@@ -325,13 +325,13 @@ constraint-dependencies = [
   "mcp>=1.28.1",
   "mlflow-skinny>=3.15.0,<3.16.0",
   "msgpack>=1.2.1",
-  "nemo-fabric-adapter-contract==0.3.0b1",
-  "nemo-fabric-adapters-claude==0.3.0b1",
-  "nemo-fabric-adapters-codex==0.3.0b1",
-  "nemo-fabric-adapters-common==0.3.0b1",
-  "nemo-fabric-adapters-deepagents==0.3.0b1",
-  "nemo-fabric-adapters-hermes==0.3.0b1",
-  "nemo-fabric-runtime==0.3.0b1",
+  "nemo-fabric-adapter-contract>=0.3.0,<0.4.0",
+  "nemo-fabric-adapters-claude>=0.3.0,<0.4.0",
+  "nemo-fabric-adapters-codex>=0.3.0,<0.4.0",
+  "nemo-fabric-adapters-common>=0.3.0,<0.4.0",
+  "nemo-fabric-adapters-deepagents>=0.3.0,<0.4.0",
+  "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0",
+  "nemo-fabric-runtime>=0.3.0,<0.4.0",
   "nbconvert>=7.17.1",
   "nltk>=3.10.3",
   "pillow>=12.3.0",
@@ -345,7 +345,7 @@ constraint-dependencies = [
   "sqlparse>=0.6.0,<0.7",
   "starlette>=1.3.1",
   "urllib3>=2.7.0",
-  "uv>=0.9.14",
+  "uv>=0.10.10",
   "wandb>=0.29.0",
 ]
 
@@ -382,6 +382,9 @@ override-dependencies = [
   "litellm>=1.83.10",         # CVE-2026-42208 (Critical SQL injection), CVE-2026-40217, and 5 other High CVEs
   "python-dotenv>=1.2.2",
   "openai>=2.26.0",
+  "nltk>=3.10.3",             # GHSA-8mgp-746c-j5xp and CVE-2026-7{1513,8680,8681,8682,9657,9674,9675} + CVE-2026-8{1722,1726,1727}
+  "gitpython>=3.1.62",        # BDSA-2026-{30097,30098,31388}
+  "accelerate>=1.15.0",       # CVE-2026-69112
 
 ]
 
