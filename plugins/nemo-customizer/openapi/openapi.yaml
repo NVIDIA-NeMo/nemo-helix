@@ -404,6 +404,188 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/job-templates:
+    post:
+      tags:
+      - Customization Job Templates
+      summary: Create Job Template
+      description: Save a job input for reuse.
+      operationId: create_job_template_apis_customization_v2_workspaces__workspace__job_templates_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCustomizationJobTemplateRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomizationJobTemplate'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Customization Job Templates
+      summary: List Job Templates
+      description: List saved job templates in the workspace.
+      operationId: list_job_templates_apis_customization_v2_workspaces__workspace__job_templates_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 20
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+          default: -created_at
+          title: Sort
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NemoListResponse_CustomizationJobTemplate_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/job-templates/{name}:
+    get:
+      tags:
+      - Customization Job Templates
+      summary: Get Job Template
+      description: Get a single job template.
+      operationId: get_job_template_apis_customization_v2_workspaces__workspace__job_templates__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomizationJobTemplate'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Customization Job Templates
+      summary: Update Job Template
+      description: Edit a job template's config, target backend or description.
+      operationId: update_job_template_apis_customization_v2_workspaces__workspace__job_templates__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCustomizationJobTemplateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomizationJobTemplate'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Customization Job Templates
+      summary: Delete Job Template
+      description: Delete a job template.
+      operationId: delete_job_template_apis_customization_v2_workspaces__workspace__job_templates__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/customization/v2/workspaces/{workspace}/rl/jobs:
     post:
       tags:
@@ -2105,6 +2287,127 @@ components:
         in
 
         ``lm_policy`` and ``BatchedDataDict.shard_by_batch_size``.'
+    CreateCustomizationJobTemplateRequest:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Unique template name within the workspace.
+        backend:
+          type: string
+          title: Backend
+          description: Customization backend the config targets, e.g. 'automodel'.
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+          description: Job input to replay, in the same shape the backend's submit
+            accepts.
+        description:
+          type: string
+          title: Description
+          description: What this template is for.
+          default: ''
+      type: object
+      required:
+      - name
+      - backend
+      - config
+      title: CreateCustomizationJobTemplateRequest
+      description: Request body for ``POST /v2/workspaces/{workspace}/job-templates``.
+    CustomizationJobTemplate:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        backend:
+          type: string
+          title: Backend
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+        description:
+          type: string
+          title: Description
+          default: ''
+        id:
+          type: string
+          title: Id
+          readOnly: true
+        created_at:
+          title: Created At
+          readOnly: true
+          type: string
+          format: date-time
+        created_by:
+          title: Created By
+          readOnly: true
+          nullable: true
+          type: string
+        updated_at:
+          title: Updated At
+          readOnly: true
+          type: string
+          format: date-time
+        updated_by:
+          title: Updated By
+          readOnly: true
+          nullable: true
+          type: string
+        entity_id:
+          type: string
+          title: Entity Id
+          description: Alias for id for backwards compatibility.
+          readOnly: true
+        parent:
+          title: Parent
+          description: Parent entity ID for nested entities.
+          readOnly: true
+          type: string
+        db_version:
+          type: integer
+          title: Db Version
+          description: Database version of the entity for optimistic locking.
+          readOnly: true
+      type: object
+      required:
+      - workspace
+      - backend
+      - config
+      - id
+      - created_at
+      - created_by
+      - updated_at
+      - updated_by
+      - entity_id
+      - parent
+      - db_version
+      title: CustomizationJobTemplate
+      description: 'A named, re-runnable customization job input.
+
+
+        ``config`` holds the same job input a submit would take, stored as given:
+        the
+
+        submitter-facing schema belongs to whichever backend plugin is installed,
+        and the
+
+        router does not import them. Submit is what checks it. ``backend`` is lifted
+        out so
+
+        callers know which customization backend/form should replay the saved config.'
     DatetimeFilter:
       additionalProperties: false
       properties:
@@ -2478,6 +2781,29 @@ components:
 
 
         To enable MLflow, provide a non-null ``mlflow`` object on :class:`IntegrationsSpec`.'
+    NemoListResponse_CustomizationJobTemplate_:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/CustomizationJobTemplate'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: "Pagination metadata \u2014 page, page_size, total_results,\
+            \ etc."
+        sort:
+          title: Sort
+          description: Sort field applied to this result set (e.g. '-created_at').
+          type: string
+        filter:
+          title: Filter
+          description: Filter criteria echoed back from the request.
+      type: object
+      required:
+      - data
+      title: NemoListResponse_CustomizationJobTemplate_
     OptimizerType:
       type: string
       enum:
@@ -4493,6 +4819,25 @@ components:
       type: object
       title: UnslothTrainingSpec
       description: Algorithm + adapter shape selectors.
+    UpdateCustomizationJobTemplateRequest:
+      properties:
+        backend:
+          title: Backend
+          description: Customization backend the config targets.
+          type: string
+        config:
+          title: Config
+          description: Job input to replay, in the same shape the backend's submit
+            accepts.
+          additionalProperties: true
+          type: object
+        description:
+          title: Description
+          description: What this template is for.
+          type: string
+      type: object
+      title: UpdateCustomizationJobTemplateRequest
+      description: Request body for ``PATCH /v2/workspaces/{workspace}/job-templates/{name}``.
     ValidationError:
       properties:
         loc:
