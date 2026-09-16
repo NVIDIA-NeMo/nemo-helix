@@ -42,9 +42,27 @@ class _FakeInference:
         self.virtual_models = virtual_models or _FakeVirtualModels()
 
 
+IGW_URL = "http://platform:8080/apis/inference-gateway/v2/workspaces/my-ws/openai/-/v1"
+
+
+class _FakeModels:
+    def __init__(self, route: str | None = IGW_URL) -> None:
+        self._route = route
+
+    def get_openai_route_base_url(self, *, workspace: str) -> str:
+        if self._route is None:
+            raise ValueError(f"no workspace configured for {workspace!r}")
+        return self._route
+
+
 class _FakeSdk:
-    def __init__(self, virtual_models: _FakeVirtualModels | None = None) -> None:
+    def __init__(
+        self,
+        virtual_models: _FakeVirtualModels | None = None,
+        models: _FakeModels | None = None,
+    ) -> None:
         self.inference = _FakeInference(virtual_models)
+        self.models = models or _FakeModels()
 
 
 @pytest.fixture
@@ -68,10 +86,22 @@ def _source_agent_config() -> dict[str, Any]:
         "harnesses": {
             "deepagents": {
                 "kind": "deepagents",
-                "model": {"provider": "nvidia", "model": "my-ws/llama-strong"},
+                "model": {
+                    "provider": "nvidia",
+                    "model": "my-ws/llama-strong",
+                    "base_url": "https://inference-api.nvidia.com/v1",
+                    "api_key_env": "NVIDIA_API_KEY",
+                },
             }
         },
-        "models": {"default": {"provider": "nvidia", "model": "my-ws/llama-strong"}},
+        "models": {
+            "default": {
+                "provider": "nvidia",
+                "model": "my-ws/llama-strong",
+                "base_url": "https://inference-api.nvidia.com/v1",
+                "api_key_env": "NVIDIA_API_KEY",
+            }
+        },
     }
 
 
@@ -237,6 +267,99 @@ def test_optimize_refuses_to_report_success_when_no_model_parameter_was_rewritte
             ctx=ctx,
             workspace="my-ws",
             sdk=_FakeSdk(),
+        )
+
+
+def test_optimize_points_the_rewritten_model_at_the_workspace_inference_gateway(ctx: JobContext) -> None:
+    """The routed VirtualModel only exists behind the gateway. Rewriting the model *name*
+    while leaving base_url on the original provider registers an agent that asks
+    inference-api.nvidia.com for a model it has never heard of.
+    """
+    optimized = SwitchyardOptimizeJob().optimize(
+        source_agent_config=_source_agent_config(),
+        config=_config(),
+        ctx=ctx,
+        workspace="my-ws",
+        sdk=_FakeSdk(),
+    )
+
+    for model in (optimized["models"]["default"], optimized["harnesses"]["deepagents"]["model"]):
+        assert model["model"] == "my-ws/my-agent-router"
+        assert model["base_url"] == IGW_URL
+        assert model["api_key_env"] == "NEMO_AGENTS_IGW_API_KEY"
+
+
+def test_optimize_keeps_an_already_gateway_routed_models_api_key_env(ctx: JobContext) -> None:
+    source = {
+        "config_format": "nemo-agents-spec-v1",
+        "name": "my-agent",
+        "models": {
+            "default": {
+                "provider": "nvidia",
+                "model": "my-ws/llama-strong",
+                "base_url": "http://platform:8080/apis/inference-gateway/v2/workspaces/my-ws/openai/-/v1",
+                "api_key_env": "MY_OWN_GATEWAY_KEY",
+            }
+        },
+    }
+    optimized = SwitchyardOptimizeJob().optimize(
+        source_agent_config=source,
+        config=_config(),
+        ctx=ctx,
+        workspace="my-ws",
+        sdk=_FakeSdk(),
+    )
+
+    assert optimized["models"]["default"]["api_key_env"] == "MY_OWN_GATEWAY_KEY"
+
+
+def test_optimize_drops_a_stale_legacy_settings_base_url(ctx: JobContext) -> None:
+    source = {
+        "config_format": "nemo-agents-spec-v1",
+        "name": "my-agent",
+        "models": {
+            "default": {
+                "provider": "nvidia",
+                "model": "my-ws/llama-strong",
+                "settings": {"base_url": "https://inference-api.nvidia.com/v1", "max_tokens": 256},
+            }
+        },
+    }
+    optimized = SwitchyardOptimizeJob().optimize(
+        source_agent_config=source,
+        config=_config(),
+        ctx=ctx,
+        workspace="my-ws",
+        sdk=_FakeSdk(),
+    )
+
+    assert optimized["models"]["default"]["base_url"] == IGW_URL
+    assert optimized["models"]["default"]["settings"] == {"max_tokens": 256}
+
+
+def test_optimize_refuses_when_the_gateway_url_cannot_be_resolved(ctx: JobContext) -> None:
+    """Refusing beats registering a valid-looking agent that cannot reach its router."""
+    sdk = _FakeSdk(models=_FakeModels(route=None))
+    with pytest.raises(LocalRunError, match="Inference Gateway URL"):
+        SwitchyardOptimizeJob().optimize(
+            source_agent_config=_source_agent_config(),
+            config=_config(),
+            ctx=ctx,
+            workspace="my-ws",
+            sdk=sdk,
+        )
+    assert sdk.inference.virtual_models.calls == []
+
+
+def test_optimize_refuses_a_route_that_is_not_an_inference_gateway_url(ctx: JobContext) -> None:
+    sdk = _FakeSdk(models=_FakeModels(route="https://inference-api.nvidia.com/v1"))
+    with pytest.raises(LocalRunError, match="not an Inference Gateway URL"):
+        SwitchyardOptimizeJob().optimize(
+            source_agent_config=_source_agent_config(),
+            config=_config(),
+            ctx=ctx,
+            workspace="my-ws",
+            sdk=sdk,
         )
 
 

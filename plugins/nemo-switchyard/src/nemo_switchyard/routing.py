@@ -105,21 +105,59 @@ def _virtual_model_entries(parsed: SwitchyardConfig) -> list[VirtualModelInferen
     return entries
 
 
-def _rewrite_model(agent_config: dict[str, Any], routed_model: str) -> bool:
+#: Mirrors ``nemo_agents_plugin.fabric.gateway_credentials``, duplicated here for the same
+#: reason as ``_PLATFORM_TO_SWITCHYARD_FORMAT`` above: nemo-switchyard does not depend on
+#: nemo-agents-plugin, and this module is imported for every ``nemo agents optimize`` run.
+PLATFORM_IGW_PATH_MARKER = "/apis/inference-gateway/"
+PLATFORM_IGW_API_KEY_ENV = "NEMO_AGENTS_IGW_API_KEY"
+
+
+def _is_gateway_routed(model: dict[str, Any]) -> bool:
+    """Whether *model* already talks to a platform Inference Gateway route."""
+    base_url = model.get("base_url")
+    if isinstance(base_url, str) and PLATFORM_IGW_PATH_MARKER in base_url:
+        return True
+    settings = model.get("settings")
+    legacy = settings.get("base_url") if isinstance(settings, dict) else None
+    return isinstance(legacy, str) and PLATFORM_IGW_PATH_MARKER in legacy
+
+
+def _rewrite_model(agent_config: dict[str, Any], routed_model: str, *, gateway_base_url: str) -> bool:
     """Point every model parameter the agent actually reads at *routed_model*.
+
+    The routed model is a VirtualModel entity ref (``workspace/name``), which only exists
+    behind the workspace's Inference Gateway — so the endpoint has to move with the name.
+    Rewriting the name alone leaves the agent asking its original provider (e.g.
+    ``inference-api.nvidia.com``) for a model that provider has never heard of.  The job
+    persists this config as a live agent entity, so an unrunnable result would not be
+    caught by a human reading a YAML diff.
+
+    ``api_key_env`` moves too: the gateway takes the platform's placeholder credential,
+    not the provider key the original ``api_key_env`` named.  A model that was already
+    gateway-routed keeps whatever ``api_key_env`` it declared.
 
     Returns whether anything was rewritten, so a config shape this strategy does not
     understand fails loudly instead of yielding an unchanged "optimized" config.
     """
-    rewritten = False
+    targets: list[dict[str, Any]] = []
     models = agent_config.get("models")
     if isinstance(models, dict) and isinstance(models.get("default"), dict):
-        models["default"]["model"] = routed_model
-        rewritten = True
+        targets.append(models["default"])
     harnesses = agent_config.get("harnesses")
     if isinstance(harnesses, dict):
         for harness in harnesses.values():
             if isinstance(harness, dict) and isinstance(harness.get("model"), dict):
-                harness["model"]["model"] = routed_model
-                rewritten = True
-    return rewritten
+                targets.append(harness["model"])
+
+    for model in targets:
+        already_routed = _is_gateway_routed(model)
+        model["model"] = routed_model
+        model["base_url"] = gateway_base_url
+        if not already_routed or not model.get("api_key_env"):
+            model["api_key_env"] = PLATFORM_IGW_API_KEY_ENV
+        # A legacy settings.base_url is only read when base_url is unset; leaving the old
+        # provider URL behind it would make the persisted agent read two ways.
+        settings = model.get("settings")
+        if isinstance(settings, dict):
+            settings.pop("base_url", None)
+    return bool(targets)
