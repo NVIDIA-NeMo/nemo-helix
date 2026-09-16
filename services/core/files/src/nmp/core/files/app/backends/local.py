@@ -137,6 +137,8 @@ class LocalStorageImpl(StorageImpl):
         path: str,
         fstream: AsyncIterator[bytes],
         content_length: int | None = None,
+        *,
+        if_absent: bool = False,
     ) -> FileInfo:
         """Upload file to local storage path.
 
@@ -202,7 +204,14 @@ class LocalStorageImpl(StorageImpl):
 
             # Atomic rename to final destination
             # This works on POSIX systems including NFS (rename is atomic)
-            await temp_path.rename(file_path)
+            if content_length is not None and total_bytes != content_length:
+                raise ValueError("Upload size does not match Content-Length")
+            if if_absent:
+                # Hard-link promotion is atomic and fails if the destination exists.
+                await to_thread.run_sync(os.link, str(temp_path), str(file_path))
+                await temp_path.unlink()
+            else:
+                await temp_path.rename(file_path)
 
             # Fsync the parent directory to ensure the rename is durable and visible.
             # This is especially important for NFS where directory entries may be cached.
@@ -231,6 +240,11 @@ class LocalStorageImpl(StorageImpl):
                         logger.warning(f"Cleaned up temporary file for {path}")
                 except Exception:
                     logger.exception(f"Failed to clean up temporary file for {path}")
+
+    async def upload_if_absent(
+        self, path: str, fstream: AsyncIterator[bytes], content_length: int | None = None
+    ) -> FileInfo:
+        return await self.upload(path, fstream, content_length, if_absent=True)
 
     async def validate_storage(self):
         """Validate that the local storage path exists and is accessible. Creates the directory if it doesn't exist."""

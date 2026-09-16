@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
 from botocore.exceptions import ClientError
 from nmp.common.api.common import SecretRef
@@ -587,3 +588,22 @@ class TestS3StorageFactory:
 
         assert isinstance(impl, S3StorageImpl)
         assert impl.config == config
+
+
+async def test_conditional_upload_header(s3_impl):
+    async with mock_s3_client(s3_impl) as client:
+        client.generate_presigned_url.return_value = "https://s3.test/upload"
+        with patch("nmp.core.files.app.backends.s3.upload_url_streaming", new_callable=AsyncMock) as upload:
+            await s3_impl.upload_if_absent("archive", AsyncIteratorMock([b"data"]), 4)
+            assert upload.call_args.kwargs["headers"] == {"Content-Length": "4", "If-None-Match": "*"}
+
+
+@pytest.mark.parametrize("status", [409, 412])
+async def test_conditional_upload_distinguishes_conflict_from_existing(s3_impl, status):
+    async with mock_s3_client(s3_impl) as client:
+        client.generate_presigned_url.return_value = "https://s3.test/upload"
+        error = aiohttp.ClientResponseError(MagicMock(), (), status=status)
+        with patch("nmp.core.files.app.backends.s3.upload_url_streaming", side_effect=error):
+            expected = FileExistsError if status == 412 else aiohttp.ClientResponseError
+            with pytest.raises(expected):
+                await s3_impl.upload_if_absent("archive", AsyncIteratorMock([b"data"]), 4)

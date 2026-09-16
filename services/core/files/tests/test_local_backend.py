@@ -359,3 +359,33 @@ async def test_delete_rejects_symlink_escape(tmp_path: Path, storage_path: Path)
 
     with pytest.raises(InvalidPathError, match="path traversal attack"):
         await storage.delete("escape/victim.txt")
+
+
+async def test_conditional_upload_has_one_winner(storage_impl, storage_path):
+    import asyncio
+
+    ready = asyncio.Event()
+
+    async def content(value):
+        yield value[:1]
+        await ready.wait()
+        yield value[1:]
+
+    first = asyncio.create_task(storage_impl.upload_if_absent("archive", content(b"first"), 5))
+    second = asyncio.create_task(storage_impl.upload_if_absent("archive", content(b"other"), 5))
+    await asyncio.sleep(0.01)
+    assert not (storage_path / "archive").exists()
+    ready.set()
+    outcomes = await asyncio.gather(first, second, return_exceptions=True)
+    assert sum(isinstance(value, FileExistsError) for value in outcomes) == 1
+    assert (storage_path / "archive").read_bytes() in {b"first", b"other"}
+    assert not list(storage_path.glob("*.tmp.*"))
+
+
+async def test_conditional_upload_rejects_short_stream(storage_impl, storage_path):
+    async def content():
+        yield b"short"
+
+    with pytest.raises(ValueError, match="Content-Length"):
+        await storage_impl.upload_if_absent("archive", content(), 100)
+    assert not (storage_path / "archive").exists()
