@@ -3,6 +3,7 @@
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
 import { getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
+import { parseTraceListQuery } from '@studio/components/IntakeDetail/traceListQuery';
 import { IntakeTracesTable } from '@studio/components/IntakeLists/IntakeTracesTable';
 import { ROUTES } from '@studio/constants/routes';
 import { mockTracesPage } from '@studio/mocks/intake/telemetry';
@@ -64,6 +65,34 @@ describe('IntakeTracesTable', () => {
     expect(await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).toHaveTextContent(
       '/workspaces/default/intake/sessions/session-agent-run-001?traceId=trace-agent-run-001'
     );
+  });
+
+  it('hands the detail page the list request, so it can step to neighbouring rows', async () => {
+    const user = userEvent.setup();
+
+    renderRoute(undefined, {
+      history: '/workspaces/default/intake/traces',
+      routes: [
+        {
+          path: ROUTES.workspace.intakeTraces,
+          element: <IntakeTracesTable workspace="default" />,
+        },
+        {
+          path: ROUTES.workspace.intakeSession,
+          element: <LocationDisplay />,
+        },
+      ],
+    });
+
+    await user.click(await screen.findByText('Answer customer policy question'));
+
+    const location = await screen.findByTestId(LOCATION_DISPLAY_TEST_ID);
+    const carried = new URLSearchParams(location.textContent?.split('?')[1] ?? '').get('traceList');
+    expect(parseTraceListQuery(carried)).toMatchObject({
+      mode: 'preview',
+      page: 1,
+      sort: '-started_at',
+    });
   });
 
   it('seeds a clearable 30-day started_at filter into trace list requests', async () => {

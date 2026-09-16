@@ -3,7 +3,7 @@
 
 import {
   autoFormat,
-  isJsonPayload,
+  readPayloadFormats,
   type SpanPayloadFormat,
   type SpanPayloadFormatState,
 } from '@studio/components/IntakeDetail/IntakeComponents/spanPayloadFormat';
@@ -19,7 +19,7 @@ export const useSpanPayloadFormat = (
   value: string | null | undefined,
   onSelect?: () => void
 ): SpanPayloadFormatState => {
-  const isJson = useMemo(() => isJsonPayload(value), [value]);
+  const { isJson, isChat } = useMemo(() => readPayloadFormats(value), [value]);
 
   // Keyed by the payload it was made for, so different text re-derives the
   // default instead of keeping a JSON view it cannot satisfy.
@@ -37,9 +37,10 @@ export const useSpanPayloadFormat = (
   );
 
   return {
-    format: selection && selection.value === value ? selection.format : autoFormat(isJson),
+    format: selection && selection.value === value ? selection.format : autoFormat(isJson, isChat),
     select,
     isJson,
+    isChat,
     isEmpty: !value?.trim(),
   };
 };

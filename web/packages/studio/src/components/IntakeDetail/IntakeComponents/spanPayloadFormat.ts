@@ -1,12 +1,18 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-export type SpanPayloadFormat = 'raw' | 'md' | 'json';
+import {
+  toChatMessages,
+  type ChatMessage,
+} from '@studio/components/IntakeDetail/IntakeComponents/openaiChat';
+
+export type SpanPayloadFormat = 'raw' | 'md' | 'json' | 'chat';
 
 export interface SpanPayloadFormatState {
   format: SpanPayloadFormat;
   select: (format: SpanPayloadFormat) => void;
   isJson: boolean;
+  isChat: boolean;
   isEmpty: boolean;
 }
 
@@ -36,9 +42,17 @@ const parseJson = (value: string | null | undefined): unknown => {
   }
 };
 
-/** Whether a JSON view applies, without paying to build one. */
-export const isJsonPayload = (value: string | null | undefined): boolean =>
-  parseJson(value) !== null;
+/** The chat turns in `value`, or `null` when it is not an OpenAI-compatible payload. */
+export const parseChatPayload = (value: string | null | undefined): ChatMessage[] | null =>
+  toChatMessages(parseJson(value));
+
+/** Which views a payload supports, from a single parse. */
+export const readPayloadFormats = (
+  value: string | null | undefined
+): { isJson: boolean; isChat: boolean } => {
+  const parsed = parseJson(value);
+  return { isJson: parsed !== null, isChat: toChatMessages(parsed) !== null };
+};
 
 /**
  * Pretty-printed `value` when it is a JSON object or array, else `null`. A
@@ -50,4 +64,5 @@ export const parseJsonPayload = (value: string | null | undefined): string | nul
   return parsed === null ? null : JSON.stringify(parsed, null, 2);
 };
 
-export const autoFormat = (isJson: boolean): SpanPayloadFormat => (isJson ? 'json' : 'raw');
+export const autoFormat = (isJson: boolean, isChat = false): SpanPayloadFormat =>
+  isChat ? 'chat' : isJson ? 'json' : 'raw';

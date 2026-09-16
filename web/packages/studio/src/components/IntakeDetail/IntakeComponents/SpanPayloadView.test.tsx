@@ -246,3 +246,96 @@ describe('SpanPayloadFormatToggle', () => {
     expect(screen.getByText(EMPTY_MESSAGE)).toBeInTheDocument();
   });
 });
+
+describe('SpanPayloadChatView', () => {
+  const CHAT_PAYLOAD = JSON.stringify({
+    content: {
+      messages: [
+        { role: 'system', content: 'You are a careful assistant.' },
+        { role: 'user', content: 'What changed?' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [{ id: 'call-1', function: { name: 'search', arguments: '{"q":"diff"}' } }],
+        },
+        { role: 'tool', tool_call_id: 'call-1', content: 'Two files.' },
+      ],
+    },
+    choices: [
+      {
+        finish_reason: 'stop',
+        message: { content: 'Two files changed.', reasoning_content: 'Read the tool result.' },
+      },
+    ],
+  });
+
+  /** Every turn still folded away, in the order the conversation renders them. */
+  const folded = () =>
+    screen.getAllByTestId('chat-turn-detail').filter((detail) => !detail.hasAttribute('open'));
+
+  it('opens an OpenAI chat payload as a conversation', async () => {
+    renderRoute(<PayloadSection value={CHAT_PAYLOAD} />);
+
+    expect(await screen.findByRole('button', { name: 'View input as a chat' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    // Generous timeout: message bodies render through the lazily imported markdown chunk.
+    expect(await screen.findByText('What changed?', {}, { timeout: 5_000 })).toBeInTheDocument();
+    expect(screen.getByText('Two files changed.')).toBeInTheDocument();
+  });
+
+  it('folds the system, tool, and reasoning turns away until they are opened', async () => {
+    renderRoute(<SpanPayloadView value={CHAT_PAYLOAD} emptyMessage={EMPTY_MESSAGE} />);
+
+    await screen.findByText('System prompt', {}, { timeout: 5_000 });
+    expect(folded().map((detail) => detail.textContent)).toEqual([
+      expect.stringContaining('System prompt'),
+      expect.stringContaining('search'),
+      expect.stringContaining('Tool result'),
+      expect.stringContaining('Reasoning'),
+    ]);
+
+    // The user and assistant exchange is the part that needs no click.
+    expect(screen.getByText('What changed?')).toBeVisible();
+  });
+
+  it('reveals a folded turn when it is opened', async () => {
+    const user = userEvent.setup();
+    renderRoute(<SpanPayloadView value={CHAT_PAYLOAD} emptyMessage={EMPTY_MESSAGE} />);
+
+    await user.click(await screen.findByText('Reasoning', {}, { timeout: 5_000 }));
+
+    expect(folded().map((detail) => detail.textContent)).not.toContainEqual(
+      expect.stringContaining('Reasoning')
+    );
+    expect(screen.getByText('Read the tool result.')).toBeInTheDocument();
+  });
+
+  it('disables the chat view for payloads that are not a conversation', async () => {
+    renderRoute(<PayloadSection value='{"message":"just prose"}' />);
+
+    expect(await screen.findByRole('button', { name: 'View input as a chat' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'View input as JSON' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+  });
+
+  it('still offers the JSON view of a chat payload', async () => {
+    const user = userEvent.setup();
+    renderRoute(<PayloadSection value={CHAT_PAYLOAD} />);
+
+    await user.click(await screen.findByRole('button', { name: 'View input as JSON' }));
+
+    await waitFor(() => expect(codeText()).toHaveTextContent('"role": "user"'));
+  });
+
+  it('falls back to the default when a chat view is requested for other JSON', async () => {
+    renderRoute(<SpanPayloadView value='{"a":1}' format="chat" emptyMessage={EMPTY_MESSAGE} />);
+
+    expect(screen.queryByTestId('span-payload-chat')).not.toBeInTheDocument();
+    // Awaited, so CodeSnippet's async highlight settles inside the test that caused it.
+    await waitFor(() => expect(codeText()).toHaveTextContent('"a": 1'));
+  });
+});

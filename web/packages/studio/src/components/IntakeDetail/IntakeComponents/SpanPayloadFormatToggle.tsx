@@ -12,6 +12,7 @@ const FORMAT_OPTIONS: readonly { format: SpanPayloadFormat; label: string; name:
   { format: 'raw', label: 'raw', name: 'raw text' },
   { format: 'md', label: 'md', name: 'markdown' },
   { format: 'json', label: 'json', name: 'JSON' },
+  { format: 'chat', label: 'chat', name: 'a chat' },
 ];
 
 interface SpanPayloadFormatToggleProps {
@@ -38,7 +39,13 @@ export const SpanPayloadFormatToggle: FC<SpanPayloadFormatToggleProps> = ({
   return (
     <Flex align="center" gap="density-xs" className="shrink-0">
       {FORMAT_OPTIONS.map(({ format, label, name }) => {
-        const unavailable = format === 'json' && !state.isJson;
+        const unavailableReason =
+          format === 'json' && !state.isJson
+            ? `This ${payloadLabel} is not valid JSON`
+            : format === 'chat' && !state.isChat
+              ? `This ${payloadLabel} is not an OpenAI chat payload`
+              : null;
+        const unavailable = unavailableReason !== null;
         const active = state.format === format;
         const button = (
           <Button
@@ -56,11 +63,7 @@ export const SpanPayloadFormatToggle: FC<SpanPayloadFormatToggleProps> = ({
           </Button>
         );
         return (
-          <Tooltip
-            key={format}
-            side="top"
-            slotContent={unavailable ? `This ${payloadLabel} is not valid JSON` : `View as ${name}`}
-          >
+          <Tooltip key={format} side="top" slotContent={unavailableReason ?? `View as ${name}`}>
             {/* A disabled button fires no hover or focus events, so its
                 tooltip needs a focusable wrapper. */}
             {unavailable ? <span tabIndex={0}>{button}</span> : button}

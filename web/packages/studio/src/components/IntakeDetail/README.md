@@ -124,7 +124,7 @@ Templates read `raw_attributes` through `SpanTemplates/rawAttributes.ts` (`parse
 | Section            | Accordion label | Body                                                                     |
 | ------------------ | --------------- | ------------------------------------------------------------------------ |
 | `llm`              | Usage           | Token/cost grid (`buildSpanLlmEntries`, minus model params in kind body) |
-| `input` / `output` | Input / Output  | `SpanPayloadView` + `raw`/`md`/`json` toggle on the trigger              |
+| `input` / `output` | Input / Output  | `SpanPayloadView` + `raw`/`md`/`json`/`chat` toggle on the trigger       |
 | `metadata`         | Metadata        | `buildSpanSummaryEntries` via `KeyValueRows`                             |
 | `annotations`      | Annotations     | `AnnotationsPanel` (+ count badge on trigger)                            |
 | _(custom)_         | _(per kind)_    | `template.customSections(span)` — open by default                        |
@@ -133,11 +133,17 @@ Templates read `raw_attributes` through `SpanTemplates/rawAttributes.ts` (`parse
 
 Expand/collapse-all from the trace toolbar drives section state via `expandToken` / `collapseToken` props (tree view). "Add note" on a row opens the Annotations section and focuses its note field via `focusNoteNonce`.
 
+### Stepping through the list
+
+The header pages to the trace run either side of this one in the list the page was opened from. The traces list keeps its state in its own search params, which the detail route does not share, so `IntakeTracesTable` hands the row click the request it just ran (`traceListQuery.ts`, carried as `traceList`) and `useTraceListNeighbors` replays it — normally a React Query cache hit on the entry the table already filled. When the current row sits at a page edge the adjacent page is fetched for that one neighbour, and stepping onto it moves the carried `page` with it. The pager hides itself when the URL carries no list request, or when the row is no longer in it.
+
 ### Payload formats
 
-Every payload renders through `SpanPayloadView` in one of three formats: `raw` (verbatim text), `md` (rendered markdown), or `json` (pretty-printed and syntax-highlighted). A payload opens in `json` when it parses as JSON and `raw` otherwise, so the common case needs no click.
+Every payload renders through `SpanPayloadView` in one of four formats: `raw` (verbatim text), `md` (rendered markdown), `json` (pretty-printed and syntax-highlighted), or `chat` (an OpenAI-compatible payload read as the conversation it describes). A payload opens in `chat` when it holds a conversation, `json` when it merely parses as JSON, and `raw` otherwise, so the common case needs no click.
 
-Input and Output pair the view with `SpanPayloadFormatToggle` on the section trigger. The two share state through `useSpanPayloadFormat`, called in `SpanMetadataAccordions` because the toggle renders in `slotEnd` while the payload renders in `slotContent`. The control hides itself when the span has no payload and disables `json` (with a tooltip) for payloads that are not JSON. Selecting a format on a collapsed section also opens it. The choice is scoped to the payload text it was made for, so selecting a span with a different payload re-derives the default rather than keeping a view that payload cannot satisfy. A span whose payload is byte-identical keeps the selection, since either one renders the same text the same way. The trigger is a `<summary>`, so each button suppresses the row toggle.
+Input and Output pair the view with `SpanPayloadFormatToggle` on the section trigger. The two share state through `useSpanPayloadFormat`, called in `SpanMetadataAccordions` because the toggle renders in `slotEnd` while the payload renders in `slotContent`. The control hides itself when the span has no payload and disables `json` and `chat` (each with a tooltip saying why) for payloads that cannot support them. Selecting a format on a collapsed section also opens it. The choice is scoped to the payload text it was made for, so selecting a span with a different payload re-derives the default rather than keeping a view that payload cannot satisfy. A span whose payload is byte-identical keeps the selection, since either one renders the same text the same way. The trigger is a `<summary>`, so each button suppresses the row toggle.
+
+`openaiChat.ts` decides what counts as a conversation: a bare transcript, a request (`messages`, also when the observer recorded the whole body and it sits under `content`), or a response (`choices[].message`, `assistant_message`). A payload holding a request and its reply reads as one conversation ending in the answer. Detection is deliberately strict — request-side turns must name a `role`, and a response-side message, whose role is implied by position, must carry content, reasoning, or a tool call — so a payload like `{"message": "some prose"}` stays JSON. `SpanPayloadChatView` renders user and assistant turns as bubbles with markdown bodies and folds the context away in native `<details>`: system and developer prompts, tool results, assistant reasoning (`reasoning_content`), and each tool call's arguments all start collapsed.
 
 Payloads at or above 20,000 characters paint a spinner for one frame before mounting the renderer, and skip Shiki highlighting so the full text always appears. Kind-specific payloads (e.g. the retriever query) use `SpanPayloadView` without a toggle and take the same default.
 

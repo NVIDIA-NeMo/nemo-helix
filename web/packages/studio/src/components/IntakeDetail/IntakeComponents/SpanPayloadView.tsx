@@ -3,8 +3,10 @@
 
 import { CodeSnippet, Text } from '@nvidia/foundations-react-core';
 import { PayloadPending } from '@studio/components/IntakeDetail/IntakeComponents/PayloadPending';
+import { SpanPayloadChatView } from '@studio/components/IntakeDetail/IntakeComponents/SpanPayloadChatView';
 import {
   autoFormat,
+  parseChatPayload,
   parseJsonPayload,
   type SpanPayloadFormat,
 } from '@studio/components/IntakeDetail/IntakeComponents/spanPayloadFormat';
@@ -28,8 +30,10 @@ interface SpanPayloadViewProps {
 export const SpanPayloadView: FC<SpanPayloadViewProps> = ({ value, emptyMessage, format }) => {
   const payload = value && value.trim() ? value : null;
   const json = useMemo(() => parseJsonPayload(value), [value]);
-  // A caller can ask for JSON on a payload that stopped being JSON.
-  const resolved = format && !(format === 'json' && json === null) ? format : autoFormat(!!json);
+  const chat = useMemo(() => parseChatPayload(value), [value]);
+  // A caller can ask for a format on a payload that stopped supporting it.
+  const unsupported = (format === 'json' && json === null) || (format === 'chat' && chat === null);
+  const resolved = format && !unsupported ? format : autoFormat(!!json, !!chat);
   const text = resolved === 'json' && json !== null ? json : payload;
 
   // Very large payloads hold the main thread long enough to look blank.
@@ -69,6 +73,10 @@ export const SpanPayloadView: FC<SpanPayloadViewProps> = ({ value, emptyMessage,
 
   if (!showPayload) {
     return <PayloadPending />;
+  }
+
+  if (resolved === 'chat' && chat !== null) {
+    return <SpanPayloadChatView messages={chat} />;
   }
 
   if (resolved === 'md') {

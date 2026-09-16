@@ -12,6 +12,7 @@ export const QUERY_PARAMETERS = {
   project: 'project',
   traceId: 'traceId',
   spanId: 'spanId',
+  traceList: 'traceList',
   compareWith: 'compareWith',
   tab: 'tab',
 } as const;

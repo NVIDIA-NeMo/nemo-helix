@@ -10,6 +10,10 @@ import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
 import type { Trace, TraceFilter, TraceSortField } from '@nemo/sdk/generated/platform/schema';
 import { useListTraces } from '@nemo/sdk/generated/platform/traces';
 import {
+  encodeTraceListQuery,
+  type TraceListQuery,
+} from '@studio/components/IntakeDetail/traceListQuery';
+import {
   isDefaultStartedAtFilter,
   makeDefaultStartedAtFilter,
   type StartedAtFilterEntry,
@@ -59,30 +63,29 @@ const SeededIntakeTracesTable: FC<
     (filter) => !isDefaultStartedAtFilter(filter, defaultStartedAtFilter)
   );
 
+  // Shared with the row click, so the detail page can replay this exact list.
+  const listQuery: TraceListQuery = {
+    filter: (dataViewState.apiFilter.filter ?? {}) as TraceFilter,
+    mode: 'preview',
+    page: dataViewState.pagination.state.pageIndex + 1,
+    page_size: dataViewState.pagination.state.pageSize,
+    sort: getSortParamWithWhitelist(
+      dataViewState.sorting.state,
+      ['started_at'],
+      '-started_at'
+    ) as TraceSortField,
+  };
+
   const {
     data: tracesResponse,
     isFetching,
     error,
-  } = useListTraces(
-    requestWorkspace,
-    {
-      filter: (dataViewState.apiFilter.filter ?? {}) as TraceFilter,
-      mode: 'preview',
-      page: dataViewState.pagination.state.pageIndex + 1,
-      page_size: dataViewState.pagination.state.pageSize,
-      sort: getSortParamWithWhitelist(
-        dataViewState.sorting.state,
-        ['started_at'],
-        '-started_at'
-      ) as TraceSortField,
+  } = useListTraces(requestWorkspace, listQuery, {
+    query: {
+      enabled: hasWorkspace,
+      placeholderData: keepPreviousData,
     },
-    {
-      query: {
-        enabled: hasWorkspace,
-        placeholderData: keepPreviousData,
-      },
-    }
-  );
+  });
 
   if (error) {
     return <ErrorMessage message={getErrorMessage(error)} />;
@@ -116,7 +119,11 @@ const SeededIntakeTracesTable: FC<
         </EditColumnsMenu>
       }
       onRowClick={(trace) =>
-        navigate(getIntakeSessionTraceRoute(requestWorkspace, trace.session_id, trace.id))
+        navigate(
+          getIntakeSessionTraceRoute(requestWorkspace, trace.session_id, trace.id, {
+            traceList: encodeTraceListQuery(listQuery),
+          })
+        )
       }
       attributes={{
         DataViewRoot: {

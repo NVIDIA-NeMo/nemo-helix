@@ -4,6 +4,7 @@
 import { getGetSessionQueryKey } from '@nemo/sdk/generated/platform/sessions';
 import { getGetSpanQueryKey, getListSpansQueryKey } from '@nemo/sdk/generated/platform/spans';
 import { getGetTraceQueryKey, getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
+import { parseTraceListQuery } from '@studio/components/IntakeDetail/traceListQuery';
 import {
   mockSessionById,
   mockSpanById,
@@ -682,5 +683,116 @@ describe('IntakeSessionDetailRoute', () => {
 
     expect(await screen.findByText('Trace Not Found')).toBeInTheDocument();
     expect(screen.getByText(/does not belong to this session/)).toBeInTheDocument();
+  });
+});
+
+describe('IntakeSessionDetailRoute trace list pager', () => {
+  const LIST_QUERY = { mode: 'preview', page: 2, page_size: 2, sort: '-started_at' } as const;
+  const listSearch = (query: object = LIST_QUERY) =>
+    `?traceId=trace-agent-run-001&traceList=${encodeURIComponent(JSON.stringify(query))}`;
+
+  /** The default handler ignores pagination, which a page-boundary test needs. */
+  const servePagedTraceList = () => {
+    const pages: Record<string, { id: string; session_id: string }[]> = {
+      '1': [
+        { id: 'trace-page-1-a', session_id: 'session-page-1-a' },
+        { id: 'trace-page-1-b', session_id: 'session-page-1-b' },
+      ],
+      '2': [
+        { id: 'trace-agent-run-001', session_id: 'session-agent-run-001' },
+        { id: 'trace-page-2-b', session_id: 'session-page-2-b' },
+      ],
+    };
+    server.use(
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), ({ request }) => {
+        const url = new URL(request.url);
+        const sessionFilter = url.searchParams.get('filter[session_id]');
+        // The session's own trajectories query is unrelated to the pager's.
+        if (sessionFilter) {
+          const data = mockTracesPage.data.filter((trace) => trace.session_id === sessionFilter);
+          return HttpResponse.json({
+            ...mockTracesPage,
+            data,
+            pagination: { ...mockTracesPage.pagination, total_results: data.length },
+          });
+        }
+        const page = url.searchParams.get('page') ?? '1';
+        const data = pages[page] ?? [];
+        return HttpResponse.json({
+          data,
+          pagination: {
+            page: Number(page),
+            page_size: 2,
+            current_page_size: data.length,
+            total_pages: 2,
+            total_results: 4,
+          },
+        });
+      })
+    );
+  };
+
+  it('offers both steps for a row that is in the list', async () => {
+    servePagedTraceList();
+
+    renderSessionDetail('session-agent-run-001', listSearch());
+
+    const pager = await screen.findByTestId('trace-list-pager');
+    expect(within(pager).getByRole('button', { name: 'Next trace run' })).toBeEnabled();
+    expect(within(pager).getByRole('button', { name: 'Previous trace run' })).toBeEnabled();
+  });
+
+  it('steps down the list', async () => {
+    const user = userEvent.setup();
+    servePagedTraceList();
+
+    renderSessionDetail('session-agent-run-001', listSearch());
+
+    await user.click(await screen.findByRole('button', { name: 'Next trace run' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(
+        '/workspaces/default/intake/sessions/session-page-2-b'
+      )
+    );
+    expect(screen.getByTestId('location')).toHaveTextContent('traceId=trace-page-2-b');
+  });
+
+  it('steps up the list across a page boundary and moves the carried page with it', async () => {
+    const user = userEvent.setup();
+    servePagedTraceList();
+
+    renderSessionDetail('session-agent-run-001', listSearch());
+
+    await user.click(await screen.findByRole('button', { name: 'Previous trace run' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(
+        '/workspaces/default/intake/sessions/session-page-1-b'
+      )
+    );
+    const search = screen.getByTestId('location').textContent?.split('?')[1] ?? '';
+    expect(parseTraceListQuery(new URLSearchParams(search).get('traceList'))).toMatchObject({
+      page: 1,
+    });
+  });
+
+  it('renders no pager for a session opened outside the list', async () => {
+    renderSessionDetail('session-agent-run-001', '?traceId=trace-agent-run-001');
+
+    expect(await screen.findByTestId('session-summary-header')).toBeInTheDocument();
+    expect(screen.queryByTestId('trace-list-pager')).not.toBeInTheDocument();
+  });
+
+  it('renders no pager when the row has dropped out of the list', async () => {
+    servePagedTraceList();
+
+    renderSessionDetail(
+      'session-agent-run-001',
+      listSearch({ ...LIST_QUERY, page: 1, filter: { status: 'error' } })
+    );
+
+    expect(await screen.findByTestId('session-summary-header')).toBeInTheDocument();
+    expect(screen.queryByTestId('trace-list-pager')).not.toBeInTheDocument();
   });
 });

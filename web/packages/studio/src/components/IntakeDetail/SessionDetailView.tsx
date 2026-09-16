@@ -10,6 +10,8 @@ import {
   TraceSummaryHeader,
 } from '@studio/components/IntakeDetail/TraceDetailSummaryHeader';
 import { TraceDetailView } from '@studio/components/IntakeDetail/TraceDetailView';
+import { TraceListPager } from '@studio/components/IntakeDetail/TraceListPager';
+import { parseTraceListQuery } from '@studio/components/IntakeDetail/traceListQuery';
 import { TraceSpanAccordions } from '@studio/components/IntakeDetail/TraceSpanAccordions';
 import {
   type TraceViewMode,
@@ -53,6 +55,8 @@ export const SessionDetailView: FC<SessionDetailViewProps> = ({
   const [searchParams, setSearchParams] = useSearchParams();
   const traceId = searchParams.get(QUERY_PARAMETERS.traceId) || undefined;
   const linkedSpanId = searchParams.get(QUERY_PARAMETERS.spanId) || undefined;
+  const rawListQuery = searchParams.get(QUERY_PARAMETERS.traceList);
+  const listQuery = useMemo(() => parseTraceListQuery(rawListQuery), [rawListQuery]);
   const [viewMode, setViewMode] = useState<TraceViewMode>('tree');
   const defaultGetSessionHref = useCallback(
     (targetSessionId: string) => getIntakeSessionRoute(workspace, targetSessionId),
@@ -177,7 +181,18 @@ export const SessionDetailView: FC<SessionDetailViewProps> = ({
         <PageHeader
           className="p-0"
           slotHeading={title}
-          slotActions={routeContext?.kind === 'evaluation' ? routeContext.headerActions : undefined}
+          slotActions={
+            routeContext?.kind === 'evaluation' ? (
+              routeContext.headerActions
+            ) : (
+              <TraceListPager
+                workspace={workspace}
+                sessionId={sessionId}
+                traceId={traceId}
+                listQuery={listQuery}
+              />
+            )
+          }
         />
         {!traceId ? (
           <div data-testid="session-summary-header" className="w-full min-w-0">
