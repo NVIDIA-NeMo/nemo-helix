@@ -10,10 +10,10 @@ from nemo_data_designer_plugin.jobs.retrieval_common import retrieval_step, work
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig, RetrievalGenerateStepConfig
 from nemo_data_designer_plugin.retrieval.corpus import hf_token_from_env, materialize_corpus
 from nemo_data_designer_plugin.retrieval.providers import build_retrieval_model_configs, resolve_retrieval_providers
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import PlatformJobSpec
 from pydantic import BaseModel
 
 
@@ -35,7 +35,7 @@ class RetrievalGenerateJob(NemoJob):
         async_sdk: object,
         is_local: bool,
     ) -> BaseModel:
-        async_sdk = cast(AsyncNeMoPlatform, async_sdk)
+        async_sdk = cast(AsyncNeMoHelix, async_sdk)
         job_config = cast(RetrievalGenerateJobConfig, input_spec)
         dd_ctx = create_validation_context(async_sdk, workspace)
         model_configs = build_retrieval_model_configs(
@@ -80,7 +80,7 @@ class RetrievalGenerateJob(NemoJob):
             ]
         )
 
-    def run(self, config: dict, ctx: JobContext, sdk: NeMoPlatform) -> dict:
+    def run(self, config: dict, ctx: JobContext, sdk: NeMoHelix) -> dict:
         from nemo_data_designer_plugin.retrieval.generation import build_generation_run_config, execute_generation
 
         step = RetrievalGenerateStepConfig.model_validate(config)

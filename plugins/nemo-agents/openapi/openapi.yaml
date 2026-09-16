@@ -5162,7 +5162,7 @@ components:
         output:
           title: Output
           description: "Where to write eval outputs \u2014 either a local directory\
-            \ (path-shaped: starts with '/', './', '../', '~/') or a NeMo Platform\
+            \ (path-shaped: starts with '/', './', '../', '~/') or a NeMo Helix\
             \ fileset reference ('name' or 'workspace/name').  Filesets are created\
             \ on demand if missing.  Defaults to <ctx.storage.persistent>/results\
             \ (the platform-injected persistent volume) when not provided."
@@ -5205,7 +5205,7 @@ components:
         \ ``None`` the job writes to ``ctx.storage.persistent /\n        \"results\"\
         `` \u2014 the platform-injected persistent volume in\n        container runs,\
         \ a tempdir under ``$TMPDIR`` for local CLI\n        runs.\n    workspace:\
-        \ NeMo Platform workspace used to scope gateway URL injection,\n        ``--agent``\
+        \ NeMo Helix workspace used to scope gateway URL injection,\n        ``--agent``\
         \ resolution, and ``--output`` fileset creation\n        when those values\
         \ are given as bare names."
     EvaluateJob:
@@ -5680,7 +5680,7 @@ components:
 
         canonical ``EvaluateSuiteConfig`` fallback to ``Path.cwd()`` would
 
-        silently land in ``/tmp/nmp-subprocess-jobs/.../task-*/``.  Making
+        silently land in ``/tmp/nhx-subprocess-jobs/.../task-*/``.  Making
 
         them required at the schema layer surfaces the requirement as a
 
@@ -6608,7 +6608,7 @@ components:
           description: "Where to publish the study artifacts (optimized config, trials\
             \ dataframe, pareto plots, ATIF evidence) once the study succeeds \u2014\
             \ either a local directory (path-shaped: starts with '/', './', '../',\
-            \ '~/') or a NeMo Platform fileset reference ('name' or 'workspace/name').\
+            \ '~/') or a NeMo Helix fileset reference ('name' or 'workspace/name').\
             \  Filesets are created on demand if missing.  This is in addition to\
             \ the per-job artifacts that ``ctx.results.save`` always registers; it\
             \ gives remote clients a stable, addressable location to read from."
@@ -6655,7 +6655,7 @@ components:
           description: "Where to publish the study artifacts (optimized config, trials\
             \ dataframe, pareto plots, ATIF evidence) once the study succeeds \u2014\
             \ either a local directory (path-shaped: starts with '/', './', '../',\
-            \ '~/') or a NeMo Platform fileset reference ('name' or 'workspace/name').\
+            \ '~/') or a NeMo Helix fileset reference ('name' or 'workspace/name').\
             \  Filesets are created on demand if missing.  This is in addition to\
             \ the per-job artifacts that ``ctx.results.save`` always registers; it\
             \ gives remote clients a stable, addressable location to read from."

@@ -10,9 +10,9 @@ import pytest
 from doubles import make_candidate
 from nemo_experimentalist_plugin.entities import Candidate, ExperimentRun, RewardRecord
 from nemo_experimentalist_plugin.experimentalist.experiment_mirror import ExperimentMirror, group_metadata
-from nemo_platform_plugin.client.errors import ConflictError, NotFoundError
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import EvaluationCreateRequest, ExperimentCreateRequest, ExperimentUpdateRequest
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import EvaluationCreateRequest, ExperimentCreateRequest, ExperimentUpdateRequest
 
 pytestmark = pytest.mark.asyncio
 

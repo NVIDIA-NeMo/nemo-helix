@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import anthropic.types as anthropic_types
 import openai.types.chat as openai_chat_types
 import pytest
-from nemo_platform_plugin.inference_middleware import BackendFormat, InferenceRequest, InferenceResponse
+from nemo_helix_plugin.inference_middleware import BackendFormat, InferenceRequest, InferenceResponse
 from nemo_switchyard._bridge import (
     _wrap_non_streaming,
     _wrap_streaming,
@@ -57,7 +57,7 @@ def _make_anthropic_message(model: str = "claude-3") -> anthropic_types.Message:
 
 
 def _make_typed_stream(backend_format: BackendFormat):
-    from nmp.core.inference_gateway.api.typed_response import TypedResponseStream
+    from nhx.core.inference_gateway.api.typed_response import TypedResponseStream
 
     async def _gen():
         return
@@ -115,7 +115,7 @@ def test_wrap_non_streaming_anthropic_message():
 
 
 def test_wrap_non_streaming_unexpected_type_raises_500():
-    from nemo_platform_plugin.inference_middleware import InferenceMiddlewareError
+    from nemo_helix_plugin.inference_middleware import InferenceMiddlewareError
 
     with pytest.raises(InferenceMiddlewareError) as exc:
         _wrap_non_streaming({"bad": "dict"})  # type: ignore[arg-type]
@@ -226,7 +226,7 @@ def test_write_back_response_streaming_clears_typed_body_sets_result_to_stream()
 
 
 def test_write_back_response_unexpected_type_raises_500():
-    from nemo_platform_plugin.inference_middleware import InferenceMiddlewareError
+    from nemo_helix_plugin.inference_middleware import InferenceMiddlewareError
 
     class _Weird:
         pass

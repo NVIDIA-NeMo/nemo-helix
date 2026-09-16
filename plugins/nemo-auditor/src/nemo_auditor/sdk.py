@@ -3,7 +3,7 @@
 
 """SDK resources for the auditor plugin.
 
-Mounted on :class:`~nemo_platform.NeMoPlatform` as ``client.auditor`` via the
+Mounted on :class:`~nemo_helix.NeMoHelix` as ``client.auditor`` via the
 ``nemo.sdk`` entry-point in :file:`pyproject.toml`. Exposes:
 
 - ``client.auditor.plugin_status()`` — service healthz check.
@@ -17,10 +17,10 @@ Mounted on :class:`~nemo_platform.NeMoPlatform` as ``client.auditor`` via the
 - ``client.auditor.get_job(job_name, workspace=...)`` — fetch a single audit job.
 - ``client.auditor.run(config=..., target=..., workspace=...)`` — in-process
   audit using :class:`~nemo_auditor.jobs.audit.AuditJob`. Delegates to
-  :meth:`~nemo_platform_plugin.scheduler.NemoJobScheduler.run_local`, which
-  constructs a tempdir-backed :class:`~nemo_platform_plugin.job_context.JobContext`
+  :meth:`~nemo_helix_plugin.scheduler.NemoJobScheduler.run_local`, which
+  constructs a tempdir-backed :class:`~nemo_helix_plugin.job_context.JobContext`
   and writes report artifacts via
-  :class:`~nemo_platform_plugin.job_results.LocalJobResults`.
+  :class:`~nemo_helix_plugin.job_results.LocalJobResults`.
 """
 
 from __future__ import annotations
@@ -32,16 +32,16 @@ from nemo_auditor.jobs.audit import AuditInputSpec, AuditJob
 from nemo_auditor.sdk_resources.configs import _AsyncConfigResource, _ConfigResource
 from nemo_auditor.sdk_resources.job_resources import AsyncAuditorJobResource, AuditorJobResource
 from nemo_auditor.sdk_resources.targets import _AsyncTargetResource, _TargetResource
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.entities import parse_qualified_name
-from nemo_platform_plugin.scheduler import NemoJobScheduler
-from nemo_platform_plugin.sdk import NemoPluginSDKResources
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.entities import parse_qualified_name
+from nemo_helix_plugin.scheduler import NemoJobScheduler
+from nemo_helix_plugin.sdk import NemoPluginSDKResources
 
 
 class AuditorPluginResource:
     """Sync SDK namespace mounted as ``client.auditor``."""
 
-    def __init__(self, platform: NeMoPlatform) -> None:
+    def __init__(self, platform: NeMoHelix) -> None:
         self._platform = platform
         self._http_client = platform._client
         self._configs: _ConfigResource | None = None
@@ -167,7 +167,7 @@ class AuditorPluginResource:
 class AsyncAuditorPluginResource:
     """Async SDK namespace mounted as ``client.auditor``."""
 
-    def __init__(self, platform: AsyncNeMoPlatform) -> None:
+    def __init__(self, platform: AsyncNeMoHelix) -> None:
         self._platform = platform
         self._http_client = platform._client
         self._configs: _AsyncConfigResource | None = None

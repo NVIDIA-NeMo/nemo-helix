@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.jobs.schemas import PlatformJobStatus
 
 pytest.importorskip("scaled_evals")
 

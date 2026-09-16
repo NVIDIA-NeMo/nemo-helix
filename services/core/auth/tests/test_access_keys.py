@@ -10,16 +10,16 @@ from unittest.mock import AsyncMock, PropertyMock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nemo_platform_plugin.auth.access_keys.issuer import AccessKeyOperationNotImplementedError
-from nemo_platform_plugin.auth.access_keys.types import AccessKeyCreateResponse
-from nmp.common.auth.client import AuthClient
-from nmp.common.auth.dependencies import auth_client_context
-from nmp.common.auth.models import Principal
-from nmp.common.config import AuthConfig
-from nmp.common.config.base import AccessKeyConfig, TokenSigningConfig
-from nmp.common.entities import EntityConflictError
-from nmp.core.auth.api.v2.access_keys.endpoints import get_access_key_issuer, router
-from nmp.core.auth.app.access_keys import AccessKeyNotFoundError, AccessKeyStateConflictError, get_access_key_registry
+from nemo_helix_plugin.auth.access_keys.issuer import AccessKeyOperationNotImplementedError
+from nemo_helix_plugin.auth.access_keys.types import AccessKeyCreateResponse
+from nhx.common.auth.client import AuthClient
+from nhx.common.auth.dependencies import auth_client_context
+from nhx.common.auth.models import Principal
+from nhx.common.config import AuthConfig
+from nhx.common.config.base import AccessKeyConfig, TokenSigningConfig
+from nhx.common.entities import EntityConflictError
+from nhx.core.auth.api.v2.access_keys.endpoints import get_access_key_issuer, router
+from nhx.core.auth.app.access_keys import AccessKeyNotFoundError, AccessKeyStateConflictError, get_access_key_registry
 
 
 class InMemoryAccessKeyRegistry:
@@ -79,7 +79,7 @@ class InMemoryAccessKeyRegistry:
         return None
 
     async def list_for_principal(self, principal, *, page, page_size, include_service_accounts=False):
-        from nemo_platform_plugin.auth.access_keys.types import AccessKeyListResponse, AccessKeyMetadataResponse
+        from nemo_helix_plugin.auth.access_keys.types import AccessKeyListResponse, AccessKeyMetadataResponse
 
         # Sort newest-first then by jti to match the real registry's `sort="-issued_at"`.
         owned = sorted(
@@ -234,7 +234,7 @@ def client(tmp_path):
         ),
         access_keys=AccessKeyConfig(
             enabled=True,
-            audience="nemo-platform-access-key",
+            audience="nemo-helix-access-key",
         ),
     )
 
@@ -261,7 +261,7 @@ def client(tmp_path):
             config=config,
         )
     )
-    with patch("nmp.core.auth.api.v2.access_keys.endpoints.get_auth_config", return_value=config):
+    with patch("nhx.core.auth.api.v2.access_keys.endpoints.get_auth_config", return_value=config):
         yield TestClient(app)
     auth_client_context.reset(token)
 
@@ -278,7 +278,7 @@ def disabled_client():
             config=config,
         )
     )
-    with patch("nmp.core.auth.api.v2.access_keys.endpoints.get_auth_config", return_value=config):
+    with patch("nhx.core.auth.api.v2.access_keys.endpoints.get_auth_config", return_value=config):
         yield TestClient(app)
     auth_client_context.reset(token)
 
@@ -529,7 +529,7 @@ def test_platform_admin_cannot_revoke_another_admins_personal_access_key(client)
 
 
 def test_create_and_revoke_emit_actor_aware_audit_logs(client, caplog):
-    with caplog.at_level(logging.INFO, logger="nmp.core.auth.app.access_keys"):
+    with caplog.at_level(logging.INFO, logger="nhx.core.auth.app.access_keys"):
         created = client.post(
             "/v2/access-keys",
             json={"name": "ci-intake", "description": "CI intake automation"},
@@ -556,7 +556,7 @@ def test_suspend_and_unsuspend_emit_actor_aware_audit_logs(client, caplog):
     created = client.post("/v2/access-keys", json={"name": "ci-intake"}).json()
     jti = created["jti"]
 
-    with caplog.at_level(logging.INFO, logger="nmp.core.auth.app.access_keys"):
+    with caplog.at_level(logging.INFO, logger="nhx.core.auth.app.access_keys"):
         client.post(f"/v2/access-keys/{jti}/suspend")
         client.post(f"/v2/access-keys/{jti}/suspend")
         client.post(f"/v2/access-keys/{jti}/unsuspend")
@@ -593,7 +593,7 @@ async def test_in_memory_access_key_registry_reports_expired_status() -> None:
             description=None,
             status="ACTIVE",
             issuer="http://testserver/apis/auth",
-            audiences=["nemo-platform-access-key"],
+            audiences=["nemo-helix-access-key"],
         )
     )
 
@@ -1019,7 +1019,7 @@ def test_list_access_keys_returns_current_principals_persisted_keys(client):
             "description": "CI intake automation",
             "status": "ACTIVE",
             "issuer": "http://testserver/apis/auth",
-            "audiences": ["nemo-platform-access-key"],
+            "audiences": ["nemo-helix-access-key"],
         }
     ]
     assert response.json()["has_more"] is False
@@ -1321,7 +1321,7 @@ def test_rotate_and_new_key_emit_actor_aware_audit_logs(client, caplog):
     created = client.post("/v2/access-keys", json={"name": "ci-intake"}).json()
     jti = created["jti"]
 
-    with caplog.at_level(logging.INFO, logger="nmp.core.auth.app.access_keys"):
+    with caplog.at_level(logging.INFO, logger="nhx.core.auth.app.access_keys"):
         response = client.post(f"/v2/access-keys/{jti}/rotate")
 
     new_jti = response.json()["new_key"]["jti"]

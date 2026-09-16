@@ -14,7 +14,7 @@ uv run --frozen python -m script.generate_openapi_spec
 
 The generator no longer emits one spec per microservice and merges them. It now produces:
 
-**One aggregate platform spec**, built from the platform runner (`nmp.platform_runner.server:create_platform_openapi_app`) with plugin services deliberately excluded (`NEMO_PLUGIN_SERVICES_ALLOWLIST=""` — see `SERVICES` in `script/generate_openapi_spec.py`). This aggregate covers the core platform services (entities, jobs, models, inference gateway, secrets, files, platform-common, etc.) and lands in:
+**One aggregate platform spec**, built from the platform runner (`nhx.platform_runner.server:create_platform_openapi_app`) with plugin services deliberately excluded (`NEMO_PLUGIN_SERVICES_ALLOWLIST=""` — see `SERVICES` in `script/generate_openapi_spec.py`). This aggregate covers the core platform services (entities, jobs, models, inference gateway, secrets, files, platform-common, etc.) and lands in:
 
 | File | Contents |
 |------|----------|
@@ -62,4 +62,4 @@ Currently, the examples are manually generated from notebooks. A robust system t
 
 ## NOTE
 
-The aggregate platform spec is now generated directly from the platform runner (`nmp.platform_runner.server`), so it corresponds to what is actually mounted at runtime. Only the GA and EA variants of that single platform spec are merged; individual core services are no longer emitted and merged separately.
+The aggregate platform spec is now generated directly from the platform runner (`nhx.platform_runner.server`), so it corresponds to what is actually mounted at runtime. Only the GA and EA variants of that single platform spec are merged; individual core services are no longer emitted and merged separately.

@@ -8,9 +8,9 @@ a clear error, not succeed silently.
 """
 
 import pytest
-from nemo_platform_plugin.client.errors import UnprocessableEntityError
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
+from nemo_helix_plugin.client.errors import UnprocessableEntityError
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import PlatformSecretCreateRequest
 
 
 @pytest.mark.integration

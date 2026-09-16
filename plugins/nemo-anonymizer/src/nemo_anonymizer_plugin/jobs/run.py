@@ -22,19 +22,19 @@ from nemo_anonymizer_plugin.app.task_config import (
     AnonymizerStepConfig,
 )
 from nemo_anonymizer_plugin.tasks.anonymizer.run import run_step_config
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
     EnvironmentVariable,
     PlatformJobSpec,
     PlatformJobStep,
 )
-from nemo_platform_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
-from nemo_platform_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.jobs.image import get_qualified_image
 from pydantic import BaseModel
 
 
@@ -54,7 +54,7 @@ class RunJob(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncNeMoHelix,
         is_local: bool,
     ) -> BaseModel:  # AnonymizerStepConfig
         del entity_client, is_local
@@ -103,7 +103,7 @@ class RunJob(NemoJob):
         spec: BaseModel,  # AnonymizerStepConfig
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncNeMoHelix,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
@@ -115,7 +115,7 @@ class RunJob(NemoJob):
                         profile=profile or "default",
                         provider="cpu",
                         container=ContainerSpec(
-                            image=get_qualified_image("nmp-cpu-tasks"),
+                            image=get_qualified_image("nhx-cpu-tasks"),
                             entrypoint=["python", "-m"],
                             command=["nemo_anonymizer_plugin.tasks.anonymizer"],
                         ),
@@ -131,7 +131,7 @@ class RunJob(NemoJob):
         config: dict,
         *,
         ctx: JobContext,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
     ) -> dict:
         step_config = AnonymizerStepConfig.model_validate(config)
         return {"exit_code": run_step_config(step_config, ctx=ctx, sdk=sdk)}

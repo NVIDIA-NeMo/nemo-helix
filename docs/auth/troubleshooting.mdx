@@ -40,7 +40,7 @@ When something goes wrong with authentication or authorization, start here. Prob
 - Refresh token has expired — re-login with `nemo auth login`
 - OIDC issuer mismatch — the token's `iss` claim doesn't match `auth.oidc.issuer` in the config
 - Audience mismatch — the token's `aud` claim doesn't match `auth.oidc.audience` (or `client_id`)
-- Using email-as-API-key (`X-NMP-Principal-Id`) when OIDC is enabled and native validation rejects it
+- Using email-as-API-key (`X-NHX-Principal-Id`) when OIDC is enabled and native validation rejects it
 
 ## "I Get 403 Forbidden but I Should Have Access"
 
@@ -86,7 +86,7 @@ The requested scope is not configured or admin consent has not been granted.
 
 ### "Device flow not enabled" or "Public client flows not allowed"
 
-Your IdP doesn't have device flow enabled for the NeMo Platform application.
+Your IdP doesn't have device flow enabled for the NeMo Helix application.
 
 **Fix**:
 
@@ -96,7 +96,7 @@ Your IdP doesn't have device flow enabled for the NeMo Platform application.
 
 ### Client ID Mismatch
 
-The `client_id` in NeMo Platform config doesn't match the application in your IdP.
+The `client_id` in NeMo Helix config doesn't match the application in your IdP.
 
 **Fix**: Verify `auth.oidc.client_id` matches the client ID in your IdP exactly.
 
@@ -130,9 +130,9 @@ The `client_id` in NeMo Platform config doesn't match the application in your Id
 
 1. Check that the gateway calls `/apis/auth/authenticate` with the original `Authorization` header before forwarding protected requests.
 
-2. Check that the gateway forwards the trusted `X-NMP-Principal-*` and `X-NMP-Scopes` headers returned by the auth service on successful authentication.
+2. Check that the gateway forwards the trusted `X-NHX-Principal-*` and `X-NHX-Scopes` headers returned by the auth service on successful authentication.
 
-3. Check that auth headers are stripped from external requests. Try sending a request with `X-NMP-Principal-Id` or `X-NMP-Scopes` from outside the cluster — those headers should be stripped by the gateway.
+3. Check that auth headers are stripped from external requests. Try sending a request with `X-NHX-Principal-Id` or `X-NHX-Scopes` from outside the cluster — those headers should be stripped by the gateway.
 
 4. Verify the PDP is reachable from platform services. If using external OPA, check that the OPA sidecar/service is running and the bundle endpoint is accessible.
 

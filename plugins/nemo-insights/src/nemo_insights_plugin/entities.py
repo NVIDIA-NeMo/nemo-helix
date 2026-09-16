@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Insights plugin entity definitions — stored in the NeMo Platform entity store."""
+"""Insights plugin entity definitions — stored in the NeMo Helix entity store."""
 
 from datetime import datetime
 from enum import StrEnum
 
-from nemo_platform_plugin.entity import NemoEntity
+from nemo_helix_plugin.entity import NemoEntity
 from pydantic import Field
 
 

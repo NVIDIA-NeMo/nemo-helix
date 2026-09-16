@@ -14,15 +14,15 @@ from contextlib import suppress
 from datetime import datetime
 from typing import Any
 
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import ConflictError, NotFoundError
-from nemo_platform_plugin.controller import NemoController
-from nemo_platform_plugin.entities.base import SyncEntityClient
-from nemo_platform_plugin.entities.client import EntitiesClient
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
-from nemo_platform_plugin.jobs.types import CreatePlatformJobRequest
-from nemo_platform_plugin.sdk_provider import get_async_platform_sdk, get_platform_sdk
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.controller import NemoController
+from nemo_helix_plugin.entities.base import SyncEntityClient
+from nemo_helix_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix_plugin.jobs.types import CreatePlatformJobRequest
+from nemo_helix_plugin.sdk_provider import get_async_platform_sdk, get_platform_sdk
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
 from nemo_scaled_evals_plugin.jobs.naming import (
     evaluation_execution_job_name,

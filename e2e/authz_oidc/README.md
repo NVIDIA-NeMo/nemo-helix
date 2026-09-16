@@ -40,7 +40,7 @@ Not part of CI: everything is marked `e2e` and skipped without `--run-e2e`.
 3. **Spawns `nemo services run`** on a free port with a fresh tmp data dir:
    `auth.enabled=true`, `oidc.enabled=true` → issuer, **`allow_unsigned_jwt=false`**
    (both local configs default it to *true*; with it on, the signed-JWT proof
-   would be hollow), audience pinned, `NMP_SEED_ON_STARTUP=true`,
+   would be hollow), audience pinned, `NHX_SEED_ON_STARTUP=true`,
    `bundle_cache_seconds=0` for instant role-binding propagation.
 4. **Provisions via signed service JWT** (`sub=service:e2e-harness` — the IAM
    role-binding API is service-principal-only at the handler, and a Bearer
@@ -76,7 +76,7 @@ point).
 
 - WebSocket routes are not enforced by the PDP middleware at all — deliberately
   absent from the matrix.
-- `X-NMP-Principal-*` headers remain a trusted identity channel in this
+- `X-NHX-Principal-*` headers remain a trusted identity channel in this
   deployment shape; the harness never sends them, but does not prove they are
   stripped (that's an ingress concern, out of authz scope).
 - `hard_fail` (the default `on_invalid_plugin` mode) aborts bundle build (auth

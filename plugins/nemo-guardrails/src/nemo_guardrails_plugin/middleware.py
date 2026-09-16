@@ -61,13 +61,13 @@ from nemo_guardrails_plugin.streaming import (
     strings_to_chunks,
 )
 from nemo_guardrails_plugin.transforms import GenerationResponseMapper
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.config import get_common_service_config
-from nemo_platform_plugin.guardrail.client import AsyncGuardrailClient
-from nemo_platform_plugin.guardrail.types import GenerationLogOptionsParam
-from nemo_platform_plugin.guardrail.types import RailsConfig as PlatformRailsConfig
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.config import get_common_service_config
+from nemo_helix_plugin.guardrail.client import AsyncGuardrailClient
+from nemo_helix_plugin.guardrail.types import GenerationLogOptionsParam
+from nemo_helix_plugin.guardrail.types import RailsConfig as PlatformRailsConfig
+from nemo_helix_plugin.inference_middleware import (
     ImmediateResponse,
     InferenceMiddlewareContext,
     InferenceMiddlewareError,
@@ -80,7 +80,7 @@ from nemo_platform_plugin.inference_middleware import (
     ResponseResult,
     VirtualModel,
 )
-from nemo_platform_plugin.refs import parse_entity_ref
+from nemo_helix_plugin.refs import parse_entity_ref
 from nemoguardrails.rails.llm.llmrails import LLMRails
 from nemoguardrails.rails.llm.options import GenerationResponse
 from nemoguardrails.types import LLMModel
@@ -645,7 +645,7 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
         """
         client = self._client
         if client is None:
-            raise RuntimeError("NeMo Platform client is not initialized. Was on_startup() called?")
+            raise RuntimeError("NeMo Helix client is not initialized. Was on_startup() called?")
         return client
 
     async def _resolve_call(self, call: MiddlewareCall) -> GuardrailConfigSource | None:

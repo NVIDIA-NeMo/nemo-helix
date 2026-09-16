@@ -4,7 +4,7 @@
 """Automodel training job (NemoJob).
 
 Shared scaffold (``to_spec`` + the Docker-runtime guard) lives in
-:class:`nmp.customization_common.contributor.jobs.BaseSubmitJob`; ``compile`` stays here
+:class:`nhx.customization_common.contributor.jobs.BaseSubmitJob`; ``compile`` stays here
 because it validates for training and resolves the execution profile from the
 schema (automodel-specific).
 """
@@ -17,13 +17,13 @@ from typing import ClassVar
 from nemo_automodel_plugin.config import get_config
 from nemo_automodel_plugin.schema import AutomodelJobInput, AutomodelJobOutput, ValidationError
 from nemo_automodel_plugin.transform import transform_input_to_output
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nemo_platform_plugin.jobs.docker import validate_gpu_available_for_docker
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
-from nmp.automodel.compile import platform_job_config_compiler
-from nmp.customization_common.contributor.jobs import BaseSubmitJob, require_container_runtime
-from nmp.customization_common.service.platform_client import (
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.jobs.api_factory import PlatformJobSpec
+from nemo_helix_plugin.jobs.docker import validate_gpu_available_for_docker
+from nemo_helix_plugin.jobs.exceptions import PlatformJobCompilationError
+from nhx.automodel.compile import platform_job_config_compiler
+from nhx.customization_common.contributor.jobs import BaseSubmitJob, require_container_runtime
+from nhx.customization_common.service.platform_client import (
     AsyncCustomizationPlatformClients,
     async_customization_platform_clients_from_platform,
 )
@@ -60,7 +60,7 @@ class AutomodelJob(BaseSubmitJob[AutomodelJobInput, AutomodelJobOutput]):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncNeMoHelix,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:

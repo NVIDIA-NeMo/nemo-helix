@@ -4,8 +4,8 @@
 """Task entrypoint for ``agents.evaluate-suite`` (``python -m nemo_agents_plugin.tasks.evaluate_suite``).
 
 Mirrors :mod:`nemo_agents_plugin.tasks.evaluate`: delegates to
-:func:`nemo_platform_plugin.tasks.dispatcher.run_task` so step config loading,
-:class:`~nemo_platform_plugin.job_context.JobContext` construction, and
+:func:`nemo_helix_plugin.tasks.dispatcher.run_task` so step config loading,
+:class:`~nemo_helix_plugin.job_context.JobContext` construction, and
 signature-based DI into :meth:`EvaluateSuiteJob.run` are all handled by the
 framework.
 
@@ -23,8 +23,8 @@ import sys
 from types import FrameType
 
 from nemo_agents_plugin.jobs.evaluate_suite import EvaluateSuiteJob
-from nemo_platform_plugin.sdk_provider import get_task_sdk
-from nemo_platform_plugin.tasks.dispatcher import run_task
+from nemo_helix_plugin.sdk_provider import get_task_sdk
+from nemo_helix_plugin.tasks.dispatcher import run_task
 
 logger = logging.getLogger(__name__)
 

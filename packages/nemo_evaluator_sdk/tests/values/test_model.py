@@ -26,7 +26,7 @@ class TestHeaderNameHelpers:
             ("openai-api-key", True),
             ("my_secret_header", True),
             ("X-Trace-Id", False),
-            ("X-NMP-Principal-Id", False),
+            ("X-NHX-Principal-Id", False),
         ],
     )
     def test_is_auth_header_name(self, header_name: str, expected: bool):
@@ -37,11 +37,11 @@ class TestHeaderNameHelpers:
             {
                 "Authorization": "Bearer secret-token",
                 "X-Trace-Id": "trace-123",
-                "X-NMP-Principal-Id": "service:evaluator",
+                "X-NHX-Principal-Id": "service:evaluator",
             }
         ) == {
             "X-Trace-Id": "trace-123",
-            "X-NMP-Principal-Id": "service:evaluator",
+            "X-NHX-Principal-Id": "service:evaluator",
         }
 
     def test_filter_auth_headers_returns_none_when_all_headers_are_filtered(self):
@@ -56,20 +56,20 @@ class TestModelDefaultHeaders:
             default_headers={"X-Existing": "model"},
         )
 
-        updated = model.with_default_headers({"X-NMP-Principal-Id": "service:evaluator"})
+        updated = model.with_default_headers({"X-NHX-Principal-Id": "service:evaluator"})
 
         assert updated is not model
         assert model.default_headers == {"X-Existing": "model"}
         assert updated.default_headers == {
             "X-Existing": "model",
-            "X-NMP-Principal-Id": "service:evaluator",
+            "X-NHX-Principal-Id": "service:evaluator",
         }
 
     def test_model_dump_excludes_default_headers(self):
         model = Model(
             url="https://judge.example.test/v1/chat/completions",
             name="judge-model",
-            default_headers={"X-NMP-Principal-Id": "service:evaluator"},
+            default_headers={"X-NHX-Principal-Id": "service:evaluator"},
         )
 
         assert "default_headers" not in model.model_dump(mode="python")
@@ -101,7 +101,7 @@ class TestModelDefaultHeaders:
     @pytest.mark.parametrize(
         "header_name",
         [
-            "X-NMP-Principal-Id",
+            "X-NHX-Principal-Id",
             "X-Trace-Id",
         ],
     )

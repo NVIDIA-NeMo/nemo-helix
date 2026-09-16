@@ -12,7 +12,7 @@
 # (see harness={"container_base_url_host": ...} on the test module). That makes
 # the Inference Gateway URL the platform injects into the deployed agent
 # container reachable from *inside* that container (the docker bridge address),
-# instead of a loopback the container cannot reach. The runner seeds NMP_BASE_URL
+# instead of a loopback the container cannot reach. The runner seeds NHX_BASE_URL
 # from this platform.base_url host (paired with the actual bind port), so the
 # configured host takes effect instead of the bind-derived loopback default.
 
@@ -48,7 +48,7 @@ deployments:
     - name: local-docker
       backend: docker
       config:
-        # The agent runs from the prebuilt nmp-api image, already present in the
+        # The agent runs from the prebuilt nhx-api image, already present in the
         # local Docker daemon (pulled by the test's CI job), so disable the
         # per-run pull and use the image as-is.
         pull_images: false

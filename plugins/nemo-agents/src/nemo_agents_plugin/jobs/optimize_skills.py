@@ -19,10 +19,10 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal
 
 from nemo_agents_plugin.jobs.evaluate_suite import _require_absolute
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import PlatformJobSpec
+from nemo_helix_plugin.jobs.exceptions import PlatformJobCompilationError
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -100,18 +100,18 @@ class OptimizeSkillsJob(NemoJob):
         Dispatched by the platform's host-subprocess executor — same machine as the
         platform (and the user's docker daemon / Claude CLI).  No dedicated container image.
         """
-        from nemo_platform_plugin.jobs.api_factory import (
+        from nemo_helix_plugin.jobs.api_factory import (
             EnvironmentVariable,
             EnvironmentVariableFromSecret,
             PlatformJobStep,
             SubprocessExecutionProviderSpec,
         )
-        from nemo_platform_plugin.jobs.constants import (
+        from nemo_helix_plugin.jobs.constants import (
             DEFAULT_JOB_STORAGE_PATH,
             PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
         )
 
-        # Subprocess work dir is /tmp/nmp-subprocess-jobs/.../task-..., not the
+        # Subprocess work dir is /tmp/nhx-subprocess-jobs/.../task-..., not the
         # caller's cwd; reject relative paths up front.
         _require_absolute(spec.evals, "evals")
         _require_absolute(spec.agent, "agent")

@@ -22,7 +22,7 @@ from nemo_agents_plugin.entities import (
     SessionStatus,
 )
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
-from nemo_platform_ext.cli.chat_tui import ExitAction, collect_stream_response
+from nemo_helix_ext.cli.chat_tui import ExitAction, collect_stream_response
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -494,7 +494,7 @@ def test_session_chat_interrupt_detaches_without_closing(exception: type[BaseExc
     with (
         patch("nemo_agents_plugin.cli._is_interactive_session_chat", return_value=True),
         transport,
-        patch("nemo_platform_ext.cli.chat_tui.Prompt.ask", side_effect=exception),
+        patch("nemo_helix_ext.cli.chat_tui.Prompt.ask", side_effect=exception),
     ):
         result = runner.invoke(AgentsCLI().get_cli(), ["chat", "--session", "debug-auth"])
 

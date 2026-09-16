@@ -28,8 +28,8 @@ secrets:
     existingSecret:
       # -- Name of an existing Kubernetes Secret containing the encryption key.
       name: ""
-      # -- Key in the existing Secret. After Kubernetes decodes the Secret data, the loaded value must be the base64-encoded NMP_SECRETS_DEFAULT_ENCRYPTION_KEY string.
-      key: NMP_SECRETS_DEFAULT_ENCRYPTION_KEY
+      # -- Key in the existing Secret. After Kubernetes decodes the Secret data, the loaded value must be the base64-encoded NHX_SECRETS_DEFAULT_ENCRYPTION_KEY string.
+      key: NHX_SECRETS_DEFAULT_ENCRYPTION_KEY
     # -- Generated key configuration used only when value and envFromSecret are empty. The generated key is not rotated or recreated on upgrade.
     generated:
       enabled: true
@@ -138,7 +138,7 @@ multinodeNetworking:
     # -- Number of RDMA devices (mlnxnics) to request per GPU
     rdmaDevicesPerGPU: 8
 
-# -- NetworkPolicy configuration. Enable the top-level switch to render all default policies, then disable individual policies only for cluster-specific exceptions. For a Calico-backed smoke test, see https://docs.nvidia.com/nemo-platform/documentation/kubernetes-deployment/setup/helm/network-policy-smoke-test.
+# -- NetworkPolicy configuration. Enable the top-level switch to render all default policies, then disable individual policies only for cluster-specific exceptions. For a Calico-backed smoke test, see https://docs.nvidia.com/nemo-helix/documentation/kubernetes-deployment/setup/helm/network-policy-smoke-test.
 # @default -- This object has the following default values. The top-level switch is disabled by default so chart upgrades do not change cluster connectivity unless explicitly enabled.
 networkPolicies:
   # -- Create NetworkPolicy resources for enabled subpolicies.
@@ -162,7 +162,7 @@ networkPolicies:
       podSelector:
         matchLabels:
           app: nemo-job
-          nmp.nvidia.com/managed_by: jobs-controller
+          nhx.nvidia.com/managed_by: jobs-controller
     # -- Extra NetworkPolicy ingress rules appended to the API policy, for cluster-specific ingress controllers, gateways, monitoring, or debugging pods.
     extraIngress: []
 
@@ -189,7 +189,7 @@ networkPolicies:
     podSelector:
       matchLabels:
         app: nemo-job
-        nmp.nvidia.com/managed_by: jobs-controller
+        nhx.nvidia.com/managed_by: jobs-controller
     # -- Allow managed job pods to reach the in-namespace Platform API pods.
     platformApi:
       # -- Enable the default egress exception to the platform API pods. Disable only when managed job pods should not call the in-namespace API, or when API access is supplied through cluster-specific extraEgress rules.
@@ -271,7 +271,7 @@ ncclTest:
       tag: "3.12-slim"
   worker:
     image:
-      repository: nvcr.io/nvidia/nemo-platform/nmp-automodel-training
+      repository: nvcr.io/nvidia/nemo-helix/nhx-automodel-training
       tag: ""
     resources:
       requests:
@@ -281,7 +281,7 @@ ncclTest:
         cpu: "8"
         memory: 16Gi
 
-# -- Local PostgreSQL configuration for the NeMo Platform.
+# -- Local PostgreSQL configuration for the NeMo Helix.
 # @default -- This object has the following default values for the PostgreSQL configuration.
 postgresql:
   # -- Whether to deploy the embedded PostgreSQL. If enabled, the chart deploys a single-replica PostgreSQL instance using the official Postgres image.
@@ -296,7 +296,7 @@ postgresql:
   auth:
     username: nemo
     password: nemo
-    database: nemoplatform
+    database: nemohelix
     # -- Name of an existing secret containing a "password" key (or use existingSecretPasswordKey). If set, the chart does not create a secret.
     existingSecret: ""
 
@@ -345,7 +345,7 @@ externalDatabase:
   # -- Database username
   user: nemo
   # -- Database name.
-  database: nemoplatform
+  database: nemohelix
   # -- Name of an existing secret resource containing the database credentials.
   existingSecret: ""
   # -- Name of an existing secret key containing the database credentials.
@@ -481,7 +481,7 @@ externalClickhouse:
 # Applied after the base platform config is evaluated for templates. Enables adding / overriding YAML-based elements in the evaluated platform config.
 # It is usually recommended to use this config section instead of `basePlatformConfig` unless you need to use templating features.
 # For example, you can set the NIM default StorageClass via models.controller.backends.deployments_plugin.default_storage_class.
-# For full configuration reference, see https://docs.nvidia.com/nemo-platform
+# For full configuration reference, see https://docs.nvidia.com/nemo-helix
 platformConfig: {}
 
 # -- Base platform configuration settings
@@ -490,14 +490,14 @@ basePlatformConfig: |
   # -- platform is the service discovery configuration for services across the platform
   platform:
     # -- runtime specifies the type of runtime the platform is running on.
-    # Always set to 'kubernetes' for NeMo Platform when deploying with Helm.
+    # Always set to 'kubernetes' for NeMo Helix when deploying with Helm.
     runtime: kubernetes
 
     # Base URLs for various platform services
-    base_url: "{{ printf "http://%s:%s" (include "nmp-api.api-servicename" . ) (toString .Values.api.service.port) }}"
+    base_url: "{{ printf "http://%s:%s" (include "nhx-api.api-servicename" . ) (toString .Values.api.service.port) }}"
 
     # Image configuration for launching containers via the platform
-    image_registry: nvcr.io/nvidia/nemo-platform
+    image_registry: nvcr.io/nvidia/nemo-helix
     image_tag: {{ .Chart.AppVersion | quote }}
     image_pull_secrets: {{ default (list) .Values.imagePullSecrets | toJson }}
     sandbox_cluster_capable: {{ .Values.sandboxClusterCapable }}
@@ -512,14 +512,14 @@ basePlatformConfig: |
     # An empty string means the Studio UI will reference its own host for API calls.
     platform_base_url: ""
     # -- static_files_path points at the Studio UI bundle baked into the container image
-    # (see docker/Dockerfile.nmp-api). The Python default resolves to the wheel's packaged
+    # (see docker/Dockerfile.nhx-api). The Python default resolves to the wheel's packaged
     # assets, which the container image doesn't populate, so we override here.
     static_files_path: "/static/studio"
 
   auth:
     enabled: false
     policy_decision_point_provider: embedded
-    policy_decision_point_base_url: "{{ printf "http://%s:%s" (include "nmp-api.api-servicename" . ) (toString .Values.api.service.port) }}"
+    policy_decision_point_base_url: "{{ printf "http://%s:%s" (include "nhx-api.api-servicename" . ) (toString .Values.api.service.port) }}"
     policy_data_refresh_interval: 5
     bundle_cache_seconds: 5
     admin_email: "admin@example.com"
@@ -539,20 +539,20 @@ basePlatformConfig: |
     # -- executor_defaults is the default configuration applied to all executor profiles
     executor_defaults:
       kubernetes_job:
-        service_account_name: {{ include "nmp-core.jobsServiceAccountName" . | quote }}
-        launcher_image: {{ include "nmp-core.image" . | quote }}
+        service_account_name: {{ include "nhx-core.jobsServiceAccountName" . | quote }}
+        launcher_image: {{ include "nhx-core.image" . | quote }}
         storage:
-          pvc_name: {{ (include "nmp-core.persistentVolumeClaim" . ) }}
+          pvc_name: {{ (include "nhx-core.persistentVolumeClaim" . ) }}
           volume_permissions_image: {{ .Values.core.storage.volumePermissionsImage | quote }}
         pod_security_context: {{ .Values.podSecurityContext | toYaml | nindent 10 }}
       volcano_job:
-        service_account_name: {{ include "nmp-core.jobsServiceAccountName" . | quote }}
-        launcher_image: {{ include "nmp-core.image" . | quote }}
+        service_account_name: {{ include "nhx-core.jobsServiceAccountName" . | quote }}
+        launcher_image: {{ include "nhx-core.image" . | quote }}
         storage:
-          pvc_name: {{ (include "nmp-core.persistentVolumeClaim" . ) }}
+          pvc_name: {{ (include "nhx-core.persistentVolumeClaim" . ) }}
           volume_permissions_image: {{ .Values.core.storage.volumePermissionsImage | quote }}
         pod_security_context: {{ .Values.podSecurityContext | toYaml | nindent 10 }}
-        {{- if include "nemo-platform.multinodeNetworkingEnabled" . }}
+        {{- if include "nemo-helix.multinodeNetworkingEnabled" . }}
         # Enable multi-node networking (triggers Kyverno policies for cloud-specific configuration)
         enable_multi_node_networking: true
         {{- end }}
@@ -564,7 +564,7 @@ basePlatformConfig: |
       providers:
         secret_key:
           local_v1:
-            from_env: "NMP_SECRETS_DEFAULT_ENCRYPTION_KEY"
+            from_env: "NHX_SECRETS_DEFAULT_ENCRYPTION_KEY"
 
   # -- models is the configuration specific to model management on the platform
   models:
@@ -579,7 +579,7 @@ basePlatformConfig: |
           lora_sidecar_command:
             - python
             - -m
-            - nmp.core.models.sidecars.adapters.main
+            - nhx.core.models.sidecars.adapters.main
 
   deployments:
     executors:
@@ -625,7 +625,7 @@ basePlatformConfig: |
     # -- job_storage_pvc_claim is the claim sandboxed GRPO re-mounts into the Gym host so
     # the sandbox can read the downloaded environment and dataset. Must match the claim the
     # Jobs controller mounts for job storage.
-    job_storage_pvc_claim: {{ (include "nmp-core.persistentVolumeClaim" . ) }}
+    job_storage_pvc_claim: {{ (include "nhx-core.persistentVolumeClaim" . ) }}
     # Gym sandbox pod size.
     sandbox_resources:
       cpu: "2"
@@ -633,7 +633,7 @@ basePlatformConfig: |
 
   # -- safe_synthesizer is the configuration specific to the Safe Synthesizer service
   safe_synthesizer:
-    container_image: safe-synthesizer-tasks
+    container_image: nhx-safe-synthesizer-tasks
 
   # -- evaluator is the configuration specific to the Evaluator service
   evaluator: {}
@@ -659,24 +659,24 @@ ingress:
       paths:
         - path: /
           pathType: Exact
-          service: '{{ include "nemo-platform.ingressBackendService" . }}'
-          port: '{{ include "nemo-platform.ingressBackendPort" . }}'
+          service: '{{ include "nemo-helix.ingressBackendService" . }}'
+          port: '{{ include "nemo-helix.ingressBackendPort" . }}'
         - path: /apis
           pathType: Prefix
-          service: '{{ include "nemo-platform.ingressBackendService" . }}'
-          port: '{{ include "nemo-platform.ingressBackendPort" . }}'
+          service: '{{ include "nemo-helix.ingressBackendService" . }}'
+          port: '{{ include "nemo-helix.ingressBackendPort" . }}'
         - path: /studio
           pathType: Prefix
-          service: '{{ include "nemo-platform.ingressBackendService" . }}'
-          port: '{{ include "nemo-platform.ingressBackendPort" . }}'
+          service: '{{ include "nemo-helix.ingressBackendService" . }}'
+          port: '{{ include "nemo-helix.ingressBackendPort" . }}'
         - path: /cluster-info
           pathType: Exact
-          service: '{{ include "nemo-platform.ingressBackendService" . }}'
-          port: '{{ include "nemo-platform.ingressBackendPort" . }}'
+          service: '{{ include "nemo-helix.ingressBackendService" . }}'
+          port: '{{ include "nemo-helix.ingressBackendPort" . }}'
         - path: /status
           pathType: Exact
-          service: '{{ include "nemo-platform.ingressBackendService" . }}'
-          port: '{{ include "nemo-platform.ingressBackendPort" . }}'
+          service: '{{ include "nemo-helix.ingressBackendService" . }}'
+          port: '{{ include "nemo-helix.ingressBackendPort" . }}'
 
 httpRoute:
   # -- Specifies whether to enable a Gateway API HTTP Route for the service.
@@ -703,8 +703,8 @@ httpRoute:
         - path: /status
           type: Exact
       backends:
-        - service: '{{ include "nemo-platform.ingressBackendService" . }}'
-          port: '{{ include "nemo-platform.ingressBackendPort" . }}'
+        - service: '{{ include "nemo-helix.ingressBackendService" . }}'
+          port: '{{ include "nemo-helix.ingressBackendPort" . }}'
   # -- This is a list of filters for the objects, such as CORS settings.
   filters: []
 
@@ -715,9 +715,9 @@ openshiftRoute:
   # -- Hostname for the route. If empty, the OpenShift router may assign a default hostname.
   host: ""
   # -- Service name to route to. Defaults to Envoy when auth+envoy enabled, otherwise API (tpl-evaluated).
-  service: '{{ include "nemo-platform.ingressBackendService" . }}'
+  service: '{{ include "nemo-helix.ingressBackendService" . }}'
   # -- Target port on the service. Defaults to Envoy or API port depending on auth (tpl-evaluated).
-  targetPort: '{{ include "nemo-platform.ingressBackendPort" . }}'
+  targetPort: '{{ include "nemo-helix.ingressBackendPort" . }}'
   # -- Optional TLS configuration (termination, certificate, key, etc.). See OpenShift Route spec.
   tls: {}
   # -- Annotations for the route resource.
@@ -766,8 +766,8 @@ api:
   # -- Container image configuration for the api deployment.
   # @default -- This object has the following default values for the image configuration.
   image:
-    # -- The registry where the NeMo Platform image is located.
-    repository: nvcr.io/nvidia/nemo-platform/nmp-api
+    # -- The registry where the NeMo Helix image is located.
+    repository: nvcr.io/nvidia/nemo-helix/nhx-api
     # -- The image pull policy determining when to pull new images.
     pullPolicy: IfNotPresent
     # -- The image tag to use.
@@ -945,7 +945,7 @@ platformSeedJob:
   securityContext: {}
   # -- Resource requests/limits for the platform-seed container.
   resources: {}
-  # -- Extra environment variables for the platform-seed container (e.g. CONFIG_STORE_PATH, NMP_PLATFORM_SEED_*).
+  # -- Extra environment variables for the platform-seed container (e.g. CONFIG_STORE_PATH, NHX_PLATFORM_SEED_*).
   extraEnv: []
   # -- Node selector for the platform seeding Job pod.
   nodeSelector: {}
@@ -965,8 +965,8 @@ core:
   # -- Container image configuration for the core deployment.
   # @default -- This object has the following default values for the image configuration.
   image:
-    # -- The registry where the NeMo Platform image is located.
-    repository: nvcr.io/nvidia/nemo-platform/nmp-api
+    # -- The registry where the NeMo Helix image is located.
+    repository: nvcr.io/nvidia/nemo-helix/nhx-api
     # -- The image pull policy determining when to pull new images.
     pullPolicy: IfNotPresent
     # -- The image tag to use.
@@ -1125,15 +1125,15 @@ envoyProxy:
 
   # Headers considered internal-only
   trustedHeaders:
-    - x-nmp-principal-id
-    - x-nmp-principal-email
-    - x-nmp-principal-groups
-    - x-nmp-principal-on-behalf-of
-    - x-nmp-principal-on-behalf-of-groups
-    - x-nmp-principal-on-behalf-of-email
-    - x-nmp-principal-filters
-    - x-nmp-principal-roles
-    - x-nmp-internal
+    - x-nhx-principal-id
+    - x-nhx-principal-email
+    - x-nhx-principal-groups
+    - x-nhx-principal-on-behalf-of
+    - x-nhx-principal-on-behalf-of-groups
+    - x-nhx-principal-on-behalf-of-email
+    - x-nhx-principal-filters
+    - x-nhx-principal-roles
+    - x-nhx-internal
 
   # Number of Envoy proxy replicas
   replicaCount: 2

@@ -8,7 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 from fastapi import Request
-from nmp.core.inference_gateway.api.mock_provider.responses import (
+from nhx.core.inference_gateway.api.mock_provider.responses import (
     DEFAULT_MODELS_RESPONSE,
     MOCK_RESPONSE_HEADER,
     MOCK_SERVED_MODELS_HEADER,

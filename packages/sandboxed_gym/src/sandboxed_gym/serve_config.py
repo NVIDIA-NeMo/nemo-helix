@@ -20,7 +20,7 @@ from sandboxed_gym.host.models import (
 class SandboxedGymServeConfig(BaseModel):
     """Trusted-side config to start the episode broker + Gym host.
 
-    ``gym_global_config`` is opaque Gym JSON (injected as ``NMP_GYM_GLOBAL_CONFIG``).
+    ``gym_global_config`` is opaque Gym JSON (injected as ``NHX_GYM_GLOBAL_CONFIG``).
     Callers own policy_model_name / policy_base_url / config_paths; this package does
     not inject RL training knobs.
     """

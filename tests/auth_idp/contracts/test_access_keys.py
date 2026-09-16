@@ -6,8 +6,8 @@ import uuid
 
 import httpx
 import pytest
-from nemo_platform_ext.client.tls import HttpxTLSConfig
-from nmp.testing import grant_workspace_role
+from nemo_helix_ext.client.tls import HttpxTLSConfig
+from nhx.testing import grant_workspace_role
 
 from tests.auth_idp.common import jwt_claims, require_capability, runtime_tls_config
 from tests.auth_idp.runtime_contract import AuthIdpRuntime, JsonObject
@@ -105,9 +105,9 @@ def test_provider_platform_access_key_authenticates_and_uses_workspace_rbac(
     tls_config = runtime_tls_config(auth_idp_runtime)
 
     assert created["principal"] == workload_token.claims["sub"]
-    assert access_key_claims["nmp_token_type"] == "access_key"
+    assert access_key_claims["nhx_token_type"] == "access_key"
     assert access_key_claims["sub"] == workload_token.claims["sub"]
-    assert access_key_claims["aud"] == "nemo-platform-access-key"
+    assert access_key_claims["aud"] == "nemo-helix-access-key"
     access_key_headers = {"Authorization": f"Bearer {access_key}"}
 
     authenticate_response = httpx.get(
@@ -205,8 +205,8 @@ def test_provider_platform_access_key_ignores_spoofed_principal_headers(
     created = _create_access_key(auth_idp_runtime, workload_token.access_token)
     access_key_headers = {
         "Authorization": f"Bearer {created['token']}",
-        "X-NMP-Principal-Id": "service:bootstrap",
-        "X-NMP-Principal-Email": "attacker@example.com",
+        "X-NHX-Principal-Id": "service:bootstrap",
+        "X-NHX-Principal-Email": "attacker@example.com",
     }
     workspace_name = f"access-key-spoof-{uuid.uuid4().hex[:8]}"
     tls_config = runtime_tls_config(auth_idp_runtime)

@@ -10,7 +10,7 @@ from typing import Any, ClassVar
 
 import pytest
 import yaml
-from nmp.core.auth.app.embedded_pdp import (
+from nhx.core.auth.app.embedded_pdp import (
     OPAPolicy,
     PolicyEngineError,
     evaluate,
@@ -25,7 +25,7 @@ from nmp.core.auth.app.embedded_pdp import (
 @pytest.fixture
 def static_authz_data():
     """Load the static authorization data."""
-    path = Path(__file__).parent.parent / "src/nmp/core/auth/assets/static-authz.yaml"
+    path = Path(__file__).parent.parent / "src/nhx/core/auth/assets/static-authz.yaml"
     with open(path) as f:
         return yaml.safe_load(f)
 
@@ -80,7 +80,7 @@ def minimal_authz_data():
 @pytest.fixture(autouse=True)
 def reset_policy():
     """Reset policy state between tests."""
-    import nmp.core.auth.app.embedded_pdp.engine as pe
+    import nhx.core.auth.app.embedded_pdp.engine as pe
 
     pe._reset_policy_state_for_testing()
     yield
@@ -161,9 +161,9 @@ class TestPolicyLoading:
         assert "OPAPolicy used from a different thread" in str(error)
 
     def test_policy_load_forwards_auto_build_config(self, monkeypatch: pytest.MonkeyPatch):
-        import nmp.core.auth.app.embedded_pdp.engine as pe
-        from nmp.common.config import Configuration
-        from nmp.core.auth.config import AuthServiceConfig
+        import nhx.core.auth.app.embedded_pdp.engine as pe
+        from nhx.common.config import Configuration
+        from nhx.core.auth.config import AuthServiceConfig
 
         calls: list[bool] = []
 
@@ -373,9 +373,9 @@ class TestResourceLimits:
 
     def test_fuel_exhaustion_raises_policy_error(self, minimal_authz_data):
         """Verify that an absurdly low fuel limit triggers PolicyEngineError."""
-        import nmp.core.auth.app.embedded_pdp.engine as pe
-        from nmp.common.config import Configuration
-        from nmp.core.auth.config import AuthServiceConfig
+        import nhx.core.auth.app.embedded_pdp.engine as pe
+        from nhx.common.config import Configuration
+        from nhx.core.auth.config import AuthServiceConfig
 
         Configuration.set_override(AuthServiceConfig(embedded_pdp_cpu_limit=0, embedded_pdp_memory_limit_mb=32))
         try:
@@ -410,16 +410,16 @@ class TestResourceLimits:
 
     def test_memory_limit_applied(self):
         """Verify that memory limits are set on the WASM store."""
-        path = Path(__file__).parent.parent / "src/nmp/core/auth/assets/policy.wasm"
+        path = Path(__file__).parent.parent / "src/nhx/core/auth/assets/policy.wasm"
         policy = OPAPolicy(str(path), fuel_limit=100_000_000, memory_limit_mb=16)
         assert policy.store is not None
         assert policy.fuel_limit == 100_000_000
 
     def test_custom_fuel_limit(self, minimal_authz_data):
         """Verify that a custom fuel limit works when sufficient."""
-        import nmp.core.auth.app.embedded_pdp.engine as pe
-        from nmp.common.config import Configuration
-        from nmp.core.auth.config import AuthServiceConfig
+        import nhx.core.auth.app.embedded_pdp.engine as pe
+        from nhx.common.config import Configuration
+        from nhx.core.auth.config import AuthServiceConfig
 
         Configuration.set_override(AuthServiceConfig(embedded_pdp_cpu_limit=50, embedded_pdp_memory_limit_mb=32))
         try:
@@ -451,7 +451,7 @@ class TestDefaultDenyWithoutData:
 
     def test_evaluate_without_set_data_raises(self):
         """OPAPolicy.evaluate() must raise when set_data() was never called."""
-        path = Path(__file__).parent.parent / "src/nmp/core/auth/assets/policy.wasm"
+        path = Path(__file__).parent.parent / "src/nhx/core/auth/assets/policy.wasm"
         policy = OPAPolicy(str(path))
         with pytest.raises(PolicyEngineError, match="Policy data not loaded"):
             policy.evaluate(self.AUTHENTICATED_REQUEST)

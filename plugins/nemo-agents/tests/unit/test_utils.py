@@ -40,11 +40,11 @@ from nemo_agents_plugin.utils import (
     temp_injected_config,
     validate_llm_models,
 )
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.refs import EndpointURL, FilesetRef, LocalDir
-from nemo_platform_plugin.run_dependencies import LocalRunError
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.refs import EndpointURL, FilesetRef, LocalDir
+from nemo_helix_plugin.run_dependencies import LocalRunError
 
 # ---------------------------------------------------------------------------
 # inject_gateway_url
@@ -318,17 +318,17 @@ class TestRebindIntakeIngestWorkspace:
 class TestGetInternalBaseUrl:
     def test_returns_none_when_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("NEMO_INTERNAL_BASE_URL", raising=False)
-        monkeypatch.delenv("NMP_INTERNAL_BASE_URL", raising=False)
+        monkeypatch.delenv("NHX_INTERNAL_BASE_URL", raising=False)
         assert get_internal_base_url() is None
 
-    def test_reads_nmp_internal_base_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_reads_nhx_internal_base_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("NEMO_INTERNAL_BASE_URL", raising=False)
-        monkeypatch.setenv("NMP_INTERNAL_BASE_URL", "http://nmp-api:8080/")
-        assert get_internal_base_url() == "http://nmp-api:8080"
+        monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nhx-api:8080/")
+        assert get_internal_base_url() == "http://nhx-api:8080"
 
     def test_nemo_internal_base_url_takes_precedence(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("NEMO_INTERNAL_BASE_URL", "http://nemo:8080")
-        monkeypatch.setenv("NMP_INTERNAL_BASE_URL", "http://nmp:8080")
+        monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nhx:8080")
         assert get_internal_base_url() == "http://nemo:8080"
 
 
@@ -451,7 +451,7 @@ class TestInjectDefaultModel:
         assert not any("NEMO_DEFAULT_MODEL" in rec.message for rec in caplog.records)
 
     def test_uses_sdk_context_default_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The resolved value comes from ``nemo_platform.config.get_context().default_model``."""
+        """The resolved value comes from ``nemo_helix.config.get_context().default_model``."""
         self._patch_default_model(monkeypatch, "from-sdk")
         config = {"llms": {"llm": {"model_name": "${NEMO_DEFAULT_MODEL}"}}}
         result = inject_default_model(config)
@@ -629,21 +629,21 @@ class TestResolveEndpoint:
         assert EvaluateAgentJob._resolve_endpoint(url, workspace="default") == "http://localhost:8080"
 
     def test_bare_name_resolves_against_workspace(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("NMP_BASE_URL", "http://platform:8080")
+        monkeypatch.setenv("NHX_BASE_URL", "http://platform:8080")
         ref = AgentRef("calculator")
         endpoint = EvaluateAgentJob._resolve_endpoint(ref, workspace="default")
         assert endpoint == "http://platform:8080/apis/agents/v2/workspaces/default/agents/calculator/-"
 
     def test_ws_qualified_name_overrides_workspace_arg(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """``"prod/calculator"`` wins over the spec's ``workspace`` field."""
-        monkeypatch.setenv("NMP_BASE_URL", "http://platform:8080")
+        monkeypatch.setenv("NHX_BASE_URL", "http://platform:8080")
         ref = AgentRef("prod/calculator")
         endpoint = EvaluateAgentJob._resolve_endpoint(ref, workspace="default")
         assert endpoint == "http://platform:8080/apis/agents/v2/workspaces/prod/agents/calculator/-"
 
     def test_plain_str_value_treated_as_url_when_it_has_a_scheme(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Robust to model-validate output: ``str`` values still classify by shape."""
-        monkeypatch.setenv("NMP_BASE_URL", "http://platform:8080")
+        monkeypatch.setenv("NHX_BASE_URL", "http://platform:8080")
         # Pydantic emits the value as a ``str`` subclass via the StrRef hook,
         # but the resolver must not depend on isinstance checks — the parser
         # is shape-based.
@@ -653,7 +653,7 @@ class TestResolveEndpoint:
 
 # ---------------------------------------------------------------------------
 # EvaluateAgentSpec.output — same union pattern as ``agent``: local
-# directory path *or* NeMo Platform fileset reference.  The shape (path vs name)
+# directory path *or* NeMo Helix fileset reference.  The shape (path vs name)
 # is detected at resolve time.
 # ---------------------------------------------------------------------------
 
@@ -867,7 +867,7 @@ class TestResolveOutput:
         evaluation artifacts on the floor.
         """
         job = EvaluateAgentJob()
-        with pytest.raises(LocalRunError, match="sdk: NeMoPlatform"):
+        with pytest.raises(LocalRunError, match="sdk: NeMoHelix"):
             with job._resolve_output(FilesetRef("eval-results"), workspace="default", sdk=None, ctx=ctx):
                 pass
 
@@ -1387,7 +1387,7 @@ class _RecordingVirtualModels:
     """Stub for the typed VirtualModels client that records lookup calls.
 
     ``missing`` is the set of ``model_name`` values that should raise
-    :class:`nemo_platform_plugin.client.errors.NotFoundError`; everything else
+    :class:`nemo_helix_plugin.client.errors.NotFoundError`; everything else
     returns a sentinel object. ``side_effect`` overrides this to raise an
     arbitrary exception on every call (used to exercise the soft-fail branch).
     """
@@ -1422,12 +1422,12 @@ class _StubSDKWithVirtualModels:
         self.inference = _StubInference(virtual_models)
 
 
-def _platform_sdk_stub() -> NeMoPlatform:
-    return cast(NeMoPlatform, object())
+def _platform_sdk_stub() -> NeMoHelix:
+    return cast(NeMoHelix, object())
 
 
-def _virtual_model_sdk(virtual_models: _RecordingVirtualModels) -> NeMoPlatform:
-    return cast(NeMoPlatform, _StubSDKWithVirtualModels(virtual_models))
+def _virtual_model_sdk(virtual_models: _RecordingVirtualModels) -> NeMoHelix:
+    return cast(NeMoHelix, _StubSDKWithVirtualModels(virtual_models))
 
 
 @pytest.fixture(autouse=True)

@@ -7,17 +7,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.messages import HumanMessage
-from nmp.guardrails.app.handlers.checks import CheckRequestHandler
-from nmp.guardrails.app.handlers.completion import CompletionRequestHandler
-from nmp.guardrails.app.llms.chat.nim import ChatNIM
-from nmp.guardrails.app.llms.completion.nim import NIM
-from nmp.guardrails.app.utils.context_utils import (
+from nhx.guardrails.app.handlers.checks import CheckRequestHandler
+from nhx.guardrails.app.handlers.completion import CompletionRequestHandler
+from nhx.guardrails.app.llms.chat.nim import ChatNIM
+from nhx.guardrails.app.llms.completion.nim import NIM
+from nhx.guardrails.app.utils.context_utils import (
     get_request_default_headers_from_context,
     set_request_default_headers_into_context,
 )
-from nmp.guardrails.entities.values.chat import GuardrailChatCompletionRequest
-from nmp.guardrails.entities.values.check import GuardrailCheckRequest
-from nmp.guardrails.entities.values.common import GuardrailsDataInput
+from nhx.guardrails.entities.values.chat import GuardrailChatCompletionRequest
+from nhx.guardrails.entities.values.check import GuardrailCheckRequest
+from nhx.guardrails.entities.values.common import GuardrailsDataInput
 
 
 def create_mock_config():
@@ -62,23 +62,23 @@ def mock_chat_dependencies():
     """Fixture to mock common dependencies for ChatNIM tests."""
     with (
         patch(
-            "nmp.guardrails.app.utils.context_utils.get_request_default_headers_from_context",
+            "nhx.guardrails.app.utils.context_utils.get_request_default_headers_from_context",
             return_value=None,
         ) as mock_get_headers,
         patch(
-            "nmp.guardrails.app.services.configs.registry.ConfigRegistry.get",
+            "nhx.guardrails.app.services.configs.registry.ConfigRegistry.get",
             return_value=create_mock_config(),
         ),
         patch(
-            "nmp.guardrails.app.handlers.utils.get_model_config_object",
+            "nhx.guardrails.app.handlers.utils.get_model_config_object",
             return_value=MagicMock(model="test-model", engine="nim"),
         ),
         patch(
-            "nmp.guardrails.app.llms.utils.get_x_model_auth_token_from_context",
+            "nhx.guardrails.app.llms.utils.get_x_model_auth_token_from_context",
             return_value="test-auth-token",
         ),
         patch(
-            "nmp.guardrails.app.llms.utils.get_main_model_from_context",
+            "nhx.guardrails.app.llms.utils.get_main_model_from_context",
             return_value=None,
         ),
     ):
@@ -90,15 +90,15 @@ def mock_llm_dependencies():
     """Fixture to mock dependencies for NIM LLM tests."""
     with (
         patch(
-            "nmp.guardrails.app.utils.context_utils.get_request_default_headers_from_context",
+            "nhx.guardrails.app.utils.context_utils.get_request_default_headers_from_context",
             return_value=None,
         ) as mock_get_headers,
         patch(
-            "nmp.guardrails.app.llms.utils.get_main_model_from_context",
+            "nhx.guardrails.app.llms.utils.get_main_model_from_context",
             return_value=None,
         ),
         patch(
-            "nmp.guardrails.app.llms.utils.get_x_model_auth_token_from_context",
+            "nhx.guardrails.app.llms.utils.get_x_model_auth_token_from_context",
             return_value="test-auth-token",
         ),
     ):
@@ -171,13 +171,13 @@ class TestChatCustomHeaders:
         assert extracted_headers == expected_custom_headers
 
         # set_custom_headers merges in service principal headers on top of custom headers.
-        # No auth context is active in this test, so only X-NMP-Principal-Id is added
-        # (X-NMP-Principal-On-Behalf-Of is omitted when there is no user in context).
+        # No auth context is active in this test, so only X-NHX-Principal-Id is added
+        # (X-NHX-Principal-On-Behalf-Of is omitted when there is no user in context).
         request_handler.set_custom_headers()
         context_headers = get_request_default_headers_from_context()
         assert context_headers == {
             **expected_custom_headers,
-            "X-NMP-Principal-Id": "service:guardrails",
+            "X-NHX-Principal-Id": "service:guardrails",
         }
 
     @pytest.mark.asyncio
@@ -305,7 +305,7 @@ class TestCheckCustomHeaders:
         assert "Content-Type" not in context_headers
 
         # Service principal headers are injected
-        assert context_headers["X-NMP-Principal-Id"] == "service:guardrails"
+        assert context_headers["X-NHX-Principal-Id"] == "service:guardrails"
 
     def test_check_set_custom_headers_no_incoming_headers(self):
         """set_custom_headers should still inject service principal even with no custom headers."""
@@ -329,4 +329,4 @@ class TestCheckCustomHeaders:
         handler.set_custom_headers()
         context_headers = get_request_default_headers_from_context()
 
-        assert context_headers["X-NMP-Principal-Id"] == "service:guardrails"
+        assert context_headers["X-NHX-Principal-Id"] == "service:guardrails"

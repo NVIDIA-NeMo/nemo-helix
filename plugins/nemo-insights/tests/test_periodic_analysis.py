@@ -14,6 +14,21 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 import yaml
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import SpanFilterParam, SpanGroup, SpanGroupsPage
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import JobResults, ResultRef
+from nemo_helix_plugin.jobs.constants import (
+    DEFAULT_JOB_STORAGE_PATH,
+    PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
+)
+from nemo_helix_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix_plugin.nooa_model_client import ConfiguredModelRefs
+from nemo_helix_plugin.schema import PaginationData
 from nemo_insights_plugin.analyst.analyst_backend import (
     InsightsFileStore,
     LocalAnalystBackend,
@@ -46,29 +61,14 @@ from nemo_insights_plugin.sdk_resources.analysis_jobs import (
     CreateAnalysisJobRequest,
     ListAnalysisJobsQueryParams,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import SpanFilterParam, SpanGroup, SpanGroupsPage
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import JobResults, ResultRef
-from nemo_platform_plugin.jobs.constants import (
-    DEFAULT_JOB_STORAGE_PATH,
-    PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
-)
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
-from nemo_platform_plugin.nooa_model_client import ConfiguredModelRefs
-from nemo_platform_plugin.schema import PaginationData
 from pydantic import JsonValue, ValidationError
 
 _BASE_URL = "https://example.com"
 _T = TypeVar("_T")
 
 
-def _async_platform() -> AsyncNeMoPlatform:
-    return AsyncNeMoPlatform(base_url=_BASE_URL)
+def _async_platform() -> AsyncNeMoHelix:
+    return AsyncNeMoHelix(base_url=_BASE_URL)
 
 
 def _http_not_found_error() -> httpx.HTTPStatusError:
@@ -479,7 +479,7 @@ class _IntakeWithGroups:
 
 
 def _patch_intake_groups(monkeypatch: pytest.MonkeyPatch, groups: _SpanGroups) -> None:
-    def fake_client_from_platform(platform: AsyncNeMoPlatform, client_cls: type[object]) -> object:
+    def fake_client_from_platform(platform: AsyncNeMoHelix, client_cls: type[object]) -> object:
         del platform
         if client_cls is AsyncIntakeClient:
             return _IntakeWithGroups(groups)
@@ -843,7 +843,7 @@ def test_analyze_job_records_success(monkeypatch: pytest.MonkeyPatch, tmp_path: 
         lambda plugin: async_client,
     )
     statuses = _RecordingAnalysisRunStatuses()
-    with NeMoPlatform(base_url=_BASE_URL) as sdk:
+    with NeMoHelix(base_url=_BASE_URL) as sdk:
         monkeypatch.setattr(sdk.insights.analysis_run_statuses, "update", statuses.update)
         result = AnalyzeJob().run(
             _analyze_spec().model_dump(mode="json"),

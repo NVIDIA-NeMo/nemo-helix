@@ -3822,7 +3822,7 @@ components:
       description: 'Args to ``FastLanguageModel.from_pretrained``.
 
 
-        ``name`` is a NeMo Platform model entity reference (``"name"`` or
+        ``name`` is a NeMo Helix model entity reference (``"name"`` or
 
         ``"workspace/name"``). The plugin''s run orchestration resolves the
 

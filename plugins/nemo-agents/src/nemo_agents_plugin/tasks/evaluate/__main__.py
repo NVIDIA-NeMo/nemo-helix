@@ -3,8 +3,8 @@
 
 """Task entrypoint for ``agents.evaluate`` (``python -m nemo_agents_plugin.tasks.evaluate``).
 
-Delegates to :func:`nemo_platform_plugin.tasks.dispatcher.run_task` so step
-config loading, :class:`~nemo_platform_plugin.job_context.JobContext` construction,
+Delegates to :func:`nemo_helix_plugin.tasks.dispatcher.run_task` so step
+config loading, :class:`~nemo_helix_plugin.job_context.JobContext` construction,
 and signature-based DI of ``ctx`` / ``sdk`` into
 :meth:`EvaluateAgentJob.run` are all handled by the framework.  This
 module's only local responsibilities are SIGTERM handling and SDK
@@ -19,8 +19,8 @@ import sys
 from types import FrameType
 
 from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob
-from nemo_platform_plugin.sdk_provider import get_task_sdk
-from nemo_platform_plugin.tasks.dispatcher import run_task
+from nemo_helix_plugin.sdk_provider import get_task_sdk
+from nemo_helix_plugin.tasks.dispatcher import run_task
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def main() -> int:
 
     SDK construction lives here (not as an inline argument to
     ``run_task``) so failures during ``get_task_sdk`` — missing
-    ``NMP_PRINCIPAL``, malformed base URL, network errors building the
+    ``NHX_PRINCIPAL``, malformed base URL, network errors building the
     internal-auth client — collapse to the same setup-error exit code
     (``2``) the dispatcher uses for env / step-config setup failures
     rather than crashing with an uncaught exception.

@@ -17,7 +17,7 @@ import httpx
 import pytest
 from nemo_experimentalist_plugin.eval_author import traces
 from nemo_experimentalist_plugin.eval_author.agent import EvalAuthor
-from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError, raise_for_status
+from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, raise_for_status
 
 _BASE = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
@@ -366,7 +366,7 @@ async def test_unreachable_platform_names_the_base_url() -> None:
     request = httpx.Request("GET", "https://example.invalid/spans")
     client = _client(error=NemoTransportError(httpx.ConnectError("unreachable", request=request)))
 
-    with pytest.raises(traces.TraceQueryError, match="NMP_BASE_URL"):
+    with pytest.raises(traces.TraceQueryError, match="NHX_BASE_URL"):
         await traces.query_traces(client, workspace="ws")
 
 

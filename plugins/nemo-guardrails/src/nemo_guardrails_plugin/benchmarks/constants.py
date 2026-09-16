@@ -9,7 +9,7 @@ WORKSPACE = "benchmark"
 GUARDRAIL_CONFIG = "content-safety-local"
 VM_NAME = "guardrails-vm"
 # Control VirtualModel with no middleware attached. Used by the benchmark
-# harness to measure NMP+IGW latency *without* the guardrails middleware so
+# harness to measure NHX+IGW latency *without* the guardrails middleware so
 # the with-vs-without delta isolates middleware overhead.
 NO_GUARDRAILS_VM_NAME = "no-guardrails-vm"
 
@@ -30,12 +30,12 @@ CS_PROVIDER = "benchmark-content-safety-llm"
 CS_PROVIDER_URL = "http://localhost:8001"
 CS_MODEL_NAME = "nvidia/llama-3.1-nemoguard-8b-content-safety"
 
-NMP_BASE_URL = "http://localhost:8080"
-NMP_HEALTH_PATH = "/health/ready"
+NHX_BASE_URL = "http://localhost:8080"
+NHX_HEALTH_PATH = "/health/ready"
 IGW_CHAT_PATH = f"/apis/inference-gateway/v2/workspaces/{WORKSPACE}/openai/-/v1/chat/completions"
 
 # Local shim that satisfies AIPerf's pre-check and reverse-proxies chat
-# completion requests through to NMP's IGW. See
+# completion requests through to NHX's IGW. See
 # `nemo_guardrails_plugin.benchmarks.shim` for the implementation.
 AIPERF_SHIM_HOST = "127.0.0.1"
 AIPERF_SHIM_PORT = 8090

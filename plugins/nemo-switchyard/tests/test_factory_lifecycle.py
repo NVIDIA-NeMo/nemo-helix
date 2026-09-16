@@ -16,13 +16,13 @@ import copy
 from typing import Any
 
 import pytest
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
     InferenceMiddlewareContext,
     InferenceRequest,
     InferenceResponse,
 )
-from nemo_platform_plugin.inference_middleware_models import (
+from nemo_helix_plugin.inference_middleware_models import (
     MiddlewareCall,
     VirtualModel,
     VirtualModelInferenceConfig,
@@ -171,7 +171,7 @@ class TestRandomRoutingLifecycle:
         self, middleware: SwitchyardMiddleware, vm: VirtualModel
     ) -> None:
         """typed_body=None is a contract violation — raises InferenceMiddlewareError 500."""
-        from nemo_platform_plugin.inference_middleware import InferenceMiddlewareError
+        from nemo_helix_plugin.inference_middleware import InferenceMiddlewareError
 
         await middleware.on_virtual_model_upserted(vm)
         ctx = _make_ctx("ws", "rr", _make_openai_request(model="ws/rr"))
@@ -395,7 +395,7 @@ class TestResponseLifecyclePerFactory:
     ) -> None:
         """typed_body=None is a contract violation — raises InferenceMiddlewareError 500.
         IGW must always populate typed_body for recognised backends."""
-        from nemo_platform_plugin.inference_middleware import InferenceMiddlewareError
+        from nemo_helix_plugin.inference_middleware import InferenceMiddlewareError
 
         vm, config_type = vm_and_config
         await middleware.on_virtual_model_upserted(vm)
@@ -419,7 +419,7 @@ class TestResponseLifecyclePerFactory:
         """When typed_body is a TypedResponseStream but ctx.backend_format is None,
         _wrap_streaming returns None and the response passes through unchanged.
         This covers the case where IGW couldn't determine the backend format."""
-        from nmp.core.inference_gateway.api.typed_response import TypedResponseStream
+        from nhx.core.inference_gateway.api.typed_response import TypedResponseStream
 
         vm, config_type = vm_and_config
         await middleware.on_virtual_model_upserted(vm)
@@ -517,7 +517,7 @@ class TestStreamingTypedResult:
         the pipeline runs (no-op for routing), and write_back_response sets
         response.result to processed.stream with typed_body cleared to None.
         The underlying chunks remain unconsumed."""
-        from nmp.core.inference_gateway.api.typed_response import TypedResponseStream
+        from nhx.core.inference_gateway.api.typed_response import TypedResponseStream
 
         vm, config_type = vm_and_config
         await middleware.on_virtual_model_upserted(vm)
@@ -551,7 +551,7 @@ class TestStreamingTypedResult:
     ) -> None:
         """When ctx.backend_format is None, _wrap_streaming returns None and the
         response is passed through unchanged."""
-        from nmp.core.inference_gateway.api.typed_response import TypedResponseStream
+        from nhx.core.inference_gateway.api.typed_response import TypedResponseStream
 
         vm, config_type = vm_and_config
         await middleware.on_virtual_model_upserted(vm)
@@ -587,7 +587,7 @@ class TestStreamingResponseTranslation:
     ) -> None:
         """OpenAI TypedResponseStream through translate response pipeline produces
         Anthropic-format events in response.result; typed_body cleared to None."""
-        from nmp.core.inference_gateway.api.typed_response import TypedResponseStream
+        from nhx.core.inference_gateway.api.typed_response import TypedResponseStream
         from switchyard.lib.chat_request.base import ChatRequestType
         from switchyard.lib.proxy_context import CTX_ORIGINAL_FORMAT
 
@@ -891,7 +891,7 @@ class TestPhaseAuthority:
     ) -> None:
         """User listed switchyard only under request_middleware. process_response
         must refuse with 400 (and a hint pointing at response_middleware)."""
-        from nemo_platform_plugin.inference_middleware import InferenceMiddlewareError
+        from nemo_helix_plugin.inference_middleware import InferenceMiddlewareError
 
         vm = _vm_for("random_routing", phases=("request",))
         await middleware.on_virtual_model_upserted(vm)
@@ -911,7 +911,7 @@ class TestPhaseAuthority:
         """Reverse: switchyard only under response_middleware. process_request
         must refuse — running an arbitrary factory's request pipeline when the
         user didn't ask for it would be silently wrong."""
-        from nemo_platform_plugin.inference_middleware import InferenceMiddlewareError
+        from nemo_helix_plugin.inference_middleware import InferenceMiddlewareError
 
         vm = _vm_for("random_routing", phases=("response",))
         await middleware.on_virtual_model_upserted(vm)

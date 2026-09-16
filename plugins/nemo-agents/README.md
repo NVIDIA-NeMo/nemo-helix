@@ -3,7 +3,7 @@
 
 # nemo-agents plugin
 
-A NeMo Platform plugin for building, registering, deploying, and invoking agents
+A NeMo Helix plugin for building, registering, deploying, and invoking agents
 as first-class managed resources.
 
 The plugin supports two agent flows:
@@ -38,7 +38,7 @@ executes it through the selected harness.
 | Requirement | Notes |
 |---|---|
 | Python | `>=3.11,<3.15` |
-| NeMo Platform | Installed and running with an inference provider and model configured |
+| NeMo Helix | Installed and running with an inference provider and model configured |
 | Model credentials | Set the credentials required by the selected provider; the examples use `NVIDIA_API_KEY` |
 | Harness CLI and authentication | Install and authenticate the selected harness when required; for example, run `codex login` for Codex or complete the Claude CLI login flow |
 | NeMo Relay CLI | Required for Claude and Codex; install it with `script/dev-install-fabric.sh` after installing the plugin |
@@ -96,10 +96,10 @@ Set the NVIDIA API key and local Platform URL from the repository root:
 
 ```bash
 export NVIDIA_API_KEY="<your NVIDIA API key>"
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 ```
 
-Start ClickHouse for Intake, then set up NeMo Platform without deploying the
+Start ClickHouse for Intake, then set up NeMo Helix without deploying the
 default demo agent:
 
 ```bash
@@ -111,8 +111,8 @@ Confirm that the Platform is ready before continuing:
 
 ```bash
 curl -fsS --connect-timeout 2 --max-time 5 \
-  "$NMP_BASE_URL/health/ready" >/dev/null || {
-  echo "NeMo Platform is not ready at $NMP_BASE_URL"
+  "$NHX_BASE_URL/health/ready" >/dev/null || {
+  echo "NeMo Helix is not ready at $NHX_BASE_URL"
   exit 1
 }
 ```
@@ -167,21 +167,21 @@ The packaging command runs locally; Platform services are not required.
 |---|---|
 | Docker | A running Docker-compatible daemon |
 | Container dependencies | Install with `uv sync --package nemo-agents-plugin --extra container` from the repository root |
-| A released `nemo-platform` (Fabric only) | Fabric images pin the installed `nemo-platform` version and resolve it from an index. A source checkout reports a setuptools-scm version such as `0.3.0.post402.dev0+062f0ac6e8`, which no index serves, so packaging stops before building. See below. |
+| A released `nemo-helix` (Fabric only) | Fabric images pin the installed `nemo-helix` version and resolve it from an index. A source checkout reports a setuptools-scm version such as `0.3.0.post402.dev0+062f0ac6e8`, which no index serves, so packaging stops before building. See below. |
 
 ##### Packaging a Fabric agent from a source checkout
 
-`nemo agents package` renders `uv pip install "nemo-platform[nemo-agents-plugin]==<version>"`
+`nemo agents package` renders `uv pip install "nemo-helix[nemo-agents-plugin]==<version>"`
 into the Fabric image, where `<version>` is whatever is installed on the build
 host. A checkout reports something like `0.3.0.post402.dev0+062f0ac6e8`, which is
 both a developmental release and a local build identifier — neither of which a
 public index serves — so the command fails immediately:
 
 ```text
-Error: The installed nemo-platform version '0.3.0.post402.dev0+062f0ac6e8' carries
+Error: The installed nemo-helix version '0.3.0.post402.dev0+062f0ac6e8' carries
 a local build identifier and is a developmental release, so no package index serves
 it. Fabric packaging pins this exact version inside the image, so the build would
-fail while resolving it. Install a released nemo-platform to package an agent, or
+fail while resolving it. Install a released nemo-helix to package an agent, or
 set NEMO_AGENTS_ALLOW_UNPUBLISHED_CONTRACT_VERSION=1 if your index serves this
 version.
 ```
@@ -191,7 +191,7 @@ The image installs that wheel instead of resolving the pin, so the version never
 has to be one an index can serve:
 
 ```bash
-uv build --package nemo-platform --wheel --out-dir dist && \
+uv build --package nemo-helix --wheel --out-dir dist && \
 NEMO_AGENTS_WHEEL=LATEST nemo agents package \
   --agent plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml \
   --tag calculator-agent:local
@@ -295,7 +295,7 @@ through Studio or `nemo agents create`, the source of truth is the
 `{agent}-spec` fileset instead, and the `agents.package` job builds from that:
 
 ```bash
-curl -X POST "$NMP_BASE_URL/apis/agents/v2/workspaces/default/jobs/package" \
+curl -X POST "$NHX_BASE_URL/apis/agents/v2/workspaces/default/jobs/package" \
   -H 'Content-Type: application/json' \
   -d '{"spec": {"agent": "my-agent", "tag": "my-agent:1.0"}}'
 ```
@@ -303,15 +303,15 @@ curl -X POST "$NMP_BASE_URL/apis/agents/v2/workspaces/default/jobs/package" \
 Poll it like any other platform job:
 
 ```bash
-curl "$NMP_BASE_URL/apis/agents/v2/workspaces/default/jobs/package/<job>/status"
-curl "$NMP_BASE_URL/apis/agents/v2/workspaces/default/jobs/package/<job>/logs"
+curl "$NHX_BASE_URL/apis/agents/v2/workspaces/default/jobs/package/<job>/status"
+curl "$NHX_BASE_URL/apis/agents/v2/workspaces/default/jobs/package/<job>/logs"
 ```
 
 The tag to hand to `nemo agents deploy --image` is published as a
 `package_result` job result:
 
 ```bash
-curl "$NMP_BASE_URL/apis/agents/v2/workspaces/default/jobs/package/<job>/results"
+curl "$NHX_BASE_URL/apis/agents/v2/workspaces/default/jobs/package/<job>/results"
 ```
 
 ```json
@@ -450,7 +450,7 @@ Additional environment variables:
 
 | Variable | Effect |
 |---|---|
-| `NEMO_AGENTS_ALLOW_UNPUBLISHED_CONTRACT_VERSION` | Set to `1` to let Fabric packaging pin an unpublished `nemo-platform` version (a local build identifier or a `.dev` release). Use only when the build's index serves that version. Does not apply when `nemo-platform` is not installed at all. |
+| `NEMO_AGENTS_ALLOW_UNPUBLISHED_CONTRACT_VERSION` | Set to `1` to let Fabric packaging pin an unpublished `nemo-helix` version (a local build identifier or a `.dev` release). Use only when the build's index serves that version. Does not apply when `nemo-helix` is not installed at all. |
 
 There are no compatibility aliases. `NAT_VERSION` remains available only for
 NAT workflow packaging.
@@ -492,7 +492,7 @@ Agent-specific labels are:
 | Label | Platform agent value |
 |---|---|
 | `com.nemo.agent.id` | Content-addressed 12-character ID |
-| `com.nemo.agent.framework` | `nemo_platform_agent` |
+| `com.nemo.agent.framework` | `nemo_helix_agent` |
 | `com.nemo.agent.contract-version` | Release-matched packaging contract |
 
 NAT images add a NAT version label as described in the NAT-specific packaging
@@ -513,7 +513,7 @@ installation differs:
 
 | Mode | Trigger | Install strategy |
 |---|---|---|
-| Config-only | No `--pyproject` | Install the release-matched `nemo-platform[nemo-agents-plugin]` runtime |
+| Config-only | No `--pyproject` | Install the release-matched `nemo-helix[nemo-agents-plugin]` runtime |
 | Project | `--pyproject` provided | Install the release-matched runtime and the project together |
 
 The image includes the supported harness adapters and dependencies, matching
@@ -579,10 +579,10 @@ nemo agents logs --agent calculator-agent --path
 Logs are stored under the Platform user-data directory:
 
 ```text
-$NMP_DATA_DIR/agents/system/<workspace>/<deployment-name>.log
+$NHX_DATA_DIR/agents/system/<workspace>/<deployment-name>.log
 ```
 
-`$NMP_DATA_DIR` resolves first from the explicit environment variable, then
+`$NHX_DATA_DIR` resolves first from the explicit environment variable, then
 from `$XDG_DATA_HOME/nemo`, and finally to `~/.local/share/nemo`. The CLI must
 run on the same host as the Platform service to read these local files.
 
@@ -695,7 +695,7 @@ In a new terminal, export the base URL once so all subsequent `nemo` commands
 pick it up automatically:
 
 ```bash
-export NMP_BASE_URL=http://127.0.0.1:8080
+export NHX_BASE_URL=http://127.0.0.1:8080
 cd plugins/nemo-agents/
 ```
 
@@ -842,7 +842,7 @@ request, so the score varies with network latency.)
 `examples/calculator-agent/calculator-eval.yml` uses `tunable_rag_evaluator`
 with an LLM judge. The judge's `model_name` is `${NEMO_DEFAULT_MODEL}`, which
 resolves to whichever model your platform context has set as the default
-(see `nemo_platform.config.get_context().default_model`); `base_url` and
+(see `nemo_helix.config.get_context().default_model`); `base_url` and
 `api_key` are auto-injected by the platform to route through the Inference
 Gateway. Set the env var, or edit `llms.judge_llm.model_name` to pin a
 specific VirtualModel registered in your workspace, then run:
@@ -950,7 +950,7 @@ it absent so the injected gateway URL takes effect.
 
 The injected URL format:
 ```
-{NMP_BASE_URL}/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1
+{NHX_BASE_URL}/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1
 ```
 
 ---
@@ -986,6 +986,6 @@ This can cut 20--40 seconds off the first deploy.
   gateway handles the translation).
 
 - **IPv6 / localhost**: Start the platform with
-  `NMP_BASE_URL=http://127.0.0.1:8080` to ensure agent subprocess processes
+  `NHX_BASE_URL=http://127.0.0.1:8080` to ensure agent subprocess processes
   can reach the platform. Python's `httpx` resolves bare `localhost` to IPv6
   `::1` on macOS, which does not match an IPv4-only listener.

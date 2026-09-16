@@ -10,7 +10,7 @@ from typing import Any
 
 from nemo_data_designer_plugin.config import get_config
 from nemo_data_designer_plugin.retrieval.corpus import HF_TOKEN_ENVVAR
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
     EnvironmentVariable,
@@ -18,14 +18,14 @@ from nemo_platform_plugin.jobs.api_factory import (
     GPUExecutionProviderSpec,
     PlatformJobStep,
 )
-from nemo_platform_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-from nemo_platform_plugin.jobs.image import get_qualified_image
-from nmp.customization_common.schemas.file_io import DownloadItem, FileIOTaskConfig, FileSetRef
+from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.image import get_qualified_image
+from nhx.customization_common.schemas.file_io import DownloadItem, FileIOTaskConfig, FileSetRef
 from pydantic import BaseModel
 
 _ENTRYPOINT = ["python", "-m"]
-RETRIEVAL_MINE_MODULE = "nmp.automodel.tasks.retrieval_mine"
-_FILE_IO_MODULE = "nmp.customization_common.tasks.file_io"
+RETRIEVAL_MINE_MODULE = "nhx.automodel.tasks.retrieval_mine"
+_FILE_IO_MODULE = "nhx.customization_common.tasks.file_io"
 _FILE_IO_ARGS = ["--service-source", "automodel", "--service-name", "customizer"]
 
 
@@ -55,7 +55,7 @@ def cpu_retrieval_step(
     spec: BaseModel,
     profile: str | None,
     module_args: list[str] | None = None,
-    image: str = "nmp-cpu-tasks",
+    image: str = "nhx-cpu-tasks",
     hf_token_secret: str | None = None,
 ) -> PlatformJobStep:
     return PlatformJobStep(
@@ -86,7 +86,7 @@ def gpu_retrieval_step(name: str, module: str, spec: BaseModel, profile: str | N
             profile=profile or get_config().job_executor_profile,
             provider="gpu",
             container=ContainerSpec(
-                image=get_qualified_image("nmp-automodel-training"),
+                image=get_qualified_image("nhx-automodel-training"),
                 entrypoint=_ENTRYPOINT,
                 command=[module],
             ),
@@ -130,7 +130,7 @@ async def model_download_step(
         config,
         profile,
         module_args=_FILE_IO_ARGS,
-        image="nmp-customizer-tasks",
+        image="nhx-customizer-tasks",
     )
 
 

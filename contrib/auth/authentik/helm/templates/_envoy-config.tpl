@@ -3,17 +3,17 @@ SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES.
 SPDX-License-Identifier: Apache-2.0
 */}}
 
-{{- define "nemo-platform-authentik.envoyConfig" -}}
-{{- $authentik := required "nemo-platform.authentikEnvoy is required" .Values.authentikEnvoy -}}
+{{- define "nemo-helix-authentik.envoyConfig" -}}
+{{- $authentik := required "nemo-helix.authentikEnvoy is required" .Values.authentikEnvoy -}}
 {{- $tlsMountPath := "" -}}
 {{- range .Values.envoyProxy.extraVolumeMounts -}}
 {{- if eq (index . "name") "workload-token-tls" -}}
 {{- $tlsMountPath = index . "mountPath" -}}
 {{- end -}}
 {{- end -}}
-{{- $tlsMountPath = required "nemo-platform.envoyProxy.extraVolumeMounts must include workload-token-tls" $tlsMountPath -}}
-{{- $apiServiceName := include "nmp-api.api-servicename" . -}}
-{{- $spoofHeaders := concat .Values.envoyProxy.trustedHeaders (list "x-nmp-authorized" "x-nmp-scopes") | uniq -}}
+{{- $tlsMountPath = required "nemo-helix.envoyProxy.extraVolumeMounts must include workload-token-tls" $tlsMountPath -}}
+{{- $apiServiceName := include "nhx-api.api-servicename" . -}}
+{{- $spoofHeaders := concat .Values.envoyProxy.trustedHeaders (list "x-nhx-authorized" "x-nhx-scopes") | uniq -}}
 admin:
   address:
     socket_address:
@@ -49,7 +49,7 @@ static_resources:
                       domains: ["*"]
                       routes:
                         - match:
-                            prefix: "/.well-known/nemo-platform/"
+                            prefix: "/.well-known/nemo-helix/"
                           route:
                             cluster: nemo
                           typed_per_filter_config:
@@ -260,13 +260,13 @@ static_resources:
                         authorization_response:
                           allowed_upstream_headers:
                             patterns:
-                              - exact: x-nmp-principal-id
-                              - exact: x-nmp-principal-email
-                              - exact: x-nmp-principal-groups
-                              - exact: x-nmp-principal-on-behalf-of
-                              - exact: x-nmp-principal-on-behalf-of-email
-                              - exact: x-nmp-principal-on-behalf-of-groups
-                              - exact: x-nmp-scopes
+                              - exact: x-nhx-principal-id
+                              - exact: x-nhx-principal-email
+                              - exact: x-nhx-principal-groups
+                              - exact: x-nhx-principal-on-behalf-of
+                              - exact: x-nhx-principal-on-behalf-of-email
+                              - exact: x-nhx-principal-on-behalf-of-groups
+                              - exact: x-nhx-scopes
                           allowed_client_headers:
                             patterns:
                               - exact: content-type

@@ -18,14 +18,14 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import BadRequestError
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.storage_config import HuggingfaceStorageConfig, NGCStorageConfig
-from nemo_platform_plugin.files.types import CreateFilesetRequest, ListFilesQueryParams
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import BadRequestError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig, NGCStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest, ListFilesQueryParams
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import PlatformSecretCreateRequest
 
 # ---------------------------------------------------------------------------
 # NGC configuration
@@ -82,7 +82,7 @@ def hf_token() -> str:
 
 
 @pytest.fixture
-def hf_secret(sdk: NeMoPlatform, workspace: str, hf_token: str) -> Iterator[str]:
+def hf_secret(sdk: NeMoHelix, workspace: str, hf_token: str) -> Iterator[str]:
     """Create a secret containing the HF token, cleaned up after test."""
     secret_name = f"e2e-hf-tok-{uuid.uuid4().hex[:8]}"
     secrets = client_from_platform(sdk, SecretsClient)
@@ -128,7 +128,7 @@ def hf_fileset(files_client: FilesClient, workspace: str, hf_secret: str) -> Ite
 class TestNGCFileset:
     """Tests for NGC-backed filesets."""
 
-    def test_list_files(self, sdk: NeMoPlatform, workspace: str, ngc_fileset: str):
+    def test_list_files(self, sdk: NeMoHelix, workspace: str, ngc_fileset: str):
         """Listing an NGC-backed fileset returns files with paths and sizes."""
         files = client_from_platform(sdk, FilesClient).list_files(name=ngc_fileset, workspace=workspace).data().data
         assert len(files) > 0, "NGC fileset should contain at least one file"
@@ -137,7 +137,7 @@ class TestNGCFileset:
             assert f.path, "Each file should have a path"
             assert f.size > 0, "Each file should have a non-zero size"
 
-    def test_download_file(self, sdk: NeMoPlatform, workspace: str, ngc_fileset: str):
+    def test_download_file(self, sdk: NeMoHelix, workspace: str, ngc_fileset: str):
         """Downloading the smallest file from an NGC fileset succeeds and size matches."""
         files = client_from_platform(sdk, FilesClient).list_files(name=ngc_fileset, workspace=workspace).data().data
         assert len(files) > 0
@@ -159,7 +159,7 @@ class TestNGCFileset:
             assert local_path.exists()
             assert local_path.stat().st_size == target.size
 
-    def test_cache_status(self, sdk: NeMoPlatform, workspace: str, ngc_fileset: str):
+    def test_cache_status(self, sdk: NeMoHelix, workspace: str, ngc_fileset: str):
         """NGC-backed files report a cacheable status."""
         files = (
             client_from_platform(sdk, FilesClient)
@@ -190,7 +190,7 @@ class TestNGCFileset:
             ),
             pytest.param(
                 None,
-                {"org": "nvidian", "team": "nemo-llm", "target": "nemo-platform-quickstart"},
+                {"org": "nvidian", "team": "nemo-llm", "target": "nemo-helix-quickstart"},
                 "Error creating NGC storage backend:",
                 id="wrong-org",
             ),
@@ -204,7 +204,7 @@ class TestNGCFileset:
     )
     def test_create_error(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         files_client: FilesClient,
         workspace: str,
         ngc_api_key: str,
@@ -263,7 +263,7 @@ class TestNGCFileset:
 class TestHuggingFaceFileset:
     """Tests for Hugging Face-backed filesets."""
 
-    def test_list_files(self, sdk: NeMoPlatform, workspace: str, hf_fileset: str):
+    def test_list_files(self, sdk: NeMoHelix, workspace: str, hf_fileset: str):
         """Listing an HF-backed fileset returns files with paths and sizes."""
         files = client_from_platform(sdk, FilesClient).list_files(name=hf_fileset, workspace=workspace).data().data
         assert len(files) > 0, "HF fileset should contain at least one file"
@@ -272,7 +272,7 @@ class TestHuggingFaceFileset:
             assert f.path, "Each file should have a path"
             assert f.size > 0, "Each file should have a non-zero size"
 
-    def test_download_file(self, sdk: NeMoPlatform, workspace: str, hf_fileset: str):
+    def test_download_file(self, sdk: NeMoHelix, workspace: str, hf_fileset: str):
         """Downloading the smallest file from an HF fileset succeeds and size matches."""
         files = client_from_platform(sdk, FilesClient).list_files(name=hf_fileset, workspace=workspace).data().data
         assert len(files) > 0
@@ -294,7 +294,7 @@ class TestHuggingFaceFileset:
             assert local_path.exists()
             assert local_path.stat().st_size == target.size
 
-    def test_cache_status(self, sdk: NeMoPlatform, workspace: str, hf_fileset: str):
+    def test_cache_status(self, sdk: NeMoHelix, workspace: str, hf_fileset: str):
         """HF-backed files report a cacheable status."""
         files = (
             client_from_platform(sdk, FilesClient)

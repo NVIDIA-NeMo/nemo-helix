@@ -34,21 +34,21 @@ from nemo_agents_plugin.entities import (
     Agent,
     ethos_fileset_name,
 )
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.job_results import ResultRef
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.exceptions import (
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.job_results import ResultRef
+from nemo_helix_plugin.jobs.api_factory import PlatformJobSpec
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.exceptions import (
     PlatformJobCompilationError,
     PlatformJobDependencyUnavailableError,
 )
-from nemo_platform_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
+from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
@@ -251,7 +251,7 @@ class PackageAgentJob(NemoJob):
         if entity_client is not None:
             return cast(NemoEntitiesClient, entity_client)
         if async_sdk is not None:
-            return NemoEntitiesClient(client_from_platform(cast(AsyncNeMoPlatform, async_sdk), AsyncEntitiesClient))
+            return NemoEntitiesClient(client_from_platform(cast(AsyncNeMoHelix, async_sdk), AsyncEntitiesClient))
         raise PlatformJobCompilationError(
             "Packaging requires a platform client to resolve the agent entity, but none was injected."
         )
@@ -270,7 +270,7 @@ class PackageAgentJob(NemoJob):
     ) -> PlatformJobSpec:
         """Single-step PlatformJobSpec running ``nemo_agents_plugin.tasks.package`` on the host."""
         del entity_client, job_name, options
-        from nemo_platform_plugin.jobs.api_factory import PlatformJobStep, SubprocessExecutionProviderSpec
+        from nemo_helix_plugin.jobs.api_factory import PlatformJobStep, SubprocessExecutionProviderSpec
 
         assert isinstance(spec, PackageAgentSpec), (
             f"PackageAgentJob.compile received unexpected spec type: {type(spec).__name__}"
@@ -319,7 +319,7 @@ class PackageAgentJob(NemoJob):
             )
         try:
             profiles = (
-                await client_from_platform(cast(AsyncNeMoPlatform, async_sdk), AsyncJobsClient).get_execution_profiles()
+                await client_from_platform(cast(AsyncNeMoHelix, async_sdk), AsyncJobsClient).get_execution_profiles()
             ).data()
         except Exception as exc:
             raise PlatformJobDependencyUnavailableError(
@@ -343,7 +343,7 @@ class PackageAgentJob(NemoJob):
         config: dict,
         *,
         ctx: JobContext | None = None,
-        async_sdk: AsyncNeMoPlatform | None = None,
+        async_sdk: AsyncNeMoHelix | None = None,
     ) -> dict:
         """Stage the agent's spec fileset into a temp build context, build, and optionally push."""
         from nemo_agents_plugin.container.builder import build_fabric_agent_image, resolve_image_id
@@ -421,7 +421,7 @@ class PackageAgentJob(NemoJob):
         return ctx.results.save(PACKAGE_RESULT_NAME, path)
 
     @staticmethod
-    async def _stage(cfg: PackageAgentSpec, build_dir: Path, async_sdk: AsyncNeMoPlatform | None) -> None:
+    async def _stage(cfg: PackageAgentSpec, build_dir: Path, async_sdk: AsyncNeMoHelix | None) -> None:
         """Download the ``{agent}-ethos`` fileset into *build_dir*.
 
         Must run before ``agent.yaml`` is written — staging clears the tree first.

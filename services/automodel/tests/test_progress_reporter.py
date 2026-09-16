@@ -6,15 +6,15 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.customization_common.service.context import NMPJobContext
-from nmp.customization_common.tasks.file_io_progress_reporter import JobsServiceProgressReporter
+from nhx.common.jobs.schemas import PlatformJobStatus
+from nhx.customization_common.service.context import NHXJobContext
+from nhx.customization_common.tasks.file_io_progress_reporter import JobsServiceProgressReporter
 
 
 def test_progress_reporter_calls_sdk_create_or_update() -> None:
     sdk = MagicMock()
     mock_jobs = MagicMock()
-    ctx = NMPJobContext(
+    ctx = NHXJobContext(
         workspace="ws-a",
         job_id="job-1",
         attempt_id="attempt-0",
@@ -28,7 +28,7 @@ def test_progress_reporter_calls_sdk_create_or_update() -> None:
     reporter = JobsServiceProgressReporter(sdk, ctx.workspace, ctx.job_id, ctx.step, ctx.normalized_task)
 
     with patch(
-        "nmp.customization_common.tasks.file_io_progress_reporter.client_from_platform",
+        "nhx.customization_common.tasks.file_io_progress_reporter.client_from_platform",
         return_value=mock_jobs,
     ):
         reporter.update_progress(PlatformJobStatus.ACTIVE, status_details={"phase": "training"})

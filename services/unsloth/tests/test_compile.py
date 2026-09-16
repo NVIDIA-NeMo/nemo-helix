@@ -5,7 +5,7 @@
 
 We check the delegation contract:
 ``compile.platform_job_config_compiler`` forwards to
-:mod:`nmp.unsloth.app.jobs.compiler` with the args the platform
+:mod:`nhx.unsloth.app.jobs.compiler` with the args the platform
 schedule passes through.
 """
 
@@ -14,8 +14,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from nmp.unsloth.compile import platform_job_config_compiler
-from nmp.unsloth.schemas import (
+from nhx.unsloth.compile import platform_job_config_compiler
+from nhx.unsloth.schemas import (
     DatasetSpec,
     LoRAParams,
     ModelLoadSpec,
@@ -46,7 +46,7 @@ async def test_compile_delegates_to_app_jobs_compiler() -> None:
     sdk = object()
 
     sentinel = object()
-    target = "nmp.unsloth.compile._compile_canonical"
+    target = "nhx.unsloth.compile._compile_canonical"
     with patch(target, new=AsyncMock(return_value=sentinel)) as mock:
         result = await platform_job_config_compiler(
             workspace="default",

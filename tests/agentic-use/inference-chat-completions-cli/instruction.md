@@ -3,9 +3,9 @@
 
 # Chat Completions via Inference Gateway (CLI)
 
-You have access to the `nmp` CLI for NeMo Platform operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nhx` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
-The `nmp` CLI is available at `/app/.venv/bin/nmp`. The CLI connects to the local NeMo Platform API server at http://localhost:8080 by default.
+The `nhx` CLI is available at `/app/.venv/bin/nhx`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.
 
 ## Context
 
@@ -13,7 +13,7 @@ A mock inference model (`default/chat-model`) has been pre-configured in this en
 
 ## Task
 
-Using the `nmp` CLI, complete the following:
+Using the `nhx` CLI, complete the following:
 
 1. Confirm the mock model is available by listing models or providers in the default workspace
 2. Make a non-streaming chat completion request to `default/chat-model` with a user message (e.g., "What is the capital of France?")

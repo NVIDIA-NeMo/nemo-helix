@@ -3,7 +3,7 @@
 
 # NeMo Auditor Plugin
 
-A NeMo Platform plugin which provides Auditor, an LLM
+A NeMo Helix plugin which provides Auditor, an LLM
 vulnerability scanner service powered by [Garak](https://https://github.com/NVIDIA/garak)
 
 ## CLI quickstart
@@ -58,12 +58,12 @@ Every CLI verb has a matching Python SDK method on `client.auditor`, plus
 service.
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 from nemo_auditor.entities import (
     AuditSystemData, AuditRunData, AuditPluginsData, AuditReportData,
 )
 
-client = NeMoPlatform()
+client = NeMoHelix()
 
 # Persist a config
 cfg = client.auditor.configs.create(

@@ -13,7 +13,7 @@ import pytest
 try:
     from fastapi.testclient import TestClient
     from nemo_scaled_evals_plugin.service import ScaledEvalsService
-    from nmp.platform_runner.plugin_adapter import NemoServiceAdapter
+    from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
     from scaled_evals.api.db import get_db
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)

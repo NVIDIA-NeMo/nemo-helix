@@ -1,0 +1,114 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "nemo-helix-ext"
+description = "A package that contains modules that extend the Stainless' generated nemo-helix SDK. This includes high-level interfaces, CLI, quickstart functionality."
+license = "Apache-2.0"
+authors = [{name = "NVIDIA Corporation"}]
+dependencies = [
+    "nemo-helix-sdk",
+    "nemo-helix-plugin",
+    "typer>=0.20.0",
+    "rich>=13.7.1",
+    "prompt_toolkit>=3.0.0",
+    "requests>=2.31.0",
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0.0",
+    "docker>=7.0.0",
+    "ngcsdk>=4.8.2",
+    "nvidia-ml-py>=13.0.0",
+    "psutil>=5.9.0",
+    "httpx>=0.23.0,<1",
+]
+requires-python = ">=3.11,<3.15"
+readme = "README.md"
+classifiers = [
+  "Typing :: Typed",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Operating System :: OS Independent",
+  "Operating System :: POSIX",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: Microsoft :: Windows",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "License :: OSI Approved :: Apache Software License"
+]
+version = "0.0.0"
+
+[project.urls]
+Homepage = "https://docs.nvidia.com/nemo-helix"
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "respx>=0.20.0",
+    "mypy>=1.0.0",
+    "ruff>=0.1.0",
+    "nhx-testing",
+]
+
+[project.scripts]
+# NOTE: this is to make it possible to call the CLI before vendoring into the SDK package
+_nemo = "nemo_helix_ext.cli.app:cli"
+_nhx = "nemo_helix_ext.cli.app:cli"
+
+# The platform's own bundled skills are registered through the same
+# ``nemo.skills`` discovery mechanism that third-party plugins use, so the
+# skills registry has a single load path.
+[project.entry-points."nemo.skills"]
+platform = "nemo_helix_ext.skills:skills_dir"
+
+[tool.uv.sources]
+nhx-testing = { workspace = true }
+nemo-helix-sdk = { workspace = true }
+
+
+[build-system]
+requires = ["hatchling==1.26.3"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = [
+  "src/*"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nemo_helix_ext"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"../../docs" = "nemo_helix_ext/cli/docs"
+
+
+[tool.vendor-package]
+package = "nemo_helix_ext"
+package_root = "packages/nemo_helix_ext"
+sdk_include_mode = "source-package"
+# Globs are evaluated per top-level module (e.g. `skills/`, `cli/`, `quickstart/`).
+# `**/*.md` recursively includes SKILL.md plus any companion markdown files
+# skills ship under `resources/` (e.g. notes, sub-docs, prompts). Add further
+# extension globs here as new companion file types are needed. Runtime JSON
+# assets live under `references/`; skill `tests.json` manifests remain
+# source-only. We avoid `**/*` because dev environments leave
+# `__pycache__/*.pyc` in source modules, which the vendor tool doesn't filter.
+included_paths = ["**/*.py", "**/*.md", "**/*.yaml", "**/*.yml", "**/references/**/*.json"]
+replace_client_inits_from = "client/enhanced.py"
+vendor_tests = true
+tests_path = "tests"
+# Include all test files; source is canonical—only edit under packages/nemo_helix_ext, then re-vendor.
+tests_included_paths = ["**/*.py"]
+scripts = [
+    { name = "nemo", value = "nemo_helix.cli.app:cli" },
+    { name = "nhx", value = "nemo_helix.cli.app:cli" }
+]
+# Mirror the source package's ``nemo.skills`` entry point in the vendored SDK
+# package so the SDK-installed ``nemo`` CLI also discovers the platform's own
+# bundled skills via the standard discovery mechanism.
+[[tool.vendor-package.entrypoints]]
+group = "nemo.skills"
+entrypoints = [{ name = "platform", value = "nemo_helix.skills:skills_dir" }]

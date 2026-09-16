@@ -22,15 +22,15 @@ workload_identity:
   expected_groups:
     - nemo-workloads
 workload_contract:
-  audience: nemo-platform
+  audience: nemo-helix
   principal_claim: sub
   groups_claim: groups
   groups_format: comma_string
   token_env_vars:
-    - NMP_WORKLOAD_IDENTITY_TOKEN_FILE
+    - NHX_WORKLOAD_IDENTITY_TOKEN_FILE
   forwarded_headers:
-    principal_id: X-NMP-Principal-Id
-    principal_groups: X-NMP-Principal-Groups
+    principal_id: X-NHX-Principal-Id
+    principal_groups: X-NHX-Principal-Groups
 token_acquisition:
   token_endpoint: https://127.0.0.1:18080/application/o/token/
   # E2E TEST HARNESS ONLY. This password grant gives auth-idp contract tests a
@@ -39,14 +39,14 @@ token_acquisition:
   # production deployments.
   e2e_setup_password_grant:
     grant_type: password
-    client_id: nemo-platform
-    client_secret: nemo-platform-secret-dev
+    client_id: nemo-helix
+    client_secret: nemo-helix-secret-dev
     username: nemo-setup
     password: nemo-setup-token-secret-dev
     scope: "openid email groups"
   workload_provider_password_grant:
     grant_type: password
-    client_id: nemo-platform-workload
+    client_id: nemo-helix-workload
     username: svc-nemo
     password_env_var: AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD
     scope: "openid email groups"

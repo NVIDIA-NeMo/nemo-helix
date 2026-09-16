@@ -32,10 +32,10 @@ from nemo_evaluator_sdk.values import Model
 from nemo_evaluator_sdk.values.agents import AgentBase
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.results import EvaluationResult
-from nemo_platform_plugin.client.errors import NemoClientError, NotFoundError
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import EvaluationPatchRequest, EvaluationResponse
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix_plugin.client.errors import NemoClientError, NotFoundError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import EvaluationPatchRequest, EvaluationResponse
+from nemo_helix_plugin.jobs.schemas import PlatformJobStatus
 from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)

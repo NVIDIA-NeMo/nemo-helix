@@ -10570,7 +10570,7 @@ export declare const useStudioDataViewState: <FilterType = Record<string, unknow
 //#endregion
 //#region src/api/filterOperators.d.ts
 /**
- * Mongo-style comparison operators accepted by NeMo Platform's unified filter
+ * Mongo-style comparison operators accepted by NeMo Helix's unified filter
  * syntax (e.g. `{ name: { $like: '%foo%' } }`, `{ created_at: { $gte, $lte } }`).
  *
  * The OpenAPI-generated SDK types model filter fields as bare scalars

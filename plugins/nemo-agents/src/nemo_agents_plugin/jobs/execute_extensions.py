@@ -10,7 +10,7 @@ from importlib.metadata import entry_points
 from typing import Any, ClassVar, Protocol
 
 from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.job_context import JobContext
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 EXECUTE_AGENT_EXTENSION_ENTRY_POINT_GROUP = "nemo.agents.execute_extensions"
@@ -96,7 +96,7 @@ def _load_execute_agent_extension(kind: str) -> type[ExecuteAgentExtension]:
         raise ValueError(f"Unknown agents.execute extension {kind!r}.")
 
     # A kind may legitimately be declared by more than one installed
-    # distribution: the aggregate ``nemo-platform`` wheel re-declares every
+    # distribution: the aggregate ``nemo-helix`` wheel re-declares every
     # bundled plugin's entry points, so a standard install sees each of them
     # twice — once from the plugin, once from the aggregate. What must be
     # unique is the *implementation*, not the number of declarations, so

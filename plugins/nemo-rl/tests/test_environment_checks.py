@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from nemo_rl_plugin.environment import check_environment_package
-from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
+from nhx.customization_common.service.platform_client import AsyncCustomizationPlatformClients
 
 ADAPTER_MANIFEST = b"""
 format: adapter-wheels-v1

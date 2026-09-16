@@ -5,7 +5,7 @@
 name: deploy-sandbox
 description: >-
   Deploys an already-built NAT agent as a policy-governed OpenShell sandbox on a
-  local NeMo Platform, so the same agent image gets Landlock filesystem isolation
+  local NeMo Helix, so the same agent image gets Landlock filesystem isolation
   and a pure default-deny network policy (the sandbox reaches nothing on the
   network directly; its model calls are brokered by the OpenShell gateway through
   the inference.local route) for free. Covers the proven wire-inference.local ->
@@ -30,13 +30,13 @@ not-for:
   - nemo-setup (use to install and start the platform first)
   - nemo-status (use for a read-only health dashboard)
 compatibility: >-
-  nemo-platform >= 0.1.0; requires the nemo-deployments plugin installed with the
+  nemo-helix >= 0.1.0; requires the nemo-deployments plugin installed with the
   openshell extra (`openshell>=0.0.92` from PyPI); a running OpenShell docker-driver
   gateway on :17670 (not :8080, which the platform owns) whose JWT signing keys were
-  generated once with `generate-certs`; a NeMo Platform reachable from inside a sandbox
+  generated once with `generate-certs`; a NeMo Helix reachable from inside a sandbox
   at the sandbox network's gateway address (`--host 0.0.0.0`) with the `openshell-local`
   executor loaded via
-  `--config packages/nmp_platform/config/local.yaml`; the gateway's `inference.local`
+  `--config packages/nhx_platform/config/local.yaml`; the gateway's `inference.local`
   route wired to the platform Inference Gateway (`openshell provider create` +
   `openshell inference set`); the agents plugin for the packaging step. Docker-driver
   specific (sandboxes reach the platform at `host.openshell.internal:8080`). Linux
@@ -72,7 +72,7 @@ Commands below assume `nemo` and `openshell` are on your PATH. In a repo checkou
 
 1. **OpenShell gateway reachable on `:17670`, with its JWT signing keys generated.**
    `:17670` is OpenShell's documented docker default. It must NOT be `:8080`: that
-   belongs to the NeMo platform (the gateway container image and the CLI's `openshell
+   belongs to the NeMo Helix (the gateway container image and the CLI's `openshell
    gateway add http://127.0.0.1:8080` example both steer onto `:8080`, the collision
    trap). Docker-driver sandboxes REQUIRE the gateway to mint sandbox JWTs, so you must
    generate the signing keys once before the gateway starts (see `gateway.toml`'s
@@ -102,16 +102,16 @@ Commands below assume `nemo` and `openshell` are on your PATH. In a repo checkou
    Tear the gateway down after the demo with `docker compose -f
    plugins/nemo-deployments/examples/openshell/docker-compose.yml down`.
 
-2. **NeMo Platform up, listening on all interfaces, started with the executor config.** The
-   `openshell-local` executor lives in `packages/nmp_platform/config/local.yaml`,
+2. **NeMo Helix up, listening on all interfaces, started with the executor config.** The
+   `openshell-local` executor lives in `packages/nhx_platform/config/local.yaml`,
    which is NOT the config `nemo services run` loads by default (that bundled default
    has no `deployments:` openshell executor), so it must be passed with `--config`.
    Start (or restart) it as:
 
    ```bash
-   export NMP_BASE_URL=http://localhost:8080
+   export NHX_BASE_URL=http://localhost:8080
    nemo services run --host 0.0.0.0 --port 8080 \
-     --config packages/nmp_platform/config/local.yaml
+     --config packages/nhx_platform/config/local.yaml
    curl -sf http://localhost:8080/health/ready      # {"status":"ready"}
    ```
 
@@ -302,7 +302,7 @@ The most common root causes are: the `MODEL` is not served on your Inference Gat
 The security punchline. Show the sandbox can reach nothing on the network directly:
 
 ```bash
-# the sandbox name is nmp-<hash>; derive it from the endpoint URL (or read `openshell sandbox list`)
+# the sandbox name is nhx-<hash>; derive it from the endpoint URL (or read `openshell sandbox list`)
 SBX=$(curl -sf "$BASE/deployments/igw-agent" | jq -r '.endpoints[0].url' | sed -E 's#^https?://##; s#--.*##')
 openshell sandbox exec --name "$SBX" -- curl -sS -m 5 https://example.com   # BLOCKED (policy default-deny)
 # a NONZERO exit from the inner curl is the PASS
@@ -343,12 +343,12 @@ docker compose -f plugins/nemo-deployments/examples/openshell/docker-compose.yml
 | `openshell gateway list` / `sandbox list` cannot reach the gateway | Gateway not running | Start the docker-driver gateway (Pre-flight step 1: `generate-certs` once, then `docker compose up -d`); re-check |
 | Gateway logs about missing JWT signing keys | `generate-certs` never run | Run the one-time `generate-certs` command (Pre-flight step 1), then restart the gateway |
 | `health/ready` not `ready` | Platform down | Route to `nemo-setup`, return when ready |
-| Deploy `FAILED` with an unknown/unregistered executor error | Platform started without the executor config | Restart with `nemo services run --host 0.0.0.0 --port 8080 --config packages/nmp_platform/config/local.yaml` (the bundled default config has no openshell executor) |
+| Deploy `FAILED` with an unknown/unregistered executor error | Platform started without the executor config | Restart with `nemo services run --host 0.0.0.0 --port 8080 --config packages/nhx_platform/config/local.yaml` (the bundled default config has no openshell executor) |
 | `openshell gateway list` shows the endpoint on `:8080` | Gateway collides with the platform port | Recreate the gateway on `:17670` (docker driver, plaintext) per Pre-flight step 1; `:8080` belongs to the platform |
 | Deploy stuck `PENDING`/`STARTING` | Image missing sandbox user, or serve command wrong | `openshell sandbox list`; inspect the sandbox; confirm Step 2 used `--sandbox-runtime openshell` |
 | Deploy `FAILED` | Policy or gateway rejected the sandbox, the serve launcher exited non-zero, or the serve process died after launch | Check platform logs (`nemo services logs -n 100`) and the deployments reconciler output; the FAILED status message carries the launcher exit detail or the serve log tail. `nemo deployments logs <name>` returns the workload's own log |
-| Invoke returns `502 Service endpoint is not reachable` | The deployment is not `READY`, or `nat serve` died after coming up | Wait for `READY` before invoking; if a `READY` deployment still 502s, read the serve log (`nemo deployments logs <name>`, or `openshell sandbox exec --name <nmp-hash> -- cat /tmp/nemo-serve.log`). A bad config path, a leftover `general.telemetry` block, or an unresolvable `model_name` surfaces as `FAILED`, not a 502 |
-| Invoke returns 503 `inference service unavailable` (in the response or the serve log) | The `inference.local` route resolved, but the gateway's upstream hop to the platform failed | Almost always a platform bound to `127.0.0.1`; restart it with `--host 0.0.0.0`. Confirm the address the sandbox actually dials with `openshell sandbox exec --name <nmp-hash> -- cat /etc/hosts` (look for `host.openshell.internal`) and check the platform answers there (`curl -sf http://<that-ip>:8080/health/ready`). A clean `openshell inference set` does NOT rule this out: it validates from the host |
+| Invoke returns `502 Service endpoint is not reachable` | The deployment is not `READY`, or `nat serve` died after coming up | Wait for `READY` before invoking; if a `READY` deployment still 502s, read the serve log (`nemo deployments logs <name>`, or `openshell sandbox exec --name <nhx-hash> -- cat /tmp/nemo-serve.log`). A bad config path, a leftover `general.telemetry` block, or an unresolvable `model_name` surfaces as `FAILED`, not a 502 |
+| Invoke returns 503 `inference service unavailable` (in the response or the serve log) | The `inference.local` route resolved, but the gateway's upstream hop to the platform failed | Almost always a platform bound to `127.0.0.1`; restart it with `--host 0.0.0.0`. Confirm the address the sandbox actually dials with `openshell sandbox exec --name <nhx-hash> -- cat /etc/hosts` (look for `host.openshell.internal`) and check the platform answers there (`curl -sf http://<that-ip>:8080/health/ready`). A clean `openshell inference set` does NOT rule this out: it validates from the host |
 | Invoke returns empty/error `value`, or serve log shows connection refused to `inference.local` | `inference.local` route not wired, or model misbehaved | Confirm `openshell inference get` shows the `nemo-igw` provider + your model; re-run Step 1's `provider create` / `inference set`; try a gpt-4o-mini-class model |
 | `example.com` reachable in Step 7 | Egress policy not applied | Confirm executor is `openshell-local` and the generated default-deny policy is attached to the sandbox |
 | `ModuleNotFoundError: openshell` at deploy | workspace extra not installed | `uv sync --package nemo-deployments-plugin --extra openshell` |
@@ -358,7 +358,7 @@ Do not claim the deployment succeeded until Step 6 prints a non-empty `value`.
 
 ## Alternate: direct-egress (agent -> host.docker.internal:8080)
 
-The shipped design routes model traffic through `inference.local` and grants the sandbox no direct egress. If you deliberately want the older direct-egress path instead (the agent calls the Inference Gateway itself at `host.docker.internal:8080`), you must **edit** `packages/nmp_platform/config/local.yaml` to set `platform_egress` on the executor (it is NOT the shipped default):
+The shipped design routes model traffic through `inference.local` and grants the sandbox no direct egress. If you deliberately want the older direct-egress path instead (the agent calls the Inference Gateway itself at `host.docker.internal:8080`), you must **edit** `packages/nhx_platform/config/local.yaml` to set `platform_egress` on the executor (it is NOT the shipped default):
 
 ```yaml
 config:

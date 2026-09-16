@@ -572,11 +572,11 @@ components:
         \           AnonymizerConfig \u2014 replace/rewrite mode + detection params.\n\
         \  data:             AnonymizerInputSpec \u2014 HTTP(S) URL or fileset source\
         \ + text/id columns.\n  model_configs:    DD ``ModelConfig`` list. ``provider``\
-        \ on each entry must\n                    reference a NeMo Platform inference\
+        \ on each entry must\n                    reference a NeMo Helix inference\
         \ provider name (optionally\n                    ``workspace/provider``).\
         \ Optional on the request model for\n                    compatibility, but\
         \ required by plugin preview/run execution\n                    so requests\
-        \ route through NeMo Platform Inference Gateway.\n  selected_models:  Optional\
+        \ route through NeMo Helix Inference Gateway.\n  selected_models:  Optional\
         \ role->alias overrides. Omitted roles fall back\n                    to the\
         \ upstream library YAML defaults."
     AnonymizerStepConfig:

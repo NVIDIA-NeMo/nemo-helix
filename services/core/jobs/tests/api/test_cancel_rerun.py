@@ -3,9 +3,9 @@
 
 import pytest
 from httpx import AsyncClient
-from nmp.core.jobs.api.v2.jobs.schemas import CreatePlatformJobRequest
-from nmp.core.jobs.app.schemas import PlatformJobSpec, PlatformJobStepSpec
-from nmp.core.jobs.app.test_helpers import TestConstants
+from nhx.core.jobs.api.v2.jobs.schemas import CreatePlatformJobRequest
+from nhx.core.jobs.app.schemas import PlatformJobSpec, PlatformJobStepSpec
+from nhx.core.jobs.app.test_helpers import TestConstants
 
 
 @pytest.mark.asyncio

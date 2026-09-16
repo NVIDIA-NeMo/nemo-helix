@@ -6,14 +6,14 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nmp.common.entities.client import ListResponse, PaginationInfo
-from nmp.common.secrets.encryption import (
+from nhx.common.entities.client import ListResponse, PaginationInfo
+from nhx.common.secrets.encryption import (
     SecretKeyEncryptor,
     envelope_decrypt,
     envelope_encrypt,
 )
-from nmp.core.secrets.api.v2.admin.routines import rotate_encryption_keys
-from nmp.core.secrets.entities import PlatformSecret
+from nhx.core.secrets.api.v2.admin.routines import rotate_encryption_keys
+from nhx.core.secrets.entities import PlatformSecret
 
 
 def make_secret(
@@ -135,7 +135,7 @@ async def test_rotate_encryption_keys_happy_path(mocker):
     entity_client.update = AsyncMock()
 
     mocker.patch(
-        "nmp.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
+        "nhx.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
         return_value=v1_encryptor,
     )
 
@@ -183,7 +183,7 @@ async def test_rotate_encryption_keys_idempotent_partial_migration(mocker):
     entity_client.update = AsyncMock()
 
     mocker.patch(
-        "nmp.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
+        "nhx.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
         return_value=v1_encryptor,
     )
 
@@ -232,7 +232,7 @@ async def test_rotate_encryption_keys_rollback_to_v1(mocker):
     entity_client.update = AsyncMock()
 
     mocker.patch(
-        "nmp.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
+        "nhx.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
         return_value=v2_encryptor,
     )
 
@@ -328,7 +328,7 @@ async def test_rotate_encryption_keys_multiple_old_providers(mocker):
         raise ValueError(f"Unknown provider: {name}")
 
     mocker.patch(
-        "nmp.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
+        "nhx.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
         side_effect=get_encryptor_by_name,
     )
 
@@ -383,7 +383,7 @@ async def test_rotate_encryption_keys_partial_rollback_after_partial_rollforward
     entity_client.update = AsyncMock()
 
     mocker.patch(
-        "nmp.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
+        "nhx.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
         return_value=v2_encryptor,
     )
 
@@ -454,7 +454,7 @@ async def test_rotate_encryption_keys_with_pagination_large_dataset(mocker):
     entity_client.update = AsyncMock()
 
     mocker.patch(
-        "nmp.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
+        "nhx.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
         return_value=v1_encryptor,
     )
 

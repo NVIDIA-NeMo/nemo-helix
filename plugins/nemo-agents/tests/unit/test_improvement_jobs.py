@@ -8,11 +8,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.jobs.exceptions import PlatformJobCompilationError
 
 
 def test_jobs_discovered_via_entry_points() -> None:
-    from nemo_platform_plugin.discovery import discover_jobs
+    from nemo_helix_plugin.discovery import discover_jobs
 
     jobs = discover_jobs()
     assert "agents.evaluate-suite" in jobs
@@ -90,7 +90,7 @@ def test_optimize_skills_config_validation() -> None:
 @pytest.mark.asyncio
 async def test_evaluate_suite_compile_produces_single_subprocess_step() -> None:
     from nemo_agents_plugin.jobs.evaluate_suite import EvaluateSuiteConfig, EvaluateSuiteJob
-    from nemo_platform_plugin.jobs.constants import (
+    from nemo_helix_plugin.jobs.constants import (
         DEFAULT_JOB_STORAGE_PATH,
         PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
     )
@@ -204,7 +204,7 @@ async def test_evaluate_suite_compile_injects_anthropic_secret_when_set() -> Non
 @pytest.mark.asyncio
 async def test_optimize_skills_compile_produces_single_subprocess_step() -> None:
     from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsConfig, OptimizeSkillsJob
-    from nemo_platform_plugin.jobs.constants import (
+    from nemo_helix_plugin.jobs.constants import (
         DEFAULT_JOB_STORAGE_PATH,
         PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
     )

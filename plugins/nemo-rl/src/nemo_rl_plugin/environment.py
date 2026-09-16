@@ -11,11 +11,11 @@ checked here instead, so the submitter gets it back from the API call.
 
 from __future__ import annotations
 
-from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
-from nemo_platform_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
-from nmp.customization_common.schemas.file_io import FileSetRef
-from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
-from nmp.rl.tasks.environment.validate import (
+from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
+from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
+from nhx.customization_common.schemas.file_io import FileSetRef
+from nhx.customization_common.service.platform_client import AsyncCustomizationPlatformClients
+from nhx.rl.tasks.environment.validate import (
     MANIFEST_FILENAME,
     EnvironmentPackageValidationError,
     parse_manifest,

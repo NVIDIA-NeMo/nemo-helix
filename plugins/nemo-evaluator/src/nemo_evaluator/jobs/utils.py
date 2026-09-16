@@ -10,40 +10,40 @@ from typing import TypeVar, overload
 
 import httpx
 from nemo_evaluator_sdk.execution.metric_execution import run_sync
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.sdk import AsyncNeMoHelix, NeMoHelix
 
 T = TypeVar("T")
 AsyncClientT = TypeVar("AsyncClientT", bound=AsyncNemoClient)
 
 
 @overload
-def as_nemo_client(sdk: NemoClient | NeMoPlatform) -> NemoClient: ...
+def as_nemo_client(sdk: NemoClient | NeMoHelix) -> NemoClient: ...
 @overload
 def as_nemo_client(sdk: None) -> None: ...
 
 
-def as_nemo_client(sdk: NemoClient | NeMoPlatform | None) -> NemoClient | None:
+def as_nemo_client(sdk: NemoClient | NeMoHelix | None) -> NemoClient | None:
     """Return *sdk* as a typed :class:`NemoClient`, adapting a generated SDK handle if needed.
 
-    Task containers inject typed clients and the local CLI injects generated ``NeMoPlatform``
+    Task containers inject typed clients and the local CLI injects generated ``NeMoHelix``
     handles, so a job ``run`` receives either.
     """
-    if isinstance(sdk, NeMoPlatform):
+    if isinstance(sdk, NeMoHelix):
         return client_from_platform(sdk, NemoClient)
     return sdk
 
 
 @overload
-def as_async_nemo_client(async_sdk: AsyncNemoClient | AsyncNeMoPlatform) -> AsyncNemoClient: ...
+def as_async_nemo_client(async_sdk: AsyncNemoClient | AsyncNeMoHelix) -> AsyncNemoClient: ...
 @overload
 def as_async_nemo_client(async_sdk: None) -> None: ...
 
 
-def as_async_nemo_client(async_sdk: AsyncNemoClient | AsyncNeMoPlatform | None) -> AsyncNemoClient | None:
+def as_async_nemo_client(async_sdk: AsyncNemoClient | AsyncNeMoHelix | None) -> AsyncNemoClient | None:
     """Async counterpart of :func:`as_nemo_client`."""
-    if isinstance(async_sdk, AsyncNeMoPlatform):
+    if isinstance(async_sdk, AsyncNeMoHelix):
         return client_from_platform(async_sdk, AsyncNemoClient)
     return async_sdk
 

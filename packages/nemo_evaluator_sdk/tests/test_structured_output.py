@@ -317,8 +317,8 @@ async def test_probe_schema_default_is_not_shared_between_calls():
         captured.append(copy.deepcopy(request))
         # Simulate any downstream code mutating the request payload it was handed.
         schema = request["response_format"]["json_schema"]["schema"]
-        schema["properties"]["__nmp_probe_score"]["type"] = "POISONED"
-        return {"choices": [{"message": {"content": '{"__nmp_probe_score": 1}'}}]}
+        schema["properties"]["__nhx_probe_score"]["type"] = "POISONED"
+        return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
 
     # use_cache=False: this exercises schema isolation between probes, not the endpoint cache.
     first = await detect_structured_output_mode(
@@ -330,8 +330,8 @@ async def test_probe_schema_default_is_not_shared_between_calls():
 
     assert first == StructuredOutputMode.OPENAI_RESPONSE_FORMAT
     assert second == StructuredOutputMode.OPENAI_RESPONSE_FORMAT
-    assert _default_probe_schema()["properties"]["__nmp_probe_score"]["type"] == "integer"
-    assert captured[1]["response_format"]["json_schema"]["schema"]["properties"]["__nmp_probe_score"] == {
+    assert _default_probe_schema()["properties"]["__nhx_probe_score"]["type"] == "integer"
+    assert captured[1]["response_format"]["json_schema"]["schema"]["properties"]["__nhx_probe_score"] == {
         "type": "integer"
     }
 
@@ -342,7 +342,7 @@ async def test_detection_is_cached_per_endpoint_within_a_session():
 
     async def inference_fn(model, request, max_retries, **kwargs):
         calls.append(request)
-        return {"choices": [{"message": {"content": '{"__nmp_probe_score": 1}'}}]}
+        return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
 
     async with begin_evaluation_session():
         first = await detect_structured_output_mode(model=_test_model(), inference_fn=inference_fn, api_key=None)
@@ -359,7 +359,7 @@ async def test_detection_is_not_cached_outside_a_session():
 
     async def inference_fn(model, request, max_retries, **kwargs):
         calls.append(request)
-        return {"choices": [{"message": {"content": '{"__nmp_probe_score": 1}'}}]}
+        return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
 
     await detect_structured_output_mode(model=_test_model(), inference_fn=inference_fn, api_key=None)
     await detect_structured_output_mode(model=_test_model(), inference_fn=inference_fn, api_key=None)
@@ -380,7 +380,7 @@ async def test_unsupported_is_cached_within_a_run_but_re_probed_by_the_next():
         attempts["n"] += 1
         if attempts["n"] <= 3:  # first run: every candidate fails transiently
             raise RuntimeError("Error code: 429 - rate limited")
-        return {"choices": [{"message": {"content": '{"__nmp_probe_score": 1}'}}]}
+        return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
 
     async with begin_evaluation_session():
         first = await detect_structured_output_mode(model=_test_model(), inference_fn=flaky_inference_fn, api_key=None)
@@ -443,7 +443,7 @@ async def test_concurrent_detections_in_one_session_probe_the_endpoint_once():
     async def slow_inference_fn(model, request, max_retries, **kwargs):
         calls.append(request)
         await asyncio.sleep(0.01)  # widen the window for a stampede
-        return {"choices": [{"message": {"content": '{"__nmp_probe_score": 1}'}}]}
+        return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
 
     async with begin_evaluation_session():
         modes = await asyncio.gather(
@@ -468,7 +468,7 @@ async def test_nested_sessions_are_re_entrant_and_share_one_cache():
 
     async def inference_fn(model, request, max_retries, **kwargs):
         calls.append(request)
-        return {"choices": [{"message": {"content": '{"__nmp_probe_score": 1}'}}]}
+        return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
 
     async with begin_evaluation_session():
         await detect_structured_output_mode(model=_test_model(), inference_fn=inference_fn, api_key=None)
@@ -486,7 +486,7 @@ async def test_separate_runs_do_not_share_a_cache():
 
     async def inference_fn(model, request, max_retries, **kwargs):
         calls.append(request)
-        return {"choices": [{"message": {"content": '{"__nmp_probe_score": 1}'}}]}
+        return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
 
     async with begin_evaluation_session():
         await detect_structured_output_mode(model=_test_model(), inference_fn=inference_fn, api_key=None)
@@ -510,7 +510,7 @@ async def test_concurrent_runs_get_isolated_caches():
         async def inference_fn(model, request, max_retries, **kwargs):
             calls.append(tag)
             await asyncio.sleep(0.01)
-            return {"choices": [{"message": {"content": '{"__nmp_probe_score": 1}'}}]}
+            return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
 
         async with begin_evaluation_session():
             return await detect_structured_output_mode(model=_test_model(), inference_fn=inference_fn, api_key=None)
@@ -548,7 +548,7 @@ async def test_probe_budget_accommodates_a_reasoning_model():
 
     async def inference_fn(model, request, max_retries, **kwargs):
         seen.append(request["max_tokens"])
-        return {"choices": [{"message": {"content": '{"__nmp_probe_score": 1}'}}]}
+        return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
 
     await detect_structured_output_mode(model=_test_model(), inference_fn=inference_fn, api_key=None)
 

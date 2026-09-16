@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Auditor plugin entity definitions stored in the NeMo Platform entity store."""
+"""Auditor plugin entity definitions stored in the NeMo Helix entity store."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from nemo_platform_plugin.entity import NemoEntity
+from nemo_helix_plugin.entity import NemoEntity
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 

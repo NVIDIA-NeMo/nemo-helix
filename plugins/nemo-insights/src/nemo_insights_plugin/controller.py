@@ -12,6 +12,17 @@ from datetime import datetime, timezone
 from typing import ClassVar, TypeVar
 from zoneinfo import ZoneInfo
 
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.config import get_nemo_config
+from nemo_helix_plugin.controller import NemoController
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import (
+    NemoEntitiesClient,
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+)
+from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
 from nemo_insights_plugin.analyst.analyst_backend import make_analyst_backend
 from nemo_insights_plugin.config import InsightsConfig
 from nemo_insights_plugin.entities import AnalysisConfig, AnalysisRunStatus
@@ -23,17 +34,6 @@ from nemo_insights_plugin.sdk_resources.analysis_jobs import (
     ListAnalysisJobsQueryParams,
 )
 from nemo_insights_plugin.types import AnalyzeSpec
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.config import get_nemo_config
-from nemo_platform_plugin.controller import NemoController
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.entity_client import (
-    NemoEntitiesClient,
-    NemoEntityConflictError,
-    NemoEntityNotFoundError,
-)
-from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
 
 logger = logging.getLogger(__name__)
 
@@ -70,13 +70,13 @@ class InsightsAnalysisController(NemoController):
     dependencies: ClassVar[list[str]] = ["entities", "jobs"]
 
     def __init__(self) -> None:
-        self._sdk: AsyncNeMoPlatform | None = None
+        self._sdk: AsyncNeMoHelix | None = None
         self._entities: NemoEntitiesClient | None = None
         self._jobs: AsyncAnalysisJobsClient | None = None
         self._config: InsightsConfig | None = None
 
     @property
-    def sdk(self) -> AsyncNeMoPlatform:
+    def sdk(self) -> AsyncNeMoHelix:
         return _require(self._sdk, "sdk")
 
     @property

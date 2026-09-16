@@ -5,7 +5,7 @@
 # Local compose image for the Phase-1 scaled-evals plugin: the platform API and
 # both scaled-evals workers run from this one image.
 #
-# This is NOT the platform's shipping image. `docker/Dockerfile.nmp-api` builds
+# This is NOT the platform's shipping image. `docker/Dockerfile.nhx-api` builds
 # that one through bake, from base images that live in internal registries, and
 # it installs the `functional-services` group — which does not include this
 # ephemeral plugin. Here we install the workspace scoped to the plugin instead
@@ -126,30 +126,30 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 COPY . /app
 
-# nmp-platform-runner is what serves the plugin (`nemo services run`); it is not
+# nhx-platform-runner is what serves the plugin (`nemo services run`); it is not
 # in the plugin's dependency closure, since the runner loads plugins rather than
 # the other way round. It costs 3 extra packages.
 #
-# nemo-platform-ext owns the implementation imported by the `nemo` SDK wrapper.
+# nemo-helix-ext owns the implementation imported by the `nemo` SDK wrapper.
 # The SDK aliases it at runtime but does not declare it as a dependency because
 # release wheels vendor the package instead. Source-checkout images need it.
 #
-# nmp-entities is not needed by this plugin at all: the runner's startup banner
-# imports `nmp.core.entities.config` unconditionally to print the database it is
-# using, but does not declare nmp-entities as a dependency. A full `uv sync`
+# nhx-entities is not needed by this plugin at all: the runner's startup banner
+# imports `nhx.core.entities.config` unconditionally to print the database it is
+# using, but does not declare nhx-entities as a dependency. A full `uv sync`
 # hides that, so it only shows up in a scoped install like this one. 28 packages.
 RUN --mount=type=cache,target=/root/.cache/uv \
     apt-get update -qq \
     && apt-get install -y -qq --no-install-recommends build-essential \
     && uv sync --frozen --no-dev \
         --package nemo-scaled-evals-plugin \
-        --package nmp-platform-runner \
-        --package nemo-platform-ext \
-        --package nmp-auth \
-        --package nmp-entities \
-        --package nmp-files \
-        --package nmp-jobs \
-        --package nmp-secrets \
+        --package nhx-platform-runner \
+        --package nemo-helix-ext \
+        --package nhx-auth \
+        --package nhx-entities \
+        --package nhx-files \
+        --package nhx-jobs \
+        --package nhx-secrets \
     && apt-get purge -y build-essential \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*

@@ -435,7 +435,7 @@ async def run_benchmark(args: argparse.Namespace) -> Path:
 
     _configure_models(benchmark_config.models)
     from nemo_experimentalist_plugin.experimentalist.run import run_experimentalist  # noqa: PLC0415
-    from nemo_platform_plugin.nooa_model_client import configured_model_refs  # noqa: PLC0415
+    from nemo_helix_plugin.nooa_model_client import configured_model_refs  # noqa: PLC0415
 
     optimizer_model_refs = configured_model_refs()
 

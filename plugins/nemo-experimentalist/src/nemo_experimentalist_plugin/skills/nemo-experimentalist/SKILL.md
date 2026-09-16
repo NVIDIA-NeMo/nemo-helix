@@ -84,13 +84,13 @@ Before running `$NEMO` or relying on a local platform, complete the
 repository-root `SETUP.md`. Then set the Platform URL and verify readiness:
 
 ```bash
-export NMP_BASE_URL=http://localhost:8080
-curl -sf "$NMP_BASE_URL/health/ready"
+export NHX_BASE_URL=http://localhost:8080
+curl -sf "$NHX_BASE_URL/health/ready"
 ```
 
 Stop if setup is incomplete or the readiness check fails.
 
-The Experimentalist needs a running NeMo Platform, an LLM endpoint for its
+The Experimentalist needs a running NeMo Helix, an LLM endpoint for its
 optimizer agents, and a model for each tier. For the NVIDIA Inference Gateway,
 set the inference key and model tiers:
 
@@ -133,7 +133,7 @@ mode, use dedicated, revocable, spending-limited keys, and retain only the
 network access the agent, Harbor, and model endpoint need. Clone mode protects
 the host checkout from writes but does **not** make ignored files secret: they
 remain readable in the sandbox. Follow the plugin's [recommended laptop
-isolation](https://github.com/NVIDIA-NeMo/nemo-platform/blob/main/plugins/nemo-experimentalist/README.md#recommended-laptop-isolation)
+isolation](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/nemo-experimentalist/README.md#recommended-laptop-isolation)
 when running locally.
 
 From the repository root, create a clone-mode sandbox and run the
@@ -144,7 +144,7 @@ last line:
 repo="$(git rev-parse --show-toplevel)"
 sbx create --clone --name nemo-experimentalist shell "$repo"
 sbx exec --workdir "$repo" \
-  --env UV_PROJECT_ENVIRONMENT=/home/agent/.venvs/nemo-platform \
+  --env UV_PROJECT_ENVIRONMENT=/home/agent/.venvs/nemo-helix \
   --env INFERENCE_API_KEY \
   --env NEMO_EXPERIMENTALIST_API_BASE \
   --env NEMO_EXPERIMENTALIST_API_KEY \
@@ -207,7 +207,7 @@ from the current directory.
 | `--train-dataset` / `--validation-dataset` | Separate local Harbor datasets or registry references used to measure improvement. | Yes, unless the profile supplies both. |
 | `--task-template` | A directory containing one Harbor task template (`task.toml`, with placeholder values). In Insight-driven mode, Eval Author copies and fills it for representative failing traces to create the targeted evaluation suite. | Required in Insight-driven mode unless the profile supplies it. |
 | `--config` | YAML or JSON **mapping** that validates as the Experimentalist run configuration: top-level run limits plus optional `source`, `storage`, `goal_config`, `coder`, `analyzer`, `proposer`, `evaluator`, and `eval_author` sections. It does not configure model endpoints or model tiers. | No; profile or defaults apply. |
-| `--workspace` / `--base-url` | NeMo workspace and platform URL. | Workspace defaults to the profile or `default`; base URL uses `NMP_BASE_URL` or localhost. |
+| `--workspace` / `--base-url` | NeMo workspace and platform URL. | Workspace defaults to the profile or `default`; base URL uses `NHX_BASE_URL` or localhost. |
 | `--experiment-dir` / `--output` / `--experiments-output` / `-o` | Experiment directory that receives `eval-and-optimize/`: the resolved source agent, generated candidates, per-trial results, analysis, `run.json` state, and `OPTIMIZATION.md` summary. | No; default is `<profile-dir>/.nemo-optimizer/experiments/<timestamp>-<uuid>` with a profile, otherwise `./tmp/<timestamp>-<uuid>`. |
 | `--framework-skills` | Additional framework-skill directories for the optimization agents. | No; may be repeated. |
 
@@ -223,7 +223,7 @@ Start with the deliberately small configuration below. The top-level options con
 candidate counts; `source` controls checkout behavior; `storage` controls
 candidate branches and PR/MR publication; `outcome_evaluator_config` controls trial
 execution; and `eval_author` controls Insight-driven evaluation authoring. See
-the [example-agent walkthrough](https://github.com/NVIDIA-NeMo/nemo-platform/blob/main/docs/get-started/example-agent.mdx)
+the [example-agent walkthrough](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/docs/get-started/example-agent.mdx)
 for a complete worked optimizer configuration and run.
 
 To inspect the complete run schema—including nested options and their defaults—run

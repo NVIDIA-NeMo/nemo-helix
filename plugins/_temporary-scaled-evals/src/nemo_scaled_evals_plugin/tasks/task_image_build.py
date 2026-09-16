@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import sys
 
-from nemo_platform_plugin.sdk_provider import get_async_task_sdk, get_task_sdk
-from nemo_platform_plugin.tasks.dispatcher import run_task
+from nemo_helix_plugin.sdk_provider import get_async_task_sdk, get_task_sdk
+from nemo_helix_plugin.tasks.dispatcher import run_task
 from nemo_scaled_evals_plugin.jobs.task_image_build import TaskImageBuildJob
 
 

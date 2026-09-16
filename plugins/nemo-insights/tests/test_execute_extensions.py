@@ -11,10 +11,10 @@ from typing import Any
 import pytest
 from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult
 from nemo_agents_plugin.jobs.execute_extensions import ExecuteAgentAfterInvokeContext
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
 from nemo_insights_plugin.execute_extensions import InsightsAnalysisExtension
 from nemo_insights_plugin.jobs.analyze import REPORT_RESULT_NAME
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
 
 
 @pytest.fixture

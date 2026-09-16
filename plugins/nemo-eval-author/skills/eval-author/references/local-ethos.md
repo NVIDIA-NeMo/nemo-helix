@@ -118,7 +118,7 @@ content review, return the exact path to the calling flow. No upload step follow
 
 If writing fails, preserve the confirmed answers in the conversation or the
 existing writable `.eval-author/intent-notes.md`, identify the specific local
-error, and provide the [Ethos documentation](https://docs.nvidia.com/nemo-platform/documentation/agents/optimize-agents/ethos)
+error, and provide the [Ethos documentation](https://docs.nvidia.com/nemo-helix/documentation/agents/optimize-agents/ethos)
 along with the complete proposed content when available. The user can save it
 in the repo and provide its path. Explain that Eval Author uses the document
 locally even if the linked platform documentation describes other integrations.

@@ -9,7 +9,7 @@ Add users to workspaces, assign roles, and control who can access your resources
 
 <Note>
 
-The SDK examples on this page use `NeMoPlatform()` with no arguments so that the client reads your active CLI context (set by `nemo auth login`). That is the right pattern for authorization workflows: you act as your logged-in identity and pass the workspace explicitly in each API call. For the standard local initialization pattern, see [CLI and SDK initialization](/documentation/get-started#nemo-setup).
+The SDK examples on this page use `NeMoHelix()` with no arguments so that the client reads your active CLI context (set by `nemo auth login`). That is the right pattern for authorization workflows: you act as your logged-in identity and pass the workspace explicitly in each API call. For the standard local initialization pattern, see [CLI and SDK initialization](/documentation/get-started#nemo-setup).
 
 </Note>
 ## Creating Workspaces
@@ -33,9 +33,9 @@ nemo config set --workspace ml-team
 <Tab title="Python SDK">
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform()
+client = NeMoHelix()
 
 workspace = client.workspaces.create(
     name="ml-team", description="Machine learning team workspace"
@@ -87,9 +87,9 @@ nemo workspaces members create --principal alice@example.com --roles Editor --wo
 <Tab title="Python SDK">
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform()
+client = NeMoHelix()
 
 # Add a member with Editor role
 client.workspaces.members.create(
@@ -155,9 +155,9 @@ nemo workspaces members list --workspace ml-team
 <Tab title="Python SDK">
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform()
+client = NeMoHelix()
 
 members = client.workspaces.members.list(workspace="ml-team")
 
@@ -184,9 +184,9 @@ nemo workspaces members update bob@example.com --roles Editor --workspace ml-tea
 <Tab title="Python SDK">
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform()
+client = NeMoHelix()
 
 # Promote a Viewer to Editor
 client.workspaces.members.update(
@@ -213,9 +213,9 @@ nemo workspaces members delete alice@example.com --workspace ml-team
 <Tab title="Python SDK">
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform()
+client = NeMoHelix()
 
 client.workspaces.members.delete(workspace="ml-team", principal_id="alice@example.com")
 ```
@@ -260,9 +260,9 @@ nemo workspaces members create --principal "*" --roles Viewer --workspace shared
 <Tab title="Python SDK">
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform()
+client = NeMoHelix()
 
 client.workspaces.members.create(workspace="shared-models", principal="*", roles=["Viewer"])
 ```
@@ -286,9 +286,9 @@ nemo workspaces members create --principal "*" --roles Editor --workspace shared
 <Tab title="Python SDK">
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform()
+client = NeMoHelix()
 
 client.workspaces.members.create(workspace="shared-datasets", principal="*", roles=["Editor"])
 ```
@@ -312,9 +312,9 @@ nemo workspaces members delete "*" --workspace ml-team
 <Tab title="Python SDK">
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform()
+client = NeMoHelix()
 
 client.workspaces.members.delete(workspace="ml-team", principal_id="*")
 ```
@@ -359,9 +359,9 @@ nemo workspaces members delete alice@example.com --workspace ml-team
 <Tab title="Python SDK">
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform()
+client = NeMoHelix()
 
 # Add another admin first
 client.workspaces.members.create(
@@ -410,9 +410,9 @@ nemo workspaces delete ml-team
 <Tab title="Python SDK">
 
 ```python
-from nemo_platform import NeMoPlatform, ConflictError
+from nemo_helix import NeMoHelix, ConflictError
 
-client = NeMoPlatform()
+client = NeMoHelix()
 
 try:
     client.workspaces.delete("ml-team")

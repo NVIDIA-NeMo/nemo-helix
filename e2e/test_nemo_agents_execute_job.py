@@ -12,13 +12,13 @@ from typing import Any
 
 import pytest
 from nemo_agents_plugin.entities import NEMO_AGENTS_SPEC_CONFIG_FORMAT
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest
-from nemo_platform_plugin.jobs.client import JobsClient
-from nmp.testing import MockProviderResponse, add_mock_provider
-from nmp.testing.e2e import wait_for_platform_job
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.jobs.client import JobsClient
+from nhx.testing import MockProviderResponse, add_mock_provider
+from nhx.testing.e2e import wait_for_platform_job
 
 from e2e.agents_deploy_helpers import (
     TEST_AGENT_RESPONSE,
@@ -33,7 +33,7 @@ pytestmark = [pytest.mark.timeout(600)]
 # A well-formed reference that can never resolve: ``.invalid`` is reserved by
 # RFC 2606 and guaranteed not to exist, so the node fails the pull immediately
 # on NXDOMAIN rather than burning the test timeout on registry retries.
-_UNRESOLVABLE_IMAGE = "registry.invalid/nmp-e2e/no-such-image:missing"
+_UNRESOLVABLE_IMAGE = "registry.invalid/nhx-e2e/no-such-image:missing"
 
 # Evidence that the failure was about the image. The first three are the
 # waiting-state reasons the Kubernetes backend maps to a job error
@@ -49,7 +49,7 @@ _IMAGE_FAILURE_MARKERS = (
 )
 
 
-def _job_diagnostic_message(sdk: NeMoPlatform, job: Any, workspace: str, prefix: str) -> str:
+def _job_diagnostic_message(sdk: NeMoHelix, job: Any, workspace: str, prefix: str) -> str:
     parts = [prefix]
     if job.status_details:
         parts.append(f"Status details: {job.status_details}")
@@ -67,11 +67,11 @@ def _job_diagnostic_message(sdk: NeMoPlatform, job: Any, workspace: str, prefix:
     return "\n".join(parts)
 
 
-def _list_execute_job_results(sdk: NeMoPlatform, workspace: str, job_name: str) -> dict[str, Any]:
+def _list_execute_job_results(sdk: NeMoHelix, workspace: str, job_name: str) -> dict[str, Any]:
     return dict(sdk.agents.jobs.execute.list_results(job_name, workspace=workspace))
 
 
-def _download_execute_job_result(sdk: NeMoPlatform, workspace: str, job_name: str, result_name: str) -> bytes:
+def _download_execute_job_result(sdk: NeMoHelix, workspace: str, job_name: str, result_name: str) -> bytes:
     return sdk.agents.jobs.execute.download_result(result_name, job=job_name, workspace=workspace)
 
 
@@ -166,7 +166,7 @@ def _mock_backed_workspace_agent_config(agent_name: str, model_name: str) -> dic
     return config
 
 
-def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoPlatform, workspace: str) -> None:
+def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoHelix, workspace: str) -> None:
     agent_name = unique_name("execute-agent")
     job_name = unique_name("execute-job")
     model_name = unique_name("invoke-model")
@@ -278,7 +278,7 @@ def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoPlatform, w
 
 
 def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     workspace: str,
 ) -> None:
     agent_name = unique_name("execute-agent")
@@ -387,7 +387,7 @@ def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs
 
 
 @pytest.fixture
-def container_backed_execute(sdk: NeMoPlatform) -> None:
+def container_backed_execute(sdk: NeMoHelix) -> None:
     """Skip unless ``agents.execute`` actually runs in a container.
 
     The jobs API rewrites a ``cpu``/``default`` container step into a host
@@ -395,7 +395,7 @@ def container_backed_execute(sdk: NeMoPlatform) -> None:
     (``translate_cpu_container_steps_to_subprocess``), and that rewrite drops
     ``container.image`` on the floor. Every assertion about which image a job
     ran on is vacuous in that mode, so gate on the precise condition rather
-    than on the harness shape: ``container_only`` only proves ``NMP_BASE_URL``
+    than on the harness shape: ``container_only`` only proves ``NHX_BASE_URL``
     is set, which an already-running local (subprocess) platform also satisfies.
     """
     profiles = client_from_platform(sdk, JobsClient).list_execution_profiles()
@@ -403,7 +403,7 @@ def container_backed_execute(sdk: NeMoPlatform) -> None:
         pytest.skip("cpu/default is diverted to the subprocess backend, which discards container.image")
 
 
-def _register_mock_backed_agent(sdk: NeMoPlatform, workspace: str, *, agent_name: str, model_name: str) -> None:
+def _register_mock_backed_agent(sdk: NeMoHelix, workspace: str, *, agent_name: str, model_name: str) -> None:
     """Register a deterministic agent whose single model is served by the mock provider."""
     add_mock_provider(
         sdk,
@@ -426,7 +426,7 @@ def _register_mock_backed_agent(sdk: NeMoPlatform, workspace: str, *, agent_name
 
 @pytest.mark.container_only
 def test_execute_job_fails_when_the_requested_image_cannot_be_pulled(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     workspace: str,
     container_backed_execute: None,
 ) -> None:

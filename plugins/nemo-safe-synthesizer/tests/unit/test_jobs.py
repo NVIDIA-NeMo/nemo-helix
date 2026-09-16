@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
-from nemo_platform_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
+from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
+from nemo_helix_plugin.jobs.exceptions import PlatformJobCompilationError
 from nemo_safe_synthesizer.config.replace_pii import ClassifyConfig, Globals, PiiReplacerConfig, StepDefinition
 from nemo_safe_synthesizer_plugin.job_config import SafeSynthesizerJobConfig as PluginJobConfig
 from nemo_safe_synthesizer_plugin.job_config import SafeSynthesizerParameters
@@ -35,8 +35,8 @@ def _patch_jobs_client(jobs_client: MagicMock, files_client: MagicMock):
     ``client_from_platform(sdk, AsyncJobsClient).get_job_result(...)`` — return the
     matching mock for each.
     """
-    from nemo_platform_plugin.files.client import AsyncFilesClient
-    from nemo_platform_plugin.jobs.client import AsyncJobsClient
+    from nemo_helix_plugin.files.client import AsyncFilesClient
+    from nemo_helix_plugin.jobs.client import AsyncJobsClient
 
     def _dispatch(_sdk, client_cls):
         if client_cls is AsyncJobsClient:
@@ -67,11 +67,11 @@ def mock_sdk(mock_files_client):
 
 @pytest.fixture(autouse=True)
 def _patch_client_from_platform(mock_files_client):
-    from nemo_platform_plugin.models.client import AsyncModelsClient
+    from nemo_helix_plugin.models.client import AsyncModelsClient
 
     models_client = MagicMock()
     models_client.get_provider_route_openai_url = MagicMock(
-        return_value="http://nmp-host/apis/inference-gateway/v2/workspaces/default/provider/my-nim/-/v1"
+        return_value="http://nhx-host/apis/inference-gateway/v2/workspaces/default/provider/my-nim/-/v1"
     )
 
     def _dispatch(_sdk, client_cls):
@@ -157,7 +157,7 @@ async def test_job_config_compiler_with_classify_provider(mock_sdk):
 
 @pytest.mark.asyncio
 async def test_job_config_compiler_uses_safe_synthesizer_tasks_image(mock_sdk, monkeypatch):
-    monkeypatch.setattr(generate.plugin_config, "container_image", "safe-synthesizer-tasks")
+    monkeypatch.setattr(generate.plugin_config, "container_image", "nhx-safe-synthesizer-tasks")
     monkeypatch.setattr(generate.plugin_config, "container_image_ref", None)
     monkeypatch.setattr(generate, "get_qualified_image", lambda name: f"registry.example.com/nemo/{name}:test-tag")
 
@@ -165,7 +165,7 @@ async def test_job_config_compiler_uses_safe_synthesizer_tasks_image(mock_sdk, m
 
     step = next(iter(result["steps"]))
     assert step["executor"]["provider"] == "gpu"
-    assert step["executor"]["container"]["image"] == "registry.example.com/nemo/safe-synthesizer-tasks:test-tag"
+    assert step["executor"]["container"]["image"] == "registry.example.com/nemo/nhx-safe-synthesizer-tasks:test-tag"
     assert step["executor"]["container"]["entrypoint"] == [
         "python",
         "-m",
@@ -191,7 +191,7 @@ async def test_job_config_compiler_rejects_submit_options(mock_sdk):
 
 @pytest.mark.asyncio
 async def test_job_config_compiler_uses_image_ref_override(mock_sdk, monkeypatch):
-    monkeypatch.setattr(generate.plugin_config, "container_image_ref", "safe-synthesizer-tasks:local")
+    monkeypatch.setattr(generate.plugin_config, "container_image_ref", "nhx-safe-synthesizer-tasks:local")
     get_qualified_image = MagicMock(side_effect=AssertionError("image ref overrides should not be qualified"))
     monkeypatch.setattr(generate, "get_qualified_image", get_qualified_image)
 
@@ -199,7 +199,7 @@ async def test_job_config_compiler_uses_image_ref_override(mock_sdk, monkeypatch
 
     step = next(iter(result["steps"]))
     assert step["executor"]["provider"] == "gpu"
-    assert step["executor"]["container"]["image"] == "safe-synthesizer-tasks:local"
+    assert step["executor"]["container"]["image"] == "nhx-safe-synthesizer-tasks:local"
     get_qualified_image.assert_not_called()
 
 

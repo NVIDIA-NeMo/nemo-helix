@@ -16,18 +16,18 @@ secrets the user can access are allowed in the job spec.
 from typing import Generator
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.jobs.client import JobsClient
-from nemo_platform_plugin.jobs.types import CreatePlatformJobRequest
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
-from nmp.core.files.service import FilesService
-from nmp.core.jobs.service import JobsService
-from nmp.core.secrets.service import SecretsService
-from nmp.testing import (
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.types import CreatePlatformJobRequest
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import PlatformSecretCreateRequest
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+from nhx.core.files.service import FilesService
+from nhx.core.jobs.service import JobsService
+from nhx.core.secrets.service import SecretsService
+from nhx.testing import (
     TEST_ADMIN_EMAIL,
     as_user,
     create_test_client,
@@ -39,7 +39,7 @@ from pydantic import SecretStr
 
 
 @pytest.fixture(scope="module")
-def sdk() -> Generator[NeMoPlatform, None, None]:
+def sdk() -> Generator[NeMoHelix, None, None]:
     """SDK client with JobsService, FilesService, and SecretsService (auth enabled)."""
     with create_test_client(
         JobsService,
@@ -77,7 +77,7 @@ def _platform_spec_with_secret(secret_ref: str, env_var_name: str = "MY_SECRET")
 class TestJobCreationWithSecretsAccess:
     """Job creation with secret references: allowed when user has access, denied when not."""
 
-    def test_create_job_with_secret_user_has_access_succeeds(self, sdk: NeMoPlatform):
+    def test_create_job_with_secret_user_has_access_succeeds(self, sdk: NeMoHelix):
         """When the user has access to the secret, job creation succeeds."""
         workspace = "default"
         secret_name = short_unique_name("job-secret")
@@ -115,7 +115,7 @@ class TestJobCreationWithSecretsAccess:
         assert job.name == job_name
         assert job.workspace == workspace
 
-    def test_create_job_with_secret_user_lacks_access_fails(self, sdk: NeMoPlatform):
+    def test_create_job_with_secret_user_lacks_access_fails(self, sdk: NeMoHelix):
         """When the user does not have access to the secret (other workspace), job creation fails."""
         workspace_own = short_unique_name("user-ws")
         workspace_other = short_unique_name("other-ws")
@@ -157,7 +157,7 @@ class TestJobCreationWithSecretsAccess:
         msg = str(exc_info.value).lower()
         assert "secret" in msg and ("not found" in msg or "access" in msg or "403" in msg)
 
-    def test_create_job_with_nonexistent_secret_fails(self, sdk: NeMoPlatform):
+    def test_create_job_with_nonexistent_secret_fails(self, sdk: NeMoHelix):
         """When the referenced secret does not exist, job creation fails."""
         workspace = "default"
         job_name = short_unique_name("job-missing-secret")

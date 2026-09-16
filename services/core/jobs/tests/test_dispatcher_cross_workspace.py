@@ -13,18 +13,18 @@ to the "default" workspace instead of searching across all workspaces.
 
 import pytest
 import pytest_asyncio
-from nmp.common.entities import ALL_WORKSPACES, EntityClient
-from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.core.jobs.api.v2.jobs.schemas import (
+from nhx.common.entities import ALL_WORKSPACES, EntityClient
+from nhx.common.jobs.schemas import PlatformJobStatus
+from nhx.core.jobs.api.v2.jobs.schemas import (
     CreatePlatformJobRequest,
     PlatformJobSortField,
     PlatformJobStepsListFilter,
     PlatformJobTaskUpdate,
 )
-from nmp.core.jobs.app.dispatcher import JobDispatcher
-from nmp.core.jobs.app.test_helpers import TestConstants
-from nmp.core.jobs.entities import PlatformJobTask
-from nmp.testing import create_test_client
+from nhx.core.jobs.app.dispatcher import JobDispatcher
+from nhx.core.jobs.app.test_helpers import TestConstants
+from nhx.core.jobs.entities import PlatformJobTask
+from nhx.testing import create_test_client
 
 
 @pytest.fixture(scope="function")
@@ -37,11 +37,11 @@ def multi_workspace_store():
 
 
 @pytest_asyncio.fixture()
-async def multi_workspace_dispatcher(multi_workspace_store, mock_nmp_client) -> JobDispatcher:
+async def multi_workspace_dispatcher(multi_workspace_store, mock_nhx_client) -> JobDispatcher:
     """Create a JobDispatcher with multi-workspace EntityStore."""
     return JobDispatcher(
         store=multi_workspace_store,
-        sdk=mock_nmp_client,
+        sdk=mock_nhx_client,
     )
 
 

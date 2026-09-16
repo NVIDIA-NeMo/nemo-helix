@@ -44,8 +44,8 @@ from nemo_data_designer_plugin.functions._types import (
     PreviewFrame,
     ProcessorOutputFrame,
 )
-from nemo_platform_plugin.cli_renderer import CLIRenderer, RendererContext
-from nemo_platform_plugin.functions.frames import Done, Error, Heartbeat
+from nemo_helix_plugin.cli_renderer import CLIRenderer, RendererContext
+from nemo_helix_plugin.functions.frames import Done, Error, Heartbeat
 from pydantic import BaseModel, TypeAdapter
 
 _PREVIEW_FRAME_ADAPTER: TypeAdapter[PreviewFrame] = TypeAdapter(PreviewFrame)

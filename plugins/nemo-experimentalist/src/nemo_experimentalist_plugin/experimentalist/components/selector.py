@@ -13,7 +13,7 @@ from nemo_experimentalist_plugin.experimentalist.components.models import (
     pareto_objectives,
     pareto_sort,
 )
-from nemo_platform_plugin.nooa_model_client import get_default_model, get_fast_model
+from nemo_helix_plugin.nooa_model_client import get_default_model, get_fast_model
 from nooa import Agent, CodeActStrategy, strategy
 from nooa.agents import TokenBudgetSummarizer
 from nooa.config import CodeActConfig

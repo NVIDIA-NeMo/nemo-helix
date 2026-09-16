@@ -1623,7 +1623,7 @@ components:
           default: true
       type: object
       title: SafeSynthesizerParameters
-      description: NMP-facing Safe Synthesizer parameters with SDK convenience flags.
+      description: NHX-facing Safe Synthesizer parameters with SDK convenience flags.
     SafeSynthesizerSummary:
       properties:
         synthetic_data_quality_score:

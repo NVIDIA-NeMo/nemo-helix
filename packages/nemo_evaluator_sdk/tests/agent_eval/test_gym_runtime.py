@@ -1098,7 +1098,7 @@ def test_token_usage_keys_match_the_openai_schemas_they_mirror() -> None:
     """The keys are *wire-format* field names, cross-checked here against their source of truth.
 
     Raised in review of #1295: could these come from Gym directly? No — this runtime never imports
-    `nemo_gym` (it shells out to the CLI, and nemo-platform excludes Ray by constraint), and the
+    `nemo_gym` (it shells out to the CLI, and nemo-helix excludes Ray by constraint), and the
     names are not Gym's anyway. They are OpenAI's, and `openai` *is* a dependency here.
 
     Deliberately a test rather than deriving the tuple at import time. What we match is the JSON a

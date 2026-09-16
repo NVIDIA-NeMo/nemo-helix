@@ -17,13 +17,13 @@ from data_designer.logging import RandomEmoji
 from nemo_data_designer_plugin.sdk.errors import DataDesignerJobError
 from nemo_data_designer_plugin.sdk.job_results import DataDesignerJobResults
 from nemo_data_designer_plugin.sdk.logging import with_logging
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NemoHTTPError, NotFoundError
-from nemo_platform_plugin.data_designer.client import AsyncDataDesignerClient, DataDesignerClient
-from nemo_platform_plugin.data_designer.types import DataDesignerJobCollection, DataDesignerJobLogsQueryParams
-from nemo_platform_plugin.jobs.archive import safe_extract_tar
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError
+from nemo_helix_plugin.data_designer.client import AsyncDataDesignerClient, DataDesignerClient
+from nemo_helix_plugin.data_designer.types import DataDesignerJobCollection, DataDesignerJobLogsQueryParams
+from nemo_helix_plugin.jobs.archive import safe_extract_tar
+from nemo_helix_plugin.jobs.schemas import PlatformJobStatus
 from typing_extensions import Self
 
 logger = logging.getLogger(__name__)
@@ -115,7 +115,7 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         self,
         *,
         job_name: str,
-        platform: NeMoPlatform,
+        platform: NeMoHelix,
         workspace: str | None,
         job_collection: DataDesignerJobCollection = "create",
     ) -> None: ...
@@ -125,7 +125,7 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         *,
         job_name: str,
         client: DataDesignerClient | None = None,
-        platform: NeMoPlatform | None = None,
+        platform: NeMoHelix | None = None,
         workspace: str | None,
         job_collection: DataDesignerJobCollection = "create",
     ):
@@ -377,7 +377,7 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         self,
         *,
         job_name: str,
-        platform: AsyncNeMoPlatform,
+        platform: AsyncNeMoHelix,
         workspace: str | None,
         job_collection: DataDesignerJobCollection = "create",
     ) -> None: ...
@@ -387,7 +387,7 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         *,
         job_name: str,
         client: AsyncDataDesignerClient | None = None,
-        platform: AsyncNeMoPlatform | None = None,
+        platform: AsyncNeMoHelix | None = None,
         workspace: str | None,
         job_collection: DataDesignerJobCollection = "create",
     ):

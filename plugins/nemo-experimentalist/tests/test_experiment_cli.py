@@ -11,7 +11,7 @@ from nemo_experimentalist_plugin import cli
 from nemo_experimentalist_plugin.entities import DatasetRef
 from nemo_experimentalist_plugin.experimentalist.strategies.evolutionary import EvolutionaryOptimizerConfig
 from nemo_experimentalist_plugin.preflight import Probes
-from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nooa import GenerationError
 from typer.testing import CliRunner
 

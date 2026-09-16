@@ -6,12 +6,12 @@
 from typing import Generator
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nmp.common.config import PlatformConfig
-from nmp.common.service.dependencies import get_platform_config
-from nmp.hello_world.config import HelloWorldConfig
-from nmp.hello_world.service import HelloWorldService
-from nmp.testing import create_test_client
+from nemo_helix import NeMoHelix
+from nhx.common.config import PlatformConfig
+from nhx.common.service.dependencies import get_platform_config
+from nhx.hello_world.config import HelloWorldConfig
+from nhx.hello_world.service import HelloWorldService
+from nhx.testing import create_test_client
 
 
 class TestConfigInfoEndpoint:
@@ -28,7 +28,7 @@ class TestConfigInfoEndpoint:
         return HelloWorldConfig(greeting_prefix="Howdy", max_message_length=200)
 
     @pytest.fixture
-    def sdk(self, mock_platform_config, mock_service_config) -> Generator[NeMoPlatform, None, None]:
+    def sdk(self, mock_platform_config, mock_service_config) -> Generator[NeMoHelix, None, None]:
         """Create SDK client with mocked configs."""
         with create_test_client(
             HelloWorldService,
@@ -39,7 +39,7 @@ class TestConfigInfoEndpoint:
         ) as client:
             yield client
 
-    def test_config_info_returns_both_configs(self, sdk: NeMoPlatform):
+    def test_config_info_returns_both_configs(self, sdk: NeMoHelix):
         """Test GET /config-info returns both platform and service config values."""
         response = sdk._client.get("/apis/hello-world/v2/workspaces/default/config-info")
 

@@ -24,7 +24,7 @@ _MARKED_BLOCK_RE = re.compile(
     rf"(?ms)^(?P<begin>[ \t]*{re.escape(BEGIN_MARKER)}[ \t]*\n).*?"
     rf"^(?P<end>[ \t]*{re.escape(END_MARKER)}[ \t]*$)"
 )
-ETHOS_DOCS_URL = "https://docs.nvidia.com/nemo-platform/documentation/agents/optimize-agents/ethos"
+ETHOS_DOCS_URL = "https://docs.nvidia.com/nemo-helix/documentation/agents/optimize-agents/ethos"
 
 
 def main(argv: list[str] | None = None) -> int:

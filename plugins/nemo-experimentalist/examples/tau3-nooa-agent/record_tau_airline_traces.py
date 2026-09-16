@@ -24,12 +24,12 @@ from nemo_experimentalist_plugin.experimentalist.components.evaluator.harbor_nat
     HarborNativeOutcomeEvaluator,
 )
 from nemo_experimentalist_plugin.experimentalist.otlp import jsonl_to_protobuf, read_trace_id
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.client.errors import ConflictError, NotFoundError
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import EvaluationCreateRequest, ExperimentCreateRequest
-from nemo_platform_plugin.workspaces.client import AsyncWorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import EvaluationCreateRequest, ExperimentCreateRequest
+from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PLUGIN_ROOT = SCRIPT_DIR.parents[1]
@@ -359,7 +359,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Existing Harbor run directory or Harbor job-results directory to upload without rerunning trials.",
     )
-    parser.add_argument("--base-url", default=os.environ.get("NMP_BASE_URL", "http://localhost:8080"))
+    parser.add_argument("--base-url", default=os.environ.get("NHX_BASE_URL", "http://localhost:8080"))
     parser.add_argument(
         "--api-base",
         default=os.environ.get("INFERENCE_API_BASE", "https://inference-api.nvidia.com/v1"),

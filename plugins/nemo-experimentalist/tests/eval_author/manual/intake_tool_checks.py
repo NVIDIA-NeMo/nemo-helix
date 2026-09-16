@@ -21,9 +21,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from nemo_experimentalist_plugin.eval_author import traces
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.workspaces.client import AsyncWorkspacesClient
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 
 DISCOVERY_SPAN_BUDGET = 200
 
@@ -229,7 +229,7 @@ async def check_errors(client: AsyncNemoClient, report: Report, workspace: str, 
         ("an unknown workspace", traces.find_agent_traces(client, agent=agent, workspace="no-such-workspace-zzz")),
         ("a missing trace", traces.read_trace(client, "trace-does-not-exist-zzz", workspace=workspace)),
         # Intake used to publish this span filter and answer it with HTTP 500. Since
-        # nemo-platform#1225 it is unpublished, so it must now read as a rejected field.
+        # nemo-helix#1225 it is unpublished, so it must now read as a rejected field.
         (
             "a filter Intake once answered with 500",
             traces.query_spans(client, workspace=workspace, filter={"dataset_name": "x"}),

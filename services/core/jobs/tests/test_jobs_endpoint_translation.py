@@ -3,10 +3,10 @@
 
 import pytest
 from fastapi import HTTPException
-from nmp.core.jobs.api.v2.jobs.endpoints import translate_cpu_container_steps_to_subprocess, validate_job_spec
-from nmp.core.jobs.app.providers import ContainerSpec, CPUExecutionProvider, SubprocessExecutionProvider
-from nmp.core.jobs.app.schemas import PlatformJobSpec, PlatformJobStepSpec
-from nmp.core.jobs.controllers.backends.docker import DockerJobExecutionProfile, DockerJobExecutionProfileConfig
+from nhx.core.jobs.api.v2.jobs.endpoints import translate_cpu_container_steps_to_subprocess, validate_job_spec
+from nhx.core.jobs.app.providers import ContainerSpec, CPUExecutionProvider, SubprocessExecutionProvider
+from nhx.core.jobs.app.schemas import PlatformJobSpec, PlatformJobStepSpec
+from nhx.core.jobs.controllers.backends.docker import DockerJobExecutionProfile, DockerJobExecutionProfileConfig
 
 
 def _cpu_step(name: str, profile: str = "default") -> PlatformJobStepSpec:

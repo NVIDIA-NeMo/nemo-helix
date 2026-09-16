@@ -25,7 +25,7 @@ from typing import cast
 
 import anthropic.types as anthropic_types
 import openai.types.chat as openai_chat_types
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
     InferenceMiddlewareError,
     InferenceRequest,
@@ -33,7 +33,7 @@ from nemo_platform_plugin.inference_middleware import (
     TypedResponseResult,
 )
 from nemo_switchyard._processors import CTX_PATH_UPDATE
-from nmp.core.inference_gateway.api.typed_response import TypedResponseStream
+from nhx.core.inference_gateway.api.typed_response import TypedResponseStream
 from switchyard.lib.chat_request.base import ChatRequest
 from switchyard.lib.chat_response.anthropic import (
     AnthropicChatResponse,

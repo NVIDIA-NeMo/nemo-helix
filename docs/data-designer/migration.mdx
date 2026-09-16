@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="data-designer-migration"></a>
 
-Data Designer configurations are mostly portable between the standalone library and the NeMo Platform plugin.
+Data Designer configurations are mostly portable between the standalone library and the NeMo Helix plugin.
 
 ## What Usually Stays the Same
 
@@ -21,9 +21,9 @@ Most configuration code can stay unchanged:
 
 ## What Changes Slightly
 
-Most "locally-defined" aspects of Data Designer workloads have NeMo Platform equivalents:
+Most "locally-defined" aspects of Data Designer workloads have NeMo Helix equivalents:
 
-| Area | Standalone library | NeMo Platform |
+| Area | Standalone library | NeMo Helix |
 | **Inference** | Define model providers in local YAML config files. | Register model providers through the Models and Inference Gateway services. |
 | **Secrets** | Reference local environment variables or provide plaintext secret values. | Create secrets using the Secrets API. |
 | **Seed data** | Reference local files or pass DataFrames. | Upload local seed data to the Files API or use HuggingFace. |
@@ -31,7 +31,7 @@ Most "locally-defined" aspects of Data Designer workloads have NeMo Platform equ
 
 ## What Isn't Supported
 
-Some features of the standalone Data Designer library are not supported on NeMo Platform at all:
+Some features of the standalone Data Designer library are not supported on NeMo Helix at all:
 
 - Custom column types / plugins
 - Local callable validators

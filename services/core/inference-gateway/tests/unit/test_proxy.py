@@ -21,10 +21,10 @@ from aiohttp import ClientError
 from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 from multidict import CIMultiDict, CIMultiDictProxy
-from nemo_platform.types.inference import ModelProvider, ServedModelMapping
-from nemo_platform.types.inference.virtual_model import VirtualModel as SDKVirtualModel
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix.types.inference import ModelProvider, ServedModelMapping
+from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
     ImmediateResponse,
     InferenceMiddlewareContext,
@@ -32,13 +32,13 @@ from nemo_platform_plugin.inference_middleware import (
     InferenceResponse,
     NemoInferenceMiddleware,
 )
-from nmp.core.inference_gateway.api.middleware_registry import (
+from nhx.core.inference_gateway.api.middleware_registry import (
     MiddlewareRegistry,
     ResolvedMiddlewareCall,
     build_inference_response,
 )
-from nmp.core.inference_gateway.api.model_cache import ModelCache, ModelProviderInfo
-from nmp.core.inference_gateway.api.proxy import (
+from nhx.core.inference_gateway.api.model_cache import ModelCache, ModelProviderInfo
+from nhx.core.inference_gateway.api.proxy import (
     NextRequestInfo,
     _build_inference_response_with_annotations,
     _parse_sse_stream,

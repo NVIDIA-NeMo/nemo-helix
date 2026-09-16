@@ -9,12 +9,12 @@ import os
 
 
 def base_url() -> str:
-    """Resolve the platform base URL (matches repo convention NMP_BASE_URL / NEMO_BASE_URL)."""
-    return (os.environ.get("NEMO_BASE_URL") or os.environ.get("NMP_BASE_URL") or "http://localhost:8080").rstrip("/")
+    """Resolve the platform base URL (matches repo convention NHX_BASE_URL / NEMO_BASE_URL)."""
+    return (os.environ.get("NEMO_BASE_URL") or os.environ.get("NHX_BASE_URL") or "http://localhost:8080").rstrip("/")
 
 
 def make_sdk(base: str):
-    """Construct a NeMoPlatform SDK client against *base*."""
-    from nemo_platform import NeMoPlatform  # lazy: keeps `doctor`/`setup` import light
+    """Construct a NeMoHelix SDK client against *base*."""
+    from nemo_helix import NeMoHelix  # lazy: keeps `doctor`/`setup` import light
 
-    return NeMoPlatform(base_url=base)
+    return NeMoHelix(base_url=base)

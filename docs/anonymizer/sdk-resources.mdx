@@ -2,36 +2,36 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "Anonymizer NeMo Platform SDK Resources"
+title: "Anonymizer NeMo Helix SDK Resources"
 description: ""
 ---
-<a id="anonymizer-nmp-sdk-resources"></a>
+<a id="anonymizer-nhx-sdk-resources"></a>
 
-The `anonymizer.config` module (from the [NVIDIA NeMo Anonymizer library](https://github.com/NVIDIA-NeMo/Anonymizer)) builds `AnonymizerConfig` objects in a context-agnostic way. Once you are ready to execute that config against the NeMo Platform Anonymizer service, you use objects from the `nemo_platform` SDK. This page describes the NeMo Platform-specific objects.
+The `anonymizer.config` module (from the [NVIDIA NeMo Anonymizer library](https://github.com/NVIDIA-NeMo/Anonymizer)) builds `AnonymizerConfig` objects in a context-agnostic way. Once you are ready to execute that config against the NeMo Helix Anonymizer service, you use objects from the `nemo_helix` SDK. This page describes the NeMo Helix-specific objects.
 
 ## AnonymizerResource
 
-The `AnonymizerResource` is the entry point for working with Anonymizer on NeMo Platform. It wraps the streaming preview endpoint and job submission for the plugin service.
+The `AnonymizerResource` is the entry point for working with Anonymizer on NeMo Helix. It wraps the streaming preview endpoint and job submission for the plugin service.
 
-A `AnonymizerResource` is accessed directly from a `NeMoPlatform` instance:
+A `AnonymizerResource` is accessed directly from a `NeMoHelix` instance:
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-sdk = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+sdk = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 anonymizer = sdk.anonymizer  # AnonymizerResource
 ```
 
-An `AsyncAnonymizerResource` with the same surface is available via `AsyncNeMoPlatform.anonymizer`.
+An `AsyncAnonymizerResource` with the same surface is available via `AsyncNeMoHelix.anonymizer`.
 
 | Method                                                   | Description                                                                                                              |
 |----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
 | `preview(request, *, workspace=None)`                    | Runs a streaming preview against the plugin service and returns an `AnonymizerPreviewResult` after the stream completes. |
-| `run(request, *, workspace=None, wait_until_done=False)` | Submits an `anonymizer.run` job to the NeMo Platform Jobs worker. Returns an `AnonymizerJobResource`. When `wait_until_done=True`, blocks until the job reaches a terminal state. |
+| `run(request, *, workspace=None, wait_until_done=False)` | Submits an `anonymizer.run` job to the NeMo Helix Jobs worker. Returns an `AnonymizerJobResource`. When `wait_until_done=True`, blocks until the job reaches a terminal state. |
 | `get_job_resource(job_name, workspace=None)`             | Returns an `AnonymizerJobResource` for an existing job (by job name).                                                    |
 
 `request` is a `PreviewRequest` or `AnonymizerRequest` instance from `nemo_anonymizer_plugin.app.task_config`. Both accept the same `config`, `data`, `model_configs`, and `selected_models` fields; `PreviewRequest` adds `num_records`.

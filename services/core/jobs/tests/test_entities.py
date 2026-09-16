@@ -3,10 +3,10 @@
 
 from typing import Any
 
-from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.core.jobs.app.schemas import PlatformJobStepSpec
-from nmp.core.jobs.app.test_helpers import TestConstants
-from nmp.core.jobs.entities import (
+from nhx.common.jobs.schemas import PlatformJobStatus
+from nhx.core.jobs.app.schemas import PlatformJobStepSpec
+from nhx.core.jobs.app.test_helpers import TestConstants
+from nhx.core.jobs.entities import (
     STEP_SPEC_NAME_CONFIG_KEY,
     PlatformJobAttempt,
     get_step_spec_name,

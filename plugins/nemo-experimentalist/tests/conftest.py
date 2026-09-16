@@ -16,7 +16,7 @@ from typing import cast
 
 import litellm
 import pytest
-from nemo_platform_plugin.nooa_model_client import ConfiguredModelClients, ConfiguredModelRefs, activate_model_clients
+from nemo_helix_plugin.nooa_model_client import ConfiguredModelClients, ConfiguredModelRefs, activate_model_clients
 from nooa.unifiedllm import CompletionClient, FakeLLMClient
 
 # Some NVIDIA inference endpoint models reject the tool_choice parameter.
@@ -65,7 +65,7 @@ class SandboxRunner:
             return command
         wrapped = ["sbx", "exec"]
         settings = {
-            "UV_PROJECT_ENVIRONMENT": "/home/agent/.venvs/nemo-platform",
+            "UV_PROJECT_ENVIRONMENT": "/home/agent/.venvs/nemo-helix",
             "PYTHONPATH": f"{self.remote_plugin_root}/src",
             "OTLP_ENDPOINT": "http://host.docker.internal:5001/v1/traces",
             **(environment or {}),

@@ -10,15 +10,15 @@ import pytest
 from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, Volume
 from nemo_deployments_plugin.reconciler.volume_reconciler import VolumeReconciler
 from nemo_deployments_plugin.types import Endpoint
-from nemo_platform_plugin.auth import AuthContext as DeploymentAuthContext
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
-from nmp.common.config import Runtime
-from nmp.core.models.app import ModelWeightsType
-from nmp.core.models.controllers.backends.backends import DeploymentStatusUpdate
-from nmp.core.models.controllers.backends.common import DeploymentConfigView
-from nmp.core.models.controllers.backends.deployments_plugin.backend import DeploymentsPluginServiceBackend
-from nmp.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
-from nmp.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
+from nemo_helix_plugin.auth import AuthContext as DeploymentAuthContext
+from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nhx.common.config import Runtime
+from nhx.core.models.app import ModelWeightsType
+from nhx.core.models.controllers.backends.backends import DeploymentStatusUpdate
+from nhx.core.models.controllers.backends.common import DeploymentConfigView
+from nhx.core.models.controllers.backends.deployments_plugin.backend import DeploymentsPluginServiceBackend
+from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
+from nhx.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
 
 CreatedEntity: TypeAlias = Deployment | DeploymentConfig
 
@@ -114,11 +114,11 @@ async def test_create_order_volume_puller_server_with_prerequisite() -> None:
     backend._entities.delete = AsyncMock(side_effect=NemoEntityNotFoundError("missing"))
     with (
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.backend.resolve_plugin_deployment",
+            "nhx.core.models.controllers.backends.deployments_plugin.backend.resolve_plugin_deployment",
             return_value=_resolved(),
         ),
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.backend.executor_for_runtime",
+            "nhx.core.models.controllers.backends.deployments_plugin.backend.executor_for_runtime",
             return_value="local-k8s",
         ),
     ):
@@ -171,11 +171,11 @@ async def test_docker_lora_creates_substrate() -> None:
     backend._entities.delete = AsyncMock(side_effect=NemoEntityNotFoundError("missing"))
     with (
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.backend.resolve_plugin_deployment",
+            "nhx.core.models.controllers.backends.deployments_plugin.backend.resolve_plugin_deployment",
             return_value=_resolved_docker_lora(),
         ),
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.backend.executor_for_runtime",
+            "nhx.core.models.controllers.backends.deployments_plugin.backend.executor_for_runtime",
             return_value="local-docker",
         ),
     ):
@@ -218,7 +218,7 @@ async def test_create_retries_after_prior_teardown_completes() -> None:
     backend._entities.create = AsyncMock(side_effect=lambda entity: entity)
     with (
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.backend.resolve_plugin_deployment",
+            "nhx.core.models.controllers.backends.deployments_plugin.backend.resolve_plugin_deployment",
             return_value=_resolved(),
         ),
         patch.object(
@@ -232,7 +232,7 @@ async def test_create_retries_after_prior_teardown_completes() -> None:
             ),
         ),
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.backend.executor_for_runtime",
+            "nhx.core.models.controllers.backends.deployments_plugin.backend.executor_for_runtime",
             return_value="local-k8s",
         ),
     ):
@@ -255,11 +255,11 @@ async def test_missing_executor_fails_fast_before_touching_substrate() -> None:
     backend._entities.delete = AsyncMock(side_effect=NemoEntityNotFoundError("missing"))
     with (
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.backend.resolve_plugin_deployment",
+            "nhx.core.models.controllers.backends.deployments_plugin.backend.resolve_plugin_deployment",
             return_value=_resolved(),
         ),
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.backend.executor_for_runtime",
+            "nhx.core.models.controllers.backends.deployments_plugin.backend.executor_for_runtime",
             return_value=None,
         ),
     ):
@@ -415,7 +415,7 @@ async def test_delete_marks_weights_and_scratch_volumes_deleting_and_waits() -> 
     backend._entities.update = AsyncMock(side_effect=lambda entity: entity)
     backend._entities.delete = AsyncMock()
     with patch(
-        "nmp.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
+        "nhx.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
         AsyncMock(return_value=[]),
     ):
         result = await backend.delete_model_deployment("default", "my-dep")
@@ -465,7 +465,7 @@ async def test_delete_preserves_volume_referenced_by_another_config() -> None:
     backend._entities.get = AsyncMock(side_effect=_get)
     backend._entities.delete = AsyncMock()
     with patch(
-        "nmp.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
+        "nhx.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
         AsyncMock(return_value=["shared-config"]),
     ):
         result = await backend.delete_model_deployment("default", "my-dep")
@@ -485,7 +485,7 @@ async def test_delete_already_deleting_volume_skips_reference_scan() -> None:
     backend._entities.get = AsyncMock(return_value=volume)
 
     with patch(
-        "nmp.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
+        "nhx.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
         AsyncMock(),
     ) as references:
         removed = await backend._complete_volume_delete("default", volume.name)
@@ -529,7 +529,7 @@ async def test_volume_delete_update_not_found_is_removed() -> None:
     backend._entities.update = AsyncMock(side_effect=NemoEntityNotFoundError("removed"))
 
     with patch(
-        "nmp.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
+        "nhx.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
         AsyncMock(return_value=[]),
     ):
         removed = await backend._complete_volume_delete("default", volume.name)
@@ -547,7 +547,7 @@ async def test_volume_delete_update_conflict_remains_deleting() -> None:
     backend._entities.update = AsyncMock(side_effect=NemoEntityConflictError("changed"))
 
     with patch(
-        "nmp.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
+        "nhx.core.models.controllers.backends.deployments_plugin.backend.deployment_config_names_referencing_volume",
         AsyncMock(return_value=[]),
     ):
         removed = await backend._complete_volume_delete("default", volume.name)
@@ -649,11 +649,11 @@ async def test_create_propagates_deployment_auth_context_to_plugin_deployments()
     backend._entities.delete = AsyncMock(side_effect=NemoEntityNotFoundError("missing"))
     with (
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.backend.resolve_plugin_deployment",
+            "nhx.core.models.controllers.backends.deployments_plugin.backend.resolve_plugin_deployment",
             return_value=resolved,
         ),
         patch(
-            "nmp.core.models.controllers.backends.deployments_plugin.backend.executor_for_runtime",
+            "nhx.core.models.controllers.backends.deployments_plugin.backend.executor_for_runtime",
             return_value="local-k8s",
         ),
     ):

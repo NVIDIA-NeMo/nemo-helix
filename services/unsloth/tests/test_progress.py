@@ -4,12 +4,12 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from nmp.customization_common.service.context import NMPJobContext
-from nmp.unsloth.tasks.training.progress import JobsServiceProgressReporter
+from nhx.customization_common.service.context import NHXJobContext
+from nhx.unsloth.tasks.training.progress import JobsServiceProgressReporter
 
 
 def test_progress_reporter_calls_sdk_create_or_update() -> None:
-    ctx = NMPJobContext(
+    ctx = NHXJobContext(
         workspace="ws-a",
         job_id="job-1",
         attempt_id="attempt-0",
@@ -24,9 +24,9 @@ def test_progress_reporter_calls_sdk_create_or_update() -> None:
     mock_jobs = MagicMock()
 
     with (
-        patch("nmp.customization_common.training.progress.get_task_sdk", return_value=mock_sdk),
+        patch("nhx.customization_common.training.progress.get_task_sdk", return_value=mock_sdk),
         patch(
-            "nmp.customization_common.training.progress.client_from_platform",
+            "nhx.customization_common.training.progress.client_from_platform",
             return_value=mock_jobs,
         ),
     ):

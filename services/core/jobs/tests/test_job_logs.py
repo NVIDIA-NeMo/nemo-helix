@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nmp.common.entities import DEFAULT_WORKSPACE, EntityClient
-from nmp.common.jobs.log_client import dep_job_logs_client
-from nmp.common.jobs.schemas import InvalidPageCursorError, PlatformJobLog, PlatformJobLogPage
-from nmp.core.jobs.api.v2.jobs.endpoints import dep_dispatcher, router
-from nmp.core.jobs.app.dispatcher import JobDispatcher
-from nmp.testing import create_test_client
+from nhx.common.entities import DEFAULT_WORKSPACE, EntityClient
+from nhx.common.jobs.log_client import dep_job_logs_client
+from nhx.common.jobs.schemas import InvalidPageCursorError, PlatformJobLog, PlatformJobLogPage
+from nhx.core.jobs.api.v2.jobs.endpoints import dep_dispatcher, router
+from nhx.core.jobs.app.dispatcher import JobDispatcher
+from nhx.testing import create_test_client
 
 
 @pytest.fixture
@@ -58,7 +58,7 @@ class TestJobLogsAPI:
         """Create a real dispatcher with test entity store and mock SDK."""
         projects = ["default/test-project"]
         with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
-            mock_nmp_client = MagicMock()
+            mock_nhx_client = MagicMock()
             mock_files = AsyncMock()
             mock_fileset_obj = MagicMock()
             mock_fileset_obj.name = "test-fileset-id"
@@ -66,8 +66,8 @@ class TestJobLogsAPI:
             mock_resp.data.return_value = mock_fileset_obj
             mock_files.create_fileset.return_value = mock_resp
 
-            with patch("nmp.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
-                dispatcher = JobDispatcher(store=mock_store, sdk=mock_nmp_client)
+            with patch("nhx.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
+                dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
                 yield dispatcher
 
     @pytest.fixture

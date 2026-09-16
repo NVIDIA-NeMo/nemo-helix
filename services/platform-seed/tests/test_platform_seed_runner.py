@@ -8,10 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from nemo_platform_plugin.client.errors import ConflictError
-from nemo_platform_plugin.models.types import CreateModelProviderRequest
-from nmp.platform_seed.config import PlatformSeedConfig
-from nmp.platform_seed.tasks.seed import run_platform_seed
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.models.types import CreateModelProviderRequest
+from nhx.platform_seed.config import PlatformSeedConfig
+from nhx.platform_seed.tasks.seed import run_platform_seed
 
 
 @pytest.fixture
@@ -59,7 +59,7 @@ async def test_run_platform_seed_guardrails_only(config_enabled, entity_client, 
     """Guardrails seed is called when guardrails_enabled is True."""
     config_enabled.guardrails_enabled = True
 
-    with patch("nmp.guardrails.app.utils.config_store.populate_config_store", new_callable=AsyncMock) as mock_populate:
+    with patch("nhx.guardrails.app.utils.config_store.populate_config_store", new_callable=AsyncMock) as mock_populate:
         result = await run_platform_seed(entity_client, sdk, config_enabled)
         mock_populate.assert_called_once_with(entity_client, config_enabled.guardrails_config_store_path)
         assert result.auth_ok is False
@@ -73,7 +73,7 @@ async def test_run_platform_seed_guardrails_failure(config_enabled, entity_clien
     config_enabled.guardrails_enabled = True
 
     with patch(
-        "nmp.guardrails.app.utils.config_store.populate_config_store",
+        "nhx.guardrails.app.utils.config_store.populate_config_store",
         new_callable=AsyncMock,
         side_effect=RuntimeError("bad"),
     ):
@@ -93,7 +93,7 @@ async def test_run_platform_seed_plugin_seed_jobs(config_enabled, entity_client,
     mock_seed_cls.return_value = mock_seed_instance
 
     with patch(
-        "nmp.platform_seed.tasks.seed.run.discover_seed_jobs",
+        "nhx.platform_seed.tasks.seed.run.discover_seed_jobs",
         return_value={"example": mock_seed_cls},
     ):
         result = await run_platform_seed(entity_client, sdk, config_enabled)
@@ -113,7 +113,7 @@ async def test_run_platform_seed_plugin_seed_job_failure(config_enabled, entity_
     mock_seed_cls.return_value = mock_seed_instance
 
     with patch(
-        "nmp.platform_seed.tasks.seed.run.discover_seed_jobs",
+        "nhx.platform_seed.tasks.seed.run.discover_seed_jobs",
         return_value={"example": mock_seed_cls},
     ):
         result = await run_platform_seed(entity_client, sdk, config_enabled)
@@ -137,10 +137,10 @@ async def test_run_platform_seed_plugin_seed_jobs_can_be_disabled_per_plugin(
     mock_other_seed_instance.run = AsyncMock()
     mock_other_seed_cls.return_value = mock_other_seed_instance
 
-    monkeypatch.setenv("NMP_PLATFORM_SEED_EXAMPLE_ENABLED", "false")
+    monkeypatch.setenv("NHX_PLATFORM_SEED_EXAMPLE_ENABLED", "false")
 
     with patch(
-        "nmp.platform_seed.tasks.seed.run.discover_seed_jobs",
+        "nhx.platform_seed.tasks.seed.run.discover_seed_jobs",
         return_value={"example": mock_example_seed_cls, "other-plugin": mock_other_seed_cls},
     ):
         result = await run_platform_seed(entity_client, sdk, config_enabled)
@@ -156,7 +156,7 @@ async def test_run_platform_seed_auth_called(config_enabled, entity_client, sdk)
     """Auth seed is called when auth_enabled is True."""
     config_enabled.auth_enabled = True
 
-    with patch("nmp.core.auth.app.seeding.run_seeding", new_callable=AsyncMock) as mock_run_seeding:
+    with patch("nhx.core.auth.app.seeding.run_seeding", new_callable=AsyncMock) as mock_run_seeding:
         mock_run_seeding.return_value = True
         result = await run_platform_seed(entity_client, sdk, config_enabled)
         mock_run_seeding.assert_called_once_with(entity_client)
@@ -171,7 +171,7 @@ async def test_run_platform_seed_model_provider_called(config_enabled, entity_cl
     models = MagicMock()
     models.create_provider = AsyncMock()
 
-    with patch("nmp.platform_seed.tasks.seed.run.client_from_platform", return_value=models):
+    with patch("nhx.platform_seed.tasks.seed.run.client_from_platform", return_value=models):
         result = await run_platform_seed(entity_client, sdk, config_enabled)
 
     models.create_provider.assert_awaited_once_with(
@@ -194,7 +194,7 @@ async def test_run_platform_seed_model_provider_conflict(config_enabled, entity_
     response = httpx.Response(409, request=httpx.Request("POST", "http://models/providers"))
     models.create_provider = AsyncMock(side_effect=ConflictError(response))
 
-    with patch("nmp.platform_seed.tasks.seed.run.client_from_platform", return_value=models):
+    with patch("nhx.platform_seed.tasks.seed.run.client_from_platform", return_value=models):
         result = await run_platform_seed(entity_client, sdk, config_enabled)
 
     assert result.models_ok is True

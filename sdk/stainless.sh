@@ -16,8 +16,8 @@ REPO_ROOT="$(cd "${SDK_DIR}/.." && pwd)"
 
 OPENAPI_SPEC="${REPO_ROOT}/openapi/openapi.yaml"
 STAINLESS_CONFIG_PATH="${SDK_DIR}/stainless.yaml"
-STAINLESS_PROJECT_NAME="nemo-platform"
-SDK_PATH="sdk/python/nemo-platform"
+STAINLESS_PROJECT_NAME="nemo-helix"
+SDK_PATH="sdk/python/nemo-helix"
 
 # Repo from which we fetch the SDK code.
 # - STAINLESS_CODE_REPO can be set explicitly to a full git remote URL.
@@ -79,7 +79,7 @@ if [ -z "${STAINLESS_BRANCH}" ]; then
     STAINLESS_BRANCH="${STAINLESS_BRANCH}-${COMMIT_SHA}"
 fi
 echo "Using branch: ${STAINLESS_BRANCH}"
-# Name of the remote that will be added to the NeMo Platform repo
+# Name of the remote that will be added to the NeMo Helix repo
 STAINLESS_CODE_REMOTE_NAME="stainless-${STAINLESS_PROJECT_NAME}-python"
 
 # Save original directory
@@ -219,7 +219,7 @@ pull_changes() {
         echo "Code pull completed."
 
         # Make sure to update the pyproject first, before any uv command that will update the uv.lock
-        uv run --frozen nemo-platform-sdk-tools post-generation update-pyproject
+        uv run --frozen nemo-helix-sdk-tools post-generation update-pyproject
 
         # Vendor internal packages into the SDK
         make vendor
@@ -228,7 +228,7 @@ pull_changes() {
         uv sync --inexact
 
         # Run all post-generation updates (license, readme, etc.)
-        uv run --frozen nemo-platform-sdk-tools post-generation update-all
+        uv run --frozen nemo-helix-sdk-tools post-generation update-all
 
         # Add all files that were pulled or vendored
         git add "${SDK_PATH}"
@@ -242,13 +242,13 @@ update_stainless_config() {
         cd "${REPO_ROOT}"
 
         echo "Syncing endpoints from OpenAPI spec with Stainless methods..."
-        uv run --frozen nemo-platform-sdk-tools openapi-stainless sync-methods \
+        uv run --frozen nemo-helix-sdk-tools openapi-stainless sync-methods \
           --openapi-spec-path "${OPENAPI_SPEC}" \
           --stainless-config-path "${STAINLESS_CONFIG_PATH}" \
           --output-path "${STAINLESS_CONFIG_PATH}"
 
         echo "Syncing schemas from OpenAPI spec with Stainless models..."
-        uv run --frozen nemo-platform-sdk-tools openapi-stainless sync-models \
+        uv run --frozen nemo-helix-sdk-tools openapi-stainless sync-models \
           --openapi-spec-path "${OPENAPI_SPEC}" \
           --stainless-config-path "${STAINLESS_CONFIG_PATH}" \
           --output-path "${STAINLESS_CONFIG_PATH}"

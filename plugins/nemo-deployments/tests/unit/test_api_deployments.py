@@ -12,8 +12,8 @@ from helpers import list_response, make_deployment, make_deployment_config
 from nemo_deployments_plugin.api.v2 import deployments as deployments_module
 from nemo_deployments_plugin.api.v2.dependencies import get_entity_client
 from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, Prerequisite
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 
 
 @pytest.fixture
@@ -145,9 +145,9 @@ def test_create_deployment_ignores_raw_auth_context_headers(client: TestClient, 
         "/apis/deployments/v2/workspaces/default/deployments",
         json={"name": "dep1", "deployment_config": "cfg1"},
         headers={
-            "X-NMP-Principal-Id": "user:alice",
-            "X-NMP-Principal-Email": "alice@example.com",
-            "X-NMP-Principal-Groups": "research,platform",
+            "X-NHX-Principal-Id": "user:alice",
+            "X-NHX-Principal-Email": "alice@example.com",
+            "X-NHX-Principal-Groups": "research,platform",
         },
     )
 

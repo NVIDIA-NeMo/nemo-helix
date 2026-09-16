@@ -9,16 +9,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 from kubernetes import client
 from kubernetes.client.rest import ApiException
-from nmp.common.auth import KUBERNETES_POD_UID_REFERENCE_NAME, AuthContext, reference_delegation_name
-from nmp.common.jobs.constants import (
+from nhx.common.auth import KUBERNETES_POD_UID_REFERENCE_NAME, AuthContext, reference_delegation_name
+from nhx.common.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_SECRETS_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
-from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.core.jobs.api.v2.jobs.schemas import PlatformJobStepWithContext
-from nmp.core.jobs.app.constants import (
+from nhx.common.jobs.schemas import PlatformJobStatus
+from nhx.core.jobs.api.v2.jobs.schemas import PlatformJobStepWithContext
+from nhx.core.jobs.app.constants import (
     JOB_EXECUTION_BACKEND_LABEL,
     JOB_EXECUTION_PROFILE_LABEL,
     JOB_ID_LABEL,
@@ -32,28 +32,28 @@ from nmp.core.jobs.app.constants import (
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
 )
-from nmp.core.jobs.app.providers import ComputeResources, ContainerSpec, DistributedGPUExecutionProvider
-from nmp.core.jobs.app.schemas import (
+from nhx.core.jobs.app.providers import ComputeResources, ContainerSpec, DistributedGPUExecutionProvider
+from nhx.core.jobs.app.schemas import (
     PlatformJobEnvironmentVariable,
     PlatformJobSecretEnvironmentVariableRef,
     PlatformJobStepSpec,
 )
-from nmp.core.jobs.controllers.backends.base import (
+from nhx.core.jobs.controllers.backends.base import (
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
     WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
     WORKLOAD_IDENTITY_VOLUME_NAME,
 )
-from nmp.core.jobs.controllers.backends.kubernetes.common import (
+from nhx.core.jobs.controllers.backends.kubernetes.common import (
     KubernetesJobStorageConfig,
     KubernetesObjectMetadata,
     common_labels_for_step,
     name_for_step,
 )
-from nmp.core.jobs.controllers.backends.kubernetes.volcano_job import (
+from nhx.core.jobs.controllers.backends.kubernetes.volcano_job import (
     VolcanoJobBackend,
     VolcanoJobExecutionProfileConfig,
 )
-from nmp.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
+from nhx.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
 from pydantic import ValidationError
 
 DEFAULT_STORAGE = KubernetesJobStorageConfig(pvc_name="job-storage-pvc")
@@ -71,11 +71,11 @@ def kubernetes_client_mock():
     custom_v1_mock = MagicMock()
     with (
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.volcano_job.client.CoreV1Api",
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.client.CoreV1Api",
             return_value=core_v1_mock,
         ),
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.volcano_job.client.CustomObjectsApi",
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.client.CustomObjectsApi",
             return_value=custom_v1_mock,
         ),
     ):
@@ -139,22 +139,22 @@ def distributed_gpu_execution_provider():
 
 @pytest.fixture
 def volcano_job(
-    mock_nmp_client,
+    mock_nhx_client,
     kubernetes_client_mock,
     volcano_execution_profile_config,
     mock_platform_config,
 ) -> Generator[VolcanoJobBackend, None, None]:
     """Create a namespaced custom object (Volcano Job) instance with mocked clients."""
     with (
-        patch("nmp.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
+            "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
         ),
     ):
         # Convert the Pydantic model to dict format expected by the base class
         volcano_job = VolcanoJobBackend(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             execution_profile_config=volcano_execution_profile_config,
             profile_name="default",
         )
@@ -168,7 +168,7 @@ def workload_exchange_auth_config():
     return SimpleNamespace(
         oidc=SimpleNamespace(
             workload_token_exchange_enabled=True,
-            workload_audience="nemo-platform",
+            workload_audience="nemo-helix",
             audience=None,
         )
     )
@@ -380,10 +380,10 @@ def test_schedule_job_success(
         assert env_vars[NEMO_JOB_FILESET_ENVVAR] == "test-logs-fileset"
         assert env_vars[PERSISTENT_JOB_STORAGE_PATH_ENVVAR] == "/var/test"
         assert env_vars[EPHEMERAL_TASK_STORAGE_PATH_ENVVAR] == "/var/tmp"
-        assert "NMP_BASE_URL" in env_vars
+        assert "NHX_BASE_URL" in env_vars
 
         # Ensure that config warnings are disabled
-        assert env_vars["NMP_CONFIG_WARNINGS_DISABLED"] == "1"
+        assert env_vars["NHX_CONFIG_WARNINGS_DISABLED"] == "1"
 
 
 def test_schedule_job_with_auth_context_mounts_projected_workload_identity_token(
@@ -396,7 +396,7 @@ def test_schedule_job_with_auth_context_mounts_projected_workload_identity_token
     volcano_job._execution_profile_config.workload_identity.token_expiration_seconds = 600
     volcano_job._execution_profile_config.workload_identity.token_audience = "test-audience"
 
-    with patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config):
+    with patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config):
         volcano_job.schedule(distributed_gpu_execution_provider, test_step_pending_with_auth_context)
 
     call_args = volcano_job._custom_v1.create_namespaced_custom_object.call_args  # ty: ignore[possibly-unbound-attribute]
@@ -438,7 +438,7 @@ def test_created_step_does_not_ttl_before_backend_acceptance(
 
 def test_volcano_job_profile_environment_applied(
     kubernetes_client_mock,
-    mock_nmp_client,
+    mock_nhx_client,
     volcano_execution_profile_config,
     mock_platform_config,
     distributed_gpu_execution_provider,
@@ -449,14 +449,14 @@ def test_volcano_job_profile_environment_applied(
         **{**volcano_execution_profile_config.model_dump(), "env": {"HOME": "/tmp"}}
     )
     with (
-        patch("nmp.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
+            "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
         ),
     ):
         backend = VolcanoJobBackend(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             execution_profile_config=profile_config,
             profile_name="default",
         )
@@ -605,10 +605,10 @@ def test_schedule_job_single_node_success(
         assert env_vars[NEMO_JOB_FILESET_ENVVAR] == "test-logs-fileset"
         assert env_vars[PERSISTENT_JOB_STORAGE_PATH_ENVVAR] == "/var/test"
         assert env_vars[EPHEMERAL_TASK_STORAGE_PATH_ENVVAR] == "/var/tmp"
-        assert "NMP_BASE_URL" in env_vars
+        assert "NHX_BASE_URL" in env_vars
 
         # Ensure that config warnings are disabled
-        assert env_vars["NMP_CONFIG_WARNINGS_DISABLED"] == "1"
+        assert env_vars["NHX_CONFIG_WARNINGS_DISABLED"] == "1"
 
 
 def test_volcano_job_nemo_job_secrets_format_same_and_cross_workspace(
@@ -808,7 +808,7 @@ def test_single_node_no_networking_annotations(
 
 def test_networking_annotations_disabled_via_config(
     kubernetes_client_mock,
-    mock_nmp_client,
+    mock_nhx_client,
     mock_platform_config,
     test_step_pending: PlatformJobStepWithContext,
 ):
@@ -824,14 +824,14 @@ def test_networking_annotations_disabled_via_config(
     )
 
     with (
-        patch("nmp.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
+            "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
         ),
     ):
         volcano_job = VolcanoJobBackend(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             execution_profile_config=volcano_execution_profile_config,
             profile_name="default",
         )
@@ -929,17 +929,17 @@ def test_sync_job_active_registers_pod_uid_workload_delegation(
     before_sync = datetime.datetime.now(datetime.UTC)
 
     expected_name = reference_delegation_name(
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_subject="system:serviceaccount:test-namespace:default",
         bound_reference_name=KUBERNETES_POD_UID_REFERENCE_NAME,
         bound_reference_value="pod-uid-123",
     )
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(volcano_job._workload_delegations, "_register_workload_delegation") as register_delegation,
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks",
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks",
             return_value=False,
         ),
         patch.object(volcano_job, "get_volcano_job_events", return_value=[]),
@@ -952,7 +952,7 @@ def test_sync_job_active_registers_pod_uid_workload_delegation(
     delegation = register_delegation.call_args.args[0]
     assert delegation.name == expected_name
     assert delegation.workload_subject == "system:serviceaccount:test-namespace:default"
-    assert delegation.workload_audience == "nemo-platform"
+    assert delegation.workload_audience == "nemo-helix"
     assert delegation.workload_workspace == test_step_pending_with_auth_context.workspace
     assert delegation.workload_kind == "job"
     assert delegation.workload_id == test_step_pending_with_auth_context.job
@@ -1000,17 +1000,17 @@ def test_sync_job_completed_revokes_pod_uid_workload_delegation(
     volcano_job._core_v1.list_namespaced_pod.return_value = client.V1PodList(items=[pod])  # ty: ignore[attr-defined]
 
     expected_name = reference_delegation_name(
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_subject="system:serviceaccount:test-namespace:default",
         bound_reference_name=KUBERNETES_POD_UID_REFERENCE_NAME,
         bound_reference_value="pod-uid-123",
     )
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(volcano_job._workload_delegations, "_revoke_workload_delegation") as revoke_delegation,
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks",
+            "nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks",
             return_value=False,
         ),
         patch.object(volcano_job, "get_volcano_job_events", return_value=[]),
@@ -1078,7 +1078,7 @@ def test_sync_active_when_volcano_job_not_found_revokes_recorded_workload_delega
     volcano_job._custom_v1.get_namespaced_custom_object.side_effect = ApiException(status=404)  # ty: ignore[invalid-assignment]
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(volcano_job._workload_delegations, "_revoke_workload_delegation") as revoke_delegation,
     ):
         job_update = volcano_job.sync(test_step_active_with_auth_context)
@@ -1260,7 +1260,7 @@ def test_cleanup_pending_by_ttl(volcano_job: VolcanoJobBackend, test_step_pendin
     volcano_job._custom_v1.get_namespaced_custom_object.return_value = mock_job  # ty: ignore[invalid-assignment]
 
     # Mock update_all_tasks
-    with patch("nmp.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks"):
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks"):
         # Call sync which should detect the TTL timeout
         result = volcano_job.sync(test_step_pending)
 
@@ -1305,7 +1305,7 @@ def test_cleanup_active_by_ttl(volcano_job: VolcanoJobBackend, test_step_active)
     volcano_job._custom_v1.get_namespaced_custom_object.return_value = mock_job  # ty: ignore[invalid-assignment]
 
     # Mock update_all_tasks
-    with patch("nmp.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks"):
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.volcano_job.update_all_tasks"):
         # Call sync which should detect the TTL timeout
         result = volcano_job.sync(test_step_active)
 
@@ -1350,14 +1350,14 @@ def test_terminate_job_revokes_pod_uid_workload_delegation(
     )
 
     expected_name = reference_delegation_name(
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_subject="system:serviceaccount:test-namespace:default",
         bound_reference_name=KUBERNETES_POD_UID_REFERENCE_NAME,
         bound_reference_value="pod-uid-123",
     )
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(volcano_job._workload_delegations, "_revoke_workload_delegation") as revoke_delegation,
     ):
         volcano_job.terminate_job(mock_job)
@@ -1475,7 +1475,7 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(volcano_job:
     volcano_job._custom_v1.list_namespaced_custom_object.return_value = mock_job_list  # type: ignore[invalid-assignment]
 
     # Mock the cleanup_job_persistent_storage function to track if it's called
-    from nmp.core.jobs.controllers.backends.kubernetes import common as k8s_common
+    from nhx.core.jobs.controllers.backends.kubernetes import common as k8s_common
 
     with patch.object(k8s_common, "cleanup_job_persistent_storage") as mock_cleanup_storage:
         # Run cleanup
@@ -1578,7 +1578,7 @@ def test_cleanup_steps_proceeds_when_job_entity_not_found_with_persistent_storag
 
     volcano_job._custom_v1.list_namespaced_custom_object.return_value = {"items": [mock_job]}  # type: ignore[invalid-assignment]
 
-    from nmp.core.jobs.controllers.backends.kubernetes import volcano_job as volcano_job_module
+    from nhx.core.jobs.controllers.backends.kubernetes import volcano_job as volcano_job_module
 
     with patch.object(volcano_job_module, "cleanup_job_persistent_storage") as mock_cleanup_storage:
         volcano_job.cleanup_steps()

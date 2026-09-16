@@ -20,10 +20,10 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: {{ printf "%s-authentik-blueprint" .Release.Name | trunc 63 | trimSuffix "-" }}
-  namespace: {{ include "nemo-platform-authentik.namespace" . }}
+  namespace: {{ include "nemo-helix-authentik.namespace" . }}
   labels:
     app.kubernetes.io/component: authentik-blueprint-apply
-    {{- include "nemo-platform-authentik.labels" . | nindent 4 }}
+    {{- include "nemo-helix-authentik.labels" . | nindent 4 }}
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "10"
@@ -36,7 +36,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/component: authentik-blueprint-apply
-        {{- include "nemo-platform-authentik.selectorLabels" . | nindent 8 }}
+        {{- include "nemo-helix-authentik.selectorLabels" . | nindent 8 }}
     spec:
       automountServiceAccountToken: false
       restartPolicy: OnFailure

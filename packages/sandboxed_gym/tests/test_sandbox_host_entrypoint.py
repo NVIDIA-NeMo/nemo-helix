@@ -98,7 +98,7 @@ def test_opensandbox_host_provider_uses_configured_protocol_for_bare_endpoints()
 def _gym_host_spec(*, entrypoint: tuple[str, ...] | None = None) -> GymHostSpec:
     return GymHostSpec(
         job_id="job-1",
-        runtime_image="nmp-gym-host:dev",
+        runtime_image="nhx-gym-host:dev",
         environment_mount=GymHostVolumeMount(
             pvc_claim="job-storage",
             sub_path="environment",

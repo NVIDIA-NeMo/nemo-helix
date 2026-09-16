@@ -93,7 +93,7 @@
       "on-activate": "  set -euo pipefail\n\n  export VIRTUAL_ENV=\"$PWD/.venv\"\n  export PATH=\"$VIRTUAL_ENV/bin:$PATH\"\n\n  if uv sync --frozen --all-packages --check; then\n    return 0\n  fi\n\n  echo \"Python environment is out of sync; synchronizing...\"\n  uv sync --frozen --all-packages\n\n  set -euo pipefail\n  mkdir -p \"$COREPACK_SHIMS\"\n  if ! test -x \"$COREPACK_SHIMS/pnpm\" || ! \"$COREPACK_SHIMS/pnpm\" --version | grep -Fxq \"$PNPM_VERSION\"; then\n    corepack install --global \"pnpm@$PNPM_VERSION\"\n    corepack enable --install-directory \"$COREPACK_SHIMS\"\n  fi\n  export PATH=\"$COREPACK_SHIMS:$PATH\"\n"
     },
     "profile": {
-      "common": "  export PATH=\"$COREPACK_SHIMS:$PATH\"\n\n  test -f .git/hooks/pre-commit || pre-commit install\n\n  gum style \"NeMo Platform\"\n"
+      "common": "  export PATH=\"$COREPACK_SHIMS:$PATH\"\n\n  test -f .git/hooks/pre-commit || pre-commit install\n\n  gum style \"NeMo Helix\"\n"
     },
     "options": {
       "systems": [
@@ -1554,7 +1554,7 @@
     "composer": {
       "schema-version": "1.14.0",
       "profile": {
-        "common": "  export PATH=\"$COREPACK_SHIMS:$PATH\"\n\n  test -f .git/hooks/pre-commit || pre-commit install\n\n  gum style \"NeMo Platform\"\n"
+        "common": "  export PATH=\"$COREPACK_SHIMS:$PATH\"\n\n  test -f .git/hooks/pre-commit || pre-commit install\n\n  gum style \"NeMo Helix\"\n"
       },
       "options": {
         "systems": [
@@ -1710,7 +1710,7 @@
           },
           "options": {}
         },
-        "name": "nemo-platform-python",
+        "name": "nemo-helix-python",
         "descriptor": {
           "dir": "tools/python"
         }
@@ -1741,7 +1741,7 @@
             ]
           }
         },
-        "name": "nemo-platform-nodejs",
+        "name": "nemo-helix-nodejs",
         "descriptor": {
           "dir": "tools/nodejs"
         }
@@ -1811,7 +1811,7 @@
             "systems"
           ]
         },
-        "higher_priority_name": "nemo-platform-nodejs"
+        "higher_priority_name": "nemo-helix-nodejs"
       },
       {
         "warning": {

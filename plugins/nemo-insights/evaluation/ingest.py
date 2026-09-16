@@ -10,8 +10,8 @@ from typing import Any, Protocol
 from urllib.parse import urlparse
 
 import httpx
-from nemo_platform import NeMoPlatform
-from nemo_platform_ext.config.config import Config
+from nemo_helix import NeMoHelix
+from nemo_helix_ext.config.config import Config
 
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
 
@@ -52,13 +52,13 @@ class _PlatformClient(Protocol):
     def close(self) -> None: ...
 
 
-def _make_platform_client(base_url: str) -> NeMoPlatform:
+def _make_platform_client(base_url: str) -> NeMoHelix:
     """Build a synchronous SDK client with platform auth for remote URLs."""
     host = (urlparse(base_url).hostname or "").lower()
     config_path = Config.get_default_config_path()
     if host in _LOOPBACK_HOSTS or not config_path.exists():
-        return NeMoPlatform(base_url=base_url, timeout=30.0)
-    return NeMoPlatform(base_url=base_url, config_path=config_path, timeout=30.0)
+        return NeMoHelix(base_url=base_url, timeout=30.0)
+    return NeMoHelix(base_url=base_url, config_path=config_path, timeout=30.0)
 
 
 def mint_agent_id(base: str) -> str:

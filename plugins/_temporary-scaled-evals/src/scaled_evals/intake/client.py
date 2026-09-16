@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""HTTP client for NeMo Platform Intake v2 ATIF ingest.
+"""HTTP client for NeMo Helix Intake v2 ATIF ingest.
 
 Posts to ``/apis/intake/v2/workspaces/{workspace}/ingest/atif``. No
 ``Authorization`` header is sent, so this only reaches Intake deployments that

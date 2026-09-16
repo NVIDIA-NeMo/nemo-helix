@@ -9,17 +9,17 @@ from pathlib import Path
 
 import pytest
 import yaml
-from nmp.rl.schemas.environment import (
+from nhx.rl.schemas.environment import (
     AdapterWheelsV1Manifest,
     EnvironmentFormat,
     GymVerifiersDatasetRow,
 )
-from nmp.rl.tasks.environment.package import (
+from nhx.rl.tasks.environment.package import (
     build_policy_model_yaml,
     build_verifiers_agent_yaml,
     write_adapter_wheels_package,
 )
-from nmp.rl.tasks.environment.validate import (
+from nhx.rl.tasks.environment.validate import (
     EnvironmentPackageValidationError,
     load_manifest,
     offline_wheel_install_required,
@@ -186,7 +186,7 @@ def test_policy_model_interpolations_match_what_nemo_rl_injects() -> None:
 
 
 def test_bootstrap_adapter_wheels_validate_only(tmp_path: Path) -> None:
-    from nmp.rl.tasks.environment.bootstrap import bootstrap_environment_package
+    from nhx.rl.tasks.environment.bootstrap import bootstrap_environment_package
 
     wheels = tmp_path / "src_wheels"
     wheels.mkdir()
@@ -203,7 +203,7 @@ def test_bootstrap_adapter_wheels_validate_only(tmp_path: Path) -> None:
 
 
 def test_convert_with_wheels_dir_writes_layout(tmp_path: Path) -> None:
-    from nmp.rl.tasks.environment.convert import ConvertEnvironmentSpec, convert_prime_environment
+    from nhx.rl.tasks.environment.convert import ConvertEnvironmentSpec, convert_prime_environment
 
     wheels = tmp_path / "prebuilt"
     wheels.mkdir()
@@ -228,7 +228,7 @@ def test_convert_with_wheels_dir_writes_layout(tmp_path: Path) -> None:
 
 
 def test_convert_rejects_empty_wheels_dir(tmp_path: Path) -> None:
-    from nmp.rl.tasks.environment.convert import ConvertEnvironmentSpec, convert_prime_environment
+    from nhx.rl.tasks.environment.convert import ConvertEnvironmentSpec, convert_prime_environment
 
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -250,8 +250,8 @@ def test_convert_vendors_hub_dataset_and_configures_its_sandbox_path(tmp_path: P
     import sys
     from types import ModuleType
 
-    from nmp.rl.tasks.environment import convert as convert_mod
-    from nmp.rl.tasks.environment.convert import ConvertEnvironmentSpec, convert_prime_environment
+    from nhx.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment.convert import ConvertEnvironmentSpec, convert_prime_environment
 
     wheels = tmp_path / "prebuilt"
     wheels.mkdir()
@@ -340,7 +340,7 @@ def test_convert_vendors_hub_dataset_and_configures_its_sandbox_path(tmp_path: P
 
 def test_split_train_validation_never_overlaps() -> None:
     """The old `or all_rows` fallback made train and validation identical."""
-    from nmp.rl.tasks.environment.convert import split_train_validation
+    from nhx.rl.tasks.environment.convert import split_train_validation
 
     rows = [{"task_idx": i} for i in range(10)]
     train, val = split_train_validation(rows, 0.2)
@@ -356,7 +356,7 @@ def test_split_train_validation_never_overlaps() -> None:
 
 @pytest.mark.parametrize(("n_rows", "fraction"), [(1, 0.2), (5, 1.0), (10, 1.0)])
 def test_split_train_validation_rejects_empty_training_set(n_rows: int, fraction: float) -> None:
-    from nmp.rl.tasks.environment.convert import split_train_validation
+    from nhx.rl.tasks.environment.convert import split_train_validation
 
     rows = [{"task_idx": i} for i in range(n_rows)]
     with pytest.raises(ValueError, match="leaves no training rows"):
@@ -366,7 +366,7 @@ def test_split_train_validation_rejects_empty_training_set(n_rows: int, fraction
 def test_validation_fraction_cli_rejects_out_of_range() -> None:
     import argparse
 
-    from nmp.rl.tasks.environment.__main__ import _validation_fraction
+    from nhx.rl.tasks.environment.__main__ import _validation_fraction
 
     assert _validation_fraction("0.2") == 0.2
     assert _validation_fraction("0") == 0.0
@@ -376,7 +376,7 @@ def test_validation_fraction_cli_rejects_out_of_range() -> None:
 
 
 def test_wheel_version_prefers_numeric_order_over_lexicographic() -> None:
-    from nmp.rl.tasks.environment.convert import _wheel_version
+    from nhx.rl.tasks.environment.convert import _wheel_version
 
     wheels = [
         Path("ascii_tree-0.9.0-py3-none-any.whl"),
@@ -420,7 +420,7 @@ def test_download_hub_wheels_resolves_before_downloading(tmp_path: Path, monkeyp
     minutes into the job. Resolving to a pinned file and downloading it with --no-deps is
     what makes the output one-file-per-distribution.
     """
-    from nmp.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment import convert as convert_mod
 
     commands: list[list[str]] = []
 
@@ -459,7 +459,7 @@ def test_download_hub_wheels_resolves_before_downloading(tmp_path: Path, monkeyp
 
 def test_download_hub_wheels_builds_sdists_and_requires_complete_closure(tmp_path: Path, monkeypatch) -> None:
     """Source-only releases must become target-Python wheels; dropping them breaks offline Gym."""
-    from nmp.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment import convert as convert_mod
 
     commands: list[list[str]] = []
     monkeypatch.setattr(convert_mod.sys, "executable", "/host/python3.12")
@@ -510,7 +510,7 @@ def test_download_hub_wheels_builds_sdists_and_requires_complete_closure(tmp_pat
 
 
 def test_complete_wheel_closure_rejects_missing_distribution(tmp_path: Path) -> None:
-    from nmp.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment import convert as convert_mod
 
     wheels = tmp_path / "wheels"
     wheels.mkdir()
@@ -524,7 +524,7 @@ def test_complete_wheel_closure_rejects_missing_distribution(tmp_path: Path) -> 
 
 def test_install_hub_package_does_not_build_sdist_deps(tmp_path: Path, monkeypatch) -> None:
     """Hub install must not rebuild verifiers from a zip sitting next to the wheel."""
-    from nmp.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment import convert as convert_mod
 
     wheels = tmp_path / "wheels"
     wheels.mkdir()
@@ -545,7 +545,7 @@ def test_install_hub_package_does_not_build_sdist_deps(tmp_path: Path, monkeypat
 
 def test_download_hub_wheels_requirements_in_lists_env_and_verifiers(tmp_path: Path, monkeypatch) -> None:
     """Both roots have to reach the resolver, or the closure is missing one of them."""
-    from nmp.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment import convert as convert_mod
 
     seen: dict[str, str] = {}
 
@@ -579,7 +579,7 @@ def test_download_hub_wheels_requirements_in_lists_env_and_verifiers(tmp_path: P
 
 def test_duplicate_wheel_distributions_reports_only_repeats(tmp_path: Path) -> None:
     """Normalized per PEP 503, so `charset_normalizer` and `charset-normalizer` are one."""
-    from nmp.rl.tasks.environment.validate import duplicate_wheel_distributions
+    from nhx.rl.tasks.environment.validate import duplicate_wheel_distributions
 
     wheels = tmp_path / "wheels"
     wheels.mkdir()
@@ -602,7 +602,7 @@ def test_validate_package_layout_warns_on_duplicate_wheels(tmp_path: Path, caplo
     """A package that does not pin its own closure must say so at validation time."""
     import logging
 
-    from nmp.rl.tasks.environment.package import write_adapter_wheels_package
+    from nhx.rl.tasks.environment.package import write_adapter_wheels_package
 
     src = tmp_path / "prebuilt"
     src.mkdir()
@@ -634,7 +634,7 @@ def test_download_hub_wheels_honours_hub_version(
     `requires a different Python`, and a release that still installs may not match the
     training image's interpreter. --hub-version makes the vendored release explicit.
     """
-    from nmp.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment import convert as convert_mod
 
     seen: dict[str, str] = {}
 
@@ -664,7 +664,7 @@ def test_download_hub_wheels_honours_hub_version(
 
 def test_convert_cli_threads_hub_version_into_the_spec(monkeypatch, tmp_path: Path) -> None:
     """The flag is useless if it stops at argparse."""
-    from nmp.rl.tasks.environment import __main__ as cli
+    from nhx.rl.tasks.environment import __main__ as cli
 
     captured: dict = {}
 
@@ -730,7 +730,7 @@ def test_download_targets_the_training_image_not_the_host(tmp_path: Path, monkey
     Markers are evaluated at resolve time too, so the compile has to target the same
     platform or the closure is wrong before anything is fetched.
     """
-    from nmp.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment import convert as convert_mod
 
     commands: list[list[str]] = []
 
@@ -774,7 +774,7 @@ def test_download_targets_the_training_image_not_the_host(tmp_path: Path, monkey
 )
 def test_assert_wheels_target_platform_rejects_foreign_wheels(tmp_path: Path, filename: str) -> None:
     """Catch foreign platforms and Python ABIs before the cluster install."""
-    from nmp.rl.tasks.environment.convert import assert_wheels_target_platform
+    from nhx.rl.tasks.environment.convert import assert_wheels_target_platform
 
     wheels = tmp_path / "wheels"
     wheels.mkdir()
@@ -801,7 +801,7 @@ def test_assert_wheels_target_platform_accepts_portable_wheels(tmp_path: Path, f
     Compound tags count if ANY component matches: pip emits e.g.
     `manylinux2014_x86_64.manylinux_2_17_x86_64` for one file.
     """
-    from nmp.rl.tasks.environment.convert import assert_wheels_target_platform
+    from nhx.rl.tasks.environment.convert import assert_wheels_target_platform
 
     wheels = tmp_path / "wheels"
     wheels.mkdir()
@@ -811,7 +811,7 @@ def test_assert_wheels_target_platform_accepts_portable_wheels(tmp_path: Path, f
 
 
 def test_compile_ignores_this_repo_dependency_policy(tmp_path: Path, monkeypatch) -> None:
-    """The closure is a user's environment, not a nemo-platform dependency set.
+    """The closure is a user's environment, not a nemo-helix dependency set.
 
     uv discovers the nearest pyproject.toml and applies its [tool.uv] policy. This repo's
     override-dependencies exist for its own CVE posture, and an override REPLACES a
@@ -819,7 +819,7 @@ def test_compile_ignores_this_repo_dependency_policy(tmp_path: Path, monkeypatch
     bound that openai-agents declares. The closure then vendors openai 3.0.0, and the
     cluster, where no overrides apply, cannot install it.
     """
-    from nmp.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment import convert as convert_mod
 
     commands: list[list[str]] = []
 

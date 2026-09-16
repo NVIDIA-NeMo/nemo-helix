@@ -9,8 +9,8 @@ import os
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
     EnvironmentVariable,

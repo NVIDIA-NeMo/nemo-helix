@@ -3,7 +3,7 @@
 
 ## Conventions
 
-Inherited from the NeMo Platform monorepo that now hosts this plugin:
+Inherited from the NeMo Helix monorepo that now hosts this plugin:
 
 - Use `uv` exclusively (`uv add`, `uv sync`, `uv run`). No pip/poetry/conda.
 - No `__init__.py` files — use implicit namespace packages.
@@ -52,12 +52,12 @@ standalone plugin that imported nothing from Experimentalist. Both arrows pointe
 other for the duration, and `uv` resolved the cycle.
 
 One rule from that entry still holds: both plugins use
-`nemo_platform_plugin.nooa_model_client`, so provider routing, Platform authentication,
+`nemo_helix_plugin.nooa_model_client`, so provider routing, Platform authentication,
 and configured model selection have one owner outside either plugin.
 
 ### 2026-07-24: Optimizer renamed to Experimentalist
 
-Ahead of the move into the `nemo-platform` monorepo, the plugin was renamed from
+Ahead of the move into the `nemo-helix` monorepo, the plugin was renamed from
 Optimizer to Experimentalist. Like the Eval Author rename below, this is a
 breaking rename with no compatibility aliases:
 

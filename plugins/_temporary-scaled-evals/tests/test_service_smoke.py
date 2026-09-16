@@ -12,7 +12,7 @@ import pytest
 # error there; the job that owns these tests installs the `scaled-evals` group first.
 try:
     from fastapi.testclient import TestClient
-    from nemo_platform_plugin.authz import get_path_rules, get_path_scope
+    from nemo_helix_plugin.authz import get_path_rules, get_path_scope
     from nemo_scaled_evals_plugin.service import ScaledEvalsService
 except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
@@ -38,7 +38,7 @@ def test_scaled_evals_service_mounts_health_and_v1_routers() -> None:
 
 
 def test_scaled_evals_healthz_via_adapter() -> None:
-    from nmp.platform_runner.plugin_adapter import NemoServiceAdapter
+    from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
 
     adapter = NemoServiceAdapter(ScaledEvalsService())
     app = adapter.create_app()

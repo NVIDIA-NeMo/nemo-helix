@@ -27,7 +27,7 @@ from nemo_evaluator.jobs.gym_sandbox import (
     resolve_sandbox_plan,
     serve_config,
 )
-from nemo_platform_plugin.jobs.execution_profiles import (
+from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobExecutionProfile,
     KubernetesJobExecutionProfileConfig,
     KubernetesJobStorageConfig,
@@ -48,7 +48,7 @@ def capable_config(**overrides: Any) -> EvaluatorConfig:
     fields: dict[str, Any] = {
         "sandboxed_gym_default": True,
         "sandbox_cluster_capable": True,
-        "sandbox_runtime_image": "registry.example.com/nmp-gym-runtime:1.0",
+        "sandbox_runtime_image": "registry.example.com/nhx-gym-runtime:1.0",
         "sandbox_job_storage_pvc_claim": "job-storage",
         "sandbox_policy_base_urls": ("https://integrate.api.nvidia.com/v1",),
     }
@@ -127,7 +127,7 @@ def test_custom_environment_carries_component_selection_for_host_composition() -
     )
 
     assert config["config_paths"][0] == "responses_api_agents/simple_agent/configs/simple_agent.yaml"
-    assert config["_nmp_environment_component_selection"] == {
+    assert config["_nhx_environment_component_selection"] == {
         "agent_instance": "custom_agent",
         "agent_config": "responses_api_agents/simple_agent/configs/simple_agent.yaml",
         "resources_server_instance": "mcqa",
@@ -147,7 +147,7 @@ def test_custom_environment_omits_agent_config_when_the_package_supplies_the_age
     )
 
     assert "responses_api_agents/simple_agent/configs/simple_agent.yaml" not in config["config_paths"]
-    assert config["_nmp_environment_component_selection"]["agent_config"] is None
+    assert config["_nhx_environment_component_selection"]["agent_config"] is None
 
 
 def test_agent_config_is_required_without_an_environment_package() -> None:
@@ -163,7 +163,7 @@ def test_environment_fileset_rejects_file_fragments() -> None:
 def test_serve_config_takes_cluster_facts_from_the_deployment_not_the_job() -> None:
     payload = serve_config(target(), capable_plan(), job_id="job-7")
 
-    assert payload["sandbox"]["image"] == "registry.example.com/nmp-gym-runtime:1.0"
+    assert payload["sandbox"]["image"] == "registry.example.com/nhx-gym-runtime:1.0"
     assert payload["sandbox"]["environment_pvc_claim"] == "job-storage"
     assert payload["episode_broker"]["job_id"] == "job-7"
     # ...and the job's half is the environment selection, nothing else.
@@ -171,10 +171,10 @@ def test_serve_config_takes_cluster_facts_from_the_deployment_not_the_job() -> N
 
 
 def test_unset_runtime_image_uses_the_qualified_gym_host(monkeypatch: pytest.MonkeyPatch) -> None:
-    qualified = "registry.example.com/nemo/nmp-gym-host:same-platform-tag"
+    qualified = "registry.example.com/nemo/nhx-gym-host:same-platform-tag"
     monkeypatch.setattr(
         "nemo_evaluator.jobs.gym_sandbox.get_qualified_image",
-        lambda name: qualified if name == "nmp-gym-host" else "",
+        lambda name: qualified if name == "nhx-gym-host" else "",
     )
 
     plan = resolve_sandbox_plan(capable_config(sandbox_runtime_image=None), target())
@@ -430,7 +430,7 @@ def test_custom_environment_uses_the_read_only_host_mount() -> None:
         target(environment=FilesetRef(root="default/custom-gym")),
     )
 
-    assert spec.bootstrap_env["NMP_ENVIRONMENT_PATH"] == "/job/environment"
+    assert spec.bootstrap_env["NHX_ENVIRONMENT_PATH"] == "/job/environment"
 
 
 def test_fileset_backed_docker_mounts_the_subprocess_persistent_storage(tmp_path: Path) -> None:
@@ -438,7 +438,7 @@ def test_fileset_backed_docker_mounts_the_subprocess_persistent_storage(tmp_path
     persistent.mkdir(parents=True)
     plan = capable_plan(
         sandbox_host_provider="docker",
-        sandbox_host_provider_options={"root_dir": "/ignored", "network": "nmp-test"},
+        sandbox_host_provider_options={"root_dir": "/ignored", "network": "nhx-test"},
     )
 
     payload = serve_config(
@@ -451,7 +451,7 @@ def test_fileset_backed_docker_mounts_the_subprocess_persistent_storage(tmp_path
     sandbox = payload["sandbox"]
     assert sandbox["host_provider_options"] == {
         "root_dir": str(persistent.parent),
-        "network": "nmp-test",
+        "network": "nhx-test",
     }
     assert (
         Path(sandbox["host_provider_options"]["root_dir"])
@@ -504,7 +504,7 @@ def test_resource_requests_reach_the_host_when_configured() -> None:
 def test_the_runtime_image_and_job_id_reach_the_host() -> None:
     spec = built_host_spec(capable_plan())
 
-    assert spec.runtime_image == "registry.example.com/nmp-gym-runtime:1.0"
+    assert spec.runtime_image == "registry.example.com/nhx-gym-runtime:1.0"
     assert spec.job_id == "job-9"
 
 
@@ -582,10 +582,10 @@ def test_the_host_env_reaches_the_built_spec() -> None:
 
 
 def test_a_job_cannot_move_the_broker_by_naming_its_variable() -> None:
-    # `env_vars` is job-authored. Redefining NMP_BROKER_URL would point the host's rollouts at the
+    # `env_vars` is job-authored. Redefining NHX_BROKER_URL would point the host's rollouts at the
     # job's own listener, outside the broker's mediation.
-    with pytest.raises(ValueError, match="NMP_BROKER_URL"):
-        built_host_spec(capable_plan(), target(env_vars={"NMP_BROKER_URL": "http://evil"}))
+    with pytest.raises(ValueError, match="NHX_BROKER_URL"):
+        built_host_spec(capable_plan(), target(env_vars={"NHX_BROKER_URL": "http://evil"}))
 
 
 # --------------------------------------------------------------------------------------------

@@ -88,7 +88,7 @@ class StrategyContext(BuilderContext, Protocol):
     #: state from :meth:`candidates` rather than starting over.
     resuming: bool
 
-    #: NeMo Platform workspace this run belongs to.
+    #: NeMo Helix workspace this run belongs to.
     workspace: str
 
     @property

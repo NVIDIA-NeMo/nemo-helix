@@ -32,7 +32,7 @@ const FEATURE_FLAGS_TS = path.join(
   REPO_ROOT,
   'web/packages/studio/src/constants/featureFlags/featureFlags.ts'
 );
-const ENV_MAPPINGS_PY = path.join(REPO_ROOT, 'services/studio/src/nmp/studio/env_mappings.py');
+const ENV_MAPPINGS_PY = path.join(REPO_ROOT, 'services/studio/src/nhx/studio/env_mappings.py');
 const LOCAL_ENV_FILE = path.join(REPO_ROOT, 'web/packages/studio/env/.env.dev.local');
 const HELM_DEPLOYMENT_VALUES_DIR = process.env.HELM_DEPLOYMENT_VALUES_DIR
   ? path.resolve(REPO_ROOT, process.env.HELM_DEPLOYMENT_VALUES_DIR)

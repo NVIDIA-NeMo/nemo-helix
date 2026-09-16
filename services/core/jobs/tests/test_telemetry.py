@@ -7,9 +7,9 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
-from nemo_platform_plugin.jobs.telemetry import build_job_telemetry_custom_fields
-from nemo_platform_plugin.telemetry.handler import QueuedEvent, _redact_endpoint, build_payload
-from nmp.core.jobs.telemetry import _send_job_run_event, build_job_run_telemetry
+from nemo_helix_plugin.jobs.telemetry import build_job_telemetry_custom_fields
+from nemo_helix_plugin.telemetry.handler import QueuedEvent, _redact_endpoint, build_payload
+from nhx.core.jobs.telemetry import _send_job_run_event, build_job_run_telemetry
 
 
 def test_build_job_run_telemetry_uses_stamped_session_id() -> None:
@@ -63,7 +63,7 @@ def test_build_payload_matches_job_run_wire_contract() -> None:
     timestamp = datetime(2026, 9, 10, 12, 0, 0, 123000, tzinfo=timezone.utc)
     payload = build_payload(
         [QueuedEvent(event=event.event, timestamp=timestamp)],
-        source_client_version="nmp-jobs",
+        source_client_version="nhx-jobs",
         session_id=event.session_id,
     )
 
@@ -99,7 +99,7 @@ async def test_send_job_run_event_skips_non_https_endpoint(monkeypatch: pytest.M
     assert event is not None
     monkeypatch.setenv("NEMO_TELEMETRY_ENDPOINT", "http://marker" + "@example.test/events?debug=value")
 
-    with patch("nemo_platform_plugin.telemetry.handler.httpx.AsyncClient") as async_client:
+    with patch("nemo_helix_plugin.telemetry.handler.httpx.AsyncClient") as async_client:
         await _send_job_run_event(event)
 
     async_client.assert_not_called()
@@ -122,8 +122,8 @@ async def test_send_job_run_event_logs_only_redacted_endpoint(monkeypatch: pytes
         raise RuntimeError("send failed")
 
     with (
-        patch("nemo_platform_plugin.telemetry.handler.httpx.AsyncClient") as async_client,
-        patch("nemo_platform_plugin.telemetry.handler.logger.debug") as debug,
+        patch("nemo_helix_plugin.telemetry.handler.httpx.AsyncClient") as async_client,
+        patch("nemo_helix_plugin.telemetry.handler.logger.debug") as debug,
     ):
         async_client.return_value.__aenter__.return_value.post.side_effect = raise_on_post
         await _send_job_run_event(event)

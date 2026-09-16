@@ -379,7 +379,7 @@ def test_usage_show_fileset_builds_sdk_with_context_base_url_and_auth(app, tmp_n
     """A fileset ref builds the SDK client with the shared context's base URL + auth token.
 
     Pins P0 parity for ``usage show``: it must honor ``nemo config`` /
-    ``NMP_BASE_URL`` and attach the ``Authorization`` bearer token, instead
+    ``NHX_BASE_URL`` and attach the ``Authorization`` bearer token, instead
     of defaulting to localhost with no auth.
     """
     captured: dict[str, object] = {}
@@ -393,7 +393,7 @@ def test_usage_show_fileset_builds_sdk_with_context_base_url_and_auth(app, tmp_n
         yield tmp_natjobs_dir
 
     with (
-        patch("nemo_agents_plugin.usage.cli.NeMoPlatform", fake_platform),
+        patch("nemo_agents_plugin.usage.cli.NeMoHelix", fake_platform),
         patch("nemo_agents_plugin.usage.cli.fileset_path", fake_fileset_path),
     ):
         result = runner.invoke(

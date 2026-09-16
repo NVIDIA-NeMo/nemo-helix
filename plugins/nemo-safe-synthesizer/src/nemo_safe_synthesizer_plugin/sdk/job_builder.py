@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pandas as pd
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 from nemo_safe_synthesizer_plugin.sdk.job import SafeSynthesizerJob
 from typing_extensions import Self
 
@@ -42,7 +42,7 @@ def _merge_config(config: _ConfigInput, kwargs: dict[str, Any]) -> dict[str, Any
 class SafeSynthesizerJobBuilder:
     """Fluent builder for Safe Synthesizer plugin jobs."""
 
-    def __init__(self, client: NeMoPlatform, workspace: str = "default"):
+    def __init__(self, client: NeMoHelix, workspace: str = "default"):
         self._client = client
         self._workspace = workspace
 

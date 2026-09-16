@@ -39,7 +39,7 @@ def _transformers_module(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setitem(sys.modules, "transformers", MagicMock())
 
 
-from nmp.automodel.tasks.training.backends.config import (  # noqa: E402
+from nhx.automodel.tasks.training.backends.config import (  # noqa: E402
     _configure_chat_dataset,
     _configure_moe_backend,
     _configure_retrieval_dataset,
@@ -50,10 +50,10 @@ from nmp.automodel.tasks.training.backends.config import (  # noqa: E402
     resolve_compiled_recipe,
     resolve_warmup_steps,
 )
-from nmp.automodel.tasks.training.datasets.preparation import PreparedDataset  # noqa: E402
-from nmp.automodel.tasks.training.schemas import EmbeddingConfig, TrainingRecipe, TrainingStepConfig  # noqa: E402
+from nhx.automodel.tasks.training.datasets.preparation import PreparedDataset  # noqa: E402
+from nhx.automodel.tasks.training.schemas import EmbeddingConfig, TrainingRecipe, TrainingStepConfig  # noqa: E402
 
-CONFIG_MODULE = "nmp.automodel.tasks.training.backends.config"
+CONFIG_MODULE = "nhx.automodel.tasks.training.backends.config"
 AUTOCONFIG_PATCH = "transformers.AutoConfig"
 MODEL_REGISTRY_PATCH = f"{CONFIG_MODULE}.ModelRegistry"
 
@@ -535,7 +535,7 @@ def test_the_reporting_block_reaches_the_recipe_config(tmp_path: Path) -> None:
     is exactly the arrangement where a rename passes every test and the run
     quietly reports at the default forever. This is the test that fails.
     """
-    from nmp.customization_common.training.reporting import ProgressReportingConfig
+    from nhx.customization_common.training.reporting import ProgressReportingConfig
 
     fixture = (
         Path(__file__).parents[3] / "contract" / "input_configs" / "llama-3.2-1b" / "llama_3_2_1b_lora_packing.json"

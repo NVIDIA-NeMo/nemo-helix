@@ -3,7 +3,7 @@
 
 """Automodel customization contributor.
 
-Shared shape lives in :class:`nmp.customization_common.contributor.base.BaseContributor`;
+Shared shape lives in :class:`nhx.customization_common.contributor.base.BaseContributor`;
 this subclass supplies the backend-specific values + the SDK resource classes the
 customization hub composes under ``client.customization.automodel``.
 """
@@ -13,8 +13,8 @@ from __future__ import annotations
 from typing import ClassVar
 
 import typer
-from nemo_platform_plugin.customization_contributor import CustomizationContributorSDKResources
-from nmp.customization_common.contributor.base import BaseContributor
+from nemo_helix_plugin.customization_contributor import CustomizationContributorSDKResources
+from nhx.customization_common.contributor.base import BaseContributor
 
 from nemo_automodel_plugin.config import AutomodelPluginConfig, generate_automodel_id, get_config
 from nemo_automodel_plugin.jobs.jobs import AutomodelJob

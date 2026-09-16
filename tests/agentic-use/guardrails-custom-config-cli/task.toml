@@ -4,7 +4,7 @@
 version = "1.0"
 
 [metadata]
-author_name = "NeMo Platform Team"
+author_name = "NeMo Helix Team"
 difficulty = "hard"
 category = "cli-guardrails"
 tags = ["guardrails", "custom-config", "input-rails", "output-rails", "cli"]

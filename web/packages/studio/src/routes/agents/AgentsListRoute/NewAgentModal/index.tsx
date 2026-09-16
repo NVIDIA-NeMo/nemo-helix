@@ -350,7 +350,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
         open={open}
         onClose={resetAndClose}
         className="w-[720px] max-w-[90vw]"
-        title="Instrument an agent with NeMo Platform"
+        title="Instrument an agent with NeMo Helix"
         instruction="Integrated agents allow users to evaluate, optimize, and deploy agents."
         submitButtonText={replaceOrphan ? 'Replace and create' : 'Create'}
         onSubmit={(event) => {

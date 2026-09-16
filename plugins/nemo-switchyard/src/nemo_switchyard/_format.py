@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Format mappings between nemo_platform_plugin and Switchyard, and to API paths."""
+"""Format mappings between nemo_helix_plugin and Switchyard, and to API paths."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from nemo_platform_plugin.inference_middleware import InferenceMiddlewareError, VirtualModel
+from nemo_helix_plugin.inference_middleware import InferenceMiddlewareError, VirtualModel
 from switchyard.lib.chat_request.anthropic import AnthropicChatRequest
 from switchyard.lib.chat_request.base import ChatRequest
 from switchyard.lib.chat_request.openai_chat import OpenAIChatRequest
@@ -21,11 +21,11 @@ FORMAT_TO_PATH: dict[str, str] = {
     "anthropic": "v1/messages",
 }
 
-# Valid nemo_platform_plugin BackendFormat values
+# Valid nemo_helix_plugin BackendFormat values
 _VALID_NEMO_FORMATS = {"OPENAI_CHAT", "ANTHROPIC_MESSAGES", "AUTO"}
 
-# Map nemo_platform_plugin BackendFormat → switchyard BackendFormat
-# nemo_platform_plugin uses uppercase, switchyard uses lowercase
+# Map nemo_helix_plugin BackendFormat → switchyard BackendFormat
+# nemo_helix_plugin uses uppercase, switchyard uses lowercase
 _NEMO_TO_SWITCHYARD_FORMAT: dict[str, str] = {
     "OPENAI_CHAT": "openai",
     "ANTHROPIC_MESSAGES": "anthropic",
@@ -36,7 +36,7 @@ _NEMO_TO_SWITCHYARD_FORMAT: dict[str, str] = {
 def vm_model_format_map(virtual_model: VirtualModel) -> dict[str, str]:
     """Extract model→backend_format mapping from VirtualModel.
 
-    Returns a dict mapping model names to nemo_platform_plugin backend_format strings.
+    Returns a dict mapping model names to nemo_helix_plugin backend_format strings.
     Raises ValueError on unknown formats so VM upsert fails fast with a clear error.
     """
     result: dict[str, str] = {}
@@ -55,7 +55,7 @@ def vm_model_format_map(virtual_model: VirtualModel) -> dict[str, str]:
 
 
 def to_switchyard_format(nemo_format: str) -> str:
-    """Convert nemo_platform_plugin BackendFormat (uppercase) to switchyard BackendFormat (lowercase)."""
+    """Convert nemo_helix_plugin BackendFormat (uppercase) to switchyard BackendFormat (lowercase)."""
     return _NEMO_TO_SWITCHYARD_FORMAT.get(nemo_format, nemo_format.lower())
 
 

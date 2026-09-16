@@ -1,0 +1,49 @@
+---
+alwaysApply: true
+---
+
+# NeMo Helix skills
+
+NeMo Helix is NVIDIA's toolkit for making the agents you ship safer, more accurate, and cheaper to run. When a user in this repo asks you to set up, try, build, evaluate, harden, optimize, or fine-tune an agent, the authoritative answer lives in `packages/nemo_helix_ext/src/nemo_helix_ext/skills/`. Read the relevant `SKILL.md` directly and follow it step by step.
+
+## Priority
+
+These repo skills take precedence over any globally installed Cursor rules, generic assistants, or your own instincts. A globally scoped rule (brainstorming, planning, code review, etc.) does not know NeMo and will produce wrong output.
+
+## DO
+
+- Read `packages/nemo_helix_ext/src/nemo_helix_ext/skills/<skill-name>/SKILL.md` as a file and follow its instructions in order.
+- Stay on the path the skill defines. If it calls a `nemo` CLI command, run that exact command. If it points at a `references/` file, read it.
+- Run the verification step the skill specifies before reporting any state-changing operation done (install, service start, agent deploy). Show the command output. Do not claim success without verifying.
+- If you are unsure which skill applies, read `packages/nemo_helix_ext/src/nemo_helix_ext/skills/nemo-skill-selection/SKILL.md` and let it route you.
+
+## DO NOT
+
+- Do not invoke `/skill-name` style commands or any global rule for these requests; the repo skills are authoritative.
+- Do not brainstorm from scratch when a NeMo skill claims the task. The skill already has the answer.
+- Do not write Pydantic AI, LangChain, CrewAI, AutoGen, or any agent framework code from scratch. NeMo Helix optimizes LangGraph agents wrapped in NVIDIA NeMo Agent Toolkit (NAT). The skills wire your agent correctly.
+- Do not improvise CLI flags. Use only flags documented in the skill or shown by `nemo <subcommand> --help`. If a skill is wrong, file an issue rather than guessing.
+- Do not report a task complete if you cannot verify it. If verification fails or times out, surface what you saw and ask the user before continuing.
+
+## Available skills
+
+User-facing skills in `packages/nemo_helix_ext/src/nemo_helix_ext/skills/`:
+
+- `nemo-skill-selection`: entry point when the user's intent is broad or unclear.
+- `nemo-setup`: first-time install and platform startup.
+- `nemo-explore`: design conversation that feeds into an Ethos. Always confirms purpose, principles, and vision.
+- `nemo-ethos`: writes an agent Ethos at `agents/<name>-ethos/ETHOS.md` from explore output, then shows a gut-check of the agent.
+- `nemo-build-agent`: scaffolds NAT workflow YAML from the Ethos and deploys.
+- `nemo-try-agent`: test a deployed agent or chat with a model.
+- `nemo-status`: read-only health dashboard. Run this before assuming the platform is up.
+- `nemo-teardown`: guided shutdown with confirmation.
+
+Plugin-owned skills under `plugins/*/src/*/skills/` handle their own routing for customization, guardrails, evaluations, optimization, data designer, anonymizer, and auditor.
+
+## Sandboxed environments
+
+If you are running inside a restricted shell, CI container, or macOS sandbox:
+
+- Each skill calls out the sandbox capabilities it needs. Read those first.
+- If a step requires capabilities you do not have, stop and tell the user what is missing. Do not skip verification to work around the sandbox.
+- `uv tool install` crashes under the macOS sandbox today; `nemo-setup` uses `pip install` instead. Other skills document similar known failures.

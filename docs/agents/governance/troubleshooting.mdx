@@ -114,8 +114,8 @@ The UI ships with the plugin, so a missing entry means Studio did not load its
 bundle. Confirm the plugin is registered and the bundle is served:
 
 ```bash
-curl -s $NMP_BASE_URL/apis/plugins
-curl -sI $NMP_BASE_URL/plugin-ui/agent-hardener/index.js
+curl -s $NHX_BASE_URL/apis/plugins
+curl -sI $NHX_BASE_URL/plugin-ui/agent-hardener/index.js
 ```
 
 The first should list `agent-hardener` with a `bundleUrl`. Then hard-reload the

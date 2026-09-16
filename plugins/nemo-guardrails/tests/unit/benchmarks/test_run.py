@@ -6,7 +6,7 @@ from __future__ import annotations
 import httpx
 from nemo_guardrails_plugin.benchmarks.run import _smoke_test
 from nemo_guardrails_plugin.benchmarks.seeding import SeededResources
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 
 def _seeded_resources() -> SeededResources:
@@ -34,7 +34,7 @@ def test_smoke_test_retries_until_virtual_model_route_is_ready(monkeypatch) -> N
 
     monkeypatch.setattr("nemo_guardrails_plugin.benchmarks.run.time.sleep", lambda _seconds: None)
     with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
-        sdk = NeMoPlatform(base_url="http://platform.test", http_client=http_client, max_retries=0)
+        sdk = NeMoHelix(base_url="http://platform.test", http_client=http_client, max_retries=0)
 
         _smoke_test(sdk, _seeded_resources())
 

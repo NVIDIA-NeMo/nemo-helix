@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import pytest
+from nemo_helix import NotFoundError
 from nemo_optimization.preflight import preflight_validate_llm_models
-from nemo_platform import NotFoundError
 
 
 class _StubResponse:

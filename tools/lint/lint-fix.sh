@@ -9,7 +9,7 @@ set -euo pipefail
 #   3. Stainless sync (pulls updated Python SDK from Stainless; openapi already done in step 1)
 #   4. Python style (ruff; run before vendoring so generated files aren't re-linted)
 #   5. CLI command generation (the vendoring and docs are handled by the next step)
-#   6. Vendor all packages (covers nemo_platform_ext too) + CLI reference docs
+#   6. Vendor all packages (covers nemo_helix_ext too) + CLI reference docs
 #   7. Copyright headers (after generated files are in place)
 #   8. License update (may change after vendoring)
 #   9. Config reference docs (independent, but run after structural changes)
@@ -19,8 +19,8 @@ set -euo pipefail
 #
 # Note: update-sdk = build-policy + refresh-openapi + stainless + update-cli, so we use
 # stainless directly here to avoid re-running refresh-openapi and update-cli redundantly.
-# Note: update-cli = generate-cli-commands + vendor-nemo-platform-ext + generate-cli-reference-docs,
-# but vendor-nemo-platform-ext is a subset of make vendor and generate-cli-reference-docs would
+# Note: update-cli = generate-cli-commands + vendor-nemo-helix-ext + generate-cli-reference-docs,
+# but vendor-nemo-helix-ext is a subset of make vendor and generate-cli-reference-docs would
 # run twice. So we run generate-cli-commands alone, then let make vendor cover all vendoring.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${CI_PROJECT_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
@@ -34,7 +34,7 @@ fi
 declare -a steps=(
   "refresh-openapi:make refresh-openapi"
   "web-sdk:bash tools/lint/lint-fix-web-sdk.sh"
-  "stainless:uv run --frozen nemo-platform-sdk-tools is-up-to-date --output-dir \"${TMPDIR:-/tmp}/nmp-sdk-lint\" || make stainless"
+  "stainless:uv run --frozen nemo-helix-sdk-tools is-up-to-date --output-dir \"${TMPDIR:-/tmp}/nhx-sdk-lint\" || make stainless"
   "python-style:uv run ruff format && uv run ruff check --fix"
   "generate-cli-commands:make generate-cli-commands"
   "vendor+cli-reference-docs:make vendor && make generate-cli-reference-docs"

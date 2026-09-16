@@ -23,8 +23,8 @@ from nemo_agents_plugin.entities import (
     ethos_fileset_name,
 )
 from nemo_deployments_plugin.entities import ConfigFile
-from nemo_platform_plugin.client.errors import NotFoundError as PluginClientNotFoundError
-from nemo_platform_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient
 
 logger = logging.getLogger(__name__)
 _CONTRACT_FILENAMES = {ETHOS_FILENAME, AGENT_SPEC_FILENAME}

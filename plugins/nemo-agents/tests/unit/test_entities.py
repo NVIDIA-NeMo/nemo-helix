@@ -43,7 +43,7 @@ from nemo_agents_plugin.schema import (
     CreateEnvironmentRequest,
     CreateEnvironmentSpecRequest,
 )
-from nemo_platform_plugin.auth import AuthContext
+from nemo_helix_plugin.auth import AuthContext
 from pydantic import ValidationError
 
 NOW = datetime.now(timezone.utc)

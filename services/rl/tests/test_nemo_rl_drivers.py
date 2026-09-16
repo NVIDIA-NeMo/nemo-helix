@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-DRIVERS = Path(__file__).resolve().parents[1] / "src/nmp/rl/tasks/training/backends/nemo_rl"
+DRIVERS = Path(__file__).resolve().parents[1] / "src/nhx/rl/tasks/training/backends/nemo_rl"
 
 
 def _closes_logger_in_finally(source: str) -> bool:

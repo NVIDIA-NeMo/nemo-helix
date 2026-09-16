@@ -202,8 +202,8 @@ The adapter `<output.name>` is registered on `default/<model-entity>`. Weights a
 
 | Target | Gateway path | OpenAI base URL | Request `"model"` field |
 |--------|--------------|-----------------|-------------------------|
-| **Base** weights | model-entity | `$NMP_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/<model-entity>/-/v1` | `default/<model-entity>` |
-| **LoRA adapter** | **provider** | `$NMP_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/<provider>/-/v1` | `default--<output.name>` |
+| **Base** weights | model-entity | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/<model-entity>/-/v1` | `default/<model-entity>` |
+| **LoRA adapter** | **provider** | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/provider/<provider>/-/v1` | `default--<output.name>` |
 
 **Common mistake:** posting to the model-entity URL with `"model": "default--<output.name>"` still runs the **base** model. Base-vs-adapter eval will look identical until LoRA requests use the **provider** URL above. See `references/post-training-eval.md` § **Request routing (base vs LoRA)**.
 
@@ -221,7 +221,7 @@ Match training context at inference — send **`messages[:-1]`** (all turns exce
 #### Example — LoRA adapter via provider
 
 \`\`\`bash
-export NMP_BASE_URL=<platform-url>   # omit when using default localhost
+export NHX_BASE_URL=<platform-url>   # omit when using default localhost
 nemo inference gateway provider post v1/chat/completions <provider> --workspace default \\
   --body '{
     "model": "default--<output.name>",
@@ -235,7 +235,7 @@ nemo inference gateway provider post v1/chat/completions <provider> --workspace 
 #### Example — base model via model-entity (comparison)
 
 \`\`\`bash
-export NMP_BASE_URL=<platform-url>
+export NHX_BASE_URL=<platform-url>
 nemo inference gateway model post v1/chat/completions <model-entity> --workspace default \\
   --body '{
     "model": "default/<model-entity>",
@@ -251,7 +251,7 @@ nemo inference gateway model post v1/chat/completions <model-entity> --workspace
 Validation loss from training is **not** accuracy. To compare base vs adapter on the validation split with correct routing:
 
 \`\`\`bash
-cd /path/to/nemo-platform
+cd /path/to/nemo-helix
 uv run python plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references/eval_helpers.py \\
   --model-entity <model-entity> \\
   --adapter <output.name> \\
@@ -260,7 +260,7 @@ uv run python plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer
   --split validation.jsonl
 \`\`\`
 
-Uses CHAT `messages` rows unchanged from the training fileset (`messages[:-1]` at inference). Repeat `--adapter` for multi-adapter compare. `--provider` is optional when a READY provider is auto-discovered. Set `NMP_BASE_URL` (or pass `--base-url`) when the platform is not localhost. LoRA only — full SFT / merged outputs need a deployed model entity (see **Using the fine-tuned model**).
+Uses CHAT `messages` rows unchanged from the training fileset (`messages[:-1]` at inference). Repeat `--adapter` for multi-adapter compare. `--provider` is optional when a READY provider is auto-discovered. Set `NHX_BASE_URL` (or pass `--base-url`) when the platform is not localhost. LoRA only — full SFT / merged outputs need a deployed model entity (see **Using the fine-tuned model**).
 ```
 
 ### Using the fine-tuned model (full SFT / merged checkpoint / DPO)
@@ -278,12 +278,12 @@ Fine-tuned weights are on model entity `default/<output.name>`. Unlike LoRA adap
 
 | Target | Gateway path | OpenAI base URL | Request `"model"` field |
 |--------|--------------|-----------------|-------------------------|
-| Fine-tuned model | model-entity | `$NMP_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/<output.name>/-/v1` | `default/<output.name>` |
+| Fine-tuned model | model-entity | `$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/model/<output.name>/-/v1` | `default/<output.name>` |
 
 Use the same chat settings as LoRA inference (`messages[:-1]`, `max_tokens`, `temperature`, `enable_thinking` as appropriate). Post-training eval: run generation eval against this model-entity URL (not `eval_helpers.py --adapter`, which is LoRA-specific).
 ```
 
-Use the user's platform URL in `NMP_BASE_URL` when they overrode it; omit the export line for default `http://127.0.0.1:8080`. Substitute `<provider>`, concrete URLs, and entity names with values from discovery — do not leave generic placeholders in the user-facing report. For **LoRA**, do **not** tell the user to update the deployment before calling the adapter — registration on the base model entity is sufficient. For **full SFT / merged / DPO**, tell the user they must deploy `<output.name>` before inference.
+Use the user's platform URL in `NHX_BASE_URL` when they overrode it; omit the export line for default `http://127.0.0.1:8080`. Substitute `<provider>`, concrete URLs, and entity names with values from discovery — do not leave generic placeholders in the user-facing report. For **LoRA**, do **not** tell the user to update the deployment before calling the adapter — registration on the base model entity is sufficient. For **full SFT / merged / DPO**, tell the user they must deploy `<output.name>` before inference.
 
 **Save report to `/tmp`** — unless the user opts out, write the full Markdown report (header, **Training configuration**, **Using the adapter** or **Using the fine-tuned model** when `completed`, and **Resources created** when a slug or new filesets were used) to `/tmp/fine-tune-result-<slug-or-job-suffix>.md`. Use the random slug from the run when one was assigned; otherwise use the job id suffix (e.g. `a925b07ff678`).
 
@@ -291,7 +291,7 @@ Use the user's platform URL in `NMP_BASE_URL` when they overrode it; omit the ex
 
 | Error type | Append |
 |------------|--------|
-| Missing training image + user-overridden `NMP_BASE_URL` | `references/troubleshooting.md` § **Missing training images** — on-target build steps, env vars, re-submit commands. **Do not** `docker build` locally for a remote platform. |
+| Missing training image + user-overridden `NHX_BASE_URL` | `references/troubleshooting.md` § **Missing training images** — on-target build steps, env vars, re-submit commands. **Do not** `docker build` locally for a remote platform. |
 | Download fails / `Failed to access upstream storage` / 502 on gated HF model | `references/troubleshooting.md` § **Gated HuggingFace models** — create/update `hf-token`, add `token_secret` to fileset, confirm HF license, re-submit. |
 | W&B not syncing / no `[launcher]` secret lines / `WandbCallback requires wandb` / wandb 401 | `references/troubleshooting.md` § **W&B / integrations not working** (jobs-launcher build, secret update, unsloth image). Setup: `references/integrations-setup.md`. |
 

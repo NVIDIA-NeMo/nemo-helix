@@ -31,8 +31,8 @@ from nemo_guardrails_plugin.llmrails_cache import (
     Provenance,
     stabilize,
 )
-from nemo_platform_plugin.guardrail.types import RailsConfig as PlatformRailsConfig
-from nemo_platform_plugin.inference_middleware import OpenAICompatibleInferenceTarget
+from nemo_helix_plugin.guardrail.types import RailsConfig as PlatformRailsConfig
+from nemo_helix_plugin.inference_middleware import OpenAICompatibleInferenceTarget
 from nemoguardrails.integrations.langchain.llm_adapter import LangChainLLMAdapter
 from nemoguardrails.rails.llm.llmrails import LLMRails
 

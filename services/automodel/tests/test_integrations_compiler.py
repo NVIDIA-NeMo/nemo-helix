@@ -4,17 +4,17 @@
 from datetime import datetime
 
 import pytest
-from nemo_platform_plugin.integrations import IntegrationsSpec
-from nemo_platform_plugin.models.types import ModelEntity
-from nmp.automodel.api.v2.jobs.schemas import (
+from nemo_helix_plugin.integrations import IntegrationsSpec
+from nemo_helix_plugin.models.types import ModelEntity
+from nhx.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
     LoRAParams,
     OutputResponse,
     SFTTraining,
 )
-from nmp.automodel.app.jobs.training.compiler import compile_training_step
-from nmp.automodel.entities.values import OutputNameType
-from nmp.common.entities.utils import get_random_id
+from nhx.automodel.app.jobs.training.compiler import compile_training_step
+from nhx.automodel.entities.values import OutputNameType
+from nhx.common.entities.utils import get_random_id
 
 
 def _make_model_entity() -> ModelEntity:

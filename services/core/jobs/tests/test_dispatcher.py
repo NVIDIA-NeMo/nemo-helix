@@ -13,28 +13,28 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nemo_platform_plugin.jobs.telemetry import build_job_telemetry_custom_fields
-from nmp.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation, parse_json_filter
-from nmp.common.api.parsed_filter import ParsedFilter
-from nmp.common.entities import (
+from nemo_helix_plugin.jobs.telemetry import build_job_telemetry_custom_fields
+from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation, parse_json_filter
+from nhx.common.api.parsed_filter import ParsedFilter
+from nhx.common.entities import (
     ALL_WORKSPACES,
     DEFAULT_WORKSPACE,
     EntityClient,
     EntityConflictError,
     EntityNotFoundError,
 )
-from nmp.common.jobs.schemas import FileStorageType, PlatformJobStatus
-from nmp.core.jobs.api.v2.jobs.schemas import (
+from nhx.common.jobs.schemas import FileStorageType, PlatformJobStatus
+from nhx.core.jobs.api.v2.jobs.schemas import (
     CreatePlatformJobRequest,
     PlatformJobResponse,
     PlatformJobTaskUpdate,
 )
-from nmp.core.jobs.app.dispatcher import JobDeletionConflictError, JobDispatcher, JobStatusUpdateSkippedError
-from nmp.core.jobs.app.schemas import (
+from nhx.core.jobs.app.dispatcher import JobDeletionConflictError, JobDispatcher, JobStatusUpdateSkippedError
+from nhx.core.jobs.app.schemas import (
     PlatformJobStepSpec,
 )
-from nmp.core.jobs.app.test_helpers import TestConstants
-from nmp.core.jobs.entities import (
+from nhx.core.jobs.app.test_helpers import TestConstants
+from nhx.core.jobs.entities import (
     PlatformJob,
     PlatformJobAttempt,
     PlatformJobResult,
@@ -226,7 +226,7 @@ async def test_delete_job_deletes_related_entities_across_all_pages(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Deleting a terminal job visits every attempt, step, task, and result page."""
-    from nmp.core.jobs.app import dispatcher as dispatcher_module
+    from nhx.core.jobs.app import dispatcher as dispatcher_module
 
     monkeypatch.setattr(dispatcher_module, "_DELETE_PAGE_SIZE", 1)
 
@@ -294,11 +294,11 @@ async def test_delete_job_deletes_related_entities_across_all_pages(
 async def test_delete_job_serializes_with_rerun_job(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
-    mock_nmp_client,
+    mock_nhx_client,
 ):
     """A rerun request cannot create a new attempt while deletion is cleaning up."""
     _, job_name, _, _, _, _ = await create_test_job_data(mock_store, "delete-rerun-lock-test-job")
-    other_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nmp_client)
+    other_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
 
     delete_started = asyncio.Event()
     allow_delete = asyncio.Event()
@@ -335,12 +335,12 @@ async def test_delete_job_serializes_with_rerun_job(
 async def test_delete_job_serializes_with_same_name_create(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
-    mock_nmp_client,
+    mock_nhx_client,
     sample_platform_job_request: CreatePlatformJobRequest,
 ):
     """A same-name create waits until delete finishes all cleanup for the old job."""
     job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "delete-create-lock-test-job")
-    other_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nmp_client)
+    other_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
     create_request = sample_platform_job_request.model_copy(update={"name": job_name})
 
     delete_started = asyncio.Event()
@@ -382,12 +382,12 @@ async def test_delete_job_serializes_with_same_name_create(
 async def test_delete_job_serializes_with_task_creation(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
-    mock_nmp_client,
+    mock_nhx_client,
 ):
     """A task update cannot create a late child row after delete cleanup starts."""
     job_id, job_name, _, step_id, _, _ = await create_test_job_data(mock_store, "delete-task-lock-test-job")
     step = await mock_store.get_by_id(PlatformJobStep, step_id)
-    other_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nmp_client)
+    other_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
 
     delete_started = asyncio.Event()
     allow_delete = asyncio.Event()
@@ -436,11 +436,11 @@ async def test_delete_job_serializes_with_task_creation(
 async def test_delete_job_serializes_with_result_creation(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
-    mock_nmp_client,
+    mock_nhx_client,
 ):
     """A result create cannot recreate associated data after delete cleanup starts."""
     job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "delete-result-lock-test-job")
-    other_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nmp_client)
+    other_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
 
     delete_started = asyncio.Event()
     allow_delete = asyncio.Event()
@@ -492,7 +492,7 @@ async def test_delete_job_does_not_leave_idle_mutation_lock(
     mock_store: EntityClient,
 ):
     """Idle job mutation locks are weakly held and do not grow forever."""
-    from nmp.core.jobs.app import dispatcher as dispatcher_module
+    from nhx.core.jobs.app import dispatcher as dispatcher_module
 
     _, job_name, _, _, _, _ = await create_test_job_data(mock_store, "delete-lock-prune-test-job")
 
@@ -541,7 +541,7 @@ async def test_delete_job_missing_fileset_succeeds(mock_dispatcher: JobDispatche
     """
     from unittest.mock import AsyncMock
 
-    from nemo_platform_plugin.client.errors import NotFoundError
+    from nemo_helix_plugin.client.errors import NotFoundError
 
     # output_location defaults to None -> job owns its fileset -> delete_fileset is attempted.
     job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "delete-missing-fileset-job")
@@ -550,7 +550,7 @@ async def test_delete_job_missing_fileset_succeeds(mock_dispatcher: JobDispatche
     mock_files = AsyncMock()
     mock_files.delete_fileset = AsyncMock(side_effect=NotFoundError.__new__(NotFoundError))
 
-    with patch("nmp.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
+    with patch("nhx.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
         deleted = await mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE)
     assert deleted is True
 
@@ -585,8 +585,8 @@ async def test_create_job_output_location_not_found_raises(
     sample_platform_job_request: CreatePlatformJobRequest,
 ):
     """A supplied output_location that does not exist is rejected and never auto-created."""
-    from nemo_platform_plugin.client.errors import NotFoundError
-    from nmp.core.jobs.app.dispatcher import JobOutputLocationError
+    from nemo_helix_plugin.client.errors import NotFoundError
+    from nhx.core.jobs.app.dispatcher import JobOutputLocationError
 
     _mock_files_client.get_fileset.side_effect = NotFoundError.__new__(NotFoundError)
     request = sample_platform_job_request.model_copy(update={"output_location": "ghost-fileset"})
@@ -604,8 +604,8 @@ async def test_create_job_output_location_forbidden_raises(
     sample_platform_job_request: CreatePlatformJobRequest,
 ):
     """A supplied output_location the caller cannot access is rejected, never auto-created."""
-    from nemo_platform_plugin.client.errors import PermissionDeniedError
-    from nmp.core.jobs.app.dispatcher import JobOutputLocationError
+    from nemo_helix_plugin.client.errors import PermissionDeniedError
+    from nhx.core.jobs.app.dispatcher import JobOutputLocationError
 
     _mock_files_client.get_fileset.side_effect = PermissionDeniedError.__new__(PermissionDeniedError)
     request = sample_platform_job_request.model_copy(update={"output_location": "forbidden-fileset"})
@@ -878,7 +878,7 @@ async def test_update_job_status_from_step_emits_job_run_telemetry_on_terminal_t
     attempt.status_details = {"model": "attempt-model", "input_tokens": 1}
     await mock_store.update(attempt)
 
-    with patch("nmp.core.jobs.app.dispatcher.emit_job_run_event") as emit_event:
+    with patch("nhx.core.jobs.app.dispatcher.emit_job_run_event") as emit_event:
         await mock_dispatcher.update_job_status_from_step(
             current_step,
             PlatformJobStatus.COMPLETED,
@@ -915,7 +915,7 @@ async def test_update_job_status_from_step_emits_job_run_telemetry_on_pause(
     attempt.status = PlatformJobStatus.ACTIVE
     await mock_store.update(attempt)
 
-    with patch("nmp.core.jobs.app.dispatcher.emit_job_run_event") as emit_event:
+    with patch("nhx.core.jobs.app.dispatcher.emit_job_run_event") as emit_event:
         await mock_dispatcher.update_job_status_from_step(
             current_step,
             PlatformJobStatus.PAUSED,
@@ -946,7 +946,7 @@ async def test_update_job_status_from_step_skips_job_run_telemetry_without_sessi
     attempt.status = PlatformJobStatus.ACTIVE
     await mock_store.update(attempt)
 
-    with patch("nmp.core.jobs.app.dispatcher.emit_job_run_event") as emit_event:
+    with patch("nhx.core.jobs.app.dispatcher.emit_job_run_event") as emit_event:
         await mock_dispatcher.update_job_status_from_step(current_step, PlatformJobStatus.COMPLETED)
 
     emit_event.assert_not_called()
@@ -1258,15 +1258,15 @@ async def test_list_steps_across_multiple_workspaces(
     """Test list_steps respects workspace filtering."""
     from unittest.mock import AsyncMock, MagicMock
 
-    from nmp.common.entities.client import EntityClient
-    from nmp.core.jobs.api.v2.jobs.schemas import PlatformJobSortField, PlatformJobStepsListFilter
-    from nmp.testing import create_test_client
+    from nhx.common.entities.client import EntityClient
+    from nhx.core.jobs.api.v2.jobs.schemas import PlatformJobSortField, PlatformJobStepsListFilter
+    from nhx.testing import create_test_client
 
     # Create entity store with multiple workspaces and projects
     projects = ["default/test-project", "other-workspace/test-project"]
     with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
         # Create mock SDK with patched files client
-        mock_nmp_client = MagicMock()
+        mock_nhx_client = MagicMock()
         mock_files = AsyncMock()
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
@@ -1274,9 +1274,9 @@ async def test_list_steps_across_multiple_workspaces(
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
 
-        with patch("nmp.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
+        with patch("nhx.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
             # Create dispatcher with the multi-workspace store
-            mock_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nmp_client)
+            mock_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
 
             # Create jobs in workspace "default"
             job1 = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
@@ -1386,16 +1386,16 @@ async def test_list_steps_with_status_filter(
     """
     from unittest.mock import AsyncMock, MagicMock
 
-    from nmp.common.entities.client import EntityClient
-    from nmp.core.jobs.api.v2.jobs.schemas import (
+    from nhx.common.entities.client import EntityClient
+    from nhx.core.jobs.api.v2.jobs.schemas import (
         PlatformJobSortField,
         PlatformJobStatus,
         PlatformJobStepsListFilter,
     )
-    from nmp.testing import create_test_client
+    from nhx.testing import create_test_client
 
     with create_test_client(client_type=EntityClient) as mock_store:
-        mock_nmp_client = MagicMock()
+        mock_nhx_client = MagicMock()
         mock_files = AsyncMock()
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
@@ -1403,8 +1403,8 @@ async def test_list_steps_with_status_filter(
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
 
-        with patch("nmp.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
-            mock_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nmp_client)
+        with patch("nhx.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
+            mock_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
             await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
 
         # Filtering by a status that no step has should return nothing — the
@@ -1428,15 +1428,15 @@ async def test_list_jobs_across_multiple_workspaces(
     """Test list_jobs respects workspace filtering."""
     from unittest.mock import MagicMock
 
-    from nmp.common.entities.client import EntityClient
-    from nmp.core.jobs.api.v2.jobs.schemas import PlatformJobListSortField
-    from nmp.testing import create_test_client
+    from nhx.common.entities.client import EntityClient
+    from nhx.core.jobs.api.v2.jobs.schemas import PlatformJobListSortField
+    from nhx.testing import create_test_client
 
     # Create entity store with multiple workspaces and projects
     projects = ["default/test-project", "other-workspace/test-project"]
     with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
         # Create mock SDK with patched files client
-        mock_nmp_client = MagicMock()
+        mock_nhx_client = MagicMock()
         mock_files = AsyncMock()
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
@@ -1444,9 +1444,9 @@ async def test_list_jobs_across_multiple_workspaces(
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
 
-        with patch("nmp.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
+        with patch("nhx.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
             # Create dispatcher with the multi-workspace store
-            mock_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nmp_client)
+            mock_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
 
             # Create jobs in workspace "default"
             job1 = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
@@ -1550,7 +1550,7 @@ async def test_list_jobs_sort_by_source(
     mock_store: EntityClient,
 ):
     """list_jobs sorts by the source field ascending and descending."""
-    from nmp.core.jobs.api.v2.jobs.schemas import PlatformJobListSortField
+    from nhx.core.jobs.api.v2.jobs.schemas import PlatformJobListSortField
 
     for source in ("zebra-source", "alpha-source", "middle-source"):
         await mock_dispatcher.create_job(

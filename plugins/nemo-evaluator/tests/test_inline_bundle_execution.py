@@ -28,7 +28,7 @@ from nemo_evaluator_sdk.metrics.f1 import F1Metric
 from nemo_evaluator_sdk.metrics.number_check import NumberCheckMetric
 from nemo_evaluator_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nemo_evaluator_sdk.metrics.string_check import StringCheckMetric
-from nemo_platform_plugin.scheduler import NemoJobScheduler
+from nemo_helix_plugin.scheduler import NemoJobScheduler
 
 
 class _CustomConstantMetric:

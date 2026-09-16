@@ -12,9 +12,9 @@ Usage::
     uv run --frozen pytest e2e -v --run-e2e
 
     # If you already have services running
-    NMP_BASE_URL=http://localhost:9090 uv run --frozen pytest e2e -v --run-e2e
+    NHX_BASE_URL=http://localhost:9090 uv run --frozen pytest e2e -v --run-e2e
 
-When ``NMP_BASE_URL`` is set the harness skips service startup/shutdown and
+When ``NHX_BASE_URL`` is set the harness skips service startup/shutdown and
 connects to the given URL.  Otherwise it spawns ``nemo services run`` as a
 child process on a free port, polls ``/status`` until ready, and
 terminates the process after the session.
@@ -73,13 +73,13 @@ import uuid
 from collections.abc import Iterator
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import PlatformSecretCreateRequest
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
 from e2e.services_pool_fixtures import (  # noqa: F401
     _services,
@@ -126,7 +126,7 @@ def ngc_api_key() -> str:
 
 
 @pytest.fixture
-def ngc_secret(sdk: NeMoPlatform, workspace: str, ngc_api_key: str) -> Iterator[str]:
+def ngc_secret(sdk: NeMoHelix, workspace: str, ngc_api_key: str) -> Iterator[str]:
     """Create a secret containing the NGC API key, cleaned up after test."""
     secret_name = f"e2e-ngc-key-{uuid.uuid4().hex[:8]}"
     secrets = client_from_platform(sdk, SecretsClient)
@@ -155,19 +155,19 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):  # noqa
 
 
 @pytest.fixture(scope="module", name="sdk")
-def e2e_sdk(request: pytest.FixtureRequest) -> NeMoPlatform:
+def e2e_sdk(request: pytest.FixtureRequest) -> NeMoHelix:
     """Provide the conventional e2e SDK fixture name."""
     return request.getfixturevalue("services_pool_sdk")
 
 
 @pytest.fixture(scope="module")
-def files_client(sdk: NeMoPlatform) -> FilesClient:
+def files_client(sdk: NeMoHelix) -> FilesClient:
     """Provide a FilesClient derived from the SDK."""
     return client_from_platform(sdk, FilesClient)
 
 
 @pytest.fixture(scope="function")
-def workspace(sdk: NeMoPlatform) -> Iterator[str]:
+def workspace(sdk: NeMoHelix) -> Iterator[str]:
     """Create a unique workspace for each test, deleted on teardown."""
     workspaces = client_from_platform(sdk, WorkspacesClient)
     name = f"e2e-{uuid.uuid4().hex[:8]}"

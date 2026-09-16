@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 from nemo_guardrails_plugin.constants import GUARDRAILS_PLUGIN_CONFIG_TYPE
-from nmp.core.inference_gateway.testing.harness import IGWLoopbackHarness, IGWPluginHarness
-from nmp.testing.mock_chat_completions import ChatCompletion, chat_completion
+from nhx.core.inference_gateway.testing.harness import IGWLoopbackHarness, IGWPluginHarness
+from nhx.testing.mock_chat_completions import ChatCompletion, chat_completion
 
 from .utils import (
     GUARDRAILS_PLUGIN_NAME,

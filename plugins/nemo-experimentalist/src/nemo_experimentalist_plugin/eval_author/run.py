@@ -16,15 +16,15 @@ from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import 
     make_experimentalist_backend,
 )
 from nemo_experimentalist_plugin.experimentalist.reporting import RunReporter
-from nemo_insights_plugin.entities import Insight
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.nooa_model_client import (
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.nooa_model_client import (
     ConfiguredModelClients,
     ConfiguredModelRefs,
     activate_model_clients,
     configured_model_refs,
     resolve_model_clients,
 )
+from nemo_insights_plugin.entities import Insight
 
 
 class _EvalAuthorAgent(Protocol):

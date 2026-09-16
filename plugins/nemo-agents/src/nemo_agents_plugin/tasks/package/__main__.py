@@ -14,8 +14,8 @@ import sys
 from types import FrameType
 
 from nemo_agents_plugin.jobs.package_agent import PackageAgentJob
-from nemo_platform_plugin.sdk_provider import get_async_task_sdk, get_task_sdk
-from nemo_platform_plugin.tasks.dispatcher import run_task
+from nemo_helix_plugin.sdk_provider import get_async_task_sdk, get_task_sdk
+from nemo_helix_plugin.tasks.dispatcher import run_task
 
 logger = logging.getLogger(__name__)
 

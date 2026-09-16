@@ -2623,9 +2623,9 @@ components:
       properties:
         seed_type:
           type: string
-          const: nmp
+          const: nhx
           title: Seed Type
-          default: nmp
+          default: nhx
         path:
           type: string
           title: Path
@@ -5204,7 +5204,7 @@ components:
               file_contents: '#/components/schemas/FileContentsSeedSource'
               hf: '#/components/schemas/HuggingFaceSeedSource'
               local: '#/components/schemas/LocalFileSeedSource'
-              nmp: '#/components/schemas/FilesetFileSeedSource'
+              nhx: '#/components/schemas/FilesetFileSeedSource'
         sampling_strategy:
           allOf:
           - $ref: '#/components/schemas/SamplingStrategy'

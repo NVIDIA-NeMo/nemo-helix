@@ -4,7 +4,7 @@
 from datetime import datetime
 from typing import assert_type
 
-from nemo_platform_plugin.jobs.types import PlatformJobStepWithContext
+from nemo_helix_plugin.jobs.types import PlatformJobStepWithContext
 
 
 def test_platform_job_step_with_context_parses_wire_timestamps_to_datetime() -> None:

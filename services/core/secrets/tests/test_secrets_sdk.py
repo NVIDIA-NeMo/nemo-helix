@@ -13,10 +13,10 @@ Uses the create_test_client pattern for fast in-memory testing.
 
 import uuid
 
-from nemo_platform_plugin.client.errors import NotFoundError, UnprocessableEntityError
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest, PlatformSecretUpdateRequest
-from nmp.common.entities import DEFAULT_WORKSPACE
+from nemo_helix_plugin.client.errors import NotFoundError, UnprocessableEntityError
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import PlatformSecretCreateRequest, PlatformSecretUpdateRequest
+from nhx.common.entities import DEFAULT_WORKSPACE
 
 
 def short_secret_name(prefix: str) -> str:

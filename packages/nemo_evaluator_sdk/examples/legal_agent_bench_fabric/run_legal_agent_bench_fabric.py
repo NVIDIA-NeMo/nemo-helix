@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Evaluate an agent on Harvey Labs' Legal Agent Benchmark (LAB) the NeMo Platform way.
+"""Evaluate an agent on Harvey Labs' Legal Agent Benchmark (LAB) the NeMo Helix way.
 
 Native `AgentEvalTask`s (built from LAB's public data) run through NeMo Fabric, and LAB's rubric is
 scored by `LabRubricMetric`, which calls **LAB's own `evaluation/score_rubric`** over the trial's

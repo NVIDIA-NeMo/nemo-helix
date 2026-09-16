@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from nemo_experimentalist_plugin.entities import Dataset
-from nemo_platform_plugin.nooa_model_client import get_fast_model
+from nemo_helix_plugin.nooa_model_client import get_fast_model
 from nooa import Agent, CodeActStrategy, strategy
 from nooa.agentdoc import doc, spec
 from nooa.agents import TokenBudgetSummarizer

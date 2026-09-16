@@ -13,39 +13,39 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 from httpx import AsyncClient
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.schemas import FileStorageType, PlatformJobResultCreateRequest
-from nemo_platform_plugin.jobs.types import PlatformJobTaskUpdate
-from nmp.common.entities import ALL_WORKSPACES, DEFAULT_WORKSPACE
-from nmp.common.entities.client import EntityValidationError
-from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.core.jobs.api.v2.jobs.endpoints import (
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.schemas import FileStorageType, PlatformJobResultCreateRequest
+from nemo_helix_plugin.jobs.types import PlatformJobTaskUpdate
+from nhx.common.entities import ALL_WORKSPACES, DEFAULT_WORKSPACE
+from nhx.common.entities.client import EntityValidationError
+from nhx.common.jobs.schemas import PlatformJobStatus
+from nhx.core.jobs.api.v2.jobs.endpoints import (
     _format_create_job_conflict,
     _format_entity_validation_error,
     get_platform_jobs_steps_list_filter,
 )
-from nmp.core.jobs.api.v2.jobs.schemas import (
+from nhx.core.jobs.api.v2.jobs.schemas import (
     CreatePlatformJobRequest,
     PlatformJobResponse,
     PlatformJobSortField,
     PlatformJobStepsListFilter,
 )
-from nmp.core.jobs.app.dispatcher import (
+from nhx.core.jobs.app.dispatcher import (
     JobAlreadyExistsError,
     JobDispatcher,
     JobOutputLocationError,
     JobSecretValidationError,
     StateTransitionConflictError,
 )
-from nmp.core.jobs.app.providers import ContainerSpec, GPUExecutionProvider, SubprocessExecutionProvider
-from nmp.core.jobs.app.schemas import (
+from nhx.core.jobs.app.providers import ContainerSpec, GPUExecutionProvider, SubprocessExecutionProvider
+from nhx.core.jobs.app.schemas import (
     PlatformJobSecret,
     PlatformJobSpec,
     PlatformJobStepSpec,
 )
-from nmp.core.jobs.app.test_helpers import TestConstants
+from nhx.core.jobs.app.test_helpers import TestConstants
 from pydantic import ValidationError
 from starlette.datastructures import QueryParams
 
@@ -56,7 +56,7 @@ def expected_translated_executor_dump() -> Dict[str, Any]:
     The Jobs API rewrites ``cpu/<profile>`` steps into ``subprocess/<profile>``
     steps before persistence (see
     ``translate_cpu_container_steps_to_subprocess`` in
-    ``services/core/jobs/src/nmp/core/jobs/api/v2/jobs/endpoints.py``), so the
+    ``services/core/jobs/src/nhx/core/jobs/api/v2/jobs/endpoints.py``), so the
     round-trip representation of a step submitted with ``TestConstants.TEST_EXECUTOR``
     is the translated subprocess executor — with ``command`` set to
     ``container.entrypoint + container.command``.
@@ -70,7 +70,7 @@ def expected_translated_executor_dump() -> Dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_create_job_using_sdk(test_sdk: AsyncNeMoPlatform):
+async def test_create_job_using_sdk(test_sdk: AsyncNeMoHelix):
     jobs = client_from_platform(test_sdk, AsyncJobsClient)
     job = (
         await jobs.create_job(
@@ -96,7 +96,7 @@ async def test_create_job_using_sdk(test_sdk: AsyncNeMoPlatform):
                                     "container": {
                                         "image": "test-image",
                                         "entrypoint": ["python", "-m"],
-                                        "command": ["nmp.testing.fake_task"],
+                                        "command": ["nhx.testing.fake_task"],
                                     },
                                 },
                             }
@@ -178,7 +178,7 @@ def test_step_name_validation(step_name: str, should_pass: bool):
 
 @pytest.mark.asyncio
 @pytest.mark.skip("This is an integration test that requires secrets service.")
-async def test_create_job_with_secrets(test_sdk: AsyncNeMoPlatform):
+async def test_create_job_with_secrets(test_sdk: AsyncNeMoHelix):
     jobs = client_from_platform(test_sdk, AsyncJobsClient)
     request = CreatePlatformJobRequest(
         name="test-job",
@@ -195,7 +195,7 @@ async def test_create_job_with_secrets(test_sdk: AsyncNeMoPlatform):
                             "container": {
                                 "image": "test-image",
                                 "entrypoint": ["python", "-m"],
-                                "command": ["nmp.testing.fake_task"],
+                                "command": ["nhx.testing.fake_task"],
                             },
                         },
                         "environment": [
@@ -385,7 +385,7 @@ async def test_create_job_conflict_sanitizes_log_fields(
     caplog,
 ):
     with patch.object(mock_dispatcher, "create_job", new=AsyncMock(side_effect=ValueError("conflict"))):
-        with caplog.at_level(logging.INFO, logger="nmp.core.jobs.api.v2.jobs.endpoints"):
+        with caplog.at_level(logging.INFO, logger="nhx.core.jobs.api.v2.jobs.endpoints"):
             response = await test_client.post(
                 "/apis/jobs/v2/workspaces/default%0Aforged/jobs",
                 json={
@@ -413,7 +413,7 @@ async def test_create_job_conflict_sanitizes_log_fields(
 @pytest.mark.asyncio
 async def test_create_job_gpu_fail_fast_when_docker_no_gpus(test_client: AsyncClient):
     """Direct Jobs API create with GPU step fails fast with 422 when platform is Docker with no GPUs."""
-    from nmp.common.config import Runtime
+    from nhx.common.config import Runtime
 
     gpu_executor = GPUExecutionProvider(
         provider="gpu",
@@ -434,7 +434,7 @@ async def test_create_job_gpu_fail_fast_when_docker_no_gpus(test_client: AsyncCl
     mock_platform_config.runtime = Runtime.DOCKER
     mock_platform_config.docker.get_reserved_gpu_ids.return_value = []
 
-    with patch("nemo_platform_plugin.jobs.docker.get_platform_config", return_value=mock_platform_config):
+    with patch("nemo_helix_plugin.jobs.docker.get_platform_config", return_value=mock_platform_config):
         response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=req.model_dump())
 
     assert response.status_code == 422
@@ -1015,7 +1015,7 @@ async def test_job_paging(test_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_job_result_crud(test_sdk: AsyncNeMoPlatform, sample_platform_job_request: CreatePlatformJobRequest):
+async def test_job_result_crud(test_sdk: AsyncNeMoHelix, sample_platform_job_request: CreatePlatformJobRequest):
     jobs = client_from_platform(test_sdk, AsyncJobsClient)
     sdk_job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
     resp = (
@@ -1060,7 +1060,7 @@ async def test_job_result_crud(test_sdk: AsyncNeMoPlatform, sample_platform_job_
 
 @pytest.mark.asyncio
 async def test_job_result_download(
-    test_sdk: AsyncNeMoPlatform,
+    test_sdk: AsyncNeMoHelix,
     sample_platform_job_request: CreatePlatformJobRequest,
     mock_result_manager,
     tmp_path: Path,
@@ -1089,7 +1089,7 @@ async def test_job_result_download(
     ).data()
 
     with patch(
-        "nmp.common.jobs.result_manager.async_result_manager_factory", return_value=mock_result_manager
+        "nhx.common.jobs.result_manager.async_result_manager_factory", return_value=mock_result_manager
     ) as factory:
         download = await jobs.download_job_result(name=result.name, workspace=DEFAULT_WORKSPACE, job=sdk_job_resp.name)
         download_bytes = await download.read()
@@ -1110,7 +1110,7 @@ async def test_job_result_download(
     mock_result_manager._tmp_dir = tmp_dir
     mock_result_manager._path = tmp_dir
 
-    with patch("nmp.common.jobs.result_manager.async_result_manager_factory", return_value=mock_result_manager):
+    with patch("nhx.common.jobs.result_manager.async_result_manager_factory", return_value=mock_result_manager):
         download = await jobs.download_job_result(name=result.name, workspace=DEFAULT_WORKSPACE, job=sdk_job_resp.name)
         tar_content = await download.read()
 
@@ -1131,7 +1131,7 @@ async def test_job_result_download(
 @pytest.mark.asyncio
 async def test_job_status_details_crud(
     test_client: AsyncClient,
-    test_sdk: AsyncNeMoPlatform,
+    test_sdk: AsyncNeMoHelix,
     sample_platform_job_request: CreatePlatformJobRequest,
 ):
     original_details = {"progress": 50, "metadata": {"key": "value"}}
@@ -1381,7 +1381,7 @@ async def test_cancel_job_conflict_sanitizes_log_fields(
         "cancel_job",
         new=AsyncMock(side_effect=StateTransitionConflictError("invalid transition")),
     ):
-        with caplog.at_level(logging.INFO, logger="nmp.core.jobs.api.v2.jobs.endpoints"):
+        with caplog.at_level(logging.INFO, logger="nhx.core.jobs.api.v2.jobs.endpoints"):
             response = await test_client.post(
                 "/apis/jobs/v2/workspaces/default%0Aforged/jobs/conflicted-job%0D%0Aforged/cancel"
             )
@@ -1402,7 +1402,7 @@ async def test_delete_non_terminal_job_returns_409_and_keeps_job(
     create_response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=request.model_dump())
     assert create_response.status_code == 201, create_response.text
 
-    with caplog.at_level(logging.INFO, logger="nmp.core.jobs.api.v2.jobs.endpoints"):
+    with caplog.at_level(logging.INFO, logger="nhx.core.jobs.api.v2.jobs.endpoints"):
         delete_response = await test_client.delete("/apis/jobs/v2/workspaces/default/jobs/non-terminal-delete")
 
     assert delete_response.status_code == 409
@@ -1453,7 +1453,7 @@ async def test_update_job_step_conflict_sanitizes_log_fields(
             "update_job_status_from_step",
             new=AsyncMock(side_effect=StateTransitionConflictError("invalid transition")),
         ),
-        caplog.at_level(logging.INFO, logger="nmp.core.jobs.api.v2.jobs.endpoints"),
+        caplog.at_level(logging.INFO, logger="nhx.core.jobs.api.v2.jobs.endpoints"),
     ):
         response = await test_client.patch(
             "/apis/jobs/v2/workspaces/default/jobs/job%0Aforged/steps/step%0D%0Aforged/status",
@@ -1471,14 +1471,14 @@ async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: 
     """Test that global step listing returns steps from all workspaces while workspaced calls are filtered."""
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    from nmp.common.entities.client import EntityClient
-    from nmp.testing import create_test_client
+    from nhx.common.entities.client import EntityClient
+    from nhx.testing import create_test_client
 
     # Create entity store with multiple workspaces and projects
     projects = ["default/test-project", "other-workspace/test-project"]
     with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
         # Create mock SDK with patched files client
-        mock_nmp_client = MagicMock()
+        mock_nhx_client = MagicMock()
         mock_files = AsyncMock()
         mock_fileset_obj = MagicMock()
         mock_fileset_obj.name = "test-fileset-id"
@@ -1486,9 +1486,9 @@ async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: 
         mock_resp.data.return_value = mock_fileset_obj
         mock_files.create_fileset.return_value = mock_resp
 
-        with patch("nmp.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
+        with patch("nhx.core.jobs.app.dispatcher.client_from_platform", return_value=mock_files):
             # Create dispatcher with the multi-workspace store
-            mock_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nmp_client)
+            mock_dispatcher = JobDispatcher(store=mock_store, sdk=mock_nhx_client)
 
             # Create jobs in "default" workspace
             job1 = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
@@ -1599,7 +1599,7 @@ async def test_job_steps_list_global_vs_workspaced(sample_platform_job_request: 
 @pytest.mark.asyncio
 async def test_job_status_timestamps(
     test_client: AsyncClient,
-    test_sdk: AsyncNeMoPlatform,
+    test_sdk: AsyncNeMoHelix,
     sample_platform_job_request: CreatePlatformJobRequest,
 ):
     """Test that created_at and updated_at are present at job, step, and task levels in status response."""

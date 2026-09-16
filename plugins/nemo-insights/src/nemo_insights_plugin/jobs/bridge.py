@@ -7,9 +7,9 @@ import signal
 import sys
 from types import FrameType
 
+from nemo_helix_plugin.sdk_provider import get_task_sdk
+from nemo_helix_plugin.tasks.dispatcher import run_task
 from nemo_insights_plugin.jobs.analyze import AnalyzeJob
-from nemo_platform_plugin.sdk_provider import get_task_sdk
-from nemo_platform_plugin.tasks.dispatcher import run_task
 
 
 def _shutdown(signum: int, _frame: FrameType | None) -> None:

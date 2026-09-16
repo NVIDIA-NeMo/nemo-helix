@@ -2,10 +2,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "Integrate NeMo Platform With An Identity Provider"
+title: "Integrate NeMo Helix With An Identity Provider"
 description: ""
 ---
-NeMo Platform integrates with external OIDC identity providers. Some reference
+NeMo Helix integrates with external OIDC identity providers. Some reference
 providers live under `contrib/auth/*`.  These are examples that can be adapted
 to work in production.
 
@@ -14,20 +14,20 @@ to work in production.
 - `contrib/auth/authentik`
 
 Each provider bundle includes a gateway layer that strips inbound
-`X-NMP-Principal-*` headers before traffic reaches NeMo.
+`X-NHX-Principal-*` headers before traffic reaches NeMo.
 
 For workload authentication, the gateway should validate the bearer token and
 derive NeMo's trusted header contract from verified claims rather than passing
 through caller-supplied identity headers. The Authentik reference demonstrates
 the first-pass workload mapping:
 
-- `sub` -> `X-NMP-Principal-Id`
-- `groups` -> `X-NMP-Principal-Groups`
+- `sub` -> `X-NHX-Principal-Id`
+- `groups` -> `X-NHX-Principal-Groups`
 
 The demo workload identity contract is:
 
-- `NMP_WORKLOAD_IDENTITY_TOKEN_FILE`
+- `NHX_WORKLOAD_IDENTITY_TOKEN_FILE`
 
 Managed job backends inject this variable and mount the token file. Job specs
 must not set `NEMO_WORKLOAD_TOKEN`, `NEMO_WORKLOAD_TOKEN_FILE`, or
-`NMP_WORKLOAD_IDENTITY_TOKEN_FILE` themselves.
+`NHX_WORKLOAD_IDENTITY_TOKEN_FILE` themselves.

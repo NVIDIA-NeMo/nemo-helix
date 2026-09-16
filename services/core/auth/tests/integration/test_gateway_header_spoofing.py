@@ -8,13 +8,13 @@ import yaml
 from tests.auth_idp.providers import load_provider_names_by_mode
 
 REQUIRED_STRIPPED_HEADERS = {
-    "x-nmp-principal-id",
-    "x-nmp-principal-email",
-    "x-nmp-principal-groups",
-    "x-nmp-principal-on-behalf-of",
-    "x-nmp-principal-on-behalf-of-email",
-    "x-nmp-principal-on-behalf-of-groups",
-    "x-nmp-scopes",
+    "x-nhx-principal-id",
+    "x-nhx-principal-email",
+    "x-nhx-principal-groups",
+    "x-nhx-principal-on-behalf-of",
+    "x-nhx-principal-on-behalf-of-email",
+    "x-nhx-principal-on-behalf-of-groups",
+    "x-nhx-scopes",
 }
 
 

@@ -19,9 +19,9 @@ from nemo_anonymizer_plugin.sdk import http
 from nemo_anonymizer_plugin.sdk.errors import AnonymizerJobError
 from nemo_anonymizer_plugin.sdk.job_results import AnonymizerJobResults
 from nemo_anonymizer_plugin.sdk.logging import with_logging
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.jobs.archive import safe_extract_tar
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.jobs.archive import safe_extract_tar
+from nemo_helix_plugin.jobs.schemas import PlatformJobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def _raise_for_status(resp: httpx.Response) -> None:
 
 @with_logging
 class AnonymizerJobResource:
-    def __init__(self, *, job_name: str, platform: NeMoPlatform, workspace: str | None):
+    def __init__(self, *, job_name: str, platform: NeMoHelix, workspace: str | None):
         self._job_name = job_name
         self._platform = platform
         self._workspace = workspace
@@ -159,7 +159,7 @@ class AnonymizerJobResource:
 
 @with_logging
 class AsyncAnonymizerJobResource:
-    def __init__(self, *, job_name: str, platform: AsyncNeMoPlatform, workspace: str | None):
+    def __init__(self, *, job_name: str, platform: AsyncNeMoHelix, workspace: str | None):
         self._job_name = job_name
         self._platform = platform
         self._workspace = workspace

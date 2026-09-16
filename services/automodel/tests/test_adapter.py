@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from nemo_automodel_plugin.schema import AutomodelJobOutput
-from nmp.automodel.adapter import automodel_spec_to_compiler_output
-from nmp.automodel.api.v2.jobs.schemas import DistillationTraining, SFTTraining
-from nmp.customization_common.integrations import collect_integration_secret_envs
+from nhx.automodel.adapter import automodel_spec_to_compiler_output
+from nhx.automodel.api.v2.jobs.schemas import DistillationTraining, SFTTraining
+from nhx.customization_common.integrations import collect_integration_secret_envs
 
 
 def test_adapter_sft() -> None:

@@ -6,9 +6,9 @@ title: "LoRA Model Customization"
 description: ""
 ---
 
-[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main/docs/customizer/tutorials/lora-customization-job.ipynb)
+[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/lora-customization-job.ipynb)
 
-Learn how to use the NeMo Platform to create a LoRA (Low-Rank Adaptation) customization job using a custom dataset. In this tutorial we use LoRA to fine-tune a **question-answering model** from the SQuAD dataset.
+Learn how to use the NeMo Helix to create a LoRA (Low-Rank Adaptation) customization job using a custom dataset. In this tutorial we use LoRA to fine-tune a **question-answering model** from the SQuAD dataset.
 
 LoRA is a parameter-efficient fine-tuning method that requires fewer computational resources than full fine-tuning. If you need full model fine-tuning instead, see the [Full SFT Customization Job](/documentation/customizer-reference/tutorials/sft-customization-job) tutorial.
 
@@ -18,8 +18,8 @@ LoRA is a parameter-efficient fine-tuning method that requires fewer computation
 
 Before starting this tutorial, ensure you have:
 
-1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Platform locally
-2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-platform[all]"`; source checkout: run `make bootstrap` from the repository root)
+1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Helix locally
+2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-helix[all]"`; source checkout: run `make bootstrap` from the repository root)
 3. **Installed the `datasets` package** for loading SQuAD: `pip install datasets`
 4. **At least one GPU with CUDA 13+**
 
@@ -27,10 +27,10 @@ Before starting this tutorial, ensure you have:
 
 ### 1. Initialize SDK
 
-The SDK needs to know your NeMo Platform server URL. By default, `http://localhost:8080` is used. If NeMo Platform is running elsewhere, set the `NMP_BASE_URL` environment variable:
+The SDK needs to know your NeMo Helix server URL. By default, `http://localhost:8080` is used. If NeMo Helix is running elsewhere, set the `NHX_BASE_URL` environment variable:
 
 ```sh
-export NMP_BASE_URL=<YOUR_NMP_BASE_URL>
+export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
 ```
 
 ```python
@@ -40,9 +40,9 @@ import re
 import time
 import uuid
 from pathlib import Path
-from nemo_platform import NeMoPlatform, ConflictError
-from nemo_platform.types.secrets import PlatformSecretResponse
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
+from nemo_helix import NeMoHelix, ConflictError
+from nemo_helix.types.secrets import PlatformSecretResponse
+from nemo_helix.types.files import HuggingfaceStorageConfigParam
 
 def sanitize_name(prefix: str, name: str):
     """Sanitize model_name for deployment/config naming. Compatible with platform naming rules."""
@@ -61,9 +61,9 @@ def max_wait_time_checker(seconds: int, job_name: str = ""):
 
     return check
 
-NMP_BASE_URL = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-client = NeMoPlatform(
-    base_url=NMP_BASE_URL,
+NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+client = NeMoHelix(
+    base_url=NHX_BASE_URL,
     workspace="default"
 )
 

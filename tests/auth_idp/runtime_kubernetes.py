@@ -21,24 +21,24 @@ from typing import TypeVar
 
 import httpx
 import pytest
-from nemo_platform import DefaultHttpxClient, NeMoPlatform
-from nemo_platform_ext.client.tls import NMP_CLIENT_SSL_CERT_FILE_ENVVAR, HttpxTLSConfig
+from nemo_helix import DefaultHttpxClient, NeMoHelix
+from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR, HttpxTLSConfig
 
 from tests.auth_idp.common import jwt_claims
 from tests.auth_idp.runtime_contract import AuthIdpCase, DeploymentWorkloadRuntimeConfig, TokenSet
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-NAMESPACE = os.environ.get("NMP_AUTHENTIK_K8S_NAMESPACE", "nemo-authentik")
-HELM_RELEASE = os.environ.get("NMP_AUTHENTIK_K8S_HELM_RELEASE", "authentik-demo")
+NAMESPACE = os.environ.get("NHX_AUTHENTIK_K8S_NAMESPACE", "nemo-authentik")
+HELM_RELEASE = os.environ.get("NHX_AUTHENTIK_K8S_HELM_RELEASE", "authentik-demo")
 HELM_CHART = Path("contrib/auth/authentik/helm")
-ENVOY_TLS_SECRET = "nemo-platform-envoy-tls"
-IN_CLUSTER_ENVOY_BASE_URL = f"https://nemo-platform-envoy.{NAMESPACE}.svc.cluster.local:8080"
-DEPLOYMENT_WORKLOAD_CA_BUNDLE_FILE = "/etc/nmp/workload-token-ca/ca.crt"
-WORKLOAD_AUDIENCE = "nemo-platform"
-WORKLOAD_CLIENT_ID = "nemo-platform-workload"
+ENVOY_TLS_SECRET = "nemo-helix-envoy-tls"
+IN_CLUSTER_ENVOY_BASE_URL = f"https://nemo-helix-envoy.{NAMESPACE}.svc.cluster.local:8080"
+DEPLOYMENT_WORKLOAD_CA_BUNDLE_FILE = "/etc/nhx/workload-token-ca/ca.crt"
+WORKLOAD_AUDIENCE = "nemo-helix"
+WORKLOAD_CLIENT_ID = "nemo-helix-workload"
 AUTHENTIK_K8S_WORKLOAD_IDENTITY_PASSWORD = "workload-identity-dev-only"
-WORKLOAD_TOKEN_PRIVATE_KEY_FILE_ENV = "NMP_AUTHENTIK_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE"
-GATEWAY_PORT_ENV = "NMP_AUTHENTIK_K8S_GATEWAY_PORT"
+WORKLOAD_TOKEN_PRIVATE_KEY_FILE_ENV = "NHX_AUTHENTIK_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE"
+GATEWAY_PORT_ENV = "NHX_AUTHENTIK_K8S_GATEWAY_PORT"
 DISCOVERY_PATH = "/application/o/nemo/.well-known/openid-configuration"
 GATEWAY_READY_PATH = "/health/gateway/ready"
 TOKEN_EXCHANGE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange"
@@ -80,13 +80,13 @@ CLUSTER_DELETE_TIMEOUT_SECONDS = 180
 ROLLOUT_STATUS_TIMEOUT = "240s"
 ROLLOUT_COMMAND_TIMEOUT_SECONDS = 300
 HELM_WAIT_TIMEOUT_DEFAULT = "20m"
-HELM_WAIT_TIMEOUT = os.environ.get("NMP_AUTHENTIK_K8S_HELM_WAIT_TIMEOUT", HELM_WAIT_TIMEOUT_DEFAULT)
+HELM_WAIT_TIMEOUT = os.environ.get("NHX_AUTHENTIK_K8S_HELM_WAIT_TIMEOUT", HELM_WAIT_TIMEOUT_DEFAULT)
 HELM_UPGRADE_COMMAND_GRACE_SECONDS = 300
 try:
     _helm_wait_seconds = _duration_seconds(HELM_WAIT_TIMEOUT)
 except ValueError as exc:
     raise RuntimeError(
-        "NMP_AUTHENTIK_K8S_HELM_WAIT_TIMEOUT must be a helm duration such as "
+        "NHX_AUTHENTIK_K8S_HELM_WAIT_TIMEOUT must be a helm duration such as "
         f"'20m', '1h30m', or a plain number of seconds; got {HELM_WAIT_TIMEOUT!r}"
     ) from exc
 HELM_UPGRADE_COMMAND_TIMEOUT_SECONDS = _helm_wait_seconds + HELM_UPGRADE_COMMAND_GRACE_SECONDS
@@ -140,7 +140,7 @@ def _run(args: list[str], *, timeout: float = DEFAULT_COMMAND_TIMEOUT_SECONDS) -
 
 def _temporary_kubeconfig_path(cluster_name: str) -> Path:
     temp_file = tempfile.NamedTemporaryFile(
-        prefix=f"nmp-authentik-{cluster_name}-",
+        prefix=f"nhx-authentik-{cluster_name}-",
         suffix="-kubeconfig.yaml",
         delete=False,
     )
@@ -238,7 +238,7 @@ def _write_diagnostic_command(
 
 
 def _port_forward_log_file(service: str) -> Path | None:
-    configured_dir = os.environ.get("NMP_AUTHENTIK_K8S_LOG_DIR")
+    configured_dir = os.environ.get("NHX_AUTHENTIK_K8S_LOG_DIR")
     if not configured_dir:
         return None
     safe_service = service.replace("/", "_")
@@ -256,7 +256,7 @@ def _port_forward_exit_message(returncode: int, log_file: Path | None) -> str:
 
 
 def _collect_kubernetes_diagnostics(context: str, cluster_name: str, kubeconfig: Path | None = None) -> Path:
-    configured_dir = os.environ.get("NMP_AUTHENTIK_K8S_LOG_DIR")
+    configured_dir = os.environ.get("NHX_AUTHENTIK_K8S_LOG_DIR")
     log_root = Path(configured_dir) if configured_dir else REPO_ROOT / "docker" / "logs"
     log_dir = log_root / f"k8s-authentik-{cluster_name}"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -348,8 +348,8 @@ def _configured_gateway_port() -> int | None:
 
 def _platform_image() -> str:
     return os.environ.get(
-        "NMP_AUTHENTIK_K8S_PLATFORM_IMAGE",
-        f"{os.environ.get('IMAGE_REGISTRY', 'my-registry')}/nmp-api:{os.environ.get('BAKE_TAG', 'local')}",
+        "NHX_AUTHENTIK_K8S_PLATFORM_IMAGE",
+        f"{os.environ.get('IMAGE_REGISTRY', 'my-registry')}/nhx-api:{os.environ.get('BAKE_TAG', 'local')}",
     )
 
 
@@ -413,7 +413,7 @@ def _create_cluster(runtime: str, name: str) -> Cluster:
             kubeconfig.unlink()
         raise
 
-    raise ValueError(f"unsupported NMP_AUTHENTIK_K8S_RUNTIME={runtime!r}; expected kind or k3d")
+    raise ValueError(f"unsupported NHX_AUTHENTIK_K8S_RUNTIME={runtime!r}; expected kind or k3d")
 
 
 def _existing_cluster(runtime: str, name: str) -> Cluster | None:
@@ -452,7 +452,7 @@ def _existing_cluster(runtime: str, name: str) -> Cluster | None:
 
     with contextlib.suppress(FileNotFoundError):
         kubeconfig.unlink()
-    raise ValueError(f"unsupported NMP_AUTHENTIK_K8S_RUNTIME={runtime!r}; expected kind or k3d")
+    raise ValueError(f"unsupported NHX_AUTHENTIK_K8S_RUNTIME={runtime!r}; expected kind or k3d")
 
 
 def _reuse_or_create_cluster(runtime: str, name: str) -> Cluster:
@@ -463,7 +463,7 @@ def _reuse_or_create_cluster(runtime: str, name: str) -> Cluster:
 
 
 def _load_platform_image(runtime: str, name: str, image: str) -> None:
-    if os.environ.get("NMP_AUTHENTIK_K8S_SKIP_IMAGE_LOAD") == "1":
+    if os.environ.get("NHX_AUTHENTIK_K8S_SKIP_IMAGE_LOAD") == "1":
         return
     if runtime == "k3d":
         _run(["k3d", "image", "import", image, "-c", name], timeout=IMAGE_LOAD_TIMEOUT_SECONDS)
@@ -471,7 +471,7 @@ def _load_platform_image(runtime: str, name: str, image: str) -> None:
     if runtime == "kind":
         _run(["kind", "load", "docker-image", image, "--name", name], timeout=IMAGE_LOAD_TIMEOUT_SECONDS)
         return
-    raise ValueError(f"unsupported NMP_AUTHENTIK_K8S_RUNTIME={runtime!r}; expected kind or k3d")
+    raise ValueError(f"unsupported NHX_AUTHENTIK_K8S_RUNTIME={runtime!r}; expected kind or k3d")
 
 
 def _delete_cluster(runtime: str, name: str, kubeconfig: Path | None = None) -> None:
@@ -490,15 +490,15 @@ def _reuse_context(runtime: str, name: str) -> str:
         return f"k3d-{name}"
     if runtime == "kind":
         return f"kind-{name}"
-    raise ValueError(f"unsupported NMP_AUTHENTIK_K8S_RUNTIME={runtime!r}; expected kind or k3d")
+    raise ValueError(f"unsupported NHX_AUTHENTIK_K8S_RUNTIME={runtime!r}; expected kind or k3d")
 
 
 def _wait_for_authentik(context: str, kubeconfig: Path | None = None) -> None:
     for deployment in (
         "authentik-server",
         "authentik-worker",
-        "nemo-platform-api",
-        "nemo-platform-envoy",
+        "nemo-helix-api",
+        "nemo-helix-envoy",
     ):
         _run(
             _kubectl_command(
@@ -534,7 +534,7 @@ def _wait_for_authentik(context: str, kubeconfig: Path | None = None) -> None:
 
 def _helm_upgrade_args(context: str, kubeconfig: Path | None = None) -> list[str]:
     image = _platform_image()
-    registry, tag = image.rsplit("/nmp-api:", 1)
+    registry, tag = image.rsplit("/nhx-api:", 1)
     args = _helm_command(
         context,
         [
@@ -550,36 +550,36 @@ def _helm_upgrade_args(context: str, kubeconfig: Path | None = None) -> list[str
             "--timeout",
             HELM_WAIT_TIMEOUT,
             "--set",
-            f"nemo-platform.api.image.repository={registry}/nmp-api",
+            f"nemo-helix.api.image.repository={registry}/nhx-api",
             "--set",
-            f"nemo-platform.api.image.tag={tag}",
+            f"nemo-helix.api.image.tag={tag}",
             "--set",
-            f"nemo-platform.core.image.repository={registry}/nmp-api",
+            f"nemo-helix.core.image.repository={registry}/nhx-api",
             "--set",
-            f"nemo-platform.core.image.tag={tag}",
+            f"nemo-helix.core.image.tag={tag}",
             "--set-string",
-            f"nemo-platform.platformConfig.platform.image_registry={registry}",
+            f"nemo-helix.platformConfig.platform.image_registry={registry}",
             "--set-string",
-            f"nemo-platform.platformConfig.platform.image_tag={tag}",
+            f"nemo-helix.platformConfig.platform.image_tag={tag}",
             "--set-string",
-            "nemo-platform.platformConfig.auth.access_keys.enabled=true",
+            "nemo-helix.platformConfig.auth.access_keys.enabled=true",
         ],
         kubeconfig,
     )
-    ngc_existing_secret = os.environ.get("NMP_AUTHENTIK_K8S_NGC_EXISTING_SECRET")
+    ngc_existing_secret = os.environ.get("NHX_AUTHENTIK_K8S_NGC_EXISTING_SECRET")
     if ngc_existing_secret:
         args.extend(
             [
                 "--set-string",
-                f"nemo-platform.existingSecret={ngc_existing_secret}",
+                f"nemo-helix.existingSecret={ngc_existing_secret}",
             ]
         )
-    image_pull_secret = os.environ.get("NMP_AUTHENTIK_K8S_IMAGE_PULL_SECRET")
+    image_pull_secret = os.environ.get("NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET")
     if image_pull_secret:
         args.extend(
             [
                 "--set-string",
-                f"nemo-platform.imagePullSecrets[0].name={image_pull_secret}",
+                f"nemo-helix.imagePullSecrets[0].name={image_pull_secret}",
             ]
         )
     gateway_port = _configured_gateway_port()
@@ -587,7 +587,7 @@ def _helm_upgrade_args(context: str, kubeconfig: Path | None = None) -> list[str
         args.extend(
             [
                 "--set-string",
-                f"nemo-platform.authentikPublicGateway.port={gateway_port}",
+                f"nemo-helix.authentikPublicGateway.port={gateway_port}",
             ]
         )
     workload_token_private_key = os.environ.get(WORKLOAD_TOKEN_PRIVATE_KEY_FILE_ENV)
@@ -818,7 +818,7 @@ class KubernetesAuthIdpRuntime:
         self._diagnostics_collected = False
         self._reuse_cluster = False
         self._keep_cluster = False
-        self._previous_client_ssl_cert_file = os.environ.get(NMP_CLIENT_SSL_CERT_FILE_ENVVAR)
+        self._previous_client_ssl_cert_file = os.environ.get(NHX_CLIENT_SSL_CERT_FILE_ENVVAR)
         self._start()
 
     @property
@@ -899,8 +899,8 @@ class KubernetesAuthIdpRuntime:
         ca_bundle = self.ca_bundle.read_text(encoding="utf-8")
         return DeploymentWorkloadRuntimeConfig(
             env=(
-                {"name": "NMP_BASE_URL", "value": IN_CLUSTER_ENVOY_BASE_URL},
-                {"name": "NMP_CLIENT_SSL_CERT_FILE", "value": DEPLOYMENT_WORKLOAD_CA_BUNDLE_FILE},
+                {"name": "NHX_BASE_URL", "value": IN_CLUSTER_ENVOY_BASE_URL},
+                {"name": "NHX_CLIENT_SSL_CERT_FILE", "value": DEPLOYMENT_WORKLOAD_CA_BUNDLE_FILE},
                 {"name": "SSL_CERT_FILE", "value": DEPLOYMENT_WORKLOAD_CA_BUNDLE_FILE},
                 {"name": "REQUESTS_CA_BUNDLE", "value": DEPLOYMENT_WORKLOAD_CA_BUNDLE_FILE},
             ),
@@ -913,13 +913,13 @@ class KubernetesAuthIdpRuntime:
             ),
         )
 
-    def e2e_setup_sdk(self) -> NeMoPlatform:
+    def e2e_setup_sdk(self) -> NeMoHelix:
         return self._sdk_for_token(self.e2e_setup_token().access_token)
 
-    def interactive_user_sdk(self) -> NeMoPlatform:
+    def interactive_user_sdk(self) -> NeMoHelix:
         return self._sdk_for_token(self.interactive_user_token().access_token)
 
-    def workload_provider_sdk(self) -> NeMoPlatform:
+    def workload_provider_sdk(self) -> NeMoHelix:
         return self._sdk_for_token(self.workload_platform_token().access_token)
 
     def workload_role_principals(self) -> list[str]:
@@ -949,9 +949,9 @@ class KubernetesAuthIdpRuntime:
                 Path(self._ca_temp_file.name).unlink()
             self._ca_temp_file = None
         if self._previous_client_ssl_cert_file is None:
-            os.environ.pop(NMP_CLIENT_SSL_CERT_FILE_ENVVAR, None)
+            os.environ.pop(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, None)
         else:
-            os.environ[NMP_CLIENT_SSL_CERT_FILE_ENVVAR] = self._previous_client_ssl_cert_file
+            os.environ[NHX_CLIENT_SSL_CERT_FILE_ENVVAR] = self._previous_client_ssl_cert_file
         if self.cluster is not None:
             cluster = self.cluster
             try:
@@ -967,10 +967,10 @@ class KubernetesAuthIdpRuntime:
                     self.cluster = None
 
     def _start(self) -> None:
-        runtime = os.environ.get("NMP_AUTHENTIK_K8S_RUNTIME", "kind")
-        name = os.environ.get("NMP_AUTHENTIK_K8S_CLUSTER_NAME") or f"nmp-authentik-{uuid.uuid4().hex[:8]}"
-        self._reuse_cluster = os.environ.get("NMP_AUTHENTIK_K8S_REUSE_CLUSTER") == "1"
-        self._keep_cluster = os.environ.get("NMP_AUTHENTIK_K8S_KEEP_CLUSTER") == "1"
+        runtime = os.environ.get("NHX_AUTHENTIK_K8S_RUNTIME", "kind")
+        name = os.environ.get("NHX_AUTHENTIK_K8S_CLUSTER_NAME") or f"nhx-authentik-{uuid.uuid4().hex[:8]}"
+        self._reuse_cluster = os.environ.get("NHX_AUTHENTIK_K8S_REUSE_CLUSTER") == "1"
+        self._keep_cluster = os.environ.get("NHX_AUTHENTIK_K8S_KEEP_CLUSTER") == "1"
         cluster = _reuse_or_create_cluster(runtime, name) if self._reuse_cluster else _create_cluster(runtime, name)
         self.cluster = cluster
         try:
@@ -981,14 +981,14 @@ class KubernetesAuthIdpRuntime:
             assert self.ca_bundle is not None
             self.gateway_base_url, self._port_forward_process = _start_port_forward_service(
                 cluster.context,
-                "nemo-platform-envoy",
+                "nemo-helix-envoy",
                 self.ca_bundle,
                 cluster.kubeconfig,
             )
             self.discovery_url = self.gateway_base_url + DISCOVERY_PATH
             self.token_endpoint = self.gateway_base_url + "/application/o/token/"
             self.workload_token_endpoint = self.gateway_base_url + "/apis/auth/token"
-            os.environ[NMP_CLIENT_SSL_CERT_FILE_ENVVAR] = self.verify
+            os.environ[NHX_CLIENT_SSL_CERT_FILE_ENVVAR] = self.verify
         except Exception:
             try:
                 self._collect_diagnostics_best_effort(cluster.context, cluster.name, cluster.kubeconfig)
@@ -997,7 +997,7 @@ class KubernetesAuthIdpRuntime:
             raise
 
     def _write_ca_bundle(self, context: str, kubeconfig: Path | None = None) -> None:
-        temp_file = tempfile.NamedTemporaryFile(suffix="-nmp-ca.crt", delete=False)
+        temp_file = tempfile.NamedTemporaryFile(suffix="-nhx-ca.crt", delete=False)
         temp_file.write(_secret_data(context, ENVOY_TLS_SECRET, "ca.crt", kubeconfig=kubeconfig))
         temp_file.flush()
         temp_file.close()
@@ -1009,8 +1009,8 @@ class KubernetesAuthIdpRuntime:
 
         return _exchange_token_with_retries(token_endpoint, grant, tls_config={"verify": self.verify})
 
-    def _sdk_for_token(self, token: str) -> NeMoPlatform:
-        return NeMoPlatform(
+    def _sdk_for_token(self, token: str) -> NeMoHelix:
+        return NeMoHelix(
             base_url=self.gateway_base_url,
             default_headers={"Authorization": f"Bearer {token}"},
             max_retries=0,

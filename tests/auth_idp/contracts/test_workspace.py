@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
-from nemo_platform import APIStatusError
-from nmp.testing import grant_workspace_role
+from nemo_helix import APIStatusError
+from nhx.testing import grant_workspace_role
 
 from tests.auth_idp.common import require_capability
 

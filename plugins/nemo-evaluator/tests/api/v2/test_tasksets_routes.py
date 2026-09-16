@@ -18,7 +18,7 @@ from nemo_evaluator.api.dependencies import get_taskset_service
 from nemo_evaluator.api.schemas import TaskRef, TasksetInput
 from nemo_evaluator.api.service.taskset_service import TasksetService
 from nemo_evaluator.api.v2 import tasksets as tasksets_routes
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 
 
 class _FakeTaskService:

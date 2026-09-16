@@ -14,7 +14,7 @@ from nemo_deployments_plugin.backends.registry import ExecutorRegistry
 from nemo_deployments_plugin.config import ControllerConfig
 from nemo_deployments_plugin.reconciler.deployment_reconciler import DeploymentReconciler
 from nemo_deployments_plugin.reconciler.volume_reconciler import VolumeReconciler
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
 
 class MockDeploymentBackend(DeploymentBackend):
@@ -22,7 +22,7 @@ class MockDeploymentBackend(DeploymentBackend):
 
     def __init__(
         self,
-        sdk: AsyncNeMoPlatform | None = None,
+        sdk: AsyncNeMoHelix | None = None,
         config: dict[str, Any] | None = None,
         *,
         create_status: BackendStatusUpdate | None = None,

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from fastapi.routing import APIRoute
 from nemo_deployments_plugin.service import DeploymentsService
-from nemo_platform_plugin.authz import get_path_rules
+from nemo_helix_plugin.authz import get_path_rules
 
 
 def _mounted_paths() -> set[str]:

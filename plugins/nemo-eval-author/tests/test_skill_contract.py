@@ -2331,10 +2331,10 @@ def test_audit_generate_explains_missing_ethos_with_docs_link(tmp_path: Path) ->
     assert "before it can generate an audit coverage report" in result.stderr
     assert "ETHOS.md records intended behavior" in result.stderr
     assert "Missing file:" in result.stderr
-    assert "Docs: https://docs.nvidia.com/nemo-platform/documentation/agents/optimize-agents/ethos" in result.stderr
+    assert "Docs: https://docs.nvidia.com/nemo-helix/documentation/agents/optimize-agents/ethos" in result.stderr
     assert "Next steps:\n" in result.stderr
     assert "rerun this command with --ethos <path>" in result.stderr
-    assert "https://docs.nvidia.com/nemo-platform/documentation/agents/optimize-agents/ethos" in result.stderr
+    assert "https://docs.nvidia.com/nemo-helix/documentation/agents/optimize-agents/ethos" in result.stderr
     assert "skills/eval-author/references/local-ethos.md" in result.stderr
     assert "Save ETHOS.md in the repository and review its contents" in result.stderr
     assert "No platform service or upload is required" in result.stderr
@@ -2370,7 +2370,7 @@ def test_audit_generate_explains_unreadable_ethos_with_docs_link(tmp_path: Path)
     assert result.stderr.startswith("Unreadable Ethos\n\n")
     assert "needs a source of truth for how the agent is supposed to behave" in result.stderr
     assert "Unreadable file:" in result.stderr
-    assert "Docs: https://docs.nvidia.com/nemo-platform/documentation/agents/optimize-agents/ethos" in result.stderr
+    assert "Docs: https://docs.nvidia.com/nemo-helix/documentation/agents/optimize-agents/ethos" in result.stderr
     assert "Next steps:\n" in result.stderr
     assert "- Fix read access for the Ethos file, then rerun this command." in result.stderr
     assert "- Or pass a readable Ethos path with --ethos <path>." in result.stderr

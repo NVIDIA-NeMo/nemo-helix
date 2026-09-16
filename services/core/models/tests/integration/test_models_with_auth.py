@@ -22,29 +22,29 @@ from typing import Generator
 from unittest.mock import patch
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import PermissionDeniedError
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.storage_config import HuggingfaceStorageConfig
-from nemo_platform_plugin.files.types import CreateFilesetRequest
-from nemo_platform_plugin.models.client import ModelsClient
-from nemo_platform_plugin.models.types import (
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import (
     CreateModelAdapterRequest,
     CreateModelEntityRequest,
     FinetuningType,
     UpdateModelEntityRequest,
 )
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
-from nmp.core.auth.app.bundle import build_authorization_data as _real_build_authorization_data
-from nmp.core.files.service import FilesService
-from nmp.core.models.config import config as models_config
-from nmp.core.models.service import ModelsService
-from nmp.core.secrets.service import SecretsService
-from nmp.testing import (
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import PlatformSecretCreateRequest
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+from nhx.core.auth.app.bundle import build_authorization_data as _real_build_authorization_data
+from nhx.core.files.service import FilesService
+from nhx.core.models.config import config as models_config
+from nhx.core.models.service import ModelsService
+from nhx.core.secrets.service import SecretsService
+from nhx.testing import (
     TEST_ADMIN_EMAIL,
     as_user,
     create_test_client,
@@ -175,14 +175,14 @@ async def _build_authorization_data_without_fileset_read(entities_client=None):
 def patched_authz_data(build_fn):
     """Patch build_authorization_data in both the bundle and embedded PDP modules."""
     with (
-        patch("nmp.core.auth.app.bundle.build_authorization_data", side_effect=build_fn),
-        patch("nmp.core.auth.app.embedded_pdp.data.build_authorization_data", side_effect=build_fn),
+        patch("nhx.core.auth.app.bundle.build_authorization_data", side_effect=build_fn),
+        patch("nhx.core.auth.app.embedded_pdp.data.build_authorization_data", side_effect=build_fn),
     ):
         yield
 
 
 @pytest.fixture(scope="module")
-def sdk() -> Generator[NeMoPlatform, None, None]:
+def sdk() -> Generator[NeMoHelix, None, None]:
     """SDK client with ModelsService, FilesService, and SecretsService (auth enabled).
 
     FilesService is needed for model/adapter create with fileset (validate_fileset_ref_exists).
@@ -203,99 +203,99 @@ class TestModelsUnauthenticated:
 
     # -- Models --
 
-    def test_list_models_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_list_models_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.get("/apis/models/v2/workspaces/default/models")
         assert response.status_code == 401
 
-    def test_get_model_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_get_model_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.get("/apis/models/v2/workspaces/default/models/any-model")
         assert response.status_code == 401
 
-    def test_create_model_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_create_model_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.post(
             "/apis/models/v2/workspaces/default/models",
             json={"name": "test-model"},
         )
         assert response.status_code == 401
 
-    def test_update_model_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_update_model_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.patch(
             "/apis/models/v2/workspaces/default/models/any-model",
             json={"description": "updated"},
         )
         assert response.status_code == 401
 
-    def test_delete_model_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_delete_model_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.delete("/apis/models/v2/workspaces/default/models/any-model")
         assert response.status_code == 401
 
     # -- Providers --
 
-    def test_list_providers_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_list_providers_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.get("/apis/models/v2/workspaces/default/providers")
         assert response.status_code == 401
 
-    def test_get_provider_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_get_provider_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.get("/apis/models/v2/workspaces/default/providers/any-provider")
         assert response.status_code == 401
 
-    def test_create_provider_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_create_provider_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.post(
             "/apis/models/v2/workspaces/default/providers",
             json={"name": "test-provider", "host_url": "http://example.com"},
         )
         assert response.status_code == 401
 
-    def test_upsert_provider_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_upsert_provider_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.put(
             "/apis/models/v2/workspaces/default/providers/any-provider",
             json={"host_url": "http://example.com"},
         )
         assert response.status_code == 401
 
-    def test_delete_provider_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_delete_provider_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.delete("/apis/models/v2/workspaces/default/providers/any-provider")
         assert response.status_code == 401
 
     # -- Deployments --
 
-    def test_list_deployments_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_list_deployments_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.get("/apis/models/v2/workspaces/default/deployments")
         assert response.status_code == 401
 
-    def test_get_deployment_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_get_deployment_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.get("/apis/models/v2/workspaces/default/deployments/any-deployment")
         assert response.status_code == 401
 
-    def test_create_deployment_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_create_deployment_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.post(
             "/apis/models/v2/workspaces/default/deployments",
             json={"name": "test-deploy", "config": "some-config"},
         )
         assert response.status_code == 401
 
-    def test_update_deployment_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_update_deployment_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.post(
             "/apis/models/v2/workspaces/default/deployments/any-deployment",
             json={"config": "some-config"},
         )
         assert response.status_code == 401
 
-    def test_delete_deployment_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_delete_deployment_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.delete("/apis/models/v2/workspaces/default/deployments/any-deployment")
         assert response.status_code == 401
 
     # -- Deployment Configs --
 
-    def test_list_deployment_configs_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_list_deployment_configs_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.get("/apis/models/v2/workspaces/default/deployment-configs")
         assert response.status_code == 401
 
-    def test_get_deployment_config_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_get_deployment_config_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.get("/apis/models/v2/workspaces/default/deployment-configs/any-config")
         assert response.status_code == 401
 
-    def test_create_deployment_config_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_create_deployment_config_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.post(
             "/apis/models/v2/workspaces/default/deployment-configs",
             json={
@@ -307,20 +307,20 @@ class TestModelsUnauthenticated:
         )
         assert response.status_code == 401
 
-    def test_update_deployment_config_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_update_deployment_config_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.post(
             "/apis/models/v2/workspaces/default/deployment-configs/any-config",
             json={"engine": "nim", "model_spec": {"model_name": "test"}, "executor_config": {"gpu": 1}},
         )
         assert response.status_code == 401
 
-    def test_delete_deployment_config_without_auth_fails(self, sdk: NeMoPlatform):
+    def test_delete_deployment_config_without_auth_fails(self, sdk: NeMoHelix):
         response = sdk._client.delete("/apis/models/v2/workspaces/default/deployment-configs/any-config")
         assert response.status_code == 401
 
 
 @pytest.fixture()
-def viewer_workspace(sdk: NeMoPlatform):
+def viewer_workspace(sdk: NeMoHelix):
     """Create a workspace with a Viewer user and pre-populated resources for read tests.
 
     Returns (workspace, viewer_sdk, admin_sdk, resource_names) where resource_names
@@ -548,7 +548,7 @@ class TestViewerModelsAccess:
 class TestEditorModelsAccess:
     """Test that Editor role can create, read, update, and delete resources."""
 
-    def test_editor_can_create_and_read_model(self, sdk: NeMoPlatform):
+    def test_editor_can_create_and_read_model(self, sdk: NeMoHelix):
         workspace = short_unique_name("ed-mdl")
         editor_email = unique_email("editor")
         model_name = short_unique_name("model")
@@ -572,7 +572,7 @@ class TestEditorModelsAccess:
         retrieved = models.get_model(name=model_name, workspace=workspace).data()
         assert retrieved.name == model_name
 
-    def test_editor_can_delete_model(self, sdk: NeMoPlatform):
+    def test_editor_can_delete_model(self, sdk: NeMoHelix):
         workspace = short_unique_name("ed-del")
         editor_email = unique_email("editor")
         model_name = short_unique_name("model")
@@ -593,7 +593,7 @@ class TestEditorModelsAccess:
         models.create_model(workspace=workspace, body=CreateModelEntityRequest(name=model_name)).data()
         models.delete_model(name=model_name, workspace=workspace)
 
-    def test_editor_can_create_provider(self, sdk: NeMoPlatform):
+    def test_editor_can_create_provider(self, sdk: NeMoHelix):
         workspace = short_unique_name("ed-prv")
         editor_email = unique_email("editor")
         provider_name = short_unique_name("prov")
@@ -618,7 +618,7 @@ class TestEditorModelsAccess:
         )
         assert created.name == provider_name
 
-    def test_editor_can_create_deployment_config(self, sdk: NeMoPlatform):
+    def test_editor_can_create_deployment_config(self, sdk: NeMoHelix):
         workspace = short_unique_name("ed-cfg")
         editor_email = unique_email("editor")
         config_name = short_unique_name("cfg")
@@ -650,7 +650,7 @@ class TestEditorModelsAccess:
 class TestProviderSecretPermissions:
     """Test that creating/upserting a provider with api_key_secret_name requires secrets.read."""
 
-    def test_editor_can_create_provider_without_secret(self, sdk: NeMoPlatform):
+    def test_editor_can_create_provider_without_secret(self, sdk: NeMoHelix):
         workspace = short_unique_name("ps-nos")
         editor_email = unique_email("editor")
 
@@ -674,7 +674,7 @@ class TestProviderSecretPermissions:
         )
         assert provider.api_key_secret_name is None
 
-    def test_editor_can_create_provider_with_secret(self, sdk: NeMoPlatform):
+    def test_editor_can_create_provider_with_secret(self, sdk: NeMoHelix):
         """Editor has secrets.read via Viewer inheritance, so this should succeed."""
         workspace = short_unique_name("ps-sec")
         editor_email = unique_email("editor")
@@ -704,7 +704,7 @@ class TestProviderSecretPermissions:
         )
         assert provider.api_key_secret_name == "my-api-key"
 
-    def test_editor_can_upsert_provider_with_secret(self, sdk: NeMoPlatform):
+    def test_editor_can_upsert_provider_with_secret(self, sdk: NeMoHelix):
         """Editor has secrets.read via Viewer inheritance, so upsert with secret should succeed."""
         workspace = short_unique_name("ps-ups")
         editor_email = unique_email("editor")
@@ -735,7 +735,7 @@ class TestProviderSecretPermissions:
         )
         assert provider.api_key_secret_name == "my-api-key"
 
-    def test_custom_role_denied_create_provider_with_secret(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_create_provider_with_secret(self, sdk: NeMoHelix):
         """A role with provider write but no secrets.read should be denied on create."""
         with patched_authz_data(_build_authorization_data_without_secrets):
             workspace = short_unique_name("ns-crt")
@@ -775,7 +775,7 @@ class TestProviderSecretPermissions:
                     api_key_secret_name="should-be-denied",
                 )
 
-    def test_custom_role_denied_upsert_provider_with_secret(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_upsert_provider_with_secret(self, sdk: NeMoHelix):
         """A role with provider write but no secrets.read should be denied on upsert."""
         with patched_authz_data(_build_authorization_data_without_secrets):
             workspace = short_unique_name("ns-ups")
@@ -812,7 +812,7 @@ class TestProviderSecretPermissions:
 class TestProviderDeploymentRefPermissions:
     """Test that creating/upserting a provider with model_deployment_id requires inference.deployments.read."""
 
-    def test_editor_can_create_provider_with_deployment_ref(self, sdk: NeMoPlatform):
+    def test_editor_can_create_provider_with_deployment_ref(self, sdk: NeMoHelix):
         """Editor has inference.deployments.read, so referencing a deployment should succeed."""
         workspace = short_unique_name("pd-ok")
         editor_email = unique_email("editor")
@@ -838,7 +838,7 @@ class TestProviderDeploymentRefPermissions:
         )
         assert provider.model_deployment_id == f"{workspace}/some-deployment"
 
-    def test_editor_can_upsert_provider_with_deployment_ref(self, sdk: NeMoPlatform):
+    def test_editor_can_upsert_provider_with_deployment_ref(self, sdk: NeMoHelix):
         """Editor has inference.deployments.read, so upsert with deployment ref should succeed."""
         workspace = short_unique_name("pd-ups")
         editor_email = unique_email("editor")
@@ -864,7 +864,7 @@ class TestProviderDeploymentRefPermissions:
         )
         assert provider.model_deployment_id == f"{workspace}/some-deployment"
 
-    def test_custom_role_denied_create_provider_with_deployment_ref(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_create_provider_with_deployment_ref(self, sdk: NeMoHelix):
         """A role without inference.deployments.read should be denied when referencing a deployment."""
         with patched_authz_data(_build_authorization_data_without_deployment_read):
             workspace = short_unique_name("pd-ncr")
@@ -892,7 +892,7 @@ class TestProviderDeploymentRefPermissions:
                     model_deployment_id=f"{workspace}/some-deployment",
                 )
 
-    def test_custom_role_denied_upsert_provider_with_deployment_ref(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_upsert_provider_with_deployment_ref(self, sdk: NeMoHelix):
         """A role without inference.deployments.read should be denied when upserting with a deployment ref."""
         with patched_authz_data(_build_authorization_data_without_deployment_read):
             workspace = short_unique_name("pd-nup")
@@ -925,7 +925,7 @@ class TestProviderDeploymentRefPermissions:
 class TestDeploymentConfigPermissions:
     """Test that creating/updating a deployment config with model_entity_id requires models.read."""
 
-    def test_editor_can_create_config_with_model_entity_id(self, sdk: NeMoPlatform):
+    def test_editor_can_create_config_with_model_entity_id(self, sdk: NeMoHelix):
         """Editor has models.read, so referencing a model_entity_id should succeed."""
         workspace = short_unique_name("dc-mei")
         editor_email = unique_email("editor")
@@ -953,7 +953,7 @@ class TestDeploymentConfigPermissions:
         )
         assert config.model_entity_id == f"{workspace}/my-model"
 
-    def test_editor_cannot_reference_model_in_inaccessible_workspace(self, sdk: NeMoPlatform):
+    def test_editor_cannot_reference_model_in_inaccessible_workspace(self, sdk: NeMoHelix):
         """Editor should be denied when referencing a model_entity_id in a workspace they can't access."""
         workspace = short_unique_name("dc-nop")
         editor_email = unique_email("editor")
@@ -981,7 +981,7 @@ class TestDeploymentConfigPermissions:
                 model_entity_id="inaccessible-workspace/some-model",
             )
 
-    def test_editor_can_update_config_with_model_entity_id(self, sdk: NeMoPlatform):
+    def test_editor_can_update_config_with_model_entity_id(self, sdk: NeMoHelix):
         """Editor has models.read, so updating a config with model_entity_id should succeed."""
         workspace = short_unique_name("dc-upd")
         editor_email = unique_email("editor")
@@ -1018,7 +1018,7 @@ class TestDeploymentConfigPermissions:
         )
         assert updated.model_entity_id == f"{workspace}/my-model"
 
-    def test_editor_cannot_update_config_with_inaccessible_model(self, sdk: NeMoPlatform):
+    def test_editor_cannot_update_config_with_inaccessible_model(self, sdk: NeMoHelix):
         """Editor should be denied when updating a config with a model_entity_id in an inaccessible workspace."""
         workspace = short_unique_name("dc-unp")
         editor_email = unique_email("editor")
@@ -1055,7 +1055,7 @@ class TestDeploymentConfigPermissions:
                 model_entity_id="inaccessible-workspace/some-model",
             )
 
-    def test_custom_role_denied_create_config_with_model_entity_id_without_read(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_create_config_with_model_entity_id_without_read(self, sdk: NeMoHelix):
         """A role without models.read should be denied when creating a config with model_entity_id."""
         with patched_authz_data(_build_authorization_data_without_model_read):
             workspace = short_unique_name("dc-ncr")
@@ -1085,7 +1085,7 @@ class TestDeploymentConfigPermissions:
                     model_entity_id=f"{workspace}/some-model",
                 )
 
-    def test_custom_role_denied_update_config_with_model_entity_id_without_read(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_update_config_with_model_entity_id_without_read(self, sdk: NeMoHelix):
         """A role without models.read should be denied when updating a config with model_entity_id."""
         with patched_authz_data(_build_authorization_data_without_model_read):
             workspace = short_unique_name("dc-nup")
@@ -1129,7 +1129,7 @@ class TestDeploymentConfigPermissions:
 class TestDeploymentPermissions:
     """Test that creating/updating a deployment with a config reference requires inference.deployment-configs.read."""
 
-    def test_editor_can_create_deployment_with_config(self, sdk: NeMoPlatform):
+    def test_editor_can_create_deployment_with_config(self, sdk: NeMoHelix):
         """Editor has inference.deployment-configs.read, so referencing a config should succeed."""
         workspace = short_unique_name("dp-ok")
         editor_email = unique_email("editor")
@@ -1163,7 +1163,7 @@ class TestDeploymentPermissions:
         )
         assert deployment.config == config_name
 
-    def test_editor_can_update_deployment_with_config(self, sdk: NeMoPlatform):
+    def test_editor_can_update_deployment_with_config(self, sdk: NeMoHelix):
         """Editor has inference.deployment-configs.read, so updating a deployment with a config ref should succeed."""
         workspace = short_unique_name("dp-upd")
         editor_email = unique_email("editor")
@@ -1204,7 +1204,7 @@ class TestDeploymentPermissions:
         )
         assert updated.config == config_name
 
-    def test_custom_role_denied_create_deployment_without_read(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_create_deployment_without_read(self, sdk: NeMoHelix):
         """A role with deployment write but no inference.deployment-configs.read should be denied on create."""
         with patched_authz_data(_build_authorization_data_without_deployment_config_read):
             workspace = short_unique_name("dp-ncr")
@@ -1240,7 +1240,7 @@ class TestDeploymentPermissions:
                     config=config_name,
                 )
 
-    def test_custom_role_denied_update_deployment_without_read(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_update_deployment_without_read(self, sdk: NeMoHelix):
         """A role with deployment write but no inference.deployment-configs.read should be denied on update."""
         with patched_authz_data(_build_authorization_data_without_deployment_config_read):
             workspace = short_unique_name("dp-nup")
@@ -1290,7 +1290,7 @@ class TestFilesetPermissions:
 
     # -- Write: editor allowed (same workspace fileset) --
 
-    def test_editor_can_create_model_with_fileset(self, sdk: NeMoPlatform):
+    def test_editor_can_create_model_with_fileset(self, sdk: NeMoHelix):
         workspace = short_unique_name("fs-crt")
         editor_email = unique_email("editor")
         fileset_name = short_unique_name("fs")
@@ -1323,7 +1323,7 @@ class TestFilesetPermissions:
         )
         assert model.fileset == f"{workspace}/{fileset_name}"
 
-    def test_editor_can_update_model_with_fileset(self, sdk: NeMoPlatform):
+    def test_editor_can_update_model_with_fileset(self, sdk: NeMoHelix):
         workspace = short_unique_name("fs-upd")
         editor_email = unique_email("editor")
         model_name = short_unique_name("mdl")
@@ -1361,7 +1361,7 @@ class TestFilesetPermissions:
         )
         assert updated.fileset == f"{workspace}/{fileset_name}"
 
-    def test_editor_can_create_adapter_with_fileset(self, sdk: NeMoPlatform):
+    def test_editor_can_create_adapter_with_fileset(self, sdk: NeMoHelix):
         workspace = short_unique_name("fs-adp")
         editor_email = unique_email("editor")
         model_name = short_unique_name("mdl")
@@ -1405,7 +1405,7 @@ class TestFilesetPermissions:
 
     # -- Write: denied (cross-workspace fileset) --
 
-    def test_editor_denied_create_model_with_inaccessible_fileset(self, sdk: NeMoPlatform):
+    def test_editor_denied_create_model_with_inaccessible_fileset(self, sdk: NeMoHelix):
         workspace = short_unique_name("fs-dnc")
         editor_email = unique_email("editor")
 
@@ -1427,7 +1427,7 @@ class TestFilesetPermissions:
                 body=CreateModelEntityRequest(name=short_unique_name("mdl"), fileset="inaccessible-ws/some-fileset"),
             ).data()
 
-    def test_editor_denied_update_model_with_inaccessible_fileset(self, sdk: NeMoPlatform):
+    def test_editor_denied_update_model_with_inaccessible_fileset(self, sdk: NeMoHelix):
         workspace = short_unique_name("fs-dnu")
         editor_email = unique_email("editor")
         model_name = short_unique_name("mdl")
@@ -1454,7 +1454,7 @@ class TestFilesetPermissions:
                 body=UpdateModelEntityRequest(fileset="inaccessible-ws/some-fileset"),
             ).data()
 
-    def test_editor_denied_create_adapter_with_inaccessible_fileset(self, sdk: NeMoPlatform):
+    def test_editor_denied_create_adapter_with_inaccessible_fileset(self, sdk: NeMoHelix):
         workspace = short_unique_name("fs-dna")
         editor_email = unique_email("editor")
         model_name = short_unique_name("mdl")
@@ -1485,7 +1485,7 @@ class TestFilesetPermissions:
                 ),
             ).data()
 
-    def test_custom_role_denied_create_model_with_fileset_without_fileset_read(self, sdk: NeMoPlatform):
+    def test_custom_role_denied_create_model_with_fileset_without_fileset_read(self, sdk: NeMoHelix):
         """A role without filesets.read should be denied when creating a model with a fileset."""
         with patched_authz_data(_build_authorization_data_without_fileset_read):
             workspace = short_unique_name("fs-nfr")
@@ -1523,7 +1523,7 @@ class TestTrustRemoteCodePermission:
     def _no_hf(self, no_hf_network):
         """These tests verify authorization logic, not HF connectivity."""
 
-    def test_create_model_trust_remote_code_true_has_permission_succeeds(self, sdk: NeMoPlatform):
+    def test_create_model_trust_remote_code_true_has_permission_succeeds(self, sdk: NeMoHelix):
         """Create with trust_remote_code=True succeeds when principal has models.trust-remote-code.set (repo not on allow list)."""
         workspace = short_unique_name("trc-has")
         editor_email = unique_email("editor")
@@ -1559,7 +1559,7 @@ class TestTrustRemoteCodePermission:
             )
         assert created.trust_remote_code is True
 
-    def test_create_model_trust_remote_code_true_without_permission_raises(self, sdk: NeMoPlatform):
+    def test_create_model_trust_remote_code_true_without_permission_raises(self, sdk: NeMoHelix):
         """Create with trust_remote_code=True returns 403 when repo not on allow list and principal lacks models.trust-remote-code.set."""
         with patched_authz_data(_real_build_authorization_data):
             workspace = short_unique_name("trc-no")
@@ -1594,7 +1594,7 @@ class TestTrustRemoteCodePermission:
                     ).data()
                 assert "Insufficient permissions to set the trust_remote_code" in str(exc_info.value)
 
-    def test_update_model_trust_remote_code_true_has_permission_succeeds(self, sdk: NeMoPlatform):
+    def test_update_model_trust_remote_code_true_has_permission_succeeds(self, sdk: NeMoHelix):
         """Update with trust_remote_code=True succeeds when principal has models.trust-remote-code.set (repo not on allow list)."""
         workspace = short_unique_name("trc-upd-has")
         editor_email = unique_email("editor")
@@ -1632,7 +1632,7 @@ class TestTrustRemoteCodePermission:
             )
         assert updated.trust_remote_code is True
 
-    def test_update_model_trust_remote_code_true_without_permission_raises(self, sdk: NeMoPlatform):
+    def test_update_model_trust_remote_code_true_without_permission_raises(self, sdk: NeMoHelix):
         """Update with trust_remote_code=True returns 403 when repo not on allow list and principal lacks models.trust-remote-code.set."""
         with patched_authz_data(_real_build_authorization_data):
             workspace = short_unique_name("trc-upd-no")
@@ -1672,7 +1672,7 @@ class TestTrustRemoteCodePermission:
                     ).data()
                 assert "Insufficient permissions to set the trust_remote_code" in str(exc_info.value)
 
-    def test_update_model_new_fileset_not_trusted_raises_permission_error(self, sdk: NeMoPlatform):
+    def test_update_model_new_fileset_not_trusted_raises_permission_error(self, sdk: NeMoHelix):
         """Update model (created with valid trust_remote_code) to a new fileset not on allow list returns 403 when principal lacks models.trust-remote-code.set."""
         with patched_authz_data(_real_build_authorization_data):
             workspace = short_unique_name("trc-newfs")
@@ -1723,7 +1723,7 @@ class TestTrustRemoteCodePermission:
                     ).data()
                 assert "Insufficient permissions to set the trust_remote_code" in str(exc_info.value)
 
-    def test_exact_match_on_allow_list_succeeds(self, sdk: NeMoPlatform):
+    def test_exact_match_on_allow_list_succeeds(self, sdk: NeMoHelix):
         """Update with trust_remote_code=True succeeds when repo matches exactly, not via regex."""
         with patched_authz_data(_real_build_authorization_data):
             workspace = short_unique_name("trc-upd-no")

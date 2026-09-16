@@ -521,7 +521,7 @@ class Settings(BaseSettings):
     # external Switchyard profiles. Empty disables external endpoints.
     switchyard_external_allowed_hosts: str = ""
 
-    # --- NMP Intake (post-run ATIF upload) ---------------------------------
+    # --- NHX Intake (post-run ATIF upload) ---------------------------------
     # Platform root; the client appends ``/apis/intake/v2/...``. No default: an
     # upload target is deployment-specific, and a wrong one would silently ship
     # trajectories off-site. Uploads are opt-in per evaluation via

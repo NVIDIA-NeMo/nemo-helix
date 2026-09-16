@@ -31,9 +31,9 @@ from nemo_deployments_plugin.backends.labels import (
 from nemo_deployments_plugin.constants import MANAGED_BY_LABEL
 from nemo_deployments_plugin.entities import DeploymentConfig, EnvVar, SecretRef
 from nemo_deployments_plugin.types import RestartPolicy
-from nemo_platform_plugin.auth.workload_delegations import WorkloadDelegationScope
-from nemo_platform_plugin.auth.workload_identity import build_kubernetes_pod_uid_workload_delegation
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.auth.workload_delegations import WorkloadDelegationScope
+from nemo_helix_plugin.auth.workload_identity import build_kubernetes_pod_uid_workload_delegation
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
 
 @pytest.fixture
@@ -361,7 +361,7 @@ async def test_read_job_status_revokes_stale_pod_uid_when_pod_list_is_confirmed_
             workload_instance_id=deployment_key("default", "task"),
             workload_claim_id="logical-task",
         ),
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_generation="old-pod",
         namespace="dep-ns",
         service_account_name="dep-sa",
@@ -412,7 +412,7 @@ async def test_read_job_status_keeps_delegation_when_pod_list_fails(
             workload_instance_id=deployment_key("default", "task"),
             workload_claim_id="logical-task",
         ),
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_generation="old-pod",
         namespace="dep-ns",
         service_account_name="dep-sa",

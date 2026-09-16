@@ -15,13 +15,13 @@ Uses the create_test_client pattern for fast in-memory testing.
 import uuid
 from unittest.mock import AsyncMock, patch
 
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import ConflictError
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
-from nmp.core.models.config import ControllerConfig, ModelsConfig
-from nmp.core.models.controllers.backends.registry import BackendRegistry
-from nmp.testing import ClientContext
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+from nhx.core.models.config import ControllerConfig, ModelsConfig
+from nhx.core.models.controllers.backends.registry import BackendRegistry
+from nhx.testing import ClientContext
 
 # Default workspace for tests
 DEFAULT_WORKSPACE = "default"
@@ -1522,7 +1522,7 @@ def test_deployment_workspace_isolation(test_clients: ClientContext):
 
 def test_backend_config_key_deployments_plugin_works_end_to_end():
     """Verify deployments_plugin key in ModelsConfig works with BackendRegistry."""
-    from nmp.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginBackendConfigModel
+    from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginBackendConfigModel
 
     config = ModelsConfig(
         controller=ControllerConfig(
@@ -1534,10 +1534,10 @@ def test_backend_config_key_deployments_plugin_works_end_to_end():
     }
 
     with patch(
-        "nmp.core.models.controllers.backends.deployments_plugin.backend.NemoEntitiesClient",
+        "nhx.core.models.controllers.backends.deployments_plugin.backend.NemoEntitiesClient",
     ):
         registry = BackendRegistry.from_config(
-            nmp_sdk=AsyncMock(),
+            nhx_sdk=AsyncMock(),
             backend_configs=backend_configs,
             huggingface_model_puller=config.huggingface_model_puller,
         )

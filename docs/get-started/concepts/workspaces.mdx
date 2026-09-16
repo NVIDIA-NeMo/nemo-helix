@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="workspaces"></a>
 
-Workspaces are the fundamental organizational and authorization boundary in NeMo Platform. All platform resources—models, datasets, customization jobs, evaluation results, and more—must belong to a workspace.
+Workspaces are the fundamental organizational and authorization boundary in NeMo Helix. All platform resources—models, datasets, customization jobs, evaluation results, and more—must belong to a workspace.
 
 When authentication is enabled, users are granted roles (Viewer, Editor, or Admin) within specific workspaces, and all resources within a workspace inherit its access controls.
 
@@ -39,10 +39,10 @@ To restrict workspace creation, remove that wildcard `WorkspaceCreator` binding 
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -102,10 +102,10 @@ To list workspaces, call the list endpoint. When authentication is enabled, only
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -134,10 +134,10 @@ To retrieve a specific workspace by its `name`:
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -164,10 +164,10 @@ To update a workspace, only the `description` field can be modified. The `name` 
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -199,10 +199,10 @@ During cleanup, the workspace is no longer visible to users. If cleanup fails, t
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 

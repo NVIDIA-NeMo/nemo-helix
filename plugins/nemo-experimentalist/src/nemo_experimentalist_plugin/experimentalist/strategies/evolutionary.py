@@ -40,7 +40,7 @@ from nemo_experimentalist_plugin.experimentalist.components.tools import (
 from nemo_experimentalist_plugin.experimentalist.components.util import load_framework_skills
 from nemo_experimentalist_plugin.experimentalist.registry import get_component, resolve
 from nemo_experimentalist_plugin.experimentalist.seam import StrategyContext, TraceLoader
-from nemo_platform_plugin.nooa_model_client import get_default_model, get_fast_model
+from nemo_helix_plugin.nooa_model_client import get_default_model, get_fast_model
 from nooa import Agent, CodeActStrategy, strategy
 from nooa.agentdoc import doc, spec
 from nooa.agents import TokenBudgetSummarizer

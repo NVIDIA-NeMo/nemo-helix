@@ -63,10 +63,10 @@ from nemo_deployments_plugin.constants import MANAGED_BY_LABEL
 from nemo_deployments_plugin.entities import ConfigFile, Container, DeploymentConfig, OpenShellDeploymentConfig
 from nemo_deployments_plugin.secrets import SecretResolutionError, resolve_deployment_config_secrets
 from nemo_deployments_plugin.types import DeploymentStatus, Endpoint
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 
 if TYPE_CHECKING:
     import grpc
@@ -92,7 +92,7 @@ _SERVE_PIDFILE = "/tmp/nemo-serve.pid"
 # succeed (guarded by set -e). Requiring it in the drained output makes delivery
 # self-attesting: a stream that ends without an exit event (exit_code is None) or
 # otherwise cannot prove the write happened is a failed, not a silent, delivery.
-_CONFIG_DELIVERED_MARKER = "__nmp_config_delivered__"
+_CONFIG_DELIVERED_MARKER = "__nhx_config_delivered__"
 
 
 def _delivery_script(path: str, mode: int) -> str:
@@ -942,7 +942,7 @@ def _sandbox_name(workspace: str, name: str) -> str:
     The digest is a non-crypto short id; the length is chosen to fit the routable-name limit.
     """
     digest = hashlib.sha256(f"{workspace}/{name}".encode()).hexdigest()[:14]
-    return f"nmp-{digest}"
+    return f"nhx-{digest}"
 
 
 def _service_name(port: Any) -> str:

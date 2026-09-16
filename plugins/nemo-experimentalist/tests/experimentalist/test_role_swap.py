@@ -777,7 +777,7 @@ def test_no_component_constructor_names_a_platform_type(isolated_registry: None)
         f"{role}:{name}": [
             parameter
             for parameter, value in inspect.signature(cls.__init__).parameters.items()
-            if "NemoClient" in str(value.annotation) or "NeMoPlatform" in str(value.annotation)
+            if "NemoClient" in str(value.annotation) or "NeMoHelix" in str(value.annotation)
         ]
         for (role, name), cls in Component._registry.items()
     }

@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Minimal uv workspace for nmp-unsloth container image builds only.
+# Minimal uv workspace for nhx-unsloth container image builds only.
 # Keeps uv validation scoped to the partial source tree copied into the image.
 
 [project]
-name = "nemo-platform-unsloth-image"
+name = "nemo-helix-unsloth-image"
 version = "0.0.0"
 requires-python = ">=3.11,<3.14"
 
@@ -14,22 +14,22 @@ required-version = ">=0.9.14,<0.10.0"
 
 [tool.uv.workspace]
 members = [
-  "packages/nmp_build_tools",
+  "packages/nhx_build_tools",
   "packages/filesets",
   "packages/models",
-  "sdk/python/nemo-platform",
-  "packages/nemo_platform_plugin",
-  "packages/nmp_common",
-  "packages/nmp_customization_common",
+  "sdk/python/nemo-helix",
+  "packages/nemo_helix_plugin",
+  "packages/nhx_common",
+  "packages/nhx_customization_common",
   "services/unsloth",
 ]
 
 [tool.uv.sources]
-nmp-build-tools = { workspace = true }
+nhx-build-tools = { workspace = true }
 filesets = { workspace = true }
 models = { workspace = true }
-nemo-platform-sdk = { workspace = true }
-nemo-platform-plugin = { workspace = true }
-nmp-common = { workspace = true }
-nmp-customization-common = { workspace = true }
-nmp-unsloth = { workspace = true }
+nemo-helix-sdk = { workspace = true }
+nemo-helix-plugin = { workspace = true }
+nhx-common = { workspace = true }
+nhx-customization-common = { workspace = true }
+nhx-unsloth = { workspace = true }

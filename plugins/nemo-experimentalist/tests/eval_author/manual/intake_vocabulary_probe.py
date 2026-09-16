@@ -26,7 +26,7 @@ import re
 from typing import Any
 
 from nemo_experimentalist_plugin.eval_author import traces
-from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
 # Every column Intake names in its "Unknown filter field" message, which is a superset of
 # what it can actually filter. Probing the superset is the point.

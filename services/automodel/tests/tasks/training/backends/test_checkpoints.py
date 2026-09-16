@@ -4,8 +4,8 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from nmp.automodel.entities.values import FinetuningType
-from nmp.automodel.tasks.training.backends.checkpoints import ModelType, process_checkpoint
+from nhx.automodel.entities.values import FinetuningType
+from nhx.automodel.tasks.training.backends.checkpoints import ModelType, process_checkpoint
 from pytest_mock import MockerFixture
 
 
@@ -18,14 +18,14 @@ def test_process_checkpoint_merges_cross_encoder_lora_without_onnx(
     customizer_config.model.path = str(tmp_path / "base")
     customizer_config.model.precision = None
 
-    merge_cross = mocker.patch("nmp.automodel.tasks.training.backends.checkpoints.merge_lora_cross_encoder_adapter")
-    merge_embed = mocker.patch("nmp.automodel.tasks.training.backends.checkpoints.merge_lora_embedding_adapter")
-    merge_llm = mocker.patch("nmp.automodel.tasks.training.backends.checkpoints.merge_lora_adapter")
-    mocker.patch("nmp.automodel.tasks.training.backends.checkpoints.fix_fsdp2_architecture")
-    export_onnx = mocker.patch("nmp.automodel.tasks.training.backends.checkpoints.export_onnx")
-    mocker.patch("nmp.automodel.tasks.training.backends.checkpoints._restructure_embedding_output")
+    merge_cross = mocker.patch("nhx.automodel.tasks.training.backends.checkpoints.merge_lora_cross_encoder_adapter")
+    merge_embed = mocker.patch("nhx.automodel.tasks.training.backends.checkpoints.merge_lora_embedding_adapter")
+    merge_llm = mocker.patch("nhx.automodel.tasks.training.backends.checkpoints.merge_lora_adapter")
+    mocker.patch("nhx.automodel.tasks.training.backends.checkpoints.fix_fsdp2_architecture")
+    export_onnx = mocker.patch("nhx.automodel.tasks.training.backends.checkpoints.export_onnx")
+    mocker.patch("nhx.automodel.tasks.training.backends.checkpoints._restructure_embedding_output")
     mocker.patch(
-        "nmp.automodel.tasks.training.backends.checkpoints.extract_precision_from_model_config",
+        "nhx.automodel.tasks.training.backends.checkpoints.extract_precision_from_model_config",
         return_value=None,
     )
 

@@ -4,12 +4,12 @@
 """Unit tests for the NGC API key secret helpers."""
 
 import pytest
-from nmp.common.config import PlatformConfig
-from nmp.core.secrets.api.v2.secrets.ngc_api_key import (
+from nhx.common.config import PlatformConfig
+from nhx.core.secrets.api.v2.secrets.ngc_api_key import (
     get_default_ngc_api_key,
     is_default_ngc_api_key,
 )
-from nmp.core.secrets.entities import PlatformSecret
+from nhx.core.secrets.entities import PlatformSecret
 
 
 @pytest.fixture

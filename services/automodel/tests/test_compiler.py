@@ -10,9 +10,9 @@ from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from nemo_platform_plugin.models.types import ModelEntity
-from nmp.automodel.adapter import automodel_spec_to_compiler_output
-from nmp.automodel.api.v2.jobs.schemas import (
+from nemo_helix_plugin.models.types import ModelEntity
+from nhx.automodel.adapter import automodel_spec_to_compiler_output
+from nhx.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
     DistillationTraining,
     EmbeddingParams,
@@ -20,13 +20,13 @@ from nmp.automodel.api.v2.jobs.schemas import (
     OutputResponse,
     SFTTraining,
 )
-from nmp.automodel.app.jobs.compiler import _build_file_download_config
-from nmp.automodel.compile import platform_job_config_compiler
-from nmp.automodel.entities.values import OutputNameType
-from nmp.automodel.images import get_tasks_image, get_training_image
-from nmp.common.entities.utils import get_random_id
-from nmp.common.jobs.exceptions import PlatformJobCompilationError
-from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
+from nhx.automodel.app.jobs.compiler import _build_file_download_config
+from nhx.automodel.compile import platform_job_config_compiler
+from nhx.automodel.entities.values import OutputNameType
+from nhx.automodel.images import get_tasks_image, get_training_image
+from nhx.common.entities.utils import get_random_id
+from nhx.common.jobs.exceptions import PlatformJobCompilationError
+from nhx.customization_common.service.platform_client import AsyncCustomizationPlatformClients
 
 
 def _make_mock_model_entity(
@@ -87,7 +87,7 @@ def test_build_file_download_config_rejects_missing_model_fileset() -> None:
 
 def test_compile_training_step_carries_pass2_fields() -> None:
     """Pass-2 hyperparameters on the v2 SFTTraining reach the internal TrainingStepConfig."""
-    from nmp.automodel.app.jobs.training.compiler import compile_training_step
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
 
     job_output = CustomizationJobOutput(
         model="default/test-target",
@@ -120,7 +120,7 @@ def test_compile_training_step_carries_pass2_fields() -> None:
 
 
 def test_compile_training_step_carries_explicit_cross_encoder_recipe() -> None:
-    from nmp.automodel.app.jobs.training.compiler import compile_training_step
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
 
     job_output = CustomizationJobOutput(
         model="default/test-target",
@@ -141,7 +141,7 @@ def test_compile_training_step_carries_explicit_cross_encoder_recipe() -> None:
 
 
 def test_compile_training_step_carries_embedding_config() -> None:
-    from nmp.automodel.app.jobs.training.compiler import compile_training_step
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
 
     job_output = CustomizationJobOutput(
         model="default/test-target",
@@ -204,8 +204,8 @@ def test_distillation_with_resolved_recipe_rejects_encoder_recipes() -> None:
 
 
 def test_resolve_training_recipe_auto_uses_cross_encoder_head() -> None:
-    from nmp.automodel.app.jobs.training.compiler import _resolve_training_recipe
-    from nmp.automodel.app.jobs.training.schemas import TrainingRecipe
+    from nhx.automodel.app.jobs.training.compiler import _resolve_training_recipe
+    from nhx.automodel.app.jobs.training.schemas import TrainingRecipe
 
     me = Mock()
     me.spec.model_fields_set = {"head_type"}
@@ -214,7 +214,7 @@ def test_resolve_training_recipe_auto_uses_cross_encoder_head() -> None:
 
 
 def test_compile_training_step_applies_retrieval_defaults_after_auto_resolution() -> None:
-    from nmp.automodel.app.jobs.training.compiler import compile_training_step
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
 
     me = _make_mock_model_entity()
     me.spec = Mock()
@@ -241,7 +241,7 @@ def test_compile_training_step_applies_retrieval_defaults_after_auto_resolution(
 
 
 def test_compile_training_step_auto_defaults_keep_explicit_lr() -> None:
-    from nmp.automodel.app.jobs.training.compiler import compile_training_step
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
 
     me = _make_mock_model_entity()
     me.spec = Mock()
@@ -271,7 +271,7 @@ async def test_platform_job_config_compiler_rejects_unmerged_lora_for_encoders(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_mock_model_entity()),
     )
     job = CustomizationJobOutput(
@@ -297,8 +297,8 @@ def test_the_reporting_budget_reaches_the_training_step_config() -> None:
     link defaults, so a broken one reports at 200 rather than failing, which is
     exactly the kind of regression nothing else here would notice.
     """
-    from nmp.automodel.app.jobs.training.compiler import compile_training_step
-    from nmp.customization_common.training.reporting import ProgressReportingConfig
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
+    from nhx.customization_common.training.reporting import ProgressReportingConfig
 
     job_output = CustomizationJobOutput(
         model="default/test-target",
@@ -323,7 +323,7 @@ def test_a_spec_still_carrying_log_every_n_steps_compiles() -> None:
     did. Pinned because a later `extra="forbid"` here would turn that silent
     tolerance into a hard failure for exactly those specs.
     """
-    from nmp.automodel.app.jobs.training.compiler import compile_training_step
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
 
     training = SFTTraining.model_validate({"learning_rate": 1e-4, "log_every_n_steps": 10})
     assert not hasattr(training, "log_every_n_steps")
@@ -343,7 +343,7 @@ def test_a_spec_still_carrying_log_every_n_steps_compiles() -> None:
 
 def test_the_reporting_budget_survives_the_plugin_adapter() -> None:
     """The adapter flattens the plugin's schedule block and is easy to drop a field from."""
-    from nmp.automodel.adapter import automodel_spec_to_compiler_output
+    from nhx.automodel.adapter import automodel_spec_to_compiler_output
 
     spec = {
         "model": "default/test-target",
@@ -359,7 +359,7 @@ def test_the_reporting_budget_survives_the_plugin_adapter() -> None:
 
 def test_a_plugin_spec_without_a_schedule_block_still_compiles() -> None:
     """`schedule` is optional in the plugin shape, so the adapter must not index it."""
-    from nmp.automodel.adapter import automodel_spec_to_compiler_output
+    from nhx.automodel.adapter import automodel_spec_to_compiler_output
 
     spec = {
         "model": "default/test-target",
@@ -378,7 +378,7 @@ async def test_platform_job_config_compiler_sft_lora(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_mock_model_entity()),
     )
     contract_dir = Path(__file__).resolve().parent / "contract" / "input_configs"
@@ -425,11 +425,11 @@ async def test_platform_job_config_compiler_sft_lora(
     training_name = training_step.name if hasattr(training_step, "name") else training_step["name"]
     assert training_name == "training"
     training_cmd = _executor_container(training_step).command
-    assert "nmp.automodel.tasks.training" in " ".join(training_cmd)
+    assert "nhx.automodel.tasks.training" in " ".join(training_cmd)
     download_cmd = _executor_container(steps[0]).command
     assert download_cmd == [
         "-m",
-        "nmp.customization_common.tasks.file_io",
+        "nhx.customization_common.tasks.file_io",
         "--service-source",
         "automodel",
         "--service-name",
@@ -459,7 +459,7 @@ async def test_platform_job_config_compiler_applies_profile_to_task_steps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        "nhx.automodel.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_mock_model_entity()),
     )
 

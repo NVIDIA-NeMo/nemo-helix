@@ -14,7 +14,7 @@
 #   ./apply.sh && ./eval-smoke.sh
 set -euo pipefail
 
-NS=nemo-platform-scaled-evals
+NS=nemo-helix-scaled-evals
 PORT="${PORT:-18081}"
 BASE="http://127.0.0.1:$PORT/apis/scaled-evals"
 TASK_SRC="$(cd "$(dirname "$0")/../../examples/tasks/hello-world" && pwd)"

@@ -12,16 +12,16 @@ from data_designer_nemo.errors import raise_if_errors
 from data_designer_nemo.runnable import resolve_runnable_config
 from nemo_data_designer_plugin.jobs.run import run_step_config_result
 from nemo_data_designer_plugin.jobs.spec import DataDesignerJobConfig, DataDesignerStepConfig
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
     PlatformJobSpec,
     PlatformJobStep,
 )
-from nemo_platform_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.jobs.image import get_qualified_image
 from pydantic import BaseModel
 
 
@@ -46,7 +46,7 @@ class CreateJob(NemoJob):
         is_local: bool,
     ) -> BaseModel:  # DataDesignerStepConfig
         del entity_client, is_local
-        async_sdk = cast(AsyncNeMoPlatform, async_sdk)
+        async_sdk = cast(AsyncNeMoHelix, async_sdk)
         input_spec = cast(DataDesignerJobConfig, input_spec)
 
         dd_ctx = create_validation_context(async_sdk, workspace)
@@ -81,7 +81,7 @@ class CreateJob(NemoJob):
                         profile=profile or "default",
                         provider="cpu",
                         container=ContainerSpec(
-                            image=get_qualified_image("nmp-cpu-tasks"),
+                            image=get_qualified_image("nhx-cpu-tasks"),
                             entrypoint=["python", "-m"],
                             command=["nemo_data_designer_plugin.jobs.bridge"],
                         ),
@@ -92,6 +92,6 @@ class CreateJob(NemoJob):
             ],
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoPlatform) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoHelix) -> dict:
         step_config = DataDesignerStepConfig.model_validate(config)
         return run_step_config_result(step_config, ctx, sdk)

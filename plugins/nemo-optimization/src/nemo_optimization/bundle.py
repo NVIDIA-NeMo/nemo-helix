@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from nemo_platform_plugin.refs import FILESET_REF_PATTERN
+from nemo_helix_plugin.refs import FILESET_REF_PATTERN
 
 from nemo_optimization.fabric import FABRIC_AGENT_SCHEMA_VERSION, is_fabric_agent_config, looks_like_nat_config
 from nemo_optimization.schemas.optimize import is_fileset_relative

@@ -13,8 +13,8 @@ wildcard path and every proxied method), and a job-factory binding.
 from __future__ import annotations
 
 from nemo_agents_plugin.service import AgentsService
-from nemo_platform_plugin.authz import AuthzContribution
-from nemo_platform_plugin.authz_discovery import _derive_service_contribution
+from nemo_helix_plugin.authz import AuthzContribution
+from nemo_helix_plugin.authz_discovery import _derive_service_contribution
 
 _BASE = "/apis/agents/v2/workspaces/{workspace}"
 _GATEWAY_AGENT = f"{_BASE}/agents/{{name}}/-/{{trailing_uri:path}}"
@@ -126,7 +126,7 @@ def test_gateway_invoke_reaches_both_roles_after_merge() -> None:
     # End-to-end: merging the derived contribution into static authz lands the gateway permission
     # on BOTH roles — Viewer via the explicit extra_role_permissions grant, Editor via the default
     # suffix heuristic. This is the actual user-facing guarantee the P1 regression broke.
-    from nemo_platform_plugin.authz_merge import merge_authz_contributions
+    from nemo_helix_plugin.authz_merge import merge_authz_contributions
 
     base = {
         "authz": {

@@ -13,17 +13,17 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nmp.common.auth.jwt import JWTValidator
-from nmp.common.auth.token_claims import ActorClaims, TokenClaims
-from nmp.common.auth.token_resolver import ResolvedBearerToken
-from nmp.common.config import AuthConfig
-from nmp.common.config.base import AccessKeyConfig, OIDCConfig, TokenSigningConfig
-from nmp.core.auth.api.v2.authenticate import router
-from nmp.core.auth.api.v2.workload_token_exchange import (
+from nhx.common.auth.jwt import JWTValidator
+from nhx.common.auth.token_claims import ActorClaims, TokenClaims
+from nhx.common.auth.token_resolver import ResolvedBearerToken
+from nhx.common.config import AuthConfig
+from nhx.common.config.base import AccessKeyConfig, OIDCConfig, TokenSigningConfig
+from nhx.core.auth.api.v2.authenticate import router
+from nhx.core.auth.api.v2.workload_token_exchange import (
     WorkloadTokenExchangeService,
     get_workload_token_exchange_service,
 )
-from nmp.core.auth.app.access_keys import get_access_key_registry
+from nhx.core.auth.app.access_keys import get_access_key_registry
 
 
 def _private_key_pem() -> bytes:
@@ -37,13 +37,13 @@ def _private_key_pem() -> bytes:
 
 def _assert_no_principal_response_headers(response) -> None:
     for header_name in (
-        "X-NMP-Principal-Id",
-        "X-NMP-Principal-Email",
-        "X-NMP-Principal-Groups",
-        "X-NMP-Principal-On-Behalf-Of",
-        "X-NMP-Principal-On-Behalf-Of-Email",
-        "X-NMP-Principal-On-Behalf-Of-Groups",
-        "X-NMP-Scopes",
+        "X-NHX-Principal-Id",
+        "X-NHX-Principal-Email",
+        "X-NHX-Principal-Groups",
+        "X-NHX-Principal-On-Behalf-Of",
+        "X-NHX-Principal-On-Behalf-Of-Email",
+        "X-NHX-Principal-On-Behalf-Of-Groups",
+        "X-NHX-Scopes",
     ):
         assert header_name not in response.headers
 
@@ -78,7 +78,7 @@ def _test_client(
     app.dependency_overrides[get_access_key_registry] = lambda: AlwaysActiveAccessKeyRegistry()
     if workload_token_exchange_service is not None:
         app.dependency_overrides[get_workload_token_exchange_service] = lambda: workload_token_exchange_service
-    with patch("nmp.core.auth.api.v2.authenticate.get_auth_config", return_value=config):
+    with patch("nhx.core.auth.api.v2.authenticate.get_auth_config", return_value=config):
         yield TestClient(app)
 
 
@@ -105,7 +105,7 @@ def _auth_config_with_workload_exchange(
             additional_issuers=additional_issuers or [],
             jwks_uri=oidc_jwks_uri,
             workload_token_exchange_enabled=True,
-            workload_audience="nemo-platform",
+            workload_audience="nemo-helix",
         ),
     )
 
@@ -126,13 +126,13 @@ def test_authenticate_access_key_returns_principal_json(tmp_path):
         email="alice@example.com",
         groups=["team-ml"],
         scopes=["models:read"],
-        raw_claims={"jti": "ak_example", "nmp_token_type": "access_key"},
+        raw_claims={"jti": "ak_example", "nhx_token_type": "access_key"},
     )
     resolved = ResolvedBearerToken(claims=claims, token_kind="access_key")
     with (
         _test_client(config) as client,
         patch(
-            "nmp.core.auth.api.v2.authenticate.resolve_bearer_token",
+            "nhx.core.auth.api.v2.authenticate.resolve_bearer_token",
             new=AsyncMock(return_value=resolved),
         ) as resolver,
     ):
@@ -174,20 +174,20 @@ def test_authenticate_passes_access_key_claims_for_legacy_record_backfill(tmp_pa
         scopes=[],
         raw_claims={
             "iss": "http://testserver/apis/auth",
-            "aud": ["nemo-platform-access-key"],
+            "aud": ["nemo-helix-access-key"],
             "sub": "alice@example.com",
             "iat": 1_785_280_000,
             "nbf": 1_785_280_000,
             "jti": "ak_legacy",
-            "nmp_token_type": "access_key",
-            "nmp_access_key": {"version": 1, "name": "legacy"},
+            "nhx_token_type": "access_key",
+            "nhx_access_key": {"version": 1, "name": "legacy"},
         },
     )
     resolved = ResolvedBearerToken(claims=claims, token_kind="access_key")
     registry = ClaimAwareAccessKeyRegistry()
     with (
         _test_client(config) as client,
-        patch("nmp.core.auth.api.v2.authenticate.resolve_bearer_token", new=AsyncMock(return_value=resolved)),
+        patch("nhx.core.auth.api.v2.authenticate.resolve_bearer_token", new=AsyncMock(return_value=resolved)),
     ):
         client.app.dependency_overrides[get_access_key_registry] = lambda: registry
         response = client.get("/authenticate", headers={"Authorization": "Bearer signed.jwt.token"})
@@ -208,12 +208,12 @@ def test_authenticate_rejects_revoked_access_key(tmp_path):
         email=None,
         groups=[],
         scopes=[],
-        raw_claims={"jti": "ak_revoked", "nmp_token_type": "access_key"},
+        raw_claims={"jti": "ak_revoked", "nhx_token_type": "access_key"},
     )
     resolved = ResolvedBearerToken(claims=claims, token_kind="access_key")
     with (
         _test_client(config) as client,
-        patch("nmp.core.auth.api.v2.authenticate.resolve_bearer_token", new=AsyncMock(return_value=resolved)),
+        patch("nhx.core.auth.api.v2.authenticate.resolve_bearer_token", new=AsyncMock(return_value=resolved)),
     ):
         client.app.dependency_overrides[get_access_key_registry] = lambda: RevokedAccessKeyRegistry()
         response = client.get("/authenticate", headers={"Authorization": "Bearer signed.jwt.token"})
@@ -234,13 +234,13 @@ def test_ext_authz_accepts_original_request_methods_and_returns_principal_header
         email=None,
         groups=[],
         scopes=["models:write"],
-        raw_claims={"jti": "ak_writer", "nmp_token_type": "access_key"},
+        raw_claims={"jti": "ak_writer", "nhx_token_type": "access_key"},
     )
     resolved = ResolvedBearerToken(claims=claims, token_kind="access_key")
     with (
         _test_client(config) as client,
         patch(
-            "nmp.core.auth.api.v2.authenticate.resolve_bearer_token",
+            "nhx.core.auth.api.v2.authenticate.resolve_bearer_token",
             new=AsyncMock(return_value=resolved),
         ) as resolver,
     ):
@@ -251,8 +251,8 @@ def test_ext_authz_accepts_original_request_methods_and_returns_principal_header
 
     assert response.status_code == 200
     assert response.content == b""
-    assert response.headers["X-NMP-Principal-Id"] == "writer@example.com"
-    assert response.headers["X-NMP-Scopes"] == "models:write"
+    assert response.headers["X-NHX-Principal-Id"] == "writer@example.com"
+    assert response.headers["X-NHX-Scopes"] == "models:write"
     resolver.assert_awaited_once()
 
 
@@ -260,7 +260,7 @@ def test_authenticate_oidc_access_token_with_actor_returns_direct_principal_json
     config = AuthConfig(
         enabled=True,
         token_signing=TokenSigningConfig(private_key_file=str(tmp_path / "private.pem")),
-        oidc=OIDCConfig(enabled=True, issuer="https://sso.example.com", client_id="nemo-platform-cli"),
+        oidc=OIDCConfig(enabled=True, issuer="https://sso.example.com", client_id="nemo-helix-cli"),
     )
     (tmp_path / "private.pem").write_bytes(_private_key_pem())
     claims = TokenClaims(
@@ -281,7 +281,7 @@ def test_authenticate_oidc_access_token_with_actor_returns_direct_principal_json
     with (
         _test_client(config) as client,
         patch(
-            "nmp.core.auth.api.v2.authenticate.resolve_bearer_token",
+            "nhx.core.auth.api.v2.authenticate.resolve_bearer_token",
             new=AsyncMock(return_value=resolved),
         ),
     ):
@@ -308,7 +308,7 @@ def test_authenticate_rejects_unresolved_bearer_token(tmp_path):
 
     with (
         _test_client(config) as client,
-        patch("nmp.core.auth.api.v2.authenticate.resolve_bearer_token", new=AsyncMock(return_value=None)),
+        patch("nhx.core.auth.api.v2.authenticate.resolve_bearer_token", new=AsyncMock(return_value=None)),
     ):
         response = client.get("/authenticate", headers={"Authorization": "Bearer invalid.token"})
 
@@ -328,7 +328,7 @@ def test_authenticate_workload_access_token_returns_principal_json(tmp_path):
         ),
         oidc=OIDCConfig(
             workload_token_exchange_enabled=True,
-            workload_audience="nemo-platform",
+            workload_audience="nemo-helix",
         ),
     )
     signing_key = WorkloadTokenExchangeService().workload_signing_key(config)
@@ -337,7 +337,7 @@ def test_authenticate_workload_access_token_returns_principal_json(tmp_path):
         {
             "iss": "http://testserver/apis/auth",
             "sub": "system:serviceaccount:nemo:job",
-            "aud": "nemo-platform",
+            "aud": "nemo-helix",
             "iat": now,
             "nbf": now,
             "exp": now + timedelta(minutes=5),
@@ -381,7 +381,7 @@ def test_authenticate_delegated_workload_access_token_returns_resolved_principal
         ),
         oidc=OIDCConfig(
             workload_token_exchange_enabled=True,
-            workload_audience="nemo-platform",
+            workload_audience="nemo-helix",
         ),
     )
     signing_key = WorkloadTokenExchangeService().workload_signing_key(config)
@@ -391,7 +391,7 @@ def test_authenticate_delegated_workload_access_token_returns_resolved_principal
             "iss": "http://testserver/apis/auth",
             "sub": "submitter@example.com",
             "email": "submitter@example.com",
-            "aud": "nemo-platform",
+            "aud": "nemo-helix",
             "iat": now,
             "nbf": now,
             "exp": now + timedelta(minutes=5),
@@ -440,7 +440,7 @@ def test_ext_authz_delegated_workload_access_token_returns_obo_principal_headers
         ),
         oidc=OIDCConfig(
             workload_token_exchange_enabled=True,
-            workload_audience="nemo-platform",
+            workload_audience="nemo-helix",
         ),
     )
     signing_key = WorkloadTokenExchangeService().workload_signing_key(config)
@@ -450,7 +450,7 @@ def test_ext_authz_delegated_workload_access_token_returns_obo_principal_headers
             "iss": "http://testserver/apis/auth",
             "sub": "submitter@example.com",
             "email": "submitter@example.com",
-            "aud": "nemo-platform",
+            "aud": "nemo-helix",
             "iat": now,
             "nbf": now,
             "exp": now + timedelta(minutes=5),
@@ -473,12 +473,12 @@ def test_ext_authz_delegated_workload_access_token_returns_obo_principal_headers
 
     assert response.status_code == 200
     assert response.content == b""
-    assert response.headers["X-NMP-Principal-Id"] == "system:serviceaccount:nemo:job"
-    assert response.headers["X-NMP-Principal-Groups"] == "system:serviceaccounts,nemo-jobs"
-    assert response.headers["X-NMP-Principal-On-Behalf-Of"] == "submitter@example.com"
-    assert response.headers["X-NMP-Principal-On-Behalf-Of-Email"] == "submitter@example.com"
-    assert response.headers["X-NMP-Principal-On-Behalf-Of-Groups"] == "workspace-editors"
-    assert response.headers["X-NMP-Scopes"] == "openid email groups"
+    assert response.headers["X-NHX-Principal-Id"] == "system:serviceaccount:nemo:job"
+    assert response.headers["X-NHX-Principal-Groups"] == "system:serviceaccounts,nemo-jobs"
+    assert response.headers["X-NHX-Principal-On-Behalf-Of"] == "submitter@example.com"
+    assert response.headers["X-NHX-Principal-On-Behalf-Of-Email"] == "submitter@example.com"
+    assert response.headers["X-NHX-Principal-On-Behalf-Of-Groups"] == "workspace-editors"
+    assert response.headers["X-NHX-Scopes"] == "openid email groups"
 
 
 def test_authenticate_workload_subject_token_uses_resolver_callback(tmp_path):
@@ -487,9 +487,9 @@ def test_authenticate_workload_subject_token_uses_resolver_callback(tmp_path):
         token_signing=TokenSigningConfig(private_key_file=str(tmp_path / "private.pem")),
         oidc=OIDCConfig(
             issuer="https://sso.example.com/application/o/nemo-cli/",
-            client_id="nemo-platform-cli",
+            client_id="nemo-helix-cli",
             workload_token_exchange_enabled=True,
-            workload_client_id="nemo-platform-workload",
+            workload_client_id="nemo-helix-workload",
             workload_subject_jwks_uri="https://sso.example.com/application/o/nemo-workload/jwks/",
             workload_subject_issuers=["https://sso.example.com/application/o/nemo-workload/"],
         ),
@@ -513,7 +513,7 @@ def test_authenticate_workload_subject_token_uses_resolver_callback(tmp_path):
     with (
         _test_client(config, workload_token_exchange_service=exchange_service) as client,
         patch(
-            "nmp.core.auth.api.v2.authenticate.resolve_bearer_token",
+            "nhx.core.auth.api.v2.authenticate.resolve_bearer_token",
             new=AsyncMock(side_effect=resolve_via_subject_callback),
         ),
         patch.object(exchange_service, "decode_jwt_subject_token", new=AsyncMock(return_value=subject_claims)),
@@ -541,7 +541,7 @@ def test_authenticate_invalid_workload_access_token_returns_401(tmp_path):
         ),
         oidc=OIDCConfig(
             workload_token_exchange_enabled=True,
-            workload_audience="nemo-platform",
+            workload_audience="nemo-helix",
         ),
     )
     with _test_client(config) as client:
@@ -559,10 +559,10 @@ def test_authenticate_workload_access_token_surfaces_signing_key_misconfiguratio
         enabled=True,
         oidc=OIDCConfig(
             workload_token_exchange_enabled=True,
-            workload_audience="nemo-platform",
+            workload_audience="nemo-helix",
         ),
     )
-    with _test_client(config) as client, caplog.at_level(logging.ERROR, logger="nmp.core.auth.api.v2.authenticate"):
+    with _test_client(config) as client, caplog.at_level(logging.ERROR, logger="nhx.core.auth.api.v2.authenticate"):
         response = client.get(
             "/authenticate",
             headers={"Authorization": "Bearer signed.jwt.token"},
@@ -676,7 +676,7 @@ def test_authenticate_allows_same_kid_when_oidc_jwks_key_material_differs(tmp_pa
         _test_client(config, workload_token_exchange_service=service) as client,
         patch.object(JWTValidator, "jwks", new=AsyncMock(return_value={"keys": [idp_jwk]})),
         patch(
-            "nmp.core.auth.api.v2.authenticate.resolve_bearer_token",
+            "nhx.core.auth.api.v2.authenticate.resolve_bearer_token",
             new=AsyncMock(return_value=resolved),
         ),
     ):

@@ -9,7 +9,7 @@ In this mode, make reasonable design decisions autonomously based on the dataset
   - Read schemas for every column, sampler type, validator, and processor you plan to use, from the `config_root` path it prints.
   - Never guess types or parameters — read the relevant config files first.
   - Always read `base.py` for inherited fields shared by all config objects.
-  - Ignore its **Model Aliases**, **Persona Datasets**, and **Commands** sections. Those describe a standalone local install; this skill runs on NeMo Platform, where aliases are declared in the script, persona data lives in platform filesets, and every command is prefixed with `nemo`. Read `references/platform-execution.md` instead.
+  - Ignore its **Model Aliases**, **Persona Datasets**, and **Commands** sections. Those describe a standalone local install; this skill runs on NeMo Helix, where aliases are declared in the script, persona data lives in platform filesets, and every command is prefixed with `nemo`. Read `references/platform-execution.md` instead.
   - Run `nemo inference providers list` to pick a provider for any LLM columns. Note that choice as one of the key decisions in step 3.
 3. **Infer** — Based on the dataset description, make reasonable decisions for:
   - Axes of diversity and what should be well represented.

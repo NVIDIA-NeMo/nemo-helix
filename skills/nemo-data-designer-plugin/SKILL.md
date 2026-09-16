@@ -5,7 +5,7 @@ description: Use when the user wants to create a dataset, generate synthetic dat
 argument-hint: [describe the dataset you want to generate]
 license: Apache-2.0
 metadata:
-  owner: nemo-platform
+  owner: nemo-helix
 ---
 
 # Before You Start
@@ -33,7 +33,7 @@ Read **only** the workflow file that matches the selected mode, then follow it:
 - Do not suggest or ask about seed datasets. Only use one when the user explicitly provides seed data or asks to build from existing records. When using a seed, read `references/seed-datasets.md`.
 - When the dataset requires person data (names, demographics, addresses), read `references/person-sampling.md`.
 - If a dataset script that matches the dataset description already exists, ask the user whether to edit it or create a new one.
-- Data Designer runs on NeMo Platform: inference, seed data, and persona data all resolve through the platform, never from local files or a local model registry. Read `references/platform-execution.md` before writing a config — it covers model configs, validation, and what the platform accepts.
+- Data Designer runs on NeMo Helix: inference, seed data, and persona data all resolve through the platform, never from local files or a local model registry. Read `references/platform-execution.md` before writing a config — it covers model configs, validation, and what the platform accepts.
 - For Nemotron retrieval SDG Stage 0/1 (`retrieval-generate` / `retrieval-prepare`), read `references/retrieval-sdg.md`. Do not use `create` for that pipeline.
 
 # Usage Tips and Common Pitfalls
@@ -64,7 +64,7 @@ Write a Python file to the current directory with a `load_config_builder()` func
 import data_designer.config as dd
 from pydantic import BaseModel, Field
 
-# Seed data on NeMo Platform comes from the Files service:
+# Seed data on NeMo Helix comes from the Files service:
 # from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
 
 

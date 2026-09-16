@@ -25,12 +25,12 @@ from nemo_evaluator_sdk.values.models import Model, ModelRef, RankingInference
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult, AggregateRangeScore
 from nemo_evaluator_sdk.values.retrieval import Retrieval
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_platform_plugin.jobs.api_factory import CPUExecutionProviderSpec
-from nemo_platform_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.jobs.api_factory import CPUExecutionProviderSpec
+from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.sdk import AsyncNeMoHelix, NeMoHelix
 from pydantic import ValidationError
 from pytest_mock import MockerFixture
 
@@ -148,7 +148,7 @@ async def test_to_spec_preflights_and_stamps_reranker_model_ref(mocker: MockerFi
         submit,
         workspace="default",
         entity_client=object(),
-        async_sdk=cast(AsyncNeMoPlatform, mocker.MagicMock()),
+        async_sdk=cast(AsyncNeMoHelix, mocker.MagicMock()),
         is_local=False,
     )
 
@@ -180,7 +180,7 @@ async def test_to_spec_rejects_incompatible_reranker_model_ref(mocker: MockerFix
             submit,
             workspace="default",
             entity_client=object(),
-            async_sdk=cast(AsyncNeMoPlatform, mocker.MagicMock()),
+            async_sdk=cast(AsyncNeMoHelix, mocker.MagicMock()),
             is_local=False,
         )
 
@@ -332,7 +332,7 @@ def test_run_records_started_at_before_evaluation(tmp_path: Path, mocker: Mocker
 
 
 def test_run_adapts_the_generated_sdk_the_local_cli_injects(tmp_path: Path, mocker: MockerFixture) -> None:
-    """``nemo evaluator retrieve-eval run`` injects a generated ``NeMoPlatform``, but the BEIR
+    """``nemo evaluator retrieve-eval run`` injects a generated ``NeMoHelix``, but the BEIR
     fileset download only accepts a typed client."""
     download = mocker.patch(
         "nemo_evaluator.jobs.retrieve_eval.download_dataset_sync",
@@ -342,7 +342,7 @@ def test_run_adapts_the_generated_sdk_the_local_cli_injects(tmp_path: Path, mock
     evaluator = mocker.Mock()
     evaluator.run_sync.return_value = _result()
     mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
-    platform = NeMoPlatform(base_url="http://platform.test", workspace="dev", http_client=httpx.Client())
+    platform = NeMoHelix(base_url="http://platform.test", workspace="dev", http_client=httpx.Client())
 
     output = RetrieveEvalJob().run(_spec().model_dump(mode="json"), ctx=_context(tmp_path), sdk=platform)
 

@@ -12,7 +12,7 @@ through ``todo/``, ``running/``, ``complete/``, and ``failed/`` directories
 under persistent storage. SIGTERM is handled by saving partial results so a
 resumed invocation picks up from the last completed probe. Completed per-probe
 reports are aggregated via ``garak.analyze.aggregate_reports`` and registered
-as job results via :meth:`~nemo_platform_plugin.job_results.JobResults.save`.
+as job results via :meth:`~nemo_helix_plugin.job_results.JobResults.save`.
 """
 
 from __future__ import annotations
@@ -33,17 +33,17 @@ from uuid import uuid4
 import garakapi
 import yaml
 from nemo_auditor.entities import AuditConfig, AuditTarget
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.response import NemoResponse
-from nemo_platform_plugin.entities import parse_qualified_name
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.job_results import JobResults
-from nemo_platform_plugin.models.client import AsyncModelsClient, ModelsClient
-from nemo_platform_plugin.models.types import ModelProvider
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.response import NemoResponse
+from nemo_helix_plugin.entities import parse_qualified_name
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.job_results import JobResults
+from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient
+from nemo_helix_plugin.models.types import ModelProvider
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 logger = logging.getLogger(__name__)
@@ -174,22 +174,22 @@ async def _resolve_ref(
 
 def _rewrite_options_uris(
     options: dict,
-    sdk: NeMoPlatform | None,
-    async_sdk: AsyncNeMoPlatform | None = None,
+    sdk: NeMoHelix | None,
+    async_sdk: AsyncNeMoHelix | None = None,
 ) -> None:
-    """Replace ``nmp_uri_spec`` sentinels in ``options`` with concrete ``uri`` values.
+    """Replace ``nhx_uri_spec`` sentinels in ``options`` with concrete ``uri`` values.
 
     Walks the options tree (BFS over dict values, non-dicts are skipped) and,
-    for every dict containing an ``nmp_uri_spec`` key, resolves
-    ``nmp_uri_spec.inference_gateway`` (which must contain ``workspace`` and
+    for every dict containing an ``nhx_uri_spec`` key, resolves
+    ``nhx_uri_spec.inference_gateway`` (which must contain ``workspace`` and
     ``provider``) through the platform SDK, sets the dict's ``uri`` to the
     resolved URL, and removes the sentinel.
 
     Mutates ``options`` in place. Mirrors
-    ``services/auditor/src/nmp/auditor/tasks/audit/main.py:rewrite_target``.
+    ``services/auditor/src/nhx/auditor/tasks/audit/main.py:rewrite_target``.
 
     Raises:
-        ValueError: malformed sentinel, or ``uri``/``nmp_uri_spec`` conflict
+        ValueError: malformed sentinel, or ``uri``/``nhx_uri_spec`` conflict
             in the same dict.
         RuntimeError: sentinel present but no SDK was injected, or the SDK
             lookup itself failed.
@@ -202,19 +202,19 @@ def _rewrite_options_uris(
         if not isinstance(node, dict):
             continue
         queue.extend(node.values())
-        spec = node.get("nmp_uri_spec")
+        spec = node.get("nhx_uri_spec")
         if not spec:
             continue
         igw_ref = spec.get("inference_gateway") if isinstance(spec, dict) else None
         if not isinstance(igw_ref, dict) or "workspace" not in igw_ref or "provider" not in igw_ref:
             raise ValueError(
-                f"Invalid nmp_uri_spec: {spec!r} (expected inference_gateway with both 'workspace' and 'provider')."
+                f"Invalid nhx_uri_spec: {spec!r} (expected inference_gateway with both 'workspace' and 'provider')."
             )
         if "uri" in node:
-            raise ValueError("Cannot specify both 'uri' and 'nmp_uri_spec' in the same options block.")
+            raise ValueError("Cannot specify both 'uri' and 'nhx_uri_spec' in the same options block.")
         if sdk is None and async_sdk is None:
             raise RuntimeError(
-                "nmp_uri_spec resolution requires a connected platform SDK; AuditJob.run was invoked without one."
+                "nhx_uri_spec resolution requires a connected platform SDK; AuditJob.run was invoked without one."
             )
         try:
             if sdk is not None:
@@ -237,7 +237,7 @@ def _rewrite_options_uris(
                 f"Failed to resolve inference gateway provider '{igw_ref['workspace']}/{igw_ref['provider']}': {exc}"
             ) from exc
         node["uri"] = uri
-        del node["nmp_uri_spec"]
+        del node["nhx_uri_spec"]
 
 
 def _build_env(persistent_dir: Path) -> dict[str, str]:
@@ -330,7 +330,7 @@ class AuditJob(NemoJob):
 
     name: ClassVar[str] = "audit"
     description: ClassVar[str] = "Run an auditor scan against a configured target."
-    container: ClassVar[str] = "auditor-tasks"
+    container: ClassVar[str] = "nhx-auditor-tasks"
     input_spec_schema: ClassVar[type[BaseModel] | None] = AuditInputSpec
     spec_schema: ClassVar[type[BaseModel] | None] = AuditSpec
 
@@ -398,7 +398,7 @@ class AuditJob(NemoJob):
         if entity_client is not None:
             return cast(NemoEntitiesClient, entity_client)
         if async_sdk is not None:
-            typed_client = client_from_platform(cast(AsyncNeMoPlatform, async_sdk), AsyncEntitiesClient)
+            typed_client = client_from_platform(cast(AsyncNeMoHelix, async_sdk), AsyncEntitiesClient)
             return NemoEntitiesClient(typed_client)
         raise RuntimeError(
             "AuditInputSpec contained a name reference but no platform "
@@ -414,20 +414,20 @@ class AuditJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncNeMoHelix,
         profile: str | None = None,
         options: dict | None = None,
     ) -> object:
         from nemo_auditor.config import get_config
-        from nemo_platform_plugin.jobs.api_factory import (
+        from nemo_helix_plugin.jobs.api_factory import (
             ContainerSpec,
             CPUExecutionProviderSpec,
             EnvironmentVariable,
             PlatformJobSpec,
             PlatformJobStep,
         )
-        from nemo_platform_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-        from nemo_platform_plugin.jobs.image import get_qualified_image
+        from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+        from nemo_helix_plugin.jobs.image import get_qualified_image
 
         return PlatformJobSpec(
             steps=[
@@ -437,7 +437,7 @@ class AuditJob(NemoJob):
                         profile=profile or get_config().job_executor_profile,
                         provider="cpu",
                         container=ContainerSpec(
-                            image=get_qualified_image("auditor-tasks"),
+                            image=get_qualified_image("nhx-auditor-tasks"),
                             entrypoint=["python", "-m"],
                             command=["nemo_auditor.tasks.audit"],
                         ),
@@ -458,8 +458,8 @@ class AuditJob(NemoJob):
         config: dict,
         *,
         ctx: JobContext,
-        sdk: NeMoPlatform | None = None,
-        async_sdk: AsyncNeMoPlatform | None = None,
+        sdk: NeMoHelix | None = None,
+        async_sdk: AsyncNeMoHelix | None = None,
     ) -> dict:
         spec = AuditSpec.model_validate(config)
 

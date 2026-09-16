@@ -7,35 +7,35 @@ description: ""
 ---
 <a id="nemo-ms-admin-setup-overview"></a>
 
-This section describes how to deploy NeMo Platform to a Kubernetes cluster using the NeMo Platform Helm chart.
+This section describes how to deploy NeMo Helix to a Kubernetes cluster using the NeMo Helix Helm chart.
 The chart is the supported path for self-managed clusters such as minikube, kind, EKS, AKS, GKE, OKE, OpenShift, and on-prem Kubernetes.
 
 This Platform Setup chapter is for the following personas.
 
--   **Cloud administrators**: Manage Kubernetes clusters and compute/storage resources. Deploy NeMo Platform to the Kubernetes clusters on premises or cloud.
+-   **Cloud administrators**: Manage Kubernetes clusters and compute/storage resources. Deploy NeMo Helix to the Kubernetes clusters on premises or cloud.
 
 ---
 
 <a id="nemo-ms-about-parent-helm-chart"></a>
-## NeMo Platform Helm Chart
+## NeMo Helix Helm Chart
 
-The NeMo Platform Helm chart is published in the `nvidia/nemo-platform` NGC org. The chart deploys the platform API, controllers, storage integration, and dependencies required for a full self-managed deployment.
+The NeMo Helix Helm chart is published in the `nvidia/nemo-helix` NGC org. The chart deploys the platform API, controllers, storage integration, and dependencies required for a full self-managed deployment.
 
-Customize the installation by updating a pinned `values.yaml` file for your target cluster. For chart assets and additional details, see the [NeMo Platform artifacts in NGC](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo-platform/helm-charts/nemo-platform).
+Customize the installation by updating a pinned `values.yaml` file for your target cluster. For chart assets and additional details, see the [NeMo Helix artifacts in NGC](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo-helix/helm-charts/nemo-helix).
 
-The install guide uses `NMP_HELM_CHART_VERSION` so every install and upgrade is tied to a specific chart version.
+The install guide uses `NHX_HELM_CHART_VERSION` so every install and upgrade is tied to a specific chart version.
 
 ---
 
-## Deploy the NeMo Platform with Helm
+## Deploy the NeMo Helix with Helm
 
-The following sections provide detailed instructions on how to deploy the NeMo Platform using the NeMo Platform Helm Chart.
+The following sections provide detailed instructions on how to deploy the NeMo Helix using the NeMo Helix Helm Chart.
 
 <Cards>
 
 <Card title="Install" href="/documentation/kubernetes-deployment/setup/helm">
 
-Install NeMo Platform with Helm on a Kubernetes cluster.
+Install NeMo Helix with Helm on a Kubernetes cluster.
 
 <small><span class="md-tag">cluster-admin</span></small>
 
@@ -53,12 +53,12 @@ Review and manage other cluster settings.
 
 <Card title="OpenTelemetry" href="/documentation/kubernetes-deployment/setup/observability">
 
-Review and configure how NeMo Platform uses OpenTelemetry for observability.
+Review and configure how NeMo Helix uses OpenTelemetry for observability.
 
 </Card>
 <Card title="Milvus" href="/documentation/kubernetes-deployment/setup/milvus">
 
-Review and configure how NeMo Platform uses Milvus for vector database storage.
+Review and configure how NeMo Helix uses Milvus for vector database storage.
 
 </Card>
 

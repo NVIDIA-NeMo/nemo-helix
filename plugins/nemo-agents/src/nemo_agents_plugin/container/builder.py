@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Docker image builder for NeMo Platform agents.
+"""Docker image builder for NeMo Helix agents.
 
 Builds a Docker image either from a pre-existing Dockerfile or by rendering
 one on-the-fly via :func:`~nemo_agents_plugin.container.template.render_nat_dockerfile`
@@ -132,12 +132,12 @@ def resolve_image_id(tag: str) -> str:
 
 
 #: Distribution a supplied wheel must be, normalized per PEP 503.
-_WHEEL_DISTRIBUTION = "nemo-platform"
+_WHEEL_DISTRIBUTION = "nemo-helix"
 _WHEEL_COPY_CHUNK_SIZE = 1024 * 1024
 
 
 def wheel_contract_version(wheel: Path) -> str:
-    """Return the nemo-platform version a wheel would install.
+    """Return the nemo-helix version a wheel would install.
 
     The image's ``contract-version`` label and its content-addressable
     ``agent_id`` both describe the runtime inside it. Deriving them from the
@@ -154,7 +154,7 @@ def wheel_contract_version(wheel: Path) -> str:
     if re.sub(r"[-_.]+", "-", distribution).lower() != _WHEEL_DISTRIBUTION:
         raise ValueError(
             f"wheel is {distribution!r}, not {_WHEEL_DISTRIBUTION!r}: {wheel.name}. "
-            "Build it with `uv build --package nemo-platform --wheel`."
+            "Build it with `uv build --package nemo-helix --wheel`."
         )
     return version
 
@@ -340,11 +340,11 @@ def resolve_latest_wheel() -> Path:
             f"{WHEEL_ENV}={WHEEL_LATEST} needs a source checkout with a 'dist' directory, "
             "which this install is not. Point it at a wheel path instead."
         )
-    wheels = sorted(dist.glob("nemo_platform-*.whl"), key=lambda path: path.stat().st_mtime, reverse=True)
+    wheels = sorted(dist.glob("nemo_helix-*.whl"), key=lambda path: path.stat().st_mtime, reverse=True)
     if not wheels:
         raise ValueError(
-            f"{WHEEL_ENV}={WHEEL_LATEST} found no nemo-platform wheels in {dist}. Build one with "
-            "`uv build --package nemo-platform --wheel --out-dir dist`."
+            f"{WHEEL_ENV}={WHEEL_LATEST} found no nemo-helix wheels in {dist}. Build one with "
+            "`uv build --package nemo-helix --wheel --out-dir dist`."
         )
     return wheels[0]
 
@@ -374,7 +374,7 @@ def build_fabric_agent_image(
 ) -> str:
     """Build a Fabric-backed NeMo agent image.
 
-    *wheel* installs a local nemo-platform wheel instead of resolving the pinned
+    *wheel* installs a local nemo-helix wheel instead of resolving the pinned
     contract version, which is the only way to package from a source checkout.
 
     This is intentionally separate from ``build_nat_agent_image`` so Fabric
@@ -409,7 +409,7 @@ def build_fabric_agent_image(
     resolved_python = resolve_value("python_version", python_version)
     resolved_uv = resolve_value("uv_version", uv_version)
 
-    from nemo_agents_plugin.container.metadata import NEMO_PLATFORM_AGENT_FRAMEWORK, extract_agent_metadata
+    from nemo_agents_plugin.container.metadata import NEMO_HELIX_AGENT_FRAMEWORK, extract_agent_metadata
     from nemo_agents_plugin.container.template import WHEEL_ENV, WHEEL_LATEST
 
     # The env var is the only caller-facing way in, so it reaches the platform
@@ -483,7 +483,7 @@ def build_fabric_agent_image(
             emit_progress(on_progress, f"Staged {wheel.name} into the build context")
 
     build_env_for_id = {
-        "agent_framework": NEMO_PLATFORM_AGENT_FRAMEWORK,
+        "agent_framework": NEMO_HELIX_AGENT_FRAMEWORK,
         "contract_version": contract_version,
         "nemo_relay_cli_version": PINNED_NEMO_RELAY_CLI_VERSION,
         "base_image_url": resolved_base_url,

@@ -13,15 +13,15 @@ Checks:
 import os
 
 import pytest
-from nemo_platform_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.client import SecretsClient
 
 WORKSPACE = "default"
 
 
 @pytest.fixture
 def client() -> SecretsClient:
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    return SecretsClient(base_url=nmp_base_url, workspace=WORKSPACE)
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    return SecretsClient(base_url=nhx_base_url, workspace=WORKSPACE)
 
 
 def test_harbor_test_secret_deleted(client: SecretsClient) -> None:

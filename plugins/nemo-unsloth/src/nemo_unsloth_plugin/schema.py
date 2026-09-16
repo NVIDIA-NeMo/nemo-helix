@@ -4,7 +4,7 @@
 """Submitter-facing Unsloth schemas.
 
 The **canonical** types (``UnslothJobOutput``, ``OutputResponse``, and
-all shared sub-shapes) live in :mod:`nmp.unsloth.schemas`. They are
+all shared sub-shapes) live in :mod:`nhx.unsloth.schemas`. They are
 re-exported from this module for backward compatibility and to keep
 caller imports concise (``from nemo_unsloth_plugin.schema import
 UnslothJobInput, ModelLoadSpec`` still works).
@@ -13,7 +13,7 @@ Only two types are defined here:
 
 - :class:`OutputRequest` — submitter-facing output preferences. The
   plugin's :func:`~nemo_unsloth_plugin.transform.transform_input_to_output`
-  resolves it into the canonical :class:`~nmp.unsloth.schemas.OutputResponse`.
+  resolves it into the canonical :class:`~nhx.unsloth.schemas.OutputResponse`.
 - :class:`UnslothJobInput` — the POST body / CLI JSON shape and the
   validators that mediate between input and canonical (mutexes,
   defaulting, etc.).
@@ -23,8 +23,8 @@ from __future__ import annotations
 
 from typing import Literal, Self
 
-from nemo_platform_plugin.integrations import IntegrationsSpec
-from nmp.unsloth.schemas import (
+from nemo_helix_plugin.integrations import IntegrationsSpec
+from nhx.unsloth.schemas import (
     BatchSpec,
     DatasetSpec,
     DeploymentParams,

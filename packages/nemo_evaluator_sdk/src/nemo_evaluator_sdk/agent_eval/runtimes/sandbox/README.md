@@ -11,9 +11,9 @@ injecting context and retrieving artifacts across the boundary. Built for
 
 `nemo_gym.sandbox` ships the same *shape* (exec + programmatic file I/O + async/sync facades), and
 this seam deliberately mirrors it so a Gym backend could be adapted later. We do **not** depend on
-the package because: it requires Python ≥3.12 (nemo-platform is 3.11) and pulls `ray`/`wandb`/`mlflow`;
+the package because: it requires Python ≥3.12 (nemo-helix is 3.11) and pulls `ray`/`wandb`/`mlflow`;
 importing it monkeypatches builtin `print` and mutates `sys.path`/HF env; and neither shipped Gym
-backend (Apptainer, OpenSandbox) matches nemo-platform's Docker-local / Kubernetes-scale target — so
+backend (Apptainer, OpenSandbox) matches nemo-helix's Docker-local / Kubernetes-scale target — so
 we write the providers ourselves regardless. See AALGO-321 for the full analysis.
 
 ## The contract

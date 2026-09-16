@@ -14,12 +14,12 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
-from nemo_platform_plugin.models.client import AsyncModelsClient
-from nemo_platform_plugin.models.types import ModelDeploymentConfig
-from nmp.automodel.app.jobs.compiler import _resolve_deployment_config_ref
-from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.models.types import ModelDeploymentConfig
+from nhx.automodel.app.jobs.compiler import _resolve_deployment_config_ref
+from nhx.customization_common.service.platform_client import AsyncCustomizationPlatformClients
 
 BASE = "http://test:8000"
 

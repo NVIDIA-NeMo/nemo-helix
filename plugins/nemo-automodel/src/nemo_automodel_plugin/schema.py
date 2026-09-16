@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from typing import Literal, Self
 
-from nemo_platform_plugin.integrations import IntegrationsSpec
-from nmp.customization_common.schema import NamespacedModel
-from nmp.customization_common.training.reporting import ProgressReportingConfig
+from nemo_helix_plugin.integrations import IntegrationsSpec
+from nhx.customization_common.schema import NamespacedModel
+from nhx.customization_common.training.reporting import ProgressReportingConfig
 from pydantic import Field, model_validator
 
 __all__ = [

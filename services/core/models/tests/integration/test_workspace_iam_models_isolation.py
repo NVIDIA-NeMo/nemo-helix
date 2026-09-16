@@ -5,7 +5,7 @@
 
 In-process tests mirror a live e2e flow: four workspaces, direct membership on A/B, a
 shared group on C, a single owner on D, then model/adapter create checks across those
-workspaces. The first class uses the NeMoPlatform SDK; the second issues hand-built
+workspaces. The first class uses the NeMoHelix SDK; the second issues hand-built
 HTTP to the same routes using a ``requests`` Session (see
 :class:`_TestClientToRequestsAdapter`) that forwards to the Starlette ``TestClient``,
 since CPython ``requests`` cannot open an in-process ASGI app directly.
@@ -24,23 +24,23 @@ from uuid import uuid4
 import pytest
 import requests
 from fastapi.testclient import TestClient
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import PermissionDeniedError
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest
-from nemo_platform_plugin.models.client import ModelsClient
-from nemo_platform_plugin.models.types import (
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import (
     CreateModelAdapterRequest,
     CreateModelEntityRequest,
     FinetuningType,
 )
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceQueryParams, CreateWorkspaceRequest
-from nmp.core.files.service import FilesService
-from nmp.core.models.service import ModelsService
-from nmp.core.secrets.service import SecretsService
-from nmp.testing import (
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceQueryParams, CreateWorkspaceRequest
+from nhx.core.files.service import FilesService
+from nhx.core.models.service import ModelsService
+from nhx.core.secrets.service import SecretsService
+from nhx.testing import (
     TEST_ADMIN_EMAIL,
     ClientContext,
     as_user,
@@ -121,16 +121,16 @@ def models_auth_context() -> Generator[ClientContext, None, None]:
 
 
 @pytest.fixture(scope="module")
-def sdk(models_auth_context: ClientContext) -> NeMoPlatform:
+def sdk(models_auth_context: ClientContext) -> NeMoHelix:
     return models_auth_context.sdk
 
 
 @pytest.mark.integration
 class TestWorkspaceIamIsolationSDK:
-    """End-to-end style IAM check using the NeMoPlatform ``models`` / ``adapters`` SDK."""
+    """End-to-end style IAM check using the NeMoHelix ``models`` / ``adapters`` SDK."""
 
     @pytest.mark.usefixtures("models_auth_context")
-    def test_model_and_adapter_iam(self, sdk: NeMoPlatform) -> None:
+    def test_model_and_adapter_iam(self, sdk: NeMoHelix) -> None:
         user_a = unique_email("user-a")
         user_b = unique_email("user-b")
         owner_d = unique_email("owner-d")
@@ -140,7 +140,7 @@ class TestWorkspaceIamIsolationSDK:
         ws_d = short_unique_name("wks-d")
         shared_group = f"team-{uuid4().hex[:12]}"
 
-        admin: NeMoPlatform = as_user(sdk, TEST_ADMIN_EMAIL)
+        admin: NeMoHelix = as_user(sdk, TEST_ADMIN_EMAIL)
         workspaces = client_from_platform(admin, WorkspacesClient)
 
         workspaces.create_workspace(
@@ -166,10 +166,10 @@ class TestWorkspaceIamIsolationSDK:
 
         model_a = short_unique_name("mdl-a")
         model_b = short_unique_name("mdl-b")
-        ua: NeMoPlatform = as_user(sdk, user_a)
-        ub: NeMoPlatform = as_user(sdk, user_b)
-        uac: NeMoPlatform = as_user(sdk, user_a, groups=[shared_group])
-        ubc: NeMoPlatform = as_user(sdk, user_b, groups=[shared_group])
+        ua: NeMoHelix = as_user(sdk, user_a)
+        ub: NeMoHelix = as_user(sdk, user_b)
+        uac: NeMoHelix = as_user(sdk, user_a, groups=[shared_group])
+        ubc: NeMoHelix = as_user(sdk, user_b, groups=[shared_group])
 
         client_from_platform(ua, ModelsClient).create_model(
             workspace=ws_a, body=CreateModelEntityRequest(name=model_a)
@@ -185,7 +185,7 @@ class TestWorkspaceIamIsolationSDK:
             workspace=ws_c, body=CreateModelEntityRequest(name=model_c_b)
         ).data()
 
-        od: NeMoPlatform = as_user(sdk, owner_d)
+        od: NeMoHelix = as_user(sdk, owner_d)
         model_d = short_unique_name("mdl-d")
         client_from_platform(od, ModelsClient).create_model(
             workspace=ws_d, body=CreateModelEntityRequest(name=model_d)
@@ -271,11 +271,11 @@ class TestWorkspaceIamIsolationHttpRequests:
 
         def h(email: str, groups: list[str] | None = None) -> dict[str, str]:
             hdr: dict[str, str] = {
-                "X-NMP-Principal-Id": email,
-                "X-NMP-Principal-Email": email,
+                "X-NHX-Principal-Id": email,
+                "X-NHX-Principal-Email": email,
             }
             if groups:
-                hdr["X-NMP-Principal-Groups"] = ",".join(groups)
+                hdr["X-NHX-Principal-Groups"] = ",".join(groups)
             return hdr
 
         b = "http://testserver"

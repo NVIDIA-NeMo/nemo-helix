@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Dependency prep for monorepo CI jobs: uv syncs + tau2 judge repoint.
 
-The tau2 checkout is expected beside the nemo-platform checkout.
+The tau2 checkout is expected beside the nemo-helix checkout.
 Flags: --sync-insights {true,false}, --install-tau2 {true,false}.
 """
 

@@ -21,9 +21,9 @@ import re
 from typing import Any
 
 from nemo_experimentalist_plugin.entities import Candidate, ExperimentRun
-from nemo_platform_plugin.client.errors import ConflictError, NotFoundError
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import (
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import (
     EvaluationCreateRequest,
     ExperimentCreateRequest,
     ExperimentUpdateRequest,

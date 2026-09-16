@@ -68,31 +68,31 @@ from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTas
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTarget
 from nemo_evaluator_sdk.metrics.protocol import Metric
 from nemo_evaluator_sdk.values import RunConfigOnline, RunConfigOnlineModel
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.client.errors import (
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.errors import (
     InternalServerError,
     NemoResponseValidationError,
     NemoTransportError,
     NotFoundError,
     PermissionDeniedError,
 )
-from nemo_platform_plugin.entities import EntityClient
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.files.types import FilesetPurpose
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec, SubprocessExecutionProviderSpec
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError, PlatformJobDependencyUnavailableError
-from nemo_platform_plugin.jobs.execution_profiles import (
+from nemo_helix_plugin.entities import EntityClient
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.files.types import FilesetPurpose
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import PlatformJobSpec, SubprocessExecutionProviderSpec
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.exceptions import PlatformJobCompilationError, PlatformJobDependencyUnavailableError
+from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobExecutionProfile,
     SubprocessJobExecutionProfile,
     VolcanoJobExecutionProfile,
 )
-from nemo_platform_plugin.jobs.spec import BaseExecutionProfile
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
+from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
+from nemo_helix_plugin.sdk import AsyncNeMoHelix, NeMoHelix
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -127,7 +127,7 @@ async def _resolve_gym_environment(
     target: Target | None,
     *,
     workspace: str,
-    async_sdk: AsyncNeMoPlatform | None,
+    async_sdk: AsyncNeMoHelix | None,
 ) -> Target | None:
     """Validate and qualify a Gym environment FileSet through the Files service."""
     if not isinstance(target, GymRunnerTarget) or target.environment is None:
@@ -220,18 +220,18 @@ async def _resolve_gym_environment(
 
 #: Identity headers forwarded from the job's platform SDK to online inference so a platform-routed
 #: target authenticates as the job's principal (``get_task_nemo_client`` emits these). An explicit allowlist
-#: — not an ``X-NMP-*`` prefix match — so trace/metadata headers the SDK may add later never leak to
-#: a third-party model/agent endpoint. ``X-NMP-Principal-Id`` is the header the PDP authorizes on
+#: — not an ``X-NHX-*`` prefix match — so trace/metadata headers the SDK may add later never leak to
+#: a third-party model/agent endpoint. ``X-NHX-Principal-Id`` is the header the PDP authorizes on
 #: (verified against an auth-enabled platform); the rest carry the delegated on-behalf-of identity.
 _FORWARDED_IDENTITY_HEADERS = frozenset(
     {
-        "X-NMP-Principal-Id",
-        "X-NMP-Principal-Email",
-        "X-NMP-Principal-Groups",
-        "X-NMP-Principal-On-Behalf-Of",
-        "X-NMP-Principal-On-Behalf-Of-Email",
-        "X-NMP-Principal-On-Behalf-Of-Groups",
-        "X-NMP-Internal",
+        "X-NHX-Principal-Id",
+        "X-NHX-Principal-Email",
+        "X-NHX-Principal-Groups",
+        "X-NHX-Principal-On-Behalf-Of",
+        "X-NHX-Principal-On-Behalf-Of-Email",
+        "X-NHX-Principal-On-Behalf-Of-Groups",
+        "X-NHX-Internal",
     }
 )
 
@@ -292,7 +292,7 @@ class AgentEvalJob(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform | None,
+        async_sdk: AsyncNeMoHelix | None,
         is_local: bool,
     ) -> BaseModel:
         """Resolve each task's metric references into inline metrics for the canonical spec."""
@@ -351,7 +351,7 @@ class AgentEvalJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform | None,
+        async_sdk: AsyncNeMoHelix | None,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
@@ -398,7 +398,7 @@ class AgentEvalJob(NemoJob):
     @staticmethod
     async def _execution_profile(
         *,
-        async_sdk: AsyncNeMoPlatform | None,
+        async_sdk: AsyncNeMoHelix | None,
         profile: str,
         require_pvc_storage: bool = False,
     ) -> BaseExecutionProfile | None:
@@ -435,7 +435,7 @@ class AgentEvalJob(NemoJob):
 
     @staticmethod
     async def _resolve_harbor_subprocess_executor(
-        *, executor: dict[str, Any], async_sdk: AsyncNeMoPlatform | None
+        *, executor: dict[str, Any], async_sdk: AsyncNeMoHelix | None
     ) -> SubprocessExecutionProviderSpec:
         """Resolve Harbor's selected profile to an explicit host subprocess executor."""
         profile = cast(str, executor["profile"])
@@ -500,12 +500,12 @@ class AgentEvalJob(NemoJob):
         tests can inject a fake inference seam.
 
         ``client`` is the SDK handle injected into ``run`` — a typed platform client in a submitted
-        job (built by ``get_task_nemo_client``, threading ``NMP_PRINCIPAL`` as on-behalf-of). It is ``None``
+        job (built by ``get_task_nemo_client``, threading ``NHX_PRINCIPAL`` as on-behalf-of). It is ``None``
         only for a platformless local run (e.g. offline ``run_local``), which has no identity to
         forward.
 
         NOTE: bearer-token auth for platform routes in an auth-enabled deployment is not yet
-        forwarded (the local/internal path relies on the ``X-NMP-*`` identity headers); see
+        forwarded (the local/internal path relies on the ``X-NHX-*`` identity headers); see
         AALGO-297 follow-ups.
         """
         identity_headers: dict[str, str] = {}
@@ -624,8 +624,8 @@ class AgentEvalJob(NemoJob):
         config: dict,
         *,
         ctx: JobContext,
-        sdk: NemoClient | NeMoPlatform | None = None,
-        async_sdk: AsyncNemoClient | AsyncNeMoPlatform | None = None,
+        sdk: NemoClient | NeMoHelix | None = None,
+        async_sdk: AsyncNemoClient | AsyncNeMoHelix | None = None,
     ) -> dict:
         """Run the agent evaluation locally and persist its result bundle as artifacts."""
         client = as_nemo_client(sdk)

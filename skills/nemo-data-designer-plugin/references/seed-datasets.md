@@ -4,12 +4,12 @@ Seed datasets bootstrap synthetic data generation from existing data. Every colu
 
 ## Supported seed sources
 
-Data Designer runs on NeMo Platform, which reads seed data over the network — not from your local disk. Only these seed sources work:
+Data Designer runs on NeMo Helix, which reads seed data over the network — not from your local disk. Only these seed sources work:
 
 | Class                     | `seed_type`      | Path format                          | Use for                                                     |
 | ------------------------- | ---------------- | ------------------------------------ | ----------------------------------------------------------- |
 | `HuggingFaceSeedSource`   | `hf`             | `datasets/<owner>/<name>/**/*.parquet` | A dataset already published on HuggingFace.                 |
-| `FilesetFileSeedSource`   | `nmp`            | `[<workspace>/]<fileset>#<file>`     | A single tabular file in the Files service. Most common.    |
+| `FilesetFileSeedSource`   | `nhx`            | `[<workspace>/]<fileset>#<file>`     | A single tabular file in the Files service. Most common.    |
 | `DirectorySeedSource`     | `directory`      | `[<workspace>/]<fileset>[#<dir>]`    | Many tabular files under a fileset directory.               |
 | `FileContentsSeedSource`  | `file_contents`  | `[<workspace>/]<fileset>[#<dir>]`    | Reading raw file contents into a `content` column.          |
 
@@ -29,7 +29,7 @@ The other three are on `dd` as usual (`dd.HuggingFaceSeedSource`, `dd.DirectoryS
 Anything else — local files, in-memory dataframes, agent rollout directories — is rejected before the workload runs:
 
 ```text
-  ✘ Seed source 'df' is not supported on the NeMo Platform.
+  ✘ Seed source 'df' is not supported on the NeMo Helix.
     Use a serializable seed source such as a HuggingFace dataset
     or the Files service.
 ```
@@ -56,4 +56,4 @@ Fileset references are `[<workspace>/]<fileset>#<path-inside-fileset>`. The work
 
 - Supported tabular formats: `.parquet`, `.csv`, `.json`, `.jsonl`.
 - Seed columns are automatically registered as `SeedDatasetColumnConfig` entries — you do **not** add them manually. Just reference them by name in downstream prompts and expressions.
-- A `HuggingFaceSeedSource.token` for a private dataset must be a NeMo Platform secret reference, not a literal token. See `nemo secrets --help`.
+- A `HuggingFaceSeedSource.token` for a private dataset must be a NeMo Helix secret reference, not a literal token. See `nemo secrets --help`.

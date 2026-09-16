@@ -23,10 +23,10 @@ from nemo_anonymizer_plugin.app.model_configs import SelectedModelsOverrides
 from nemo_anonymizer_plugin.app.task_config import AnonymizerRequest, AnonymizerStepConfig
 from nemo_anonymizer_plugin.jobs import run as run_module
 from nemo_anonymizer_plugin.jobs.run import RunJob
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.jobs.exceptions import PlatformJobCompilationError
 
 
 def _make_job_context(tmp_path: Path, *, workspace: str = "team-a") -> JobContext:
@@ -59,11 +59,9 @@ def _restore_task_loggers(snapshot: dict[str, tuple[list[logging.Handler], int, 
 async def _to_run_spec(
     request: AnonymizerRequest,
     *,
-    async_sdk: AsyncNeMoPlatform | None = None,
+    async_sdk: AsyncNeMoHelix | None = None,
 ) -> AnonymizerStepConfig:
-    resolved_async_sdk = (
-        async_sdk if async_sdk is not None else cast(AsyncNeMoPlatform, AsyncMock(spec=AsyncNeMoPlatform))
-    )
+    resolved_async_sdk = async_sdk if async_sdk is not None else cast(AsyncNeMoHelix, AsyncMock(spec=AsyncNeMoHelix))
     spec = await RunJob.to_spec(
         request,
         workspace="team-a",
@@ -138,7 +136,7 @@ async def test_run_job_uses_igw_provider_registry(
     )
     monkeypatch.setattr(RunJob, "_validate_anonymizer_config", classmethod(lambda cls, config: None))
     monkeypatch.setattr(context_module, "make_model_provider_registry", igw_lookup)
-    async_sdk = AsyncMock(spec=AsyncNeMoPlatform)
+    async_sdk = AsyncMock(spec=AsyncNeMoHelix)
 
     step_config = await _to_run_spec(request, async_sdk=async_sdk)
 
@@ -170,7 +168,7 @@ async def test_run_serialized_step_config_can_be_revalidated(
     assert RunJob().run(
         step_config.model_dump(),
         ctx=ctx,
-        sdk=Mock(spec=NeMoPlatform),
+        sdk=Mock(spec=NeMoHelix),
     ) == {"exit_code": 0}
 
 
@@ -232,7 +230,7 @@ def test_run_step_config_uses_ctx_results(
             task_run_module.run_step_config(
                 step_config,
                 ctx=ctx,
-                sdk=Mock(spec=NeMoPlatform),
+                sdk=Mock(spec=NeMoHelix),
             )
             == 0
         )
@@ -286,7 +284,7 @@ def test_run_step_config_requires_resolved_model_configs(
     logging_snapshot = _snapshot_task_loggers()
 
     try:
-        assert task_run_module.run_step_config(step_config, ctx=ctx, sdk=Mock(spec=NeMoPlatform)) == 1
+        assert task_run_module.run_step_config(step_config, ctx=ctx, sdk=Mock(spec=NeMoHelix)) == 1
     finally:
         _restore_task_loggers(logging_snapshot)
     anonymizer.assert_not_called()

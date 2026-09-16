@@ -3,7 +3,7 @@
 
 # Intake Service
 
-Intake is the telemetry ingestion and read API for NeMo Platform. It stores span
+Intake is the telemetry ingestion and read API for NeMo Helix. It stores span
 and trace data in ClickHouse, accepts OpenTelemetry traces, and supports
 post-hoc annotations and evaluator result lookup.
 
@@ -44,7 +44,7 @@ The Experiments feature captures evaluation runs as leaderboard rows. The flow:
 
 For the step-by-step guide with copy-pasteable payloads for all three ingest endpoints, the Harbor
 mapping, and a troubleshooting table, see the **`nemo-experiments-upload`** agent skill:
-`packages/nemo_platform_ext/src/nemo_platform_ext/skills/nemo-experiments-upload/`.
+`packages/nemo_helix_ext/src/nemo_helix_ext/skills/nemo-experiments-upload/`.
 
 > Naming note: the entity/API is mid-rename. The API surfaces "Evaluation" and "Experiment Group",
 > but the stored entity is still `Experiment`. The OTLP evaluation attribute key is
@@ -76,7 +76,7 @@ Docker daemon must be running.
 Intake is tested and profiled on ClickHouse 26.3 LTS. Other ClickHouse versions
 may not be supported.
 
-Start Intake with the platform runner. When `NMP_INTAKE_CLICKHOUSE_URL` is not
+Start Intake with the platform runner. When `NHX_INTAKE_CLICKHOUSE_URL` is not
 set and the configured URL is the default `http://localhost:8123`, Intake
 automatically provisions a ClickHouse container before initializing its client:
 
@@ -89,8 +89,8 @@ uv run nemo services run \
 
 The container is owned by the resolved NeMo data directory, publishes ClickHouse
 on a Docker-assigned loopback port, and is reused by platform processes sharing
-that data directory. Its data is stored below `$NMP_DATA_DIR/intake-clickhouse/`
-(or the normal NeMo data directory when `NMP_DATA_DIR` is unset). Graceful
+that data directory. Its data is stored below `$NHX_DATA_DIR/intake-clickhouse/`
+(or the normal NeMo data directory when `NHX_DATA_DIR` is unset). Graceful
 platform shutdown stops the container without removing it or its data; later
 startups restart and reuse it. A hard process termination can leave it running.
 The managed lifecycle assumes only one active local platform runner uses a given
@@ -99,20 +99,20 @@ reattaches a stale container after that directory has been deleted and
 recreated. Replacing a container does not delete the current directory. Only an
 explicitly confirmed full data teardown deletes the default storage under the
 NeMo data directory, after removing the managed container. An explicitly
-configured `NMP_INTAKE_CLICKHOUSE_DATA_DIR` outside the NeMo data directory is
+configured `NHX_INTAKE_CLICKHOUSE_DATA_DIR` outside the NeMo data directory is
 never deleted by platform teardown.
 
 The managed image and storage location can be overridden through the typed
 Intake configuration surface:
 
 ```bash
-export NMP_INTAKE_CLICKHOUSE_IMAGE=clickhouse/clickhouse-server:26.3
-export NMP_INTAKE_CLICKHOUSE_DATA_DIR=/path/to/clickhouse-data
+export NHX_INTAKE_CLICKHOUSE_IMAGE=clickhouse/clickhouse-server:26.3
+export NHX_INTAKE_CLICKHOUSE_DATA_DIR=/path/to/clickhouse-data
 ```
 
 Intake does not change permissions on an explicitly configured data directory.
-Changing `NMP_INTAKE_CLICKHOUSE_USER` or
-`NMP_INTAKE_CLICKHOUSE_PASSWORD` requires removing the existing managed
+Changing `NHX_INTAKE_CLICKHOUSE_USER` or
+`NHX_INTAKE_CLICKHOUSE_PASSWORD` requires removing the existing managed
 container so it can be provisioned with the new credentials; removing the
 container does not remove its bind-mounted data. If the image is not installed
 locally, startup logs announce the synchronous image pull before it begins.
@@ -125,17 +125,17 @@ To use an operator-managed ClickHouse and bypass Docker provisioning entirely,
 set its URL explicitly before starting the platform:
 
 ```bash
-export NMP_INTAKE_CLICKHOUSE_URL=https://clickhouse.example.com:8443
+export NHX_INTAKE_CLICKHOUSE_URL=https://clickhouse.example.com:8443
 ```
 
 `services/intake/scripts/spans/run_clickhouse.sh` remains available for callers
-that need the historical `nmp-intake-clickhouse` name, fixed localhost ports
+that need the historical `nhx-intake-clickhouse` name, fixed localhost ports
 `8123`/`9000`, and repository-local data under `tmp/intake-clickhouse`. Point
 Intake at that compatibility container explicitly:
 
 ```bash
 services/intake/scripts/spans/run_clickhouse.sh
-NMP_INTAKE_CLICKHOUSE_URL=http://localhost:8123 uv run nemo services run
+NHX_INTAKE_CLICKHOUSE_URL=http://localhost:8123 uv run nemo services run
 ```
 
 Remove a compatibility container with its wrapper so the same data directory
@@ -143,10 +143,10 @@ is targeted, or pass the directory explicitly to the underlying command:
 
 ```bash
 services/intake/scripts/spans/run_clickhouse.sh --remove
-uv run python -m nmp.intake.local_clickhouse --remove --data-dir /path/to/clickhouse-data
+uv run python -m nhx.intake.local_clickhouse --remove --data-dir /path/to/clickhouse-data
 ```
 
-Running `python -m nmp.intake.local_clickhouse` without compatibility flags uses
+Running `python -m nhx.intake.local_clickhouse` without compatibility flags uses
 the normal managed container naming and dynamic loopback port behavior.
 
 In another terminal, start Studio from the `web/` workspace with the Intake

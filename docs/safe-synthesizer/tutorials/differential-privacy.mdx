@@ -62,7 +62,7 @@ By default, NeMo Safe Synthesizer uses **record-level** differential privacy, wh
 
 ## Setup
 
-Install the PyPI `nemo-platform` wrapper package with Safe Synthesizer support.
+Install the PyPI `nemo-helix` wrapper package with Safe Synthesizer support.
 If you are working from a source checkout, run `make bootstrap` from the repository root instead,
 then install the tutorial-only packages (`kagglehub matplotlib`) in that environment.
 
@@ -70,9 +70,9 @@ For a PyPI install:
 
 ```shell
 if command -v uv &> /dev/null; then
- uv pip install "nemo-platform[all]" kagglehub matplotlib
+ uv pip install "nemo-helix[all]" kagglehub matplotlib
 else
- pip install "nemo-platform[all]" kagglehub matplotlib
+ pip install "nemo-helix[all]" kagglehub matplotlib
 fi
 ```
 
@@ -81,12 +81,12 @@ And assuming the platform is running locally:
 ```python
 import os
 import pandas as pd
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuilder
 
 # Configure client
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 ```

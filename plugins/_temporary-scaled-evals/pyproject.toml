@@ -3,12 +3,12 @@
 
 [project]
 name = "nemo-scaled-evals-plugin"
-description = "Ephemeral scaled-evals control-plane plugin for NeMo Platform (Phase 1)."
+description = "Ephemeral scaled-evals control-plane plugin for NeMo Helix (Phase 1)."
 requires-python = ">=3.12,<3.15"
 version = "0.98.1"
 dependencies = [
-  "nemo-platform-plugin",
-  "nemo-platform",
+  "nemo-helix-plugin",
+  "nemo-helix",
   "boto3>=1.35.0",
   "click>=8.1.0",
   "cryptography>=43.0.0",
@@ -60,8 +60,8 @@ packages = ["src/scaled_evals", "src/nemo_scaled_evals_plugin"]
 "db" = "scaled_evals/db"
 
 [tool.uv.sources]
-nemo-platform = { workspace = true }
-nemo-platform-plugin = { workspace = true }
+nemo-helix = { workspace = true }
+nemo-helix-plugin = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

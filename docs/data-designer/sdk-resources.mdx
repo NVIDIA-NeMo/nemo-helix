@@ -5,10 +5,10 @@
 title: "Data Designer SDK Resources"
 description: ""
 ---
-<a id="data-designer-nmp-sdk-resources"></a>
+<a id="data-designer-nhx-sdk-resources"></a>
 
 The `data_designer.config` module provides a consistent, context-agnostic experience for building Data Designer configs.
-Once you are ready to execute that config through NeMo Services APIs, you use objects from the `nemo_platform` SDK.
+Once you are ready to execute that config through NeMo Services APIs, you use objects from the `nemo_helix` SDK.
 This page explains the SDK objects used for Data Designer API execution.
 
 ## DataDesignerResource
@@ -16,14 +16,14 @@ This page explains the SDK objects used for Data Designer API execution.
 The `DataDesignerResource` is the initial SDK object for working with Data Designer through the SDK.
 It provides Data Designer API preview and create operations for Data Designer configurations.
 
-A `DataDesignerResource` is accessed directly from a `NeMoPlatform` instance:
+A `DataDesignerResource` is accessed directly from a `NeMoHelix` instance:
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 data_designer = client.data_designer  # this object is a DataDesignerResource

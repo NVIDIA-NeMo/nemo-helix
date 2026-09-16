@@ -5,7 +5,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
-from nemo_platform_ext.auth.helpers import discover_nmp_config
+from nemo_helix_ext.auth.helpers import discover_nhx_config
 
 from tests.auth_idp.common import require_capability, runtime_tls_config
 from tests.auth_idp.device_flow import (
@@ -37,7 +37,7 @@ def test_provider_gateway_serves_oidc_discovery(auth_idp_case, auth_idp_runtime)
 def test_provider_discovery_exposes_device_flow_when_supported(auth_idp_case, auth_idp_runtime):
     require_capability(auth_idp_case, "device_flow")
 
-    oidc = discover_nmp_config(auth_idp_runtime.gateway_base_url)
+    oidc = discover_nhx_config(auth_idp_runtime.gateway_base_url)
 
     assert oidc.auth_enabled is True
     assert oidc.client_id
@@ -49,7 +49,7 @@ def test_provider_discovery_exposes_device_flow_when_supported(auth_idp_case, au
 def test_provider_device_authorization_endpoint_issues_user_code(auth_idp_case, auth_idp_runtime):
     require_capability(auth_idp_case, "device_flow")
 
-    oidc = discover_nmp_config(auth_idp_runtime.gateway_base_url)
+    oidc = discover_nhx_config(auth_idp_runtime.gateway_base_url)
     tls_config = runtime_tls_config(auth_idp_runtime)
     assert oidc.device_authorization_endpoint is not None
     device_authorization_endpoint = with_url_origin(
@@ -83,7 +83,7 @@ def test_provider_device_authorization_endpoint_issues_user_code(auth_idp_case, 
 def test_provider_device_flow_returns_refresh_token(auth_idp_case, auth_idp_runtime):
     require_capability(auth_idp_case, "device_flow")
 
-    oidc = discover_nmp_config(auth_idp_runtime.gateway_base_url)
+    oidc = discover_nhx_config(auth_idp_runtime.gateway_base_url)
     assert oidc.client_id is not None
     assert oidc.token_endpoint
     assert oidc.device_authorization_endpoint

@@ -1,6 +1,6 @@
-# Running Data Designer on NeMo Platform
+# Running Data Designer on NeMo Helix
 
-Data Designer runs as a NeMo Platform service. Inference, seed data, and persona data are all resolved by the platform, not from local configuration on your machine. The CLI surface is `nemo data-designer …`.
+Data Designer runs as a NeMo Helix service. Inference, seed data, and persona data are all resolved by the platform, not from local configuration on your machine. The CLI surface is `nemo data-designer …`.
 
 ## Model configs
 
@@ -46,7 +46,7 @@ nemo data-designer validate <path>
 ```
 
 ```text
-  ✘ Seed source 'df' is not supported on the NeMo Platform.
+  ✘ Seed source 'df' is not supported on the NeMo Helix.
     Use a serializable seed source such as a HuggingFace dataset
     or the Files service.
 ```
@@ -60,7 +60,7 @@ Flags:
 
 ## Seed data
 
-Seed data comes from HuggingFace or the NeMo Platform Files service. Local files and in-memory dataframes are rejected. See `references/seed-datasets.md`.
+Seed data comes from HuggingFace or the NeMo Helix Files service. Local files and in-memory dataframes are rejected. See `references/seed-datasets.md`.
 
 ## Person data
 
@@ -70,7 +70,7 @@ Nemotron Personas locales are read from filesets in the `system` workspace, crea
 
 `nemo data-designer create` stores output at a Jobs-service-managed path, so there is no local artifact folder to name or relocate.
 
-## Related NeMo Platform commands
+## Related NeMo Helix commands
 
 - `nemo inference providers list` / `nemo models list` — inference providers and models available to `ModelConfig.provider`.
 - `nemo files` — manage filesets, including seed data and persona filesets.

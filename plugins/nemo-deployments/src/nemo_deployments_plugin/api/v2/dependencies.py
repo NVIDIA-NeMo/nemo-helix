@@ -6,11 +6,11 @@
 from __future__ import annotations
 
 from fastapi import HTTPException, Request
-from nemo_platform_plugin.entity_client import get_entity_client
+from nemo_helix_plugin.entity_client import get_entity_client
 
 __all__ = ["get_entity_client", "require_service_principal"]
 
-_PRINCIPAL_ID_HEADER = "X-NMP-Principal-Id"
+_PRINCIPAL_ID_HEADER = "X-NHX-Principal-Id"
 
 
 def require_service_principal(request: Request) -> None:

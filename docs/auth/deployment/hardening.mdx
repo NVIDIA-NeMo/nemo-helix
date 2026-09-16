@@ -5,7 +5,7 @@
 title: "Production Hardening"
 description: ""
 ---
-Security checklist for deploying NeMo Platform to production. Work through each section and verify your deployment meets these requirements.
+Security checklist for deploying NeMo Helix to production. Work through each section and verify your deployment meets these requirements.
 
 For the security architecture, see [Security Model](/documentation/access-control/security-model). For configuration details, see [Auth Configuration](/documentation/access-control/deployment).
 
@@ -13,10 +13,10 @@ For the security architecture, see [Security Model](/documentation/access-contro
 
 - [ ] **Enable auth**: Set `auth.enabled: true` in platform config.
 - [ ] **Configure OIDC**: Connect a production identity provider. See [OIDC Setup](/documentation/access-control/authentication/oidc-setup).
-- [ ] **Disable password grant in production**: Password grant bypasses MFA. If your IdP supports it, disable the resource owner password grant for the NeMo Platform application registration. Restrict it to dedicated service accounts if CI/CD requires it.
+- [ ] **Disable password grant in production**: Password grant bypasses MFA. If your IdP supports it, disable the resource owner password grant for the NeMo Helix application registration. Restrict it to dedicated service accounts if CI/CD requires it.
 - [ ] **Set `admin_email` to a real platform admin**: Use a specific person's email, not a shared mailbox. The PlatformAdmin role bypasses all authorization checks.
 - [ ] **Verify token lifetime**: Check your IdP's access token and refresh token lifetimes. Shorter access token lifetimes (1 hour or less) reduce the impact of token theft.
-- [ ] **Review additional issuers**: If `additional_issuers` is configured, verify all listed issuers are trusted. Each issuer can produce tokens that NeMo Platform will accept.
+- [ ] **Review additional issuers**: If `additional_issuers` is configured, verify all listed issuers are trusted. Each issuer can produce tokens that NeMo Helix will accept.
 
 ## Authorization
 
@@ -28,7 +28,7 @@ For the security architecture, see [Security Model](/documentation/access-contro
 
 ## Gateway and Network
 
-- [ ] **Strip auth headers from external requests**: Configure your ingress/gateway to remove `X-NMP-Principal-Id`, `X-NMP-Principal-Email`, `X-NMP-Principal-Groups`, `X-NMP-Principal-On-Behalf-Of`, and `X-NMP-Scopes` from all incoming external traffic. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
+- [ ] **Strip auth headers from external requests**: Configure your ingress/gateway to remove `X-NHX-Principal-Id`, `X-NHX-Principal-Email`, `X-NHX-Principal-Groups`, `X-NHX-Principal-On-Behalf-Of`, and `X-NHX-Scopes` from all incoming external traffic. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
 - [ ] **Enable TLS termination**: Terminate TLS at the ingress or load balancer. Tokens in `Authorization` headers are sent in the clear without TLS.
 - [ ] **Consider gateway bearer-auth callout**: To enforce bearer-token validation before requests reach platform services, configure Envoy `ext_authz` to call `/apis/auth/ext-authz`. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
 
@@ -40,7 +40,7 @@ For the security architecture, see [Security Model](/documentation/access-contro
 
 ## Secrets and Credentials
 
-- [ ] **Verify CLI config file permissions**: Token storage at `~/.config/nmp/config.yaml` should have permissions `0600` (owner read/write only). Avoid storing this file in cloud-synced or shared directories. See [Using Authentication — Config File](/documentation/access-control/authentication/using-authentication#config-file) for full guidance.
+- [ ] **Verify CLI config file permissions**: Token storage at `~/.config/nhx/config.yaml` should have permissions `0600` (owner read/write only). Avoid storing this file in cloud-synced or shared directories. See [Using Authentication — Config File](/documentation/access-control/authentication/using-authentication#config-file) for full guidance.
 - [ ] **Rotate IdP client secrets**: If your OIDC application uses a client secret, rotate it periodically per your organization's policy.
 - [ ] **Avoid storing tokens in source code or CI configs**: Use environment variables or secret managers for tokens in CI/CD pipelines.
 

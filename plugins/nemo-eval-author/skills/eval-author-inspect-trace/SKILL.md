@@ -20,7 +20,7 @@ not-for:
   - nemo-experimentalist (use for an optimization experiment across many trials)
 compatibility: >-
   A working nemo CLI invocation, an explicit workspace, and read access to
-  Intake on a configured local or remote NeMo Platform instance.
+  Intake on a configured local or remote NeMo Helix instance.
 maturity: alpha
 license: Apache-2.0
 user-invocable: false
@@ -37,9 +37,9 @@ instrumentation, ingest, or a general Intake query, use `nemo-intake`. Read
 ## Requirements
 
 Use a working `nemo` CLI invocation with an explicit workspace and read access to
-Intake. The configured NeMo Platform instance can be local or remote. Use the
-active context, a caller-supplied context, or `NMP_BASE_URL` and
-`NMP_ACCESS_TOKEN`.
+Intake. The configured NeMo Helix instance can be local or remote. Use the
+active context, a caller-supplied context, or `NHX_BASE_URL` and
+`NHX_ACCESS_TOKEN`.
 
 ### Resolve the CLI invocation
 

@@ -234,11 +234,11 @@ on `nemo agents undeploy`. No image or executor configuration is required.
 
 ```bash
 # Confirm that the local Platform instance is ready
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 
 curl -fsS --connect-timeout 2 --max-time 5 \
-  "$NMP_BASE_URL/health/ready" >/dev/null || {
-  echo "NeMo Platform is not ready at $NMP_BASE_URL"
+  "$NHX_BASE_URL/health/ready" >/dev/null || {
+  echo "NeMo Helix is not ready at $NHX_BASE_URL"
   exit 1
 }
 
@@ -266,10 +266,10 @@ nemo agents invoke \
 import os
 
 import yaml
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -330,11 +330,11 @@ checkout. Run them from the repository root. Its config is located at
 Build a wheel from the checkout and select it for packaging:
 
 ```bash
-uv build --package nemo-platform --wheel --out-dir dist
+uv build --package nemo-helix --wheel --out-dir dist
 export NEMO_AGENTS_WHEEL=LATEST
 ```
 
-`LATEST` selects the newest `nemo_platform-*.whl` file in `dist`. You can instead
+`LATEST` selects the newest `nemo_helix-*.whl` file in `dist`. You can instead
 set `NEMO_AGENTS_WHEEL` to an absolute wheel path.
 
 <Tabs>
@@ -448,10 +448,10 @@ nemo agents invoke \
 import os
 
 import yaml
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -518,10 +518,10 @@ nemo agents invoke \
 import os
 
 import yaml
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -656,10 +656,10 @@ nemo agents deployments get calculator-agent-deployment
 ```python
 import os
 
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -699,10 +699,10 @@ nemo agents delete calculator-agent
 ```python
 import os
 
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 

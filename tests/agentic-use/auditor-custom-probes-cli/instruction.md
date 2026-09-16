@@ -3,9 +3,9 @@
 
 # Custom Audit with Selected Probes (CLI)
 
-You have access to the `nmp` CLI for NeMo Platform operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nhx` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
-The `nmp` CLI is available at `/app/.venv/bin/nmp`. The CLI connects to the local NeMo Platform API server at http://localhost:8080 by default. CLI auth is pre-configured.
+The `nhx` CLI is available at `/app/.venv/bin/nhx`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default. CLI auth is pre-configured.
 
 ## Context
 
@@ -13,7 +13,7 @@ An inference provider named `nvidia-inference` has been pre-configured in this e
 
 ## Task
 
-Using the `nmp` CLI, create a custom audit configuration with specific selected probes, create an audit target, and run an audit with that custom config:
+Using the `nhx` CLI, create a custom audit configuration with specific selected probes, create an audit target, and run an audit with that custom config:
 
 1. **Explore available global audit configs** to understand the config structure and available options
 2. **Create an audit target** named `custom-audit-target` that references model `aws/anthropic/bedrock-claude-sonnet-4-5-v1` through the `nvidia-inference` provider
@@ -28,17 +28,17 @@ Note: The audit may take a long time to complete in this environment. If the loc
 
 ```bash
 # Create an audit target
-nmp auditor targets create <name> -d '{"model": "<model-name>", "type": "<type>", "options": {"provider": "<provider-name>"}}'
+nhx auditor targets create <name> -d '{"model": "<model-name>", "type": "<type>", "options": {"provider": "<provider-name>"}}'
 
 # Create an audit config
-nmp auditor configs create <name> -d '{"description": "<description>", "system": {"lite": true}, "run": {"generations": 5}, "plugins": {"probe_spec": "dan.DanInTheWild,dan.AutoDANCached,dan.Ablation_Dan_11_0"}, "reporting": {}}'
+nhx auditor configs create <name> -d '{"description": "<description>", "system": {"lite": true}, "run": {"generations": 5}, "plugins": {"probe_spec": "dan.DanInTheWild,dan.AutoDANCached,dan.Ablation_Dan_11_0"}, "reporting": {}}'
 
 # Verify configs and targets
-nmp auditor configs get <name>
-nmp auditor targets get <name>
+nhx auditor configs get <name>
+nhx auditor targets get <name>
 
 # Run an audit locally
-nmp auditor audit run --spec '{"config": "default/<config-name>", "target": "default/<target-name>"}'
+nhx auditor audit run --spec '{"config": "default/<config-name>", "target": "default/<target-name>"}'
 ```
 
 ## Success Criteria

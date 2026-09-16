@@ -21,9 +21,9 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.models.client import ModelsClient
-from nemo_platform_plugin.models.types import (
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import (
     CreateModelAdapterRequest,
     CreateModelDeploymentConfigRequest,
     CreateModelDeploymentRequest,
@@ -38,9 +38,9 @@ from nemo_platform_plugin.models.types import (
 
 
 def _make_job_ctx(workspace: str = "default"):
-    from nmp.customization_common.service.context import NMPJobContext
+    from nhx.customization_common.service.context import NHXJobContext
 
-    return NMPJobContext(
+    return NHXJobContext(
         workspace=workspace,
         job_id="job-1",
         attempt_id="attempt-0",
@@ -54,7 +54,7 @@ def _make_job_ctx(workspace: str = "default"):
 
 
 def _make_runner(models: ModelsClient, files: FilesClient):
-    from nmp.customization_common.tasks.model_entity.run import ModelEntityRunner
+    from nhx.customization_common.tasks.model_entity.run import ModelEntityRunner
 
     return ModelEntityRunner(models=models, files=files, job_ctx=_make_job_ctx())
 
@@ -84,7 +84,7 @@ def _raise_runner_conflict() -> None:
     """
     import sys
 
-    run_mod = sys.modules["nmp.customization_common.tasks.model_entity.run"]
+    run_mod = sys.modules["nhx.customization_common.tasks.model_entity.run"]
     raise run_mod.ConflictError.__new__(run_mod.ConflictError, "already exists")
 
 
@@ -116,19 +116,19 @@ def _compiler_model_entity(*, workspace: str = "default", name: str = "base") ->
 
 class TestSanitizeName:
     def test_lowercases_and_replaces_invalid_chars(self) -> None:
-        from nmp.customization_common.tasks.model_entity.run import sanitize_name
+        from nhx.customization_common.tasks.model_entity.run import sanitize_name
 
         assert sanitize_name("sft-cfg", "Qwen/Qwen3-0.6B") == "sft-cfg-qwen-qwen3-0.6b"
 
     def test_collapses_consecutive_hyphens(self) -> None:
-        from nmp.customization_common.tasks.model_entity.run import sanitize_name
+        from nhx.customization_common.tasks.model_entity.run import sanitize_name
 
         # "/" is not in the allowed set, so each "/" becomes "-", then
         # the consecutive-hyphen collapse fires.
         assert sanitize_name("p", "a//b") == "p-a-b"
 
     def test_caps_length_below_60_and_strips_trailing_hyphen(self) -> None:
-        from nmp.customization_common.tasks.model_entity.run import sanitize_name
+        from nhx.customization_common.tasks.model_entity.run import sanitize_name
 
         # 59-char limit accounts for the "-v1" the backend appends.
         long_name = "a" * 80
@@ -144,8 +144,8 @@ class TestSanitizeName:
 
 class TestCreateFullEntity:
     def test_creates_model_entity_for_full_sft(self) -> None:
-        from nmp.customization_common.schemas.file_io import FileSetRef
-        from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig
 
         models, files = _make_clients()
         models.get_model.return_value = _response(_model_entity(name="base-model"))
@@ -178,8 +178,8 @@ class TestCreateFullEntity:
         assert result is not None
 
     def test_conflict_falls_back_to_update(self) -> None:
-        from nmp.customization_common.schemas.file_io import FileSetRef
-        from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig
 
         models, files = _make_clients()
         models.get_model.return_value = _response(_model_entity(name="base-model"))
@@ -209,8 +209,8 @@ class TestCreateFullEntity:
         assert body.trust_remote_code is False
 
     def test_missing_fileset_raises_creation_error(self) -> None:
-        from nmp.customization_common.schemas.file_io import FileSetRef
-        from nmp.customization_common.schemas.model_entity import ModelEntityCreationError, ModelEntityTaskConfig
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import ModelEntityCreationError, ModelEntityTaskConfig
 
         models, files = _make_clients()
         files.get_fileset.side_effect = RuntimeError("fileset missing")
@@ -236,9 +236,9 @@ class TestCreateFullEntity:
 
 class TestCreateAdapter:
     def test_creates_adapter_for_lora(self) -> None:
-        from nmp.customization_common.schemas.file_io import FileSetRef
-        from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
-        from nmp.unsloth.entities.values import FinetuningType
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
+        from nhx.unsloth.entities.values import FinetuningType
 
         models, files = _make_clients()
         base_me = _model_entity(name="base-model")
@@ -271,9 +271,9 @@ class TestCreateAdapter:
         assert deploy_target is base_me
 
     def test_adapter_conflict_falls_back_to_update(self) -> None:
-        from nmp.customization_common.schemas.file_io import FileSetRef
-        from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
-        from nmp.unsloth.entities.values import FinetuningType
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
+        from nhx.unsloth.entities.values import FinetuningType
 
         models, files = _make_clients()
         models.get_model.return_value = _response(_model_entity(name="base-model"))
@@ -309,8 +309,8 @@ class TestCreateAdapter:
 
 class TestLaunchModel:
     def test_no_deployment_config_returns_early(self) -> None:
-        from nmp.customization_common.schemas.file_io import FileSetRef
-        from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig
 
         models, files = _make_clients()
         runner = _make_runner(models, files)
@@ -329,8 +329,8 @@ class TestLaunchModel:
         models.create_deployment_config.assert_not_called()
 
     def test_inline_params_creates_config_then_deployment(self) -> None:
-        from nmp.customization_common.schemas.file_io import FileSetRef
-        from nmp.customization_common.schemas.model_entity import DeploymentParameters, ModelEntityTaskConfig
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import DeploymentParameters, ModelEntityTaskConfig
 
         models, files = _make_clients()
         deployment_config = types.SimpleNamespace(workspace="other", name="sft-cfg-x")
@@ -381,8 +381,8 @@ class TestLaunchModel:
         models.get_deployment.assert_called_once_with(workspace="other", name="sft-deploy-x")
 
     def test_inline_config_conflict_updates_before_deployment(self) -> None:
-        from nmp.customization_common.schemas.file_io import FileSetRef
-        from nmp.customization_common.schemas.model_entity import DeploymentParameters, ModelEntityTaskConfig
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import DeploymentParameters, ModelEntityTaskConfig
 
         models, files = _make_clients()
         models.create_deployment_config.side_effect = lambda **_: _raise_runner_conflict()
@@ -423,8 +423,8 @@ class TestLaunchModel:
         models.create_deployment.assert_called_once()
 
     def test_string_ref_resolves_existing_config(self) -> None:
-        from nmp.customization_common.schemas.file_io import FileSetRef
-        from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig
 
         models, files = _make_clients()
         deployment_config = types.SimpleNamespace(workspace="shared", name="existing-cfg")
@@ -458,13 +458,13 @@ class TestLaunchModel:
         assert deployment_call.kwargs["body"].config == "existing-cfg"
 
     def test_lora_with_active_deployment_skips(self) -> None:
-        from nmp.customization_common.schemas.file_io import FileSetRef
-        from nmp.customization_common.schemas.model_entity import (
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import (
             DeploymentParameters,
             ModelEntityTaskConfig,
             PEFTConfig,
         )
-        from nmp.unsloth.entities.values import FinetuningType
+        from nhx.unsloth.entities.values import FinetuningType
 
         models, files = _make_clients()
         existing_config = types.SimpleNamespace(workspace="other", name="cfg-1")
@@ -501,13 +501,13 @@ class TestLaunchModel:
         self,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        from nmp.customization_common.schemas.file_io import FileSetRef
-        from nmp.customization_common.schemas.model_entity import (
+        from nhx.customization_common.schemas.file_io import FileSetRef
+        from nhx.customization_common.schemas.model_entity import (
             DeploymentParameters,
             ModelEntityTaskConfig,
             PEFTConfig,
         )
-        from nmp.unsloth.entities.values import FinetuningType
+        from nhx.unsloth.entities.values import FinetuningType
 
         models, files = _make_clients()
         models.list_deployment_configs.return_value = _page([])
@@ -540,8 +540,8 @@ class TestCompilerDeploymentConfigPlumbing:
     async def test_inline_params_pass_through_to_model_entity_step(self) -> None:
         from unittest.mock import AsyncMock
 
-        from nmp.unsloth.app.jobs.compiler import platform_job_config_compiler
-        from nmp.unsloth.schemas import (
+        from nhx.unsloth.app.jobs.compiler import platform_job_config_compiler
+        from nhx.unsloth.schemas import (
             DatasetSpec,
             DeploymentParams,
             LoRAParams,
@@ -562,7 +562,7 @@ class TestCompilerDeploymentConfigPlumbing:
         )
 
         # Patch fetch_model_entity to avoid hitting the platform.
-        from nmp.unsloth.app.jobs import compiler as compiler_mod
+        from nhx.unsloth.app.jobs import compiler as compiler_mod
 
         original_fetch = compiler_mod.fetch_model_entity
         compiler_mod.fetch_model_entity = AsyncMock(return_value=_compiler_model_entity())
@@ -587,8 +587,8 @@ class TestCompilerDeploymentConfigPlumbing:
     async def test_string_ref_passes_through_unchanged(self) -> None:
         from unittest.mock import AsyncMock
 
-        from nmp.unsloth.app.jobs.compiler import platform_job_config_compiler
-        from nmp.unsloth.schemas import (
+        from nhx.unsloth.app.jobs.compiler import platform_job_config_compiler
+        from nhx.unsloth.schemas import (
             DatasetSpec,
             LoRAParams,
             ModelLoadSpec,
@@ -607,7 +607,7 @@ class TestCompilerDeploymentConfigPlumbing:
             deployment_config="my-config",
         )
 
-        from nmp.unsloth.app.jobs import compiler as compiler_mod
+        from nhx.unsloth.app.jobs import compiler as compiler_mod
 
         original_fetch = compiler_mod.fetch_model_entity
         compiler_mod.fetch_model_entity = AsyncMock(return_value=_compiler_model_entity())

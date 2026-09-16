@@ -9,8 +9,8 @@ import logging
 import re
 from typing import Any
 
-from nemo_platform import NeMoPlatform, NotFoundError
-from nemo_platform_plugin.entities.base import parse_qualified_name
+from nemo_helix import NeMoHelix, NotFoundError
+from nemo_helix_plugin.entities.base import parse_qualified_name
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ def preflight_validate_llm_models(
     optimize_config: dict[str, Any],
     *,
     workspace: str,
-    sdk: NeMoPlatform | None,
+    sdk: NeMoHelix | None,
     agent_config: dict[str, Any] | None = None,
 ) -> None:
     """Validate IGW-routed model names against workspace VirtualModels.

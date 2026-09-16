@@ -14,7 +14,7 @@ pytest.importorskip("nemo_scaled_evals_plugin")
 import nemo_scaled_evals_plugin.jobs.evaluation_execution as evaluation_job_module
 import nemo_scaled_evals_plugin.jobs.task_image_build as build_job_module
 import nemo_scaled_evals_plugin.tasks.evaluation_execution as evaluation_task_module
-from nemo_platform_plugin.jobs.providers import CPUExecutionProvider, SubprocessExecutionProvider
+from nemo_helix_plugin.jobs.providers import CPUExecutionProvider, SubprocessExecutionProvider
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
 from nemo_scaled_evals_plugin.jobs.naming import (
     evaluation_execution_job_name,
@@ -171,7 +171,7 @@ def test_direct_run_reuses_existing_backends(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_jobs_are_discovered_from_plugin_entry_points() -> None:
-    from nemo_platform_plugin.discovery import discover, discover_controllers, discover_jobs
+    from nemo_helix_plugin.discovery import discover, discover_controllers, discover_jobs
     from nemo_scaled_evals_plugin.controller import ScaledEvalsJobsController
 
     discover.cache_clear()

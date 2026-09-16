@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
-  title: Nemo Platform API
-  description: API for Nemo Platform services
+  title: Nemo Helix API
+  description: API for Nemo Helix services
   version: 0.0.0
 paths:
   /apis/auth/authenticate:
@@ -60,7 +60,7 @@ paths:
       summary: Discover auth configuration
       description: "Return authentication configuration for CLI/SDK discovery.\n\n\
         This endpoint is unauthenticated and returns the information clients\nneed\
-        \ to authenticate with this NeMo Platform deployment.\n\n**Response fields:**\n\
+        \ to authenticate with this NeMo Helix deployment.\n\n**Response fields:**\n\
         \n- `auth_enabled`: Whether authentication is enabled on this cluster\n- `oidc`:\
         \ OIDC configuration (only present when OIDC is enabled)\n  - `issuer`: The\
         \ OIDC issuer URL\n  - `authorization_endpoint`: Authorization endpoint for\
@@ -11273,7 +11273,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nmp-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -14178,7 +14178,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nmp-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -14349,7 +14349,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nmp-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -14632,7 +14632,7 @@ components:
         token_audience:
           title: Token Audience
           description: Audience for the projected service account token. Defaults
-            to auth.oidc.workload_client_id, auth.oidc.client_id, then 'nemo-platform'.
+            to auth.oidc.workload_client_id, auth.oidc.client_id, then 'nemo-helix'.
           type: string
       additionalProperties: false
       type: object
@@ -19436,7 +19436,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nmp-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:
@@ -19452,7 +19452,7 @@ components:
           title: Working Directory
           description: Root directory for subprocess job state, config, storage, and
             logs.
-          default: /tmp/nmp-subprocess-jobs
+          default: /tmp/nhx-subprocess-jobs
         graceful_shutdown_timeout_seconds:
           type: integer
           title: Graceful Shutdown Timeout Seconds
@@ -20693,7 +20693,7 @@ components:
           title: Default Task Image
           description: Default container image for job task pods. Used when a job
             step omits container.image. When unset, falls back to the platform CPU
-            tasks image (platform.image_registry/nmp-cpu-tasks:platform.image_tag).
+            tasks image (platform.image_registry/nhx-cpu-tasks:platform.image_tag).
           type: string
           minLength: 1
         env:

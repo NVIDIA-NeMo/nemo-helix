@@ -4,8 +4,8 @@
 """Create-request names must satisfy the entity store's NAME_PATTERN, not a looser one."""
 
 import pytest
-from nmp.common.entities import constants
-from nmp.core.models.schemas import (
+from nhx.common.entities import constants
+from nhx.core.models.schemas import (
     CreateModelAdapterRequest,
     CreateModelDeploymentConfigRequest,
     CreateModelDeploymentRequest,

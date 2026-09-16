@@ -16,22 +16,22 @@ from unittest.mock import AsyncMock, call, patch
 
 import pytest
 from httpx import AsyncClient
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.schemas import (
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.schemas import (
     FileStorageType,
     PlatformJobLog,
     PlatformJobLogPage,
     PlatformJobResultCreateRequest,
     PlatformJobStatus,
 )
-from nemo_platform_plugin.jobs.types import (
+from nemo_helix_plugin.jobs.types import (
     CreatePlatformJobRequest,
     JobStatusDetailsUpdate,
     PlatformJobStatusUpdateRequest,
     PlatformJobTaskUpdate,
 )
-from nmp.common.jobs.file_manager import TmpDirPath
-from nmp.common.jobs.log_client import dep_job_logs_client
+from nhx.common.jobs.file_manager import TmpDirPath
+from nhx.common.jobs.log_client import dep_job_logs_client
 
 
 @pytest.fixture
@@ -321,7 +321,7 @@ async def test_result_methods_round_trip(
     result_path.write_bytes(b"typed result")
     downloaded = TmpDirPath(path=result_path, tmp_dir=result_dir)
     with patch(
-        "nmp.core.jobs.api.v2.jobs.endpoints.download_from_result_info",
+        "nhx.core.jobs.api.v2.jobs.endpoints.download_from_result_info",
         new=AsyncMock(return_value=("output.txt", downloaded)),
     ):
         content = await (await jobs_client.download_job_result(workspace="default", job=job.name, name="output")).read()

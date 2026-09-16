@@ -140,9 +140,9 @@ def _preflight_models(config: dict[str, Any], *, workspace: str, agent: str | No
 
 def _platform_sdk(base_url: str) -> Any:
     """An auth-aware platform SDK client for the fileset upload."""
-    from nemo_platform import NeMoPlatform
+    from nemo_helix import NeMoHelix
 
     headers = resolve_context_headers()
     if headers:
-        return NeMoPlatform(base_url=base_url, default_headers=headers)
-    return NeMoPlatform(base_url=base_url)
+        return NeMoHelix(base_url=base_url, default_headers=headers)
+    return NeMoHelix(base_url=base_url)

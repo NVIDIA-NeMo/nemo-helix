@@ -42,22 +42,22 @@ Request an invitation.
 **Why?** Stainless uses GitHub repositories to store the generated SDK code and configuration files. These repositories live in the `stainless-sdks` organization, so to be able to access them, you'll need to accept an invite in GitHub.
 
 The easiest way to do that is to open this link in your browser:
-- https://github.com/stainless-sdks/nemo-platform-python: generated Python code.
+- https://github.com/stainless-sdks/nemo-helix-python: generated Python code.
 
 <details>
 <summary>CLI command to do the same</summary>
 
 ```shell
-open https://github.com/stainless-sdks/nemo-platform-python
+open https://github.com/stainless-sdks/nemo-helix-python
 ```
 </details>
 
 The above links MUST work with your GitHub account that you used when setting up your Stainless account!
 
 If either repo above 404s, this indicates the recurrence of a bug with stainless auto invites.
-Check your email for an invite to the affected repo, and if you do not have an invite, create a thread in `#swdl-aire-collab` and tag `@nmp-sdk-support`. We will need to rerequest the invite link for your GitHub account with the Stainless team (there's an external, private slack channel for this).
+Check your email for an invite to the affected repo, and if you do not have an invite, create a thread in `#swdl-aire-collab` and tag `@nhx-sdk-support`. We will need to rerequest the invite link for your GitHub account with the Stainless team (there's an external, private slack channel for this).
 
-Note you will receive GitHub invites to ~15 repos in your email after accepting the invite in step 1, recommended to accept all the invites so you have access to the repos. Though at this time only the `nemo-platform-v1-python` repo is required for the Python SDK generation.
+Note you will receive GitHub invites to ~15 repos in your email after accepting the invite in step 1, recommended to accept all the invites so you have access to the repos. Though at this time only the `nemo-helix-v1-python` repo is required for the Python SDK generation.
 
 ## 3. Create a Stainless API key
 

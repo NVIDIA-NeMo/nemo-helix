@@ -13,54 +13,54 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.capabilities import reset_capability_cache
-from nemo_platform_plugin.jobs.api_factory import ContainerSpec as FactoryContainerSpec
-from nemo_platform_plugin.jobs.api_factory import CPUExecutionProviderSpec as FactoryCPUExecutionProviderSpec
-from nemo_platform_plugin.jobs.api_factory import EnvironmentVariable as FactoryEnvironmentVariable
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec as FactoryPlatformJobSpec
-from nemo_platform_plugin.jobs.api_factory import PlatformJobStep as FactoryPlatformJobStep
-from nemo_platform_plugin.jobs.api_factory import job_route_factory
-from nmp.common.config import Configuration, ImagePullSecret, PlatformConfig
-from nmp.common.entities.client import EntityClient
-from nmp.common.jobs.constants import (
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.capabilities import reset_capability_cache
+from nemo_helix_plugin.jobs.api_factory import ContainerSpec as FactoryContainerSpec
+from nemo_helix_plugin.jobs.api_factory import CPUExecutionProviderSpec as FactoryCPUExecutionProviderSpec
+from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable as FactoryEnvironmentVariable
+from nemo_helix_plugin.jobs.api_factory import PlatformJobSpec as FactoryPlatformJobSpec
+from nemo_helix_plugin.jobs.api_factory import PlatformJobStep as FactoryPlatformJobStep
+from nemo_helix_plugin.jobs.api_factory import job_route_factory
+from nhx.common.config import Configuration, ImagePullSecret, PlatformConfig
+from nhx.common.entities.client import EntityClient
+from nhx.common.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
-from nmp.common.jobs.file_manager import FileStorageType, TmpDirPath
-from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.common.service.dependencies import get_entity_client
-from nmp.core.jobs.api.dependencies import dep_dispatcher
-from nmp.core.jobs.api.v2.jobs.endpoints import router
-from nmp.core.jobs.api.v2.jobs.rerun import router as rerun_router
-from nmp.core.jobs.api.v2.jobs.schemas import (
+from nhx.common.jobs.file_manager import FileStorageType, TmpDirPath
+from nhx.common.jobs.schemas import PlatformJobStatus
+from nhx.common.service.dependencies import get_entity_client
+from nhx.core.jobs.api.dependencies import dep_dispatcher
+from nhx.core.jobs.api.v2.jobs.endpoints import router
+from nhx.core.jobs.api.v2.jobs.rerun import router as rerun_router
+from nhx.core.jobs.api.v2.jobs.schemas import (
     CreatePlatformJobRequest,
     PlatformJobResponse,
     PlatformJobStepWithContext,
 )
-from nmp.core.jobs.app.dispatcher import JobDispatcher
-from nmp.core.jobs.app.providers import ContainerSpec, CPUExecutionProvider
-from nmp.core.jobs.app.schemas import (
+from nhx.core.jobs.app.dispatcher import JobDispatcher
+from nhx.core.jobs.app.providers import ContainerSpec, CPUExecutionProvider
+from nhx.core.jobs.app.schemas import (
     PlatformJobEnvironmentVariable,
     PlatformJobStepSpec,
 )
-from nmp.core.jobs.app.test_helpers import TestConstants
-from nmp.core.jobs.config import JobsServiceConfig
-from nmp.core.jobs.controllers.backends.registry import BackendKey, BackendRegistry
-from nmp.core.jobs.controllers.backends.subprocess import SubprocessJobBackend
-from nmp.core.jobs.controllers.backends.test import (
+from nhx.core.jobs.app.test_helpers import TestConstants
+from nhx.core.jobs.config import JobsServiceConfig
+from nhx.core.jobs.controllers.backends.registry import BackendKey, BackendRegistry
+from nhx.core.jobs.controllers.backends.subprocess import SubprocessJobBackend
+from nhx.core.jobs.controllers.backends.test import (
     MockDockerCPUJobBackend,
     MockDockerGPUJobBackend,
     MockKubernetesCPUJobBackend,
     MockKubernetesGPUJobBackend,
 )
-from nmp.core.jobs.entities import (
+from nhx.core.jobs.entities import (
     PlatformJob,
     PlatformJobAttempt,
     PlatformJobResult,
 )
-from nmp.testing import create_test_client, subprocess_job_executor_patch
-from nmp.testing.blockbuster import blockbuster_fixture
+from nhx.testing import create_test_client, subprocess_job_executor_patch
+from nhx.testing.blockbuster import blockbuster_fixture
 from pydantic import BaseModel
 from pytest import fixture
 
@@ -83,12 +83,12 @@ def _reset_capability_cache() -> Iterator[None]:
 @pytest.fixture
 def docker_probe_unavailable():
     """Patch probe_docker as unavailable on merge + registry import paths."""
-    from nemo_platform_plugin.capabilities import ProbeResult
+    from nemo_helix_plugin.capabilities import ProbeResult
 
     result = ProbeResult(available=False, detail="down")
     with (
-        patch("nmp.core.jobs.controllers.backends.config.probe_docker", return_value=result),
-        patch("nmp.core.jobs.controllers.backends.registry.probe_docker", return_value=result),
+        patch("nhx.core.jobs.controllers.backends.config.probe_docker", return_value=result),
+        patch("nhx.core.jobs.controllers.backends.registry.probe_docker", return_value=result),
     ):
         yield result
 
@@ -140,11 +140,11 @@ def mock_store():
 
 
 @pytest_asyncio.fixture()
-async def mock_dispatcher(mock_store, mock_nmp_client) -> JobDispatcher:
+async def mock_dispatcher(mock_store, mock_nhx_client) -> JobDispatcher:
     """Create a JobDispatcher instance for testing with mock EntityStore."""
     return JobDispatcher(
         store=mock_store,
-        sdk=mock_nmp_client,
+        sdk=mock_nhx_client,
     )
 
 
@@ -289,11 +289,11 @@ def _mock_files_client():
 # no longer import ``client_from_platform`` directly — patching ``base`` covers
 # them. ``common`` has a standalone helper that still builds its own client.
 _JOBS_CLIENT_CONTROLLER_MODULES = (
-    "nmp.core.jobs.controllers.scheduler",
-    "nmp.core.jobs.controllers.reconciler",
-    "nmp.core.jobs.controllers.diagnostics",
-    "nmp.core.jobs.controllers.backends.base",
-    "nmp.core.jobs.controllers.backends.kubernetes.common",
+    "nhx.core.jobs.controllers.scheduler",
+    "nhx.core.jobs.controllers.reconciler",
+    "nhx.core.jobs.controllers.diagnostics",
+    "nhx.core.jobs.controllers.backends.base",
+    "nhx.core.jobs.controllers.backends.kubernetes.common",
 )
 
 
@@ -309,8 +309,8 @@ def mock_jobs_client():
 
 
 @fixture
-def mock_nmp_client(_mock_files_client, mock_jobs_client):
-    """Create a flexible mock of NeMoPlatform for testing.
+def mock_nhx_client(_mock_files_client, mock_jobs_client):
+    """Create a flexible mock of NeMoHelix for testing.
 
     ``client_from_platform`` is patched in the dispatcher (returns the files client)
     and in every controller module that builds a typed Jobs client. The controller
@@ -320,14 +320,14 @@ def mock_nmp_client(_mock_files_client, mock_jobs_client):
     mock_client = MagicMock()
     mock_client.beta = MagicMock()
 
-    from nemo_platform_plugin.jobs.client import JobsClient
+    from nemo_helix_plugin.jobs.client import JobsClient
 
     def _dispatch(_sdk, client_type):
         if client_type is JobsClient:
             return mock_jobs_client
         return _mock_files_client
 
-    patchers = [patch("nmp.core.jobs.app.dispatcher.client_from_platform", return_value=_mock_files_client)]
+    patchers = [patch("nhx.core.jobs.app.dispatcher.client_from_platform", return_value=_mock_files_client)]
     patchers += [
         patch(f"{module}.client_from_platform", side_effect=_dispatch) for module in _JOBS_CLIENT_CONTROLLER_MODULES
     ]
@@ -453,7 +453,7 @@ executor_defaults:
 
 jobs:
   # Executor profiles configuration. The subprocess/default entry mirrors what
-  # ships in `packages/nmp_platform/config/local.yaml` and opts the documented
+  # ships in `packages/nhx_platform/config/local.yaml` and opts the documented
   # `cpu/default` plugin steps into the cpu→subprocess translation in the Jobs
   # API (see `translate_cpu_container_steps_to_subprocess`). Tests that submit
   # jobs through the core /apis/jobs/v2/workspaces/{ws}/jobs endpoint with a
@@ -464,7 +464,7 @@ jobs:
       profile: default
       backend: subprocess
       config:
-        working_directory: /tmp/nmp-subprocess-jobs
+        working_directory: /tmp/nhx-subprocess-jobs
     - provider: cpu
       profile: default
       backend: docker
@@ -525,10 +525,10 @@ jobs:
 
 
 @pytest.fixture
-def backend_registry(mock_nmp_client, job_config_with_many_profiles) -> BackendRegistry:
+def backend_registry(mock_nhx_client, job_config_with_many_profiles) -> BackendRegistry:
     """Create a backend registry with test configuration."""
     return BackendRegistry.from_config(
-        nmp_sdk=mock_nmp_client,
+        nhx_sdk=mock_nhx_client,
         profiles=job_config_with_many_profiles.executors,
         # Mock the backends. Register the real SubprocessJobBackend to satisfy
         # the subprocess/default executor that ships in
@@ -582,8 +582,8 @@ def hello_world_job_config(
 async def test_client(mock_dispatcher, mock_store, job_config_with_many_profiles) -> AsyncGenerator[AsyncClient, None]:
     # Mock the config.executors to have the test execution profiles, including
     # subprocess/default for cpu/default to subprocess/default translation.
-    from nmp.common.auth.middleware import AuthorizationMiddleware
-    from nmp.common.service.dependencies import get_sdk_client
+    from nhx.common.auth.middleware import AuthorizationMiddleware
+    from nhx.common.service.dependencies import get_sdk_client
 
     with subprocess_job_executor_patch(job_config_with_many_profiles.executors):
         app = FastAPI()
@@ -600,7 +600,7 @@ async def test_client(mock_dispatcher, mock_store, job_config_with_many_profiles
                 return mock_store
 
             # Create SDK for dependency injection
-            test_sdk = AsyncNeMoPlatform(base_url=ac.base_url, http_client=ac)
+            test_sdk = AsyncNeMoHelix(base_url=ac.base_url, http_client=ac)
 
             app.dependency_overrides[dep_dispatcher] = override_get_dispatcher
             app.dependency_overrides[get_entity_client] = override_get_entity_client
@@ -627,6 +627,6 @@ async def test_client(mock_dispatcher, mock_store, job_config_with_many_profiles
 
 
 @pytest.fixture
-def test_sdk(test_client: AsyncClient) -> AsyncNeMoPlatform:
+def test_sdk(test_client: AsyncClient) -> AsyncNeMoHelix:
     # Disable retries to prevent duplicate entity creation attempts on transient errors
-    return AsyncNeMoPlatform(base_url=test_client.base_url, http_client=test_client, max_retries=0)
+    return AsyncNeMoHelix(base_url=test_client.base_url, http_client=test_client, max_retries=0)

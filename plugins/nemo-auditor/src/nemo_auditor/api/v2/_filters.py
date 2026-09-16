@@ -17,7 +17,7 @@ from collections.abc import Awaitable, Callable
 from typing import cast
 
 from fastapi import HTTPException
-from nemo_platform_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.filters import make_filter_obj_dep
 from pydantic import BaseModel, ValidationError
 from starlette.requests import Request
 

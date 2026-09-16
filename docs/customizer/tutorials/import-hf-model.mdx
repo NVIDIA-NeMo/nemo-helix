@@ -15,7 +15,7 @@ Use this tutorial to learn how to import a private Hugging Face model into NeMo 
 
 ### Tutorial-Specific Prerequisites
 
-- Completed the [Quickstart](/documentation/get-started) to install and deploy NeMo Platform locally.
+- Completed the [Quickstart](/documentation/get-started) to install and deploy NeMo Helix locally.
 - Installed the Python SDK and any tutorial packages you need in your environment.
 - A Hugging Face token with access to the private or gated model repository.
 - A Hugging Face model with a compatible architecture. This tutorial uses `google/gemma-2-2b-it` as an example, but success depends on architectural compatibility.
@@ -23,7 +23,7 @@ Use this tutorial to learn how to import a private Hugging Face model into NeMo 
 
 <Note>
 
-This tutorial uses the current NeMo Platform SDK resources: `client.files.filesets`, `client.models`, `client.customization.automodel.jobs`, and `client.inference.gateway`.
+This tutorial uses the current NeMo Helix SDK resources: `client.files.filesets`, `client.models`, `client.customization.automodel.jobs`, and `client.inference.gateway`.
 
 </Note>
 
@@ -59,10 +59,10 @@ For a complete list of tested models, see the [Model Catalog](/documentation/cus
 
 ### 1. Initialize the SDK
 
-The SDK needs your NeMo Platform server URL. By default, this tutorial uses `http://localhost:8080`.
+The SDK needs your NeMo Helix server URL. By default, this tutorial uses `http://localhost:8080`.
 
 ```sh
-export NMP_BASE_URL=<YOUR_NMP_BASE_URL>
+export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
 export HF_TOKEN=<YOUR_HUGGINGFACE_TOKEN>
 ```
 
@@ -84,9 +84,9 @@ from nemo_automodel_plugin.schema import (
     ScheduleSpec,
     TrainingSpec,
 )
-from nemo_platform import ConflictError, NeMoPlatform
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
-from nemo_platform.types.secrets import PlatformSecretResponse
+from nemo_helix import ConflictError, NeMoHelix
+from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix.types.secrets import PlatformSecretResponse
 
 def max_wait_time_checker(seconds: int, job_name: str = ""):
     start_time = time.time()
@@ -97,13 +97,13 @@ def max_wait_time_checker(seconds: int, job_name: str = ""):
 
     return check
 
-NMP_BASE_URL = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-client = NeMoPlatform(base_url=NMP_BASE_URL, workspace="default")
+NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+client = NeMoHelix(base_url=NHX_BASE_URL, workspace="default")
 ```
 
 ### 2. Store the Hugging Face Token
 
-Private and gated Hugging Face repositories require a token. Store it as a NeMo Platform secret and reference that secret from the Hugging Face fileset.
+Private and gated Hugging Face repositories require a token. Store it as a NeMo Helix secret and reference that secret from the Hugging Face fileset.
 
 ```python
 def create_or_get_secret(name: str, value: str | None, label: str) -> PlatformSecretResponse:
@@ -459,7 +459,7 @@ print(lora_response["choices"][0]["message"]["content"])
 export OUTPUT_NAME="<output adapter name from the Python job block>"
 export INFERENCE_MODEL_NAME="default--${OUTPUT_NAME}"
 
-curl -s "${NMP_BASE_URL}/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions" \
+curl -s "${NHX_BASE_URL}/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions" \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "'${INFERENCE_MODEL_NAME}'",

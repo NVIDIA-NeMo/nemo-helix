@@ -54,12 +54,12 @@ from nemo_agents_plugin.tasks.execute.workdir import (
 )
 from nemo_agents_plugin.telemetry import intake_export
 from nemo_agents_plugin.telemetry.intake_export import supports_intake_atif_export, wants_intake_atif_export
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.dependencies import get_entity_client, get_sdk_client
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
-from nemo_platform_plugin.jobs.routes import add_job_routes
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.dependencies import get_entity_client, get_sdk_client
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.jobs.routes import add_job_routes
 from pydantic import ValidationError
 
 
@@ -496,7 +496,7 @@ async def test_compile_produces_single_cpu_step_with_canonical_config() -> None:
     )
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
-        get_config.return_value.jobs.default_image = "registry.example/nmp-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
         platform_spec = await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -510,7 +510,7 @@ async def test_compile_produces_single_cpu_step_with_canonical_config() -> None:
     step = steps[0]
     assert step["name"] == "execute-agent"
     assert step["executor"]["provider"] == "cpu"
-    assert step["executor"]["container"]["image"] == "registry.example/nmp-cpu-tasks:test"
+    assert step["executor"]["container"]["image"] == "registry.example/nhx-cpu-tasks:test"
     assert step["executor"]["container"]["command"] == ["nemo_agents_plugin.tasks.execute"]
     assert step["config"] == spec.model_dump(mode="json")
     step_config = cast(dict[str, Any], step["config"])
@@ -562,7 +562,7 @@ async def test_compile_omits_image_to_inherit_substrate_chain() -> None:
 
     The job deliberately names no image of its own here: omitting it is what
     lets the jobs substrate apply the execution profile's ``default_task_image``
-    and then the platform CPU tasks image, which the old ``nmp-api`` fallback
+    and then the platform CPU tasks image, which the old ``nhx-api`` fallback
     short-circuited.
     """
     image = await _compiled_image(AgentsConfig(), ExecuteAgentJobConfig(agent="calc", input="hello"))
@@ -823,7 +823,7 @@ async def test_compile_injects_secret_env_and_compute_resources() -> None:
     )
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
-        get_config.return_value.jobs.default_image = "registry.example/nmp-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
         platform_spec = await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -851,7 +851,7 @@ async def test_compile_without_compute_omits_executor_resources() -> None:
     )
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
-        get_config.return_value.jobs.default_image = "registry.example/nmp-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
         platform_spec = await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -877,7 +877,7 @@ async def test_compile_rejects_unsupported_compute_resource_key() -> None:
         patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config,
         pytest.raises(PlatformJobCompilationError, match="Unsupported compute resource key"),
     ):
-        get_config.return_value.jobs.default_image = "registry.example/nmp-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
         await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -892,14 +892,14 @@ async def test_compile_rejects_secret_env_colliding_with_reserved_name() -> None
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
         agent=_resolved_agent(),
-        secrets={"NMP_BASE_URL": "default/some-secret"},
+        secrets={"NHX_BASE_URL": "default/some-secret"},
     )
 
     with (
         patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config,
         pytest.raises(PlatformJobCompilationError, match="reserved job env var name"),
     ):
-        get_config.return_value.jobs.default_image = "registry.example/nmp-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
         await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -1303,7 +1303,7 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
 
     fake_jobs = SimpleNamespace(create_job=_create_job)
     with (
-        patch("nemo_platform_plugin.jobs.api_factory.client_from_platform", return_value=fake_jobs),
+        patch("nemo_helix_plugin.jobs.api_factory.client_from_platform", return_value=fake_jobs),
         patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files),
     ):
         response = TestClient(app).post(
@@ -1362,10 +1362,10 @@ def test_execute_job_create_route_maps_reserved_secret_env_to_422() -> None:
     app.include_router(add_job_routes(ExecuteAgentJob), prefix="/apis/agents/v2/workspaces/{workspace}")
 
     # Agent resolves, plus an environment whose EnvironmentSpec maps a secret env
-    # var onto a reserved job env var name (NMP_BASE_URL).
+    # var onto a reserved job env var name (NHX_BASE_URL).
     env = AgentEnvironment(name="prod", workspace="default", environment_spec="default/prod-spec")
     env_spec = AgentEnvironmentSpec(
-        name="prod-spec", workspace="default", secrets={"NMP_BASE_URL": "default/some-secret"}
+        name="prod-spec", workspace="default", secrets={"NHX_BASE_URL": "default/some-secret"}
     )
 
     async def _get(entity_type: type, *, name: str, workspace: str) -> object:
@@ -1383,7 +1383,7 @@ def test_execute_job_create_route_maps_reserved_secret_env_to_422() -> None:
     app.dependency_overrides[get_sdk_client] = lambda: _sdk_with_files()
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
-        get_config.return_value.jobs.default_image = "registry.example/nmp-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
         response = TestClient(app, raise_server_exceptions=False).post(
             "/apis/agents/v2/workspaces/default/jobs/execute",
             json={"name": "execute-1", "spec": {"agent": "calc", "input": "hello", "environment": "default/prod"}},
@@ -1915,7 +1915,7 @@ def _fabric_agent_config(**overrides: Any) -> dict[str, Any]:
 
 def test_telemetry_is_pointed_at_the_workspace_intake_ingest(monkeypatch: pytest.MonkeyPatch) -> None:
     """Only the task knows the platform URL reachable from its own pod."""
-    monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
+    monkeypatch.setenv("NHX_BASE_URL", "http://nemo-helix-api:8080")
     config = _fabric_agent_config()
 
     _configure_intake_telemetry(config, workspace="team-a", sdk=None)
@@ -1926,25 +1926,25 @@ def test_telemetry_is_pointed_at_the_workspace_intake_ingest(monkeypatch: pytest
     assert telemetry["agent_name"] == "demo-agent"
     storage = telemetry["atif"]["storage"][0]
     assert storage["type"] == "http"
-    assert storage["endpoint"] == "http://nemo-platform-api:8080/apis/intake/v2/workspaces/team-a/ingest/atif"
+    assert storage["endpoint"] == "http://nemo-helix-api:8080/apis/intake/v2/workspaces/team-a/ingest/atif"
     # The wired config still has to be a valid agent config.
     assert AgentConfig.model_validate(config).telemetry.enabled is True
 
 
 def test_telemetry_credentials_go_to_the_environment_not_the_config(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fabric writes the config into artifacts that are uploaded as a job result."""
-    monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
+    monkeypatch.setenv("NHX_BASE_URL", "http://nemo-helix-api:8080")
     # Registered before the call so pytest unsets it afterwards: the code writes
     # this variable directly, and monkeypatch can only restore what it saw first.
-    header_var = "NMP_AGENT_TELEMETRY_HEADER_X_NMP_PRINCIPAL_ID"
+    header_var = "NHX_AGENT_TELEMETRY_HEADER_X_NHX_PRINCIPAL_ID"
     monkeypatch.setenv(header_var, "overwritten-by-the-call")
-    sdk = cast(NeMoPlatform, SimpleNamespace(_custom_headers={"X-NMP-Principal-Id": "service:agents"}))
+    sdk = cast(NeMoHelix, SimpleNamespace(_custom_headers={"X-NHX-Principal-Id": "service:agents"}))
     config = _fabric_agent_config()
 
     _configure_intake_telemetry(config, workspace="default", sdk=sdk)
 
     storage = config["telemetry"]["atif"]["storage"][0]
-    assert storage["header_env"] == {"X-NMP-Principal-Id": "NMP_AGENT_TELEMETRY_HEADER_X_NMP_PRINCIPAL_ID"}
+    assert storage["header_env"] == {"X-NHX-Principal-Id": "NHX_AGENT_TELEMETRY_HEADER_X_NHX_PRINCIPAL_ID"}
     assert "headers" not in storage, "an inline header would land in a downloadable artifact"
     assert os.environ[header_var] == "service:agents"
 
@@ -1964,19 +1964,19 @@ def test_another_outputs_destination_does_not_speak_for_atif(
     Leaving ATIF unset is no opinion about ATIF, so the Intake default applies
     and the agent keeps the destination it did choose.
     """
-    monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
+    monkeypatch.setenv("NHX_BASE_URL", "http://nemo-helix-api:8080")
     config = _fabric_agent_config(telemetry={"enabled": True, output: declaration})
 
     _configure_intake_telemetry(config, workspace="team-a", sdk=None)
 
     storage = config["telemetry"]["atif"]["storage"][0]
-    assert storage["endpoint"] == "http://nemo-platform-api:8080/apis/intake/v2/workspaces/team-a/ingest/atif"
+    assert storage["endpoint"] == "http://nemo-helix-api:8080/apis/intake/v2/workspaces/team-a/ingest/atif"
     assert config["telemetry"][output] == declaration
 
 
 def test_an_agent_that_names_its_own_destination_keeps_it(monkeypatch: pytest.MonkeyPatch) -> None:
     """An explicit export destination beats an inferred one."""
-    monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
+    monkeypatch.setenv("NHX_BASE_URL", "http://nemo-helix-api:8080")
     mine = {"type": "http", "endpoint": "https://elsewhere.example/ingest"}
     config = _fabric_agent_config(telemetry={"enabled": True, "atif": {"enabled": True, "storage": [mine]}})
 
@@ -1987,7 +1987,7 @@ def test_an_agent_that_names_its_own_destination_keeps_it(monkeypatch: pytest.Mo
 
 def test_telemetry_disabled_on_the_agent_is_an_opt_out(monkeypatch: pytest.MonkeyPatch) -> None:
     """False means no, as distinct from a config that never mentioned telemetry."""
-    monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
+    monkeypatch.setenv("NHX_BASE_URL", "http://nemo-helix-api:8080")
     config = _fabric_agent_config(telemetry={"enabled": False})
 
     _configure_intake_telemetry(config, workspace="default", sdk=None)
@@ -1997,7 +1997,7 @@ def test_telemetry_disabled_on_the_agent_is_an_opt_out(monkeypatch: pytest.Monke
 
 def test_an_agent_that_only_names_itself_is_still_wired(monkeypatch: pytest.MonkeyPatch) -> None:
     """The point of the tri-state: naming yourself is not configuring an export."""
-    monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
+    monkeypatch.setenv("NHX_BASE_URL", "http://nemo-helix-api:8080")
     config = _fabric_agent_config(telemetry={"agent_name": "my-agent-name"})
 
     _configure_intake_telemetry(config, workspace="default", sdk=None)
@@ -2008,7 +2008,7 @@ def test_an_agent_that_only_names_itself_is_still_wired(monkeypatch: pytest.Monk
 
 def test_telemetry_is_skipped_when_no_platform_url_is_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
     """A run untraced beats a run that fails over its own tracing."""
-    monkeypatch.delenv("NMP_BASE_URL", raising=False)
+    monkeypatch.delenv("NHX_BASE_URL", raising=False)
     config = _fabric_agent_config()
 
     _configure_intake_telemetry(config, workspace="default", sdk=None)
@@ -2018,7 +2018,7 @@ def test_telemetry_is_skipped_when_no_platform_url_is_reachable(monkeypatch: pyt
 
 def test_an_unrecognized_telemetry_section_is_left_alone(monkeypatch: pytest.MonkeyPatch) -> None:
     """Deployments never model-validate, so a stray key must not fail the whole config."""
-    monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
+    monkeypatch.setenv("NHX_BASE_URL", "http://nemo-helix-api:8080")
     config = _fabric_agent_config(telemetry={"enabled": True, "not_a_real_field": 1})
 
     _configure_intake_telemetry(config, workspace="default", sdk=None)
@@ -2070,7 +2070,7 @@ def test_declining_auto_telemetry_submits_the_agent_config_as_written(
     Driven through ``run`` so the opt-out branch is what is under test, rather
     than the request parsing around it.
     """
-    monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
+    monkeypatch.setenv("NHX_BASE_URL", "http://nemo-helix-api:8080")
     # ATIF is left unset, so this config *would* be wired -- otherwise the test
     # would pass whether or not auto_telemetry was honoured.
     declared = {"enabled": True, "opentelemetry": {"endpoints": [{"type": "gen_ai", "endpoint": "https://mine"}]}}
@@ -2097,34 +2097,34 @@ def test_declining_auto_telemetry_submits_the_agent_config_as_written(
 
 def test_workload_identity_jobs_export_with_a_bearer_token(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """The SDK adds this per request; Relay's raw POST to Intake does not go through it."""
-    monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
+    monkeypatch.setenv("NHX_BASE_URL", "http://nemo-helix-api:8080")
     token_file = tmp_path / "subject-token"
     token_file.write_text("subject", encoding="utf-8")
-    monkeypatch.setenv("NMP_WORKLOAD_IDENTITY_TOKEN_FILE", str(token_file))
-    monkeypatch.setenv("NMP_AGENT_TELEMETRY_HEADER_AUTHORIZATION", "unset")
+    monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", str(token_file))
+    monkeypatch.setenv("NHX_AGENT_TELEMETRY_HEADER_AUTHORIZATION", "unset")
     monkeypatch.setattr(
         execute_module,
         "resolve_workload_exchange_provider",
         lambda **_kwargs: SimpleNamespace(get_access_token=lambda: "exchanged-token"),
     )
-    sdk = cast(NeMoPlatform, SimpleNamespace(_custom_headers={"X-NMP-Internal": "true"}))
+    sdk = cast(NeMoHelix, SimpleNamespace(_custom_headers={"X-NHX-Internal": "true"}))
     config = _fabric_agent_config()
 
     _configure_intake_telemetry(config, workspace="default", sdk=sdk)
 
     storage = config["telemetry"]["atif"]["storage"][0]
-    assert storage["header_env"]["Authorization"] == "NMP_AGENT_TELEMETRY_HEADER_AUTHORIZATION"
-    assert os.environ["NMP_AGENT_TELEMETRY_HEADER_AUTHORIZATION"] == "Bearer exchanged-token"
+    assert storage["header_env"]["Authorization"] == "NHX_AGENT_TELEMETRY_HEADER_AUTHORIZATION"
+    assert os.environ["NHX_AGENT_TELEMETRY_HEADER_AUTHORIZATION"] == "Bearer exchanged-token"
 
 
 def test_a_failed_token_exchange_still_exports_rather_than_failing_the_run(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Telemetry is not worth failing an agent over."""
-    monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
+    monkeypatch.setenv("NHX_BASE_URL", "http://nemo-helix-api:8080")
     token_file = tmp_path / "subject-token"
     token_file.write_text("subject", encoding="utf-8")
-    monkeypatch.setenv("NMP_WORKLOAD_IDENTITY_TOKEN_FILE", str(token_file))
+    monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", str(token_file))
 
     def explode(**_kwargs: Any) -> Any:
         raise RuntimeError("auth discovery unavailable")
@@ -2148,14 +2148,14 @@ def test_an_atif_block_turned_on_without_a_destination_is_filled(
     platform trajectory, recoverable only by hand-writing the endpoint and
     header names this wiring exists to spare people.
     """
-    monkeypatch.setenv("NMP_BASE_URL", "http://nemo-platform-api:8080")
+    monkeypatch.setenv("NHX_BASE_URL", "http://nemo-helix-api:8080")
     mine = {"endpoints": [{"type": "gen_ai", "endpoint": "https://mine/otlp"}]}
     config = _fabric_agent_config(telemetry={"enabled": True, "atif": {"enabled": True}, "opentelemetry": mine})
 
     _configure_intake_telemetry(config, workspace="team-a", sdk=None)
 
     storage = config["telemetry"]["atif"]["storage"][0]
-    assert storage["endpoint"] == "http://nemo-platform-api:8080/apis/intake/v2/workspaces/team-a/ingest/atif"
+    assert storage["endpoint"] == "http://nemo-helix-api:8080/apis/intake/v2/workspaces/team-a/ingest/atif"
     assert config["telemetry"]["opentelemetry"] == mine, "the collector the agent chose is untouched"
 
 

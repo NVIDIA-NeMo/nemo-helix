@@ -5,11 +5,11 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
-from nemo_platform import AsyncNeMoPlatform
-from nmp.common.entities import EntityClient
-from nmp.hello_world.api.v2.jobs.endpoints import compile_hello_world_job
-from nmp.hello_world.api.v2.jobs.schemas import HelloWorldJobConfig
-from nmp.hello_world.service import HelloWorldService
+from nemo_helix import AsyncNeMoHelix
+from nhx.common.entities import EntityClient
+from nhx.hello_world.api.v2.jobs.endpoints import compile_hello_world_job
+from nhx.hello_world.api.v2.jobs.schemas import HelloWorldJobConfig
+from nhx.hello_world.service import HelloWorldService
 
 
 class TestHelloWorldService:
@@ -23,7 +23,7 @@ class TestHelloWorldService:
     def test_service_module_name(self):
         """Test service has correct module name."""
         service = HelloWorldService()
-        assert service.module_name == "nmp.hello_world"
+        assert service.module_name == "nhx.hello_world"
 
     def test_service_title(self):
         """Test service title."""
@@ -57,7 +57,7 @@ class TestCompileHelloWorldJob:
         job_config = HelloWorldJobConfig(message="Test message")
         entity_client = MagicMock(spec=EntityClient)
         job_name = "test-job"
-        sdk = AsyncMock(spec=AsyncNeMoPlatform)
+        sdk = AsyncMock(spec=AsyncNeMoHelix)
 
         # This test verifies the function signature is correct
         # If any parameter is missing, this will raise TypeError
@@ -82,15 +82,15 @@ class TestCompileHelloWorldJob:
         assert step_dict["name"] == "hello-world"
         assert step_dict["executor"]["provider"] == "cpu"
         assert step_dict["executor"]["profile"] == "default"
-        assert "nemo-platform" in step_dict["executor"]["container"]["entrypoint"]
-        assert "nmp.hello_world.tasks.hello_world" in step_dict["executor"]["container"]["command"]
+        assert "nemo-helix" in step_dict["executor"]["container"]["entrypoint"]
+        assert "nhx.hello_world.tasks.hello_world" in step_dict["executor"]["container"]["command"]
 
     def test_compile_hello_world_job_with_none_job_name(self):
         """Test that compile_hello_world_job works with None job_name."""
         workspace = "test-workspace"
         job_config = HelloWorldJobConfig(message="Test message")
         entity_client = MagicMock(spec=EntityClient)
-        sdk = AsyncMock(spec=AsyncNeMoPlatform)
+        sdk = AsyncMock(spec=AsyncNeMoHelix)
 
         # Test with None job_name
         result = compile_hello_world_job(
@@ -111,7 +111,7 @@ class TestCompileHelloWorldJob:
         workspace = "test-workspace"
         job_config = HelloWorldJobConfig(message="Custom message")
         entity_client = MagicMock(spec=EntityClient)
-        sdk = AsyncMock(spec=AsyncNeMoPlatform)
+        sdk = AsyncMock(spec=AsyncNeMoHelix)
 
         result = compile_hello_world_job(
             workspace=workspace,

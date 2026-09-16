@@ -5,8 +5,8 @@
 
 import jsonschema
 import pytest
-from nmp.rl.schemas.environment import GymDatasetRow, GymVerifiersDatasetRow
-from nmp.rl.tasks.training.datasets.validation import GRPO_SCHEMA
+from nhx.rl.schemas.environment import GymDatasetRow, GymVerifiersDatasetRow
+from nhx.rl.tasks.training.datasets.validation import GRPO_SCHEMA
 
 VERIFIERS_ROW = {
     "task_idx": 0,

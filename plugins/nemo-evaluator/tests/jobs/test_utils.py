@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import httpx
 from nemo_evaluator.jobs.utils import run_with_isolated_async_client
-from nemo_platform_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from pytest_mock import MockerFixture
 
 

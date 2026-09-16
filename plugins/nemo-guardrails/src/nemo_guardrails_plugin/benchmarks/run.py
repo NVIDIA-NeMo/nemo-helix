@@ -9,7 +9,7 @@ The harness orchestrates the entire benchmark run by running the following steps
 2. Write a per-run AIPerf config under ``runs/<id>/generated/``.
 3. Start the two mock LLM servers from ``${NEMO_GUARDRAILS_REPO_ROOT}/benchmark``.
 4. Start (or reuse) ``nemo services run``.
-5. Wait for per-process health probes, seed NMP resources via the SDK, smoke-test the VirtualModel.
+5. Wait for per-process health probes, seed NHX resources via the SDK, smoke-test the VirtualModel.
 6. Invoke ``python -m benchmark.aiperf run --config-file ...`` for the sweep.
 7. Collect per-sweep results and exit non-zero on any failure.
 
@@ -42,8 +42,8 @@ from nemo_guardrails_plugin.benchmarks.constants import (
     APP_PROVIDER_URL,
     CS_PROVIDER_URL,
     IGW_CHAT_PATH,
-    NMP_BASE_URL,
-    NMP_HEALTH_PATH,
+    NHX_BASE_URL,
+    NHX_HEALTH_PATH,
     VARIANT_WITH_GUARDRAILS,
     VARIANT_WITHOUT_GUARDRAILS,
     WORKSPACE,
@@ -52,7 +52,7 @@ from nemo_guardrails_plugin.benchmarks.paths import (
     RunPaths,
     build_run_paths,
     default_nemoguardrails_repo_root,
-    discover_nmp_repo_root,
+    discover_nhx_repo_root,
 )
 from nemo_guardrails_plugin.benchmarks.processes import (
     SupervisedProcess,
@@ -60,12 +60,12 @@ from nemo_guardrails_plugin.benchmarks.processes import (
     wait_http,
 )
 from nemo_guardrails_plugin.benchmarks.seeding import SeededResources, seed_benchmark
-from nemo_platform import APIConnectionError, APIStatusError, NeMoPlatform
+from nemo_helix import APIConnectionError, APIStatusError, NeMoHelix
 
 log = logging.getLogger("nemo_guardrails_plugin.benchmarks")
 
 _MOCK_HEALTH_TIMEOUT_SECONDS = 60.0
-_NMP_HEALTH_TIMEOUT_SECONDS = 180.0
+_NHX_HEALTH_TIMEOUT_SECONDS = 180.0
 
 
 _REQUIRED_NEMOGUARDRAILS_FILES = (
@@ -155,20 +155,20 @@ def _build_mock_nim_processes(paths: RunPaths, workers: int) -> list[SupervisedP
     ]
 
 
-def _build_nmp_process(paths: RunPaths) -> SupervisedProcess:
+def _build_nhx_process(paths: RunPaths) -> SupervisedProcess:
     """Start ``nemo services run`` in a supervised process.
 
-    The harness sets ``NMP_BASE_URL`` and ``NMP_DATA_DIR`` env vars so the
-    child process can talk to NMP over HTTP and write state to the per-run data dir.
+    The harness sets ``NHX_BASE_URL`` and ``NHX_DATA_DIR`` env vars so the
+    child process can talk to NHX over HTTP and write state to the per-run data dir.
     """
     return SupervisedProcess(
-        name="nmp-services",
+        name="nhx-services",
         cmd=["nemo", "services", "run"],
-        log_path=paths.log_dir / "nmp-services.log",
-        cwd=paths.nmp_repo_root,
-        env={"NMP_BASE_URL": NMP_BASE_URL, "NMP_DATA_DIR": str(paths.nmp_data_dir)},
-        health_url=f"{NMP_BASE_URL}{NMP_HEALTH_PATH}",
-        health_timeout_seconds=_NMP_HEALTH_TIMEOUT_SECONDS,
+        log_path=paths.log_dir / "nhx-services.log",
+        cwd=paths.nhx_repo_root,
+        env={"NHX_BASE_URL": NHX_BASE_URL, "NHX_DATA_DIR": str(paths.nhx_data_dir)},
+        health_url=f"{NHX_BASE_URL}{NHX_HEALTH_PATH}",
+        health_timeout_seconds=_NHX_HEALTH_TIMEOUT_SECONDS,
     )
 
 
@@ -183,13 +183,13 @@ def _build_aiperf_shim_process(paths: RunPaths) -> SupervisedProcess:
         name="aiperf-shim",
         cmd=[sys.executable, "-m", "nemo_guardrails_plugin.benchmarks.shim"],
         log_path=paths.log_dir / "aiperf-shim.log",
-        cwd=paths.nmp_repo_root,
+        cwd=paths.nhx_repo_root,
         health_url=f"{AIPERF_SHIM_BASE_URL}/__shim/health",
         health_timeout_seconds=_MOCK_HEALTH_TIMEOUT_SECONDS,
     )
 
 
-def _smoke_test(sdk: NeMoPlatform, seeded: SeededResources) -> None:
+def _smoke_test(sdk: NeMoHelix, seeded: SeededResources) -> None:
     """Verify the VirtualModel is reachable and returns a chat completion,
     before running the AIPerf sweep.
     """
@@ -279,7 +279,7 @@ def _run_benchmark(
         "Starting AIPerf sweep [%s] against %s -> shim -> %s%s",
         variant,
         AIPERF_SHIM_BASE_URL,
-        NMP_BASE_URL,
+        NHX_BASE_URL,
         IGW_CHAT_PATH,
     )
 
@@ -336,7 +336,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=Path(
             os.environ.get(
                 "NEMO_GUARDRAILS_REPO_ROOT",
-                str(default_nemoguardrails_repo_root(discover_nmp_repo_root())),
+                str(default_nemoguardrails_repo_root(discover_nhx_repo_root())),
             )
         ),
         help="Path to a local NeMo Guardrails checkout (default: $NEMO_GUARDRAILS_REPO_ROOT or ../NeMo-Guardrails).",
@@ -344,19 +344,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--reuse-services",
         action="store_true",
-        default=os.environ.get("NMP_BENCHMARK_REUSE_SERVICES", "0") == "1",
-        help="Skip starting `nemo services run` and reuse an existing local NMP at :8080.",
+        default=os.environ.get("NHX_BENCHMARK_REUSE_SERVICES", "0") == "1",
+        help="Skip starting `nemo services run` and reuse an existing local NHX at :8080.",
     )
     parser.add_argument(
         "--keep-running",
         action="store_true",
-        default=os.environ.get("NMP_BENCHMARK_KEEP_RUNNING", "0") == "1",
+        default=os.environ.get("NHX_BENCHMARK_KEEP_RUNNING", "0") == "1",
         help="Leave started processes alive after the sweep (debugging).",
     )
     parser.add_argument(
         "--mock-workers",
         type=int,
-        default=int(os.environ.get("NMP_BENCHMARK_MOCK_WORKERS", "4")),
+        default=int(os.environ.get("NHX_BENCHMARK_MOCK_WORKERS", "4")),
         help="uvicorn worker count for each mock LLM server.",
     )
     parser.add_argument(
@@ -370,9 +370,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="all",
         help=(
             "Which sweep to run. 'all' (default) runs both variants sequentially "
-            "against the same NMP; the with-vs-without delta isolates middleware "
+            "against the same NHX; the with-vs-without delta isolates middleware "
             "overhead. In CI, run the two variants as parallel jobs against "
-            "separate NMP instances."
+            "separate NHX instances."
         ),
     )
     parser.add_argument("--verbose", "-v", action="store_true")
@@ -397,9 +397,9 @@ def main(argv: list[str] | None = None) -> int:
     log.info("Validated NeMo Guardrails local checkout at: %s", nemoguardrails_repo_root)
 
     # Build the directory structure that will contain the benchmark results.
-    nmp_repo_root = discover_nmp_repo_root()
+    nhx_repo_root = discover_nhx_repo_root()
     paths = build_run_paths(
-        nmp_repo_root=nmp_repo_root,
+        nhx_repo_root=nhx_repo_root,
         nemoguardrails_repo_root=nemoguardrails_repo_root,
         run_id=args.run_id,
     )
@@ -423,11 +423,11 @@ def main(argv: list[str] | None = None) -> int:
 
     processes = _build_mock_nim_processes(paths, args.mock_workers)
     if not args.reuse_services:
-        processes.append(_build_nmp_process(paths))
+        processes.append(_build_nhx_process(paths))
 
     processes.append(_build_aiperf_shim_process(paths))
 
-    # Start the processes and wait for them to be ready before seeding NMP.
+    # Start the processes and wait for them to be ready before seeding NHX.
     with ExitStack() as stack:
         stack.enter_context(supervised_processes(processes))
         if args.keep_running:
@@ -435,16 +435,16 @@ def main(argv: list[str] | None = None) -> int:
             stack.pop_all()
 
         if args.reuse_services:
-            log.info("Waiting for existing NMP services at %s...", NMP_BASE_URL)
+            log.info("Waiting for existing NHX services at %s...", NHX_BASE_URL)
             wait_http(
-                f"{NMP_BASE_URL}{NMP_HEALTH_PATH}",
-                timeout_seconds=_NMP_HEALTH_TIMEOUT_SECONDS,
-                label="nmp-services",
+                f"{NHX_BASE_URL}{NHX_HEALTH_PATH}",
+                timeout_seconds=_NHX_HEALTH_TIMEOUT_SECONDS,
+                label="nhx-services",
             )
 
         log.info(f"All services are ready. Seeding benchmark resources in workspace {WORKSPACE}...")
 
-        sdk = NeMoPlatform(base_url=NMP_BASE_URL)
+        sdk = NeMoHelix(base_url=NHX_BASE_URL)
         seeded = seed_benchmark(
             sdk,
             nemoguardrails_repo_root=paths.nemoguardrails_repo_root,
@@ -454,7 +454,7 @@ def main(argv: list[str] | None = None) -> int:
         log.info("Waiting for VirtualModel %s to be ready...", seeded.vm_ref)
         _smoke_test(sdk, seeded)
 
-        # Variants run sequentially against the same NMP; only the targeted
+        # Variants run sequentially against the same NHX; only the targeted
         # VirtualModel differs, so the delta isolates middleware overhead.
         outcomes: list[BenchmarkOutcome] = []
         for variant in variants:

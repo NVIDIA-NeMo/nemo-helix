@@ -14,8 +14,8 @@ from nemo_data_designer_plugin.sdk.validation import (
     ValidationReport,
     validate_config_sync,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.cli_state import resolve_local_cli_sdks
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.cli_state import resolve_local_cli_sdks
 
 OutputFormat = Literal["text", "json"]
 
@@ -57,12 +57,12 @@ def validate_command(
         raise typer.Exit(code=1) from e
 
     sdk, async_sdk = resolve_local_cli_sdks(typer_ctx)
-    sdk = cast("NeMoPlatform | None", sdk)
-    async_sdk = cast("AsyncNeMoPlatform | None", async_sdk)
+    sdk = cast("NeMoHelix | None", sdk)
+    async_sdk = cast("AsyncNeMoHelix | None", async_sdk)
 
     if sdk is None and async_sdk is None:
         print_error(
-            "No NeMo Platform SDK is available. Run `nemo` from a configured environment "
+            "No NeMo Helix SDK is available. Run `nemo` from a configured environment "
             "or supply credentials via the top-level CLI."
         )
         raise typer.Exit(code=1)

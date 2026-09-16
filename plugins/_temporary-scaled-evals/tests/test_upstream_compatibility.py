@@ -72,7 +72,7 @@ def test_harbor_catalog_and_compose_image_advertise_the_same_runners() -> None:
     assert "0.20.0" in supported_harbor_versions()
     assert resolve_harbor_runner("0.20.0").harbor_dir == "/opt/harbor/0.20.0"
     assert catalog["adapter"] == {
-        "version": "nemo-platform-plugin-overlay-v1",
+        "version": "nemo-helix-plugin-overlay-v1",
         "files": [
             "harbor-patches/patch_langgraph_writable_venv.py",
             "harbor-patches/patch_pi_extra_env.py",

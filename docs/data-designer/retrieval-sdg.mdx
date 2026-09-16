@@ -7,7 +7,7 @@ description: "Generate and prepare retrieval training data with the Nemotron Sta
 ---
 <a id="retrieval-sdg"></a>
 
-NeMo Platform exposes Nemotron embed/rerank Stage 0 (`sdg`) and Stage 1
+NeMo Helix exposes Nemotron embed/rerank Stage 0 (`sdg`) and Stage 1
 (`prep`) as dedicated Data Designer jobs. They wrap
 `data-designer-retrieval-sdg` and do **not** go through
 `nemo data-designer create`.
@@ -70,10 +70,10 @@ nemo data-designer retrieval-prepare --spec '{
 ```
 
 Enable mining (GPU, ~40GB) with `"enable_mining": true`. The `model` field identifies
-a platform model entity whose fileset is downloaded by `nmp-customizer-tasks` into
-the shared job storage. `nmp-automodel-training` then loads the encoder and tokenizer
+a platform model entity whose fileset is downloaded by `nhx-customizer-tasks` into
+the shared job storage. `nhx-automodel-training` then loads the encoder and tokenizer
 from that local directory with Hugging Face networking disabled. Conversion-only
-prepare stays on `nmp-cpu-tasks`.
+prepare stays on `nhx-cpu-tasks`.
 
 All retrieval steps use the same container-backed execution profile so they share job
 storage across generation, conversion, model staging, and mining. Configure it with
@@ -102,10 +102,10 @@ in-config workflow chaining.
 ## SDK
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig
 
-client = NeMoPlatform(base_url="http://localhost:8080", workspace="default")
+client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
 
 client.data_designer.retrieval_generate(
     RetrievalGenerateJobConfig(

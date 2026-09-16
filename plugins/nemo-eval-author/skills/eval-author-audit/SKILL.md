@@ -49,7 +49,7 @@ Author needs a source of truth for how the agent is supposed to behave before it
 can decide what `audit.md` should cover. Code shows what the agent does today;
 Ethos records intended behavior, mission, constraints, success and failure
 criteria, and what may change. Link the user to
-[ETHOS.md](https://docs.nvidia.com/nemo-platform/documentation/agents/optimize-agents/ethos)
+[ETHOS.md](https://docs.nvidia.com/nemo-helix/documentation/agents/optimize-agents/ethos)
 for what Ethos is and how to create one.
 
 Follow [Local Ethos](../eval-author/references/local-ethos.md) to capture and

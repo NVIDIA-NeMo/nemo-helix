@@ -13,13 +13,13 @@ from nemo_deployments_plugin.entities import (
     Toleration,
     VolumeMount,
 )
-from nemo_platform_plugin.models.types import K8sNIMOperatorConfig
-from nmp.common.config import Runtime
-from nmp.core.models.app import ModelWeightsType
-from nmp.core.models.controllers.backends.common import DeploymentConfigView
-from nmp.core.models.controllers.backends.deployments_plugin import nim_compiler
-from nmp.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
-from nmp.core.models.controllers.backends.deployments_plugin.nim_compiler import (
+from nemo_helix_plugin.models.types import K8sNIMOperatorConfig
+from nhx.common.config import Runtime
+from nhx.core.models.app import ModelWeightsType
+from nhx.core.models.controllers.backends.common import DeploymentConfigView
+from nhx.core.models.controllers.backends.deployments_plugin import nim_compiler
+from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
+from nhx.core.models.controllers.backends.deployments_plugin.nim_compiler import (
     apply_container_resources,
     apply_k8s_nim_operator_container_overrides,
     apply_nim_override_config,
@@ -30,7 +30,7 @@ from nmp.core.models.controllers.backends.deployments_plugin.nim_compiler import
     startup_probe_failure_threshold,
     tool_call_plugin_init_containers,
 )
-from nmp.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
+from nhx.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
 
 
 def _resolved() -> ResolvedPluginDeployment:

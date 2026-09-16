@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Async intake client backed by the NeMo Platform SDK."""
+"""Async intake client backed by the NeMo Helix SDK."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from switchyard.lib.factories.intake_sink.intake_sink_config import (
 )
 
 if TYPE_CHECKING:
-    from nemo_platform import AsyncNeMoPlatform
+    from nemo_helix import AsyncNeMoHelix
 
 log = logging.getLogger(__name__)
 JsonObject = dict[str, object]
@@ -27,18 +27,18 @@ JsonObject = dict[str, object]
 _DRAIN_TIMEOUT_S = 30.0
 
 _SDK_INSTALL_HINT = (
-    "Install the NeMo Platform SDK with the `intake` extra, e.g. "
+    "Install the NeMo Helix SDK with the `intake` extra, e.g. "
     "`uv run --extra intake switchyard launch claude --enable-intake`."
 )
 
 _SDK_LOGIN_HINT = (
-    "Run `uv run nmp auth login --base-url https://platform.example.com`, "
+    "Run `uv run nhx auth login --base-url https://platform.example.com`, "
     "or pass --intake-base-url and --intake-api-key."
 )
 
 
 class IntakeClient:
-    """Fail-open queue + worker that POSTs completed turns through AsyncNeMoPlatform.
+    """Fail-open queue + worker that POSTs completed turns through AsyncNeMoHelix.
 
     The SDK handles config bootstrap, auth, and retries. Intake still uses a
     generic POST path because the stable SDK does not expose a generated
@@ -46,7 +46,7 @@ class IntakeClient:
     """
 
     def __init__(self, config: IntakeSinkConfig) -> None:
-        self._client: AsyncNeMoPlatform = _build_sdk_client(config)
+        self._client: AsyncNeMoHelix = _build_sdk_client(config)
         # Payloads need a concrete workspace even when the SDK resolves it.
         self._config = config.model_copy(update={
             "workspace": config.workspace or _sdk_workspace(self._client) or "default",
@@ -61,7 +61,7 @@ class IntakeClient:
 
     @property
     def effective_config(self) -> IntakeSinkConfig:
-        """Config with workspace resolved against SDK / nmp config."""
+        """Config with workspace resolved against SDK / nhx config."""
         return self._config
 
     async def enqueue(self, payload: JsonObject) -> None:
@@ -171,12 +171,12 @@ class IntakeClient:
             )
 
 
-def _build_sdk_client(config: IntakeSinkConfig) -> AsyncNeMoPlatform:
-    """Build an ``AsyncNeMoPlatform`` for the intake POST path."""
-    if importlib.util.find_spec("nemo_platform") is None:
+def _build_sdk_client(config: IntakeSinkConfig) -> AsyncNeMoHelix:
+    """Build an ``AsyncNeMoHelix`` for the intake POST path."""
+    if importlib.util.find_spec("nemo_helix") is None:
         raise RuntimeError(_SDK_INSTALL_HINT)
 
-    from nemo_platform import AsyncNeMoPlatform
+    from nemo_helix import AsyncNeMoHelix
 
     client_kwargs: dict[str, object] = {
         "timeout": config.request_timeout_s,
@@ -190,15 +190,15 @@ def _build_sdk_client(config: IntakeSinkConfig) -> AsyncNeMoPlatform:
         client_kwargs["access_token"] = config.api_key
 
     try:
-        return AsyncNeMoPlatform(**client_kwargs)
+        return AsyncNeMoHelix(**client_kwargs)
     except Exception as exc:
         raise RuntimeError(
-            f"Failed to construct AsyncNeMoPlatform for intake: {exc}. "
+            f"Failed to construct AsyncNeMoHelix for intake: {exc}. "
             + _SDK_LOGIN_HINT,
         ) from exc
 
 
-def _sdk_workspace(client: AsyncNeMoPlatform) -> str | None:
+def _sdk_workspace(client: AsyncNeMoHelix) -> str | None:
     workspace = getattr(client, "workspace", None)
     return workspace if isinstance(workspace, str) else None
 

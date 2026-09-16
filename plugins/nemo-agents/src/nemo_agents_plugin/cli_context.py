@@ -6,7 +6,7 @@
 The agents plugin makes platform calls from two places — the platform
 commands in :mod:`nemo_agents_plugin.cli` (raw ``httpx``) and
 ``nemo agents usage show`` in :mod:`nemo_agents_plugin.usage.cli` (the
-NeMoPlatform SDK client).  Both must resolve the platform base URL and the
+NeMoHelix SDK client).  Both must resolve the platform base URL and the
 auth token the same way every other ``nemo`` command does: through the
 shared CLI context object stored on ``typer.Context.obj``.
 
@@ -32,7 +32,7 @@ DEFAULT_BASE_URL = "http://localhost:8080"
 BASE_URL_HELP = (
     "Platform base URL. Resolution order: "
     "(1) this --base-url flag or NEMO_BASE_URL; "
-    "(2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; "
+    "(2) shared CLI config (`nemo config set --base-url`) or NHX_BASE_URL; "
     f"(3) {DEFAULT_BASE_URL} (default)."
 )
 
@@ -73,7 +73,7 @@ def resolve_base_url(base_url: str | None) -> str:
     Precedence:
       1. Explicit ``--base-url`` / ``NEMO_BASE_URL`` on the command.
       2. The shared CLI context — ``nemo config set --base-url`` and the
-         ``NMP_BASE_URL`` env var — so ``nemo agents`` targets the same
+         ``NHX_BASE_URL`` env var — so ``nemo agents`` targets the same
          platform as every other ``nemo`` command.
       3. The built-in localhost default.
 
@@ -89,7 +89,7 @@ def resolve_base_url(base_url: str | None) -> str:
 def resolve_context_headers() -> dict[str, str]:
     """Return auth (and other) default headers from the shared CLI context.
 
-    Mirrors ``nemo_platform_plugin.commands._resolve_submit_auth_headers``:
+    Mirrors ``nemo_helix_plugin.commands._resolve_submit_auth_headers``:
     reads the SDK client config off the shared context so ``nemo agents``
     attaches the same ``Authorization: Bearer`` token as the rest of the CLI
     (i.e. the token established by ``nemo auth login``).  Returns an empty

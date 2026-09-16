@@ -1,35 +1,35 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NeMo Platform
+# NeMo Helix
 
-NeMo Platform is NVIDIA's toolkit for making the agents you ship safer, more accurate, and cheaper to run.
+NeMo Helix is NVIDIA's toolkit for making the agents you ship safer, more accurate, and cheaper to run.
 
 ## How to help users in this repo
 
-If a user asks you to set up, try, build, evaluate, harden, or optimize an agent inside this repo, you MUST use the skills defined in `packages/nemo_platform_ext/src/nemo_platform_ext/skills/`. Read the relevant skill file directly with your `Read` tool and follow it step by step.
+If a user asks you to set up, try, build, evaluate, harden, or optimize an agent inside this repo, you MUST use the skills defined in `packages/nemo_helix_ext/src/nemo_helix_ext/skills/`. Read the relevant skill file directly with your `Read` tool and follow it step by step.
 
 ### DO
 
-- Read `packages/nemo_platform_ext/src/nemo_platform_ext/skills/<skill-name>/SKILL.md` as a file with your `Read` tool, and follow the instructions in order.
+- Read `packages/nemo_helix_ext/src/nemo_helix_ext/skills/<skill-name>/SKILL.md` as a file with your `Read` tool, and follow the instructions in order.
 - Stay on the path the skill defines. If the skill calls a `nemo` CLI command, run that exact command. If it points at a `references/` file, read it.
 - If a step changes system state (installs something, starts a service, deploys an agent), run the verification step the skill specifies before moving on. Do not claim a step succeeded without verifying.
-- If you are unsure which skill applies, read `packages/nemo_platform_ext/src/nemo_platform_ext/skills/nemo-skill-selection/SKILL.md` and let it route you.
+- If you are unsure which skill applies, read `packages/nemo_helix_ext/src/nemo_helix_ext/skills/nemo-skill-selection/SKILL.md` and let it route you.
 
 ### DO NOT
 
 - DO NOT use your `Skill` tool, `/skill-name` slash commands, or any plugin-based skill invocation for these requests. The repo skills are authoritative. A globally-installed skill (brainstorming, planning, code-review, etc.) will give the wrong answer because it does not know NeMo.
 - DO NOT brainstorm a solution from scratch when a NeMo skill claims the task. The skill already has the answer.
-- DO NOT write Python, Pydantic AI, LangChain, or any agent framework code from scratch. NeMo Platform uses the NVIDIA NeMo Agent Toolkit (NAT) under the hood. Skills will tell you the right way to wire your agent.
+- DO NOT write Python, Pydantic AI, LangChain, or any agent framework code from scratch. NeMo Helix uses the NVIDIA NeMo Agent Toolkit (NAT) under the hood. Skills will tell you the right way to wire your agent.
 - DO NOT improvise CLI flags. Only use flags documented in the skill or shown in `nemo <subcommand> --help`. If the skill is wrong, file an issue rather than guessing.
 - DO NOT report a task complete if you cannot verify it. If a verification step fails or times out, surface what you saw and ask the user to confirm before continuing.
 
 ### Available skills
 
-User-facing skills in `packages/nemo_platform_ext/src/nemo_platform_ext/skills/`:
+User-facing skills in `packages/nemo_helix_ext/src/nemo_helix_ext/skills/`:
 
 - `nemo-skill-selection`: entry point. Use when the user's intent is broad or unclear ("help me with nemo," "I want to try this," "what does this repo do?").
-- `setup`: verifies that NeMo Platform is installed and running. Hands off if it is; tells the user how to run the CLI install (`make bootstrap` + `nemo setup`) if it isn't. **Install is CLI-only.** Do not attempt skill-driven installation; it has been tried and consistently fails on workspace dependency resolution, credential handling, and Python version friction inside a sandbox.
+- `setup`: verifies that NeMo Helix is installed and running. Hands off if it is; tells the user how to run the CLI install (`make bootstrap` + `nemo setup`) if it isn't. **Install is CLI-only.** Do not attempt skill-driven installation; it has been tried and consistently fails on workspace dependency resolution, credential handling, and Python version friction inside a sandbox.
 - `nemo-explore`: design conversation. Use before `nemo-ethos`. Always confirms purpose, principles, and vision.
 - `nemo-ethos`: writes `agents/<name>-ethos/ETHOS.md` from the explore output, then shows a gut-check of the agent.
 - `nemo-build-agent`: scaffolds NAT workflow YAML from the Ethos and deploys.
@@ -49,7 +49,7 @@ If you are running inside a macOS sandbox, a CI container, or any environment wh
 
 ## What this repo is
 
-NeMo Platform brings together NVIDIA NeMo libraries under one CLI, Python SDK, and web UI. Current capabilities:
+NeMo Helix brings together NVIDIA NeMo libraries under one CLI, Python SDK, and web UI. Current capabilities:
 
 - **Harden agents**: guardrails (content safety, jailbreak detection, PII redaction), auditor (red-teaming via garak), anonymizer (PII handling for training data).
 - **Evaluate agents**: evaluator (LLM-as-judge, deterministic, agentic, RAG benchmarks), Harbor-backed eval suites.
@@ -57,7 +57,7 @@ NeMo Platform brings together NVIDIA NeMo libraries under one CLI, Python SDK, a
 - **Build agents**: NeMo Agent Toolkit (NAT) for LangGraph-based agents. Broader framework support on the roadmap.
 - **Shared infrastructure**: Inference Gateway, Secrets, Files, Entity Store, Jobs.
 
-NeMo Platform optimizes LangGraph agents wrapped in NAT today. If a user has an agent in another framework (CrewAI, AutoGen, plain LangChain, Pydantic AI), the build/optimize path requires a NAT wrapper, which they would write themselves. Be honest about this when users ask.
+NeMo Helix optimizes LangGraph agents wrapped in NAT today. If a user has an agent in another framework (CrewAI, AutoGen, plain LangChain, Pydantic AI), the build/optimize path requires a NAT wrapper, which they would write themselves. Be honest about this when users ask.
 
 ## For developers
 

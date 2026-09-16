@@ -36,7 +36,7 @@ A permission id follows the grammar `<service>.<resource>.<action>`, joined from
 You never hand-build id strings. Declare permissions in a typed `PermissionSet` and reference the members:
 
 ```python
-from nemo_platform_plugin.authz import PermissionSet, perm
+from nemo_helix_plugin.authz import PermissionSet, perm
 
 class ItemPerms(PermissionSet, namespace="myplugin.items"):
     CREATE = perm("Create example items")   # -> id "myplugin.items.create"
@@ -63,7 +63,7 @@ A plugin owns one `AuthzScope`, which mints both the coarse OAuth scope and the 
 When the permission namespace nests deeper than the OAuth scope, use `child()` — the scope stays put while the permission id deepens:
 
 ```python
-from nemo_platform_plugin.authz import AuthzScope
+from nemo_helix_plugin.authz import AuthzScope
 
 scope = AuthzScope("agents")
 scope.child("deployments").permission("create", description="Create a deployment")
@@ -80,8 +80,8 @@ For a hand-written route, `@router.<method>` is the **outermost** (top) decorato
 
 ```python
 from fastapi import APIRouter
-from nemo_platform_plugin.authz import AuthzScope, CallerKind, PermissionSet, path_rule, perm
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.authz import AuthzScope, CallerKind, PermissionSet, path_rule, perm
+from nemo_helix_plugin.service import NemoService, RouterSpec
 
 scope = AuthzScope("example")
 
@@ -112,7 +112,7 @@ Stacking `@path_rule` on the same handler adds OR-alternatives: any satisfied ru
 A controller-only write route pins the caller kind to `SERVICE_PRINCIPAL` and requires the compound permission:
 
 ```python
-from nemo_platform_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.authz import CallerKind, path_rule
 
 @router.put("/deployments/{name}/status", response_model=Deployment)
 @scope.write
@@ -134,9 +134,9 @@ async def upload_blob(name: str, request: Request) -> BlobUploadResponse: ...
 Jobs and functions are mounted through route factories rather than hand-written handlers. You **must** pass `authz=` — the kwarg defaults to `None`, and a factory called without it leaves its routes unruled, which fails closed at bundle time.
 
 ```python
-from nemo_platform_plugin.authz import AuthzScope
-from nemo_platform_plugin.functions.routes import add_function_routes
-from nemo_platform_plugin.jobs.routes import add_job_routes
+from nemo_helix_plugin.authz import AuthzScope
+from nemo_helix_plugin.functions.routes import add_function_routes
+from nemo_helix_plugin.jobs.routes import add_job_routes
 
 scope = AuthzScope("myplugin")
 
@@ -156,8 +156,8 @@ When `authz=` is set, `add_function_routes` stamps a `PRINCIPAL` rule on the rou
 Some permissions are not 1:1 with a route — they are checked in middleware, declared ahead of the route that will reference them, or need to be granted to a role the default heuristic misses. Declare these on your `NemoService` via two escape hatches; both are merged into the derived catalog.
 
 ```python
-from nemo_platform_plugin.authz import Permission
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.authz import Permission
+from nemo_helix_plugin.service import NemoService, RouterSpec
 
 class MyService(NemoService):
     name = "myplugin"
@@ -184,9 +184,9 @@ Use `extra_role_permissions` when that heuristic is wrong — e.g. an agent gate
 
 ## When a Plugin's Authz Is Invalid
 
-An unruled route, or a rule referencing an undeclared or out-of-namespace permission, makes a plugin's authz invalid. The offending routes are always emitted as explicit denies; the auth service's `on_invalid_plugin` fail-mode (env prefix `NMP_AUTH_`) controls the blast radius:
+An unruled route, or a rule referencing an undeclared or out-of-namespace permission, makes a plugin's authz invalid. The offending routes are always emitted as explicit denies; the auth service's `on_invalid_plugin` fail-mode (env prefix `NHX_AUTH_`) controls the blast radius:
 
-| `NMP_AUTH_ON_INVALID_PLUGIN` | Behavior |
+| `NHX_AUTH_ON_INVALID_PLUGIN` | Behavior |
 |------------------------------|----------|
 | `hard_fail` (default) | Refuse to build the OPA bundle — fail closed at the platform level. |
 | `quarantine` | Deny the whole offending plugin, but keep the platform up. |

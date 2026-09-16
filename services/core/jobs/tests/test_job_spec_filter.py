@@ -12,12 +12,12 @@ while keeping offline runs that name no target at all.
 import json
 
 import pytest
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.spec import PlatformJobSpec
-from nemo_platform_plugin.jobs.types import CreatePlatformJobRequest, ListJobsQueryParams
-from nmp.common.entities import DEFAULT_WORKSPACE
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.spec import PlatformJobSpec
+from nemo_helix_plugin.jobs.types import CreatePlatformJobRequest, ListJobsQueryParams
+from nhx.common.entities import DEFAULT_WORKSPACE
 
 TEST_PLATFORM_SPEC = PlatformJobSpec.model_validate(
     {
@@ -72,7 +72,7 @@ async def _list(jobs: AsyncJobsClient, condition: dict) -> set[str]:
 
 
 @pytest.fixture
-async def seeded_jobs(test_sdk: AsyncNeMoPlatform) -> AsyncJobsClient:
+async def seeded_jobs(test_sdk: AsyncNeMoHelix) -> AsyncJobsClient:
     jobs = client_from_platform(test_sdk, AsyncJobsClient)
     await _create(jobs, "agent-job", AGENT_SPEC)
     await _create(jobs, "model-job", MODEL_SPEC)

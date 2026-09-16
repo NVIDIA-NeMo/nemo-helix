@@ -4,18 +4,18 @@
 """E2E tests for the secrets service.
 
 These tests verify basic secret creation and listing operations
-work correctly when running against a fully deployed NMP platform.
+work correctly when running against a fully deployed NHX platform.
 """
 
 import uuid
 
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import PlatformSecretCreateRequest
 
 
-def test_secret_create_and_list(sdk: NeMoPlatform, workspace: str):
+def test_secret_create_and_list(sdk: NeMoHelix, workspace: str):
     """Test creating a secret and listing it in the workspace.
 
     This test verifies the secrets system works end-to-end:
@@ -46,7 +46,7 @@ def test_secret_create_and_list(sdk: NeMoPlatform, workspace: str):
     assert retrieved_secret.workspace == workspace
 
 
-def test_secret_create_duplicate_fails(sdk: NeMoPlatform, workspace: str):
+def test_secret_create_duplicate_fails(sdk: NeMoHelix, workspace: str):
     """Test that creating a secret with a duplicate name fails.
 
     This test verifies that the secrets system enforces unique
@@ -74,7 +74,7 @@ def test_secret_create_duplicate_fails(sdk: NeMoPlatform, workspace: str):
         assert "already exists" in str(e) or "duplicate" in str(e)
 
 
-def test_secret_create_and_delete(sdk: NeMoPlatform, workspace: str):
+def test_secret_create_and_delete(sdk: NeMoHelix, workspace: str):
     """Test creating and deleting a secret.
 
     This test verifies that a secret can be created and then deleted,
@@ -107,7 +107,7 @@ def test_secret_create_and_delete(sdk: NeMoPlatform, workspace: str):
     assert secret_name not in secret_names
 
 
-def test_secret_data_not_in_create_response(sdk: NeMoPlatform, workspace: str):
+def test_secret_data_not_in_create_response(sdk: NeMoHelix, workspace: str):
     """Test that secret data is not exposed in the create response.
 
     This test verifies that when creating a secret, the response does not
@@ -136,7 +136,7 @@ def test_secret_data_not_in_create_response(sdk: NeMoPlatform, workspace: str):
     assert "_data" not in secret_dict
 
 
-def test_secret_data_not_in_retrieve_response(sdk: NeMoPlatform, workspace: str):
+def test_secret_data_not_in_retrieve_response(sdk: NeMoHelix, workspace: str):
     """Test that secret data is not exposed in the retrieve response.
 
     This test verifies that when retrieving a secret by name, the response
@@ -164,7 +164,7 @@ def test_secret_data_not_in_retrieve_response(sdk: NeMoPlatform, workspace: str)
     assert "_data" not in secret_dict
 
 
-def test_secret_data_not_in_list_response(sdk: NeMoPlatform, workspace: str):
+def test_secret_data_not_in_list_response(sdk: NeMoHelix, workspace: str):
     """Test that secret data is not exposed in the list response.
 
     This test verifies that when listing secrets, none of the secrets

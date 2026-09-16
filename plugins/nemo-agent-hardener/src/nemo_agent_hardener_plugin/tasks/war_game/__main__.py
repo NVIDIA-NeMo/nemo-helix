@@ -16,8 +16,8 @@ import sys
 from types import FrameType
 
 from nemo_agent_hardener_plugin.jobs.run import AgentHardenerRunJob
-from nemo_platform_plugin.sdk_provider import get_task_sdk
-from nemo_platform_plugin.tasks.dispatcher import run_task
+from nemo_helix_plugin.sdk_provider import get_task_sdk
+from nemo_helix_plugin.tasks.dispatcher import run_task
 
 logger = logging.getLogger(__name__)
 

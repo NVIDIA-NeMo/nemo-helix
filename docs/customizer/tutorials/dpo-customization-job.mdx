@@ -5,11 +5,11 @@ title: "DPO Customization"
 description: ""
 ---
 
-[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/release/0.5/docs/customizer/tutorials/dpo-customization-job.ipynb)
+[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/release/0.5/docs/customizer/tutorials/dpo-customization-job.ipynb)
 
-Learn how to use the NeMo Platform to align a model with **DPO** (Direct Preference Optimization) on a preference dataset. For each prompt, DPO trains on a *chosen* (preferred) and a *rejected* response so the model prefers the chosen style — no separate reward model required.
+Learn how to use the NeMo Helix to align a model with **DPO** (Direct Preference Optimization) on a preference dataset. For each prompt, DPO trains on a *chosen* (preferred) and a *rejected* response so the model prefers the chosen style — no separate reward model required.
 
-This tutorial uses the `rl` customization backend (powered by [NVIDIA NeMo-RL](https://github.com/NVIDIA-NeMo/RL)), which runs DPO on a **Ray** cluster. Unlike the [SFT](/documentation/customizer-reference/tutorials/sft-customization-job) and [LoRA](/documentation/customizer-reference/tutorials/lora-customization-job) tutorials (Docker GPU jobs), `rl` requires a **Kubernetes-backed** NeMo Platform. DPO here is **full-weight** (no LoRA/adapter); the output is a full model entity.
+This tutorial uses the `rl` customization backend (powered by [NVIDIA NeMo-RL](https://github.com/NVIDIA-NeMo/RL)), which runs DPO on a **Ray** cluster. Unlike the [SFT](/documentation/customizer-reference/tutorials/sft-customization-job) and [LoRA](/documentation/customizer-reference/tutorials/lora-customization-job) tutorials (Docker GPU jobs), `rl` requires a **Kubernetes-backed** NeMo Helix. DPO here is **full-weight** (no LoRA/adapter); the output is a full model entity.
 
 **Time to complete:** approximately 45-60 minutes. Job duration increases with model and dataset size.
 
@@ -17,10 +17,10 @@ This tutorial uses the `rl` customization backend (powered by [NVIDIA NeMo-RL](h
 
 Before starting this tutorial, ensure you have:
 
-1. **Completed the [Quickstart](/documentation/get-started)** to install the NeMo Platform and Python SDK.
-2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-platform[all,nemo-rl-plugin]"` so `RlJobInput` is available; source checkout: run `make bootstrap` from the repository root). `nemo-platform[all]` does not include the RL plugin.
+1. **Completed the [Quickstart](/documentation/get-started)** to install the NeMo Helix and Python SDK.
+2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-helix[all,nemo-rl-plugin]"` so `RlJobInput` is available; source checkout: run `make bootstrap` from the repository root). `nemo-helix[all]` does not include the RL plugin.
 3. **Installed the `datasets` package**: `pip install datasets`.
-4. **A platform configured with `platform.runtime: kubernetes`.** The `rl` (DPO) backend provisions a Ray cluster and has **no local Docker fallback** — `submit` fails fast on a Docker-runtime platform. Multi-node jobs (`parallelism.num_nodes > 1`) additionally require the platform-side `NMP_RL_MULTINODE_SHARED_STORAGE_PATH`.
+4. **A platform configured with `platform.runtime: kubernetes`.** The `rl` (DPO) backend provisions a Ray cluster and has **no local Docker fallback** — `submit` fails fast on a Docker-runtime platform. Multi-node jobs (`parallelism.num_nodes > 1`) additionally require the platform-side `NHX_RL_MULTINODE_SHARED_STORAGE_PATH`.
 5. **A Hugging Face token** with access to the gated base model (this tutorial uses `meta-llama/Llama-3.2-1B-Instruct`). Export it as `HF_TOKEN`.
 6. **At least one GPU with CUDA 13+** and a GPU execution profile (`nemo jobs list-execution-profiles`).
 
@@ -28,10 +28,10 @@ Before starting this tutorial, ensure you have:
 
 ### 1. Initialize the SDK
 
-The SDK needs your NeMo Platform server URL. By default `http://localhost:8080` is used; set `NMP_BASE_URL` to override:
+The SDK needs your NeMo Helix server URL. By default `http://localhost:8080` is used; set `NHX_BASE_URL` to override:
 
 ```sh
-export NMP_BASE_URL=<YOUR_NMP_BASE_URL>
+export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
 ```
 
 ```python
@@ -40,9 +40,9 @@ import os
 import time
 import uuid
 from pathlib import Path
-from nemo_platform import NeMoPlatform, ConflictError
-from nemo_platform.types.secrets import PlatformSecretResponse
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
+from nemo_helix import NeMoHelix, ConflictError
+from nemo_helix.types.secrets import PlatformSecretResponse
+from nemo_helix.types.files import HuggingfaceStorageConfigParam
 from nemo_rl_plugin.schema import RlJobInput
 
 
@@ -57,8 +57,8 @@ def max_wait_time_checker(seconds: int, label: str = ""):
     return check
 
 
-NMP_BASE_URL = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-sdk = NeMoPlatform(base_url=NMP_BASE_URL, workspace="default")
+NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+sdk = NeMoHelix(base_url=NHX_BASE_URL, workspace="default")
 ```
 
 ### 2. Prepare the Preference Dataset
@@ -351,7 +351,7 @@ print(response["choices"][0]["message"]["content"])
 
 ## Conclusion
 
-You aligned a base model with **DPO** on the NeMo Platform using the `rl` backend:
+You aligned a base model with **DPO** on the NeMo Helix using the `rl` backend:
 
 - Uploaded a HelpSteer3 preference dataset **as-is** (the platform detects the schema natively).
 - Submitted a full-weight DPO job that ran on a Ray cluster via the Kubernetes executor.

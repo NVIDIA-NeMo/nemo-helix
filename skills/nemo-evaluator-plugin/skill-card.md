@@ -9,7 +9,7 @@ NVIDIA <br>
 ### License/Terms of Use: <br>
 Apache 2.0 <br>
 ## Use Case: <br>
-Developers and engineers evaluating LLM and agent performance using NeMo Platform's evaluation framework for metric selection, job submission, and result retrieval. <br>
+Developers and engineers evaluating LLM and agent performance using NeMo Helix's evaluation framework for metric selection, job submission, and result retrieval. <br>
 
 ### Deployment Geography for Use: <br>
 Global <br>

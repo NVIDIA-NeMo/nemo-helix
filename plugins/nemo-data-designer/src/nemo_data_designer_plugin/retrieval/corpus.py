@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 
 from data_designer_nemo.filesystem import make_filesystem
 from filesets import FilesetPathError, build_fileset_ref, parse_fileset_ref
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 _HF_PREFIX = "hf://"
 
@@ -24,7 +24,7 @@ def hf_token_from_env() -> str | None:
 def materialize_corpus(
     corpus: str,
     dest: Path,
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     workspace: str,
     hf_token: str | None = None,
     allow_local_path: bool = False,
@@ -84,7 +84,7 @@ def _download_hf(corpus: str, dest: Path, token: str | None) -> Path:
     return local_dir / subdir if subdir else local_dir
 
 
-def _download_fileset(corpus: str, dest: Path, sdk: NeMoPlatform, workspace: str) -> Path:
+def _download_fileset(corpus: str, dest: Path, sdk: NeMoHelix, workspace: str) -> Path:
     try:
         fileset_workspace, fileset, fragment = parse_fileset_ref(corpus, workspace_fallback=workspace)
     except FilesetPathError as exc:

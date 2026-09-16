@@ -28,27 +28,27 @@ from nemo_data_designer_plugin.jobs.create import CreateJob
 from nemo_data_designer_plugin.jobs.spec import DataDesignerJobConfig
 from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 from nemo_data_designer_plugin.service import DataDesignerService
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.commands import add_function_commands, add_job_commands
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import PlatformJobResults
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nemo_platform_plugin.jobs.client import JobsClient
-from nemo_platform_plugin.jobs.result_manager import ResultManager
-from nemo_platform_plugin.jobs.types import CreatePlatformJobRequest
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
-from nmp.core.files.service import FilesService
-from nmp.core.inference_gateway.service import InferenceGatewayService
-from nmp.core.jobs.service import JobsService
-from nmp.core.models.service import ModelsService
-from nmp.core.secrets.service import SecretsService
-from nmp.platform_runner.plugin_adapter import NemoServiceAdapter
-from nmp.testing import ClientContext, TaskResult, add_mock_provider, create_test_client, subprocess_job_executor_patch
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.commands import add_function_commands, add_job_commands
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import PlatformJobResults
+from nemo_helix_plugin.jobs.api_factory import PlatformJobSpec
+from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.result_manager import ResultManager
+from nemo_helix_plugin.jobs.types import CreatePlatformJobRequest
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import PlatformSecretCreateRequest
+from nhx.core.files.service import FilesService
+from nhx.core.inference_gateway.service import InferenceGatewayService
+from nhx.core.jobs.service import JobsService
+from nhx.core.models.service import ModelsService
+from nhx.core.secrets.service import SecretsService
+from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
+from nhx.testing import ClientContext, TaskResult, add_mock_provider, create_test_client, subprocess_job_executor_patch
 from pydantic import SecretStr
 
 WORKSPACE_NAME = "my-workspace"
@@ -207,7 +207,7 @@ def setup_mock_nemotron_personas_data(
     yield
 
 
-def _create_nemotron_personas_fileset(sdk: NeMoPlatform, persona_data: pd.DataFrame) -> None:
+def _create_nemotron_personas_fileset(sdk: NeMoHelix, persona_data: pd.DataFrame) -> None:
     fileset_name = get_resource_name_for_locale("en_US")
     files = client_from_platform(sdk, FilesClient)
     files.create_fileset(body=CreateFilesetRequest(name=fileset_name), workspace="system")
@@ -224,9 +224,9 @@ def _create_nemotron_personas_fileset(sdk: NeMoPlatform, persona_data: pd.DataFr
 async def compile_create_job(
     original_spec: DataDesignerJobConfig,
     workspace: str = WORKSPACE_NAME,
-    sdk: AsyncNeMoPlatform | None = None,
+    sdk: AsyncNeMoHelix | None = None,
 ) -> PlatformJobSpec:
-    sdk = sdk or AsyncMock(spec=AsyncNeMoPlatform)
+    sdk = sdk or AsyncMock(spec=AsyncNeMoHelix)
     entity_client = Mock()
     job = CreateJob()
     # This helper exercises the plugin-service compilation path, where
@@ -261,14 +261,14 @@ def _make_data_designer_cli_app() -> typer.Typer:
 
 @dataclass
 class DataDesignerCLIState:
-    sdk: NeMoPlatform
-    async_sdk: AsyncNeMoPlatform
+    sdk: NeMoHelix
+    async_sdk: AsyncNeMoHelix
     overrides: dict[str, Any]
 
-    def get_client(self) -> NeMoPlatform:
+    def get_client(self) -> NeMoHelix:
         return self.sdk
 
-    def get_async_client(self) -> AsyncNeMoPlatform:
+    def get_async_client(self) -> AsyncNeMoHelix:
         return self.async_sdk
 
 
@@ -345,8 +345,8 @@ def _normalize_job_config(job_config: Any) -> dict[str, Any]:
 
 @dataclass
 class CreateJobTestContext:
-    sdk: NeMoPlatform
-    async_sdk: AsyncNeMoPlatform
+    sdk: NeMoHelix
+    async_sdk: AsyncNeMoHelix
     config: dict[str, Any]
     job_ctx: JobContext
 

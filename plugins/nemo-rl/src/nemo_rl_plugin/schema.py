@@ -4,7 +4,7 @@
 """Submitter-facing NeMo-RL schemas.
 
 The **canonical** types (``RlJobOutput``, ``DPOTraining``, ``GRPOTraining``, ``OutputResponse``)
-live in :mod:`nmp.rl.schemas` and are re-exported here for concise imports. Only
+live in :mod:`nhx.rl.schemas` and are re-exported here for concise imports. Only
 the thin input shape (``RlJobInput`` + ``OutputRequest``) is defined here; the
 plugin's :func:`~nemo_rl_plugin.transform.transform_input_to_output` resolves it
 into the canonical output.
@@ -12,8 +12,8 @@ into the canonical output.
 
 from __future__ import annotations
 
-from nemo_platform_plugin.integrations import IntegrationsSpec
-from nmp.rl.schemas import (
+from nemo_helix_plugin.integrations import IntegrationsSpec
+from nhx.rl.schemas import (
     DPOTraining,
     GRPOTraining,
     LoRAParams,

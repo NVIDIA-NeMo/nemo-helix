@@ -27,9 +27,9 @@ from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import 
     CandidateStorageConfig,
     LocalExperimentalistBackend,
 )
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_insights_plugin.entities import Insight
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.client.errors import NotFoundError
 
 
 def _local_backend(tmp_path: Path) -> LocalExperimentalistBackend:

@@ -6,13 +6,13 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.core.jobs.api.v2.jobs.schemas import PlatformJobStepWithContext
-from nmp.core.jobs.controllers.backends.kubernetes.common import (
+from nhx.common.jobs.schemas import PlatformJobStatus
+from nhx.core.jobs.api.v2.jobs.schemas import PlatformJobStepWithContext
+from nhx.core.jobs.controllers.backends.kubernetes.common import (
     PodStatus,
     aggregate_pod_statuses_for_job_step,
 )
-from nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job import map_kubernetes_job_status_to_step_status
+from nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job import map_kubernetes_job_status_to_step_status
 
 
 def _job(
@@ -55,7 +55,7 @@ def _pod(
     )
 
 
-@patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
 def test_map_status_empty_pods_returns_pending_waiting_message(
     mock_list_pods: MagicMock, test_step_pending: PlatformJobStepWithContext
 ) -> None:
@@ -69,7 +69,7 @@ def test_map_status_empty_pods_returns_pending_waiting_message(
     assert "Waiting for pods" in details["message"]
 
 
-@patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
 def test_map_status_succeeded_pods_without_job_completion_time(
     mock_list_pods: MagicMock, test_step_pending: PlatformJobStepWithContext
 ) -> None:
@@ -84,7 +84,7 @@ def test_map_status_succeeded_pods_without_job_completion_time(
     assert "completion_time" in details["message"].lower() or "transient" in details["message"].lower()
 
 
-@patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
 def test_map_status_failed_count_without_failed_condition_true(
     mock_list_pods: MagicMock, test_step_pending: PlatformJobStepWithContext
 ) -> None:
@@ -105,7 +105,7 @@ def test_map_status_failed_count_without_failed_condition_true(
     assert len(details["kubernetes_conditions"]) == 1
 
 
-@patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
 def test_map_status_unknown_phase_pods_fallback_pending(
     mock_list_pods: MagicMock, test_step_pending: PlatformJobStepWithContext
 ) -> None:

@@ -14,14 +14,14 @@ import pytest
 from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
 from data_designer_nemo.nemotron_personas import WORKSPACE, get_resource_name_for_locale
 from nemo_data_designer_plugin.sdk.errors import DataDesignerJobError
-from nemo_platform import NeMoPlatform
-from nemo_platform.types.inference import ModelProvider
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest
-from nmp.testing import MockProviderResponse, add_mock_provider, assert_exit_0, run_nemo_local
-from nmp.testing.pytest_outcomes import pytest_skip
+from nemo_helix import NeMoHelix
+from nemo_helix.types.inference import ModelProvider
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nhx.testing import MockProviderResponse, add_mock_provider, assert_exit_0, run_nemo_local
+from nhx.testing.pytest_outcomes import pytest_skip
 
 pytestmark = [pytest.mark.e2e_config("e2e/configs/local-subprocess.yaml")]
 
@@ -59,7 +59,7 @@ def _chat_completion_response(content: str, model: str) -> dict[str, Any]:
     }
 
 
-def _make_mock_provider(sdk: NeMoPlatform, workspace: str) -> ModelProvider:
+def _make_mock_provider(sdk: NeMoHelix, workspace: str) -> ModelProvider:
     return add_mock_provider(
         sdk,
         workspace=workspace,
@@ -127,7 +127,7 @@ def _assert_dataset_equal(actual: pd.DataFrame, expected: pd.DataFrame) -> None:
     pd.testing.assert_frame_equal(actual, expected, check_like=True)
 
 
-def test_simple_ndd_config(sdk: NeMoPlatform, workspace: str) -> None:
+def test_simple_ndd_config(sdk: NeMoHelix, workspace: str) -> None:
     provider = _make_mock_provider(sdk, workspace)
     config_builder = _setup_dd_config(provider)
 
@@ -140,7 +140,7 @@ def test_simple_ndd_config(sdk: NeMoPlatform, workspace: str) -> None:
     _assert_dataset_equal(job_dataset, expected_job_dataset)
 
 
-def test_fileset_seed_data(sdk: NeMoPlatform, files_client: FilesClient, workspace: str) -> None:
+def test_fileset_seed_data(sdk: NeMoHelix, files_client: FilesClient, workspace: str) -> None:
     """Tests that the Data Designer *library* plugin that makes Filesets available as seed sources
     is wired up properly by the Data Designer *platform plugin*.
     """
@@ -215,7 +215,7 @@ def nemotron_personas_locale(
         files_client.delete_fileset(name=fileset_name, workspace=WORKSPACE)
 
 
-def test_nemotron_personas_sampling(sdk: NeMoPlatform, workspace: str, nemotron_personas_locale: str) -> None:
+def test_nemotron_personas_sampling(sdk: NeMoHelix, workspace: str, nemotron_personas_locale: str) -> None:
     """Test Nemotron Personas data can be created in the platform and subsequently dd.SamplerType.PERSON
     columns can be included in workloads.
 
@@ -264,7 +264,7 @@ def test_nemotron_personas_sampling(sdk: NeMoPlatform, workspace: str, nemotron_
 
 
 def _create_job_and_get_dataset(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     workspace: str,
     config_builder: dd.DataDesignerConfigBuilder,
 ) -> pd.DataFrame:

@@ -23,7 +23,7 @@ from nemo_data_designer_plugin.jobs.retrieval_prepare import RetrievalPrepareJob
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPrepareJobConfig, RetrievalPrepareStepConfig
 from nemo_data_designer_plugin.retrieval.conversion import execute_conversion
 from nemo_data_designer_plugin.retrieval.manifest import write_generation_manifest
-from nmp.customization_common.retrieval.inline import wrapped_to_inline_jsonl
+from nhx.customization_common.retrieval.inline import wrapped_to_inline_jsonl
 
 
 def _stage0_record(doc: str, chunks: list[str], questions: list[str]) -> dict:

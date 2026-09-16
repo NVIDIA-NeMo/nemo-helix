@@ -22,16 +22,16 @@ from data_designer_nemo.model_provider import (
 )
 from data_designer_nemo.person_reader import FilesetsPersonReader
 from data_designer_nemo.person_sampling import ensure_nemotron_personas_filesets
-from data_designer_nemo.secret_resolver import NMPSecretResolver
+from data_designer_nemo.secret_resolver import NHXSecretResolver
 from data_designer_nemo.seed import validate_seed
 from data_designer_nemo.tool_configs import validate_no_tool_configs
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
 
 
 class DataDesignerValidationContext:
     """Async-only context for remote config validation and provider resolution."""
 
-    def __init__(self, async_sdk: AsyncNeMoPlatform, workspace: str) -> None:
+    def __init__(self, async_sdk: AsyncNeMoHelix, workspace: str) -> None:
         self._async_sdk = async_sdk
         self._workspace = workspace
         self._validated_filesystem_roots: set[str] = set()
@@ -84,7 +84,7 @@ class DataDesignerExecutionContext:
 
     def __init__(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         workspace: str,
         *,
         validated_roots: set[str] | None = None,
@@ -94,7 +94,7 @@ class DataDesignerExecutionContext:
         self._validated_filesystem_roots = set(validated_roots or ())
 
     def get_secret_resolver(self) -> SecretResolver:
-        return NMPSecretResolver(self._sdk, self._workspace)
+        return NHXSecretResolver(self._sdk, self._workspace)
 
     def get_seed_readers(self) -> list[SeedReader]:
         provider = FilesetFileSystemProvider(
@@ -113,12 +113,12 @@ class DataDesignerExecutionContext:
         return FilesetsPersonReader(self._sdk)
 
 
-def create_validation_context(async_sdk: AsyncNeMoPlatform, workspace: str) -> DataDesignerValidationContext:
+def create_validation_context(async_sdk: AsyncNeMoHelix, workspace: str) -> DataDesignerValidationContext:
     return DataDesignerValidationContext(async_sdk, workspace)
 
 
 def create_execution_context(
-    sdk: NeMoPlatform,
+    sdk: NeMoHelix,
     workspace: str,
     *,
     validated_roots: set[str] | None = None,

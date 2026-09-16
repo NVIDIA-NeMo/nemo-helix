@@ -31,7 +31,7 @@ static_resources:
                       domains: ["*"]
                       routes:
                         - match:
-                            prefix: "/.well-known/nemo-platform/"
+                            prefix: "/.well-known/nemo-helix/"
                           route:
                             cluster: nemo
                           typed_per_filter_config:
@@ -211,14 +211,14 @@ static_resources:
 
                         function envoy_on_request(request_handle)
                           local headers = request_handle:headers()
-                          headers:remove("x-nmp-principal-id")
-                          headers:remove("x-nmp-principal-email")
-                          headers:remove("x-nmp-principal-groups")
-                          headers:remove("x-nmp-principal-on-behalf-of")
-                          headers:remove("x-nmp-principal-on-behalf-of-email")
-                          headers:remove("x-nmp-principal-on-behalf-of-groups")
-                          headers:remove("x-nmp-authorized")
-                          headers:remove("x-nmp-scopes")
+                          headers:remove("x-nhx-principal-id")
+                          headers:remove("x-nhx-principal-email")
+                          headers:remove("x-nhx-principal-groups")
+                          headers:remove("x-nhx-principal-on-behalf-of")
+                          headers:remove("x-nhx-principal-on-behalf-of-email")
+                          headers:remove("x-nhx-principal-on-behalf-of-groups")
+                          headers:remove("x-nhx-authorized")
+                          headers:remove("x-nhx-scopes")
 
                           if headers:get(":path") ~= "/health/gateway/ready" then
                             return
@@ -252,13 +252,13 @@ static_resources:
                         authorization_response:
                           allowed_upstream_headers:
                             patterns:
-                              - exact: x-nmp-principal-id
-                              - exact: x-nmp-principal-email
-                              - exact: x-nmp-principal-groups
-                              - exact: x-nmp-principal-on-behalf-of
-                              - exact: x-nmp-principal-on-behalf-of-email
-                              - exact: x-nmp-principal-on-behalf-of-groups
-                              - exact: x-nmp-scopes
+                              - exact: x-nhx-principal-id
+                              - exact: x-nhx-principal-email
+                              - exact: x-nhx-principal-groups
+                              - exact: x-nhx-principal-on-behalf-of
+                              - exact: x-nhx-principal-on-behalf-of-email
+                              - exact: x-nhx-principal-on-behalf-of-groups
+                              - exact: x-nhx-scopes
                           allowed_client_headers:
                             patterns:
                               - exact: content-type

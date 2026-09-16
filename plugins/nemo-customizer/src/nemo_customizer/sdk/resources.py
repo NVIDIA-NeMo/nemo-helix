@@ -10,17 +10,17 @@ from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import Self, TypeVar
 
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.customization_contributor import (
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.customization_contributor import (
     CustomizationContributor,
     CustomizationContributorSDKResources,
     CustomizationSDKResourceFactory,
 )
-from nemo_platform_plugin.discovery import discover_customization_contributors
-from nemo_platform_plugin.sdk import NemoPluginSDKResources
-from nmp.customization_common.sdk.client import (
+from nemo_helix_plugin.discovery import discover_customization_contributors
+from nemo_helix_plugin.sdk import NemoPluginSDKResources
+from nhx.customization_common.sdk.client import (
     AsyncCustomizationBackendResource,
     AsyncCustomizationClient,
     AsyncCustomizationSDKContext,
@@ -111,7 +111,7 @@ class Customization:
         return cls(make_customization_sdk_context(client))
 
     @classmethod
-    def from_platform(cls, platform: NeMoPlatform) -> Self:
+    def from_platform(cls, platform: NeMoHelix) -> Self:
         return cls.from_client(client_from_platform(platform, NemoClient))
 
     @property
@@ -157,7 +157,7 @@ class AsyncCustomization:
         return cls(make_async_customization_sdk_context(client))
 
     @classmethod
-    def from_platform(cls, platform: AsyncNeMoPlatform) -> Self:
+    def from_platform(cls, platform: AsyncNeMoHelix) -> Self:
         return cls.from_client(client_from_platform(platform, AsyncNemoClient))
 
     @property
@@ -178,9 +178,7 @@ class AsyncCustomization:
         return _coerce_health_payload(response.data().model_dump(mode="json"))
 
 
-customization_sdk_resources = NemoPluginSDKResources[
-    NeMoPlatform, Customization, AsyncNeMoPlatform, AsyncCustomization
-](
+customization_sdk_resources = NemoPluginSDKResources[NeMoHelix, Customization, AsyncNeMoHelix, AsyncCustomization](
     sync_resource=Customization.from_platform,
     async_resource=AsyncCustomization.from_platform,
 )

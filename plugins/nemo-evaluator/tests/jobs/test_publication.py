@@ -57,17 +57,17 @@ from nemo_evaluator_sdk.values import Model, RunConfigOnline, RunConfigOnlineMod
 from nemo_evaluator_sdk.values.agents import NemoAgentToolkitAgent
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult  # noqa: F401
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult, EvaluationResult, RowScore
-from nemo_platform_plugin.client.errors import NemoTransportError, NotFoundError
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import (
+from nemo_helix_plugin.client.errors import NemoTransportError, NotFoundError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import (
     AtifCreateRequest,
     EvaluationPatchRequest,
     EvaluatorResultCreateRequest,
     ListTracesQueryParams,
 )
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.jobs.schemas import PlatformJobStatus
 from pydantic import ValidationError
 from pytest_mock import MockerFixture
 
@@ -615,7 +615,7 @@ def test_job_publishes_through_the_real_sync_bridge(tmp_path: Path, mocker: Mock
 
     # The evaluator drove a loop to completion first; publication then ran on a different one,
     # reusing the same injected SDK. That crossing is what raises "Event loop is closed" when the
-    # client is bound to a dead loop (cf. nmp-1hr.2). It does not distinguish `run_sync` from a bare
+    # client is bound to a dead loop (cf. nhx-1hr.2). It does not distinguish `run_sync` from a bare
     # `asyncio.run` — no loop is running at this point, so both behave the same here.
     ingest_loop = client.intake.ingest.atif.loop
     assert evaluator.loop is not None

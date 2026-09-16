@@ -30,10 +30,10 @@ from typing import Any, cast
 from nemo_experimentalist_plugin.entities import ResourceRef, Task, TrialResult
 from nemo_experimentalist_plugin.experimentalist.components.trace_analyzer import Diagnostic, TraceAnalyzer
 from nemo_experimentalist_plugin.experimentalist.components.trace_explorer import TraceExplorer
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import (
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import (
     ListSpanGroupsQueryParams,
     ListSpansQueryParams,
     ListTracesQueryParams,
@@ -61,7 +61,7 @@ def _explain(exc: Exception, *, doing: str, workspace: str) -> TraceQueryError:
     if isinstance(exc, NemoHTTPError):
         if exc.status_code in (401, 403):
             hint = (
-                "Credentials were rejected. Run `nemo auth login`, then confirm that NMP_BASE_URL "
+                "Credentials were rejected. Run `nemo auth login`, then confirm that NHX_BASE_URL "
                 f"points at the cluster that owns workspace '{workspace}'."
             )
         elif exc.status_code == 404:
@@ -76,7 +76,7 @@ def _explain(exc: Exception, *, doing: str, workspace: str) -> TraceQueryError:
         return TraceQueryError(f"{doing} failed. {hint}")
     if isinstance(exc, NemoTransportError):
         return TraceQueryError(
-            f"{doing} failed: the platform is unreachable. Check NMP_BASE_URL and that the services run."
+            f"{doing} failed: the platform is unreachable. Check NHX_BASE_URL and that the services run."
         )
     if isinstance(exc, ValueError):
         # TraceExplorer raises ValueError both for an unreadable ref and for a trace with

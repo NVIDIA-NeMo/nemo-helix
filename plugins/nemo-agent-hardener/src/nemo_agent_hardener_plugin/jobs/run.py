@@ -57,16 +57,16 @@ from nemo_agent_hardener_plugin.model_config import (
     WarGameModels,
 )
 from nemo_agent_hardener_plugin.model_preflight import validate_choice
-from nemo_platform_plugin.entity_client import NemoEntitiesClient
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix_plugin.entity_client import NemoEntitiesClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import (
     EnvironmentVariable,
     PlatformJobSpec,
     PlatformJobStep,
     SubprocessExecutionProviderSpec,
 )
-from nemo_platform_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)

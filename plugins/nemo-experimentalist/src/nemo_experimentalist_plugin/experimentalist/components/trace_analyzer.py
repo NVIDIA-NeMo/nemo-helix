@@ -15,8 +15,8 @@ from nemo_experimentalist_plugin.entities import DependencyRuntime, MetricResult
 from nemo_experimentalist_plugin.experimentalist.components import cache
 from nemo_experimentalist_plugin.experimentalist.components.tools import GuardedShellTools, WorkspaceTool
 from nemo_experimentalist_plugin.experimentalist.seam import TraceLoader
+from nemo_helix_plugin.nooa_model_client import get_default_model, get_fast_model
 from nemo_insights_plugin.entities import Insight
-from nemo_platform_plugin.nooa_model_client import get_default_model, get_fast_model
 from nooa import Agent, CodeActStrategy, strategy
 from nooa.agentdoc import doc, spec
 from nooa.agents import TokenBudgetSummarizer

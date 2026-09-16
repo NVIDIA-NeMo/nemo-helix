@@ -12,8 +12,8 @@ import pytest
 from data_designer_nemo.errors import NDDInvalidConfigError
 from nemo_data_designer_plugin.functions.retrieval_preview import RetrievalPreviewFrame, RetrievalPreviewFunction
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig, RetrievalPreviewSpec
-from nemo_platform_plugin.client.errors import PermissionDeniedError
-from nemo_platform_plugin.functions.frames import Done, Error
+from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.functions.frames import Done, Error
 
 
 def _generate_config(tmp_path) -> RetrievalGenerateJobConfig:

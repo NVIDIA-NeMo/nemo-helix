@@ -11,13 +11,13 @@ value through the Secrets service here.
 
 from __future__ import annotations
 
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.secrets.client import AsyncSecretsClient
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 
 
 async def resolve_hf_token(
-    async_sdk: AsyncNeMoPlatform,
+    async_sdk: AsyncNeMoHelix,
     hf_token_secret: str | None,
     workspace: str,
 ) -> str | None:

@@ -31,15 +31,15 @@ from nemo_anonymizer_plugin.sdk.errors import (
 )
 from nemo_anonymizer_plugin.sdk.job_resources import AnonymizerJobResource, AsyncAnonymizerJobResource
 from nemo_anonymizer_plugin.sdk.logging import with_logging
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.functions.frames import Done, Error, Heartbeat
-from nemo_platform_plugin.sdk import NemoPluginSDKResources
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.functions.frames import Done, Error, Heartbeat
+from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from pydantic import BaseModel, TypeAdapter
 
 logger = logging.getLogger(__name__)
 
-PlatformResourceClient = NeMoPlatform | AsyncNeMoPlatform
-PlatformResourceClientT = TypeVar("PlatformResourceClientT", NeMoPlatform, AsyncNeMoPlatform)
+PlatformResourceClient = NeMoHelix | AsyncNeMoHelix
+PlatformResourceClientT = TypeVar("PlatformResourceClientT", NeMoHelix, AsyncNeMoHelix)
 
 _PREVIEW_FRAME_ADAPTER = TypeAdapter(PreviewFrame)
 _KNOWN_PREVIEW_FRAME_KINDS = {
@@ -168,7 +168,7 @@ class _BaseAnonymizerResource(Generic[PlatformResourceClientT]):
 
 
 @with_logging
-class AnonymizerResource(_BaseAnonymizerResource[NeMoPlatform]):
+class AnonymizerResource(_BaseAnonymizerResource[NeMoHelix]):
     """Sync client for the Anonymizer plugin service."""
 
     def preview(
@@ -246,7 +246,7 @@ class AnonymizerResource(_BaseAnonymizerResource[NeMoPlatform]):
 
 
 @with_logging
-class AsyncAnonymizerResource(_BaseAnonymizerResource[AsyncNeMoPlatform]):
+class AsyncAnonymizerResource(_BaseAnonymizerResource[AsyncNeMoHelix]):
     """Async client for the Anonymizer plugin service."""
 
     async def preview(

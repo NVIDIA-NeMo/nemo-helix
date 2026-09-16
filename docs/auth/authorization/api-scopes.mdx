@@ -93,7 +93,7 @@ This enables least-privilege tokens: an Editor can create a read-only token (`pl
 
 Scopes must be registered in your IdP as custom API scopes. The CLI requests them during the OAuth flow, and the IdP includes granted scopes in the access token.
 
-If your IdP prefixes scopes (e.g., Azure AD uses `api://client-id/platform:read`), configure `scope_prefix` in the NeMo Platform OIDC settings so the platform strips the prefix before authorization:
+If your IdP prefixes scopes (e.g., Azure AD uses `api://client-id/platform:read`), configure `scope_prefix` in the NeMo Helix OIDC settings so the platform strips the prefix before authorization:
 
 ```yaml
 auth:
@@ -101,7 +101,7 @@ auth:
  scope_prefix: "api://your-client-id/"
 ```
 
-If you use per-API scopes, each scope (e.g., `api://nmp/models:read`) must be exposed individually in the IdP app registration.
+If you use per-API scopes, each scope (e.g., `api://nhx/models:read`) must be exposed individually in the IdP app registration.
 
 ## Scope Checking Behavior
 

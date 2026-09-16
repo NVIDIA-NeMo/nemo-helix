@@ -3,7 +3,7 @@
 
 """The entities every Experimentalist plugin speaks.
 
-``ExperimentRun`` and ``Candidate`` are stored in the NeMo Platform entity store; the
+``ExperimentRun`` and ``Candidate`` are stored in the NeMo Helix entity store; the
 dataset and evaluation-result models are what a strategy reads and writes. Every plugin
 shares these, so they live here rather than inside any one component.
 """
@@ -22,7 +22,7 @@ from types import TracebackType
 from typing import Any, Literal, TypeAlias
 from urllib.parse import unquote, urlparse
 
-from nemo_platform_plugin.entity import NemoEntity
+from nemo_helix_plugin.entity import NemoEntity
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, SerializeAsAny, model_validator
 
 DataValue: TypeAlias = str | int | float | bool | dict[str, Any] | list[Any] | None
@@ -549,7 +549,7 @@ class Candidate(NemoEntity, entity_type="candidate"):
 
     workspace: str = Field(
         default="default",
-        description="NeMo Platform workspace this candidate belongs to.",
+        description="NeMo Helix workspace this candidate belongs to.",
     )
     run_id: str = Field(
         ...,

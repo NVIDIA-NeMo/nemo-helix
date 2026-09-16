@@ -46,17 +46,17 @@ from nemo_experimentalist_plugin.experimentalist.components.repository import (
 from nemo_experimentalist_plugin.experimentalist.experiment_mirror import ExperimentMirror
 from nemo_experimentalist_plugin.experimentalist.otlp import jsonl_to_protobuf, read_trace_id, spans_to_protobuf
 from nemo_experimentalist_plugin.experimentalist.result import ExperimentalistResult
-from nemo_insights_plugin.entities import Insight
-from nemo_insights_plugin.typed_client import AsyncInsightsClient
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.client.errors import NemoHTTPError, NotFoundError
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import (
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import (
     AtifCreateRequest,
     EvaluatorResultCreateRequest,
     ListSpansQueryParams,
     Trace,
 )
+from nemo_insights_plugin.entities import Insight
+from nemo_insights_plugin.typed_client import AsyncInsightsClient
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)

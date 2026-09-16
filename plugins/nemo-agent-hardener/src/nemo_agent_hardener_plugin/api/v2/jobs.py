@@ -15,9 +15,9 @@ from nemo_agent_hardener_plugin.authz import scope
 from nemo_agent_hardener_plugin.jobs.run import AgentHardenerRunJob
 from nemo_agent_hardener_plugin.jobs.spec import WarGameSpec
 from nemo_agent_hardener_plugin.jobs.synth_benign import AgentHardenerSynthBenignJob, SynthBenignSpec
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.entities import EntityClient
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec, job_route_factory
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.entities import EntityClient
+from nemo_helix_plugin.jobs.api_factory import PlatformJobSpec, job_route_factory
 
 
 async def _compile_war_game(
@@ -26,7 +26,7 @@ async def _compile_war_game(
     transformed_spec: WarGameSpec,
     entity_client: EntityClient,
     job_name: str | None,
-    sdk: AsyncNeMoPlatform,
+    sdk: AsyncNeMoHelix,
 ) -> PlatformJobSpec:
     """Compile a war-game submission into a platform job (delegates to the job's own compile)."""
     del original_spec
@@ -54,7 +54,7 @@ async def _compile_synth_benign(
     transformed_spec: SynthBenignSpec,
     entity_client: EntityClient,
     job_name: str | None,
-    sdk: AsyncNeMoPlatform,
+    sdk: AsyncNeMoHelix,
 ) -> PlatformJobSpec:
     """Compile a benign-suite synthesis submission into a platform job (delegates to the job's own compile)."""
     del original_spec

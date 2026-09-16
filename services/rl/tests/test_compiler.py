@@ -11,21 +11,21 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from nemo_platform_plugin.integrations import IntegrationsSpec, MlflowIntegration, WandbIntegration
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
-from nemo_platform_plugin.models.types import ModelEntity
-from nmp.common.entities.utils import get_random_id
-from nmp.customization_common.schemas.values import OutputNameType
-from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
-from nmp.rl.app.jobs.compiler import (
+from nemo_helix_plugin.integrations import IntegrationsSpec, MlflowIntegration, WandbIntegration
+from nemo_helix_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.models.types import ModelEntity
+from nhx.common.entities.utils import get_random_id
+from nhx.customization_common.schemas.values import OutputNameType
+from nhx.customization_common.service.platform_client import AsyncCustomizationPlatformClients
+from nhx.rl.app.jobs.compiler import (
     _build_download_config,
     _build_training_step,
     _build_training_step_config,
     platform_job_config_compiler,
 )
-from nmp.rl.app.jobs.training.schemas import OptimizerType, TrainingType
-from nmp.rl.entities.values import FinetuningType
-from nmp.rl.schemas import DPOTraining, GRPOTraining, OutputResponse, ParallelismParams, RlJobOutput
+from nhx.rl.app.jobs.training.schemas import OptimizerType, TrainingType
+from nhx.rl.entities.values import FinetuningType
+from nhx.rl.schemas import DPOTraining, GRPOTraining, OutputResponse, ParallelismParams, RlJobOutput
 
 
 def _make_model_entity(fileset: str | None = "default/base-model") -> ModelEntity:
@@ -52,11 +52,11 @@ def sandbox_capable(monkeypatch: pytest.MonkeyPatch) -> None:
 
     `raising=False` on RL `config` fields: those are read off the module-level
     object, and a test run without the RL service settings loaded may not have
-    every attribute present. Platform fields always exist on `NemoPlatformConfig`.
+    every attribute present. Platform fields always exist on `NemoHelixConfig`.
     """
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.config.sandboxed_gym_default", True, raising=False)
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.platform_config.sandbox_cluster_capable", True)
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.config.job_storage_pvc_claim", "nmp-job-storage", raising=False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.config.sandboxed_gym_default", True, raising=False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.platform_config.sandbox_cluster_capable", True)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.config.job_storage_pvc_claim", "nhx-job-storage", raising=False)
 
 
 def _make_job_output(
@@ -137,7 +137,7 @@ def test_the_reporting_budget_reaches_the_training_step_config() -> None:
     Every link in the chain defaults, so a dropped one reports at 200 rather than
     failing -- which is exactly the kind of regression nothing else here notices.
     """
-    from nmp.customization_common.training.reporting import ProgressReportingConfig
+    from nhx.customization_common.training.reporting import ProgressReportingConfig
 
     t = DPOTraining(
         type="dpo", progress_reporting=ProgressReportingConfig(time_series_metrics=["*_loss", "*_accuracy"])
@@ -161,7 +161,7 @@ def test_the_reporting_budget_reaches_the_training_step_config_for_grpo(sandbox_
     test_grpo_config's equivalent checks, and presence is exactly what stayed true
     while the wiring was gone.
     """
-    from nmp.customization_common.training.reporting import ProgressReportingConfig
+    from nhx.customization_common.training.reporting import ProgressReportingConfig
 
     t = GRPOTraining(
         type="grpo",
@@ -238,14 +238,14 @@ def test_single_node_uses_gpu_executor() -> None:
     step = _build_training_step(job, [], trust_remote_code=False, profile=None)
     assert step["name"] == "dpo-training"
     assert _provider(step) == "gpu"
-    assert _container(step)["command"] == ["-m", "nmp.rl.tasks.training"]
+    assert _container(step)["command"] == ["-m", "nhx.rl.tasks.training"]
     resources = step["executor"]["resources"]
     actual = resources.shm_size if hasattr(resources, "shm_size") else resources["shm_size"]
     assert actual == "8Gi"
 
 
 def test_multi_node_gpu_shm_scales_with_gpus_per_node(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.config.multinode_shared_storage_path", "/shared", raising=False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.config.multinode_shared_storage_path", "/shared", raising=False)
     job = _make_job_output(DPOTraining(type="dpo", parallelism=ParallelismParams(num_nodes=2, num_gpus_per_node=2)))
     step = _build_training_step(job, [], trust_remote_code=False, profile=None)
     resources = step["executor"]["resources"]
@@ -254,14 +254,14 @@ def test_multi_node_gpu_shm_scales_with_gpus_per_node(monkeypatch: pytest.Monkey
 
 
 def test_multi_node_requires_shared_storage(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.config.multinode_shared_storage_path", None, raising=False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.config.multinode_shared_storage_path", None, raising=False)
     job = _make_job_output(DPOTraining(type="dpo", parallelism=ParallelismParams(num_nodes=2, num_gpus_per_node=2)))
     with pytest.raises(PlatformJobCompilationError, match="shared filesystem"):
         _build_training_step(job, [], trust_remote_code=False, profile=None)
 
 
 def test_multi_node_uses_distributed_executor_with_shared_storage(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.config.multinode_shared_storage_path", "/shared", raising=False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.config.multinode_shared_storage_path", "/shared", raising=False)
     job = _make_job_output(DPOTraining(type="dpo", parallelism=ParallelismParams(num_nodes=2, num_gpus_per_node=2)))
     step = _build_training_step(job, [], trust_remote_code=False, profile=None)
     assert _provider(step) == "gpu_distributed"
@@ -290,7 +290,7 @@ async def test_compiler_emits_four_steps(
     platform_clients: AsyncCustomizationPlatformClients,
 ) -> None:
     monkeypatch.setattr(
-        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        "nhx.rl.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_model_entity()),
     )
     spec = await platform_job_config_compiler("default", _make_job_output(), platform_clients)
@@ -300,12 +300,12 @@ async def test_compiler_emits_four_steps(
     assert names == ["model-and-dataset-download", "dpo-training", "model-upload", "model-entity-creation"]
 
     # CPU task steps share the lighter customizer-tasks image; the GPU step uses the training image.
-    assert "nmp-customizer-tasks" in _container(steps[0])["image"]
-    assert "nmp-rl-training" in _container(steps[1])["image"]
-    assert "nmp-customizer-tasks" in _container(steps[2])["image"]
+    assert "nhx-customizer-tasks" in _container(steps[0])["image"]
+    assert "nhx-rl-training" in _container(steps[1])["image"]
+    assert "nhx-customizer-tasks" in _container(steps[2])["image"]
     assert _container(steps[0])["command"] == [
         "-m",
-        "nmp.customization_common.tasks.file_io",
+        "nhx.customization_common.tasks.file_io",
         "--service-source",
         "rl",
         "--service-name",
@@ -313,7 +313,7 @@ async def test_compiler_emits_four_steps(
     ]
     assert _container(steps[3])["command"] == [
         "-m",
-        "nmp.customization_common.tasks.model_entity",
+        "nhx.customization_common.tasks.model_entity",
         "--service-name",
         "rl",
     ]
@@ -328,7 +328,7 @@ async def test_compiler_rejects_model_without_fileset(
     platform_clients: AsyncCustomizationPlatformClients,
 ) -> None:
     monkeypatch.setattr(
-        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        "nhx.rl.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_model_entity(fileset=None)),
     )
     with pytest.raises(PlatformJobCompilationError, match="has no fileset"):
@@ -359,7 +359,7 @@ def test_grpo_training_step_config_sandboxed(sandbox_capable: None) -> None:
 
 
 def test_grpo_lora_training_step_config(sandbox_capable: None) -> None:
-    from nmp.rl.schemas import LoRAParams
+    from nhx.rl.schemas import LoRAParams
 
     job = RlJobOutput(
         model="default/base-model",
@@ -381,8 +381,8 @@ def test_grpo_lora_training_step_config(sandbox_capable: None) -> None:
 
 
 def test_grpo_lora_model_entity_peft(sandbox_capable: None) -> None:
-    from nmp.rl.app.jobs.compiler import _build_model_entity_config
-    from nmp.rl.schemas import LoRAParams
+    from nhx.rl.app.jobs.compiler import _build_model_entity_config
+    from nhx.rl.schemas import LoRAParams
 
     job = RlJobOutput(
         model="default/base-model",
@@ -399,10 +399,10 @@ def test_grpo_lora_model_entity_peft(sandbox_capable: None) -> None:
 
 
 def test_grpo_compile_succeeds_when_platform_sandbox_capable(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.config.sandboxed_gym_default", True, raising=False)
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.platform_config.sandbox_cluster_capable", True)
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.config.job_storage_pvc_claim", "nmp-job-storage", raising=False)
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.platform_config.sandbox_server_protocol", "http")
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.config.sandboxed_gym_default", True, raising=False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.platform_config.sandbox_cluster_capable", True)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.config.job_storage_pvc_claim", "nhx-job-storage", raising=False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.platform_config.sandbox_server_protocol", "http")
 
     sc = _build_training_step_config(
         _make_job_output(GRPOTraining(type="grpo"), environment="default/env"),
@@ -414,8 +414,8 @@ def test_grpo_compile_succeeds_when_platform_sandbox_capable(monkeypatch: pytest
 
 
 def test_grpo_compile_fails_closed_without_sandbox_capability(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.config.sandboxed_gym_default", True, raising=False)
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.platform_config.sandbox_cluster_capable", False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.config.sandboxed_gym_default", True, raising=False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.platform_config.sandbox_cluster_capable", False)
     with pytest.raises(PlatformJobCompilationError, match="sandbox_cluster_capable"):
         _build_training_step_config(
             _make_job_output(GRPOTraining(type="grpo"), environment="default/env"),
@@ -430,9 +430,9 @@ def test_dpo_compiles_without_sandbox_capability(monkeypatch: pytest.MonkeyPatch
     gate ever moves somewhere shared, every DPO job on a sandbox-less cluster stops
     compiling -- and DPO is the path that has no need of a sandbox at all.
     """
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.config.sandboxed_gym_default", True, raising=False)
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.platform_config.sandbox_cluster_capable", False)
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.config.job_storage_pvc_claim", None, raising=False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.config.sandboxed_gym_default", True, raising=False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.platform_config.sandbox_cluster_capable", False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.config.job_storage_pvc_claim", None, raising=False)
 
     sc = _build_training_step_config(_make_job_output(), trust_remote_code=False)
 
@@ -441,11 +441,11 @@ def test_dpo_compiles_without_sandbox_capability(monkeypatch: pytest.MonkeyPatch
 
 
 def test_grpo_training_step_injects_egress_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.platform_config.sandbox_cluster_capable", True)
-    monkeypatch.setattr("nmp.rl.app.jobs.compiler.config.job_storage_pvc_claim", "nmp-job-storage", raising=False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.platform_config.sandbox_cluster_capable", True)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.config.job_storage_pvc_claim", "nhx-job-storage", raising=False)
     job = _make_job_output(GRPOTraining(type="grpo"), environment="default/env")
     step = _build_training_step(job, [], trust_remote_code=False, profile=None)
     assert step["name"] == "grpo-training"
     env_names = {env["name"] for env in step["environment"]}
-    assert "NMP_VLLM_SERVICE_HOST" in env_names
-    assert "NMP_BROKER_SERVICE_PORT" in env_names
+    assert "NHX_VLLM_SERVICE_HOST" in env_names
+    assert "NHX_BROKER_SERVICE_PORT" in env_names

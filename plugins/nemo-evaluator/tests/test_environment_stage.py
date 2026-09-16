@@ -6,10 +6,10 @@ from pathlib import Path
 import httpx
 import pytest
 from nemo_evaluator.jobs.environment_stage import EnvironmentStageJob
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_platform_plugin.sdk import NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.sdk import NeMoHelix
 from pytest_mock import MockerFixture
 
 
@@ -132,7 +132,7 @@ def test_failed_download_removes_partial_staging_without_replacing_environment(
 
 
 def test_run_adapts_the_generated_sdk_the_local_cli_injects(tmp_path: Path, mocker: MockerFixture) -> None:
-    """``nemo evaluator stage-environment run`` injects a generated ``NeMoPlatform``, but staging
+    """``nemo evaluator stage-environment run`` injects a generated ``NeMoHelix``, but staging
     reaches the Files service through ``FilesClient.from_client``, which only accepts a typed
     client."""
     received: dict[str, object] = {}
@@ -145,7 +145,7 @@ def test_run_adapts_the_generated_sdk_the_local_cli_injects(tmp_path: Path, mock
         "nemo_evaluator.jobs.environment_stage._download_fileset_contents",
         side_effect=download_contents,
     )
-    platform = NeMoPlatform(base_url="http://platform.test", workspace="dev", http_client=httpx.Client())
+    platform = NeMoHelix(base_url="http://platform.test", workspace="dev", http_client=httpx.Client())
 
     result = EnvironmentStageJob().run({"environment": "shared/custom-gym"}, ctx=_context(tmp_path), sdk=platform)
 

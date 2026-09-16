@@ -38,8 +38,8 @@ from nemo_experimentalist_plugin.experimentalist.context import ExperimentContex
 from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import ExperimentalistBackend
 from nemo_experimentalist_plugin.experimentalist.reporting import RunReporter
 from nemo_experimentalist_plugin.experimentalist.result import ExperimentalistResult
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_insights_plugin.entities import Insight
-from nemo_platform_plugin.client.client import AsyncNemoClient
 
 
 def fake_client() -> AsyncNemoClient:

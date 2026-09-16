@@ -6,10 +6,10 @@ import json
 import tarfile
 
 import httpx
-from nemo_platform import NeMoPlatform
-from nmp.common.auth import AuthContext, Principal, WorkloadDelegationEntity, docker_delegation_name
-from nmp.common.entities import SYSTEM_WORKSPACE
-from nmp.core.jobs.controllers.backends.workload_tokens import (
+from nemo_helix import NeMoHelix
+from nhx.common.auth import AuthContext, Principal, WorkloadDelegationEntity, docker_delegation_name
+from nhx.common.entities import SYSTEM_WORKSPACE
+from nhx.core.jobs.controllers.backends.workload_tokens import (
     WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS,
     build_token_archive,
     create_authenticated_workload_delegation_store,
@@ -76,13 +76,13 @@ def test_authenticated_workload_delegation_store_uses_sync_service_client() -> N
         )
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
-        sdk = NeMoPlatform(
+        sdk = NeMoHelix(
             base_url="http://platform",
             default_headers={
                 "Authorization": "Bearer controller-token",
-                "X-NMP-Principal-On-Behalf-Of": "alice@example.com",
-                "X-NMP-Principal-On-Behalf-Of-Email": "alice@example.com",
-                "X-NMP-Principal-On-Behalf-Of-Groups": "team-a",
+                "X-NHX-Principal-On-Behalf-Of": "alice@example.com",
+                "X-NHX-Principal-On-Behalf-Of-Email": "alice@example.com",
+                "X-NHX-Principal-On-Behalf-Of-Groups": "team-a",
             },
             http_client=http_client,
         )
@@ -96,11 +96,11 @@ def test_authenticated_workload_delegation_store_uses_sync_service_client() -> N
     assert request.method == "POST"
     assert str(request.url) == "http://platform/apis/entities/v2/workspaces/system/entities/workload_delegation"
     assert request.headers["Authorization"] == "Bearer controller-token"
-    assert request.headers["X-NMP-Principal-Id"] == "service:jobs"
-    assert request.headers["X-NMP-Principal-On-Behalf-Of"] == ""
-    assert request.headers["X-NMP-Principal-On-Behalf-Of-Email"] == ""
-    assert request.headers["X-NMP-Principal-On-Behalf-Of-Groups"] == ""
-    assert request.headers["X-NMP-Internal"] == "true"
+    assert request.headers["X-NHX-Principal-Id"] == "service:jobs"
+    assert request.headers["X-NHX-Principal-On-Behalf-Of"] == ""
+    assert request.headers["X-NHX-Principal-On-Behalf-Of-Email"] == ""
+    assert request.headers["X-NHX-Principal-On-Behalf-Of-Groups"] == ""
+    assert request.headers["X-NHX-Internal"] == "true"
 
 
 def _workload_delegation_entity() -> WorkloadDelegationEntity:
@@ -114,7 +114,7 @@ def _workload_delegation_entity() -> WorkloadDelegationEntity:
         name=delegation_name,
         workspace=SYSTEM_WORKSPACE,
         workload_subject=delegation_name,
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_workspace="default",
         job_id="job-123",
         attempt_id="attempt-1",

@@ -7,7 +7,7 @@ Spawns dedicated ``nemo services run`` instances (fresh tmp data dir, free
 port, this checkout's code) configured for **native OIDC only**:
 ``auth.enabled=true``, ``oidc.enabled=true`` pointing at the in-harness
 issuer, and — critically — ``allow_unsigned_jwt=false``, so every identity in
-the matrix is established by a real RS256-signed JWT. ``X-NMP-Principal-*``
+the matrix is established by a real RS256-signed JWT. ``X-NHX-Principal-*``
 headers are never sent; provisioning itself authenticates with a signed JWT
 whose ``sub`` is ``service:e2e-harness``.
 
@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parents[1]
-_PLATFORM_CONFIG = _REPO_ROOT / "packages/nmp_platform/config/local.yaml"
+_PLATFORM_CONFIG = _REPO_ROOT / "packages/nhx_platform/config/local.yaml"
 _FIXTURE_PLUGINS = ["harness-fixture", "harness-unruled", "harness-broken"]
 
 _HEALTH_TIMEOUT = 180
@@ -130,36 +130,36 @@ def _uninstall_fixture_plugins(names: list[str]) -> None:
 
 
 def _platform_env(issuer_url: str, base_url: str, data_dir: Path, extra: dict[str, str]) -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("NMP_", "DATABASE_"))}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("NHX_", "DATABASE_"))}
     env.update(
         {
-            "NMP_CONFIG_FILE_PATH": str(_PLATFORM_CONFIG),
-            "NMP_CONFIG_WARNINGS_DISABLED": "1",
-            "NMP_BASE_URL": base_url,
-            "NMP_DATA_DIR": str(data_dir),
-            "NMP_SEED_ON_STARTUP": "true",
+            "NHX_CONFIG_FILE_PATH": str(_PLATFORM_CONFIG),
+            "NHX_CONFIG_WARNINGS_DISABLED": "1",
+            "NHX_BASE_URL": base_url,
+            "NHX_DATA_DIR": str(data_dir),
+            "NHX_SEED_ON_STARTUP": "true",
             # Authz rows need auth seeding, but the default model-provider seed
             # requires a real NGC_API_KEY and is unrelated to this matrix.
-            "NMP_PLATFORM_SEED_MODEL_PROVIDER_ENABLED": "false",
-            "NMP_AUTH_ENABLED": "true",
-            "NMP_AUTH_ALLOW_UNSIGNED_JWT": "false",  # defaults are true; signed JWTs only
-            "NMP_AUTH_POLICY_DECISION_POINT_BASE_URL": base_url,
-            "NMP_AUTH_OIDC__ENABLED": "true",
-            "NMP_AUTH_OIDC__ISSUER": issuer_url,
-            "NMP_AUTH_OIDC__AUDIENCE": DEFAULT_AUDIENCE,
-            "NMP_AUTH_ADMIN_EMAIL": ADMIN_EMAIL,
+            "NHX_PLATFORM_SEED_MODEL_PROVIDER_ENABLED": "false",
+            "NHX_AUTH_ENABLED": "true",
+            "NHX_AUTH_ALLOW_UNSIGNED_JWT": "false",  # defaults are true; signed JWTs only
+            "NHX_AUTH_POLICY_DECISION_POINT_BASE_URL": base_url,
+            "NHX_AUTH_OIDC__ENABLED": "true",
+            "NHX_AUTH_OIDC__ISSUER": issuer_url,
+            "NHX_AUTH_OIDC__AUDIENCE": DEFAULT_AUDIENCE,
+            "NHX_AUTH_ADMIN_EMAIL": ADMIN_EMAIL,
             # bundle_cache_seconds must stay NONZERO: at 0 every PDP eval
             # rebuilds policy data, and degraded fixture plugins are never
             # cached — each eval then re-runs full plugin derivation
             # and entity paging, blowing the 5s PDP timeout platform-wide.
             # Fast background refresh + settle-probes handle propagation.
-            "NMP_AUTH_BUNDLE_CACHE_SECONDS": "5",
-            "NMP_AUTH_POLICY_DATA_REFRESH_INTERVAL": "2",
+            "NHX_AUTH_BUNDLE_CACHE_SECONDS": "5",
+            "NHX_AUTH_POLICY_DATA_REFRESH_INTERVAL": "2",
             # FINDING (harness-discovered): branch rego exceeds the default
             # embedded-PDP fuel budget (100M; config docstring says typical
             # evals are 20-25M) once seeded principal data is loaded — every
             # request 502s. Raised here to unblock; flagged for the branch.
-            "NMP_AUTH_EMBEDDED_PDP_CPU_LIMIT": "2000",
+            "NHX_AUTH_EMBEDDED_PDP_CPU_LIMIT": "2000",
         }
     )
     env.update(extra)
@@ -340,7 +340,7 @@ def platform(
     would abort bundle generation and leave the platform degraded) to exercise
     per-route fencing on a running platform.
     """
-    gen = _spawn_platform(issuer, tmp_path_factory, "default", {"NMP_AUTH_ON_INVALID_PLUGIN": "deny_route"})
+    gen = _spawn_platform(issuer, tmp_path_factory, "default", {"NHX_AUTH_ON_INVALID_PLUGIN": "deny_route"})
     with closing(gen):
         p = next(gen)
         _provision(p)
@@ -356,7 +356,7 @@ def platform_knobs(
         issuer,
         tmp_path_factory,
         "knobs",
-        {"NMP_AUTH_ON_INVALID_PLUGIN": "quarantine"},
+        {"NHX_AUTH_ON_INVALID_PLUGIN": "quarantine"},
     )
     with closing(gen):
         p = next(gen)

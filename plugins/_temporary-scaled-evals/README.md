@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # nemo-scaled-evals (Phase 1 ephemeral plugin)
 
-Vendors the scaled-evals control plane into NeMo Platform as an ephemeral plugin so Harbor/Gym scaled evaluation keeps working end-to-end while substrate plugins (builder/registry/sandbox) and the nemo-evaluator API merge land later.
+Vendors the scaled-evals control plane into NeMo Helix as an ephemeral plugin so Harbor/Gym scaled evaluation keeps working end-to-end while substrate plugins (builder/registry/sandbox) and the nemo-evaluator API merge land later.
 
 Portable behavior is reconciled through standalone scaled-evals `1.13.0`
 (`c64f23e71dc829414ab9279483973a84a17eea8d`). This remains a platform-adapted
@@ -17,7 +17,7 @@ imply reconciliation of the other changes after `1.13.0`.
 ## Install (ephemeral — not in `enabled-plugins` yet)
 
 ```bash
-# From nemo-platform repo root
+# From nemo-helix repo root
 uv sync
 uv pip install -e plugins/_temporary-scaled-evals/
 ```
@@ -261,7 +261,7 @@ explicitly rather than assuming.
 
 ```bash
 uv run python -c "
-from nmp.platform_runner.registry import get_available_services, get_service_groups
+from nhx.platform_runner.registry import get_available_services, get_service_groups
 print('discovered:', 'scaled-evals' in get_available_services())
 print('in groups:', [g for g, v in get_service_groups().items() if 'scaled-evals' in v])
 "

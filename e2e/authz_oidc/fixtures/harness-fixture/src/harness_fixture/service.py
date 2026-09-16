@@ -20,8 +20,8 @@ from __future__ import annotations
 from typing import ClassVar
 
 from fastapi import APIRouter
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.service import NemoService, RouterSpec
 
 router = APIRouter()
 

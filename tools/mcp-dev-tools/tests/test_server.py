@@ -10,11 +10,11 @@ from pathlib import Path
 # Add parent directory to path to import the script
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Import from the standalone script (nmp_dev_mcp.py)
-import nmp_dev_mcp
+# Import from the standalone script (nhx_dev_mcp.py)
+import nhx_dev_mcp
 
-create_server = nmp_dev_mcp.create_server
-parse_pytest_output = nmp_dev_mcp.parse_pytest_output
+create_server = nhx_dev_mcp.create_server
+parse_pytest_output = nhx_dev_mcp.parse_pytest_output
 
 
 def test_pytest_parser():
@@ -25,10 +25,10 @@ def test_pytest_parser():
     sample_output = """
 ============================= test session starts ==============================
 platform darwin -- Python 3.11.13, pytest-8.4.2, pluggy-1.6.0
-rootdir: /Users/mkornfield/dev/nmp2
+rootdir: /Users/mkornfield/dev/nhx2
 configfile: pytest.ini
 
-FAILED packages/nmp_common/tests/observability/test_otel.py::TestLoggingIntegration::test_initialize_obs_configures_json_logging_when_env_set - subprocess.TimeoutExpired
+FAILED packages/nhx_common/tests/observability/test_otel.py::TestLoggingIntegration::test_initialize_obs_configures_json_logging_when_env_set - subprocess.TimeoutExpired
 ERROR packages/test_something.py::test_broken - Exception: Something broke
 
 = 1 failed, 4628 passed, 75 skipped, 2 xfailed, 110 warnings, 22 subtests passed in 207.29s (0:03:27) =
@@ -111,7 +111,7 @@ def test_server():
     print(f"\nTotal: {len(expected_tools)} tools")
     print("\nTo test interactively, run:")
     print(
-        "  npx @modelcontextprotocol/inspector uv run tools/mcp-dev-tools/nmp_dev_mcp.py"
+        "  npx @modelcontextprotocol/inspector uv run tools/mcp-dev-tools/nhx_dev_mcp.py"
     )
 
 

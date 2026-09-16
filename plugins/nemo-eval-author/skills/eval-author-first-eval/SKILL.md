@@ -129,7 +129,7 @@ An empty file, placeholder, or unrelated Ethos does not satisfy this prerequisit
 If missing, explain that Ethos records the agent's purpose, intended behavior,
 constraints, success and failure criteria, and what may change. It is the source
 of truth for what the evals should test; code only shows current implementation.
-Share the [Ethos documentation](https://docs.nvidia.com/nemo-platform/documentation/agents/optimize-agents/ethos).
+Share the [Ethos documentation](https://docs.nvidia.com/nemo-helix/documentation/agents/optimize-agents/ethos).
 
 Read and follow [Local Ethos](../eval-author/references/local-ethos.md) to create,
 check, and review the file in the user's repo, defaulting to root `ETHOS.md`.

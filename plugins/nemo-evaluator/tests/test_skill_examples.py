@@ -313,10 +313,10 @@ def test_skill_manifest_has_discovery_metadata() -> None:
     )
     assert manifest["license"] == "Apache-2.0"
     assert manifest["metadata"] == {
-        "owner": "nemo-platform",
-        "author": "nemo-platform",
+        "owner": "nemo-helix",
+        "author": "nemo-helix",
         "maturity": "active",
-        "tags": ["evaluation", "metrics", "agent-eval", "nemo-platform"],
+        "tags": ["evaluation", "metrics", "agent-eval", "nemo-helix"],
     }
 
 

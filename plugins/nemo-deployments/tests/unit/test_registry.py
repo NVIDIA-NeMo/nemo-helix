@@ -25,7 +25,7 @@ from nemo_deployments_plugin.backends.registry import (
     UnknownBackendTypeError,
 )
 from nemo_deployments_plugin.entities import Container, ContainerPort, DeploymentConfig
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
 
 class _StubBackend(DeploymentBackend):
@@ -94,7 +94,7 @@ def test_empty_registry_starts(backend_classes: dict[str, type[DeploymentBackend
 
 
 def test_resolve_by_name(backend_classes: dict[str, type[DeploymentBackend]]) -> None:
-    sdk = AsyncNeMoPlatform(base_url="http://localhost:8080")
+    sdk = AsyncNeMoHelix(base_url="http://localhost:8080")
     registry = ExecutorRegistry.from_config(
         sdk,
         [
@@ -109,7 +109,7 @@ def test_resolve_by_name(backend_classes: dict[str, type[DeploymentBackend]]) ->
 
 
 def test_missing_executor_raises(backend_classes: dict[str, type[DeploymentBackend]]) -> None:
-    sdk = AsyncNeMoPlatform(base_url="http://localhost:8080")
+    sdk = AsyncNeMoHelix(base_url="http://localhost:8080")
     registry = ExecutorRegistry.from_config(
         sdk,
         [ExecutorSpec(name="a", backend="docker", config={})],
@@ -125,7 +125,7 @@ def test_unavailable_executor_reports_distinct_error(
     # A configured executor whose backend was skipped must resolve to a distinct,
     # actionable error that names the backend, not the generic 'not registered'
     # message used for a genuinely unknown name.
-    sdk = AsyncNeMoPlatform(base_url="http://localhost:8080")
+    sdk = AsyncNeMoHelix(base_url="http://localhost:8080")
     classes = {**backend_classes, "sandbox": _MissingDepBackend}
     registry = ExecutorRegistry.from_config(
         sdk,
@@ -146,7 +146,7 @@ def test_unavailable_executor_reports_distinct_error(
 
 
 def test_unknown_backend_type_raises() -> None:
-    sdk = AsyncNeMoPlatform(base_url="http://localhost:8080")
+    sdk = AsyncNeMoHelix(base_url="http://localhost:8080")
     with pytest.raises(UnknownBackendTypeError):
         ExecutorRegistry.from_config(
             sdk,
@@ -166,7 +166,7 @@ class _MissingDepBackend(_StubBackend):
 
 
 def test_registry_rolls_back_on_partial_init(backend_classes: dict[str, type[DeploymentBackend]]) -> None:
-    sdk = AsyncNeMoPlatform(base_url="http://localhost:8080")
+    sdk = AsyncNeMoHelix(base_url="http://localhost:8080")
     classes = {**backend_classes, "fail": _FailingBackend}
     shutdown_calls: list[str] = []
 
@@ -192,7 +192,7 @@ def test_registry_skips_backend_with_missing_dependency(
 ) -> None:
     # An opt-in backend whose optional extra is absent is skipped, not fatal:
     # other executors still register and the service can boot.
-    sdk = AsyncNeMoPlatform(base_url="http://localhost:8080")
+    sdk = AsyncNeMoHelix(base_url="http://localhost:8080")
     classes = {**backend_classes, "sandbox": _MissingDepBackend}
     registry = ExecutorRegistry.from_config(
         sdk,
@@ -212,7 +212,7 @@ def test_registry_missing_dependency_default_executor_fails(
 ) -> None:
     # Skipping an optional executor is fine; a configured default that cannot
     # register must fail fast so misconfiguration is obvious at startup.
-    sdk = AsyncNeMoPlatform(base_url="http://localhost:8080")
+    sdk = AsyncNeMoHelix(base_url="http://localhost:8080")
     classes = {**backend_classes, "sandbox": _MissingDepBackend}
     with pytest.raises(
         ExecutorNotFoundError,
@@ -229,7 +229,7 @@ def test_registry_missing_dependency_default_executor_fails(
 def test_registry_skips_unavailable_docker_and_keeps_other_backends(
     backend_classes: dict[str, type[DeploymentBackend]],
 ) -> None:
-    sdk = AsyncNeMoPlatform(base_url="http://localhost:8080")
+    sdk = AsyncNeMoHelix(base_url="http://localhost:8080")
 
     class _UnavailableDocker(_StubBackend):
         def init(self) -> None:
@@ -252,7 +252,7 @@ def test_registry_skips_unavailable_docker_and_keeps_other_backends(
 def test_registry_unavailable_docker_default_executor_fails(
     backend_classes: dict[str, type[DeploymentBackend]],
 ) -> None:
-    sdk = AsyncNeMoPlatform(base_url="http://localhost:8080")
+    sdk = AsyncNeMoHelix(base_url="http://localhost:8080")
 
     class _UnavailableDocker(_StubBackend):
         def init(self) -> None:
@@ -275,7 +275,7 @@ def test_registry_unavailable_docker_default_executor_fails(
 
 
 def test_multiple_docker_executors_distinct_config() -> None:
-    sdk = AsyncNeMoPlatform(base_url="http://localhost:8080")
+    sdk = AsyncNeMoHelix(base_url="http://localhost:8080")
     with _patched_docker_init():
         registry = ExecutorRegistry.from_config(
             sdk,
@@ -294,7 +294,7 @@ def test_multiple_docker_executors_distinct_config() -> None:
 
 @pytest.mark.asyncio
 async def test_executor_port_range_used_for_allocation() -> None:
-    sdk = AsyncNeMoPlatform(base_url="http://localhost:8080")
+    sdk = AsyncNeMoHelix(base_url="http://localhost:8080")
     mock_entities = AsyncMock()
     mock_docker_client = MagicMock()
     mock_docker_client.containers.get.side_effect = NotFound("missing")

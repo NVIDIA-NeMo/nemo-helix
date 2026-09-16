@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, call
 
 import pandas as pd
 import pytest
-from nemo_platform_plugin.jobs.constants import NEMO_JOB_ID_ENVVAR, NEMO_JOB_WORKSPACE_ENVVAR
+from nemo_helix_plugin.jobs.constants import NEMO_JOB_ID_ENVVAR, NEMO_JOB_WORKSPACE_ENVVAR
 
 
 def _resp(data):

@@ -622,12 +622,12 @@ def test_profile_dir_env_file_is_loaded_for_experiment(app, profile_tree: Path, 
         os.environ.pop("NEMO_OPT_TEST_DOTENV", None)
 
 
-def test_experiment_loads_nmp_base_url_from_profile_env(app, profile_tree: Path, monkeypatch) -> None:
+def test_experiment_loads_nhx_base_url_from_profile_env(app, profile_tree: Path, monkeypatch) -> None:
     recorder = RunRecorder()
     monkeypatch.setattr(cli, "run_experimentalist", recorder)
-    monkeypatch.delenv("NMP_BASE_URL", raising=False)
+    monkeypatch.delenv("NHX_BASE_URL", raising=False)
     (profile_tree / ".env").write_text(
-        "NMP_BASE_URL=https://platform.example\n",
+        "NHX_BASE_URL=https://platform.example\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(profile_tree)
@@ -643,7 +643,7 @@ def test_experiment_loads_nmp_base_url_from_profile_env(app, profile_tree: Path,
     assert client.closed
 
 
-def test_doctor_loads_nmp_base_url_from_profile_env(app, profile_tree: Path, monkeypatch) -> None:
+def test_doctor_loads_nhx_base_url_from_profile_env(app, profile_tree: Path, monkeypatch) -> None:
     write_task_toml(profile_tree)
     urls: list[str] = []
 
@@ -659,9 +659,9 @@ def test_doctor_loads_nmp_base_url_from_profile_env(app, profile_tree: Path, mon
             http_ok=record_http,
         ),
     )
-    monkeypatch.delenv("NMP_BASE_URL", raising=False)
+    monkeypatch.delenv("NHX_BASE_URL", raising=False)
     (profile_tree / ".env").write_text(
-        "NMP_BASE_URL=https://platform.example\n",
+        "NHX_BASE_URL=https://platform.example\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(profile_tree)
@@ -1085,7 +1085,7 @@ def test_env_file_encoding_failure_is_clean_and_actionable(
     command: str,
 ) -> None:
     write_task_toml(profile_tree)
-    (profile_tree / ".env").write_bytes(b"NMP_BASE_URL=\xff")
+    (profile_tree / ".env").write_bytes(b"NHX_BASE_URL=\xff")
     monkeypatch.chdir(profile_tree)
     args = [command]
     if command == "run":
@@ -1106,7 +1106,7 @@ def test_doctor_env_file_permission_failure_is_required_and_actionable(
 ) -> None:
     write_task_toml(profile_tree)
     env_file = profile_tree / ".env"
-    env_file.write_text("NMP_BASE_URL=https://profile.example\n", encoding="utf-8")
+    env_file.write_text("NHX_BASE_URL=https://profile.example\n", encoding="utf-8")
     original_read_text = Path.read_text
 
     def deny_env_file(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
@@ -1136,7 +1136,7 @@ def test_doctor_env_file_permission_failure_is_required_and_actionable(
     ],
     ids=["explicit", "shell", "profile-env", "default-ignores-nemo"],
 )
-def test_experiment_nmp_base_url_precedence_and_ignores_nemo_base_url(
+def test_experiment_nhx_base_url_precedence_and_ignores_nemo_base_url(
     app,
     profile_tree: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1149,11 +1149,11 @@ def test_experiment_nmp_base_url_precedence_and_ignores_nemo_base_url(
     monkeypatch.setattr(cli, "run_experimentalist", recorder)
     monkeypatch.setenv("NEMO_BASE_URL", "https://legacy-must-be-ignored.example")
     if shell is None:
-        monkeypatch.delenv("NMP_BASE_URL", raising=False)
+        monkeypatch.delenv("NHX_BASE_URL", raising=False)
     else:
-        monkeypatch.setenv("NMP_BASE_URL", shell)
+        monkeypatch.setenv("NHX_BASE_URL", shell)
     if profile_env is not None:
-        (profile_tree / ".env").write_text(f"NMP_BASE_URL={profile_env}\n", encoding="utf-8")
+        (profile_tree / ".env").write_text(f"NHX_BASE_URL={profile_env}\n", encoding="utf-8")
     monkeypatch.chdir(profile_tree)
     args = ["run", "--no-insight", "-o", str(profile_tree / "out")]
     if explicit is not None:
@@ -1177,7 +1177,7 @@ def test_experiment_nmp_base_url_precedence_and_ignores_nemo_base_url(
     ],
     ids=["explicit", "shell", "profile-env", "default-ignores-nemo"],
 )
-def test_doctor_nmp_base_url_precedence_and_ignores_nemo_base_url(
+def test_doctor_nhx_base_url_precedence_and_ignores_nemo_base_url(
     app,
     profile_tree: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1198,11 +1198,11 @@ def test_doctor_nmp_base_url_precedence_and_ignores_nemo_base_url(
     )
     monkeypatch.setenv("NEMO_BASE_URL", "https://legacy-must-be-ignored.example")
     if shell is None:
-        monkeypatch.delenv("NMP_BASE_URL", raising=False)
+        monkeypatch.delenv("NHX_BASE_URL", raising=False)
     else:
-        monkeypatch.setenv("NMP_BASE_URL", shell)
+        monkeypatch.setenv("NHX_BASE_URL", shell)
     if profile_env is not None:
-        (profile_tree / ".env").write_text(f"NMP_BASE_URL={profile_env}\n", encoding="utf-8")
+        (profile_tree / ".env").write_text(f"NHX_BASE_URL={profile_env}\n", encoding="utf-8")
     monkeypatch.chdir(profile_tree)
     args = ["doctor"]
     if explicit is not None:

@@ -32,7 +32,7 @@ pytestmark = [
     skip_without_kubeconfig,
 ]
 
-NAMESPACE = os.environ.get("NMP_K8S_ITEST_NAMESPACE", "default")
+NAMESPACE = os.environ.get("NHX_K8S_ITEST_NAMESPACE", "default")
 POLL_ATTEMPTS = 60
 POLL_INTERVAL_SECONDS = 1
 ALPINE_IMAGE = "docker.io/library/alpine:3.20"

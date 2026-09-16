@@ -17,7 +17,7 @@ This page covers common issues and how to resolve them.
 
 **Cause:**
 
-If you installed `nemo-platform` with `pip` or `uv pip`, it was installed in a virtual environment. The `nemo` command is only available when that environment is activated.
+If you installed `nemo-helix` with `pip` or `uv pip`, it was installed in a virtual environment. The `nemo` command is only available when that environment is activated.
 
 **Solution:**
 
@@ -31,18 +31,18 @@ source /path/to/venv/bin/activate
 ### Install Fails Building a Dependency
 
 **Symptoms:**
-- `uv tool install "nemo-platform[all]"` fails while building a dependency, often on a missing C header such as `omp.h`
+- `uv tool install "nemo-helix[all]"` fails while building a dependency, often on a missing C header such as `omp.h`
 
 **Cause:**
 
-NeMo Platform supports Python 3.12 and 3.13, but uv [picks the interpreter itself](https://docs.astral.sh/uv/concepts/tools/#python-versions), so an install can land on Python 3.14. `nemo setup` exits immediately on an unsupported interpreter instead of starting services.
+NeMo Helix supports Python 3.12 and 3.13, but uv [picks the interpreter itself](https://docs.astral.sh/uv/concepts/tools/#python-versions), so an install can land on Python 3.14. `nemo setup` exits immediately on an unsupported interpreter instead of starting services.
 
 **Solution:**
 
 Name a supported interpreter. uv downloads one if you do not have it:
 
 ```bash
-uv tool install --python 3.13 --reinstall "nemo-platform[all]"
+uv tool install --python 3.13 --reinstall "nemo-helix[all]"
 ```
 
 ## Connection Issues
@@ -90,7 +90,7 @@ uv tool install --python 3.13 --reinstall "nemo-platform[all]"
 2. Re-configure the connection:
 
     ```bash
-    nemo config set --base-url https://nmp.example.com
+    nemo config set --base-url https://nhx.example.com
     nemo auth login
     ```
 

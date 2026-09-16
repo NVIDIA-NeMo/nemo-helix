@@ -163,7 +163,7 @@ class TestIGWRouting:
         result = _prepare_aut_config_for_runtime(
             aut_config,
             tmp_path,
-            nmp_base_url="http://myhost:9090",
+            nhx_base_url="http://myhost:9090",
         )
         cfg = yaml.safe_load(result.read_text())
         assert cfg["llms"]["agent"]["base_url"].startswith("http://myhost:9090/")
@@ -172,7 +172,7 @@ class TestIGWRouting:
         result = _prepare_aut_config_for_runtime(
             aut_config,
             tmp_path,
-            nmp_base_url="http://localhost:8080/",
+            nhx_base_url="http://localhost:8080/",
         )
         cfg = yaml.safe_load(result.read_text())
         assert "//apis" not in cfg["llms"]["agent"]["base_url"]
@@ -382,7 +382,7 @@ workflow:
         runtime_workflow = _prepare_workflow_for_runtime(
             workflow,
             tmp_path,
-            nmp_base_url="http://platform:8080",
+            nhx_base_url="http://platform:8080",
             nat_model="custom-model",
         )
         config = yaml.safe_load(runtime_workflow.read_text(encoding="utf-8"))
@@ -661,7 +661,7 @@ workflow:
             nvidia_api_key="nvidia-secret",
             anthropic_api_key="anthropic-secret",
             anthropic_base_url="https://anthropic.example",
-            nmp_base_url="http://localhost:8080",
+            nhx_base_url="http://localhost:8080",
             agent_model=None,
             agent_params={},
             codex_auth_json=None,
@@ -712,7 +712,7 @@ workflow:
             nvidia_api_key="nvidia-secret",
             anthropic_api_key="anthropic-secret",
             anthropic_base_url="https://anthropic.example",
-            nmp_base_url="http://localhost:8080",
+            nhx_base_url="http://localhost:8080",
             agent_model=None,
             agent_params={},
             codex_auth_json=codex_auth,
@@ -760,7 +760,7 @@ workflow:
             nvidia_api_key="",
             anthropic_api_key="",
             anthropic_base_url="https://anthropic.example",
-            nmp_base_url="http://localhost:8080",
+            nhx_base_url="http://localhost:8080",
             agent_model=None,
             agent_params={},
             codex_auth_json=None,
@@ -806,7 +806,7 @@ workflow:
             task_dir,
             "task-image",
             output_dir,
-            nmp_base_url="http://localhost:8080",
+            nhx_base_url="http://localhost:8080",
             state_dir=state_dir,
             workspace_dir=workspace_dir,
             agent_backend="codex",
@@ -836,7 +836,7 @@ workflow:
             nvidia_api_key="",
             anthropic_api_key="",
             anthropic_base_url="https://anthropic.example",
-            nmp_base_url="http://localhost:8080",
+            nhx_base_url="http://localhost:8080",
             agent_model="gpt-test",
             agent_params={"intelligence": "high", "speed": "fast"},
             codex_auth_json=None,
@@ -890,7 +890,7 @@ workflow:
             nvidia_api_key="",
             anthropic_api_key="",
             anthropic_base_url="https://anthropic.example",
-            nmp_base_url="http://localhost:8080",
+            nhx_base_url="http://localhost:8080",
             agent_model=None,
             agent_params=None,
             codex_auth_json=None,
@@ -905,7 +905,7 @@ workflow:
             smoke_workspace=None,
         )
 
-        assert built_tags == ["nmp-nat-task-a:latest"]
+        assert built_tags == ["nhx-nat-task-a:latest"]
         assert result["build"] == "ok"
         assert result["agent"] == "skipped"
         assert result["verify"] == "skipped"
@@ -944,7 +944,7 @@ workflow:
             nvidia_api_key=" nvidia-secret ",
             anthropic_api_key=" null ",
             anthropic_base_url="https://anthropic.example",
-            nmp_base_url="http://localhost:8080",
+            nhx_base_url="http://localhost:8080",
             agent_model=None,
             agent_params={},
             codex_auth_json=None,

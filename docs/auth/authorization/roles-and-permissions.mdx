@@ -5,11 +5,11 @@
 title: "Roles and Permissions"
 description: ""
 ---
-The authoritative reference for NeMo Platform roles and their permissions. For background on how RBAC works, see [Authorization Concepts](/documentation/access-control/concepts). For managing workspace members, see [Managing Access](/documentation/access-control/authorization/managing-access).
+The authoritative reference for NeMo Helix roles and their permissions. For background on how RBAC works, see [Authorization Concepts](/documentation/access-control/concepts). For managing workspace members, see [Managing Access](/documentation/access-control/authorization/managing-access).
 
 ## Role Descriptions
 
-NeMo Platform provides human-facing roles for interactive users and a separate workload role for job runtime identities:
+NeMo Helix provides human-facing roles for interactive users and a separate workload role for job runtime identities:
 
 **Viewer** — For stakeholders who need visibility into resources but should not modify them.
 
@@ -33,7 +33,7 @@ NeMo Platform provides human-facing roles for interactive users and a separate w
 - Grant wildcard access (`*`) to the workspace
 - Change workspace visibility
 
-**PlatformAdmin** — For platform operators who manage the entire NeMo Platform deployment. This role bypasses all workspace-level authorization.
+**PlatformAdmin** — For platform operators who manage the entire NeMo Helix deployment. This role bypasses all workspace-level authorization.
 
 - All Admin permissions across every workspace
 - Access all workspaces regardless of role bindings
@@ -146,7 +146,7 @@ Example:
 
 ## Default Workspace Bindings
 
-NeMo Platform automatically provisions wildcard bindings on built-in workspaces:
+NeMo Helix automatically provisions wildcard bindings on built-in workspaces:
 
 | Workspace | Wildcard Role | Effect |
 |-----------|--------------|--------|

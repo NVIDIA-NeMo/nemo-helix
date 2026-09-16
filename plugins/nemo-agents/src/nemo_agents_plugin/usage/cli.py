@@ -7,7 +7,7 @@ One subcommand, ``nemo agents usage show <ref>``, registered onto the
 parent ``agents`` Typer app under a ``usage`` group.
 
 ``<ref>`` accepts a ``Union[LocalDir, FilesetRef]`` per the
-``nemo_platform_plugin.refs`` convention — path-shaped values are read locally,
+``nemo_helix_plugin.refs`` convention — path-shaped values are read locally,
 bare names download from a fileset.
 """
 
@@ -29,8 +29,8 @@ from nemo_agents_plugin.usage.models import (
 )
 from nemo_agents_plugin.usage.sources.fileset import FilesetDownloadError, FilesetRefError, fileset_path
 from nemo_agents_plugin.usage.sources.local import UsageSourceError, local_path
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.refs import FilesetRef, LocalDir, classify_output_target
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.refs import FilesetRef, LocalDir, classify_output_target
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ def register_usage_commands(app: typer.Typer) -> None:
         ref: str = typer.Argument(
             ...,
             metavar="<PATH | FILESET_REF>",
-            help="Local path to a result.json / run dir / nat-jobs dir, or a NeMo Platform fileset reference.",
+            help="Local path to a result.json / run dir / nat-jobs dir, or a NeMo Helix fileset reference.",
         ),
         total_params: Optional[float] = typer.Option(
             None,
@@ -190,11 +190,11 @@ def _rewrite_task_source(
     return task.model_copy(update={"source_dir": new_src})
 
 
-def _build_sdk(*, base_url: str) -> NeMoPlatform:
-    """Construct a NeMoPlatform SDK client for fileset downloads.
+def _build_sdk(*, base_url: str) -> NeMoHelix:
+    """Construct a NeMoHelix SDK client for fileset downloads.
 
     *base_url* is the value already resolved by ``resolve_base_url`` (flag /
-    ``NEMO_BASE_URL`` > shared CLI config / ``NMP_BASE_URL`` > localhost), so
+    ``NEMO_BASE_URL`` > shared CLI config / ``NHX_BASE_URL`` > localhost), so
     don't re-read the env here — that would invert precedence.
 
     Attaches the CLI auth token from the shared context (the same
@@ -204,8 +204,8 @@ def _build_sdk(*, base_url: str) -> NeMoPlatform:
     """
     headers = resolve_context_headers()
     if headers:
-        return NeMoPlatform(base_url=base_url, default_headers=headers)
-    return NeMoPlatform(base_url=base_url)
+        return NeMoHelix(base_url=base_url, default_headers=headers)
+    return NeMoHelix(base_url=base_url)
 
 
 def _score_report(

@@ -1,0 +1,82 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "nhx-common"
+description = "Add your description here"
+readme = "README.md"
+authors = [{ name = "Ryan Leary", email = "rleary@nvidia.com" }]
+requires-python = ">=3.11,<3.15"
+
+classifiers = [
+  "Development Status :: 4 - Beta",
+
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Human Machine Interfaces",
+  "Topic :: Software Development",
+
+  "License :: OSI Approved :: Apache Software License",
+
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
+
+dependencies = [
+    "aiofiles>=24.1.0",
+    "base58>=2.1.1",
+    "pydantic>=2.10.3",
+    "pydantic-settings>=2.8.1",
+    "fastapi[standard]>=0.137.2",
+    "lark>=1.1.0",
+    "nemo-helix-plugin",
+    "pyyaml>=6.0.2",
+    "nemo-helix-sdk",
+    "sqlalchemy>=2.0.0",
+    "huggingface-hub>=1.0.1,<2.0.0",
+    "hvac>=2.3.0",
+    "kubernetes>=30.1.0",
+    "prometheus-fastapi-instrumentator>=8.0.2",
+    "opentelemetry-exporter-prometheus>=0.64b0",
+    "opentelemetry-processor-baggage>=0.64b0",
+    "opentelemetry-instrumentation-fastapi>=0.64b0",
+    "opentelemetry-instrumentation-system-metrics>=0.64b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.64b0",
+    "opentelemetry-instrumentation-httpx>=0.64b0",
+    "opentelemetry-exporter-otlp-proto-http>=1.38.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.38.0",
+    "opentelemetry-sdk>=1.38.0",
+    "prometheus-client>=0.23.0",
+    "structlog>=24.1.0",
+    "nvidia-ml-py>=13.0.0",
+    "pyjwt[crypto]>=2.13.0",
+]
+version = "0.0.0"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.3",
+]
+
+dev-dependencies = [
+  "pytest>=8.3.3",
+]
+
+[project.entry-points."nemo.sdk_provider"]
+platform = "nhx.common.sdk_factory:PlatformSDKProvider"
+
+[project.entry-points."nemo.client_provider"]
+platform = "nhx.common.client_factory:PlatformNemoClientProvider"
+
+[project.entry-points."nemo.logging_provider"]
+platform = "nhx.common.observability.task_logging:PlatformTaskLoggingProvider"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nhx_common", "src/nhx"]

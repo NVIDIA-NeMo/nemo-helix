@@ -10,17 +10,17 @@ from unittest.mock import MagicMock, patch
 from urllib.parse import urlunsplit
 
 import pytest
-from nmp.common.config import PlatformConfig
-from nmp.common.jobs.constants import EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.core.jobs.api.v2.jobs.schemas import PlatformJobStepWithContext
-from nmp.core.jobs.app.providers import ContainerSpec, CPUExecutionProvider
-from nmp.core.jobs.app.schemas import PlatformJobStepSpec, StepLifecycle
-from nmp.core.jobs.controllers.backends.base import (
+from nhx.common.config import PlatformConfig
+from nhx.common.jobs.constants import EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nhx.common.jobs.schemas import PlatformJobStatus
+from nhx.core.jobs.api.v2.jobs.schemas import PlatformJobStepWithContext
+from nhx.core.jobs.app.providers import ContainerSpec, CPUExecutionProvider
+from nhx.core.jobs.app.schemas import PlatformJobStepSpec, StepLifecycle
+from nhx.core.jobs.controllers.backends.base import (
     JOB_LOGS_ENDPOINT_ENVVAR,
-    NMP_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
-    NMP_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR,
-    NMP_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR,
+    NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
+    NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR,
+    NHX_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR,
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
     JobExecutionProfileConfig,
     _contains_loopback_address,
@@ -33,7 +33,7 @@ from nmp.core.jobs.controllers.backends.base import (
     resolve_task_image,
     validate_no_reserved_managed_job_environment_variable_names,
 )
-from nmp.core.jobs.controllers.backends.test import MockKubernetesCPUJobBackend
+from nhx.core.jobs.controllers.backends.test import MockKubernetesCPUJobBackend
 from pydantic import ValidationError
 
 from services.core.jobs.tests.controllers.client_mocks import data_response
@@ -43,16 +43,16 @@ class TestManagedJobReservedEnvironment:
     def test_finds_reserved_auth_names_and_prefixes(self):
         assert find_reserved_managed_job_environment_variable_names(
             [
-                "NMP_ACCESS_TOKEN",
+                "NHX_ACCESS_TOKEN",
                 WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
                 "NEMO_WORKFLOW_TOKEN",
-                "NMP_WORKFLOW_TOKEN",
+                "NHX_WORKFLOW_TOKEN",
                 "APP_SETTING",
             ]
         ) == [
             "NEMO_WORKFLOW_TOKEN",
-            "NMP_ACCESS_TOKEN",
-            "NMP_WORKFLOW_TOKEN",
+            "NHX_ACCESS_TOKEN",
+            "NHX_WORKFLOW_TOKEN",
             WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
         ]
 
@@ -63,9 +63,9 @@ class TestManagedJobReservedEnvironment:
         )
 
     def test_step_validation_rejects_workload_identity_prefixes(self):
-        with pytest.raises(ValueError, match="NMP_WORKLOAD_TOKEN"):
+        with pytest.raises(ValueError, match="NHX_WORKLOAD_TOKEN"):
             validate_no_reserved_managed_job_environment_variable_names(
-                ["NMP_WORKLOAD_TOKEN"],
+                ["NHX_WORKLOAD_TOKEN"],
                 source="Job step environment keys",
             )
 
@@ -77,12 +77,12 @@ class TestManagedJobReservedEnvironment:
             )
 
     def test_profile_env_rejects_access_token(self):
-        with pytest.raises(ValidationError, match="NMP_ACCESS_TOKEN"):
-            JobExecutionProfileConfig(env={"NMP_ACCESS_TOKEN": "token"})
+        with pytest.raises(ValidationError, match="NHX_ACCESS_TOKEN"):
+            JobExecutionProfileConfig(env={"NHX_ACCESS_TOKEN": "token"})
 
     def test_profile_env_rejects_auth_service_url(self):
-        with pytest.raises(ValidationError, match="NMP_AUTH_URL"):
-            JobExecutionProfileConfig(env={"NMP_AUTH_URL": "https://auth.example.com"})
+        with pytest.raises(ValidationError, match="NHX_AUTH_URL"):
+            JobExecutionProfileConfig(env={"NHX_AUTH_URL": "https://auth.example.com"})
 
     def test_profile_env_rejects_workflow_typo_prefix(self):
         with pytest.raises(ValidationError, match="NEMO_WORKFLOW_TOKEN"):
@@ -112,15 +112,15 @@ class TestWorkloadIdentityAudience:
     def test_uses_workload_client_id_for_projected_subject_tokens(self):
         auth_config = SimpleNamespace(
             oidc=SimpleNamespace(
-                workload_client_id="nemo-platform-workload",
-                client_id="nemo-platform-cli",
-                workload_audience="nemo-platform",
-                audience="nemo-platform",
+                workload_client_id="nemo-helix-workload",
+                client_id="nemo-helix-cli",
+                workload_audience="nemo-helix",
+                audience="nemo-helix",
             )
         )
 
-        with patch("nmp.common.config.get_auth_config", return_value=auth_config):
-            assert get_workload_identity_token_audience() == "nemo-platform-workload"
+        with patch("nhx.common.config.get_auth_config", return_value=auth_config):
+            assert get_workload_identity_token_audience() == "nemo-helix-workload"
 
 
 class TestReplaceLoopbackAddress:
@@ -160,7 +160,7 @@ class TestGetLogsEndpointFromFileset:
         )
 
         with patch(
-            "nmp.core.jobs.controllers.backends.base.determine_loopback_override",
+            "nhx.core.jobs.controllers.backends.base.determine_loopback_override",
             return_value=None,
         ):
             result = get_logs_endpoint_from_fileset(config, workspace="my-workspace", fileset_id="my-fileset-id")
@@ -216,7 +216,7 @@ class TestGetLogsEndpointFromFileset:
         )
 
         with patch(
-            "nmp.core.jobs.controllers.backends.base.determine_loopback_override",
+            "nhx.core.jobs.controllers.backends.base.determine_loopback_override",
             return_value="host.docker.internal",
         ):
             result = get_logs_endpoint_from_fileset(config, workspace="default", fileset_id="job-logs-xyz")
@@ -233,7 +233,7 @@ class TestGetLogsEndpointFromFileset:
         )
 
         with patch(
-            "nmp.core.jobs.controllers.backends.base.determine_loopback_override",
+            "nhx.core.jobs.controllers.backends.base.determine_loopback_override",
             return_value=None,
         ):
             result = get_logs_endpoint_from_fileset(config, workspace="ns1", fileset_id="fileset-789")
@@ -249,7 +249,7 @@ class TestGetLogsEndpointFromFileset:
         )
 
         with patch(
-            "nmp.core.jobs.controllers.backends.base.determine_loopback_override",
+            "nhx.core.jobs.controllers.backends.base.determine_loopback_override",
             return_value=None,
         ):
             result = get_logs_endpoint_from_fileset(config, workspace="my-workspace", fileset_id="my-fileset-id")
@@ -267,7 +267,7 @@ class TestGetLogsEndpointFromFileset:
         )
 
         with patch(
-            "nmp.core.jobs.controllers.backends.base.determine_loopback_override",
+            "nhx.core.jobs.controllers.backends.base.determine_loopback_override",
             return_value=None,
         ):
             result = get_logs_endpoint_from_fileset(
@@ -289,7 +289,7 @@ class TestGetLogsEndpointFromFileset:
         )
 
         with patch(
-            "nmp.core.jobs.controllers.backends.base.determine_loopback_override",
+            "nhx.core.jobs.controllers.backends.base.determine_loopback_override",
             return_value=None,
         ):
             result = get_logs_endpoint_from_fileset(config, workspace="ws1", fileset_id="fs-1")
@@ -307,7 +307,7 @@ class TestGetLogsEndpointFromFileset:
         )
 
         with patch(
-            "nmp.core.jobs.controllers.backends.base.determine_loopback_override",
+            "nhx.core.jobs.controllers.backends.base.determine_loopback_override",
             return_value=None,
         ):
             result = get_logs_endpoint_from_fileset(config, workspace="ws1", fileset_id="fs-1")
@@ -324,7 +324,7 @@ class TestGetLogsEndpointFromFileset:
         )
 
         with patch(
-            "nmp.core.jobs.controllers.backends.base.determine_loopback_override",
+            "nhx.core.jobs.controllers.backends.base.determine_loopback_override",
             return_value=None,
         ):
             result = get_logs_endpoint_from_fileset(config, workspace="ws1", fileset_id="fs-1")
@@ -348,33 +348,31 @@ class TestGetLogsEndpointFromFileset:
     def test_uds_files_url_uses_placeholder_http_origin(self):
         """UDS files URL is normalized to a valid HTTP URL for OTLP request construction."""
         config = PlatformConfig(  # type: ignore[abstract]
-            service_discovery={"files": "unix:///tmp/nemo-platform.sock"},
+            service_discovery={"files": "unix:///tmp/nemo-helix.sock"},
             loopback_address="host.docker.internal",
         )
 
         result = get_logs_endpoint_from_fileset(config, workspace="default", fileset_id="job-logs-123")
 
-        assert result == (
-            "http://nemo-platform.local/apis/files/v2/workspaces/default/filesets/job-logs-123/otlp/v1/logs"
-        )
+        assert result == ("http://nemo-helix.local/apis/files/v2/workspaces/default/filesets/job-logs-123/otlp/v1/logs")
 
     def test_uds_files_url_preserves_transport_metadata(self):
         config = PlatformConfig(  # type: ignore[abstract]
-            service_discovery={"files": "unix:///tmp/nemo-platform.sock"},
+            service_discovery={"files": "unix:///tmp/nemo-helix.sock"},
             loopback_address="host.docker.internal",
         )
 
         result = get_logs_endpoint_config_from_fileset(config, workspace="default", fileset_id="job-logs-123")
 
         assert result.endpoint == (
-            "http://nemo-platform.local/apis/files/v2/workspaces/default/filesets/job-logs-123/otlp/v1/logs"
+            "http://nemo-helix.local/apis/files/v2/workspaces/default/filesets/job-logs-123/otlp/v1/logs"
         )
         assert result.transport == "uds"
-        assert result.socket_path == "/tmp/nemo-platform.sock"
+        assert result.socket_path == "/tmp/nemo-helix.sock"
         assert result.to_env() == {
-            NMP_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR: result.endpoint,
-            NMP_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR: "uds",
-            NMP_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR: "/tmp/nemo-platform.sock",
+            NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR: result.endpoint,
+            NHX_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR: "uds",
+            NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR: "/tmp/nemo-helix.sock",
         }
 
 
@@ -383,11 +381,11 @@ class TestGetJobRuntimeSharedEnvvars:
         """A task container gets no platform config file, so a chart set to
         ``service.log_format: json`` would otherwise start its tasks on
         ``plain``. Resolve here, where the file is readable, and pass it down."""
-        from nemo_platform_plugin.config import NMP_CONFIG_FILE_PATH_ENV_VAR, Configuration
+        from nemo_helix_plugin.config import NHX_CONFIG_FILE_PATH_ENV_VAR, Configuration
 
         config_file = tmp_path / "config.yaml"
         config_file.write_text("service:\n  LOG_FORMAT: json\n  LOG_LEVEL: DEBUG\n")
-        monkeypatch.setenv(NMP_CONFIG_FILE_PATH_ENV_VAR, str(config_file))
+        monkeypatch.setenv(NHX_CONFIG_FILE_PATH_ENV_VAR, str(config_file))
         monkeypatch.delenv("LOG_FORMAT", raising=False)
         monkeypatch.delenv("LOG_LEVEL", raising=False)
         Configuration.clear_cache()
@@ -403,11 +401,11 @@ class TestGetJobRuntimeSharedEnvvars:
     def test_unreadable_logging_settings_do_not_fail_scheduling(self, monkeypatch, tmp_path):
         """Logging configuration is not worth failing a schedule over; the task
         falls back to its own defaults."""
-        from nemo_platform_plugin.config import NMP_CONFIG_FILE_PATH_ENV_VAR, Configuration
+        from nemo_helix_plugin.config import NHX_CONFIG_FILE_PATH_ENV_VAR, Configuration
 
         config_file = tmp_path / "config.yaml"
         config_file.write_text("this: is: not: valid: yaml:\n")
-        monkeypatch.setenv(NMP_CONFIG_FILE_PATH_ENV_VAR, str(config_file))
+        monkeypatch.setenv(NHX_CONFIG_FILE_PATH_ENV_VAR, str(config_file))
         Configuration.clear_cache()
 
         try:
@@ -415,7 +413,7 @@ class TestGetJobRuntimeSharedEnvvars:
         finally:
             Configuration.clear_cache()
 
-        assert "NMP_BASE_URL" in envvars, "scheduling env was lost over a logging setting"
+        assert "NHX_BASE_URL" in envvars, "scheduling env was lost over a logging setting"
 
     def test_uses_service_discovery_gateway_urls_for_job_runtimes(self):
         config = PlatformConfig(  # type: ignore[abstract]
@@ -434,13 +432,13 @@ class TestGetJobRuntimeSharedEnvvars:
         envvars = get_job_runtime_shared_envvars(config)
 
         assert envvars == {
-            "NMP_BASE_URL": "https://nemo-gateway:8080",
-            "NMP_AUTH_URL": "https://nemo-gateway:8080",
-            "NMP_JOBS_URL": "https://nemo-gateway:8080",
-            "NMP_FILES_URL": "https://nemo-gateway:8080",
-            "NMP_MODELS_URL": "https://nemo-gateway:8080",
-            "NMP_SECRETS_URL": "https://nemo-gateway:8080",
-            "NMP_CONFIG_WARNINGS_DISABLED": "1",
+            "NHX_BASE_URL": "https://nemo-gateway:8080",
+            "NHX_AUTH_URL": "https://nemo-gateway:8080",
+            "NHX_JOBS_URL": "https://nemo-gateway:8080",
+            "NHX_FILES_URL": "https://nemo-gateway:8080",
+            "NHX_MODELS_URL": "https://nemo-gateway:8080",
+            "NHX_SECRETS_URL": "https://nemo-gateway:8080",
+            "NHX_CONFIG_WARNINGS_DISABLED": "1",
             # Propagated so a task container, which has no platform config
             # file, still logs the way the deployment configured it.
             "LOG_LEVEL": "INFO",
@@ -456,19 +454,19 @@ class TestGetJobRuntimeSharedEnvvars:
         )
 
         with patch(
-            "nmp.core.jobs.controllers.backends.base.determine_loopback_override",
+            "nhx.core.jobs.controllers.backends.base.determine_loopback_override",
             return_value=None,
         ):
             envvars = get_job_runtime_shared_envvars(config)
 
         assert envvars == {
-            "NMP_BASE_URL": "https://nemo-gateway:8080",
-            "NMP_AUTH_URL": "https://nemo-gateway:8080",
-            "NMP_JOBS_URL": "https://nemo-gateway:8080",
-            "NMP_FILES_URL": "https://nemo-gateway:8080",
-            "NMP_MODELS_URL": "https://nemo-gateway:8080",
-            "NMP_SECRETS_URL": "https://nemo-gateway:8080",
-            "NMP_CONFIG_WARNINGS_DISABLED": "1",
+            "NHX_BASE_URL": "https://nemo-gateway:8080",
+            "NHX_AUTH_URL": "https://nemo-gateway:8080",
+            "NHX_JOBS_URL": "https://nemo-gateway:8080",
+            "NHX_FILES_URL": "https://nemo-gateway:8080",
+            "NHX_MODELS_URL": "https://nemo-gateway:8080",
+            "NHX_SECRETS_URL": "https://nemo-gateway:8080",
+            "NHX_CONFIG_WARNINGS_DISABLED": "1",
             # Propagated so a task container, which has no platform config
             # file, still logs the way the deployment configured it.
             "LOG_LEVEL": "INFO",
@@ -484,19 +482,19 @@ class TestGetJobRuntimeSharedEnvvars:
         )
 
         with patch(
-            "nmp.core.jobs.controllers.backends.base.determine_loopback_override",
+            "nhx.core.jobs.controllers.backends.base.determine_loopback_override",
             return_value=None,
         ):
             envvars = get_job_runtime_shared_envvars(config)
 
         assert envvars == {
-            "NMP_BASE_URL": "http://127.0.0.1:59007",
-            "NMP_AUTH_URL": "http://127.0.0.1:59007",
-            "NMP_JOBS_URL": "http://127.0.0.1:59007",
-            "NMP_FILES_URL": "http://127.0.0.1:59007",
-            "NMP_MODELS_URL": "http://127.0.0.1:59007",
-            "NMP_SECRETS_URL": "http://127.0.0.1:59007",
-            "NMP_CONFIG_WARNINGS_DISABLED": "1",
+            "NHX_BASE_URL": "http://127.0.0.1:59007",
+            "NHX_AUTH_URL": "http://127.0.0.1:59007",
+            "NHX_JOBS_URL": "http://127.0.0.1:59007",
+            "NHX_FILES_URL": "http://127.0.0.1:59007",
+            "NHX_MODELS_URL": "http://127.0.0.1:59007",
+            "NHX_SECRETS_URL": "http://127.0.0.1:59007",
+            "NHX_CONFIG_WARNINGS_DISABLED": "1",
             # Propagated so a task container, which has no platform config
             # file, still logs the way the deployment configured it.
             "LOG_LEVEL": "INFO",
@@ -512,17 +510,17 @@ class TestGetJobRuntimeSharedEnvvars:
         )
 
         with patch(
-            "nmp.core.jobs.controllers.backends.base.determine_loopback_override",
+            "nhx.core.jobs.controllers.backends.base.determine_loopback_override",
             return_value=None,
         ):
             envvars = get_job_runtime_shared_envvars(config)
 
-        assert envvars["NMP_BASE_URL"] == "https://nemo-gateway:8080"
-        assert envvars["NMP_AUTH_URL"] == "http://nemo-auth:8080"
+        assert envvars["NHX_BASE_URL"] == "https://nemo-gateway:8080"
+        assert envvars["NHX_AUTH_URL"] == "http://nemo-auth:8080"
 
     def test_platform_service_discovery_platform_overrides_job_runtime_base_url(self):
         config = PlatformConfig(  # type: ignore[abstract]
-            base_url="http://nemo-platform-api:8080",
+            base_url="http://nemo-helix-api:8080",
             services="jobs,files,models,secrets",
             service_discovery={
                 "platform": "https://nemo-gateway:8080",
@@ -532,15 +530,15 @@ class TestGetJobRuntimeSharedEnvvars:
         )
 
         with patch(
-            "nmp.core.jobs.controllers.backends.base.determine_loopback_override",
+            "nhx.core.jobs.controllers.backends.base.determine_loopback_override",
             return_value=None,
         ):
             envvars = get_job_runtime_shared_envvars(config)
 
-        assert envvars["NMP_BASE_URL"] == "https://nemo-gateway:8080"
-        assert envvars["NMP_AUTH_URL"] == "https://nemo-auth:8080"
-        assert envvars["NMP_JOBS_URL"] == "https://nemo-gateway:8080"
-        assert envvars["NMP_FILES_URL"] == "https://nemo-gateway:8080"
+        assert envvars["NHX_BASE_URL"] == "https://nemo-gateway:8080"
+        assert envvars["NHX_AUTH_URL"] == "https://nemo-auth:8080"
+        assert envvars["NHX_JOBS_URL"] == "https://nemo-gateway:8080"
+        assert envvars["NHX_FILES_URL"] == "https://nemo-gateway:8080"
 
     def test_loopback_replacement_applies_to_base_url_fallback(self):
         config = PlatformConfig(  # type: ignore[abstract]
@@ -551,9 +549,9 @@ class TestGetJobRuntimeSharedEnvvars:
 
         envvars = get_job_runtime_shared_envvars(config)
 
-        assert envvars["NMP_BASE_URL"] == "http://host.docker.internal:8080"
-        assert envvars["NMP_AUTH_URL"] == "http://host.docker.internal:8080"
-        assert envvars["NMP_FILES_URL"] == "http://host.docker.internal:8080"
+        assert envvars["NHX_BASE_URL"] == "http://host.docker.internal:8080"
+        assert envvars["NHX_AUTH_URL"] == "http://host.docker.internal:8080"
+        assert envvars["NHX_FILES_URL"] == "http://host.docker.internal:8080"
 
 
 def _make_step(
@@ -590,7 +588,7 @@ def _make_task(status: str = "active", updated_at: datetime.datetime | None = No
 
 def _make_backend(mock_sdk: MagicMock | None = None) -> MockKubernetesCPUJobBackend:
     sdk = mock_sdk or MagicMock()
-    return MockKubernetesCPUJobBackend(nmp_sdk=sdk, execution_profile_config=MagicMock(), profile_name="default")
+    return MockKubernetesCPUJobBackend(nhx_sdk=sdk, execution_profile_config=MagicMock(), profile_name="default")
 
 
 @contextmanager
@@ -757,6 +755,6 @@ class TestResolveTaskImage:
         assert resolve_task_image("my-image:v1", None) == "my-image:v1"
 
     def test_falls_back_to_platform_cpu_tasks_image_when_both_none(self):
-        with patch("nemo_platform_plugin.jobs.image.get_platform_config") as mock_config:
+        with patch("nemo_helix_plugin.jobs.image.get_platform_config") as mock_config:
             mock_config.return_value = MagicMock(image_registry="my-registry", image_tag="v1.0")
-            assert resolve_task_image(None, None) == "my-registry/nmp-cpu-tasks:v1.0"
+            assert resolve_task_image(None, None) == "my-registry/nhx-cpu-tasks:v1.0"

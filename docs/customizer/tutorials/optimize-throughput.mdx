@@ -6,10 +6,10 @@ title: "Optimize for Tokens/GPU Throughput"
 description: ""
 ---
 
-[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main/docs/customizer/tutorials/optimize-throughput.ipynb)
+[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/optimize-throughput.ipynb)
 
 ## About
-Learn how to use the NeMo Platform Customizer to create a [LoRA](/documentation/customizer-reference/customization-concepts#nemo-ms-about-concepts-customization) (Low-Rank Adaptation) customization job optimized for higher tokens/GPU throughput and lower runtime. 
+Learn how to use the NeMo Helix Customizer to create a [LoRA](/documentation/customizer-reference/customization-concepts#nemo-ms-about-concepts-customization) (Low-Rank Adaptation) customization job optimized for higher tokens/GPU throughput and lower runtime.
 
 **In this tutorial, you will:**
 1. Fine-tune [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct) on the SQuAD dataset using LoRA, with [sequence packing](/documentation/customizer-reference/customization-concepts#nemo-ms-about-concepts-customization) enabled for one run and disabled for another.
@@ -22,28 +22,28 @@ Learn how to use the NeMo Platform Customizer to create a [LoRA](/documentation/
 
 Before starting this tutorial, ensure you have:
 
-1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Platform locally
-2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-platform[all]"`; source checkout: run `make bootstrap` from the repository root)
+1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Helix locally
+2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-helix[all]"`; source checkout: run `make bootstrap` from the repository root)
 3. **At least one GPU with CUDA 13+**
 
 ## Quick Start
 
 ### 1. Initialize SDK
 
-The SDK needs to know your NeMo Platform server URL. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Platform is running at a custom location, you can override the URL by setting the `NMP_BASE_URL` environment variable:
+The SDK needs to know your NeMo Helix server URL. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Helix is running at a custom location, you can override the URL by setting the `NHX_BASE_URL` environment variable:
 
 ```sh
-export NMP_BASE_URL=<YOUR_NMP_BASE_URL>
+export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
 ```
 
 ```python
 import json
 import os
-from nemo_platform import NeMoPlatform, ConflictError
+from nemo_helix import NeMoHelix, ConflictError
 
-NMP_BASE_URL = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-client = NeMoPlatform(
-    base_url=NMP_BASE_URL,
+NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+client = NeMoHelix(
+    base_url=NHX_BASE_URL,
     workspace="default"
 )
 ```
@@ -222,7 +222,7 @@ Note: for public models, you can omit the `token_secret` parameter when creating
 
 ```python
 import time
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
+from nemo_helix.types.files import HuggingfaceStorageConfigParam
 
 HF_REPO_ID = "meta-llama/Llama-3.2-1B-Instruct"
 MODEL_NAME = "llama-3-2-1b-base"
@@ -330,7 +330,7 @@ print(f"Output adapter: {PACK_OUTPUT_NAME}")
 
 ### 6. Track Fine-Tuning Progress
 
-A training job contains multiple steps: 
+A training job contains multiple steps:
 - Model and dataset downloading
 - Fine-tuning where LoRA adapter weights are trained
 - Creating a fileset entry for the fine-tuned model
@@ -489,7 +489,7 @@ The cell below polls the job status every 10 seconds and renders a live dashboar
 import time
 from typing import cast
 from IPython.display import clear_output
-from nemo_platform.types.shared import PlatformJobStatusResponse
+from nemo_helix.types.shared import PlatformJobStatusResponse
 
 # Timeout set to 30 minutes to accommodate typical LoRA training duration for this dataset size.
 # Actual training time will vary based on hardware, model size, and dataset complexity.
@@ -754,7 +754,7 @@ else:
 - Sequence packed version should have a higher GPU utilization and higher GPU Memory Allocation.
 
 ```python
-from nemo_platform.types.jobs import PlatformJobStep
+from nemo_helix.types.jobs import PlatformJobStep
 import pandas as pd
 
 STEP_NAME = "training"

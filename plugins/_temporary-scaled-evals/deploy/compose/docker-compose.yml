@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Phase-1 compose stack: the NeMo Platform API serving the scaled-evals plugin,
+# Phase-1 compose stack: the NeMo Helix API serving the scaled-evals plugin,
 # plus the two scaled-evals workers and the substrate they need.
 #
 # Run it from this directory (`docker compose up -d`); the build context is the
@@ -200,8 +200,8 @@ services:
       # Subprocess Jobs deliberately inherit only PATH and VIRTUAL_ENV. Supply
       # scaled-evals runtime configuration through the local execution profile
       # so it is not persisted in each Platform Job spec.
-      NMP_JOBS_EXECUTORS: >-
-        [{"provider":"subprocess","profile":"default","backend":"subprocess","config":{"working_directory":"/tmp/nmp-subprocess-jobs","cleanup_completed_jobs_immediately":false,"env":{"SCALED_EVALS_DATABASE_URL":"postgresql://${POSTGRES_USER:-scaled_evals}:${POSTGRES_PASSWORD:-scaled_evals}@postgres:5432/${POSTGRES_DB:-scaled_evals}","DATABASE_SSL_MODE":"${DATABASE_SSL_MODE:-disable}","CREDENTIALS_ENCRYPTION_KEY":"${CREDENTIALS_ENCRYPTION_KEY:?generate a Fernet key and set it in .env}","S3_ENDPOINT":"http://rustfs:9000","S3_PUBLIC_ENDPOINT":"${S3_PUBLIC_ENDPOINT:-http://localhost:9000}","S3_ACCESS_KEY":"${S3_ACCESS_KEY:-scaledevals}","S3_SECRET_KEY":"${S3_SECRET_KEY:-scaledevals-dev-secret}","S3_BUCKET":"${S3_BUCKET:-scaled-evals}","BUILDKIT_ADDR":"unix:///run/buildkit/buildkitd.sock","IMAGE_REGISTRY":"${IMAGE_REGISTRY:-registry:5000}","REGISTRY_INSECURE":"${REGISTRY_INSECURE:-true}","TASK_IMAGE_VALIDATION_MODE":"${TASK_IMAGE_VALIDATION_MODE:-resolve}","TASK_IMAGE_ALLOWED_REGISTRIES":"${TASK_IMAGE_ALLOWED_REGISTRIES:-registry:5000}","TASK_IMAGE_REGISTRY_INSECURE":"${TASK_IMAGE_REGISTRY_INSECURE:-true}","HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES":"${HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES:-docker.io,ghcr.io}","IMAGE_BUILD_PLATFORM":"${IMAGE_BUILD_PLATFORM-}"}}}]
+      NHX_JOBS_EXECUTORS: >-
+        [{"provider":"subprocess","profile":"default","backend":"subprocess","config":{"working_directory":"/tmp/nhx-subprocess-jobs","cleanup_completed_jobs_immediately":false,"env":{"SCALED_EVALS_DATABASE_URL":"postgresql://${POSTGRES_USER:-scaled_evals}:${POSTGRES_PASSWORD:-scaled_evals}@postgres:5432/${POSTGRES_DB:-scaled_evals}","DATABASE_SSL_MODE":"${DATABASE_SSL_MODE:-disable}","CREDENTIALS_ENCRYPTION_KEY":"${CREDENTIALS_ENCRYPTION_KEY:?generate a Fernet key and set it in .env}","S3_ENDPOINT":"http://rustfs:9000","S3_PUBLIC_ENDPOINT":"${S3_PUBLIC_ENDPOINT:-http://localhost:9000}","S3_ACCESS_KEY":"${S3_ACCESS_KEY:-scaledevals}","S3_SECRET_KEY":"${S3_SECRET_KEY:-scaledevals-dev-secret}","S3_BUCKET":"${S3_BUCKET:-scaled-evals}","BUILDKIT_ADDR":"unix:///run/buildkit/buildkitd.sock","IMAGE_REGISTRY":"${IMAGE_REGISTRY:-registry:5000}","REGISTRY_INSECURE":"${REGISTRY_INSECURE:-true}","TASK_IMAGE_VALIDATION_MODE":"${TASK_IMAGE_VALIDATION_MODE:-resolve}","TASK_IMAGE_ALLOWED_REGISTRIES":"${TASK_IMAGE_ALLOWED_REGISTRIES:-registry:5000}","TASK_IMAGE_REGISTRY_INSECURE":"${TASK_IMAGE_REGISTRY_INSECURE:-true}","HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES":"${HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES:-docker.io,ghcr.io}","IMAGE_BUILD_PLATFORM":"${IMAGE_BUILD_PLATFORM-}"}}}]
     ports:
       - "${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8080}:8080"
     depends_on:

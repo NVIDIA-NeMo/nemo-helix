@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import httpx
 import pytest
-from nemo_platform_plugin.files.types import FilesetOutput
+from nemo_helix_plugin.files.types import FilesetOutput
 from opentelemetry.proto.collector.logs.v1 import logs_service_pb2
 
 

@@ -5,21 +5,21 @@ import logging
 
 from data_designer.engine.errors import SecretResolutionError
 from data_designer_nemo.errors import NDDInternalError, NDDInvalidConfigError
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NotFoundError, PermissionDeniedError
-from nemo_platform_plugin.secrets.client import AsyncSecretsClient, SecretsClient
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient, SecretsClient
 
 logger = logging.getLogger(__name__)
 
 
-async def validate_secret(sdk: AsyncNeMoPlatform, secret: str, default_workspace: str) -> None:
+async def validate_secret(sdk: AsyncNeMoHelix, secret: str, default_workspace: str) -> None:
     """Validate a secret reference with an async SDK instance.
     The SDK instance should carry end user authentication headers,
     so that this function validate existence and access in API
     endpoints and the job config compiler, *prior to* starting
     Data Designer library engine execution (which requires the
-    NMPSecretResolver).
+    NHXSecretResolver).
     """
     workspace, name = _parse_secret_reference(secret, default_workspace)
     secrets = client_from_platform(sdk, AsyncSecretsClient)
@@ -36,18 +36,18 @@ async def validate_secret(sdk: AsyncNeMoPlatform, secret: str, default_workspace
         ) from e
 
 
-class NMPSecretResolver:
+class NHXSecretResolver:
     """An implementation of the Data Designer library's SecretResolver protocol
-    that considers the provided `secret` string a NeMo Platform Secret reference. Providing
+    that considers the provided `secret` string a NeMo Helix Secret reference. Providing
     only this secret resolver (and not a composite secret resolver with other types,
-    e.g. EnvVar or PlainText resolvers) ensures that in this NeMo Platform context, the DD
-    library only accepts NeMo Platform secrets in fields treated as secrets by the library.
+    e.g. EnvVar or PlainText resolvers) ensures that in this NeMo Helix context, the DD
+    library only accepts NeMo Helix secrets in fields treated as secrets by the library.
 
     Public ``.resolve(secret) -> str`` is sync because the DD engine library is
     sync. Secrets should be validated in advance using :func:`validate_secret`.
     """
 
-    def __init__(self, sdk: NeMoPlatform, default_workspace: str):
+    def __init__(self, sdk: NeMoHelix, default_workspace: str):
         self._sdk = sdk
         self._default_workspace = default_workspace
 

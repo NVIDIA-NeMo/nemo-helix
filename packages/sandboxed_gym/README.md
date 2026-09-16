@@ -12,7 +12,7 @@ training client (e.g. NeMo-RL's thin `SandboxedGymActor` adapter).
 
 ## Provenance
 
-Vendored from [`soluwalana/RL`](https://github.com/soluwalana/RL) branch `nmp/customizer` at
+Vendored from [`soluwalana/RL`](https://github.com/soluwalana/RL) branch `nhx/customizer` at
 **`67821a9`** (2026-08-03), the fork this code still shares an ancestor with. Upstream changes have
 been applied selectively since; the divergences are deliberate and documented where they occur.
 
@@ -88,5 +88,5 @@ See `examples/serve.yaml`. Key fields:
 
 - `sandbox.environment_pvc_claim` / `dataset_pvc_claim` / `workspace_pvc_claim`
 - `episode_broker` (allowlists, TTL, `advertise_url`)
-- `gym_global_config` — opaque Gym JSON injected as `NMP_GYM_GLOBAL_CONFIG`
+- `gym_global_config` — opaque Gym JSON injected as `NHX_GYM_GLOBAL_CONFIG`
 - `rollout_auth_token` — optional bearer for the orchestrator proxy

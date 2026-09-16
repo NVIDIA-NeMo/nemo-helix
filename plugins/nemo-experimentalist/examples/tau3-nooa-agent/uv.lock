@@ -907,14 +907,14 @@ wheels = [
 ]
 
 [[package]]
-name = "nemo-platform-plugin"
-source = { editable = "../../../../packages/nemo_platform_plugin" }
+name = "nemo-helix-plugin"
+source = { editable = "../../../../packages/nemo_helix_plugin" }
 dependencies = [
     { name = "anthropic" },
     { name = "fastapi" },
     { name = "jsonschema" },
     { name = "lark" },
-    { name = "nemo-platform-sdk" },
+    { name = "nemo-helix-sdk" },
     { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -925,13 +925,13 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.88.0" },
-    { name = "anyio", marker = "extra == 'nemo-platform-sdk'", specifier = ">=4.0.0,<5" },
-    { name = "distro", marker = "extra == 'nemo-platform-sdk'", specifier = ">=1.7.0,<2" },
-    { name = "docker", marker = "extra == 'nemo-platform-sdk'", specifier = ">=7.0.0" },
+    { name = "anyio", marker = "extra == 'nemo-helix-sdk'", specifier = ">=4.0.0,<5" },
+    { name = "distro", marker = "extra == 'nemo-helix-sdk'", specifier = ">=1.7.0,<2" },
+    { name = "docker", marker = "extra == 'nemo-helix-sdk'", specifier = ">=7.0.0" },
     { name = "fastapi", specifier = ">=0.115.4" },
-    { name = "fsspec", marker = "extra == 'nemo-platform-sdk'", specifier = ">=2023.1.0" },
+    { name = "fsspec", marker = "extra == 'nemo-helix-sdk'", specifier = ">=2023.1.0" },
     { name = "httpx", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.27.0,<1" },
-    { name = "httpx", marker = "extra == 'nemo-platform-sdk'", specifier = ">=0.23.0,<1" },
+    { name = "httpx", marker = "extra == 'nemo-helix-sdk'", specifier = ">=0.23.0,<1" },
     { name = "jinja2", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=3.1.6" },
     { name = "jsonpath-ng", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.7.0" },
     { name = "jsonschema", specifier = ">=4.0.0" },
@@ -940,47 +940,47 @@ requires-dist = [
     { name = "langchain-openai", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.3.5" },
     { name = "lark", specifier = ">=1.1.0" },
     { name = "nemo-fabric", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.3.0,<0.4.0" },
-    { name = "nemo-platform-sdk", editable = "../../../../sdk/python/nemo-platform" },
+    { name = "nemo-helix-sdk", editable = "../../../../sdk/python/nemo-helix" },
     { name = "nemo-relay", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.7.3,<0.8" },
-    { name = "ngcsdk", marker = "extra == 'nemo-platform-sdk'", specifier = ">=4.8.2" },
-    { name = "nvidia-ml-py", marker = "extra == 'nemo-platform-sdk'", specifier = ">=13.0.0" },
+    { name = "ngcsdk", marker = "extra == 'nemo-helix-sdk'", specifier = ">=4.8.2" },
+    { name = "nvidia-ml-py", marker = "extra == 'nemo-helix-sdk'", specifier = ">=13.0.0" },
     { name = "openai", specifier = ">=1.109.1" },
     { name = "openai", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.61.0" },
-    { name = "openai", marker = "extra == 'nemo-platform-sdk'" },
+    { name = "openai", marker = "extra == 'nemo-helix-sdk'" },
     { name = "opentelemetry-proto", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.27.0" },
     { name = "pandas", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.5.3" },
-    { name = "prompt-toolkit", marker = "extra == 'nemo-platform-sdk'", specifier = ">=3.0.0" },
-    { name = "psutil", marker = "extra == 'nemo-platform-sdk'", specifier = ">=5.9.0" },
+    { name = "prompt-toolkit", marker = "extra == 'nemo-helix-sdk'", specifier = ">=3.0.0" },
+    { name = "psutil", marker = "extra == 'nemo-helix-sdk'", specifier = ">=5.9.0" },
     { name = "pyarrow", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=19.0.1" },
     { name = "pydantic", specifier = ">=2.12.0" },
     { name = "pydantic", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=2.10.6" },
-    { name = "pydantic", marker = "extra == 'nemo-platform-sdk'", specifier = ">=2.0.0,<3" },
+    { name = "pydantic", marker = "extra == 'nemo-helix-sdk'", specifier = ">=2.0.0,<3" },
     { name = "pydantic-settings", specifier = ">=2.8.1" },
     { name = "pytrec-eval-terrier", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.5.10" },
     { name = "pyyaml", specifier = ">=6.0.2" },
-    { name = "pyyaml", marker = "extra == 'nemo-platform-sdk'", specifier = ">=6.0.0" },
+    { name = "pyyaml", marker = "extra == 'nemo-helix-sdk'", specifier = ">=6.0.0" },
     { name = "ragas", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.4.3" },
-    { name = "requests", marker = "extra == 'nemo-platform-sdk'", specifier = ">=2.31.0" },
-    { name = "rich", marker = "extra == 'nemo-platform-sdk'", specifier = ">=13.7.1" },
+    { name = "requests", marker = "extra == 'nemo-helix-sdk'", specifier = ">=2.31.0" },
+    { name = "rich", marker = "extra == 'nemo-helix-sdk'", specifier = ">=13.7.1" },
     { name = "rouge-score", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.1.2" },
     { name = "sacrebleu", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=2.5.1" },
-    { name = "sniffio", marker = "extra == 'nemo-platform-sdk'" },
+    { name = "sniffio", marker = "extra == 'nemo-helix-sdk'" },
     { name = "typer", specifier = ">=0.20.0,<0.26" },
-    { name = "typer", marker = "extra == 'nemo-platform-sdk'", specifier = ">=0.20.0" },
-    { name = "typing-extensions", marker = "extra == 'nemo-platform-sdk'", specifier = ">=4.14,<5" },
+    { name = "typer", marker = "extra == 'nemo-helix-sdk'", specifier = ">=0.20.0" },
+    { name = "typing-extensions", marker = "extra == 'nemo-helix-sdk'", specifier = ">=4.14,<5" },
 ]
-provides-extras = ["nemo-evaluator-sdk", "nemo-platform-sdk"]
+provides-extras = ["nemo-evaluator-sdk", "nemo-helix-sdk"]
 
 [[package]]
-name = "nemo-platform-sdk"
-source = { editable = "../../../../sdk/python/nemo-platform" }
+name = "nemo-helix-sdk"
+source = { editable = "../../../../sdk/python/nemo-helix" }
 dependencies = [
     { name = "anyio" },
     { name = "distro" },
     { name = "docker" },
     { name = "fsspec" },
     { name = "httpx" },
-    { name = "nemo-platform-plugin" },
+    { name = "nemo-helix-plugin" },
     { name = "ngcsdk" },
     { name = "nvidia-ml-py" },
     { name = "openai" },
@@ -1011,7 +1011,7 @@ requires-dist = [
     { name = "langchain-nvidia-ai-endpoints", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.4.3,<2.0.0" },
     { name = "langchain-openai", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.3.5" },
     { name = "nemo-fabric", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.3.0,<0.4.0" },
-    { name = "nemo-platform-plugin", editable = "../../../../packages/nemo_platform_plugin" },
+    { name = "nemo-helix-plugin", editable = "../../../../packages/nemo_helix_plugin" },
     { name = "nemo-relay", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.7.3,<0.8" },
     { name = "ngcsdk", specifier = ">=4.8.2" },
     { name = "nvidia-ml-py", specifier = ">=13.0.0" },
@@ -1063,7 +1063,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "mcp" },
-    { name = "nemo-platform-plugin" },
+    { name = "nemo-helix-plugin" },
     { name = "nooa", extra = ["tracing"] },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "orjson" },
@@ -1072,7 +1072,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "mcp", specifier = "==1.25.0" },
-    { name = "nemo-platform-plugin", editable = "../../../../packages/nemo_platform_plugin" },
+    { name = "nemo-helix-plugin", editable = "../../../../packages/nemo_helix_plugin" },
     { name = "nooa", extras = ["tracing"], specifier = ">=0.0.9" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "orjson", specifier = "==3.11.9" },

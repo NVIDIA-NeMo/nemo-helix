@@ -41,22 +41,22 @@ Tip: Run the cells in order. You can re-run preview/generation to explore differ
 
 ## **Step 1**: 🎨 NeMo Data Designer
 
-First, create a client for interacting with NeMo Platform.
+First, create a client for interacting with NeMo Helix.
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 # Base URL for the platform
-BASE_URL = os.getenv("NMP_BASE_URL", "http://localhost:8080")
+BASE_URL = os.getenv("NHX_BASE_URL", "http://localhost:8080")
 WORKSPACE = "default"
 
-# Initialize NeMoPlatform client (does not trigger any action yet)
-client = NeMoPlatform(base_url=BASE_URL, workspace=WORKSPACE)
+# Initialize NeMoHelix client (does not trigger any action yet)
+client = NeMoHelix(base_url=BASE_URL, workspace=WORKSPACE)
 ```
 
 Create a Secret and Model Provider to use models hosted on `build.nvidia.com`.
-Note: these resources may already exist if you are running NeMo Platform Quickstart.
+Note: these resources may already exist if you are running NeMo Helix Quickstart.
 
 ```python
 SECRET_NAME = "nvidia-build-api-key"
@@ -444,8 +444,8 @@ We evaluate the model on filtered triage notes to see if it predicts the correct
 - **Metric**: String containment check against ground-truth ESI
 
 ```python
-from nemo_platform import ConflictError
-from nemo_platform.filesets import build_fileset_ref
+from nemo_helix import ConflictError
+from nemo_helix.filesets import build_fileset_ref
 
 # Split the filtered dataframe into different complexity levels
 df_complexities = {
@@ -534,7 +534,7 @@ For *each* complexity level, the accuracy score for each model is printed, allow
 import time
 import pandas as pd
 from typing import Any
-from nemo_platform.types.evaluation import (
+from nemo_helix.types.evaluation import (
  FilesetRef,
  MetricOnlineJobParam,
  ModelParam,

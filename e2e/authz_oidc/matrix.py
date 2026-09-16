@@ -346,7 +346,7 @@ MATRIX: list[Case] = [
         "provisioner",
         {401},
         body={"input": {}},
-        notes="middleware consults only X-NMP-Principal-Id on /apis/auth/v2/authz/*",
+        notes="middleware consults only X-NHX-Principal-Id on /apis/auth/v2/authz/*",
     ),
     # ------------------------------------------------------------------ #
     # F. plugin fence & deny_route containment.                           #

@@ -21,10 +21,10 @@ from nemo_evaluator.jobs.evaluate import EvaluateSpec
 from nemo_evaluator.sdk.utils import filter_aggregate_scores
 from nemo_evaluator_sdk.execution.job_poll import async_poll_until_terminal
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult, AggregateFieldName, EvaluationResult, RowScore
-from nemo_platform_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
-from nemo_platform_plugin.jobs.api_factory import BaseJob
-from nemo_platform_plugin.jobs.archive import safe_extract_tar
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatusResponse
+from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
+from nemo_helix_plugin.jobs.api_factory import BaseJob
+from nemo_helix_plugin.jobs.archive import safe_extract_tar
+from nemo_helix_plugin.jobs.schemas import PlatformJobStatusResponse
 from pydantic import BaseModel
 
 EvaluatorJob: TypeAlias = BaseJob[EvaluateSpec]
@@ -131,9 +131,9 @@ def _raise_for_terminal_status(status: PlatformJobStatusResponse) -> None:
     if status_value in _TERMINAL_FAILURE_STATUSES:
         error_details = status.error_details or "Unknown error"
         raise RuntimeError(
-            f"NeMo Platform metric job {status.name!r} finished with status {status_value!r}: {error_details}"
+            f"NeMo Helix metric job {status.name!r} finished with status {status_value!r}: {error_details}"
         )
-    raise RuntimeError(f"NeMo Platform metric job {status.name!r} reached unexpected terminal status {status_value!r}")
+    raise RuntimeError(f"NeMo Helix metric job {status.name!r} reached unexpected terminal status {status_value!r}")
 
 
 def _status_is_complete(status: PlatformJobStatusResponse, raise_if_not_complete: bool) -> bool:
@@ -142,16 +142,16 @@ def _status_is_complete(status: PlatformJobStatusResponse, raise_if_not_complete
     if status_value == _TERMINAL_SUCCESS_STATUS:
         return True
     if status_value in _TERMINAL_FAILURE_STATUSES:
-        msg = f"NeMo Platform metric job {status.name!r} stopped with status {status_value!r}"
+        msg = f"NeMo Helix metric job {status.name!r} stopped with status {status_value!r}"
         if raise_if_not_complete:
             error_details = status.error_details or "Unknown error"
             raise RuntimeError(f"{msg}: {error_details}")
         return False
     if status_value in _QUEUED_STATUSES | _RUNNING_STATUSES:
         if raise_if_not_complete:
-            raise RuntimeError(f"NeMo Platform metric job {status.name!r} is not complete; status is {status_value!r}")
+            raise RuntimeError(f"NeMo Helix metric job {status.name!r} is not complete; status is {status_value!r}")
         return False
-    msg = f"NeMo Platform metric job {status.name!r} is in an unknown state: {status_value!r}"
+    msg = f"NeMo Helix metric job {status.name!r} is in an unknown state: {status_value!r}"
     if raise_if_not_complete:
         raise RuntimeError(msg)
     log.error(msg)

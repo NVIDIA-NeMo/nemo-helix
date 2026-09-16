@@ -11,6 +11,20 @@ import logging
 from typing import ClassVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.config import get_nemo_config
+from nemo_helix_plugin.entities import (
+    EntityValidationError as NemoEntityValidationError,
+)
+from nemo_helix_plugin.entity_client import (
+    NemoEntitiesClient,
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+    get_entity_client,
+)
+from nemo_helix_plugin.jobs.routes import add_job_routes
+from nemo_helix_plugin.schema import PaginationData
+from nemo_helix_plugin.service import NemoService, RouterSpec
 from nemo_insights_plugin._perms import AnalysisConfigPerms, AnalysisRunStatusPerms, InsightPerms
 from nemo_insights_plugin.analysis_runs import router as analysis_runs_router
 from nemo_insights_plugin.authz import scope
@@ -33,22 +47,8 @@ from nemo_insights_plugin.schema import (
     UpdateAnalysisRunStatusRequest,
     UpdateInsightRequest,
 )
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.config import get_nemo_config
-from nemo_platform_plugin.entities import (
-    EntityValidationError as NemoEntityValidationError,
-)
-from nemo_platform_plugin.entity_client import (
-    NemoEntitiesClient,
-    NemoEntityConflictError,
-    NemoEntityNotFoundError,
-    get_entity_client,
-)
-from nemo_platform_plugin.jobs.routes import add_job_routes
-from nemo_platform_plugin.schema import PaginationData
-from nemo_platform_plugin.service import NemoService, RouterSpec
-from nmp.intake.entities.experiments import ExperimentGroup
-from nmp.intake.spans.api.dependencies import SpansServiceDep
+from nhx.intake.entities.experiments import ExperimentGroup
+from nhx.intake.spans.api.dependencies import SpansServiceDep
 
 logger = logging.getLogger(__name__)
 

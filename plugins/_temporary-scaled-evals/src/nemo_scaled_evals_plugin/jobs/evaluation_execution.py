@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.jobs.api_factory import (
     PlatformJobSpec,
     PlatformJobStep,
     ResourcesLimitsSpec,

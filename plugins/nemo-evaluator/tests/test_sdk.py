@@ -36,10 +36,10 @@ from nemo_evaluator.shared.metric_bundles.inline import InlineMetricBundlePackag
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nemo_evaluator_sdk.values import FieldMapping, Model, ModelRef, RunConfig, RunConfigOnline, RunConfigOnlineModel
-from nemo_platform_plugin.client.errors import NemoResponseValidationError, NotFoundError
-from nemo_platform_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
-from nemo_platform_plugin.models.client import AsyncModelsClient, ModelsClient
+from nemo_helix_plugin.client.errors import NemoResponseValidationError, NotFoundError
+from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
+from nemo_helix_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient
 from pytest_mock import MockerFixture
 
 _EXACT_MATCH_METRIC = ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")

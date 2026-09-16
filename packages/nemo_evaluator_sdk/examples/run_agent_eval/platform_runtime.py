@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""NeMo-Platform glue that lets this example run a real ``tests/agentic-use`` task.
+"""NeMo-Helix glue that lets this example run a real ``tests/agentic-use`` task.
 
 Generic logic lives in ``nemo_evaluator_sdk.agent_eval``; this module holds only
 the agentic-use-specific pieces: :func:`agentic_task_from_dir` (load a task from
@@ -10,8 +10,8 @@ the agentic-use-specific pieces: :func:`agentic_task_from_dir` (load a task from
 shaped through the shared :func:`run_agent_then_verify`), and
 :class:`VerifierRewardMetric` (scores the pytest reward).
 
-Running a real task requires Docker, the ``nmp-agentic-base:latest`` image, a
-running NeMo Platform, and ``NVIDIA_API_KEY`` — see this example's README.
+Running a real task requires Docker, the ``nhx-agentic-base:latest`` image, a
+running NeMo Helix, and ``NVIDIA_API_KEY`` — see this example's README.
 """
 
 from __future__ import annotations
@@ -67,9 +67,9 @@ EVALUATOR_SDK_SRC = REPO_ROOT / "packages" / "nemo_evaluator_sdk" / "src"
 
 RUNTIME_NAME = "workflow"
 DEFAULT_TIMEOUT_SEC = 600
-DEFAULT_LOCAL_NMP_BASE_URL = "http://localhost:8080"
+DEFAULT_LOCAL_NHX_BASE_URL = "http://localhost:8080"
 FILES_STORAGE_CONFIG = '{"type":"local","path":"/data/files_storage"}'
-PLATFORM_CONFIG_PATH = "/app/packages/nmp_platform/config/local.yaml"
+PLATFORM_CONFIG_PATH = "/app/packages/nhx_platform/config/local.yaml"
 NAT_TRACE_EXPORT_SCRIPT_CONTAINER_PATH = "/app/tests/agentic-use/scripts/nat_trace_export.py"
 INSTRUCTION_CONTAINER_PATH = "/tmp/nat_instruction.md"
 WORKFLOW_CONTAINER_PATH = "/tmp/nat_workflow.yml"
@@ -84,7 +84,7 @@ DOCKER_SOCKET_CONTAINER_PATH = "/var/run/docker.sock"
 class NatWorkflowConfig:
     """Configuration for :class:`NatWorkflowRuntime`."""
 
-    nmp_base_url: str = DEFAULT_LOCAL_NMP_BASE_URL
+    nhx_base_url: str = DEFAULT_LOCAL_NHX_BASE_URL
     nvidia_api_key: str | None = None
     agent_model: str | None = None
     timeout_sec: int = DEFAULT_TIMEOUT_SEC
@@ -107,7 +107,7 @@ class AgenticRunLayout:
 
 
 def task_image_tag(task_id: str) -> str:
-    return f"nmp-nat-{task_id}:latest"
+    return f"nhx-nat-{task_id}:latest"
 
 
 def resolve_run_layout(task: AgentEvalTask, config: AgentEvalRunConfig | None) -> AgenticRunLayout:
@@ -127,7 +127,7 @@ def resolve_run_layout(task: AgentEvalTask, config: AgentEvalRunConfig | None) -
 
 
 class PlatformDockerEnvironmentProvider(DockerEnvironmentProvider):
-    """Docker provider defaulting each task to ``nmp-nat-<id>:latest``."""
+    """Docker provider defaulting each task to ``nhx-nat-<id>:latest``."""
 
     def __init__(self, *, image_tag_fn: Callable[[str], str] = task_image_tag) -> None:
         super().__init__(image_tag_fn=image_tag_fn)
@@ -260,13 +260,13 @@ def build_workflow_agent_cmd(workflow_container: str, instruction_container: str
 def prepare_workflow_for_runtime(
     workflow_path: Path,
     output_dir: Path,
-    nmp_base_url: str,
+    nhx_base_url: str,
     *,
     nat_model: str | None = None,
 ) -> Path:
     """Rewrite a task ``workflow.yml`` for container execution + trajectory export."""
     text = workflow_path.read_text(encoding="utf-8")
-    text = text.replace("http://localhost:8080", nmp_base_url)
+    text = text.replace("http://localhost:8080", nhx_base_url)
     if nat_model:
         text = text.replace(
             "model_name: nvidia/llama-3.1-nemotron-70b-instruct",
@@ -297,14 +297,14 @@ def prepare_workflow_for_runtime(
     return rewritten
 
 
-def base_container_env(nmp_base_url: str, *, timeout_sec: int) -> dict[str, str]:
+def base_container_env(nhx_base_url: str, *, timeout_sec: int) -> dict[str, str]:
     env = {
-        "NMP_BASE_URL": nmp_base_url,
+        "NHX_BASE_URL": nhx_base_url,
         "AGENTIC_USE_WORKSPACE_DIR": "/app/workspace",
         "DATABASE_DIALECT": "sqlite",
-        "DATABASE_PATH": "/data/nmp-platform.db",
-        "NMP_FILES_DEFAULT_STORAGE_CONFIG": FILES_STORAGE_CONFIG,
-        "NMP_CONFIG_FILE_PATH": PLATFORM_CONFIG_PATH,
+        "DATABASE_PATH": "/data/nhx-platform.db",
+        "NHX_FILES_DEFAULT_STORAGE_CONFIG": FILES_STORAGE_CONFIG,
+        "NHX_CONFIG_FILE_PATH": PLATFORM_CONFIG_PATH,
         "NEMO_AGENTS_GATEWAY_READ_TIMEOUT": str(timeout_sec),
         "NEMO_AGENTS_INVOKE_TIMEOUT": str(timeout_sec),
     }
@@ -331,7 +331,7 @@ def build_verify_run_spec(
     task_dir: Path,
     layout: AgenticRunLayout,
     *,
-    nmp_base_url: str,
+    nhx_base_url: str,
     agent_model: str,
     agent_backend: str = RUNTIME_NAME,
     timeout_sec: int | None = None,
@@ -359,7 +359,7 @@ def build_verify_run_spec(
         """),
     ]
 
-    env = base_container_env(nmp_base_url, timeout_sec=timeout_sec or DEFAULT_TIMEOUT_SEC)
+    env = base_container_env(nhx_base_url, timeout_sec=timeout_sec or DEFAULT_TIMEOUT_SEC)
     env.update(
         {
             "NAT_AGENT": "1",
@@ -392,7 +392,7 @@ async def maybe_run_verify(
     enabled: bool,
     task_dir: Path,
     layout: AgenticRunLayout,
-    nmp_base_url: str,
+    nhx_base_url: str,
     agent_model: str,
     agent_backend: str = RUNTIME_NAME,
     timeout_sec: int | None = None,
@@ -404,7 +404,7 @@ async def maybe_run_verify(
     spec = build_verify_run_spec(
         task_dir,
         layout,
-        nmp_base_url=nmp_base_url,
+        nhx_base_url=nhx_base_url,
         agent_model=agent_model,
         agent_backend=agent_backend,
         timeout_sec=timeout_sec,
@@ -450,7 +450,7 @@ def build_trial_from_artifacts(
         kind="filesystem",
         format="dir",
         ref=str(layout.state_dir),
-        metadata={"role": "platform_state", "extension": "nemo-platform"},
+        metadata={"role": "platform_state", "extension": "nemo-helix"},
     )
 
     output_text = log_text.strip() or ("" if agent_ok else "(agent phase failed)")
@@ -502,7 +502,7 @@ async def run_agent_then_verify(
     runtime_name: str,
     agent_model: str,
     run_verify: bool,
-    nmp_base_url: str,
+    nhx_base_url: str,
     verify_timeout_sec: int,
     docker_extra_args: list[str],
 ) -> AgentEvalTrial:
@@ -524,7 +524,7 @@ async def run_agent_then_verify(
             enabled=run_verify and agent_ok,
             task_dir=Path(str(task.metadata["task_dir"])),
             layout=layout,
-            nmp_base_url=nmp_base_url,
+            nhx_base_url=nhx_base_url,
             agent_model=agent_model,
             agent_backend=runtime_name,
             timeout_sec=verify_timeout_sec,
@@ -574,7 +574,7 @@ class NatWorkflowRuntime:
             name="example_nat_workflow",
             kind="runner",
             config={
-                "nmp_base_url": self.config.nmp_base_url,
+                "nhx_base_url": self.config.nhx_base_url,
                 "agent_model": self.config.agent_model,
                 "timeout_sec": self.config.timeout_sec,
                 "run_verify": self.config.run_verify,
@@ -605,7 +605,7 @@ class NatWorkflowRuntime:
             runtime_name=RUNTIME_NAME,
             agent_model=agent_model,
             run_verify=self.config.run_verify,
-            nmp_base_url=self.config.nmp_base_url,
+            nhx_base_url=self.config.nhx_base_url,
             verify_timeout_sec=self.config.timeout_sec + 120,
             docker_extra_args=list(self.config.docker_extra_args),
         )
@@ -620,11 +620,11 @@ class NatWorkflowRuntime:
         workflow_host = prepare_workflow_for_runtime(
             workflow_path,
             layout.agent_log_dir,
-            self.config.nmp_base_url,
+            self.config.nhx_base_url,
             nat_model=self.config.agent_model,
         )
 
-        env = base_container_env(self.config.nmp_base_url, timeout_sec=timeout_sec)
+        env = base_container_env(self.config.nhx_base_url, timeout_sec=timeout_sec)
         if self.config.nvidia_api_key:
             env["NVIDIA_API_KEY"] = self.config.nvidia_api_key
         if self.config.agent_model:

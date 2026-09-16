@@ -6,7 +6,7 @@ UNAME_S := $(shell uname -s)
 ARCH := $(shell uname -m)
 PLATFORM := $(shell echo $(UNAME_S) | tr '[:upper:]' '[:lower:]')
 PROFILE ?= platform
-NMP_CONFIG_FILE_PATH ?= packages/nmp_platform/config/local.yaml
+NHX_CONFIG_FILE_PATH ?= packages/nhx_platform/config/local.yaml
 
 # Normalize architecture names and set arch-specific defaults.
 ifeq ($(ARCH),x86_64)
@@ -89,24 +89,24 @@ update-web-sdk: verify-toolchain ## Regenerate the TypeScript web SDK (web/packa
 .PHONY: update-sdk
 update-sdk: build-policy refresh-openapi stainless update-web-sdk update-cli ## Update the SDK by regenerating the OpenAPI spec and syncing it with Stainless
 
-.PHONY: vendor-nemo-platform-ext
-vendor-nemo-platform-ext:
-	$(FLOX_EXEC) $(MAKE) -C packages/nemo_platform_ext vendor
+.PHONY: vendor-nemo-helix-ext
+vendor-nemo-helix-ext:
+	$(FLOX_EXEC) $(MAKE) -C packages/nemo_helix_ext vendor
 
 .PHONY: generate-cli-commands
 generate-cli-commands: ## Run generation of the CLI commands
-	$(UV) run --frozen nemo-platform-sdk-tools generate-cli $(ARGS)
+	$(UV) run --frozen nemo-helix-sdk-tools generate-cli $(ARGS)
 
 	# auto-generated code can be cleaned up more aggressively (in this case, we want to remove unused imports in __init__.py files)
-	$(UV) run --frozen ruff check --fix --preview --unsafe-fixes --extend-select F401,E402 packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/
+	$(UV) run --frozen ruff check --fix --preview --unsafe-fixes --extend-select F401,E402 packages/nemo_helix_ext/src/nemo_helix_ext/cli/commands/api/
 	# ARG001 catches unused function arguments which indicates variable shadowing bugs (no auto-fix)
-	$(UV) run --frozen ruff check --select ARG001 packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/
-	$(UV) run --frozen ruff check --fix --unsafe-fixes packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/
-	$(UV) run --frozen ruff format packages/nemo_platform_ext
+	$(UV) run --frozen ruff check --select ARG001 packages/nemo_helix_ext/src/nemo_helix_ext/cli/commands/api/
+	$(UV) run --frozen ruff check --fix --unsafe-fixes packages/nemo_helix_ext/src/nemo_helix_ext/cli/commands/api/
+	$(UV) run --frozen ruff format packages/nemo_helix_ext
 
 .PHONY: generate-cli-reference-docs
 generate-cli-reference-docs: ## Generate the CLI reference documentation
-	NMP_CONFIG_FILE_PATH="$(NMP_CONFIG_FILE_PATH)" $(UV) run --frozen packages/nemo_platform_ext/scripts/docs_generator.py all
+	NHX_CONFIG_FILE_PATH="$(NHX_CONFIG_FILE_PATH)" $(UV) run --frozen packages/nemo_helix_ext/scripts/docs_generator.py all
 
 .PHONY: generate-config-reference-docs
 generate-config-reference-docs: ## Generate the platform config reference documentation
@@ -168,7 +168,7 @@ docs-publish: ## Trigger the Publish Fern Docs workflow (normally runs on push t
 	gh workflow run publish-fern-docs.yaml
 
 .PHONY: update-cli
-update-cli: generate-cli-commands vendor-nemo-platform-ext generate-cli-reference-docs
+update-cli: generate-cli-commands vendor-nemo-helix-ext generate-cli-reference-docs
 
 .PHONY: clean-python
 clean-python: ## remove python virtual environment
@@ -322,18 +322,18 @@ bootstrap: bootstrap-python ## Bootstrap the local dev environment, including St
 	@$(BOOTSTRAP_ACTIVATION_REMINDER)
 
 .PHONY: run
-run: build-policy ## Run the NeMo Platform locally with Docker job backend
-	NMP_CONFIG_FILE_PATH=${NMP_CONFIG_FILE_PATH} $(UV) run nemo services run
+run: build-policy ## Run the NeMo Helix locally with Docker job backend
+	NHX_CONFIG_FILE_PATH=${NHX_CONFIG_FILE_PATH} $(UV) run nemo services run
 
 .PHONY: clean
-clean: clean-python ## Clean the NeMo Platform DB, files, and Python virtual environment
-	rm -f /tmp/nmp-platform.db*
-	rm -rf /tmp/nmp-files
+clean: clean-python ## Clean the NeMo Helix DB, files, and Python virtual environment
+	rm -f /tmp/nhx-platform.db*
+	rm -rf /tmp/nhx-files
 
 .PHONY: update-licenses
 update-licenses: ## Update the third_party/license.txt file with the latest licenses
 	$(UV) sync --inexact
-	$(UV) run --frozen nemo-platform-sdk-tools license generate
+	$(UV) run --frozen nemo-helix-sdk-tools license generate
 
 .PHONY: check-licenses
 check-licenses: ## Check that license files are up to date
@@ -342,7 +342,7 @@ check-licenses: ## Check that license files are up to date
 	export PATH="$$HOME/.local/bin:$$PATH" && \
 	$(MAKE) update-licenses && \
 	diff third_party/licenses.jsonl "$${LICENSE_DIR}/$${LICENSE_NAME}" && \
-	$(UV) run --frozen nemo-platform-sdk-tools license find-missing
+	$(UV) run --frozen nemo-helix-sdk-tools license find-missing
 
 CMD_COPYRIGHT_HEADER_FIXER := $(UV) run python tools/lint/copyright_fixer.py
 .PHONY: update-copyright-headers
@@ -385,10 +385,10 @@ check-github-scripts: test-github-scripts lint-github-scripts ## Test, lint, and
 
 .PHONY: vendor
 vendor: ## Vendor packages into the SDK and generate wrapper metadata
-	$(UV) run --no-sync nemo-platform-sdk-tools vendor all-from-configs \
-		nemo_platform_ext models filesets \
+	$(UV) run --no-sync nemo-helix-sdk-tools vendor all-from-configs \
+		nemo_helix_ext models filesets \
 		nemo_evaluator_sdk
-	$(UV) run --no-sync nemo-platform-sdk-tools post-generation update-license-headers
+	$(UV) run --no-sync nemo-helix-sdk-tools post-generation update-license-headers
 
 # ============================================================================
 # Python Testing Targets
@@ -509,7 +509,7 @@ test-coverage-report: ## Generate and display coverage report (run after test-co
 	 echo "Coverage report is at htmlcov/index.html"
 
 .PHONY: test-package
-test-package: ## Run tests for a specific package (usage: make test-package PACKAGE=nmp_common)
+test-package: ## Run tests for a specific package (usage: make test-package PACKAGE=nhx_common)
 ifndef PACKAGE
 	$(error PACKAGE is not set. Usage: make test-package PACKAGE=<package_name>)
 endif
@@ -585,10 +585,10 @@ test-policy: ## Run OPA policy tests for auth service
 		exit 1; \
 	fi
 	@echo "Running OPA policy tests..."
-	opa test services/core/auth/src/nmp/core/auth/app/policies services/core/auth/src/nmp/core/auth/app/policy_tests services/core/auth/src/nmp/core/auth/assets/static-authz.yaml -v
+	opa test services/core/auth/src/nhx/core/auth/app/policies services/core/auth/src/nhx/core/auth/app/policy_tests services/core/auth/src/nhx/core/auth/assets/static-authz.yaml -v
 
 # Policy WASM bundle paths
-ASSETS_DIR := services/core/auth/src/nmp/core/auth/assets
+ASSETS_DIR := services/core/auth/src/nhx/core/auth/assets
 
 .PHONY: build-policy
 build-policy: ## Build OPA policies into WASM bundle
@@ -634,7 +634,7 @@ test-e2e-docker-gpu: ## Run GPU e2e tests using docker (requires GPU host and GP
 	$(UV) run --frozen pytest e2e --docker --feature gpu -v --junitxml=report.xml
 
 .PHONY: test-e2e-kubernetes
-test-e2e-kubernetes: ## Run e2e tests against Kubernetes (set NMP_E2E_CLUSTER_URL)
+test-e2e-kubernetes: ## Run e2e tests against Kubernetes (set NHX_E2E_CLUSTER_URL)
 	@echo "Running e2e tests with Kubernetes..."
 	$(UV) run --frozen pytest e2e --kubernetes -v -n 2 --junitxml=report-kubernetes.xml
 
@@ -644,22 +644,22 @@ test-e2e-kubernetes-network-policies: ## Set up local kind with Calico and run t
 	e2e/k8s/scripts/run_network_policy_e2e.sh
 
 .PHONY: test-e2e-kubernetes-auth
-test-e2e-kubernetes-auth: ## Run e2e tests against Kubernetes with auth enabled (set NMP_E2E_CLUSTER_URL)
+test-e2e-kubernetes-auth: ## Run e2e tests against Kubernetes with auth enabled (set NHX_E2E_CLUSTER_URL)
 	@echo "Running e2e tests with Kubernetes and feature auth enabled..."
 	$(UV) run --frozen pytest e2e --kubernetes --feature auth -n 2 -v --junitxml=report-kubernetes-auth.xml
 
 .PHONY: test-e2e-kubernetes-kai
-test-e2e-kubernetes-kai: ## Run KAI Scheduler e2e tests against Kubernetes (set NMP_E2E_CLUSTER_URL)
+test-e2e-kubernetes-kai: ## Run KAI Scheduler e2e tests against Kubernetes (set NHX_E2E_CLUSTER_URL)
 	@echo "Running e2e tests with Kubernetes and feature kai-scheduler..."
 	$(UV) run --frozen pytest e2e --kubernetes --feature kai-scheduler -v --junitxml=report-kubernetes-kai.xml
 
 .PHONY: test-e2e-kubernetes-gpu
-test-e2e-kubernetes-gpu: ## Run GPU e2e tests against Kubernetes (requires GPU nodes; set NMP_E2E_CLUSTER_URL)
+test-e2e-kubernetes-gpu: ## Run GPU e2e tests against Kubernetes (requires GPU nodes; set NHX_E2E_CLUSTER_URL)
 	@echo "Running GPU e2e tests with Kubernetes with feature gpu enabled..."
 	$(UV) run --frozen pytest e2e --kubernetes --feature gpu -v --junitxml=report-kubernetes-gpu.xml
 
 .PHONY: test-e2e-kubernetes-gpu-automodel
-test-e2e-kubernetes-gpu-automodel: ## Run GPU automodel customization e2e tests against Kubernetes (requires GPU nodes; set NMP_E2E_CLUSTER_URL)
+test-e2e-kubernetes-gpu-automodel: ## Run GPU automodel customization e2e tests against Kubernetes (requires GPU nodes; set NHX_E2E_CLUSTER_URL)
 	@echo "Running GPU automodel customization e2e tests with Kubernetes..."
 	$(UV) run --frozen pytest tests/agentic-use/customizer-lora-job-cli/tests/test_outputs.py --kubernetes --feature gpu --log-cli-level=INFO -v --junitxml=report-kubernetes-gpu-automodel.xml
 

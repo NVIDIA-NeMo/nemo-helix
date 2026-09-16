@@ -38,12 +38,12 @@ from nemo_auditor.jobs.audit import (
     _garak_config_dict,
     _rewrite_options_uris,
 )
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.config import clear_nemo_config_override, set_nemo_config_override
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.config import clear_nemo_config_override, set_nemo_config_override
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
 
 # The probe name returned by parse_plugin_spec for "encoding.InjectAscii85".
 _PROBE_NAME = "encoding.InjectAscii85"
@@ -710,7 +710,7 @@ class TestCompileProfileDefault:
                 spec=_make_config(),
                 entity_client=None,
                 job_name=None,
-                async_sdk=cast(AsyncNeMoPlatform, None),
+                async_sdk=cast(AsyncNeMoHelix, None),
                 profile=profile,
             )
         )
@@ -825,7 +825,7 @@ class TestCollectReportArtifacts:
 
 
 # ---------------------------------------------------------------------------
-# _rewrite_options_uris — nmp_uri_spec resolution via the platform SDK
+# _rewrite_options_uris — nhx_uri_spec resolution via the platform SDK
 # ---------------------------------------------------------------------------
 
 
@@ -867,13 +867,13 @@ def _patch_client_from_platform():
 
 
 class TestRewriteOptionsUris:
-    def test_replaces_nmp_uri_spec_at_top_level_nim(self) -> None:
+    def test_replaces_nhx_uri_spec_at_top_level_nim(self) -> None:
         options = {
             "nim": {
                 "skip_seq_start": "<think>",
                 "skip_seq_end": "</think>",
                 "max_tokens": 4000,
-                "nmp_uri_spec": {
+                "nhx_uri_spec": {
                     "inference_gateway": {"workspace": "default", "provider": "build"},
                 },
             }
@@ -895,7 +895,7 @@ class TestRewriteOptionsUris:
         options = {
             "openai": {
                 "OpenAICompatible": {
-                    "nmp_uri_spec": {
+                    "nhx_uri_spec": {
                         "inference_gateway": {"workspace": "default", "provider": "openai"},
                     }
                 }
@@ -932,36 +932,36 @@ class TestRewriteOptionsUris:
         sdk.models_client.get_provider.assert_not_called()
 
     def test_raises_on_missing_provider(self) -> None:
-        options = {"nim": {"nmp_uri_spec": {"inference_gateway": {"workspace": "default"}}}}
-        with pytest.raises(ValueError, match="Invalid nmp_uri_spec"):
+        options = {"nim": {"nhx_uri_spec": {"inference_gateway": {"workspace": "default"}}}}
+        with pytest.raises(ValueError, match="Invalid nhx_uri_spec"):
             _rewrite_options_uris(options, _mock_sdk())
 
     def test_raises_on_missing_workspace(self) -> None:
-        options = {"nim": {"nmp_uri_spec": {"inference_gateway": {"provider": "build"}}}}
-        with pytest.raises(ValueError, match="Invalid nmp_uri_spec"):
+        options = {"nim": {"nhx_uri_spec": {"inference_gateway": {"provider": "build"}}}}
+        with pytest.raises(ValueError, match="Invalid nhx_uri_spec"):
             _rewrite_options_uris(options, _mock_sdk())
 
     def test_raises_on_missing_inference_gateway_key(self) -> None:
-        options = {"nim": {"nmp_uri_spec": {"some_other_resolver": {}}}}
-        with pytest.raises(ValueError, match="Invalid nmp_uri_spec"):
+        options = {"nim": {"nhx_uri_spec": {"some_other_resolver": {}}}}
+        with pytest.raises(ValueError, match="Invalid nhx_uri_spec"):
             _rewrite_options_uris(options, _mock_sdk())
 
     def test_raises_on_uri_and_sentinel_conflict(self) -> None:
         options = {
             "nim": {
                 "uri": "https://this-should-not-exist",
-                "nmp_uri_spec": {
+                "nhx_uri_spec": {
                     "inference_gateway": {"workspace": "default", "provider": "build"},
                 },
             }
         }
-        with pytest.raises(ValueError, match="both 'uri' and 'nmp_uri_spec'"):
+        with pytest.raises(ValueError, match="both 'uri' and 'nhx_uri_spec'"):
             _rewrite_options_uris(options, _mock_sdk())
 
     def test_raises_when_sentinel_present_but_sdk_is_none(self) -> None:
         options = {
             "nim": {
-                "nmp_uri_spec": {
+                "nhx_uri_spec": {
                     "inference_gateway": {"workspace": "default", "provider": "build"},
                 }
             }
@@ -972,7 +972,7 @@ class TestRewriteOptionsUris:
     def test_raises_when_both_sdk_and_async_sdk_are_none(self) -> None:
         options = {
             "nim": {
-                "nmp_uri_spec": {
+                "nhx_uri_spec": {
                     "inference_gateway": {"workspace": "default", "provider": "build"},
                 }
             }
@@ -980,11 +980,11 @@ class TestRewriteOptionsUris:
         with pytest.raises(RuntimeError, match="requires a connected platform SDK"):
             _rewrite_options_uris(options, None, async_sdk=None)
 
-    def test_resolves_nmp_uri_spec_via_async_sdk(self) -> None:
+    def test_resolves_nhx_uri_spec_via_async_sdk(self) -> None:
         options = {
             "nim": {
                 "max_tokens": 32,
-                "nmp_uri_spec": {
+                "nhx_uri_spec": {
                     "inference_gateway": {"workspace": "default", "provider": "nvidia-inference-api"},
                 },
             }
@@ -1004,7 +1004,7 @@ class TestRewriteOptionsUris:
         sdk.models_client.get_provider.side_effect = LookupError("no such provider")
         options = {
             "nim": {
-                "nmp_uri_spec": {
+                "nhx_uri_spec": {
                     "inference_gateway": {"workspace": "default", "provider": "ghost"},
                 }
             }
@@ -1014,7 +1014,7 @@ class TestRewriteOptionsUris:
 
 
 # ---------------------------------------------------------------------------
-# AuditJob.run — end-to-end with nmp_uri_spec
+# AuditJob.run — end-to-end with nhx_uri_spec
 # ---------------------------------------------------------------------------
 
 
@@ -1027,7 +1027,7 @@ class TestAuditJobIGW:
             options={
                 "nim": {
                     "max_tokens": 4000,
-                    "nmp_uri_spec": {
+                    "nhx_uri_spec": {
                         "inference_gateway": {"workspace": "default", "provider": "build"},
                     },
                 }
@@ -1051,12 +1051,12 @@ class TestAuditJobIGW:
             }
         }
         # And the original validated spec is untouched.
-        assert "nmp_uri_spec" in target.options["nim"]
+        assert "nhx_uri_spec" in target.options["nim"]
 
     def test_run_without_sdk_when_no_sentinel_works(
         self, tmp_path: Path, fake_garak_python: Path, fake_parse_plugin_spec
     ) -> None:
-        """sdk=None is fine when options carry no nmp_uri_spec."""
+        """sdk=None is fine when options carry no nhx_uri_spec."""
         ctx = _make_ctx(tmp_path)
         spec = _make_spec_dict(target=_make_target(options={"nim": {"max_tokens": 100}}))
 
@@ -1067,16 +1067,16 @@ class TestAuditJobIGW:
         on_disk = json.loads((ctx.storage.persistent / "target_options.json").read_text())
         assert on_disk == {"nim": {"max_tokens": 100}}
 
-    def test_run_resolves_nmp_uri_spec_via_async_sdk(
+    def test_run_resolves_nhx_uri_spec_via_async_sdk(
         self, tmp_path: Path, fake_garak_python: Path, fake_parse_plugin_spec
     ) -> None:
-        """async_sdk path: nmp_uri_spec is rewritten when sdk=None but async_sdk is provided."""
+        """async_sdk path: nhx_uri_spec is rewritten when sdk=None but async_sdk is provided."""
         ctx = _make_ctx(tmp_path)
         target = _make_target(
             options={
                 "nim": {
                     "max_tokens": 32,
-                    "nmp_uri_spec": {
+                    "nhx_uri_spec": {
                         "inference_gateway": {"workspace": "default", "provider": "nvidia-inference-api"},
                     },
                 }
@@ -1097,7 +1097,7 @@ class TestAuditJobIGW:
         assert opts_path.exists()
         on_disk = json.loads(opts_path.read_text())
         assert on_disk == {"nim": {"max_tokens": 32, "uri": "https://igw-async.example/v1"}}
-        assert "nmp_uri_spec" in target.options["nim"]  # original spec untouched
+        assert "nhx_uri_spec" in target.options["nim"]  # original spec untouched
 
 
 # ---------------------------------------------------------------------------

@@ -14,7 +14,7 @@ from typing import Annotated, Any, ClassVar, Union, get_args, get_origin
 import typer
 from nemo_evaluator_sdk.metrics.types import MetricVariants
 from nemo_evaluator_sdk.values.metrics import _RAGASBase
-from nemo_platform_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli import NemoCLI
 from pydantic import BaseModel
 
 

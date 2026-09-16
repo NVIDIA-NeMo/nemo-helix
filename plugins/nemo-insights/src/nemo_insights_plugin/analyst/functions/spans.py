@@ -10,8 +10,8 @@ supplies the raw Intake filter and composes the results in Nooa CodeAct.
 
 from typing import Any
 
+from nemo_helix_plugin.intake.types import SpanMode
 from nemo_insights_plugin.analyst.deps import AnalystDeps
-from nemo_platform_plugin.intake.types import SpanMode
 
 # Sentinel the analyst can pass as ``filter["agent_name"]`` to query spans across
 # all agents instead of the run's default agent under test.

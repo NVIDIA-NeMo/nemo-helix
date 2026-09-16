@@ -2,16 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
-from nmp.common.secrets.encryption import (
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import PlatformSecretCreateRequest
+from nhx.common.secrets.encryption import (
     SecretKeyEncryptor,
     SecretKeyEncryptorConfig,
     envelope_decrypt,
     envelope_encrypt,
 )
-from nmp.core.secrets.entities import PlatformSecret
+from nhx.core.secrets.entities import PlatformSecret
 from pydantic import SecretStr
 
 

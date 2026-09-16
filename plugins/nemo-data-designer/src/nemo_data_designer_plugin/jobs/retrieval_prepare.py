@@ -15,12 +15,12 @@ from nemo_data_designer_plugin.jobs.retrieval_common import (
 )
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPrepareJobConfig, RetrievalPrepareStepConfig
 from nemo_data_designer_plugin.retrieval.corpus import hf_token_from_env, materialize_corpus
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nmp.customization_common.retrieval.inline import wrapped_to_inline_jsonl
-from nmp.customization_common.service.platform_client import fetch_model_entity
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import PlatformJobSpec
+from nhx.customization_common.retrieval.inline import wrapped_to_inline_jsonl
+from nhx.customization_common.service.platform_client import fetch_model_entity
 from pydantic import BaseModel
 
 
@@ -50,7 +50,7 @@ class RetrievalPrepareJob(NemoJob):
         if not job_config.enable_mining:
             return RetrievalPrepareStepConfig(job_config=job_config, phase="convert")
 
-        model = await fetch_model_entity(job_config.model, workspace, cast(AsyncNeMoPlatform, async_sdk))
+        model = await fetch_model_entity(job_config.model, workspace, cast(AsyncNeMoHelix, async_sdk))
         if not model.fileset:
             raise ValueError(
                 f"Model '{model.workspace}/{model.name}' has no fileset. "
@@ -108,14 +108,14 @@ class RetrievalPrepareJob(NemoJob):
             )
         return PlatformJobSpec(steps=steps)
 
-    def run(self, config: dict, ctx: JobContext, sdk: NeMoPlatform) -> dict:
+    def run(self, config: dict, ctx: JobContext, sdk: NeMoHelix) -> dict:
         step = RetrievalPrepareStepConfig.model_validate(config)
         if step.phase == "mine":
-            raise RuntimeError("Mining runs as nmp.automodel.tasks.retrieval_mine, not this module")
+            raise RuntimeError("Mining runs as nhx.automodel.tasks.retrieval_mine, not this module")
         return _run_convert(step.job_config, work_dir(ctx, "stage1_data_prep"), ctx, sdk)
 
 
-def _materialize_input(ref: str, dest: Path, ctx: JobContext, sdk: NeMoPlatform) -> Path:
+def _materialize_input(ref: str, dest: Path, ctx: JobContext, sdk: NeMoHelix) -> Path:
     hf_token = hf_token_from_env()
     if Path(ref).is_absolute():
         return materialize_corpus(ref, dest=dest, sdk=sdk, workspace=ctx.workspace, hf_token=hf_token)
@@ -128,7 +128,7 @@ def _materialize_input(ref: str, dest: Path, ctx: JobContext, sdk: NeMoPlatform)
     return materialize_corpus(ref, dest=dest, sdk=sdk, workspace=ctx.workspace, hf_token=hf_token)
 
 
-def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobContext, sdk: NeMoPlatform) -> dict:
+def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobContext, sdk: NeMoHelix) -> dict:
     if job.train_input_file:
         train_file = _materialize_input(
             job.train_input_file,

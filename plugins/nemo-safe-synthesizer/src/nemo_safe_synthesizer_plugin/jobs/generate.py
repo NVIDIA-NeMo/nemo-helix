@@ -10,13 +10,13 @@ from typing import Any, ClassVar
 from urllib.parse import urlparse
 
 from filesets import FilesetPathError, parse_fileset_ref
-from nemo_platform import AsyncNeMoPlatform, NotFoundError, PermissionDeniedError
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
-from nemo_platform_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix import AsyncNeMoHelix, NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
+from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     EnvironmentVariable,
     EnvironmentVariableFromSecret,
@@ -30,10 +30,10 @@ from nemo_platform_plugin.jobs.api_factory import (
     ResourcesRequestsSpec,
     ResourcesSpec,
 )
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
-from nemo_platform_plugin.jobs.image import get_qualified_image
-from nemo_platform_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_safe_synthesizer.config.external_results import SafeSynthesizerSummary
 from nemo_safe_synthesizer_plugin.config import config as plugin_config
 from nemo_safe_synthesizer_plugin.job_config import SafeSynthesizerJobConfig, parse_pretrained_model_job_ref
@@ -79,7 +79,7 @@ class GenerateJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncNeMoHelix,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:

@@ -16,7 +16,7 @@ Dockerfile.bake
 **/__pycache__
 **/node_modules
 web/packages/sdk/generated/
-sdk/python/nemo-platform/_dev/nmp
+sdk/python/nemo-helix/_dev/nhx
 # nemo-agents optimize-skills artifacts. These ephemeral run outputs can
 # contain root-owned files (the harbor agent runs as root inside the
 # container) that fail docker build context scanning with permission

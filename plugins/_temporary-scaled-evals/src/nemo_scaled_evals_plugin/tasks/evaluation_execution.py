@@ -10,8 +10,8 @@ import os
 import sys
 from pathlib import Path
 
-from nemo_platform_plugin.sdk_provider import get_async_task_sdk, get_task_sdk
-from nemo_platform_plugin.tasks.dispatcher import run_task
+from nemo_helix_plugin.sdk_provider import get_async_task_sdk, get_task_sdk
+from nemo_helix_plugin.tasks.dispatcher import run_task
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
 
 
@@ -51,7 +51,7 @@ def _ensure_in_cluster_kubeconfig() -> None:
                 "context": {
                     "cluster": "incluster",
                     "user": "incluster",
-                    "namespace": os.getenv("POD_NAMESPACE", "nemo-platform-scaled-evals"),
+                    "namespace": os.getenv("POD_NAMESPACE", "nemo-helix-scaled-evals"),
                 },
             }
         ],

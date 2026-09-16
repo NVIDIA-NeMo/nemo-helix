@@ -10,10 +10,10 @@ from nemo_evaluator.api.service.metric_service import MetricService
 from nemo_evaluator.api.service.result_service import ResultService
 from nemo_evaluator.api.service.task_service import TaskService
 from nemo_evaluator.api.service.taskset_service import TasksetService
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.dependencies import get_nemo_client
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, get_entity_client
-from nemo_platform_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.dependencies import get_nemo_client
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, get_entity_client
+from nemo_helix_plugin.files.client import AsyncFilesClient
 
 
 def get_metric_service(

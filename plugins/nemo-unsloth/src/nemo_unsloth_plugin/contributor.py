@@ -12,7 +12,7 @@ class at startup and:
 - adds :meth:`get_cli` under ``nemo customization unsloth``
 - composes :meth:`get_sdk_resources` under ``client.customization.unsloth``
 
-The shared shape lives in :class:`nmp.customization_common.contributor.base.BaseContributor`.
+The shared shape lives in :class:`nhx.customization_common.contributor.base.BaseContributor`.
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ from __future__ import annotations
 from typing import ClassVar
 
 import typer
-from nemo_platform_plugin.customization_contributor import CustomizationContributorSDKResources
-from nmp.customization_common.contributor.base import BaseContributor
+from nemo_helix_plugin.customization_contributor import CustomizationContributorSDKResources
+from nhx.customization_common.contributor.base import BaseContributor
 
 from nemo_unsloth_plugin.config import UnslothPluginConfig, generate_unsloth_id, get_config
 from nemo_unsloth_plugin.jobs.jobs import UnslothJob

@@ -11,7 +11,7 @@ from copy import deepcopy
 from typing import Any
 
 from nemo_deployments_plugin.backends.k8s.compiler import ExecutorK8sDefaults
-from nemo_platform_plugin.config import ImagePullSecret
+from nemo_helix_plugin.config import ImagePullSecret
 from pydantic import BaseModel, Field, field_validator
 
 _DNS_LABEL_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")

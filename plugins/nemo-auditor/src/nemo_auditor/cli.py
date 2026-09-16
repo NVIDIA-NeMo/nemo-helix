@@ -28,8 +28,8 @@ from typing import Any, ClassVar
 
 import httpx
 import typer
-from nemo_platform_plugin.cli import NemoCLI
-from nemo_platform_plugin.cli_errors import print_http_request_error, print_http_status_error
+from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli_errors import print_http_request_error, print_http_status_error
 
 _DEFAULT_BASE_URL = "http://localhost:8080"
 _DEFAULT_WORKSPACE = "default"
@@ -102,7 +102,7 @@ def _build_crud_app(resource: str, singular: str, help_text: str) -> typer.Typer
         ),
         data: str | None = typer.Option(None, "--data", "-d", help=f"Inline JSON body for the {singular}."),
         workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
-        base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NMP_BASE_URL"),
+        base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NHX_BASE_URL"),
     ) -> None:
         body = _load_data(data_file, data)
         payload = {"name": name, **body}
@@ -112,7 +112,7 @@ def _build_crud_app(resource: str, singular: str, help_text: str) -> typer.Typer
     @sub.command("list")
     def list_cmd(
         workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
-        base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NMP_BASE_URL"),
+        base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NHX_BASE_URL"),
     ) -> None:
         resp = _api_request("GET", base_url, _plugin_path(workspace, resource))
         typer.echo(json.dumps(resp, indent=2))
@@ -121,7 +121,7 @@ def _build_crud_app(resource: str, singular: str, help_text: str) -> typer.Typer
     def get(
         name: str = typer.Argument(..., help=f"{singular.capitalize()} name."),
         workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
-        base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NMP_BASE_URL"),
+        base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NHX_BASE_URL"),
     ) -> None:
         resp = _api_request("GET", base_url, _plugin_path(workspace, resource, name))
         typer.echo(json.dumps(resp, indent=2))
@@ -140,7 +140,7 @@ def _build_crud_app(resource: str, singular: str, help_text: str) -> typer.Typer
         ),
         data: str | None = typer.Option(None, "--data", "-d", help="Inline JSON body."),
         workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
-        base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NMP_BASE_URL"),
+        base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NHX_BASE_URL"),
     ) -> None:
         body = _load_data(data_file, data)
         resp = _api_request("PUT", base_url, _plugin_path(workspace, resource, name), json_body=body)
@@ -150,7 +150,7 @@ def _build_crud_app(resource: str, singular: str, help_text: str) -> typer.Typer
     def delete(
         name: str = typer.Argument(..., help=f"{singular.capitalize()} name."),
         workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
-        base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NMP_BASE_URL"),
+        base_url: str = typer.Option(_DEFAULT_BASE_URL, "--base-url", envvar="NHX_BASE_URL"),
     ) -> None:
         _api_request("DELETE", base_url, _plugin_path(workspace, resource, name))
         typer.echo(f"{singular.capitalize()} '{name}' deleted.")

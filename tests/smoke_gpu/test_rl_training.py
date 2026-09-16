@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""nmp-rl-training image import smoke tests.
+"""nhx-rl-training image import smoke tests.
 
 Built as part of the docker-bake.hcl bake group (smoke-test stage) and run on a CPU runner —
 no GPU hardware required.
@@ -48,7 +48,7 @@ BASE_VENV_MINIMUM_PYTHON_PACKAGE_VERSIONS = {
 
 # Actor FQN -> packages that must import inside that actor's venv.
 #
-# MUST list every venv the build prefetches (the eight filters in docker/rl/Dockerfile.nmp-rl-base
+# MUST list every venv the build prefetches (the eight filters in docker/rl/Dockerfile.nhx-rl-base
 # resolve to NINE actors, because `vllm.vllm_worker` matches the sync and async workers alike).
 # Listing all nine is what makes a broken prefetch filter fail here instead of silently shipping an
 # image whose workers rebuild their venv on the node at job start.
@@ -155,30 +155,30 @@ def _import_in_venv(venv: Path, module: str) -> subprocess.CompletedProcess:
 # --- base venv: only what genuinely lives there -------------------------------------------------
 
 
-@pytest.mark.smoke_nmp_rl_training
+@pytest.mark.smoke_nhx_rl_training
 def test_base_python_package_min_versions():
     assert_python_package_min_versions(BASE_VENV_MINIMUM_PYTHON_PACKAGE_VERSIONS)
 
 
-@pytest.mark.smoke_nmp_rl_training
+@pytest.mark.smoke_nhx_rl_training
 def test_torch_importable():
     """torch is a default dependency, so it is present in the base (driver) venv."""
     import torch  # noqa: F401
 
 
-@pytest.mark.smoke_nmp_rl_training
+@pytest.mark.smoke_nhx_rl_training
 def test_nemo_rl_importable():
     import nemo_rl  # noqa: F401
 
 
-@pytest.mark.smoke_nmp_rl_training
-def test_nmp_rl_training_importable():
+@pytest.mark.smoke_nhx_rl_training
+def test_nhx_rl_training_importable():
     # Exercises the full platform-glue import chain the training entrypoint pulls in
-    # (nemo_platform SDK -> plugin -> nmp_common -> nmp_customization_common -> services/rl).
-    from nmp.rl.tasks.training import __main__ as training_main  # noqa: F401
+    # (nemo_helix SDK -> plugin -> nhx_common -> nhx_customization_common -> services/rl).
+    from nhx.rl.tasks.training import __main__ as training_main  # noqa: F401
 
 
-@pytest.mark.smoke_nmp_rl_training
+@pytest.mark.smoke_nhx_rl_training
 def test_sandboxed_gym_driver_imports():
     """The driver must be able to import the mode-B sandbox modules.
 
@@ -198,7 +198,7 @@ def test_sandboxed_gym_driver_imports():
 # --- per-worker venvs: where training actually runs ---------------------------------------------
 
 
-@pytest.mark.smoke_nmp_rl_training
+@pytest.mark.smoke_nhx_rl_training
 @pytest.mark.parametrize("actor_fqn", sorted(WORKER_VENV_IMPORTS))
 def test_worker_venv_prefetched(actor_fqn):
     """Each actor's venv must be baked into the image, not built on the node at job start."""
@@ -207,7 +207,7 @@ def test_worker_venv_prefetched(actor_fqn):
     assert python.exists(), f"missing prefetched venv for {actor_fqn} (expected {python}); present: {present}"
 
 
-@pytest.mark.smoke_nmp_rl_training
+@pytest.mark.smoke_nhx_rl_training
 def test_prefetched_venvs_match_expected_set():
     """The prefetched venvs must be exactly the set this file covers — no more, no less.
 
@@ -223,11 +223,11 @@ def test_prefetched_venvs_match_expected_set():
         f"  only in image: {sorted(found - expected)}\n"
         f"  only in map:   {sorted(expected - found)}\n"
         f"Keep WORKER_VENV_IMPORTS in sync with the prefetch filters in "
-        f"docker/rl/Dockerfile.nmp-rl-base."
+        f"docker/rl/Dockerfile.nhx-rl-base."
     )
 
 
-@pytest.mark.smoke_nmp_rl_training
+@pytest.mark.smoke_nhx_rl_training
 @pytest.mark.parametrize(("actor_fqn", "module"), WORKER_IMPORT_CASES)
 def test_worker_venv_imports(actor_fqn, module):
     """Import each package in the venv that owns it (catches ABI mismatches and missing extras)."""
@@ -238,7 +238,7 @@ def test_worker_venv_imports(actor_fqn, module):
     assert result.returncode == 0, f"`import {module}` failed in {venv}:\n{result.stderr}"
 
 
-@pytest.mark.smoke_nmp_rl_training
+@pytest.mark.smoke_nhx_rl_training
 @pytest.mark.parametrize(("actor_fqn", "dist"), WORKER_DIST_CASES)
 def test_worker_venv_driver_linked_dists_installed(actor_fqn, dist):
     """Verify driver-linked packages are installed without importing them.
@@ -262,7 +262,7 @@ def test_worker_venv_driver_linked_dists_installed(actor_fqn, dist):
     assert result.returncode == 0, f"{dist} is not installed in {venv}:\n{result.stderr}"
 
 
-@pytest.mark.smoke_nmp_rl_training
+@pytest.mark.smoke_nhx_rl_training
 def test_worker_venvs_symlink_into_shared_cache():
     """Worker venvs must symlink into /opt/uv_cache rather than carry their own copies.
 
@@ -280,14 +280,14 @@ def test_worker_venvs_symlink_into_shared_cache():
     )
 
 
-@pytest.mark.smoke_nmp_rl_training
+@pytest.mark.smoke_nhx_rl_training
 def test_soundfile_libsndfile_removed():
     patterns = read_file_patterns(FINAL_FILE_REMOVALS)
     assert SOUNDFILE_FILE_REMOVALS.issubset(patterns)
     assert_file_patterns_absent(patterns)
 
 
-@pytest.mark.smoke_nmp_rl_training
+@pytest.mark.smoke_nhx_rl_training
 def test_transformers_audio_backend_probe_is_off():
     """Removing the codec must also switch off the probe that guards its import.
 
@@ -302,13 +302,13 @@ def test_transformers_audio_backend_probe_is_off():
     assert not is_soundfile_available()
 
 
-@pytest.mark.smoke_nmp_rl_training
+@pytest.mark.smoke_nhx_rl_training
 def test_grpo_driver_module_imports():
     """The exact import the GRPO driver performs first, and the one the codec strip broke."""
     from nemo_rl.algorithms.grpo import MasterConfig  # noqa: F401
 
 
-@pytest.mark.smoke_nmp_rl_training
+@pytest.mark.smoke_nhx_rl_training
 def test_no_git_directories_shipped():
     """The published image must not carry repository history.
 

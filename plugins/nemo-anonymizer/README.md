@@ -3,14 +3,14 @@
 
 # NeMo Anonymizer Plugin
 
-A NeMo Platform plugin that wraps the
+A NeMo Helix plugin that wraps the
 [NVIDIA-NeMo/Anonymizer](https://github.com/NVIDIA-NeMo/Anonymizer) library
 to detect and replace/rewrite PII in tabular text data.
 
 The plugin exposes an `anonymizer` service, CLI commands under
-`nemo anonymizer`, an SDK accessor on `NeMoPlatform.anonymizer`, a streaming
+`nemo anonymizer`, an SDK accessor on `NeMoHelix.anonymizer`, a streaming
 preview API, and an `anonymizer.run` job that executes on the
-`nmp-cpu-tasks` container image.
+`nhx-cpu-tasks` container image.
 
 ## What it does
 
@@ -26,8 +26,8 @@ The plugin provides functional parity with the
 [NVIDIA NeMo Anonymizer library](https://github.com/NVIDIA-NeMo/Anonymizer):
 
 - All four replacement strategies + `Rewrite` mode.
-- Input sources: `http(s)://` URL or NeMo Platform fileset reference.
-- Plugin execution requires `model_configs` so requests route through NeMo Platform
+- Input sources: `http(s)://` URL or NeMo Helix fileset reference.
+- Plugin execution requires `model_configs` so requests route through NeMo Helix
   Inference Gateway instead of the library's NVIDIA Build defaults.
 
 ## Installation (developer)

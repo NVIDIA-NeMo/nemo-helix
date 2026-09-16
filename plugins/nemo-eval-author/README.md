@@ -22,7 +22,7 @@ validation need PyYAML to read YAML and jsonschema to enforce
 `schemas/audit.schema.json`; audit measurement and reporting use
 `skills/eval-author-audit/requirements.txt`. Trace inspection requires the
 supported `nemo` CLI, an explicit workspace, and read access to a configured
-local or remote NeMo Platform instance.
+local or remote NeMo Helix instance.
 
 `tests/test_skill_contract.py` holds to the same boundary and imports nothing
 from the platform, so `pytest`, `pyyaml`, and `jsonschema` are enough to run it.

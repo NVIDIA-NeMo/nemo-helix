@@ -6,15 +6,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from kubernetes import client
-from nmp.common.auth import AuthContext
-from nmp.common.auth.workload_delegations import (
+from nhx.common.auth import AuthContext
+from nhx.common.auth.workload_delegations import (
     KUBERNETES_POD_UID_REFERENCE_NAME,
     WorkloadDelegationConflictError,
     reference_delegation_name,
 )
-from nmp.common.entities import SYSTEM_WORKSPACE
-from nmp.core.jobs.api.v2.jobs.schemas import PlatformJobStepWithContext
-from nmp.core.jobs.app.constants import (
+from nhx.common.entities import SYSTEM_WORKSPACE
+from nhx.core.jobs.api.v2.jobs.schemas import PlatformJobStepWithContext
+from nhx.core.jobs.app.constants import (
     JOB_ATTEMPT_ID_LABEL,
     JOB_ID_LABEL,
     JOB_MANAGED_BY_JOBS_CONTROLLER,
@@ -25,7 +25,7 @@ from nmp.core.jobs.app.constants import (
     JOB_TYPE_LABEL,
     JOB_WORKSPACE_ID_LABEL,
 )
-from nmp.core.jobs.controllers.backends.kubernetes.workload_delegations import (
+from nhx.core.jobs.controllers.backends.kubernetes.workload_delegations import (
     KubernetesPodBoundWorkloadDelegationManager,
     KubernetesPodBoundWorkloadDelegationTarget,
 )
@@ -74,7 +74,7 @@ def _manager(
         core_v1=core_v1 or MagicMock(),
         namespace="test-namespace",
         ttl_seconds_active=lambda: 900,
-        workload_audience=lambda: "nemo-platform",
+        workload_audience=lambda: "nemo-helix",
         register_workload_delegation=register or MagicMock(),
         revoke_workload_delegation=revoke or MagicMock(),
     )
@@ -82,7 +82,7 @@ def _manager(
 
 def _expected_name(bound_reference_value: str = "pod-uid-123") -> str:
     return reference_delegation_name(
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_subject="system:serviceaccount:test-namespace:default",
         bound_reference_name=KUBERNETES_POD_UID_REFERENCE_NAME,
         bound_reference_value=bound_reference_value,
@@ -96,7 +96,7 @@ def test_manager_registers_pod_uid_bound_delegation(test_step_pending_with_auth_
     manager = _manager(core_v1=core_v1, register=register)
 
     with patch(
-        "nmp.core.jobs.controllers.backends.kubernetes.workload_delegations."
+        "nhx.core.jobs.controllers.backends.kubernetes.workload_delegations."
         "is_workload_identity_token_exchange_enabled",
         return_value=True,
     ):
@@ -106,7 +106,7 @@ def test_manager_registers_pod_uid_bound_delegation(test_step_pending_with_auth_
     assert delegation.name == _expected_name()
     assert delegation.workspace == SYSTEM_WORKSPACE
     assert delegation.workload_subject == "system:serviceaccount:test-namespace:default"
-    assert delegation.workload_audience == "nemo-platform"
+    assert delegation.workload_audience == "nemo-helix"
     assert delegation.bound_reference_name == KUBERNETES_POD_UID_REFERENCE_NAME
     assert delegation.bound_reference_value == "pod-uid-123"
     assert delegation.workload_workspace == "default"
@@ -128,7 +128,7 @@ def test_manager_skips_work_when_step_has_no_auth_context(test_step_pending):
     manager = _manager(core_v1=core_v1, register=register)
 
     with patch(
-        "nmp.core.jobs.controllers.backends.kubernetes.workload_delegations."
+        "nhx.core.jobs.controllers.backends.kubernetes.workload_delegations."
         "is_workload_identity_token_exchange_enabled",
         return_value=True,
     ):
@@ -146,7 +146,7 @@ def test_manager_treats_conflict_as_success_and_records_delegation(test_step_pen
     target = _target()
 
     with patch(
-        "nmp.core.jobs.controllers.backends.kubernetes.workload_delegations."
+        "nhx.core.jobs.controllers.backends.kubernetes.workload_delegations."
         "is_workload_identity_token_exchange_enabled",
         return_value=True,
     ):
@@ -165,7 +165,7 @@ def test_manager_retries_failed_registration_on_next_ensure(test_step_pending_wi
     target = _target()
 
     with patch(
-        "nmp.core.jobs.controllers.backends.kubernetes.workload_delegations."
+        "nhx.core.jobs.controllers.backends.kubernetes.workload_delegations."
         "is_workload_identity_token_exchange_enabled",
         return_value=True,
     ):
@@ -189,7 +189,7 @@ def test_manager_revokes_recorded_names_without_relisting_pods():
     manager._delegations_by_target_key[target_key] = {"ref:recorded-delegation"}
 
     with patch(
-        "nmp.core.jobs.controllers.backends.kubernetes.workload_delegations."
+        "nhx.core.jobs.controllers.backends.kubernetes.workload_delegations."
         "is_workload_identity_token_exchange_enabled",
         return_value=True,
     ):
@@ -207,7 +207,7 @@ def test_manager_derives_revoke_names_from_current_pods_when_no_names_are_record
     manager = _manager(core_v1=core_v1, revoke=revoke)
 
     with patch(
-        "nmp.core.jobs.controllers.backends.kubernetes.workload_delegations."
+        "nhx.core.jobs.controllers.backends.kubernetes.workload_delegations."
         "is_workload_identity_token_exchange_enabled",
         return_value=True,
     ):
@@ -224,7 +224,7 @@ def test_manager_preserves_failed_revokes_for_retry():
     manager._delegations_by_target_key[target_key] = {"ref:a", "ref:b"}
 
     with patch(
-        "nmp.core.jobs.controllers.backends.kubernetes.workload_delegations."
+        "nhx.core.jobs.controllers.backends.kubernetes.workload_delegations."
         "is_workload_identity_token_exchange_enabled",
         return_value=True,
     ):
@@ -246,7 +246,7 @@ def test_manager_can_revoke_by_key_after_native_job_object_is_gone():
     manager._delegations_by_target_key[target_key] = {"ref:recorded-delegation"}
 
     with patch(
-        "nmp.core.jobs.controllers.backends.kubernetes.workload_delegations."
+        "nhx.core.jobs.controllers.backends.kubernetes.workload_delegations."
         "is_workload_identity_token_exchange_enabled",
         return_value=True,
     ):

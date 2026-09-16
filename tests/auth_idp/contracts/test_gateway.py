@@ -6,8 +6,8 @@ import uuid
 
 import httpx
 import pytest
-from nemo_platform_ext.client.tls import HttpxTLSConfig
-from nmp.testing import grant_workspace_role
+from nemo_helix_ext.client.tls import HttpxTLSConfig
+from nhx.testing import grant_workspace_role
 
 from tests.auth_idp.common import jwt_claims, require_capability, runtime_tls_config
 
@@ -94,8 +94,8 @@ def test_provider_gateway_rejects_spoofed_principal_headers(auth_idp_case, auth_
     authenticated_principal_id = str(claims["sub"])
     headers = {
         "Authorization": f"Bearer {workload_provider_token}",
-        "X-NMP-Principal-Id": "service:bootstrap",
-        "X-NMP-Principal-Email": "attacker@example.com",
+        "X-NHX-Principal-Id": "service:bootstrap",
+        "X-NHX-Principal-Email": "attacker@example.com",
     }
     tls_config = runtime_tls_config(auth_idp_runtime)
 

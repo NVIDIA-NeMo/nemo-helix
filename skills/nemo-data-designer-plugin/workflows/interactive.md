@@ -9,7 +9,7 @@ This is an interactive, iterative design process. Do not disengage from the loop
   - Read schemas for every column, sampler type, validator, and processor you plan to use, from the `config_root` path it prints.
   - Never guess types or parameters — read the relevant config files first.
   - Always read `base.py` for inherited fields shared by all config objects.
-  - Ignore its **Model Aliases**, **Persona Datasets**, and **Commands** sections. Those describe a standalone local install; this skill runs on NeMo Platform, where aliases are declared in the script, persona data lives in platform filesets, and every command is prefixed with `nemo`. Read `references/platform-execution.md` instead.
+  - Ignore its **Model Aliases**, **Persona Datasets**, and **Commands** sections. Those describe a standalone local install; this skill runs on NeMo Helix, where aliases are declared in the script, persona data lives in platform filesets, and every command is prefixed with `nemo`. Read `references/platform-execution.md` instead.
 3. **Clarify** — Ask the user clarifying questions to narrow down precisely what they want.
   - Optimize for a great user experience: prefer a structured question tool over plain text if one is available, batch related questions together, keep the set short, provide concrete options/examples/defaults where possible, and use structured inputs (single-select, multi-select, free text, etc.) when they make answering easier.
   - If the dataset uses LLM columns, confirm with the user which provider/model(s) to use. Run `nemo inference providers list` to see what is registered, and offer those as options. See `references/platform-execution.md`.

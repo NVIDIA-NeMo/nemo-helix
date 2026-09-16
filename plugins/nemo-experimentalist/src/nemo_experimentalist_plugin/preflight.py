@@ -40,9 +40,9 @@ from nemo_experimentalist_plugin.resolve import (
     profile_storage_flags,
     select_local_insight,
 )
+from nemo_helix_plugin.nooa_model_client import configured_model_refs
 from nemo_insights_plugin.contracts.checks import CheckResult, make_check_result
 from nemo_insights_plugin.contracts.profile import resolve_profile_path
-from nemo_platform_plugin.nooa_model_client import configured_model_refs
 from pydantic import BaseModel
 
 _SKELETON_HINT = (
@@ -146,7 +146,7 @@ def check_environment(
             "advisory",
             f"{display_base_url} reachable",
             f"{display_base_url} unreachable",
-            hint="is the platform running? check --base-url/NMP_BASE_URL",
+            hint="is the platform running? check --base-url/NHX_BASE_URL",
         )
     )
     profile_agent = profile.agent if (profile is not None and enforce_insight_agent) else None

@@ -36,9 +36,9 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
-from nemo_platform_plugin.guardrail.types import OutputRailsStreamingConfig
-from nemo_platform_plugin.guardrail.types import RailsConfig as PlatformRailsConfig
-from nemo_platform_plugin.inference_middleware import OpenAICompatibleInferenceTarget
+from nemo_helix_plugin.guardrail.types import OutputRailsStreamingConfig
+from nemo_helix_plugin.guardrail.types import RailsConfig as PlatformRailsConfig
+from nemo_helix_plugin.inference_middleware import OpenAICompatibleInferenceTarget
 from nemoguardrails import RailsConfig as LibraryRailsConfig
 from nemoguardrails.rails.llm.config import Model
 from nemoguardrails.rails.llm.llmrails import LLMRails
@@ -159,7 +159,7 @@ InferenceTargetResolver = Callable[[str], OpenAICompatibleInferenceTarget]
 """Resolve a VirtualModel ID to an OpenAI-compatible IGW target.
 
 Satisfied by
-:meth:`~nemo_platform_plugin.inference_middleware.NemoInferenceMiddleware.get_openai_compatible_inference_url_and_model`.
+:meth:`~nemo_helix_plugin.inference_middleware.NemoInferenceMiddleware.get_openai_compatible_inference_url_and_model`.
 """
 
 

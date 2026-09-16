@@ -27,7 +27,7 @@ from nemo_data_designer_plugin.jobs.retrieval_spec import (
     RetrievalRunJobConfig,
 )
 from nemo_data_designer_plugin.jobs.spec import DataDesignerJobConfig
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec, PlatformJobStep
+from nemo_helix_plugin.jobs.api_factory import PlatformJobSpec, PlatformJobStep
 from pydantic import ValidationError
 
 
@@ -84,7 +84,7 @@ async def test_retrieval_generate_compile_is_cpu() -> None:
     assert len(steps) == 1
     executor = _executor(steps[0])
     assert executor["provider"] == "cpu"
-    assert "nmp-cpu-tasks" in executor["container"]["image"]
+    assert "nhx-cpu-tasks" in executor["container"]["image"]
 
 
 @pytest.mark.asyncio
@@ -126,10 +126,10 @@ async def test_retrieval_prepare_compile_uses_one_container_profile() -> None:
     steps = _steps(compiled)
     assert [_executor(step)["provider"] for step in steps] == ["cpu", "cpu", "gpu"]
     assert [_executor(step)["profile"] for step in steps] == ["gpu", "gpu", "gpu"]
-    assert "nmp-automodel-training" in _executor(steps[2])["container"]["image"]
-    assert _executor(steps[2])["container"]["command"] == ["nmp.automodel.tasks.retrieval_mine"]
+    assert "nhx-automodel-training" in _executor(steps[2])["container"]["image"]
+    assert _executor(steps[2])["container"]["command"] == ["nhx.automodel.tasks.retrieval_mine"]
     assert _executor(steps[1])["container"]["command"] == [
-        "nmp.customization_common.tasks.file_io",
+        "nhx.customization_common.tasks.file_io",
         "--service-source",
         "automodel",
         "--service-name",
@@ -244,13 +244,13 @@ async def test_retrieval_prepare_compile_adds_gpu_mining_step() -> None:
     assert len(steps) == 3
     assert _executor(steps[0])["provider"] == "cpu"
     assert _executor(steps[1])["provider"] == "cpu"
-    assert "nmp-customizer-tasks" in _executor(steps[1])["container"]["image"]
+    assert "nhx-customizer-tasks" in _executor(steps[1])["container"]["image"]
     assert steps[1]["config"]["download"] == [
         {"src": {"workspace": "default", "name": "retrieval-model"}, "dest": "model"}
     ]
     assert _executor(steps[2])["provider"] == "gpu"
-    assert "nmp-automodel-training" in _executor(steps[2])["container"]["image"]
-    assert _executor(steps[2])["container"]["command"] == ["nmp.automodel.tasks.retrieval_mine"]
+    assert "nhx-automodel-training" in _executor(steps[2])["container"]["image"]
+    assert _executor(steps[2])["container"]["command"] == ["nhx.automodel.tasks.retrieval_mine"]
     for step in steps:
         environment = {item["name"]: item["value"] for item in step["environment"]}
         assert environment["NEMO_JOB_PERSISTENT_JOB_STORAGE_PATH"] == "/var/run/scratch/job"

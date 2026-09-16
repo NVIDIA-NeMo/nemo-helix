@@ -52,19 +52,19 @@ from nemo_agents_plugin.telemetry.intake_export import (
     configure_intake_atif_export,
     supports_intake_atif_export,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.constants import (
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.constants import (
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
     is_workload_identity_token_file_set,
 )
-from nemo_platform_plugin.client.oidc_factory import resolve_workload_exchange_provider
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
-from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.job_results import ResultRef
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix_plugin.client.oidc_factory import resolve_workload_exchange_provider
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.job_results import ResultRef
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
     EnvironmentVariable,
@@ -74,7 +74,7 @@ from nemo_platform_plugin.jobs.api_factory import (
     ResourcesLimitsSpec,
     ResourcesSpec,
 )
-from nemo_platform_plugin.jobs.constants import (
+from nemo_helix_plugin.jobs.constants import (
     CONFIG_TASK_STORAGE_PATH_ENVVAR,
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
@@ -88,9 +88,9 @@ from nemo_platform_plugin.jobs.constants import (
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
     TASK_CONFIG_ENVVAR,
 )
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
-from nemo_platform_plugin.refs import ENTITY_REF_PATTERN, parse_entity_ref
-from nemo_platform_plugin.sdk_provider import get_forwarding_headers
+from nemo_helix_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, parse_entity_ref
+from nemo_helix_plugin.sdk_provider import get_forwarding_headers
 from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
@@ -100,8 +100,8 @@ FABRIC_BASE_DIR_NAME = "fabric"
 INPUT_WORKDIR_RESULT_NAME = "input_workdir"
 OUTPUT_WORKDIR_RESULT_NAME = "output_workdir"
 OUTPUT_ARTIFACTS_RESULT_NAME = "output_artifacts"
-NMP_BASE_URL_ENVVAR = "NMP_BASE_URL"
-HEADER_ENVVAR_PREFIX = "NMP_AGENT_TELEMETRY_HEADER_"
+NHX_BASE_URL_ENVVAR = "NHX_BASE_URL"
+HEADER_ENVVAR_PREFIX = "NHX_AGENT_TELEMETRY_HEADER_"
 FABRIC_RUN_RESULT_NAME = "fabric_run_result"
 FABRIC_ERROR_RESULT_NAME = "fabric_error"
 FABRIC_RUN_RESULT_FILENAME = "fabric_run_result.json"
@@ -135,13 +135,13 @@ _SUPPORTED_RESOURCE_KEYS = frozenset({"cpu", "memory", _GPU_RESOURCE_KEY})
 
 # Env var names a secret-backed env var must never shadow. Splitting a secret's
 # resolved value over one of these would clobber platform-injected job state (the
-# jobs substrate sets the ``NEMO_JOB_*``/``NMP_TASK_CONFIG`` family on every
+# jobs substrate sets the ``NEMO_JOB_*``/``NHX_TASK_CONFIG`` family on every
 # step) or the agent-container env the execute task relies on to reach the
 # platform SDK (mirrors the deployment container's reserved set). Reject the
 # collision at compile time so it can never reach the running step.
 _RESERVED_ENV_VAR_NAMES = frozenset(
     {
-        # Jobs substrate (nemo_platform_plugin.jobs.constants).
+        # Jobs substrate (nemo_helix_plugin.jobs.constants).
         EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
         PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
         CONFIG_TASK_STORAGE_PATH_ENVVAR,
@@ -155,9 +155,9 @@ _RESERVED_ENV_VAR_NAMES = frozenset(
         NEMO_JOB_FILESET_ENVVAR,
         NEMO_JOB_SECRETS_ENVVAR,
         # Agent execution env (mirrors the deployment container's reserved set).
-        "NMP_WORKSPACE",
-        "NMP_AGENT_NAME",
-        "NMP_BASE_URL",
+        "NHX_WORKSPACE",
+        "NHX_AGENT_NAME",
+        "NHX_BASE_URL",
         "PYTHONPATH",
         "AGENT_CONFIG_PATH",
         "NAT_CONFIG_PATH",
@@ -358,7 +358,7 @@ class ExecuteAgentJob(NemoJob):
 
         workdir = None
         if request.workdir is not None:
-            async_sdk_handle = cast(AsyncNeMoPlatform, async_sdk)
+            async_sdk_handle = cast(AsyncNeMoHelix, async_sdk)
             files_client = client_from_platform(async_sdk_handle, AsyncFilesClient)
             workdir = await validate_agent_workdir(request.workdir, files_client, default_workspace=workspace)
 
@@ -437,7 +437,7 @@ class ExecuteAgentJob(NemoJob):
             ],
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoPlatform | None = None) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoHelix | None = None) -> dict:
         step_config = ExecuteAgentStepConfig.model_validate(config)
         agent_ref = f"{step_config.agent.workspace}/{step_config.agent.name}"
         # Logged before validation so a config that fails to parse still names the agent it belonged to.
@@ -848,12 +848,12 @@ def _configure_intake_telemetry(
     agent_config: dict[str, Any],
     *,
     workspace: str,
-    sdk: NeMoPlatform | None,
+    sdk: NeMoHelix | None,
 ) -> None:
     """Wire the agent's trajectory export to Intake for this job.
 
     Runs here rather than at create time because only the task knows both
-    halves: ``NMP_BASE_URL`` is the platform URL reachable from *this* pod (the
+    halves: ``NHX_BASE_URL`` is the platform URL reachable from *this* pod (the
     Jobs service rewrites it per runtime), and the task's own SDK carries the
     identity the platform gave this job -- the same ``service:agents`` principal
     and on-behalf-of delegation a deployment gets from its auth-proxy sidecar.
@@ -863,9 +863,9 @@ def _configure_intake_telemetry(
     are uploaded as a job result, so an inline header would be a downloadable
     one.
     """
-    base_url = os.environ.get(NMP_BASE_URL_ENVVAR)
+    base_url = os.environ.get(NHX_BASE_URL_ENVVAR)
     if not base_url:
-        logger.warning("%s is not set; the agent will run untraced.", NMP_BASE_URL_ENVVAR)
+        logger.warning("%s is not set; the agent will run untraced.", NHX_BASE_URL_ENVVAR)
         return
 
     headers = get_forwarding_headers(sdk) if sdk is not None else {}

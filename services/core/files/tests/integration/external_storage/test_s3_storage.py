@@ -35,22 +35,22 @@ from collections.abc import AsyncIterator, Iterator
 import pytest
 from aiobotocore.session import get_session
 from botocore.exceptions import ClientError
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NemoHTTPError as ClientBadRequestError
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest, FilesetOutput
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
-from nmp.common.auth import AuthClient, get_auth_client
-from nmp.common.auth.models import Principal
-from nmp.common.config import AuthConfig
-from nmp.common.files.storage_config import S3StorageConfig
-from nmp.core.files.config import FilesConfig
-from nmp.core.files.service import FilesService
-from nmp.core.files.testing.utils import create_fileset
-from nmp.core.secrets.service import SecretsService
-from nmp.testing import create_test_client
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NemoHTTPError as ClientBadRequestError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetOutput
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import PlatformSecretCreateRequest
+from nhx.common.auth import AuthClient, get_auth_client
+from nhx.common.auth.models import Principal
+from nhx.common.config import AuthConfig
+from nhx.common.files.storage_config import S3StorageConfig
+from nhx.core.files.config import FilesConfig
+from nhx.core.files.service import FilesService
+from nhx.core.files.testing.utils import create_fileset
+from nhx.core.secrets.service import SecretsService
+from nhx.testing import create_test_client
 from pydantic import SecretStr
 from types_aiobotocore_s3 import S3Client
 
@@ -121,7 +121,7 @@ async def s3_test_bucket(s3_client: S3Client) -> AsyncIterator[str]:
 
 
 @pytest.fixture
-def s3_credentials(sdk: NeMoPlatform) -> Iterator[tuple[str, str]]:
+def s3_credentials(sdk: NeMoHelix) -> Iterator[tuple[str, str]]:
     """Create temporary secrets for S3 credentials and clean up after use."""
     access_key_secret = f"s3-access-key-{uuid.uuid4().hex[:8]}"
     secret_key_secret = f"s3-secret-key-{uuid.uuid4().hex[:8]}"
@@ -144,7 +144,7 @@ def s3_credentials(sdk: NeMoPlatform) -> Iterator[tuple[str, str]]:
 
 
 @pytest.fixture
-def s3_fileset(sdk: NeMoPlatform, s3_test_bucket: str, s3_credentials: tuple[str, str]) -> Iterator[FilesetOutput]:
+def s3_fileset(sdk: NeMoHelix, s3_test_bucket: str, s3_credentials: tuple[str, str]) -> Iterator[FilesetOutput]:
     """Create a fileset with S3 storage for testing."""
     name = f"s3-test-{uuid.uuid4().hex[:8]}"
     access_key_secret, secret_key_secret = s3_credentials
@@ -160,9 +160,7 @@ def s3_fileset(sdk: NeMoPlatform, s3_test_bucket: str, s3_credentials: tuple[str
 class TestS3StorageBackend:
     """Test S3 storage backend through the Files service SDK."""
 
-    def test_fileset_create_with_s3_storage(
-        self, sdk: NeMoPlatform, s3_test_bucket: str, s3_credentials: tuple[str, str]
-    ):
+    def test_fileset_create_with_s3_storage(self, sdk: NeMoHelix, s3_test_bucket: str, s3_credentials: tuple[str, str]):
         """Test creating a fileset with S3 storage configuration."""
         name = f"s3-test-{uuid.uuid4().hex[:8]}"
         access_key_secret, secret_key_secret = s3_credentials
@@ -177,7 +175,7 @@ class TestS3StorageBackend:
             assert persisted.storage.type == "s3"
             assert persisted.storage.bucket == s3_test_bucket
 
-    def test_validate_storage_bucket_not_found(self, sdk: NeMoPlatform, s3_credentials: tuple[str, str]):
+    def test_validate_storage_bucket_not_found(self, sdk: NeMoHelix, s3_credentials: tuple[str, str]):
         """Test that creating a fileset with non-existent bucket fails validation."""
         name = f"s3-test-{uuid.uuid4().hex[:8]}"
         access_key_secret, secret_key_secret = s3_credentials
@@ -199,7 +197,7 @@ class TestS3StorageBackend:
         assert exc_info.value.status_code == 400
         assert "Not found" in str(exc_info.value) or "bucket" in str(exc_info.value).lower()
 
-    def test_invalid_credentials(self, sdk: NeMoPlatform, s3_test_bucket: str):
+    def test_invalid_credentials(self, sdk: NeMoHelix, s3_test_bucket: str):
         """Test that invalid credentials raise an error during fileset creation."""
         name = f"s3-test-{uuid.uuid4().hex[:8]}"
         bad_access_secret = f"bad-s3-access-{uuid.uuid4().hex[:8]}"
@@ -232,7 +230,7 @@ class TestS3StorageBackend:
             secrets.delete_secret(name=bad_access_secret, workspace=DEFAULT_WORKSPACE)
             secrets.delete_secret(name=bad_secret_secret, workspace=DEFAULT_WORKSPACE)
 
-    def test_upload_and_download_roundtrip(self, sdk: NeMoPlatform, s3_fileset: FilesetOutput, tmp_path):
+    def test_upload_and_download_roundtrip(self, sdk: NeMoHelix, s3_fileset: FilesetOutput, tmp_path):
         """Test upload file, download it back, verify content matches."""
         test_content = b"Hello, S3 storage backend test!"
         upload_file = tmp_path / "test-file.txt"
@@ -265,7 +263,7 @@ class TestS3StorageBackend:
         )
         assert download_path.read_bytes() == test_content
 
-    def test_upload_and_download_empty_file(self, sdk: NeMoPlatform, s3_fileset: FilesetOutput, tmp_path):
+    def test_upload_and_download_empty_file(self, sdk: NeMoHelix, s3_fileset: FilesetOutput, tmp_path):
         """Test upload and download of an empty file.
 
         This exercises the edge case where iter_chunked yields no chunks,
@@ -295,7 +293,7 @@ class TestS3StorageBackend:
         ).read()
         assert downloaded_content == test_content
 
-    def test_upload_large_file(self, sdk: NeMoPlatform, s3_fileset: FilesetOutput, tmp_path):
+    def test_upload_large_file(self, sdk: NeMoHelix, s3_fileset: FilesetOutput, tmp_path):
         """Test upload of a large file via presigned URL streaming.
 
         Validates that large file uploads work correctly through the presigned
@@ -323,7 +321,7 @@ class TestS3StorageBackend:
         ).read()
         assert downloaded_content == test_content
 
-    def test_download_with_byte_range(self, sdk: NeMoPlatform, s3_fileset: FilesetOutput, tmp_path):
+    def test_download_with_byte_range(self, sdk: NeMoHelix, s3_fileset: FilesetOutput, tmp_path):
         """Test partial download using HTTP Range header."""
         test_content = b"0123456789ABCDEF"
         upload_file = tmp_path / "range-test.txt"
@@ -346,7 +344,7 @@ class TestS3StorageBackend:
         assert range_response.http_response.status_code == 206  # Partial Content
         assert range_content == b"56789A"
 
-    def test_delete_file(self, sdk: NeMoPlatform, s3_fileset: FilesetOutput, tmp_path):
+    def test_delete_file(self, sdk: NeMoHelix, s3_fileset: FilesetOutput, tmp_path):
         """Test upload, delete, verify gone."""
         upload_file = tmp_path / "to-delete.txt"
         upload_file.write_bytes(b"Delete me!")
@@ -371,7 +369,7 @@ class TestS3StorageBackend:
 
     def test_delete_fileset_with_files(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         s3_test_bucket: str,
         s3_credentials: tuple[str, str],
         s3_client: S3Client,
@@ -423,7 +421,7 @@ class TestS3StorageBackend:
             files_client.delete_fileset(name=fileset.name, workspace=fileset.workspace)
 
             # Verify fileset is gone
-            from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
+            from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 
             with pytest.raises(ClientNotFoundError):
                 files_client.get_fileset(name=name, workspace=DEFAULT_WORKSPACE)
@@ -436,7 +434,7 @@ class TestS3StorageBackend:
                 pass
             raise
 
-    def test_multiple_files_with_directory_structure(self, sdk: NeMoPlatform, s3_fileset: FilesetOutput, tmp_path):
+    def test_multiple_files_with_directory_structure(self, sdk: NeMoHelix, s3_fileset: FilesetOutput, tmp_path):
         """Test uploading multiple files with directory structure."""
         files_to_upload = {
             "file1.txt": b"content1",
@@ -463,7 +461,7 @@ class TestS3StorageBackend:
 
     def test_prefix_isolation(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         s3_test_bucket: str,
         s3_credentials: tuple[str, str],
         tmp_path,
@@ -530,7 +528,7 @@ class TestS3StorageBackend:
 
 
 @pytest.fixture
-def sdk_with_s3_default(s3_test_bucket: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[NeMoPlatform]:
+def sdk_with_s3_default(s3_test_bucket: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[NeMoHelix]:
     """Create an SDK with S3 as the default storage config."""
     # Set AWS credentials via environment variables (SDK credential chain)
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", S3_TEST_ACCESS_KEY)
@@ -568,7 +566,7 @@ class TestS3DefaultStorageConfig:
     This simulates a deployment where S3 is the primary storage for all filesets.
     """
 
-    def test_fileset_without_storage_uses_s3_default(self, sdk_with_s3_default: NeMoPlatform, s3_test_bucket: str):
+    def test_fileset_without_storage_uses_s3_default(self, sdk_with_s3_default: NeMoHelix, s3_test_bucket: str):
         """Test that filesets created without storage config use S3 default."""
         name = f"default-storage-test-{uuid.uuid4().hex[:8]}"
 
@@ -589,7 +587,7 @@ class TestS3DefaultStorageConfig:
         finally:
             files.delete_fileset(name=name, workspace=DEFAULT_WORKSPACE)
 
-    def test_upload_download_with_s3_default(self, sdk_with_s3_default: NeMoPlatform, tmp_path):
+    def test_upload_download_with_s3_default(self, sdk_with_s3_default: NeMoHelix, tmp_path):
         """Test file upload/download on fileset using S3 default storage."""
         name = f"default-storage-test-{uuid.uuid4().hex[:8]}"
         test_content = b"Hello from S3 default storage!"
@@ -631,7 +629,7 @@ class TestS3DefaultStorageConfig:
         finally:
             files.delete_fileset(name=name, workspace=DEFAULT_WORKSPACE)
 
-    def test_multiple_filesets_isolated_with_s3_default(self, sdk_with_s3_default: NeMoPlatform, tmp_path):
+    def test_multiple_filesets_isolated_with_s3_default(self, sdk_with_s3_default: NeMoHelix, tmp_path):
         """Test that multiple filesets using S3 default are isolated via prefix."""
         name1 = f"default-test-1-{uuid.uuid4().hex[:8]}"
         name2 = f"default-test-2-{uuid.uuid4().hex[:8]}"
@@ -686,7 +684,7 @@ class TestS3DefaultStorageConfig:
             files.delete_fileset(name=name1, workspace=DEFAULT_WORKSPACE)
             files.delete_fileset(name=name2, workspace=DEFAULT_WORKSPACE)
 
-    def test_download_from_huggingface_fileset_with_s3_default(self, sdk_with_s3_default: NeMoPlatform):
+    def test_download_from_huggingface_fileset_with_s3_default(self, sdk_with_s3_default: NeMoHelix):
         """Test downloading from a HuggingFace fileset works with S3 as default storage.
 
         This exercises the full download path with HuggingFace backend while the

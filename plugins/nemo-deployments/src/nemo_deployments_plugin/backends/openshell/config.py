@@ -26,7 +26,7 @@ class OpenShellTLSConfig(BaseModel):
 
 
 class PlatformEgressConfig(BaseModel):
-    """The NeMo platform endpoint a sandbox must always be able to reach.
+    """The NeMo Helix endpoint a sandbox must always be able to reach.
 
     Environment-specific: on the docker driver a sandbox reaches the platform at
     host.docker.internal:8080; an in-cluster (k8s) driver uses the platform Service

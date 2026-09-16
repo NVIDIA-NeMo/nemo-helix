@@ -42,7 +42,7 @@ from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
 from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
-from nemo_platform_plugin.sdk import NeMoPlatform
+from nemo_helix_plugin.sdk import NeMoHelix
 
 WORKSPACE = "default"
 
@@ -85,7 +85,7 @@ def _inline_metric() -> MetricInline:
     return MetricInline.model_validate(bundle.model_dump(mode="json"))
 
 
-def _stored_taskset(client: NeMoPlatform) -> str:
+def _stored_taskset(client: NeMoHelix) -> str:
     """A one-task taskset to reference. Its content is irrelevant — only the reference travels."""
     task_name = _unique("gym-submit-task")
     client.evaluator.tasks.create(
@@ -108,7 +108,7 @@ def _stored_taskset(client: NeMoPlatform) -> str:
 
 
 def test_a_live_gym_runner_submits_and_round_trips_through_the_service(subprocess_platform: str) -> None:
-    client = NeMoPlatform(base_url=subprocess_platform, workspace=WORKSPACE, max_retries=2)
+    client = NeMoHelix(base_url=subprocess_platform, workspace=WORKSPACE, max_retries=2)
     taskset_name = _stored_taskset(client)
 
     # Non-default values throughout: a field dropped anywhere along runner -> target -> wire ->
@@ -139,7 +139,7 @@ def test_a_live_gym_runner_submits_and_round_trips_through_the_service(subproces
     # assuming: `job_route_base_url` builds the status path from `/evaluate/jobs` while agent jobs
     # live under `/agent-evaluate/jobs`, and a review round questioned whether that 404s. It does
     # not — the status lookup ignores the collection prefix — but nothing else covers it, since the
-    # execution path polls through `nmp.testing` rather than this resource.
+    # execution path polls through `nhx.testing` rather than this resource.
     status = job.get_job_status()
     assert status.status, f"the agent job's status route returned no status: {status!r}"
 

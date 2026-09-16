@@ -10,26 +10,26 @@ import logging
 from datetime import datetime, timezone
 from typing import ClassVar
 
-from nemo_insights_plugin.analyst.run import run_analyst
-from nemo_insights_plugin.entities import AnalysisConfigStatus
-from nemo_insights_plugin.types import ANALYSIS_JOB_NAME, AnalyzeSpec
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
     EnvironmentVariable,
     PlatformJobSpec,
     PlatformJobStep,
 )
-from nemo_platform_plugin.jobs.constants import (
+from nemo_helix_plugin.jobs.constants import (
     DEFAULT_JOB_STORAGE_PATH,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
-from nemo_platform_plugin.jobs.image import get_qualified_image
-from nemo_platform_plugin.nooa_model_client import ConfiguredModelRefs
-from nemo_platform_plugin.sdk_provider import get_async_task_sdk
+from nemo_helix_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.nooa_model_client import ConfiguredModelRefs
+from nemo_helix_plugin.sdk_provider import get_async_task_sdk
+from nemo_insights_plugin.analyst.run import run_analyst
+from nemo_insights_plugin.entities import AnalysisConfigStatus
+from nemo_insights_plugin.types import ANALYSIS_JOB_NAME, AnalyzeSpec
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ class AnalyzeJob(NemoJob):
                         profile=profile or "default",
                         provider="cpu",
                         container=ContainerSpec(
-                            image=get_qualified_image("nmp-cpu-tasks"),
+                            image=get_qualified_image("nhx-cpu-tasks"),
                             entrypoint=["python", "-m"],
                             command=["nemo_insights_plugin.jobs.bridge"],
                         ),
@@ -91,7 +91,7 @@ class AnalyzeJob(NemoJob):
         config: dict,
         *,
         ctx: JobContext,
-        sdk: NeMoPlatform | None = None,
+        sdk: NeMoHelix | None = None,
     ) -> dict:
         """Run analysis and persist a small report artifact."""
         spec = AnalyzeSpec.model_validate(config)
@@ -165,7 +165,7 @@ class AnalyzeJob(NemoJob):
     def _record_analysis_run_status(
         self,
         *,
-        sdk: NeMoPlatform | None,
+        sdk: NeMoHelix | None,
         ctx: JobContext,
         spec: AnalyzeSpec,
         status: AnalysisConfigStatus,

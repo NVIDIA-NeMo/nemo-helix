@@ -12,12 +12,12 @@ const {
 
 const WHEELS = [
   {
-    id: "nemo-platform",
-    package: "nemo-platform",
-    path: "packages/nemo_platform",
+    id: "nemo-helix",
+    package: "nemo-helix",
+    path: "packages/nemo_helix",
   },
 ];
-const CONTAINERS = [{ id: "nmp-api", target: "nmp-api-docker" }];
+const CONTAINERS = [{ id: "nhx-api", target: "nhx-api-docker" }];
 const SHA = "a".repeat(40);
 const BRANCHES = [
   { name: "release/0.10", commit: { sha: SHA } },
@@ -93,8 +93,8 @@ test("resolves a custom nightly release and uses the supplied clock", async () =
     context: manualContext({
       "release-type": "nightly",
       "release-scope": "custom",
-      "wheel-ids": "nemo-platform",
-      "container-ids": "nmp-api",
+      "wheel-ids": "nemo-helix",
+      "container-ids": "nhx-api",
       "include-helm": "false",
       "dry-run": "true",
     }),
@@ -105,8 +105,8 @@ test("resolves a custom nightly release and uses the supplied clock", async () =
   assert.equal(plan.sourceSha, SHA);
   assert.equal(plan.sourceBranch, "release/0.10");
   assert.equal(plan.releaseLabel, "nightly-20260827123456");
-  assert.deepEqual(plan.wheelIds, ["nemo-platform"]);
-  assert.deepEqual(plan.containerIds, ["nmp-api"]);
+  assert.deepEqual(plan.wheelIds, ["nemo-helix"]);
+  assert.deepEqual(plan.containerIds, ["nhx-api"]);
 });
 
 test("rejects duplicate custom artifact IDs", async () => {
@@ -116,7 +116,7 @@ test("rejects duplicate custom artifact IDs", async () => {
       context: manualContext({
         "release-type": "nightly",
         "release-scope": "custom",
-        "wheel-ids": "nemo-platform,nemo-platform",
+        "wheel-ids": "nemo-helix,nemo-helix",
       }),
       listBranches: async () => BRANCHES,
     }),

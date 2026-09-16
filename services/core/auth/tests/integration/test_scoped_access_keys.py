@@ -12,12 +12,12 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 from httpx import Response
-from nmp.common.auth.access_keys import public_jwk_from_private_key_pem, validate_access_key_token
-from nmp.common.auth.token_claims import TokenClaims
-from nmp.common.config import AuthConfig
-from nmp.common.config.base import AccessKeyConfig, TokenSigningConfig
-from nmp.core.auth.config import AuthServiceConfig
-from nmp.testing.client import create_test_client
+from nhx.common.auth.access_keys import public_jwk_from_private_key_pem, validate_access_key_token
+from nhx.common.auth.token_claims import TokenClaims
+from nhx.common.config import AuthConfig
+from nhx.common.config.base import AccessKeyConfig, TokenSigningConfig
+from nhx.core.auth.config import AuthServiceConfig
+from nhx.testing.client import create_test_client
 
 # Keep this test in its own xdist group while embedded PDP uses process-wide
 # wasmtime state. This limits cross-test scheduling noise under --dist loadgroup.
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.xdist_group("auth_scoped_access_keys")
 ACCESS_KEYS_PATH = "/apis/auth/v2/access-keys"
 IAM_ROLE_BINDINGS_PATH = "/apis/auth/v2/iam/role-bindings"
 WORKSPACES_PATH = "/apis/entities/v2/workspaces"
-SERVICE_HEADERS = {"X-NMP-Principal-Id": "service:integration-test"}
+SERVICE_HEADERS = {"X-NHX-Principal-Id": "service:integration-test"}
 AUTHZ_PROPAGATION_TIMEOUT_SECONDS = 5.0
 AUTHZ_PROPAGATION_POLL_INTERVAL_SECONDS = 0.05
 
@@ -104,8 +104,8 @@ def test_legacy_access_key_without_identity_fields_is_listed_as_user(tmp_path: P
     principal = f"legacy-access-key-{uuid.uuid4().hex[:8]}@example.com"
     jti = f"ak_legacy_{uuid.uuid4().hex}"
     user_headers = {
-        "X-NMP-Principal-Id": principal,
-        "X-NMP-Principal-Email": principal,
+        "X-NHX-Principal-Id": principal,
+        "X-NHX-Principal-Email": principal,
     }
 
     with create_test_client(
@@ -118,7 +118,7 @@ def test_legacy_access_key_without_identity_fields_is_listed_as_user(tmp_path: P
             "description": "Pre-migration access key",
             "principal": principal,
             "issuer": "http://testserver/apis/auth",
-            "audiences": ["nemo-platform-access-key"],
+            "audiences": ["nemo-helix-access-key"],
             "issued_at": "2026-08-25T00:00:00Z",
             "expires_at": "2030-01-01T00:00:00Z",
             "status": "ACTIVE",
@@ -157,9 +157,9 @@ def test_scoped_access_key_created_by_auth_service_authenticates_platform_reques
         group = f"access-key-group-{uuid.uuid4().hex[:8]}"
         user = f"access-key-user-{uuid.uuid4().hex[:8]}@example.com"
         user_headers = {
-            "X-NMP-Principal-Id": user,
-            "X-NMP-Principal-Email": user,
-            "X-NMP-Principal-Groups": group,
+            "X-NHX-Principal-Id": user,
+            "X-NHX-Principal-Email": user,
+            "X-NHX-Principal-Groups": group,
         }
 
         create_workspace = client.post(
@@ -193,14 +193,14 @@ def test_scoped_access_key_created_by_auth_service_authenticates_platform_reques
                 return await validate_access_key_token(config, token, jwks_override=jwks)
 
             def get_workspace_with_access_key(token: str) -> Response:
-                with patch("nmp.common.auth.access_keys.validate_access_key_token", validate_with_local_jwks):
+                with patch("nhx.common.auth.access_keys.validate_access_key_token", validate_with_local_jwks):
                     return client.get(
                         f"{WORKSPACES_PATH}/{workspace}",
                         headers={"Authorization": f"Bearer {token}"},
                     )
 
             def authenticate_with_access_key(token: str) -> Response:
-                with patch("nmp.common.auth.access_keys.validate_access_key_token", validate_with_local_jwks):
+                with patch("nhx.common.auth.access_keys.validate_access_key_token", validate_with_local_jwks):
                     return client.get(
                         "/apis/auth/authenticate",
                         headers={"Authorization": f"Bearer {token}"},
@@ -277,8 +277,8 @@ def test_rotated_access_key_keeps_working_during_grace_period_and_new_key_authen
     shared_config, service_config = _auth_configs(str(private_key_file))
     user = f"rotate-user-{uuid.uuid4().hex[:8]}@example.com"
     user_headers = {
-        "X-NMP-Principal-Id": user,
-        "X-NMP-Principal-Email": user,
+        "X-NHX-Principal-Id": user,
+        "X-NHX-Principal-Email": user,
     }
 
     with create_test_client(
@@ -310,7 +310,7 @@ def test_rotated_access_key_keeps_working_during_grace_period_and_new_key_authen
             return await validate_access_key_token(config, token, jwks_override=jwks)
 
         def authenticate_with_access_key(token: str) -> Response:
-            with patch("nmp.common.auth.access_keys.validate_access_key_token", validate_with_local_jwks):
+            with patch("nhx.common.auth.access_keys.validate_access_key_token", validate_with_local_jwks):
                 return client.get(
                     "/apis/auth/authenticate",
                     headers={"Authorization": f"Bearer {token}"},
@@ -347,12 +347,12 @@ def test_platform_admin_creates_service_bound_key_with_independent_identity(tmp_
     _write_private_key(private_key_file)
     shared_config, service_config = _auth_configs(str(private_key_file))
     admin_headers = {
-        "X-NMP-Principal-Id": "admin@example.com",
-        "X-NMP-Principal-Email": "admin@example.com",
+        "X-NHX-Principal-Id": "admin@example.com",
+        "X-NHX-Principal-Email": "admin@example.com",
     }
     user_headers = {
-        "X-NMP-Principal-Id": "user@example.com",
-        "X-NMP-Principal-Email": "user@example.com",
+        "X-NHX-Principal-Id": "user@example.com",
+        "X-NHX-Principal-Email": "user@example.com",
     }
 
     with create_test_client(
@@ -382,7 +382,7 @@ def test_platform_admin_creates_service_bound_key_with_independent_identity(tmp_
         async def validate_with_local_jwks(config: AuthConfig, token: str) -> TokenClaims | None:
             return await validate_access_key_token(config, token, jwks_override=jwks)
 
-        with patch("nmp.common.auth.access_keys.validate_access_key_token", validate_with_local_jwks):
+        with patch("nhx.common.auth.access_keys.validate_access_key_token", validate_with_local_jwks):
             authenticated = client.get(
                 "/apis/auth/authenticate",
                 headers={"Authorization": f"Bearer {body['token']}"},
@@ -399,7 +399,7 @@ def test_platform_admin_creates_service_bound_key_with_independent_identity(tmp_
         assert create_workspace.status_code in {200, 201}, create_workspace.text
 
         def get_workspace_with_service_key() -> Response:
-            with patch("nmp.common.auth.access_keys.validate_access_key_token", validate_with_local_jwks):
+            with patch("nhx.common.auth.access_keys.validate_access_key_token", validate_with_local_jwks):
                 return client.get(
                     f"{WORKSPACES_PATH}/{workspace}",
                     headers={"Authorization": f"Bearer {body['token']}"},
@@ -422,8 +422,8 @@ def test_platform_admin_creates_service_bound_key_with_independent_identity(tmp_
         # PlatformAdmin who did not create this key must still see it in their own listing,
         # not just be able to look it up by jti.
         other_admin_headers = {
-            "X-NMP-Principal-Id": "admin2@example.com",
-            "X-NMP-Principal-Email": "admin2@example.com",
+            "X-NHX-Principal-Id": "admin2@example.com",
+            "X-NHX-Principal-Email": "admin2@example.com",
         }
         other_admin_role_binding = client.post(
             IAM_ROLE_BINDINGS_PATH,

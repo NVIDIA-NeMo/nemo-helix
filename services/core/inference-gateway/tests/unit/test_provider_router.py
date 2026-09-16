@@ -7,7 +7,7 @@ import json
 
 from fastapi.testclient import TestClient
 from multidict import CIMultiDict
-from nmp.core.inference_gateway.api.model_cache import ModelCache
+from nhx.core.inference_gateway.api.model_cache import ModelCache
 
 
 def test_provider_proxy_endpoint(client: TestClient, mock_proxy_client, mock_proxy_response):

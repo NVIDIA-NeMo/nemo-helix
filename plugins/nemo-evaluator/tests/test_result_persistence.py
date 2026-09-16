@@ -34,11 +34,11 @@ from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult, AgentEvalSumm
 from nemo_evaluator_sdk.enums import AgentFormat
 from nemo_evaluator_sdk.values import Agent, GenericAgent, Model
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult, EvaluationResult
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.entities import EntityBase, EntityClient
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.entities import EntityBase, EntityClient
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
 from pytest_mock import MockerFixture
 
 _ASYNC_SDK = AsyncNemoClient(

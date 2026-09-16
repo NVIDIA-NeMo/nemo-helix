@@ -7,7 +7,7 @@ These pin the two behaviours that make ``nemo agents`` usable against a
 remote, secured platform:
 
 - **Base URL** resolves through the shared CLI context the rest of the CLI
-  uses (``nemo config set --base-url`` / ``NMP_BASE_URL``), with an explicit
+  uses (``nemo config set --base-url`` / ``NHX_BASE_URL``), with an explicit
   ``--base-url`` / ``NEMO_BASE_URL`` still taking precedence, and the resolved
   target echoed to stderr so a mis-pointed command is visible instead of
   silently hitting localhost.

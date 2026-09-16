@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared NeMo Platform client construction for Insight consumers.
+"""Shared NeMo Helix client construction for Insight consumers.
 
 Auth lives in the active ``nemo auth login`` context in
-``~/.config/nmp/config.yaml``. Passing ``base_url`` alone puts the typed client in
+``~/.config/nhx/config.yaml``. Passing ``base_url`` alone puts the typed client in
 "direct mode", which injects no auth headers -- fine for an unauthenticated local
 ``nemo services run``, but it 401s against a remote deployment. To authenticate
 against a remote URL we combine the explicit URL with the context's credentials.
@@ -13,12 +13,12 @@ against a remote URL we combine the explicit URL with the context's credentials.
 from pathlib import Path
 from urllib.parse import urlparse
 
-from nemo_platform_plugin.client.auth import AsyncTokenProvider, TokenProvider
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.client.config.config import Config
-from nemo_platform_plugin.client.config.models import ConfigParams, OAuthUser
-from nemo_platform_plugin.client.oidc import discover_nmp_config
-from nemo_platform_plugin.client.oidc_factory import resolve_oidc_provider
+from nemo_helix_plugin.client.auth import AsyncTokenProvider, TokenProvider
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.config.config import Config
+from nemo_helix_plugin.client.config.models import ConfigParams, OAuthUser
+from nemo_helix_plugin.client.oidc import discover_nhx_config
+from nemo_helix_plugin.client.oidc_factory import resolve_oidc_provider
 
 # Loopback hosts are served by an unauthenticated local platform; attaching
 # (and refreshing) OAuth tokens there is both unnecessary and a failure mode
@@ -35,7 +35,7 @@ def _require_secure_authenticated_remote(base_url: str) -> None:
     if _is_loopback_url(base_url):
         return
     if parsed.scheme != "https":
-        raise ValueError("Authenticated remote NeMo Platform URLs must use HTTPS")
+        raise ValueError("Authenticated remote NeMo Helix URLs must use HTTPS")
 
 
 def _client_from_config_with_base_url(base_url: str, config_path: Path) -> AsyncNemoClient:
@@ -61,13 +61,13 @@ def _client_from_config_with_base_url(base_url: str, config_path: Path) -> Async
 def make_client(base_url: str | None) -> AsyncNemoClient:
     """Construct an :class:`AsyncNemoClient` honoring an optional ``base_url``.
 
-    - No ``base_url``: use the active nmp context for both URL and auth.
+    - No ``base_url``: use the active nhx context for both URL and auth.
     - Loopback ``base_url``: direct mode (local platform is unauthenticated).
-    - Authenticated remote ``base_url`` with an nmp config present: combine the
+    - Authenticated remote ``base_url`` with an nhx config present: combine the
       URL with the context's auth so the client injects and refreshes a Bearer token.
     - Unauthenticated remote ``base_url``: direct mode, even when an unrelated
       OAuth context exists locally.
-    - Remote ``base_url`` without an nmp config: direct mode (no credentials to
+    - Remote ``base_url`` without an nhx config: direct mode (no credentials to
       use; the request will surface a clear auth error).
     """
     if not base_url:
@@ -77,7 +77,7 @@ def make_client(base_url: str | None) -> AsyncNemoClient:
     if _is_loopback_url(base_url) or not config_path.exists():
         return AsyncNemoClient(base_url=base_url)
 
-    if not discover_nmp_config(base_url).auth_enabled:
+    if not discover_nhx_config(base_url).auth_enabled:
         return AsyncNemoClient(base_url=base_url)
 
     return _client_from_config_with_base_url(base_url, config_path)

@@ -15,8 +15,8 @@ from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import 
 from nemo_experimentalist_plugin.experimentalist.reporting import RunReporter, Verbosity
 from nemo_experimentalist_plugin.experimentalist.runner import ExperimentRunner
 from nemo_experimentalist_plugin.experimentalist.strategies.evolutionary import EvolutionaryOptimizerConfig
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.nooa_model_client import (
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.nooa_model_client import (
     ConfiguredModelClients,
     ConfiguredModelRefs,
     activate_model_clients,

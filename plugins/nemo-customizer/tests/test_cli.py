@@ -8,7 +8,7 @@ from typing import ClassVar
 import pytest
 import typer
 from nemo_customizer.cli import CustomizationCLI, CustomizationCLIError
-from nemo_platform_plugin.service import RouterSpec
+from nemo_helix_plugin.service import RouterSpec
 
 
 class _FakeContributor:

@@ -9,17 +9,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel)"
 MINIKUBE_PROFILE="${MINIKUBE_PROFILE:-minikube-auth}"
-BASE_URL="${NMP_E2E_CLUSTER_URL:-http://localhost:30080}"
-PRINCIPAL_ID="${NMP_E2E_PRINCIPAL_ID:-e2e-test-user@example.com}"
+BASE_URL="${NHX_E2E_CLUSTER_URL:-http://localhost:30080}"
+PRINCIPAL_ID="${NHX_E2E_PRINCIPAL_ID:-e2e-test-user@example.com}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-UV_PROJECT="${NMP_E2E_UV_PROJECT:-${REPO_ROOT}}"
+UV_PROJECT="${NHX_E2E_UV_PROJECT:-${REPO_ROOT}}"
 
 if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
     PYTHON_BIN="python"
 fi
 
 if [ ! -f "${UV_PROJECT}/pyproject.toml" ]; then
-    echo "Could not find pyproject.toml at ${UV_PROJECT}. Set NMP_E2E_UV_PROJECT to a checkout with pyproject.toml." >&2
+    echo "Could not find pyproject.toml at ${UV_PROJECT}. Set NHX_E2E_UV_PROJECT to a checkout with pyproject.toml." >&2
     exit 1
 fi
 
@@ -68,15 +68,15 @@ if [ "${unauth_code}" != "401" ]; then
 fi
 echo "Unauthenticated request check passed"
 
-auth_code="$(curl -s -o /dev/null -w '%{http_code}' -H "X-NMP-Principal-Id: ${PRINCIPAL_ID}" "${BASE_URL}/apis/entities/v2/workspaces")"
+auth_code="$(curl -s -o /dev/null -w '%{http_code}' -H "X-NHX-Principal-Id: ${PRINCIPAL_ID}" "${BASE_URL}/apis/entities/v2/workspaces")"
 if [ "${auth_code}" != "200" ]; then
     echo "Expected authenticated workspace list to return 200, got ${auth_code}" >&2
     exit 1
 fi
 echo "Authenticated request check passed"
 
-export NMP_E2E_CLUSTER_URL="${BASE_URL}"
-export NMP_BASE_URL="${BASE_URL}"
+export NHX_E2E_CLUSTER_URL="${BASE_URL}"
+export NHX_BASE_URL="${BASE_URL}"
 
 cd "${REPO_ROOT}"
 if [ "${#PYTEST_TARGETS[@]}" -gt 0 ]; then

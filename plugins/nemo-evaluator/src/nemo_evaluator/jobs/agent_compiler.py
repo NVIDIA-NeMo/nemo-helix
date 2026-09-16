@@ -20,7 +20,7 @@ from nemo_evaluator.jobs.agent_spec import AgentEvalSpec, AgentTarget, GymRunner
 from nemo_evaluator.jobs.environment_stage import EnvironmentStageSpec
 from nemo_evaluator.jobs.gym_sandbox import GYM_SANDBOX_PLAN_ENVVAR, SandboxPlan, resolve_sandbox_plan
 from nemo_evaluator.jobs.secret_env import build_task_environment
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
     EnvironmentVariable,
@@ -28,15 +28,15 @@ from nemo_platform_plugin.jobs.api_factory import (
     PlatformJobStep,
     SubprocessExecutionProviderSpec,
 )
-from nemo_platform_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.jobs.image import get_qualified_image
 
 AGENT_EVAL_STEP_NAME = "agent-evaluate"
 
 #: Container wiring for agent-evaluate steps, run via ``python -m``. Colocated Gym targets use a
 #: dedicated image because NeMo Gym requires Ray. Sandboxed Gym targets only orchestrate the separate
 #: Gym host, so they use the shared CPU task image.
-AGENT_EVAL_IMAGE = "nmp-cpu-tasks"
-GYM_AGENT_EVAL_IMAGE = "nmp-gym-tasks"
+AGENT_EVAL_IMAGE = "nhx-cpu-tasks"
+GYM_AGENT_EVAL_IMAGE = "nhx-gym-tasks"
 AGENT_EVAL_ENTRYPOINT = ["python", "-m"]
 GYM_AGENT_EVAL_ENTRYPOINT = ["/app/.venv/bin/python", "-m"]
 AGENT_EVAL_COMMAND = ["nemo_evaluator.tasks.agent_evaluate"]

@@ -2,12 +2,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "NeMo Auditor NeMo Platform SDK Resources"
+title: "NeMo Auditor NeMo Helix SDK Resources"
 description: ""
 ---
-<a id="auditor-nmp-sdk-resources"></a>
+<a id="auditor-nhx-sdk-resources"></a>
 
-The NeMo Auditor plugin mounts a Python SDK surface on the `nemo_platform` client at `client.auditor`.
+The NeMo Auditor plugin mounts a Python SDK surface on the `nemo_helix` client at `client.auditor`.
 This page documents that surface: how to manage audit configurations and targets in the entity store, and how to run an audit in-process using the local execution path.
 
 The CRUD methods exposed on `client.auditor.configs` and `client.auditor.targets` are 1:1 mirrors of the [audit configuration](/documentation/vulnerability-scanning/configurations) and [audit target](/documentation/vulnerability-scanning/targets) lifecycle and use the same `AuditConfig` and `AuditTarget` pydantic schemas the entity store persists.
@@ -15,14 +15,14 @@ The CRUD methods exposed on `client.auditor.configs` and `client.auditor.targets
 ## AuditorPluginResource
 
 The `AuditorPluginResource` is the sync SDK object for working with the NeMo Auditor plugin.
-It is accessed directly from a `NeMoPlatform` instance:
+It is accessed directly from a `NeMoHelix` instance:
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 auditor = client.auditor  # AuditorPluginResource
@@ -174,7 +174,7 @@ target = auditor.targets.create(
     model="nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
     options={
         "nim": {
-            "nmp_uri_spec": {
+            "nhx_uri_spec": {
                 "inference_gateway": {"workspace": "default", "provider": "nvidia-inference-api"},
             },
         },
@@ -201,15 +201,15 @@ result = auditor.run(config=config, target=target, workspace="default")
 
 ## AsyncAuditorPluginResource
 
-The `AsyncAuditorPluginResource` provides the same surface for `AsyncNeMoPlatform`.
+The `AsyncAuditorPluginResource` provides the same surface for `AsyncNeMoHelix`.
 Async methods must be awaited.
 
 ```python
 import os
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
-client = AsyncNeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = AsyncNeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 auditor = client.auditor  # AsyncAuditorPluginResource

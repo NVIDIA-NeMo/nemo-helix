@@ -8,8 +8,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.run_dependencies import LocalRunError
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.run_dependencies import LocalRunError
 
 from nemo_optimization.fabric import FABRIC_AGENT_SCHEMA_VERSION, is_fabric_agent_config
 
@@ -22,7 +22,7 @@ def resolve_agent_config(
     agent: str | None,
     *,
     workspace: str,
-    sdk: NeMoPlatform | None,
+    sdk: NeMoHelix | None,
 ) -> dict[str, Any] | None:
     """Fetch a platform-managed agent's config and return a Fabric agent package.
 

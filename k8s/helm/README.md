@@ -1,16 +1,16 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NeMo Platform Helm Chart
+# NeMo Helix Helm Chart
 
 ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
 
-Documentation can be found at: https://docs.nvidia.com/nemo-platform.
-For deployment instructions, see https://docs.nvidia.com/nemo-platform/documentation/kubernetes-deployment/setup.
+Documentation can be found at: https://docs.nvidia.com/nemo-helix.
+For deployment instructions, see https://docs.nvidia.com/nemo-helix/documentation/kubernetes-deployment/setup.
 
 ## Platform Secrets Encryption Key
 
-The platform secrets service reads `NMP_SECRETS_DEFAULT_ENCRYPTION_KEY` from the
+The platform secrets service reads `NHX_SECRETS_DEFAULT_ENCRYPTION_KEY` from the
 API env Secret. The value must be base64-encoded and decode to at least 32 bytes.
 
 Set `secrets.defaultEncryptionKey.value` to provide your own key. When that value
@@ -28,7 +28,7 @@ Set `envFromSecret` to use a fully user-managed API env Secret. In that mode the
 chart does not create or generate the API env Secret.
 
 On upgrade, the generated Secret must already exist and contain
-`NMP_SECRETS_DEFAULT_ENCRYPTION_KEY`. If it is missing, restore the original
+`NHX_SECRETS_DEFAULT_ENCRYPTION_KEY`. If it is missing, restore the original
 Secret instead of generating a replacement key; existing encrypted platform
 secrets will not decrypt with a new key.
 
@@ -124,7 +124,7 @@ and
 The chart does not install Kyverno. Multi-node NCCL device injection renders
 ClusterPolicies that Kyverno must apply. Enable exactly one cloud provider
 under `multinodeNetworking`.
-How-to: https://docs.nvidia.com/nemo-platform/latest/documentation/kubernetes-deployment/setup/helm/multinode-networking
+How-to: https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/multinode-networking
 
 ## Volcano
 
@@ -132,7 +132,7 @@ The chart does not install Volcano. Multi-node `volcano_job` workloads need it.
 `rbac.volcanoEnabled` defaults to true so the core controller can manage Volcano
 CRs. Skip Volcano and set `rbac.volcanoEnabled: false` if you are not running
 those jobs.
-How-to: https://docs.nvidia.com/nemo-platform/latest/documentation/kubernetes-deployment/setup/helm/volcano
+How-to: https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/volcano
 
 ## OpenSandbox
 
@@ -144,9 +144,9 @@ already installed server as an HTTP client (`OPEN_SANDBOX_DOMAIN`,
 namespace**. Control plane may stay in `opensandbox-system`. Copy the API-key
 Secret into the job namespace.
 
-Example overlays: [k8s/helm/examples/opensandbox](https://github.com/NVIDIA-NeMo/nemo-platform/tree/main/k8s/helm/examples/opensandbox).
-Shared-kernel (cluster default OCI runtime): https://docs.nvidia.com/nemo-platform/latest/documentation/kubernetes-deployment/setup/helm/open-sandbox
-Kata QEMU: https://docs.nvidia.com/nemo-platform/latest/documentation/kubernetes-deployment/setup/helm/opensandbox-kata
+Example overlays: [k8s/helm/examples/opensandbox](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/k8s/helm/examples/opensandbox).
+Shared-kernel (cluster default OCI runtime): https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/open-sandbox
+Kata QEMU: https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/opensandbox-kata
 
 ## NetworkPolicies
 
@@ -177,7 +177,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | api.extraVolumes | list | `[]` | Additional volumes to add to the Platform API pod. |
 | api.image | object | [See values.yaml](values.yaml#L768) | Container image configuration for the api deployment. |
 | api.image.pullPolicy | string | `"IfNotPresent"` | The image pull policy determining when to pull new images. |
-| api.image.repository | string | `"nvcr.io/nvidia/nemo-platform/nmp-api"` | The registry where the NeMo Platform image is located. |
+| api.image.repository | string | `"nvcr.io/nvidia/nemo-helix/nhx-api"` | The registry where the NeMo Helix image is located. |
 | api.image.tag | string | `""` | The image tag to use. |
 | api.livenessProbe | object | [See values.yaml](values.yaml#L850) | Liveness probe configuration for the api service. |
 | api.livenessProbe.failureThreshold | int | `3` | The failure threshold for the liveness probe. |
@@ -305,7 +305,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | core.enabled | bool | `true` | Specifies whether to enable the core deployment. |
 | core.image | object | [See values.yaml](values.yaml#L967) | Container image configuration for the core deployment. |
 | core.image.pullPolicy | string | `"IfNotPresent"` | The image pull policy determining when to pull new images. |
-| core.image.repository | string | `"nvcr.io/nvidia/nemo-platform/nmp-api"` | The registry where the NeMo Platform image is located. |
+| core.image.repository | string | `"nvcr.io/nvidia/nemo-helix/nhx-api"` | The registry where the NeMo Helix image is located. |
 | core.image.tag | string | `""` | The image tag to use. |
 | core.jobs | object | [See values.yaml](values.yaml#L997) | Service account configuration for pods created by the jobs controller (Kubernetes/Volcano job pods). |
 | core.jobs.serviceAccount.annotations | object | `{}` | Annotations to add to the service account. |
@@ -391,7 +391,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | externalClickhouse.secure | bool | `false` | Whether Intake should connect to ClickHouse over HTTPS. |
 | externalClickhouse.user | string | `"nemo"` | ClickHouse username used by Intake. |
 | externalDatabase | object | [See values.yaml](values.yaml#L340) | External PostgreSQL configuration settings. These values are only used when postgresql.enabled is set to false. |
-| externalDatabase.database | string | `"nemoplatform"` | Database name. |
+| externalDatabase.database | string | `"nemohelix"` | Database name. |
 | externalDatabase.existingSecret | string | `""` | Name of an existing secret resource containing the database credentials. |
 | externalDatabase.existingSecretPasswordKey | string | `""` | Name of an existing secret key containing the database credentials. |
 | externalDatabase.host | string | `"localhost"` | External database host address. |
@@ -437,7 +437,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | ncclTest.iterations | int | `3` | How many times to run the full multinode NCCL test (orchestrator loop; env NCCL_TEST_ITERATIONS). Increase the test timeout on helm test if increasing this variable |
 | ncclTest.validation.minBandwidthMBpsAt1024MB | int | `8000` | Minimum allreduce bandwidth (MB/s) at 1024MB message size; 0 disables the floor check in nccl_test.py. |
 | ncclTest.waitTimeoutSeconds | int | `900` | Max seconds to wait for each worker pod to complete. |
-| networkPolicies | object | [See values.yaml](values.yaml#L143) | NetworkPolicy configuration. Enable the top-level switch to render all default policies, then disable individual policies only for cluster-specific exceptions. For a Calico-backed smoke test, see https://docs.nvidia.com/nemo-platform/documentation/kubernetes-deployment/setup/helm/network-policy-smoke-test. |
+| networkPolicies | object | [See values.yaml](values.yaml#L143) | NetworkPolicy configuration. Enable the top-level switch to render all default policies, then disable individual policies only for cluster-specific exceptions. For a Calico-backed smoke test, see https://docs.nvidia.com/nemo-helix/documentation/kubernetes-deployment/setup/helm/network-policy-smoke-test. |
 | networkPolicies.api | object | [See values.yaml](values.yaml#L148) | NetworkPolicy configuration for the Platform API pods. |
 | networkPolicies.api.enabled | bool | `true` | Create NetworkPolicy resources that isolate Platform API pod ingress. |
 | networkPolicies.api.extraIngress | list | `[]` | Extra NetworkPolicy ingress rules appended to the API policy, for cluster-specific ingress controllers, gateways, monitoring, or debugging pods. |
@@ -484,13 +484,13 @@ For the complete default values, see [values.yaml](values.yaml).
 | openshiftRoute.service | string | [See values.yaml](values.yaml#L718) | Service name to route to. Defaults to Envoy when auth+envoy enabled, otherwise API (tpl-evaluated). |
 | openshiftRoute.targetPort | string | [See values.yaml](values.yaml#L720) | Target port on the service. Defaults to Envoy or API port depending on auth (tpl-evaluated). |
 | openshiftRoute.tls | object | `{}` | Optional TLS configuration (termination, certificate, key, etc.). See OpenShift Route spec. |
-| platformConfig | object | `{}` | Platform-wide configuration settings Set configuration here to apply custom, structured configuration across all services. Applied after the base platform config is evaluated for templates. Enables adding / overriding YAML-based elements in the evaluated platform config. It is usually recommended to use this config section instead of `basePlatformConfig` unless you need to use templating features. For example, you can set the NIM default StorageClass via models.controller.backends.deployments_plugin.default_storage_class. For full configuration reference, see https://docs.nvidia.com/nemo-platform |
+| platformConfig | object | `{}` | Platform-wide configuration settings Set configuration here to apply custom, structured configuration across all services. Applied after the base platform config is evaluated for templates. Enables adding / overriding YAML-based elements in the evaluated platform config. It is usually recommended to use this config section instead of `basePlatformConfig` unless you need to use templating features. For example, you can set the NIM default StorageClass via models.controller.backends.deployments_plugin.default_storage_class. For full configuration reference, see https://docs.nvidia.com/nemo-helix |
 | platformSeedJob | object | [See values.yaml](values.yaml#L933) | Platform seed Job (Helm hook: runs after install/upgrade) Runs the platform-seed task (guardrails configs, evaluator system entities, data designer filesets). Uses post-install,post-upgrade hooks so it runs on fresh installs and can be re-triggered on no-op upgrade. |
 | platformSeedJob.activeDeadlineSeconds | int | `600` | Maximum time in seconds the Job can run. |
 | platformSeedJob.affinity | object | `{}` | Affinity for the platform seeding Job pod. |
 | platformSeedJob.backoffLimit | int | `6` | Number of retries before considering the Job failed. |
 | platformSeedJob.enabled | bool | `true` | Specifies whether to enable the platform-seed Job. |
-| platformSeedJob.extraEnv | list | `[]` | Extra environment variables for the platform-seed container (e.g. CONFIG_STORE_PATH, NMP_PLATFORM_SEED_*). |
+| platformSeedJob.extraEnv | list | `[]` | Extra environment variables for the platform-seed container (e.g. CONFIG_STORE_PATH, NHX_PLATFORM_SEED_*). |
 | platformSeedJob.nodeSelector | object | `{}` | Node selector for the platform seeding Job pod. |
 | platformSeedJob.podLabels | object | `{}` | Additional labels for the platform seeding Job pod. |
 | platformSeedJob.podSecurityContext | object | `{}` | Pod-level security context for the platform seeding Job pod. |
@@ -499,7 +499,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | platformSeedJob.tolerations | list | `[]` | Tolerations for the platform seeding Job pod. |
 | platformSeedJob.ttlSecondsAfterFinished | int | `86400` | Seconds after the Job finishes (success or failure) before it is eligible for automatic deletion. |
 | podSecurityContext | object | [See values.yaml](values.yaml#L753) | Pod security context settings applied to all services by default. These can be overridden in individual service configurations. |
-| postgresql | object | [See values.yaml](values.yaml#L286) | Local PostgreSQL configuration for the NeMo Platform. |
+| postgresql | object | [See values.yaml](values.yaml#L286) | Local PostgreSQL configuration for the NeMo Helix. |
 | postgresql.affinity | object | `{}` | Affinity for the PostgreSQL pod. |
 | postgresql.auth | object | [See values.yaml](values.yaml#L296) | PostgreSQL authentication configuration. |
 | postgresql.auth.existingSecret | string | `""` | Name of an existing secret containing a "password" key (or use existingSecretPasswordKey). If set, the chart does not create a secret. |
@@ -522,7 +522,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | sandboxClusterCapable | bool | `false` | Whether OpenSandbox is installed on this cluster. The chart does not install OpenSandbox. Defaults to false so sandboxed GRPO fail-closes until you deploy OpenSandbox and set this true. See the OpenSandbox section in this README. |
 | secrets | object | [See values.yaml](values.yaml#L23) | Secrets service configuration. |
 | secrets.defaultEncryptionKey.existingSecret | object | [See values.yaml](values.yaml#L28) | Existing Kubernetes Secret containing the key for encrypting platform secrets. If name is set, the chart does not create or generate the default api-env Secret. |
-| secrets.defaultEncryptionKey.existingSecret.key | string | `"NMP_SECRETS_DEFAULT_ENCRYPTION_KEY"` | Key in the existing Secret. After Kubernetes decodes the Secret data, the loaded value must be the base64-encoded NMP_SECRETS_DEFAULT_ENCRYPTION_KEY string. |
+| secrets.defaultEncryptionKey.existingSecret.key | string | `"NHX_SECRETS_DEFAULT_ENCRYPTION_KEY"` | Key in the existing Secret. After Kubernetes decodes the Secret data, the loaded value must be the base64-encoded NHX_SECRETS_DEFAULT_ENCRYPTION_KEY string. |
 | secrets.defaultEncryptionKey.existingSecret.name | string | `""` | Name of an existing Kubernetes Secret containing the encryption key. |
 | secrets.defaultEncryptionKey.generated | object | [See values.yaml](values.yaml#L34) | Generated key configuration used only when value and envFromSecret are empty. The generated key is not rotated or recreated on upgrade. |
 | secrets.defaultEncryptionKey.generated.activeDeadlineSeconds | int | `120` | Maximum seconds for the key generation hook to run. |

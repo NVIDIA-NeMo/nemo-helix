@@ -12,11 +12,11 @@ from urllib.parse import urlparse
 
 import httpx
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_ext.client.tls import NMP_CLIENT_SSL_CERT_FILE_ENVVAR, HttpxTLSConfig, httpx_tls_config_from_env
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceQueryParams, CreateWorkspaceRequest
+from nemo_helix import NeMoHelix
+from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR, HttpxTLSConfig, httpx_tls_config_from_env
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceQueryParams, CreateWorkspaceRequest
 
 from e2e.services_pool import E2EHarnessConfig, E2EServicesPool, RunningServices
 from tests.auth_idp.authentik_live import authentik_gateway_tls_ca_bundle, prepare_authentik_compose_inputs
@@ -143,13 +143,13 @@ def _compose_e2e_config_for_case(
     marker = marker_decorator.mark
     config_layers = cast(tuple[str | dict[str, Any], ...], marker.args)
     harness_config = cast(E2EHarnessConfig, dict(marker.kwargs.get("harness") or {}))
-    lifecycle = os.environ.get("NMP_E2E_COMPOSE_LIFECYCLE")
+    lifecycle = os.environ.get("NHX_E2E_COMPOSE_LIFECYCLE")
     if lifecycle:
         harness_config["lifecycle"] = cast(Any, lifecycle)
-    compose_project_name = os.environ.get("NMP_AUTHENTIK_COMPOSE_PROJECT_NAME")
+    compose_project_name = os.environ.get("NHX_AUTHENTIK_COMPOSE_PROJECT_NAME")
     if compose_project_name:
         harness_config["compose_project_name"] = compose_project_name
-    gateway_port = os.environ.get("NMP_AUTHENTIK_COMPOSE_GATEWAY_PORT")
+    gateway_port = os.environ.get("NHX_AUTHENTIK_COMPOSE_GATEWAY_PORT")
     if gateway_port:
         dynamic_ports = dict(harness_config.get("dynamic_ports") or {})
         gateway_config = dict(dynamic_ports.get("gateway") or {})
@@ -275,7 +275,7 @@ def _prepare_authentik_compose_inputs_for_e2e(idp_e2e_enabled: bool) -> None:
     if idp_e2e_enabled:
         prepare_authentik_compose_inputs()
         os.environ.setdefault(
-            NMP_CLIENT_SSL_CERT_FILE_ENVVAR,
+            NHX_CLIENT_SSL_CERT_FILE_ENVVAR,
             str(authentik_gateway_tls_ca_bundle()),
         )
 
@@ -417,8 +417,8 @@ def interactive_user_token(authentik_stack: ProviderConfig) -> str:
 
 
 @pytest.fixture(scope="module")
-def authentik_e2e_setup_sdk(authentik_stack: ProviderConfig, e2e_setup_token: str) -> NeMoPlatform:
-    return NeMoPlatform(
+def authentik_e2e_setup_sdk(authentik_stack: ProviderConfig, e2e_setup_token: str) -> NeMoHelix:
+    return NeMoHelix(
         base_url=authentik_stack.gateway_base_url,
         default_headers={"Authorization": f"Bearer {e2e_setup_token}"},
         max_retries=0,
@@ -426,8 +426,8 @@ def authentik_e2e_setup_sdk(authentik_stack: ProviderConfig, e2e_setup_token: st
 
 
 @pytest.fixture(scope="module")
-def authentik_interactive_user_sdk(authentik_stack: ProviderConfig, interactive_user_token: str) -> NeMoPlatform:
-    return NeMoPlatform(
+def authentik_interactive_user_sdk(authentik_stack: ProviderConfig, interactive_user_token: str) -> NeMoHelix:
+    return NeMoHelix(
         base_url=authentik_stack.gateway_base_url,
         default_headers={"Authorization": f"Bearer {interactive_user_token}"},
         max_retries=0,
@@ -435,8 +435,8 @@ def authentik_interactive_user_sdk(authentik_stack: ProviderConfig, interactive_
 
 
 @pytest.fixture(scope="module")
-def workload_provider_sdk(authentik_stack: ProviderConfig, workload_provider_token: str) -> NeMoPlatform:
-    return NeMoPlatform(
+def workload_provider_sdk(authentik_stack: ProviderConfig, workload_provider_token: str) -> NeMoHelix:
+    return NeMoHelix(
         base_url=authentik_stack.gateway_base_url,
         default_headers={"Authorization": f"Bearer {workload_provider_token}"},
         max_retries=0,
@@ -444,7 +444,7 @@ def workload_provider_sdk(authentik_stack: ProviderConfig, workload_provider_tok
 
 
 @pytest.fixture
-def authentik_workspace(authentik_e2e_setup_sdk: NeMoPlatform) -> Iterator[str]:
+def authentik_workspace(authentik_e2e_setup_sdk: NeMoHelix) -> Iterator[str]:
     workspaces = client_from_platform(authentik_e2e_setup_sdk, WorkspacesClient)
     workspace_name = f"authentik-ws-{uuid.uuid4().hex[:8]}"
     workspaces.create_workspace(

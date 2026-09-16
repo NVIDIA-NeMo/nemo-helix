@@ -211,7 +211,7 @@ def test_apply_uv_dirs_does_not_override_explicit_config(monkeypatch):
 
 def test_uv_cache_dir_prefers_the_configured_env_var(monkeypatch):
     """`uv cache dir` exits non-zero when the CWD's pyproject pins a conflicting
-    [tool.uv] required-version - true in the nemo-platform image - so an explicit
+    [tool.uv] required-version - true in the nemo-helix image - so an explicit
     UV_CACHE_DIR must win without shelling out at all."""
     monkeypatch.setenv("NRL_CONTAINER", "1")
     monkeypatch.setenv("UV_CACHE_DIR", "/home/ubuntu/.cache/uv")
@@ -673,9 +673,9 @@ def test_bootstrap_composes_a_wheels_package_like_native_v1(tmp_path, monkeypatc
     monkeypatch.setattr(runtime, "_allocate_head_server_port", lambda config: 5000)
     monkeypatch.setattr(runtime, "_create_rollout_helper", lambda: "rollout-helper")
     monkeypatch.setattr(runtime, "_install_wheels_v1_dependencies", lambda loaded_package, work_path: None)
-    monkeypatch.setenv("NMP_ENVIRONMENT_PATH", str(tmp_path))
+    monkeypatch.setenv("NHX_ENVIRONMENT_PATH", str(tmp_path))
     monkeypatch.setenv(runtime.ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY, "true")
-    monkeypatch.setenv("NMP_WORK_PATH", str(tmp_path / "work"))
+    monkeypatch.setenv("NHX_WORK_PATH", str(tmp_path / "work"))
     monkeypatch.setenv(runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY, "/operator/root")
 
     runtime.bootstrap_gym_host()
@@ -763,10 +763,10 @@ def test_bootstrap_installs_wheels_before_starting_gym(monkeypatch):
         "_apply_huggingface_offline_policy",
         lambda: events.append("hf-offline-policy-applied"),
     )
-    monkeypatch.setenv("NMP_ENVIRONMENT_PATH", "/job/environment")
+    monkeypatch.setenv("NHX_ENVIRONMENT_PATH", "/job/environment")
     monkeypatch.setenv(runtime.ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY, "true")
-    monkeypatch.setenv("NMP_WORK_PATH", "/job/work")
-    monkeypatch.setenv("NMP_DATASET_PATH", "/job/dataset")
+    monkeypatch.setenv("NHX_WORK_PATH", "/job/work")
+    monkeypatch.setenv("NHX_DATASET_PATH", "/job/dataset")
 
     _, head_server_config, rollout_helper = runtime.bootstrap_gym_host()
 

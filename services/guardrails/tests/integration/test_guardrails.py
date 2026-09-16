@@ -23,17 +23,17 @@ from typing import Generator, cast
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nemo_platform import NeMoPlatform
-from nmp.common.entities import SYSTEM_WORKSPACE
-from nmp.core.auth.service import AuthService
-from nmp.core.files.service import FilesService
-from nmp.core.models.service import ModelsService
-from nmp.core.secrets.service import SecretsService
-from nmp.guardrails.config import GuardrailsServiceConfig
-from nmp.guardrails.service import GuardrailsService
-from nmp.platform_seed.config import PlatformSeedConfig
-from nmp.platform_seed.tasks.seed import run_platform_seed
-from nmp.testing.client import SDKTestClientAdapter, create_test_client
+from nemo_helix import NeMoHelix
+from nhx.common.entities import SYSTEM_WORKSPACE
+from nhx.core.auth.service import AuthService
+from nhx.core.files.service import FilesService
+from nhx.core.models.service import ModelsService
+from nhx.core.secrets.service import SecretsService
+from nhx.guardrails.config import GuardrailsServiceConfig
+from nhx.guardrails.service import GuardrailsService
+from nhx.platform_seed.config import PlatformSeedConfig
+from nhx.platform_seed.tasks.seed import run_platform_seed
+from nhx.testing.client import SDKTestClientAdapter, create_test_client
 
 # Default workspace for tests
 DEFAULT_WORKSPACE = "default"
@@ -163,9 +163,9 @@ def http_client() -> Generator[TestClient, None, None]:
 
 
 @pytest.fixture(scope="module")
-def sdk(http_client: TestClient) -> NeMoPlatform:
+def sdk(http_client: TestClient) -> NeMoHelix:
     """SDK client backed by the test client."""
-    return NeMoPlatform(base_url="http://testserver", http_client=SDKTestClientAdapter(http_client))
+    return NeMoHelix(base_url="http://testserver", http_client=SDKTestClientAdapter(http_client))
 
 
 def _generate_guardrail_config(name: str | None = None):
@@ -229,7 +229,7 @@ def _generate_guardrail_config(name: str | None = None):
 class TestGuardrailsOpenAPI:
     """Tests for guardrails routes in OpenAPI spec."""
 
-    def test_guardrail_configs_routes_in_openapi(self, sdk: NeMoPlatform):
+    def test_guardrail_configs_routes_in_openapi(self, sdk: NeMoHelix):
         """Test that guardrail config endpoints are documented in OpenAPI spec."""
         response = sdk._client.get("/openapi.json")
         assert response.status_code == 200
@@ -243,7 +243,7 @@ class TestGuardrailsOpenAPI:
         assert "post" in paths["/apis/guardrails/v2/workspaces/{workspace}/configs"]
         assert "get" in paths["/apis/guardrails/v2/workspaces/{workspace}/configs/{name}"]
 
-    def test_guardrail_checks_routes_in_openapi(self, sdk: NeMoPlatform):
+    def test_guardrail_checks_routes_in_openapi(self, sdk: NeMoHelix):
         """Test that guardrail check endpoints are documented in OpenAPI spec."""
         response = sdk._client.get("/openapi.json")
         assert response.status_code == 200
@@ -255,7 +255,7 @@ class TestGuardrailsOpenAPI:
         assert "/apis/guardrails/v2/workspaces/{workspace}/checks" in paths
         assert "post" in paths["/apis/guardrails/v2/workspaces/{workspace}/checks"]
 
-    def test_guardrail_inference_routes_not_in_openapi(self, sdk: NeMoPlatform):
+    def test_guardrail_inference_routes_not_in_openapi(self, sdk: NeMoHelix):
         """Test that deprecated guardrail inference endpoints are not documented in OpenAPI spec."""
         response = sdk._client.get("/openapi.json")
         assert response.status_code == 200
@@ -277,7 +277,7 @@ class TestGuardrailsOpenAPI:
 class TestGuardrailsDefaultConfigs:
     """Tests for default guardrails configs loaded on startup."""
 
-    def test_default_configs_are_loaded(self, sdk: NeMoPlatform):
+    def test_default_configs_are_loaded(self, sdk: NeMoHelix):
         """Test that default configs (default, content-safety, self-check) are loaded."""
         response = sdk._client.get(f"/apis/guardrails/v2/workspaces/{SYSTEM_WORKSPACE}/configs")
         assert response.status_code == 200
@@ -300,7 +300,7 @@ class TestGuardrailsDefaultConfigs:
             assert config.get("created_at")
             assert config.get("updated_at")
 
-    def test_default_config_has_passthrough_true(self, sdk: NeMoPlatform):
+    def test_default_config_has_passthrough_true(self, sdk: NeMoHelix):
         """Test that the 'default' config has passthrough=true."""
         response = sdk._client.get(f"/apis/guardrails/v2/workspaces/{SYSTEM_WORKSPACE}/configs")
         assert response.status_code == 200
@@ -312,7 +312,7 @@ class TestGuardrailsDefaultConfigs:
         # Default config should have passthrough enabled
         assert default_config["data"]["passthrough"] is True
 
-    def test_content_safety_config_has_models_and_rails(self, sdk: NeMoPlatform):
+    def test_content_safety_config_has_models_and_rails(self, sdk: NeMoHelix):
         """Test that the 'content-safety' config has the NemoGuard model and input/output rails."""
         response = sdk._client.get(f"/apis/guardrails/v2/workspaces/{SYSTEM_WORKSPACE}/configs")
         assert response.status_code == 200
@@ -337,7 +337,7 @@ class TestGuardrailsDefaultConfigs:
         # Should be passthrough
         assert cs_config["data"]["passthrough"] is True
 
-    def test_self_check_config_has_llm_model(self, sdk: NeMoPlatform):
+    def test_self_check_config_has_llm_model(self, sdk: NeMoHelix):
         """Test that the 'self-check' config has a main model and input rail configured."""
         response = sdk._client.get(f"/apis/guardrails/v2/workspaces/{SYSTEM_WORKSPACE}/configs")
         assert response.status_code == 200
@@ -359,7 +359,7 @@ class TestGuardrailsDefaultConfigs:
         # Should be passthrough
         assert self_check_config["data"]["passthrough"] is True
 
-    def test_configs_have_workspace(self, sdk: NeMoPlatform):
+    def test_configs_have_workspace(self, sdk: NeMoHelix):
         """Test that all seeded configs are in the system workspace."""
         response = sdk._client.get(f"/apis/guardrails/v2/workspaces/{SYSTEM_WORKSPACE}/configs")
         assert response.status_code == 200
@@ -378,7 +378,7 @@ class TestGuardrailsDefaultConfigs:
 class TestGuardrailConfigs:
     """Tests for guardrails config CRUD operations."""
 
-    def test_create_config(self, sdk: NeMoPlatform):
+    def test_create_config(self, sdk: NeMoHelix):
         """Test creating a guardrail config."""
         unique_name = f"test-config-{uuid.uuid4().hex[:8]}"
         config_data = _generate_guardrail_config(name=unique_name)
@@ -397,7 +397,7 @@ class TestGuardrailConfigs:
         # Cleanup
         sdk._client.delete(f"/apis/guardrails/v2/workspaces/{DEFAULT_WORKSPACE}/configs/{unique_name}")
 
-    def test_get_config(self, sdk: NeMoPlatform):
+    def test_get_config(self, sdk: NeMoHelix):
         """Test getting a guardrail config by name."""
         unique_name = f"get-config-{uuid.uuid4().hex[:8]}"
         config_data = _generate_guardrail_config(name=unique_name)
@@ -425,7 +425,7 @@ class TestGuardrailConfigs:
         # Cleanup
         sdk._client.delete(f"/apis/guardrails/v2/workspaces/{DEFAULT_WORKSPACE}/configs/{unique_name}")
 
-    def test_list_configs(self, sdk: NeMoPlatform):
+    def test_list_configs(self, sdk: NeMoHelix):
         """Test listing guardrail configs."""
         unique_name = f"list-config-{uuid.uuid4().hex[:8]}"
         config_data = _generate_guardrail_config(name=unique_name)
@@ -455,7 +455,7 @@ class TestGuardrailConfigs:
         # Cleanup
         sdk._client.delete(f"/apis/guardrails/v2/workspaces/{DEFAULT_WORKSPACE}/configs/{unique_name}")
 
-    def test_update_config(self, sdk: NeMoPlatform):
+    def test_update_config(self, sdk: NeMoHelix):
         """Test updating a guardrail config."""
         unique_name = f"update-config-{uuid.uuid4().hex[:8]}"
         config_data = _generate_guardrail_config(name=unique_name)
@@ -484,7 +484,7 @@ class TestGuardrailConfigs:
         # Cleanup
         sdk._client.delete(f"/apis/guardrails/v2/workspaces/{DEFAULT_WORKSPACE}/configs/{unique_name}")
 
-    def test_delete_config(self, sdk: NeMoPlatform):
+    def test_delete_config(self, sdk: NeMoHelix):
         """Test deleting a guardrail config."""
         unique_name = f"delete-config-{uuid.uuid4().hex[:8]}"
         config_data = _generate_guardrail_config(name=unique_name)
@@ -503,17 +503,17 @@ class TestGuardrailConfigs:
         get_response = sdk._client.get(f"/apis/guardrails/v2/workspaces/{DEFAULT_WORKSPACE}/configs/{unique_name}")
         assert get_response.status_code == 404
 
-    def test_get_nonexistent_config_returns_404(self, sdk: NeMoPlatform):
+    def test_get_nonexistent_config_returns_404(self, sdk: NeMoHelix):
         """Test getting a non-existent config returns 404."""
         response = sdk._client.get(f"/apis/guardrails/v2/workspaces/{DEFAULT_WORKSPACE}/configs/fake-config-id")
         assert response.status_code == 404
 
-    def test_delete_nonexistent_config_returns_404(self, sdk: NeMoPlatform):
+    def test_delete_nonexistent_config_returns_404(self, sdk: NeMoHelix):
         """Test deleting a non-existent config returns 404."""
         response = sdk._client.delete(f"/apis/guardrails/v2/workspaces/{DEFAULT_WORKSPACE}/configs/fake-config-id")
         assert response.status_code == 404
 
-    def test_update_nonexistent_config_returns_404(self, sdk: NeMoPlatform):
+    def test_update_nonexistent_config_returns_404(self, sdk: NeMoHelix):
         """Test updating a non-existent config returns 404."""
         patch_data = {"description": "Updated description"}
         response = sdk._client.patch(
@@ -521,7 +521,7 @@ class TestGuardrailConfigs:
         )
         assert response.status_code == 404
 
-    def test_create_duplicate_config_returns_409(self, sdk: NeMoPlatform):
+    def test_create_duplicate_config_returns_409(self, sdk: NeMoHelix):
         """Test that creating a config with an already-existing name returns 409."""
         unique_name = f"dup-config-{uuid.uuid4().hex[:8]}"
         config_data = _generate_guardrail_config(name=unique_name)
@@ -537,7 +537,7 @@ class TestGuardrailConfigs:
         # Cleanup
         sdk._client.delete(f"/apis/guardrails/v2/workspaces/{DEFAULT_WORKSPACE}/configs/{unique_name}")
 
-    def test_create_config_with_minimal_fields(self, sdk: NeMoPlatform):
+    def test_create_config_with_minimal_fields(self, sdk: NeMoHelix):
         """Test creating a config with only the required name field returns 201 with null data."""
         unique_name = f"minimal-{uuid.uuid4().hex[:8]}"
 
@@ -554,7 +554,7 @@ class TestGuardrailConfigs:
         # Cleanup
         sdk._client.delete(f"/apis/guardrails/v2/workspaces/{DEFAULT_WORKSPACE}/configs/{unique_name}")
 
-    def test_create_config_missing_name_returns_422(self, sdk: NeMoPlatform):
+    def test_create_config_missing_name_returns_422(self, sdk: NeMoHelix):
         """Test that omitting the required name field returns 422."""
         response = sdk._client.post(
             f"/apis/guardrails/v2/workspaces/{DEFAULT_WORKSPACE}/configs",
@@ -563,7 +563,7 @@ class TestGuardrailConfigs:
         assert response.status_code == 422, f"Expected 422, got {response.status_code}: {response.text}"
         assert "name" in response.text.lower()
 
-    def test_delete_then_recreate_same_name_succeeds(self, sdk: NeMoPlatform):
+    def test_delete_then_recreate_same_name_succeeds(self, sdk: NeMoHelix):
         """Test that a name can be reused after the original config is deleted."""
         unique_name = f"recycle-{uuid.uuid4().hex[:8]}"
         config_data = _generate_guardrail_config(name=unique_name)
@@ -634,7 +634,7 @@ class TestGuardrailsChecksValidationErrors:
 class TestGuardrailsConfigPagination:
     """Tests for guardrails config pagination."""
 
-    def test_configs_list_has_pagination(self, sdk: NeMoPlatform):
+    def test_configs_list_has_pagination(self, sdk: NeMoHelix):
         """Test that config listing returns pagination info."""
         response = sdk._client.get("/apis/guardrails/v2/workspaces/default/configs")
         assert response.status_code == 200
@@ -646,7 +646,7 @@ class TestGuardrailsConfigPagination:
         assert "page_size" in data["pagination"]
         assert "total_results" in data["pagination"]
 
-    def test_configs_list_pagination_params(self, sdk: NeMoPlatform):
+    def test_configs_list_pagination_params(self, sdk: NeMoHelix):
         """Test that pagination parameters work."""
         response = sdk._client.get("/apis/guardrails/v2/workspaces/default/configs?page=1&page_size=2")
         assert response.status_code == 200
@@ -713,7 +713,7 @@ class TestGuardrailsFileBasedSeeding:
     - default/           — same name as a code-defined config (verifies code-defined config takes precedence)
     """
 
-    def test_file_based_config_is_loaded(self, sdk: NeMoPlatform) -> None:
+    def test_file_based_config_is_loaded(self, sdk: NeMoHelix) -> None:
         """File-based configs from CONFIG_STORE_PATH are created in Entity Store."""
         response = sdk._client.get(f"/apis/guardrails/v2/workspaces/{SYSTEM_WORKSPACE}/configs")
         assert response.status_code == 200
@@ -721,7 +721,7 @@ class TestGuardrailsFileBasedSeeding:
         names = {c["name"] for c in response.json()["data"]}
         assert _FILE_BASED_TEST_CONFIG in names, f"Expected file-based config '{_FILE_BASED_TEST_CONFIG}' in {names}"
 
-    def test_file_based_config_has_inline_data(self, sdk: NeMoPlatform) -> None:
+    def test_file_based_config_has_inline_data(self, sdk: NeMoHelix) -> None:
         """File-based configs are loaded at startup and stored with inline data."""
         response = sdk._client.get(
             f"/apis/guardrails/v2/workspaces/{SYSTEM_WORKSPACE}/configs/{_FILE_BASED_TEST_CONFIG}"
@@ -732,7 +732,7 @@ class TestGuardrailsFileBasedSeeding:
         assert "files_url" not in config, "files_url should not be exposed in the API response"
         assert config.get("data") is not None, "File-based config should have inline data populated at startup"
 
-    def test_file_based_config_has_auto_generated_description(self, sdk: NeMoPlatform) -> None:
+    def test_file_based_config_has_auto_generated_description(self, sdk: NeMoHelix) -> None:
         """File-based configs receive an auto-generated description of the form '{name} guardrail config'."""
         response = sdk._client.get(
             f"/apis/guardrails/v2/workspaces/{SYSTEM_WORKSPACE}/configs/{_FILE_BASED_TEST_CONFIG}"
@@ -742,7 +742,7 @@ class TestGuardrailsFileBasedSeeding:
 
         assert config["description"] == f"{_FILE_BASED_TEST_CONFIG} guardrail config"
 
-    def test_code_defined_config_takes_precedence_over_file_based(self, sdk: NeMoPlatform) -> None:
+    def test_code_defined_config_takes_precedence_over_file_based(self, sdk: NeMoHelix) -> None:
         """Code-defined defaults are not overwritten by a file-based entry with the same name.
 
         The test config store contains a 'default/' directory without passthrough: true.
@@ -762,7 +762,7 @@ class TestGuardrailsFileBasedSeeding:
         # Code-defined configs use inline data, not files_url
         assert config.get("files_url") is None, "Code-defined config should not have files_url"
 
-    def test_code_defined_configs_still_present_alongside_file_based(self, sdk: NeMoPlatform) -> None:
+    def test_code_defined_configs_still_present_alongside_file_based(self, sdk: NeMoHelix) -> None:
         """All code-defined defaults are still present when file-based seeding also runs."""
         response = sdk._client.get(f"/apis/guardrails/v2/workspaces/{SYSTEM_WORKSPACE}/configs")
         assert response.status_code == 200

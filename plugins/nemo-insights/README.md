@@ -3,7 +3,7 @@
 
 # NeMo Insights
 
-NeMo Platform plugin for analyzing agent telemetry and persisting actionable insights.
+NeMo Helix plugin for analyzing agent telemetry and persisting actionable insights.
 
 ## Install from the monorepo
 
@@ -46,10 +46,10 @@ resolved relative to the profile. When it is omitted, Insights looks for
 
 An adjacent `.env` is loaded when a profile is found, without replacing
 variables already set in the shell. For this shared profile workflow,
-`NMP_BASE_URL` is the only base-URL environment variable. Resolution order is
+`NHX_BASE_URL` is the only base-URL environment variable. Resolution order is
 explicit command-line flags, then profile values (for `agent`, `ethos`,
-and `workspace`) or `NMP_BASE_URL` (for the base URL), then the built-in
-defaults. `--base-url` takes precedence over `NMP_BASE_URL`.
+and `workspace`) or `NHX_BASE_URL` (for the base URL), then the built-in
+defaults. `--base-url` takes precedence over `NHX_BASE_URL`.
 
 ### Telemetry requirement
 
@@ -106,7 +106,7 @@ analysis config so scheduled jobs do not depend on the operator's local CLI
 file. Re-run `enable` after changing the pair with `nemo setup`. Existing
 enabled records created before model-pair persistence must also be re-enabled.
 
-`--base-url` defaults to `NMP_BASE_URL`, then `http://localhost:8080`.
+`--base-url` defaults to `NHX_BASE_URL`, then `http://localhost:8080`.
 
 ## API and SDK
 

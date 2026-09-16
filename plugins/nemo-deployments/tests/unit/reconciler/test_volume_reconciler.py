@@ -7,7 +7,7 @@ import pytest
 from helpers import make_volume
 from nemo_deployments_plugin.backends.base import VolumeStatusUpdate
 from nemo_deployments_plugin.reconciler.volume_reconciler import VolumeReconciler
-from nemo_platform_plugin.entity_client import NemoEntityConflictError
+from nemo_helix_plugin.entity_client import NemoEntityConflictError
 from reconciler.conftest import MockDeploymentBackend
 
 

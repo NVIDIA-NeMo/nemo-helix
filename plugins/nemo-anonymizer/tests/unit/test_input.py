@@ -16,9 +16,9 @@ from nemo_anonymizer_plugin.app.input import (
     prepare_anonymizer_input_async,
     validate_anonymizer_input_source,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
-from nemo_platform_plugin.jobs.file_manager import TmpDirPath
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.jobs.file_manager import TmpDirPath
 
 FilesetClient = FilesClient | AsyncFilesClient
 
@@ -28,17 +28,17 @@ class FakeFilesetFileSystem:
         self.client = client
 
 
-def _async_platform() -> AsyncNeMoPlatform:
-    return AsyncNeMoPlatform(base_url="http://platform.test", workspace="team-a")
+def _async_platform() -> AsyncNeMoHelix:
+    return AsyncNeMoHelix(base_url="http://platform.test", workspace="team-a")
 
 
-def _platform() -> NeMoPlatform:
-    return NeMoPlatform(base_url="http://platform.test", workspace="team-a")
+def _platform() -> NeMoHelix:
+    return NeMoHelix(base_url="http://platform.test", workspace="team-a")
 
 
 def _patch_files_client(monkeypatch: pytest.MonkeyPatch) -> None:
     def client_from_platform(
-        sdk: NeMoPlatform | AsyncNeMoPlatform,
+        sdk: NeMoHelix | AsyncNeMoHelix,
         client_cls: type[FilesClient] | type[AsyncFilesClient],
     ) -> FilesetClient:
         base_url = str(sdk.base_url).rstrip("/")
@@ -272,7 +272,7 @@ async def test_prepare_fileset_with_sync_sdk_runs_in_worker_thread(
     def fake_prepare_anonymizer_input(
         data: AnonymizerInputSpec,
         *,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         workspace: str,
         allow_local_paths: bool,
     ) -> input_module.PreparedAnonymizerInput:

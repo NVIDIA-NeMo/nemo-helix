@@ -7,20 +7,20 @@ import uuid
 from collections.abc import Iterator
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NemoHTTPError
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
-from nmp.common.auth import AuthClient, get_auth_client
-from nmp.common.auth.models import Principal
-from nmp.common.config import AuthConfig, Configuration
-from nmp.core.files.config import FilesConfig
-from nmp.core.files.service import FilesService
-from nmp.core.secrets.service import SecretsService
-from nmp.testing import create_test_client
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NemoHTTPError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import PlatformSecretCreateRequest
+from nhx.common.auth import AuthClient, get_auth_client
+from nhx.common.auth.models import Principal
+from nhx.common.config import AuthConfig, Configuration
+from nhx.core.files.config import FilesConfig
+from nhx.core.files.service import FilesService
+from nhx.core.secrets.service import SecretsService
+from nhx.testing import create_test_client
 from pydantic import SecretStr
 
 # Mock auth so fileset create endpoint works (same pattern as integration/conftest.py)
@@ -53,7 +53,7 @@ def files_config_restrictive_allowed_hosts() -> Iterator[None]:
 @pytest.fixture
 def sdk_with_restrictive_hosts(
     files_config_restrictive_allowed_hosts: None,
-) -> Iterator[NeMoPlatform]:
+) -> Iterator[NeMoHelix]:
     """SDK client with Files config override so NGC/HF default hosts are disallowed."""
     with create_test_client(
         FilesService,
@@ -68,7 +68,7 @@ class TestAllowedExternalHostsRejection:
 
     def test_create_ngc_fileset_with_disallowed_host_rejected(
         self,
-        sdk_with_restrictive_hosts: NeMoPlatform,
+        sdk_with_restrictive_hosts: NeMoHelix,
     ) -> None:
         """Creating an NGC fileset with host outside allowed_external_hosts returns 400."""
         sdk = sdk_with_restrictive_hosts
@@ -108,7 +108,7 @@ class TestAllowedExternalHostsRejection:
 
     def test_create_huggingface_fileset_with_disallowed_endpoint_rejected(
         self,
-        sdk_with_restrictive_hosts: NeMoPlatform,
+        sdk_with_restrictive_hosts: NeMoHelix,
     ) -> None:
         """Creating a HuggingFace fileset with endpoint outside allowed_external_hosts returns 400."""
         sdk = sdk_with_restrictive_hosts

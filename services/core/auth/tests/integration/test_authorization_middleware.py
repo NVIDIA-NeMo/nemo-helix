@@ -43,8 +43,8 @@ class TestAuthorizationMiddleware:
     def test_authenticated_user_allowed_to_list_workspaces(self, http_client: TestClient):
         """Authenticated users should be able to list workspaces."""
         headers = {
-            "X-NMP-Principal-Id": TEST_USER_EMAIL,
-            "X-NMP-Principal-Email": TEST_USER_EMAIL,
+            "X-NHX-Principal-Id": TEST_USER_EMAIL,
+            "X-NHX-Principal-Email": TEST_USER_EMAIL,
         }
         response = http_client.get(WORKSPACES_PATH, headers=headers)
         # Should be allowed (200) - listing workspaces is typically allowed
@@ -53,7 +53,7 @@ class TestAuthorizationMiddleware:
     def test_service_principal_authorized_via_pdp(self, http_client: TestClient):
         """Service principals are authorized via PDP (policy allows service:*)."""
         headers = {
-            "X-NMP-Principal-Id": SERVICE_PRINCIPAL,
+            "X-NHX-Principal-Id": SERVICE_PRINCIPAL,
         }
         response = http_client.get(WORKSPACES_PATH, headers=headers)
         assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
@@ -75,8 +75,8 @@ class TestAuthorizationMiddleware:
             "name": workspace_name,
         }
         headers = {
-            "X-NMP-Principal-Id": TEST_USER_EMAIL,
-            "X-NMP-Principal-Email": TEST_USER_EMAIL,
+            "X-NHX-Principal-Id": TEST_USER_EMAIL,
+            "X-NHX-Principal-Email": TEST_USER_EMAIL,
         }
         response = http_client.post(WORKSPACES_PATH, json=workspace_data, headers=headers)
         # Should be allowed with auth
@@ -93,7 +93,7 @@ class TestAuthorizationMiddleware:
                 "path": WORKSPACES_PATH,
             }
         }
-        headers = {"X-NMP-Principal-Id": SERVICE_PRINCIPAL}
+        headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
         response = http_client.post("/apis/auth/v2/authz/allow", json=auth_input, headers=headers)
         assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
 
@@ -102,7 +102,7 @@ class TestAuthorizationMiddleware:
         assert "allowed" in result["result"]
 
     def test_authz_invalid_entrypoint_returns_structured_detail(self, http_client: TestClient):
-        headers = {"X-NMP-Principal-Id": SERVICE_PRINCIPAL}
+        headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
         response = http_client.post(
             "/apis/auth/v2/authz/missing",
             json={"input": {}},
@@ -139,8 +139,8 @@ class TestAuthorizationMiddleware:
             }
         }
         headers = {
-            "X-NMP-Principal-Id": TEST_USER_EMAIL,
-            "X-NMP-Principal-Email": TEST_USER_EMAIL,
+            "X-NHX-Principal-Id": TEST_USER_EMAIL,
+            "X-NHX-Principal-Email": TEST_USER_EMAIL,
         }
         response = http_client.post("/apis/auth/v2/authz/allow", json=auth_input, headers=headers)
         assert response.status_code == 403, f"Expected 403, got {response.status_code}: {response.text}"
@@ -148,8 +148,8 @@ class TestAuthorizationMiddleware:
     def test_iam_role_bindings_forbidden_for_user_principal(self, http_client: TestClient):
         """IAM role-bindings are internal; end users must not call them directly."""
         headers = {
-            "X-NMP-Principal-Id": TEST_USER_EMAIL,
-            "X-NMP-Principal-Email": TEST_USER_EMAIL,
+            "X-NHX-Principal-Id": TEST_USER_EMAIL,
+            "X-NHX-Principal-Email": TEST_USER_EMAIL,
         }
         response = http_client.get("/apis/auth/v2/iam/role-bindings", headers=headers)
         assert response.status_code == 403, f"Expected 403, got {response.status_code}: {response.text}"
@@ -157,8 +157,8 @@ class TestAuthorizationMiddleware:
     def test_nested_entities_forbidden_for_user_principal(self, http_client: TestClient):
         """Workspace-scoped entity APIs are internal; end users must not call them directly."""
         headers = {
-            "X-NMP-Principal-Id": TEST_USER_EMAIL,
-            "X-NMP-Principal-Email": TEST_USER_EMAIL,
+            "X-NHX-Principal-Id": TEST_USER_EMAIL,
+            "X-NHX-Principal-Email": TEST_USER_EMAIL,
         }
         response = http_client.get(
             "/apis/entities/v2/workspaces/default/entities/evaluation_config",

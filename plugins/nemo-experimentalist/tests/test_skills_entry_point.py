@@ -13,7 +13,7 @@ def test_entry_point_resolves_to_the_skills_dir() -> None:
     """The nemo.skills entry-point must resolve to a skills_dir holding our skills.
 
     In a source checkout two distributions advertise this name -- the plugin itself
-    and the `nemo-platform` wrapper that bundles it -- so the guarantee is that every
+    and the `nemo-helix` wrapper that bundles it -- so the guarantee is that every
     provider agrees on one target, not that only one provider exists.
     """
     eps = [ep for ep in entry_points(group="nemo.skills") if ep.name == "experimentalist"]

@@ -61,8 +61,8 @@ from nemo_deployments_plugin.backends.workload_identity import (
 from nemo_deployments_plugin.constants import MANAGED_BY_LABEL
 from nemo_deployments_plugin.entities import DeploymentConfig, K8sDeploymentConfig
 from nemo_deployments_plugin.types import RestartPolicy
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.auth.workload_delegations import WorkloadDelegationStore
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.auth.workload_delegations import WorkloadDelegationStore
 
 logger = logging.getLogger(__name__)
 

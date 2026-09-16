@@ -133,7 +133,7 @@ adapts its rollouts into trials, scoring each rollout's reward. `GymRuntimeConfi
 `agent_config`, and `resources_server`; `discover_gym_tasks` builds the tasks from a Gym jsonl
 dataset.
 
-Gym is **not** a dependency of this SDK — it imports Ray at module load, which nemo-platform excludes
+Gym is **not** a dependency of this SDK — it imports Ray at module load, which nemo-helix excludes
 by constraint. Install it into its own environment and put its `bin` on `PATH`.
 
 It can also be submitted as a platform job from the live runner object, via
@@ -143,7 +143,7 @@ Platform job specifications use `GymRunnerTarget`. It adds fields that a live lo
 carry:
 
 - `environment` references a complete custom environment FileSet and requires sandboxed execution.
-- `env_secrets` maps environment variable names to NeMo Platform secret references.
+- `env_secrets` maps environment variable names to NeMo Helix secret references.
 - `agent_ref_name` selects the registered Gym agent instance when it differs from `agent`.
 
 `agent_config` is required for `GymRuntimeConfig` and for a platform target without an environment

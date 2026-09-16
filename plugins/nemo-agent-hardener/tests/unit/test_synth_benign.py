@@ -13,7 +13,7 @@ import pytest
 import yaml
 from _doubles import make_job_context, make_sdk
 from nemo_agent_hardener_plugin.cli import _shared, war_game
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.job_context import JobContext
 from typer.testing import CliRunner
 
 _HEADER = "tool,payload,label,rationale,persona\n"

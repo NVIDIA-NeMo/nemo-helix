@@ -34,10 +34,10 @@ from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
 from nemo_evaluator_sdk.values import Agent, AgentBase, Model
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.results import EvaluationResult
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.entities import EntityBase, EntityClient
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.entities import EntityBase, EntityClient
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.job_context import JobContext
 
 logger = logging.getLogger(__name__)
 

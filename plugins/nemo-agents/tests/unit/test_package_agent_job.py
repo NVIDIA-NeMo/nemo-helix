@@ -17,12 +17,12 @@ from nemo_agents_plugin.jobs.package_agent import (
     PackageAgentJob,
     PackageAgentSpec,
 )
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
-from nemo_platform_plugin.jobs.exceptions import (
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.jobs.exceptions import (
     PlatformJobCompilationError,
     PlatformJobDependencyUnavailableError,
 )
-from nemo_platform_plugin.jobs.execution_profiles import (
+from nemo_helix_plugin.jobs.execution_profiles import (
     DockerJobExecutionProfile,
     DockerJobExecutionProfileConfig,
     SubprocessJobExecutionProfile,
@@ -429,7 +429,7 @@ class TestCliSurface:
 
 
 class TestPublishedPackagingContract:
-    """The generated `nemo-platform[nemo-agents-plugin]` extra mirrors this plugin's
+    """The generated `nemo-helix[nemo-agents-plugin]` extra mirrors this plugin's
     base dependencies only, so packaging deps declared as an extra would leave a
     PyPI install advertising `agents.package-agent` but unable to run it."""
 
@@ -446,9 +446,9 @@ class TestPublishedPackagingContract:
         import tomllib
 
         repo_root = Path(__file__).resolve().parents[4]
-        pyproject = repo_root / "packages" / "nemo_platform" / "pyproject.toml"
+        pyproject = repo_root / "packages" / "nemo_helix" / "pyproject.toml"
         if not pyproject.exists():
-            pytest.skip("vendored nemo-platform wrapper is not present in this checkout")
+            pytest.skip("vendored nemo-helix wrapper is not present in this checkout")
         extras = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["optional-dependencies"]
         assert any(spec.startswith(dependency) for spec in extras["nemo-agents-plugin"])
 
@@ -459,7 +459,7 @@ class TestTagNamespace:
     @pytest.mark.parametrize(
         "tag",
         [
-            "nvcr.io/nvidia/nemo-platform:latest",
+            "nvcr.io/nvidia/nemo-helix:latest",
             "other-workspace/my-agent:1.0",
             "../escape:1.0",
             "my-agent:1.0\nRUN echo pwned",

@@ -53,10 +53,10 @@ from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
     discover_harbor_tasks,
 )
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
-from nemo_platform import APIError, AsyncNeMoPlatform
-from nemo_platform.types.intake.trace_filter_param import TraceFilterParam
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
+from nemo_helix import APIError, AsyncNeMoHelix
+from nemo_helix.types.intake.trace_filter_param import TraceFilterParam
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
 
 #: Tasks to pull and run. Terminal-Bench 2.1 is Apache-2.0 and its tasks ship prebuilt images, so a
 #: run pulls rather than builds; these two are among its quickest.
@@ -236,7 +236,7 @@ def _preflight(base_url: str, agent: str, model: str | None) -> None:
         raise SystemExit(f"Platform at {base_url} is not ready.")
 
 
-async def _probe_intake(async_sdk: AsyncNeMoPlatform, workspace: str) -> None:
+async def _probe_intake(async_sdk: AsyncNeMoHelix, workspace: str) -> None:
     """Confirm Intake can reach ClickHouse, which platform readiness does not cover.
 
     Intake starts and reports itself ready when ClickHouse is unreachable, serving its
@@ -291,7 +291,7 @@ async def _evaluate(
 
 
 async def _publish(
-    async_sdk: AsyncNeMoPlatform,
+    async_sdk: AsyncNeMoHelix,
     result: AgentEvalResult,
     *,
     workspace: str,
@@ -330,7 +330,7 @@ async def _publish(
     return report
 
 
-async def _read_back(async_sdk: AsyncNeMoPlatform, report: PublishReport, *, workspace: str) -> None:
+async def _read_back(async_sdk: AsyncNeMoHelix, report: PublishReport, *, workspace: str) -> None:
     """Query Intake for what was just written — the trajectory and its score rows."""
     print("\nRead back from Intake:")
     for published in report.published_trials:
@@ -354,7 +354,7 @@ def _print_studio_links(
     """Print Studio URLs for what was just published.
 
     Studio mounts its SPA under ``/studio`` and the paths mirror two of the destinations Studio
-    itself publishes in ``nmp.studio.studio_links``: ``experiment_detail`` for the Evaluation and
+    itself publishes in ``nhx.studio.studio_links``: ``experiment_detail`` for the Evaluation and
     ``intake_session`` for a single trial's trajectory. The links resolve only when Studio is
     among the running services.
     """
@@ -369,7 +369,7 @@ async def _main(args: argparse.Namespace) -> None:
     _preflight(args.base_url, args.agent, args.model)
     dataset_dir = _ensure_tasks(args.tasks, args.tasks_dir)
     _validate_tasks(dataset_dir, args.tasks)
-    async with AsyncNeMoPlatform(base_url=args.base_url, max_retries=2) as async_sdk:
+    async with AsyncNeMoHelix(base_url=args.base_url, max_retries=2) as async_sdk:
         await _probe_intake(async_sdk, args.workspace)
         result = await _evaluate(dataset_dir, args.tasks, agent=args.agent, model=args.model, jobs_dir=args.jobs_dir)
         # One Evaluation per run by default: a stable name makes every re-run pile more test-case
@@ -397,7 +397,7 @@ async def _main(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--base-url", default=os.environ.get("NMP_BASE_URL", "http://localhost:8080"))
+    parser.add_argument("--base-url", default=os.environ.get("NHX_BASE_URL", "http://localhost:8080"))
     parser.add_argument("--workspace", default="default")
     parser.add_argument(
         "--dataset",

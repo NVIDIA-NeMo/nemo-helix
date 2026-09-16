@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import Literal
 
-from nmp.customization_common.contributor.transform import generated_output_name
-from nmp.customization_common.service.platform_client import (
+from nhx.customization_common.contributor.transform import generated_output_name
+from nhx.customization_common.service.platform_client import (
     AsyncCustomizationPlatformClients,
     check_dataset_access,
     fetch_model_entity,

@@ -56,15 +56,15 @@ from nemo_evaluator_sdk.values import (
 )
 from nemo_evaluator_sdk.values.models import ModelRef
 from nemo_evaluator_sdk.values.scores import JSONScoreParser, RangeScore
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.commands import add_job_commands
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_platform_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-from nemo_platform_plugin.jobs.spec import PlatformJobSpec
-from nemo_platform_plugin.models.client import AsyncModelsClient
-from nemo_platform_plugin.scheduler import NemoJobScheduler
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.commands import add_job_commands
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.spec import PlatformJobSpec
+from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.scheduler import NemoJobScheduler
+from nemo_helix_plugin.sdk import AsyncNeMoHelix, NeMoHelix
 from pydantic import BaseModel, ConfigDict
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
@@ -224,8 +224,8 @@ register_metric_bundle_kind(
 )
 
 
-def _generated_async_sdk() -> AsyncNeMoPlatform:
-    return AsyncNeMoPlatform(
+def _generated_async_sdk() -> AsyncNeMoHelix:
+    return AsyncNeMoHelix(
         base_url="http://platform.test",
         workspace="default",
         http_client=AsyncMock(spec=httpx.AsyncClient),
@@ -1260,7 +1260,7 @@ class TestEvaluateJobRun:
         assert call_kwargs["prompt_template"] is None
 
     def test_run_adapts_the_generated_sdk_the_local_cli_injects(self, tmp_path: Path, mocker: MockerFixture) -> None:
-        """``nemo evaluator evaluate run`` injects a generated ``NeMoPlatform``, but resolving a
+        """``nemo evaluator evaluate run`` injects a generated ``NeMoHelix``, but resolving a
         ``FilesetRef`` dataset only accepts a typed client."""
         evaluator = mocker.Mock()
         evaluator.run_sync.return_value = _empty_evaluation_result()
@@ -1270,7 +1270,7 @@ class TestEvaluateJobRun:
             return_value=tmp_path / "persistent" / "dataset" / "default" / "helpsteer2" / "validation.jsonl",
             create=True,
         )
-        platform = NeMoPlatform(base_url="http://platform.test", workspace="dev", http_client=httpx.Client())
+        platform = NeMoHelix(base_url="http://platform.test", workspace="dev", http_client=httpx.Client())
         config = {**_exact_match_spec(), "dataset": FilesetRef(root="default/helpsteer2#validation.jsonl")}
 
         EvaluateJob().run(config, ctx=_make_job_context(tmp_path), sdk=platform)
@@ -1318,7 +1318,7 @@ class TestEvaluateTask:
     """Coverage for the compiled container task entrypoint."""
 
     def test_main_dispatches_evaluate_job_with_task_sdk(self, mocker: MockerFixture) -> None:
-        sdk = NeMoPlatform(base_url="http://platform.test", workspace="default")
+        sdk = NeMoHelix(base_url="http://platform.test", workspace="default")
         client = NemoClient(
             base_url="http://platform.test", workspace="default", http_client=MagicMock(spec=httpx.Client)
         )

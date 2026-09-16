@@ -4,19 +4,19 @@
 [project]
 name = "nemo-rl-plugin"
 version = "0.1.0"
-description = "NeMo-RL DPO customization contributor for NeMo Platform (Ray on Kubernetes)."
+description = "NeMo-RL DPO customization contributor for NeMo Helix (Ray on Kubernetes)."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "nemo-platform-plugin",
-    "nmp-rl",
-    "nmp-customization-common",
+    "nemo-helix-plugin",
+    "nhx-rl",
+    "nhx-customization-common",
     "pydantic>=2.10.6",
     "pydantic-settings>=2.6.1",
     "typer>=0.12.5",
 ]
 
-# Heavy ML deps (nemo-rl, ray, vllm) are baked into the nmp-rl-training container
+# Heavy ML deps (nemo-rl, ray, vllm) are baked into the nhx-rl-training container
 # image, not installed by the plugin. The plugin process only needs the
 # lightweight compile-side imports.
 
@@ -34,10 +34,10 @@ build-backend = "hatchling.build"
 packages = ["src/nemo_rl_plugin"]
 
 [tool.uv.sources]
-nemo-platform-plugin = { workspace = true }
+nemo-helix-plugin = { workspace = true }
 nemo-customizer-plugin = { workspace = true }
-nmp-rl = { workspace = true }
-nmp-customization-common = { workspace = true }
+nhx-rl = { workspace = true }
+nhx-customization-common = { workspace = true }
 
 [dependency-groups]
 dev = [

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nmp.studio.static_files import DEFAULT_CSP, SPAStaticFiles, build_csp
+from nhx.studio.static_files import DEFAULT_CSP, SPAStaticFiles, build_csp
 
 
 @pytest.fixture()

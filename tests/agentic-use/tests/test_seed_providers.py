@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
+from nemo_helix_plugin.secrets.types import PlatformSecretCreateRequest
 from seed_providers import (
     DEFAULT_HTTP_TIMEOUT_SEC,
     ProviderSeedResult,
@@ -91,7 +91,7 @@ class TestLoadManifest:
 
 
 class TestCreateSecret:
-    @patch("nemo_platform_plugin.client.adapter.client_from_platform")
+    @patch("nemo_helix_plugin.client.adapter.client_from_platform")
     def test_creates_secret(self, mock_client_from_platform: MagicMock) -> None:
         sdk = MagicMock()
         mock_secrets = MagicMock()
@@ -107,7 +107,7 @@ class TestCreateSecret:
         assert body.value.get_secret_value() == "val"
         assert kwargs["workspace"] == "ws"
 
-    @patch("nemo_platform_plugin.client.adapter.client_from_platform")
+    @patch("nemo_helix_plugin.client.adapter.client_from_platform")
     def test_ignores_conflict(self, mock_client_from_platform: MagicMock) -> None:
         sdk = MagicMock()
         mock_secrets = MagicMock()
@@ -116,7 +116,7 @@ class TestCreateSecret:
 
         _create_secret(sdk, "ws", "my-secret", "val")
 
-    @patch("nemo_platform_plugin.client.adapter.client_from_platform")
+    @patch("nemo_helix_plugin.client.adapter.client_from_platform")
     def test_raises_on_other_error(self, mock_client_from_platform: MagicMock) -> None:
         sdk = MagicMock()
         mock_secrets = MagicMock()
@@ -248,8 +248,8 @@ class TestCreateVirtualModel:
 
 
 class TestSeedAll:
-    @patch("nemo_platform_plugin.client.adapter.client_from_platform")
-    @patch("nemo_platform.NeMoPlatform")
+    @patch("nemo_helix_plugin.client.adapter.client_from_platform")
+    @patch("nemo_helix.NeMoHelix")
     def test_skips_unset_env_vars(
         self,
         mock_sdk_cls: MagicMock,
@@ -265,8 +265,8 @@ class TestSeedAll:
         assert all(p.status == "skipped" for p in result.providers)
         mock_client_from_platform.return_value.create_secret.assert_not_called()
 
-    @patch("nemo_platform_plugin.client.adapter.client_from_platform")
-    @patch("nemo_platform.NeMoPlatform")
+    @patch("nemo_helix_plugin.client.adapter.client_from_platform")
+    @patch("nemo_helix.NeMoHelix")
     def test_seeds_providers(
         self,
         mock_sdk_cls: MagicMock,
@@ -291,8 +291,8 @@ class TestSeedAll:
         assert mock_secrets.create_secret.call_count == 2
         assert sdk.inference.providers.create.call_count == 2
 
-    @patch("nemo_platform_plugin.client.adapter.client_from_platform")
-    @patch("nemo_platform.NeMoPlatform")
+    @patch("nemo_helix_plugin.client.adapter.client_from_platform")
+    @patch("nemo_helix.NeMoHelix")
     def test_partial_env_skips_missing(
         self,
         mock_sdk_cls: MagicMock,
@@ -308,8 +308,8 @@ class TestSeedAll:
         assert result.providers[0].status == "ok"
         assert result.providers[1].status == "skipped"
 
-    @patch("nemo_platform_plugin.client.adapter.client_from_platform")
-    @patch("nemo_platform.NeMoPlatform")
+    @patch("nemo_helix_plugin.client.adapter.client_from_platform")
+    @patch("nemo_helix.NeMoHelix")
     def test_error_on_create_marks_status(
         self,
         mock_sdk_cls: MagicMock,
@@ -327,7 +327,7 @@ class TestSeedAll:
         assert result.providers[0].status == "error"
 
     @patch("urllib.request.urlopen")
-    @patch("nemo_platform.NeMoPlatform")
+    @patch("nemo_helix.NeMoHelix")
     def test_skips_vm_when_dep_provider_failed(
         self,
         mock_sdk_cls: MagicMock,

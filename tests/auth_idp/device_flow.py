@@ -6,7 +6,7 @@ from json import JSONDecodeError
 from urllib.parse import urlencode, urljoin, urlparse, urlunparse
 
 import httpx
-from nemo_platform_ext.client.tls import HttpxTLSConfig
+from nemo_helix_ext.client.tls import HttpxTLSConfig
 
 from tests.auth_idp.runtime_contract import JsonObject
 

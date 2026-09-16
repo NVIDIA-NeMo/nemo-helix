@@ -15,11 +15,11 @@ from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPreviewSpec
 from nemo_data_designer_plugin.retrieval.corpus import materialize_corpus
 from nemo_data_designer_plugin.retrieval.providers import build_retrieval_model_configs, resolve_retrieval_providers
 from nemo_data_designer_plugin.retrieval.secrets import resolve_hf_token
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.errors import NemoClientError
-from nemo_platform_plugin.function import NemoFunction
-from nemo_platform_plugin.function_context import FunctionContext
-from nemo_platform_plugin.functions.frames import Done, Error
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.function import NemoFunction
+from nemo_helix_plugin.function_context import FunctionContext
+from nemo_helix_plugin.functions.frames import Done, Error
 from pydantic import BaseModel
 
 
@@ -30,7 +30,7 @@ class RetrievalPreviewFrame(BaseModel):
 
 
 async def _resolve_hf_token_or_raise(
-    async_sdk: AsyncNeMoPlatform,
+    async_sdk: AsyncNeMoHelix,
     hf_token_secret: str | None,
     workspace: str,
 ) -> str | None:
@@ -51,8 +51,8 @@ class RetrievalPreviewFunction(NemoFunction[RetrievalPreviewSpec]):
         self,
         spec: RetrievalPreviewSpec,
         ctx: FunctionContext,
-        sdk: NeMoPlatform,
-        async_sdk: AsyncNeMoPlatform,
+        sdk: NeMoHelix,
+        async_sdk: AsyncNeMoHelix,
         is_local: bool = False,
     ) -> AsyncIterator[BaseModel]:
         job = spec.generate

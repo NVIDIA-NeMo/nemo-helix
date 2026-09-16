@@ -8,13 +8,13 @@ from __future__ import annotations
 from typing import ClassVar
 
 from fastapi import APIRouter
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.customization_contributor import CustomizationContributorDiscoveryError
-from nemo_platform_plugin.discovery import (
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.customization_contributor import CustomizationContributorDiscoveryError
+from nemo_helix_plugin.discovery import (
     CUSTOMIZATION_CONTRIBUTORS_GROUP,
     discover_customization_contributors,
 )
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.service import NemoService, RouterSpec
 
 
 class CustomizationRouterError(CustomizationContributorDiscoveryError):

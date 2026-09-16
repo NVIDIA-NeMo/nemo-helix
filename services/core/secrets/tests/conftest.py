@@ -7,12 +7,12 @@ from typing import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nmp.common.secrets.encryption import get_base64_encoded_random_bytes
-from nmp.core.secrets.config import SecretsServiceConfig
-from nmp.core.secrets.service import SecretsService
-from nmp.testing import ClientContext, SDKTestClientAdapter, create_test_client
-from nmp.testing.blockbuster import blockbuster_fixture
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nhx.common.secrets.encryption import get_base64_encoded_random_bytes
+from nhx.core.secrets.config import SecretsServiceConfig
+from nhx.core.secrets.service import SecretsService
+from nhx.testing import ClientContext, SDKTestClientAdapter, create_test_client
+from nhx.testing.blockbuster import blockbuster_fixture
 
 # Enable BlockBuster to detect blocking calls in async code
 blockbuster = blockbuster_fixture(autouse=True)

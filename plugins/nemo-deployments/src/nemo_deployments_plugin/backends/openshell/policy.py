@@ -54,7 +54,7 @@ DEFAULT_EGRESS_BINARIES: tuple[str, ...] = ("/workspace/.venv/bin/python3.13", "
 
 # Map key for the mandatory platform egress rule. Reserved: injected into every
 # policy, so a user rule at this key is overwritten rather than merged.
-PLATFORM_EGRESS_KEY = "nemo_platform"
+PLATFORM_EGRESS_KEY = "nemo_helix"
 
 
 # Values the supervisor recognises for the two free-form string fields that fail OPEN when
@@ -83,7 +83,7 @@ class SandboxFilesystem:
 
 @dataclass(frozen=True)
 class PlatformEgress:
-    """The one egress a sandbox must always be allowed: the NeMo platform (Inference Gateway/entities/files).
+    """The one egress a sandbox must always be allowed: the NeMo Helix (Inference Gateway/entities/files).
 
     Environment-specific (docker driver -> host.docker.internal:8080; k8s -> the
     platform Service). This is the sole allowed rule in a generated default-deny
@@ -98,7 +98,7 @@ class PlatformEgress:
     access: str = "full"
     enforcement: str = "enforce"
     binaries: tuple[str, ...] = DEFAULT_EGRESS_BINARIES
-    name: str = "nemo-platform-egress"
+    name: str = "nemo-helix-egress"
     key: str = PLATFORM_EGRESS_KEY
 
 

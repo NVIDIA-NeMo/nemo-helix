@@ -2,20 +2,20 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "NeMo Platform Skills Spec"
+title: "NeMo Helix Skills Spec"
 description: ""
 ---
 
-This document defines the conventions for skills shipped with NeMo Platform: how they're structured, what their frontmatter must contain, how they get tested, and where they live in the repo.
+This document defines the conventions for skills shipped with NeMo Helix: how they're structured, what their frontmatter must contain, how they get tested, and where they live in the repo.
 
 ---
 
 ## TL;DR: what are we actually solving for?
 
-NeMo Platform is positioned as "the toolkit for safer, more accurate, cheaper agents." Two distinct populations of users hit that pitch with very different starting points:
+NeMo Helix is positioned as "the toolkit for safer, more accurate, cheaper agents." Two distinct populations of users hit that pitch with very different starting points:
 
-1. **The user who doesn't have an agent yet.** They have a *problem* and a *use case*. They want NeMo Platform to take them from idea → deployed working agent.
-2. **The user who already has a deployed agent.** They have *metrics that aren't good enough*. They want NeMo Platform to make their agent measurably better.
+1. **The user who doesn't have an agent yet.** They have a *problem* and a *use case*. They want NeMo Helix to take them from idea → deployed working agent.
+2. **The user who already has a deployed agent.** They have *metrics that aren't good enough*. They want NeMo Helix to make their agent measurably better.
 
 Today's catalog half-served both. There was no top-level orchestrator for the build journey (users had to guess after setup completed), and no overview / theory / outer-loop for the optimization journey (users had per-technique skills but no map of when to use which).
 
@@ -31,7 +31,7 @@ They don't overlap. We need both. This doc proposes a unified spec so future ski
 
 ### Journey A: "I want to build an agent for my use case"
 
-Entry point: a coding agent (Claude Code, Cursor, Codex, OpenCode) opened inside a freshly installed NeMo Platform repo. The user has just run `make bootstrap` and `nemo setup` in their shell.
+Entry point: a coding agent (Claude Code, Cursor, Codex, OpenCode) opened inside a freshly installed NeMo Helix repo. The user has just run `make bootstrap` and `nemo setup` in their shell.
 
 **What they care about:**
 - Going from a fuzzy idea to a working, testable agent in their preferred coding agent.
@@ -59,7 +59,7 @@ Entry point: a coding agent (Claude Code, Cursor, Codex, OpenCode) opened inside
 
 ### Journey B: "I have an agent. Make it better."
 
-Entry point: a coding agent opened inside a NeMo Platform repo where they have a deployed agent. Metrics aren't where they want them.
+Entry point: a coding agent opened inside a NeMo Helix repo where they have a deployed agent. Metrics aren't where they want them.
 
 **What they care about:**
 - Knowing what kinds of optimization exist and when each applies.
@@ -74,7 +74,7 @@ Entry point: a coding agent opened inside a NeMo Platform repo where they have a
 
 | Step | Skill | What it does |
 |---|---|---|
-| 1 | `nemo-platform-overview` | Map of surfaces, plugins, and which skill owns each capability |
+| 1 | `nemo-helix-overview` | Map of surfaces, plugins, and which skill owns each capability |
 | 2 | `agent-optimization-concepts` (proposed rename: `nemo-optimization-concepts`) | Tool-agnostic theory: four axes (quality/cost/latency/safety), decision tree, eval-as-ground-truth |
 | 3 | `optimize-loop` (proposed rename: `nemo-optimize-loop`) | Orchestrator: baseline → analyze → suggest → apply via sibling-and-deploy → re-evaluate → promote |
 | 4+ | `nemo-agents-optimize`, `nemo-agent-skills-optimization`, `nemo-agents-secure`, `nemo-evaluator`, `nemo-auditor`, `nemo-guardrails` | Per-technique deep-dives, called from the loop |
@@ -105,7 +105,7 @@ Every skill ships with the following YAML frontmatter at the top of `SKILL.md`. 
 
 Library-prefix naming (`nemo-*`) is required for user-invocable skills (skills install into shared agent catalogs alongside skills from other plugins; the prefix prevents collisions). It's optional for internal helpers.
 
-**Canonical location:** `packages/nemo_platform_ext/src/nemo_platform_ext/skills/<name>/`. Skills there ship with `pip install "nemo-platform[all]"`.
+**Canonical location:** `packages/nemo_helix_ext/src/nemo_helix_ext/skills/<name>/`. Skills there ship with `pip install "nemo-helix[all]"`.
 
 ---
 
@@ -128,7 +128,7 @@ not-for:
   - nemo-explore (use for design conversation before an Ethos exists)
   - nemo-try-agent (use to test an already-deployed agent)
   - nemo-agents-optimize (use to improve a deployed agent's metrics)
-compatibility: nemo-platform >= 0.1.0; macOS or Linux; requires `agents/<name>-ethos/ETHOS.md`
+compatibility: nemo-helix >= 0.1.0; macOS or Linux; requires `agents/<name>-ethos/ETHOS.md`
 maturity: active
 license: Apache-2.0
 user-invocable: true
@@ -157,7 +157,7 @@ If user-invocable, the `nemo-*` prefix is required. If internal, optional.
 
 ### 3. Pick the canonical location
 
-- User-invocable: `packages/nemo_platform_ext/src/nemo_platform_ext/skills/<name>/` (ships with the platform package).
+- User-invocable: `packages/nemo_helix_ext/src/nemo_helix_ext/skills/<name>/` (ships with the platform package).
 - Plugin-owned (skill is specific to a plugin): `plugins/<plugin-name>/src/<plugin_module>/skills/<name>/`.
 - Internal-only dev skills: `.agents/skills/<name>/` (gitignored from skills install by default).
 
@@ -202,7 +202,7 @@ If the skill body needs reference material (template files, troubleshooting tabl
 ### 8. Local verification before PR
 
 ```bash
-.venv/bin/python scripts/skill-cli-lint.py --root packages/nemo_platform_ext/src/nemo_platform_ext/skills/<your-skill>
+.venv/bin/python scripts/skill-cli-lint.py --root packages/nemo_helix_ext/src/nemo_helix_ext/skills/<your-skill>
 .venv/bin/python scripts/skill-test.py --skill <your-skill>
 nemo skills list | grep <your-skill>
 nemo skills show <your-skill>

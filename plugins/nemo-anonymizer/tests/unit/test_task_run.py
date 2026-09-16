@@ -7,7 +7,7 @@ import logging
 
 import pytest
 from nemo_anonymizer_plugin.tasks.anonymizer import run as task_run
-from nemo_platform_plugin.jobs.constants import NEMO_JOB_ID_ENVVAR, NEMO_JOB_WORKSPACE_ENVVAR
+from nemo_helix_plugin.jobs.constants import NEMO_JOB_ID_ENVVAR, NEMO_JOB_WORKSPACE_ENVVAR
 
 
 def _task_handlers(logger: logging.Logger) -> list[logging.Handler]:

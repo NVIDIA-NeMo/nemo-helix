@@ -9,7 +9,7 @@ complete and consistent.
 """
 
 import pytest
-from nmp.core.secrets.api.v2.secrets.schemas import (
+from nhx.core.secrets.api.v2.secrets.schemas import (
     PlatformSecretAccessResponse,
     PlatformSecretCreateRequest,
     PlatformSecretUpdateRequest,

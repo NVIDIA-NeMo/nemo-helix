@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [project]
-name = "nemoplatform"
-description = "NeMo Platform"
+name = "nemohelix"
+description = "NeMo Helix"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 license = "Apache-2.0"
@@ -41,29 +41,29 @@ dependencies = [
   "mypy-extensions==1.0.0",
   "tornado>=6.5.7",             # pinned for CVE GHSA-7cx3-6m66-7c5m (>=6.5.0) + GHSA-qjxf-f2mg-c6mc (<=6.5.4, fixed in 6.5.5)
   "tomlkit>=0.13.3",
-  "nmp-guardrails",
-  "nmp-hello-world",
-  "nmp-intake",
-  "nmp-core-mcp",
-  "nemo-platform",
-  "nemo-platform-ext",
-  "nmp-common",
+  "nhx-guardrails",
+  "nhx-hello-world",
+  "nhx-intake",
+  "nhx-core-mcp",
+  "nemo-helix",
+  "nemo-helix-ext",
+  "nhx-common",
   "garak-api",
-  "nmp-platform",
-  "nmp-platform-seed",
-  "nmp-secrets",
+  "nhx-platform",
+  "nhx-platform-seed",
+  "nhx-secrets",
   # Core services needed for OpenAPI generation (platform imports these dynamically)
-  "nmp-auth",
-  "nmp-models",
+  "nhx-auth",
+  "nhx-models",
   "models",
-  "nmp-files",
-  "nmp-inference-gateway",
-  "nmp-jobs",
-  "nmp-entities",
+  "nhx-files",
+  "nhx-inference-gateway",
+  "nhx-jobs",
+  "nhx-entities",
   "orjson>=3.11.6",
   "hvac>=2.3.0",
-  "nmp-studio",
-  "nmp-platform-runner",
+  "nhx-studio",
+  "nhx-platform-runner",
   "requests>=2.33.1",
 ]
 version = "0.0.0"
@@ -102,20 +102,20 @@ dev = [
   "ipykernel>=6.29.5",
   "ty==0.0.56",
   "hatchling>=1.26.3",
-  "nmp-testing",
+  "nhx-testing",
   "mlflow-skinny>=3.15.0,<3.16.0", # Optional dep for fine-tuning (shipped in training images); skinny variant to test API surface without bloating uv.lock
-  "nemo-platform-plugin",          # Optional runtime dep; included here for type checking
+  "nemo-helix-plugin",          # Optional runtime dep; included here for type checking
   # Needed so the plugin's unit tests can import it. Safe to install: the plugin never imports
   # agent-hardener itself, which stays in its own venv (garak pulls litellm/torch, incompatible pins).
   "nemo-agent-hardener-plugin",
   "nvidia-nat-atif>=1.9.0a20260811,<1.10", # ATIF schema models for agentic-use trajectory validation
-  "nemo-platform-sdk-tools",               # Include SDK/license tool migration target for testing
-  "nmp-build-tools",                       # Build hook helpers imported by package-local hatch_build.py files
+  "nemo-helix-sdk-tools",               # Include SDK/license tool migration target for testing
+  "nhx-build-tools",                       # Build hook helpers imported by package-local hatch_build.py files
   # Out-of-tree Experimentalist strategy. Without it installed, the tests proving a third-party
   # package can ship a component skip silently -- which is how a broken one went unnoticed.
   "acme-strategies ; python_full_version < '3.14'",
-  "nmp-dev-mcp",                                    # Include MCP dev tools
-  # These are the dev dependencies from `sdk/python/nemo-platform`.
+  "nhx-dev-mcp",                                    # Include MCP dev tools
+  # These are the dev dependencies from `sdk/python/nemo-helix`.
   # Including here until we find a better way to include them.
   "pyright==1.1.399",
   "mypy",
@@ -146,16 +146,16 @@ dev = [
   # Service packages for local development (not in root deps to allow --only-group in containers)
   "nemo-anonymizer-plugin",
   "nemo-data-designer-plugin[retrieval-sdg]",
-  "nmp-guardrails",
+  "nhx-guardrails",
   "nemo-safe-synthesizer-plugin",
-  "nmp-hello-world",
-  "nmp-intake",
-  "nmp-core-mcp",
-  "nemo-platform",
-  "nemo-platform-ext",
-  "nmp-common",
-  "nmp-platform",
-  "nmp-secrets",
+  "nhx-hello-world",
+  "nhx-intake",
+  "nhx-core-mcp",
+  "nemo-helix",
+  "nemo-helix-ext",
+  "nhx-common",
+  "nhx-platform",
+  "nhx-secrets",
   "blockbuster>=1.5.26",
   "ipywidgets>=8.1.9",
 ]
@@ -175,18 +175,18 @@ dev = [
 
 # Base dependencies for all Python containers.
 # Keep both CLIs available in every image: `nemo` for service startup and
-# `nemo-platform` for task-oriented backward compatibility.
-# nemo-platform-plugin provides the runtime interfaces used by first-party plugins bundled into images.
+# `nemo-helix` for task-oriented backward compatibility.
+# nemo-helix-plugin provides the runtime interfaces used by first-party plugins bundled into images.
 # Each container group explicitly lists only the services it needs.
-nmp-base = [
-  "nmp-common",
-  "nemo-platform",
-  "nmp-platform",
-  "nemo-platform-plugin",
+nhx-base = [
+  "nhx-common",
+  "nemo-helix",
+  "nhx-platform",
+  "nemo-helix-plugin",
 ]
 
 # Extra runtime needed specifically for `nemo services run` in service images.
-nmp-services-runtime = ["nemo-platform[services]"]
+nhx-services-runtime = ["nemo-helix[services]"]
 
 # First-party plugins installed by default for local syncs and core service images.
 enabled-plugins = [
@@ -209,47 +209,47 @@ enabled-plugins = [
 ]
 
 # Legacy runtime needed specifically for task images that still invoke
-# `nemo-platform run task` for backwards compatibility.
-nmp-task-runtime = ["nmp-platform"]
+# `nemo-helix run task` for backwards compatibility.
+nhx-task-runtime = ["nhx-platform"]
 
 # Core infrastructure services (for the core-services container set)
 # These are the minimal services needed for core platform functionality
 core-services = [
-  { include-group = "nmp-base" },
-  { include-group = "nmp-services-runtime" },
-  "nmp-auth",
-  "nmp-models",
-  "nmp-files",
-  "nmp-inference-gateway",
-  "nmp-jobs",
-  "nmp-secrets",
-  "nmp-entities",
+  { include-group = "nhx-base" },
+  { include-group = "nhx-services-runtime" },
+  "nhx-auth",
+  "nhx-models",
+  "nhx-files",
+  "nhx-inference-gateway",
+  "nhx-jobs",
+  "nhx-secrets",
+  "nhx-entities",
   { include-group = "enabled-plugins" },
 ]
 
-# All functional services (for nmp-api container)
+# All functional services (for nhx-api container)
 # Includes core services plus all application services
 functional-services = [
   { include-group = "core-services" },
-  # Ship the openshell deployment SDK in the nmp-api image only. The extra carries
+  # Ship the openshell deployment SDK in the nhx-api image only. The extra carries
   # platform-restricted wheels (manylinux_2_39 / macOS 13 arm64) and is deliberately
   # kept out of `enabled-plugins` so bare `uv sync` on unsupported hosts (older glibc,
   # older macOS) does not hard-fail. The api image runs on a compatible base.
   "nemo-deployments-plugin[openshell]",
-  "nmp-studio",
-  "nmp-guardrails",
+  "nhx-studio",
+  "nhx-guardrails",
   "nemo-data-designer-plugin[retrieval-sdg]",
   "nemo-anonymizer-plugin",
-  "nmp-intake",
-  "nmp-hello-world",
-  "nmp-platform-seed",
+  "nhx-intake",
+  "nhx-hello-world",
+  "nhx-platform-seed",
 ]
 
-# CPU task dependencies (for nmp-cpu-tasks container)
+# CPU task dependencies (for nhx-cpu-tasks container)
 # Services that have CPU-only batch tasks
 cpu-tasks = [
-  { include-group = "nmp-base" },
-  { include-group = "nmp-task-runtime" },
+  { include-group = "nhx-base" },
+  { include-group = "nhx-task-runtime" },
   # agents.execute task module plus the bundled Fabric adapters (claude, codex,
   # deepagents, hermes). Without this the job's declared `container = "cpu-tasks"`
   # is not true: nemo_agents_plugin.tasks.execute is not importable here.
@@ -261,15 +261,15 @@ cpu-tasks = [
   "nemo-anonymizer-plugin",
   "nemo-data-designer-plugin[retrieval-sdg]",
   "nemo-optimization-plugin",
-  "nmp-hello-world",
+  "nhx-hello-world",
 ]
 
-# GPU task dependencies (for nmp-gpu-tasks container)
+# GPU task dependencies (for nhx-gpu-tasks container)
 # Services that have GPU-intensive batch tasks
 gpu-tasks = [
-  { include-group = "nmp-base" },
-  { include-group = "nmp-task-runtime" },
-  "nmp-models",
+  { include-group = "nhx-base" },
+  { include-group = "nhx-task-runtime" },
+  "nhx-models",
 ]
 
 
@@ -301,7 +301,7 @@ constraint-dependencies = [
   "GitPython>=3.1.60",
   "Mako>=1.3.12",
   "Pygments>=2.20.0",
-  "aiohttp>=3.14.1",                               # High/Medium/Low OOS – auditor-tasks + customizer
+  "aiohttp>=3.14.1",                               # High/Medium/Low OOS – nhx-auditor-tasks + customizer
   "authlib>=1.6.11",
   "black>=26.3.1",
   "bleach>=6.4.0",
@@ -363,19 +363,19 @@ override-dependencies = [
   # todo(dn-v2): unpin these. this was originally causing tests to fail.
   "aiodns==3.5.0",
   "pycares==4.11.0",
-  "authlib>=1.6.9",           # Critical – nmp-api/core/cpu-tasks/gpu-tasks
-  "aiohttp>=3.14.1",          # High/Medium/Low OOS – auditor-tasks + customizer
-  "jaraco-context>=6.1.0",    # High OOS – auditor-tasks + customizer
+  "authlib>=1.6.9",           # Critical – nhx-api/core/cpu-tasks/gpu-tasks
+  "aiohttp>=3.14.1",          # High/Medium/Low OOS – nhx-auditor-tasks + customizer
+  "jaraco-context>=6.1.0",    # High OOS – nhx-auditor-tasks + customizer
   "joserfc>=1.7.2",
-  "pyasn1>=0.6.4",            # High OOS – auditor-tasks + customizer
-  "setuptools>=78.1.1",       # High OOS – nmp-cpu-tasks/gpu-tasks/customizer-tasks
-  "urllib3>=2.7.0",           # High OOS – auditor-tasks + customizer
+  "pyasn1>=0.6.4",            # High OOS – nhx-auditor-tasks + customizer
+  "setuptools>=78.1.1",       # High OOS – nhx-cpu-tasks/gpu-tasks/customizer-tasks
+  "urllib3>=2.7.0",           # High OOS – nhx-auditor-tasks + customizer
   "wheel>=0.46.2",            # High OOS – widespread
-  "cbor2>=5.9.0",             # High – customizer + nmp-gpu-tasks
-  "simpleeval>=1.0.5",        # High – nmp-api + nmp-gpu-tasks
-  "ujson>=5.12.0",            # High – nmp-api/cpu-tasks/gpu-tasks
-  "xgrammar>=0.1.32",         # High – customizer + nmp-gpu-tasks
-  "fastmcp>=3.2.0",           # GHSA-vv7q-7jx5-f767 (Critical) + GHSA-rww4-4w9c-7733 (High); overrides vendored sdk/python/nemo-platform <3 constraint
+  "cbor2>=5.9.0",             # High – customizer + nhx-gpu-tasks
+  "simpleeval>=1.0.5",        # High – nhx-api + nhx-gpu-tasks
+  "ujson>=5.12.0",            # High – nhx-api/cpu-tasks/gpu-tasks
+  "xgrammar>=0.1.32",         # High – customizer + nhx-gpu-tasks
+  "fastmcp>=3.2.0",           # GHSA-vv7q-7jx5-f767 (Critical) + GHSA-rww4-4w9c-7733 (High); overrides vendored sdk/python/nemo-helix <3 constraint
   "wandb>=0.29.0",            # wandb-core Go CVEs (nspect); optional integrations + training images
   "cryptography>=50.0.0,<51", # GHSA-g6cj-pr64-35w5; overrides nvidia-nat-core's <47 cap after changelog review
   "click>=8.2.0",             # Below CVEs are based on constraints that garak has
@@ -395,40 +395,40 @@ explicit = true
 
 [tool.uv.sources]
 data-designer-retrieval-sdg = { index = "data-designer-plugins" }
-nmp-auth = { workspace = true }
+nhx-auth = { workspace = true }
 nemo-anonymizer-plugin = { workspace = true }
 nemo-agent-hardener-plugin = { workspace = true }
 nemo-data-designer-plugin = { workspace = true }
 data-designer-nemo = { workspace = true }
 nemo-evaluator-sdk = { workspace = true }
 sandboxed-gym = { workspace = true }
-nmp-guardrails = { workspace = true }
-nmp-intake = { workspace = true }
-nmp-jobs = { workspace = true }
-nmp-models = { workspace = true }
-nmp-inference-gateway = { workspace = true }
-nmp-files = { workspace = true }
-nmp-entities = { workspace = true }
+nhx-guardrails = { workspace = true }
+nhx-intake = { workspace = true }
+nhx-jobs = { workspace = true }
+nhx-models = { workspace = true }
+nhx-inference-gateway = { workspace = true }
+nhx-files = { workspace = true }
+nhx-entities = { workspace = true }
 models = { workspace = true }
-nemo-platform-sdk = { workspace = true }
-nemo-platform = { workspace = true }
-nemo-platform-ext = { workspace = true }
+nemo-helix-sdk = { workspace = true }
+nemo-helix = { workspace = true }
+nemo-helix-ext = { workspace = true }
 acme-strategies = { workspace = true }
-nemo-platform-sdk-tools = { workspace = true }
-nmp-core-mcp = { workspace = true }
+nemo-helix-sdk-tools = { workspace = true }
+nhx-core-mcp = { workspace = true }
 nemo-nb = { workspace = true }
-nmp-common = { workspace = true }
+nhx-common = { workspace = true }
 garak-api = { workspace = true }
-nmp-platform = { workspace = true }
-nmp-platform-runner = { workspace = true }
-nmp-platform-seed = { workspace = true }
-nmp-hello-world = { workspace = true }
-nmp-studio = { workspace = true }
-nmp-secrets = { workspace = true }
-nmp-dev-mcp = { workspace = true }
-nmp-testing = { workspace = true }
-nmp-build-tools = { workspace = true }
-nemo-platform-plugin = { workspace = true }
+nhx-platform = { workspace = true }
+nhx-platform-runner = { workspace = true }
+nhx-platform-seed = { workspace = true }
+nhx-hello-world = { workspace = true }
+nhx-studio = { workspace = true }
+nhx-secrets = { workspace = true }
+nhx-dev-mcp = { workspace = true }
+nhx-testing = { workspace = true }
+nhx-build-tools = { workspace = true }
+nemo-helix-plugin = { workspace = true }
 nemo-insights-plugin = { workspace = true }
 nemo-eval-author-plugin = { workspace = true }
 nemo-experimentalist-plugin = { workspace = true }
@@ -449,26 +449,26 @@ nemo-automodel-plugin = { workspace = true }
 nemo-optimization-plugin = { workspace = true }
 nemo-unsloth-plugin = { workspace = true }
 nemo-rl-plugin = { workspace = true }
-nmp-automodel = { workspace = true }
-nmp-unsloth = { workspace = true }
-nmp-rl = { workspace = true }
-nmp-customization-common = { workspace = true }
+nhx-automodel = { workspace = true }
+nhx-unsloth = { workspace = true }
+nhx-rl = { workspace = true }
+nhx-customization-common = { workspace = true }
 
 
 [tool.uv.workspace]
 members = [
-  "packages/nemo_platform_plugin",
-  "packages/nmp_build_tools",
-  "packages/nemo_platform",
+  "packages/nemo_helix_plugin",
+  "packages/nhx_build_tools",
+  "packages/nemo_helix",
   "packages/filesets",
-  "packages/nmp_common",
-  "packages/nmp_customization_common",
-  "packages/nmp_platform_runner",
+  "packages/nhx_common",
+  "packages/nhx_customization_common",
+  "packages/nhx_platform_runner",
   "packages/garak_api/",
-  "packages/nmp_testing",
+  "packages/nhx_testing",
   "packages/nemo_nb",
   "packages/data_designer_nemo",
-  "packages/nmp_platform",
+  "packages/nhx_platform",
   "packages/sandboxed_gym",
   "services/hello-world",
   "services/studio",
@@ -486,12 +486,12 @@ members = [
   "services/core/files",
   "services/core/secrets",
   "services/core/mcp",
-  "tools/nemo-platform-sdk-tools",
+  "tools/nemo-helix-sdk-tools",
   "tools/mcp-dev-tools",
-  "packages/nmp_testing",
+  "packages/nhx_testing",
   # SDK
-  "sdk/python/nemo-platform",
-  "packages/nemo_platform_ext",
+  "sdk/python/nemo-helix",
+  "packages/nemo_helix_ext",
   "packages/nemo_evaluator_sdk",
   "packages/filesets",
   "packages/models",
@@ -529,14 +529,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["packages/nmp_platform/", "script/"]
+packages = ["packages/nhx_platform/", "script/"]
 
 # Pytest configuration is now in pytest.ini
 # This section is kept for reference but pytest.ini takes precedence
 # [tool.pytest.ini_options]
 # testpaths = [
 #     "tests/integration",
-#     "packages/nmp_common/tests",
+#     "packages/nhx_common/tests",
 # ]
 
 
@@ -626,7 +626,7 @@ extra-paths = [
   # add its src so ty can resolve nemo_studio_assistant imports from its tests.
   "agents/nemo-studio-assistant/src",
   # example-plugin is not a workspace member; add its src so ty can
-  # resolve nmp.example_plugin imports when checking plugin test files.
+  # resolve nhx.example_plugin imports when checking plugin test files.
   "plugins/example-plugin/src",
   # nemo-guardrails plugin is not a workspace member; add its src so ty can
   # resolve nemo_guardrails_plugin imports when checking plugin test files.
@@ -662,7 +662,7 @@ exclude = [
 
   "./script/",
 
-  "packages/nmp_common/",
+  "packages/nhx_common/",
 
   # Runtime-only imports absent from a workspace checkout by design. `gym_host_runtime` drives
   # NeMo-Gym from inside the Gym image; the other three use the OpenSandbox SDK, an optional
@@ -679,21 +679,21 @@ exclude = [
   "packages/sandboxed_gym/src/sandboxed_gym/ray/",
   "packages/sandboxed_gym/src/sandboxed_gym/runtime/gym_host_runtime.py",
 
-  "packages/nemo_platform_ext/",
+  "packages/nemo_helix_ext/",
   "packages/nemo_nb/",
 
-  "packages/nemo_platform_plugin/src/nemo_platform_plugin/jobs/api_factory.py",
+  "packages/nemo_helix_plugin/src/nemo_helix_plugin/jobs/api_factory.py",
 
   "packages/garak_api/",
 
   # GPU-container training drivers import torch/peft/nemo_automodel/unsloth/nemo_rl at runtime only.
-  "services/automodel/src/nmp/automodel/tasks/training/backends/",
-  "services/automodel/src/nmp/automodel/tasks/training/utils.py",
-  "services/automodel/src/nmp/automodel/tasks/retrieval_mine/mine_hard_negatives.py",
-  "services/unsloth/src/nmp/unsloth/tasks/training/backends/",
-  "services/rl/src/nmp/rl/tasks/training/backends/",
-  "services/rl/src/nmp/rl/tasks/training/utils.py",
-  "services/rl/src/nmp/rl/tasks/training/runner.py",
+  "services/automodel/src/nhx/automodel/tasks/training/backends/",
+  "services/automodel/src/nhx/automodel/tasks/training/utils.py",
+  "services/automodel/src/nhx/automodel/tasks/retrieval_mine/mine_hard_negatives.py",
+  "services/unsloth/src/nhx/unsloth/tasks/training/backends/",
+  "services/rl/src/nhx/rl/tasks/training/backends/",
+  "services/rl/src/nhx/rl/tasks/training/utils.py",
+  "services/rl/src/nhx/rl/tasks/training/runner.py",
   # Helm chart test payloads run inside purpose-built Kubernetes containers.
   # The NCCL worker imports torch at runtime, which is not part of the root
   # workspace type-checking environment.
@@ -727,8 +727,8 @@ exclude = [
 
   "./sdk/",
 
-  "tools/nemo-platform-sdk-tools/src/nemo_platform_sdk_tools/sdk",
-  "tools/nemo-platform-sdk-tools/tests/sdk",
+  "tools/nemo-helix-sdk-tools/src/nemo_helix_sdk_tools/sdk",
+  "tools/nemo-helix-sdk-tools/tests/sdk",
 ]
 
 # nooa agents declare their LLM-generated methods as annotated signatures with an

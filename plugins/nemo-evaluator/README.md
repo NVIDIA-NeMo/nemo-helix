@@ -3,7 +3,7 @@
 
 # NeMo Evaluator Plugin
 
-The Evaluator plugin connects the NeMo Evaluator SDK to NeMo Platform. It
+The Evaluator plugin connects the NeMo Evaluator SDK to NeMo Helix. It
 provides:
 
 - **CLI** `nemo evaluator` commands for plugin status, job schema inspection, and
@@ -51,10 +51,10 @@ Check the plugin status:
 uv run nemo evaluator info
 ```
 
-Follow the repository `SETUP.md` for detailed setup instructions and starting local NeMo Platform services.
+Follow the repository `SETUP.md` for detailed setup instructions and starting local NeMo Helix services.
 
 ## Dataset-Driven vs. Task-Driven evaluation
-Review the [Evaluator documentation](https://docs.nvidia.com/nemo-platform/documentation/evaluate-models#two-shapes-of-evaluation) for a detailed explanation of the difference between dataset-driven and task-driven evaluation.
+Review the [Evaluator documentation](https://docs.nvidia.com/nemo-helix/documentation/evaluate-models#two-shapes-of-evaluation) for a detailed explanation of the difference between dataset-driven and task-driven evaluation.
 
 ## Dataset-Driven evaluation
 
@@ -90,9 +90,9 @@ Use the mounted SDK resource to submit durable evaluation jobs:
 
 ```python
 from nemo_evaluator_sdk import ExactMatchMetric, RunConfig
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(base_url="http://localhost:8080", workspace="default")
+client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
 metric = ExactMatchMetric(
     reference="{{item.expected}}",
     candidate="{{item.output}}",
@@ -204,13 +204,13 @@ resources support retrieve, list, and delete.
 
 - Local model-backed evaluation resolves `api_key_secret` as a local
   environment-variable name, such as `NVIDIA_API_KEY`..
-- Durable platformjobs resolve it as a NeMo Platform secret in the target workspace.
+- Durable platformjobs resolve it as a NeMo Helix secret in the target workspace.
 
 Never place a credential value in a spec or log.
 
 ## References
 
-- [Evaluator documentation](https://docs.nvidia.com/nemo-platform/documentation/evaluate-models)
+- [Evaluator documentation](https://docs.nvidia.com/nemo-helix/documentation/evaluate-models)
 - [Canonical evaluator skill](../../skills/nemo-evaluator-plugin/SKILL.md)
 - [Evaluator API auth](../../skills/nemo-evaluator-plugin/references/api-auth.md)
 - [Troubleshooting](../../skills/nemo-evaluator-plugin/references/troubleshooting.md)

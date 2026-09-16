@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
 
-PlatformClient = NeMoPlatform | AsyncNeMoPlatform
+PlatformClient = NeMoHelix | AsyncNeMoHelix
 
 _API_PREFIX = "/apis/anonymizer/v2/workspaces"
 

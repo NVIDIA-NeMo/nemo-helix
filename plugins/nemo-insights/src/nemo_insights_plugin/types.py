@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import NotRequired, TypedDict
 
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix_plugin.jobs.schemas import PlatformJobStatus
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 ANALYSIS_JOB_NAME = "analyze-job"

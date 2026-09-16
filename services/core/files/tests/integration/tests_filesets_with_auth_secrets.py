@@ -8,22 +8,22 @@ from typing import Generator
 from unittest.mock import patch
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NemoHTTPError
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
-from nmp.core.auth.app.bundle import (
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NemoHTTPError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import PlatformSecretCreateRequest
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+from nhx.core.auth.app.bundle import (
     build_authorization_data as _real_build_authorization_data,
 )
-from nmp.core.files.app.backends.huggingface import HuggingfaceStorageImpl
-from nmp.core.files.service import FilesService
-from nmp.core.secrets.service import SecretsService
-from nmp.testing import (
+from nhx.core.files.app.backends.huggingface import HuggingfaceStorageImpl
+from nhx.core.files.service import FilesService
+from nhx.core.secrets.service import SecretsService
+from nhx.testing import (
     TEST_ADMIN_EMAIL,
     as_user,
     create_test_client,
@@ -57,9 +57,9 @@ async def _build_authorization_data_without_secrets_read(entities_client=None):
 def patched_authz_data(build_fn):
     """Patch authz data builders used by embedded PDP."""
     with (
-        patch("nmp.core.auth.app.bundle.build_authorization_data", side_effect=build_fn),
+        patch("nhx.core.auth.app.bundle.build_authorization_data", side_effect=build_fn),
         patch(
-            "nmp.core.auth.app.embedded_pdp.data.build_authorization_data",
+            "nhx.core.auth.app.embedded_pdp.data.build_authorization_data",
             side_effect=build_fn,
         ),
     ):
@@ -67,7 +67,7 @@ def patched_authz_data(build_fn):
 
 
 @pytest.fixture(scope="module")
-def sdk() -> Generator[NeMoPlatform, None, None]:
+def sdk() -> Generator[NeMoHelix, None, None]:
     """Auth-enabled test stack with Files + Secrets services."""
     with create_test_client(
         FilesService,
@@ -96,7 +96,7 @@ def no_hf_network(monkeypatch):
 class TestFilesetCreateWithSecretAuth:
     def test_editor_can_create_hf_fileset_with_token_secret(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         no_hf_network,
     ):
         workspace = short_unique_name("hf-ok")
@@ -140,7 +140,7 @@ class TestFilesetCreateWithSecretAuth:
 
     def test_custom_role_without_secrets_read_denied_with_token_secret(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         no_hf_network,
     ):
         with patched_authz_data(_build_authorization_data_without_secrets_read):
@@ -185,7 +185,7 @@ class TestFilesetCreateWithSecretAuth:
 
     def test_missing_secret_returns_secret_not_found_error(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         no_hf_network,
     ):
         workspace = short_unique_name("hf-miss")
@@ -224,7 +224,7 @@ class TestFilesetCreateWithSecretAuth:
 
     def test_public_hf_without_token_secret_succeeds(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         no_hf_network,
     ):
         workspace = short_unique_name("hf-public")
@@ -263,7 +263,7 @@ class TestFilesetCreateWithSecretAuth:
 
     def test_editor_can_list_files_from_hf_fileset_with_token_secret(
         self,
-        sdk: NeMoPlatform,
+        sdk: NeMoHelix,
         no_hf_network,
         monkeypatch,
     ):

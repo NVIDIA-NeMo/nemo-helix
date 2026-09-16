@@ -15,12 +15,12 @@ from typing import Iterator
 
 import httpx
 import pandas as pd
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NemoClientError
-from nemo_platform_plugin.jobs.client import JobsClient
-from nemo_platform_plugin.jobs.schemas import PlatformJobLog, PlatformJobStatusResponse
-from nemo_platform_plugin.jobs.types import JobLogsQueryParams
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.schemas import PlatformJobLog, PlatformJobStatusResponse
+from nemo_helix_plugin.jobs.types import JobLogsQueryParams
 from nemo_safe_synthesizer.config.external_results import SafeSynthesizerSummary
 from typing_extensions import Self
 
@@ -57,7 +57,7 @@ class ReportHtml:
 class SafeSynthesizerJob:
     """Convenience wrapper for a Safe Synthesizer platform job."""
 
-    def __init__(self, job_name: str, client: NeMoPlatform, workspace: str = "default"):
+    def __init__(self, job_name: str, client: NeMoHelix, workspace: str = "default"):
         self.job_name = job_name
         self._client = client
         self._workspace = workspace

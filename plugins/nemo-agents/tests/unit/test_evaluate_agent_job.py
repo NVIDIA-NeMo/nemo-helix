@@ -12,8 +12,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob, EvaluateAgentSpec
 from nemo_agents_plugin.refs import AgentRef
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.refs import FilesetRef
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.refs import FilesetRef
 
 
 @pytest.mark.asyncio
@@ -42,7 +42,7 @@ async def test_compile_produces_single_cpu_step() -> None:
     assert step["config"]["eval_config"] == "config.yml"
     assert step["config"]["eval_config_fileset"] == "nemo-agent-eval-calc"
 
-    from nemo_platform_plugin.jobs.constants import (
+    from nemo_helix_plugin.jobs.constants import (
         DEFAULT_JOB_STORAGE_PATH,
         EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
         PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
