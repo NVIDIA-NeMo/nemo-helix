@@ -1,0 +1,3 @@
+{
+  "goal": "stats.py's mean divides by len(values), so check.py passes; check.py itself is unchanged."
+}
