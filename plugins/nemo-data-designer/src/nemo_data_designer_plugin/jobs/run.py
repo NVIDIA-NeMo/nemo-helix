@@ -8,10 +8,10 @@ import data_designer.config as dd
 from data_designer.logging import _make_json_formatter
 from data_designer_nemo.context.execution import create_execution_context
 from data_designer_nemo.fileset_file_seed_reader import workspace_cvar
+from data_designer_nemo.token_usage import capture_token_usage
 from nemo_data_designer_plugin._data_designer import create_data_designer
 from nemo_data_designer_plugin.jobs.result_manager import DataDesignerResultManager
 from nemo_data_designer_plugin.jobs.spec import DataDesignerStepConfig
-from nemo_data_designer_plugin.jobs.token_usage import capture_token_usage
 from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.job_results import ResultRef

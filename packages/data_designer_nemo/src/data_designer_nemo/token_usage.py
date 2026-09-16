@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Data Designer token-usage aggregation for platform jobs."""
+"""Data Designer token-usage aggregation for NeMo Platform jobs."""
 
 from __future__ import annotations
 

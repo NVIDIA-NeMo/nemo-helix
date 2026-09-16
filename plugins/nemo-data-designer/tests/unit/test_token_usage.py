@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 from data_designer.engine.models.usage_events import TokenUsageEvent, emit_token_usage_event
 from data_designer.engine.observability import RuntimeCorrelation, runtime_correlation_provider
-from nemo_data_designer_plugin.jobs.token_usage import capture_token_usage
+from data_designer_nemo.token_usage import capture_token_usage
 from nemo_platform_plugin.job_usage import LocalJobUsageReporter
 
 
