@@ -17,7 +17,7 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { buildEvaluationSpec } from '@studio/routes/evaluation/EvaluationNewRoute/buildEvaluationSpec';
 import type {
   EvaluationFormValues,
-  TemplateBindings,
+  DatasetBindings,
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
 import { getEvaluationResultDetailsRoute } from '@studio/routes/utils';
 import { getModelInferenceGatewayUrl } from '@studio/util/models';
@@ -38,8 +38,9 @@ export function useCreateEvaluation() {
   const toast = useToast();
   const { mutateAsync: createEvaluateJob, isPending } = useEvaluatorCreateEvaluateJob();
 
-  const createEvaluation = async (values: EvaluationFormValues, bindings: TemplateBindings) => {
+  const createEvaluation = async (values: EvaluationFormValues, bindings: DatasetBindings) => {
     const spec = buildEvaluationSpec(values, bindings, workspace);
+
     const name = generateEvalConfigName();
     const fileset = evalConfigFileset(name);
 

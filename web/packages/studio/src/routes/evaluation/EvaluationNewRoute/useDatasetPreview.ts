@@ -37,6 +37,11 @@ export interface MessageSelector {
   role: string;
 }
 
+/** The last message with a given role, which is the turn being evaluated in a
+ *  multi-turn conversation. */
+export const lastSelectorForRole = (selectors: MessageSelector[], role: string): string | null =>
+  selectors.filter((entry) => entry.role === role).at(-1)?.selector ?? null;
+
 export interface DatasetPreview {
   /** The row at ``rowIndex``. Row 0 is also the row the dry run scores. */
   row: Record<string, unknown> | null;

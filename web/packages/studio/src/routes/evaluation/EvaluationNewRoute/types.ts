@@ -120,7 +120,7 @@ export const DEFAULT_HELPFULNESS_SCORE: PanelScoreFormData = {
  *  Not the same as ``field_mapping``: for an OpenAI messages dataset the binding
  *  is the whole array (``messages -> <column>``), because ``FieldMapping`` refuses
  *  a path containing ``[`` or ``]``, and the index lives in the template instead. */
-export interface TemplateBindings {
+export interface DatasetBindings {
   /** Set when the dataset is OpenAI messages format; the bound column's name. */
   messagesColumn: string | null;
   input: string;
@@ -135,7 +135,7 @@ export interface TemplateBindings {
 }
 
 /** Prompt sent to the model under test, built from the resolved input binding. */
-export const composeGenerationPrompt = (bindings: TemplateBindings) => ({
+export const composeGenerationPrompt = (bindings: DatasetBindings) => ({
   messages: [{ role: 'user', content: bindings.input }],
 });
 
@@ -157,11 +157,11 @@ export const composeGenerationPrompt = (bindings: TemplateBindings) => ({
  *  in request else completions.create`) -- so a string prompt silently routes the
  *  judge to the COMPLETIONS endpoint, which chat models do not serve. Verified
  *  live: the job fails making a completions request to the judge model. */
-export const composeJudgePromptTemplate = (bindings: TemplateBindings) => ({
+export const composeJudgePromptTemplate = (bindings: DatasetBindings) => ({
   messages: [{ role: 'user', content: composeJudgeUserPrompt(bindings) }],
 });
 
-export const composeJudgeUserPrompt = (bindings: TemplateBindings): string => {
+export const composeJudgeUserPrompt = (bindings: DatasetBindings): string => {
   // Labels match the mapping UI exactly -- a user who mapped "Ground Truth"
   // should see "Ground Truth" in the prompt, not a synonym.
   const lines = [`Input: ${bindings.input}`];
@@ -270,7 +270,8 @@ export const toFieldMapping = (
   mapping: Record<CanonicalField, string>
 ): Record<string, string> | undefined => {
   const bound = CANONICAL_FIELDS.filter(
-    (field) => mapping[field] && mapping[field] !== UNMAPPED
+    (field) =>
+      mapping[field] && mapping[field] !== UNMAPPED && isSupportedMappingPath(mapping[field])
   ).map((field) => [field, mapping[field]] as const);
   return bound.length > 0 ? Object.fromEntries(bound) : undefined;
 };
@@ -368,11 +369,17 @@ export const evaluationSchema = z
     const needsReference = selected.some(
       (metric) => REFERENCE_METRICS.includes(metric) || COMPARISON_METRICS.includes(metric)
     );
-    if (needsReference && !mapping.reference && !mapping.messages) {
+    // A bound messages column is NOT proof of a ground truth: the reference is
+    // the assistant turn, and a prompts-only dataset has none. The error goes to
+    // the metrics slot in that case because no Ground Truth select is rendered
+    // for a messages dataset, so a field error there would never be seen.
+    if (needsReference && !mapping.reference) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['fieldMapping', 'reference'],
-        message: 'This metric compares against ground truth, so Ground Truth must be mapped.',
+        path: mapping.messages ? ['body', 'metrics'] : ['fieldMapping', 'reference'],
+        message: mapping.messages
+          ? 'This dataset has no assistant turn to compare against. Clear the metrics that score against Ground Truth.'
+          : 'This metric compares against ground truth, so Ground Truth must be mapped.',
       });
     }
 

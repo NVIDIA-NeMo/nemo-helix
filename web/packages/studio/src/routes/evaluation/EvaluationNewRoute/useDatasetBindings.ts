@@ -3,18 +3,14 @@
 
 import {
   type EvaluationFormValues,
-  type TemplateBindings,
+  type DatasetBindings,
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
-import { useDatasetPreview } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetPreview';
+import {
+  lastSelectorForRole,
+  useDatasetPreview,
+} from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetPreview';
 import { useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
-
-/** The last message with a given role, which is the turn being evaluated in a
- *  multi-turn conversation. */
-const lastSelectorForRole = (
-  selectors: { selector: string; role: string }[],
-  role: string
-): string | null => selectors.filter((entry) => entry.role === role).at(-1)?.selector ?? null;
 
 /**
  * The Jinja expressions templates should use for input / reference / context.
@@ -29,7 +25,7 @@ const lastSelectorForRole = (
  * - **Flat columns.** Canonical ``{{input}}`` / ``{{reference}}`` / ``{{context}}``,
  *   backed by the bindings the user picked.
  */
-export function useTemplateBindings(): TemplateBindings {
+export function useDatasetBindings(): DatasetBindings {
   const { control } = useFormContext<EvaluationFormValues>();
   const [dataset, fieldMapping] = useWatch({ control, name: ['dataset', 'fieldMapping'] });
   const { messagesColumn, messageSelectors } = useDatasetPreview(dataset ?? null);

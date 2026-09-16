@@ -20,7 +20,7 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { buildMetricBundles } from '@studio/routes/evaluation/EvaluationNewRoute/buildEvaluationSpec';
 import {
   type EvaluationFormValues,
-  type TemplateBindings,
+  type DatasetBindings,
   toFieldMapping,
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
 import { useCallback, useRef, useState } from 'react';
@@ -150,7 +150,7 @@ export function useDryRun() {
   const run = useCallback(
     async (
       values: EvaluationFormValues,
-      bindings: TemplateBindings,
+      bindings: DatasetBindings,
       row: Record<string, unknown>
     ) => {
       const runId = ++runRef.current;

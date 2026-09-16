@@ -5,9 +5,9 @@ import { resolveKeyPath } from '@nemo/common/src/utils/file';
 import { formatEvaluatorScore } from '@nemo/common/src/utils/formatters';
 import { Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import { type EvaluationFormValues } from '@studio/routes/evaluation/EvaluationNewRoute/types';
+import { useDatasetBindings } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetBindings';
 import { useDatasetPreview } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetPreview';
 import { useDryRun } from '@studio/routes/evaluation/EvaluationNewRoute/useDryRun';
-import { useTemplateBindings } from '@studio/routes/evaluation/EvaluationNewRoute/useTemplateBindings';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { FC, useEffect, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -37,7 +37,7 @@ export const DryRunPanel: FC = () => {
   const { row, rowCount, isPartial } = useDatasetPreview(dataset ?? null, rowIndex);
   // Bindings, not fieldMapping: a messages dataset resolves its input and ground
   // truth positionally, and reading the mapping directly reports them unmapped.
-  const bindings = useTemplateBindings();
+  const bindings = useDatasetBindings();
   const { state, run, cancel } = useDryRun();
   const busy = state.status === 'busy';
 

@@ -13,7 +13,7 @@ import {
   renderScoreGuidance,
   type SelectableMetric,
   selectedMetrics,
-  type TemplateBindings,
+  type DatasetBindings,
   toFieldMapping,
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
 import { getModelInferenceGatewayUrl } from '@studio/util/models';
@@ -108,7 +108,7 @@ const OUTPUT_TEMPLATE = '{{sample.output_text}}';
 const buildMetricBundle = (
   metric: SelectableMetric,
   values: EvaluationFormValues,
-  bindings: TemplateBindings,
+  bindings: DatasetBindings,
   workspace: string
 ): InlineMetricBundle | null => {
   const reference = bindings.reference;
@@ -202,7 +202,7 @@ const buildMetricBundle = (
 
 export const buildMetricBundles = (
   values: EvaluationFormValues,
-  bindings: TemplateBindings,
+  bindings: DatasetBindings,
   workspace: string
 ): InlineMetricBundle[] =>
   selectedMetrics(values)
@@ -215,7 +215,7 @@ export const buildMetricBundles = (
  */
 export const buildEvaluationSpec = (
   values: EvaluationFormValues,
-  bindings: TemplateBindings,
+  bindings: DatasetBindings,
   workspace: string
 ): DatasetEvalSpec => ({
   dataset: values.dataset ?? '',

@@ -25,7 +25,7 @@ import {
   evaluationSchema,
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
 import { useCreateEvaluation } from '@studio/routes/evaluation/EvaluationNewRoute/useCreateEvaluation';
-import { useTemplateBindings } from '@studio/routes/evaluation/EvaluationNewRoute/useTemplateBindings';
+import { useDatasetBindings } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetBindings';
 import { useWizardProgress } from '@studio/routes/evaluation/EvaluationNewRoute/useWizardProgress';
 import { getEvaluationResultsRoute } from '@studio/routes/utils';
 import { FC } from 'react';
@@ -35,7 +35,7 @@ import { FormProvider, type Resolver, useForm, useFormContext } from 'react-hook
  *  and wizard progress, both of which derive from form state. */
 const EvaluationForm: FC = () => {
   const form = useFormContext<EvaluationFormValues>();
-  const bindings = useTemplateBindings();
+  const bindings = useDatasetBindings();
   const progress = useWizardProgress();
   const { createEvaluation, isPending } = useCreateEvaluation();
 
