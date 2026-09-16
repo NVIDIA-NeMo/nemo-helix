@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 
 import httpx
@@ -16,6 +17,8 @@ from nemo_evaluator_sdk.retrieval.passages import Truncation, passage_text
 from nemo_evaluator_sdk.values.retrieval import Retrieval
 
 __all__ = ["dense_search", "retrieve"]
+
+logger = logging.getLogger(__name__)
 
 
 async def retrieve(
@@ -75,6 +78,10 @@ async def dense_search(
             document_id: passage_text(dataset.corpus[document_id], truncate_long_documents)
             for document_id in document_ids
         }
+    logger.info(
+        f"dense search {embeddings.model.name}: {len(document_ids)} passages, {len(query_ids)} queries, "
+        f"batch_size={batch_size}, in_flight={in_flight}"
+    )
     owns_client = client is None
     if client is None:
         client = httpx.AsyncClient(timeout=embeddings.timeout)
@@ -151,16 +158,36 @@ async def _encode_batches(
     batches = [texts[start : start + batch_size] for start in range(0, len(texts), batch_size)]
     if not batches:
         return []
+    n_batches = len(batches)
+    model_name = embeddings.model.name
+    logger.info(
+        f"encoding {input_type} for {model_name}: {len(texts)} texts in {n_batches} batches "
+        f"(batch_size={batch_size}, in_flight={in_flight})"
+    )
     semaphore = asyncio.Semaphore(in_flight)
 
-    async def _encode(batch: list[str]) -> list[list[float]]:
+    async def _encode(index: int, batch: list[str]) -> list[list[float]]:
+        offset = index * batch_size
+        chars = sum(len(text) for text in batch)
         async with semaphore:
-            return await embeddings.encode(batch, input_type=input_type, client=client)
+            logger.info(
+                f"encode {model_name} {input_type} batch {index + 1}/{n_batches} "
+                f"offset={offset} n={len(batch)} chars={chars}"
+            )
+            try:
+                return await embeddings.encode(batch, input_type=input_type, client=client)
+            except Exception as error:
+                logger.error(
+                    f"encode {model_name} {input_type} failed batch {index + 1}/{n_batches} "
+                    f"offset={offset} n={len(batch)} chars={chars}: {error}"
+                )
+                raise
 
-    encoded = await asyncio.gather(*(_encode(batch) for batch in batches))
+    encoded = await asyncio.gather(*(_encode(index, batch) for index, batch in enumerate(batches)))
     vectors: list[list[float]] = []
     for part in encoded:
         vectors.extend(part)
+    logger.info(f"finished encoding {input_type} for {model_name}: {len(texts)} texts")
     return vectors
 
 
