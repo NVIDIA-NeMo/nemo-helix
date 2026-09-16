@@ -6,19 +6,24 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, NotRequired, Required, TypedDict
+from typing import Annotated, Any, Literal, NotRequired, Required, TypedDict
 
 from nemo_platform_plugin.schema import Page
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, TypeAdapter, model_validator, with_config
 
 EvaluatorResultDataType = Literal["NUMERIC", "BOOLEAN", "CATEGORICAL", "TEXT"]
 TraceMode = Literal["summary", "preview", "detailed"]
 TraceStatus = Literal["OK", "ERROR", "UNSET"] | str
 SpanMode = Literal["summary", "preview", "detailed"]
-SpanKind = Literal["AGENT", "CHAIN", "EVALUATOR", "LLM", "TOOL"] | str
-SpanStatus = Literal["success", "error", "cancelled", "unknown", "OK", "ERROR", "UNSET"] | str
+# The server's SpanKind / SpanStatus enums; direct span ingest is validated against them.
+SpanKind = Literal[
+    "LLM", "CHAIN", "TOOL", "RETRIEVER", "EMBEDDING", "AGENT", "RERANKER", "EVALUATOR", "GUARDRAIL", "UNKNOWN"
+]
+
+SpanStatus = Literal["success", "error", "cancelled", "unknown"]
 
 
+@with_config(ConfigDict(extra="allow"))
 class EvaluationContextParam(TypedDict, total=False):
     evaluation_name: str
     test_case_name: str
@@ -26,6 +31,7 @@ class EvaluationContextParam(TypedDict, total=False):
     test_case_id: str
 
 
+@with_config(ConfigDict(extra="allow"))
 class AtifAgentParam(TypedDict, total=False):
     name: Required[str]
     version: Required[str]
@@ -62,6 +68,7 @@ class AtifStepAgentParam(TypedDict, total=False):
 AtifStepParam = dict[str, Any]
 
 
+@with_config(ConfigDict(extra="allow"))
 class AtifCreateParams(TypedDict, total=False):
     workspace: str
     evaluation_context: EvaluationContextParam
@@ -397,7 +404,7 @@ class ListTracesQueryParams(TypedDict, total=False):
     page_size: int
     sort: str
     mode: TraceMode
-    filter: TraceFilterParam
+    filter: TraceFilterParam | str
 
 
 class RetrieveTraceQueryParams(TypedDict, total=False):
@@ -429,7 +436,7 @@ class ListSpansQueryParams(TypedDict, total=False):
     page_size: int
     sort: str
     mode: SpanMode
-    filter: SpanFilterParam | dict[str, JsonValue]
+    filter: SpanFilterParam | dict[str, JsonValue] | str
 
 
 class ListSpanGroupsQueryParams(TypedDict, total=False):
@@ -437,7 +444,7 @@ class ListSpanGroupsQueryParams(TypedDict, total=False):
     page: int
     page_size: int
     sort: str
-    filter: SpanFilterParam | dict[str, JsonValue]
+    filter: SpanFilterParam | dict[str, JsonValue] | str
 
 
 class AnnotationFilterParam(TypedDict, total=False):
@@ -455,15 +462,246 @@ class ListAnnotationsQueryParams(TypedDict, total=False):
     page: int
     page_size: int
     sort: str
-    filter: AnnotationFilterParam | dict[str, JsonValue]
+    filter: AnnotationFilterParam | dict[str, JsonValue] | str
 
 
 class ListEvaluatorResultsQueryParams(TypedDict, total=False):
     page: int
     page_size: int
     sort: str
-    filter: dict[str, Any]
+    filter: dict[str, Any] | str
 
+
+TraceMetricBucket = Literal["total", "hour", "day", "week", "month"]
+
+AnnotationKind = Literal["feedback", "note", "metadata", "label"]
+
+
+class TraceMetricsQueryParams(TypedDict, total=False):
+    bucket: TraceMetricBucket
+    timezone: str
+    filter: TraceFilterParam | str
+
+
+class TokenRollup(BaseModel):
+    sum: int | None = Field(default=None, ge=0)
+    mean: float | None = None
+    p90: float | None = None
+    p99: float | None = None
+
+
+class CostRollup(BaseModel):
+    sum: float | None = None
+    mean: float | None = None
+    p90: float | None = None
+    p99: float | None = None
+
+
+class LatencyRollup(BaseModel):
+    mean: float | None = None
+    p50: float | None = None
+    p90: float | None = None
+    p95: float | None = None
+    p99: float | None = None
+
+
+class TraceMetricPoint(BaseModel):
+    """One time bucket of trace metric rollups."""
+
+    bucket_start: datetime | None = Field(
+        default=None, description="Start of the bucket in the requested timezone. Omitted when bucket=total."
+    )
+    run_count: int = Field(ge=0, description="Agent runs started in this bucket.")
+    failed_run_count: int = Field(ge=0, description="Runs whose root span ended in error.")
+    input_tokens: TokenRollup
+    output_tokens: TokenRollup
+    cached_tokens: TokenRollup
+    total_tokens: TokenRollup
+    cost_usd: CostRollup
+    latency_ms: LatencyRollup
+
+
+class TraceMetrics(BaseModel):
+    """Response body for GET /traces/metrics."""
+
+    bucket: TraceMetricBucket
+    timezone: str
+    data: list[TraceMetricPoint]
+
+
+class Session(BaseModel):
+    """Aggregate telemetry for one Intake session."""
+
+    id: str
+    workspace: str
+    started_at: datetime
+    ended_at: datetime | None = None
+    duration_ms: float | None = None
+    status: SpanStatus
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    cached_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    cost_usd: float | None = None
+    cost_input_usd: float | None = None
+    cost_output_usd: float | None = None
+    trace_count: int = Field(ge=0)
+    span_count: int = Field(ge=0)
+
+
+class _AnnotationInputBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    span_id: str | None = Field(
+        default=None,
+        description="Id of the span this annotation applies to. Omit to annotate the whole session.",
+    )
+    session_id: str = Field(description="Id of the session this annotation belongs to. Always required.")
+
+
+class FeedbackAnnotationInput(_AnnotationInputBase):
+    kind: Literal["feedback"]
+    value: Literal["positive", "negative"]
+
+
+class NoteAnnotationInput(_AnnotationInputBase):
+    kind: Literal["note"]
+    text: str = Field(min_length=1, max_length=10_000)
+
+
+class MetadataAnnotationInput(_AnnotationInputBase):
+    kind: Literal["metadata"]
+    metadata: dict[str, Any] = Field(min_length=1)
+
+
+class LabelAnnotationInput(_AnnotationInputBase):
+    kind: Literal["label"]
+    value_type: Literal["text", "numeric"]
+    value: str | float
+    name: str | None = Field(default=None, max_length=256)
+
+    @model_validator(mode="after")
+    def _validate(self) -> LabelAnnotationInput:
+        if self.value_type == "numeric":
+            if not isinstance(self.value, (int, float)) or isinstance(self.value, bool):
+                raise ValueError("value_type=numeric requires a numeric `value`")
+            if self.name is None:
+                raise ValueError("value_type=numeric requires `name`")
+        elif not isinstance(self.value, str):
+            raise ValueError("value_type=text requires a string `value`")
+        return self
+
+
+AnnotationInput = Annotated[
+    FeedbackAnnotationInput | NoteAnnotationInput | MetadataAnnotationInput | LabelAnnotationInput,
+    Field(discriminator="kind"),
+]
+
+ANNOTATION_INPUT_ADAPTER: TypeAdapter[
+    FeedbackAnnotationInput | NoteAnnotationInput | MetadataAnnotationInput | LabelAnnotationInput
+] = TypeAdapter(AnnotationInput)
+
+
+class _AnnotationReadBase(BaseModel):
+    annotation_id: str
+    workspace: str
+    span_id: str | None = None
+    session_id: str
+    created_by: str | None = None
+    created_at: datetime
+    ingested_at: datetime
+
+
+class FeedbackAnnotation(_AnnotationReadBase):
+    kind: Literal["feedback"]
+    value: Literal["positive", "negative"]
+
+
+class NoteAnnotation(_AnnotationReadBase):
+    kind: Literal["note"]
+    text: str
+
+
+class MetadataAnnotation(_AnnotationReadBase):
+    kind: Literal["metadata"]
+    metadata: dict[str, Any]
+
+
+class LabelAnnotation(_AnnotationReadBase):
+    kind: Literal["label"]
+    value_type: Literal["text", "numeric"]
+    value: str | float
+    name: str | None = None
+
+
+class ChatCompletionsIngestRequest(BaseModel):
+    """Request body for POST /ingest/chat-completions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    evaluation_context: EvaluationContextParam | None = None
+    request: dict[str, Any] = Field(description="Flexible captured chat-completions request.")
+    response: dict[str, Any] = Field(description="Flexible captured chat-completions response.")
+    session_id: str | None = None
+    trace_id: str | None = None
+    provider: str | None = None
+    cost_usd: float | None = Field(default=None, ge=0)
+    cost_input_usd: float | None = Field(default=None, ge=0)
+    cost_output_usd: float | None = Field(default=None, ge=0)
+    cost_details: dict[str, float] = Field(default_factory=dict)
+
+
+class ChatCompletionsIngestResponse(BaseModel):
+    session_id: str
+    span_id: str
+
+
+class DirectSpanInput(BaseModel):
+    """One provider-neutral span supplied by a historical trace importer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    span_id: str
+    trace_id: str
+    session_id: str | None = None
+    parent_span_id: str | None = None
+    name: str = ""
+    kind: SpanKind = "UNKNOWN"
+    status: SpanStatus = "unknown"
+    started_at: datetime
+    ended_at: datetime | None = None
+    input: JsonValue | None = None
+    output: JsonValue | None = None
+    attributes: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class DirectSpansIngestRequest(BaseModel):
+    """Request body for POST /ingest/spans."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str = Field(description="Stable name for the source trace store, such as `langsmith` or `mlflow`.")
+    spans: list[DirectSpanInput] = Field(min_length=1, max_length=1000)
+
+
+class ExperimentFilterParam(TypedDict, total=False):
+    name: str
+    insight_id: str
+    is_favorite: bool
+    show_evaluations_over_time: bool
+    baseline_evaluation_name: str
+    is_deleted: bool
+    metadata: dict[str, str]
+
+
+class ListExperimentsQueryParams(TypedDict, total=False):
+    page: int
+    page_size: int
+    sort: str
+    filter: ExperimentFilterParam | str
+
+
+ExperimentPage = Page[ExperimentResponse]
 
 TracePage = Page[Trace]
 SpanPage = Page[Span]

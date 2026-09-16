@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# NOTE: This file is auto-generated
+"""``nemo experiments`` command group, backed by the typed Intake client."""
+
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal, cast
 
 import typer
-
 from nemo_platform_ext.cli.core.api import build_kwargs, merge_filter_dict
 from nemo_platform_ext.cli.core.code_generator import handle_code_generation
 from nemo_platform_ext.cli.core.context import CLIContext
@@ -19,8 +19,13 @@ from nemo_platform_ext.cli.core.formatters import (
     validate_stream_output_format,
 )
 from nemo_platform_ext.cli.core.help_formatter import collect_warnings, create_typer_app
-from nemo_platform_ext.cli.core.pagination import PaginationType, fetch_all_pages, warn_if_more_pages
-from nemo_platform_ext.cli.core.stdin_utils import read_data_input_with_flags, read_payload, validate_required_fields
+from nemo_platform_ext.cli.core.pagination import PaginationType, collect_offset_pages, warn_if_more_pages
+from nemo_platform_ext.cli.core.stdin_utils import (
+    build_request_body,
+    read_data_input_with_flags,
+    read_payload,
+    validate_required_fields,
+)
 from nemo_platform_ext.cli.core.types import (
     EntityOutputFormatOption,
     ListOutputFormatOption,
@@ -28,8 +33,43 @@ from nemo_platform_ext.cli.core.types import (
     OutputColumnsOption,
     StreamOutputOption,
 )
+from nemo_platform_plugin.intake.client import IntakeClient
+from nemo_platform_plugin.intake.types import (
+    ExperimentCreateRequest,
+    ExperimentUpdateRequest,
+    ListExperimentsQueryParams,
+)
+from nmp.intake.cli_commands.common import list_query_params
 
 app = create_typer_app(name="experiments", help="Manage experiments")
+
+_COLUMN_LAYOUT_HELP = (
+    "A saved table layout for a group's evaluations list: column order and which columns are hidden.Column ids "
+    "are Studio's and cannot be enumerated here — the table builds a column per evaluator and metadata key found "
+    "in the rows — so ids are stored and echoed back unvalidated.Visibility is stored as the _hidden_ ids rather "
+    "than a map over every column, so a column that appears later (a new evaluator, a new metadata key) shows up "
+    "by default. (JSON string)"
+)
+_DEFAULT_SORT_HELP = (
+    "Default sort for this experiment's evaluations list, as a `sort`-param string: a comma-separated, ordered "
+    "list of fields where the first is the primary sort and the rest break ties (leading '-' on a field = "
+    "descending), e.g. '-evaluators.reward.mean,cost_usd.mean'. Defaults to '-created_at'. Accepts any field the "
+    "evaluations list `sort` param does; clients apply it as the list `sort` param."
+)
+_PARETO_HELP = (
+    "Default X/Y metrics for a group's cost-vs-accuracy Pareto view.Metric ids use the same vocabulary as the "
+    "evaluations list sort/filter fields — `cost_usd`, `latency_ms`, or `evaluators.<name>`. Defaults to cost (x) "
+    "vs latency (y): both exist for every group, so the chart always has something to render before anyone "
+    "customizes it. (JSON string)"
+)
+_IS_FAVORITE_HELP = (
+    "Whether this Experiment is marked as a favorite. Defaults to false on create; omit on update to preserve "
+    "the existing value."
+)
+_SHOW_OVER_TIME_HELP = (
+    "Whether Studio should display this Experiment's Evaluation results over time. Defaults to false on create; "
+    "omit on update to preserve the existing value."
+)
 
 
 @app.command("create")
@@ -39,20 +79,8 @@ def create_experiments(
     ctx: typer.Context,
     name: Annotated[str | None, typer.Argument(help="Workspace-unique experiment name. (required)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
-    column_layout: Annotated[
-        str | None,
-        typer.Option(
-            "--column-layout",
-            help="A saved table layout for a group's evaluations list: column order and which columns are hidden.Column ids are Studio's and cannot be enumerated here — the table builds a column per evaluator and metadata key found in the rows — so ids are stored and echoed back unvalidated.Visibility is stored as the _hidden_ ids rather than a map over every column, so a column that appears later (a new evaluator, a new metadata key) shows up by default. (JSON string)",
-        ),
-    ] = None,
-    default_sort: Annotated[
-        str | None,
-        typer.Option(
-            "--default-sort",
-            help="Default sort for this experiment's evaluations list, as a `sort`-param string: a comma-separated, ordered list of fields where the first is the primary sort and the rest break ties (leading '-' on a field = descending), e.g. '-evaluators.reward.mean,cost_usd.mean'. Defaults to '-created_at'. Accepts any field the evaluations list `sort` param does; clients apply it as the list `sort` param.",
-        ),
-    ] = None,
+    column_layout: Annotated[str | None, typer.Option("--column-layout", help=_COLUMN_LAYOUT_HELP)] = None,
+    default_sort: Annotated[str | None, typer.Option("--default-sort", help=_DEFAULT_SORT_HELP)] = None,
     description: Annotated[
         str | None, typer.Option("--description", help="Human-readable purpose of the experiment.")
     ] = None,
@@ -60,29 +88,13 @@ def create_experiments(
         str | None,
         typer.Option("--insight-id", help="Reference to an external insight that seeded this experiment, if any."),
     ] = None,
-    is_favorite: Annotated[
-        bool | None,
-        typer.Option(
-            "--is-favorite",
-            help="Whether this Experiment is marked as a favorite. Defaults to false on create; omit on update to preserve the existing value.",
-        ),
-    ] = None,
+    is_favorite: Annotated[bool | None, typer.Option("--is-favorite", help=_IS_FAVORITE_HELP)] = None,
     metadata: Annotated[
         str | None, typer.Option("--metadata", help="Free-form producer metadata for the experiment. (JSON string)")
     ] = None,
-    pareto: Annotated[
-        str | None,
-        typer.Option(
-            "--pareto",
-            help="Default X/Y metrics for a group's cost-vs-accuracy Pareto view.Metric ids use the same vocabulary as the evaluations list sort/filter fields — `cost_usd`, `latency_ms`, or `evaluators.<name>`. Defaults to cost (x) vs latency (y): both exist for every group, so the chart always has something to render before anyone customizes it. (JSON string)",
-        ),
-    ] = None,
+    pareto: Annotated[str | None, typer.Option("--pareto", help=_PARETO_HELP)] = None,
     show_evaluations_over_time: Annotated[
-        bool | None,
-        typer.Option(
-            "--show-evaluations-over-time",
-            help="Whether Studio should display this Experiment's Evaluation results over time. Defaults to false on create; omit on update to preserve the existing value.",
-        ),
+        bool | None, typer.Option("--show-evaluations-over-time", help=_SHOW_OVER_TIME_HELP)
     ] = None,
     summary: Annotated[
         str | None, typer.Option("--summary", help="Human- or agent-authored summary of the experiment's findings.")
@@ -154,20 +166,26 @@ def create_experiments(
         },
     )
 
-    all_kwargs = input_payload
+    body = build_request_body(
+        ExperimentCreateRequest, input_payload, exclude={"workspace", "exist_ok"}, command_name="experiments create"
+    )
+    kwargs = build_kwargs(
+        workspace=input_payload.get("workspace"),
+        body=body,
+        exist_ok=input_payload.get("exist_ok"),
+    )
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["experiments"], "create", all_kwargs, output_format, state):
+    if handle_code_generation(IntakeClient, "create_experiment", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.experiments.create(**all_kwargs)
+    result = state.typed_client(IntakeClient).create_experiment(**kwargs)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -183,12 +201,7 @@ def delete_experiments(
 ) -> None:
     """Delete Experiment"""
     state: CLIContext = ctx.obj
-    client = state.get_client()
-
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-    client.experiments.delete(name, **kwargs)
+    state.typed_client(IntakeClient).delete_experiment(name=name, workspace=workspace)
 
     typer.echo("✓ Deleted successfully")
 
@@ -238,56 +251,51 @@ def list_experiments(
 ) -> None:
     """List Experiments"""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
-    validate_stream_output_format(output_format, stream)
+    resolved_output_format = state.get_output_format(output_format)
+    validate_stream_output_format(resolved_output_format, stream)
 
-    check_output_columns_with_format(columns, output_format)
+    check_output_columns_with_format(columns, resolved_output_format)
 
     default_columns = [
         Column("name", None),
         Column("workspace", None),
         Column("created_at", None),
     ]
+    output_columns: str | list[Column] | None = columns
     if columns is None or str(columns).strip() == "default":
-        columns = default_columns
+        output_columns = default_columns
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-        filter=merge_filter_dict(
-            filter,
-            baseline_evaluation_name=filter_baseline_evaluation_name,
-            insight_id=filter_insight_id,
-            is_deleted=filter_is_deleted,
-            is_favorite=filter_is_favorite,
-            name=filter_name,
-            show_evaluations_over_time=filter_show_evaluations_over_time,
+    query_params = cast(
+        ListExperimentsQueryParams | None,
+        list_query_params(
+            filter=merge_filter_dict(
+                filter,
+                baseline_evaluation_name=filter_baseline_evaluation_name,
+                insight_id=filter_insight_id,
+                is_deleted=filter_is_deleted,
+                is_favorite=filter_is_favorite,
+                name=filter_name,
+                show_evaluations_over_time=filter_show_evaluations_over_time,
+            ),
+            page=page,
+            page_size=page_size,
+            sort=sort,
         ),
-        page=page,
-        page_size=page_size,
-        sort=sort,
     )
+    kwargs = build_kwargs(workspace=workspace, query_params=query_params)
 
-    if handle_code_generation(["experiments"], "list", kwargs, output_format, state):
+    if handle_code_generation(IntakeClient, "list_experiments", kwargs, resolved_output_format, state, result="list"):
         return
 
-    client = state.get_client()
-    path_args = ()
+    response = state.typed_client(IntakeClient).list_experiments(workspace=workspace, query_params=query_params)
     pagination_type = PaginationType.PAGE_NUMBER
-    if all_pages:
-        items = fetch_all_pages(
-            client.experiments.list,
-            path_args=path_args,
-            body_args=kwargs,
-            pagination_type=pagination_type,
-        )
-    else:
-        items = client.experiments.list(*path_args, **kwargs)
+    items = collect_offset_pages(response, all_pages=all_pages)
 
     format_output(
         items,
         is_list=True,
-        output_format=output_format,
-        output_columns=columns,
+        output_format=resolved_output_format,
+        output_columns=output_columns,
         no_truncate=state.get_no_truncate(no_truncate),
         timestamp_format=state.get_timestamp_format(),
         stream=stream,
@@ -307,21 +315,18 @@ def retrieve_experiments(
 ) -> None:
     """Get Experiment"""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-    if handle_code_generation(["experiments"], "retrieve", kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=workspace)
+    if handle_code_generation(IntakeClient, "get_experiment", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.experiments.retrieve(name, **kwargs)
+    result = state.typed_client(IntakeClient).get_experiment(name=name, workspace=workspace)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -344,20 +349,8 @@ def update_experiments(
             help="Name of this Experiment's baseline Evaluation. The Evaluation must already be a live member of the Experiment. Set null to clear the selected baseline.",
         ),
     ] = None,
-    column_layout: Annotated[
-        str | None,
-        typer.Option(
-            "--column-layout",
-            help="A saved table layout for a group's evaluations list: column order and which columns are hidden.Column ids are Studio's and cannot be enumerated here — the table builds a column per evaluator and metadata key found in the rows — so ids are stored and echoed back unvalidated.Visibility is stored as the _hidden_ ids rather than a map over every column, so a column that appears later (a new evaluator, a new metadata key) shows up by default. (JSON string)",
-        ),
-    ] = None,
-    default_sort: Annotated[
-        str | None,
-        typer.Option(
-            "--default-sort",
-            help="Default sort for this experiment's evaluations list, as a `sort`-param string: a comma-separated, ordered list of fields where the first is the primary sort and the rest break ties (leading '-' on a field = descending), e.g. '-evaluators.reward.mean,cost_usd.mean'. Defaults to '-created_at'. Accepts any field the evaluations list `sort` param does; clients apply it as the list `sort` param.",
-        ),
-    ] = None,
+    column_layout: Annotated[str | None, typer.Option("--column-layout", help=_COLUMN_LAYOUT_HELP)] = None,
+    default_sort: Annotated[str | None, typer.Option("--default-sort", help=_DEFAULT_SORT_HELP)] = None,
     description: Annotated[
         str | None, typer.Option("--description", help="Human-readable purpose of the experiment.")
     ] = None,
@@ -365,29 +358,13 @@ def update_experiments(
         str | None,
         typer.Option("--insight-id", help="Reference to an external insight that seeded this experiment, if any."),
     ] = None,
-    is_favorite: Annotated[
-        bool | None,
-        typer.Option(
-            "--is-favorite",
-            help="Whether this Experiment is marked as a favorite. Defaults to false on create; omit on update to preserve the existing value.",
-        ),
-    ] = None,
+    is_favorite: Annotated[bool | None, typer.Option("--is-favorite", help=_IS_FAVORITE_HELP)] = None,
     metadata: Annotated[
         str | None, typer.Option("--metadata", help="Free-form producer metadata for the experiment. (JSON string)")
     ] = None,
-    pareto: Annotated[
-        str | None,
-        typer.Option(
-            "--pareto",
-            help="Default X/Y metrics for a group's cost-vs-accuracy Pareto view.Metric ids use the same vocabulary as the evaluations list sort/filter fields — `cost_usd`, `latency_ms`, or `evaluators.<name>`. Defaults to cost (x) vs latency (y): both exist for every group, so the chart always has something to render before anyone customizes it. (JSON string)",
-        ),
-    ] = None,
+    pareto: Annotated[str | None, typer.Option("--pareto", help=_PARETO_HELP)] = None,
     show_evaluations_over_time: Annotated[
-        bool | None,
-        typer.Option(
-            "--show-evaluations-over-time",
-            help="Whether Studio should display this Experiment's Evaluation results over time. Defaults to false on create; omit on update to preserve the existing value.",
-        ),
+        bool | None, typer.Option("--show-evaluations-over-time", help=_SHOW_OVER_TIME_HELP)
     ] = None,
     summary: Annotated[
         str | None, typer.Option("--summary", help="Human- or agent-authored summary of the experiment's findings.")
@@ -453,21 +430,25 @@ def update_experiments(
         },
     )
 
-    all_kwargs = {"path_name": path_name, **input_payload}
+    # The flag wins over a "name" key in the input file, like every other flag above.
+    body_payload: dict[str, Any] = {**input_payload, "name": input_payload["body_name"]}
+    body = build_request_body(
+        ExperimentUpdateRequest, body_payload, exclude={"workspace", "body_name"}, command_name="experiments update"
+    )
+    kwargs = build_kwargs(name=path_name, workspace=input_payload.get("workspace"), body=body)
 
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["experiments"], "update", all_kwargs, output_format, state):
+    if handle_code_generation(IntakeClient, "update_experiment", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.experiments.update(**all_kwargs)
+    result = state.typed_client(IntakeClient).update_experiment(**kwargs)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )

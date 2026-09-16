@@ -1,13 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# NOTE: This file is auto-generated
+"""``nemo guardrail configs`` command group, backed by the typed Guardrail client."""
+
 from __future__ import annotations
 
-from typing import Annotated, Literal
+import json
+from typing import Annotated, Any, Literal
 
 import typer
-
 from nemo_platform_ext.cli.core.api import build_kwargs, merge_filter_dict
 from nemo_platform_ext.cli.core.code_generator import handle_code_generation
 from nemo_platform_ext.cli.core.context import CLIContext
@@ -19,8 +20,13 @@ from nemo_platform_ext.cli.core.formatters import (
     validate_stream_output_format,
 )
 from nemo_platform_ext.cli.core.help_formatter import collect_warnings, create_typer_app
-from nemo_platform_ext.cli.core.pagination import PaginationType, fetch_all_pages, warn_if_more_pages
-from nemo_platform_ext.cli.core.stdin_utils import read_data_input_with_flags, read_payload, validate_required_fields
+from nemo_platform_ext.cli.core.pagination import PaginationType, collect_offset_pages, warn_if_more_pages
+from nemo_platform_ext.cli.core.stdin_utils import (
+    build_request_body,
+    read_data_input_with_flags,
+    read_payload,
+    validate_required_fields,
+)
 from nemo_platform_ext.cli.core.types import (
     EntityOutputFormatOption,
     ListOutputFormatOption,
@@ -28,8 +34,41 @@ from nemo_platform_ext.cli.core.types import (
     OutputColumnsOption,
     StreamOutputOption,
 )
+from nemo_platform_plugin.guardrail.client import GuardrailClient
+from nemo_platform_plugin.guardrail.types import (
+    CreateGuardrailConfigRequest,
+    ListGuardrailConfigsQueryParams,
+    UpdateGuardrailConfigRequest,
+)
+from pydantic import TypeAdapter
 
 app = create_typer_app(name="configs", help="Manage configs")
+
+GuardrailConfigSortField = Literal["created_at", "-created_at", "updated_at", "-updated_at", "name", "-name"]
+
+
+_BOOL = TypeAdapter(bool)
+
+
+def _filter_query(value: str | dict[str, Any] | None) -> str | None:
+    if isinstance(value, dict):
+        return json.dumps(value)
+    return value
+
+
+def _list_configs_query_params(
+    *, filter_value: str | None, page: int | None, page_size: int | None, sort: str | None
+) -> ListGuardrailConfigsQueryParams | None:
+    query_params: ListGuardrailConfigsQueryParams = {}
+    if filter_value is not None:
+        query_params["filter"] = filter_value
+    if page is not None:
+        query_params["page"] = page
+    if page_size is not None:
+        query_params["page_size"] = page_size
+    if sort is not None:
+        query_params["sort"] = sort
+    return query_params or None
 
 
 @app.command("create")
@@ -96,20 +135,31 @@ def create_configs(
         },
     )
 
-    all_kwargs = input_payload
-    state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    body = build_request_body(
+        CreateGuardrailConfigRequest,
+        input_payload,
+        exclude={"workspace", "exist_ok"},
+        command_name="guardrail configs create",
+    )
+    resolved_workspace = input_payload.get("workspace")
+    # --input-data may carry exist_ok as a JSON/YAML string; parse it like the server would.
+    resolved_exist_ok = _BOOL.validate_python(input_payload.get("exist_ok", False))
 
-    if handle_code_generation(["guardrail", "configs"], "create", all_kwargs, output_format, state):
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+
+    kwargs = build_kwargs(workspace=resolved_workspace, body=body, exist_ok=resolved_exist_ok or None)
+    if handle_code_generation(GuardrailClient, "create_guardrail_config", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.guardrail.configs.create(**all_kwargs)
+    result = state.typed_client(GuardrailClient).create_guardrail_config(
+        workspace=resolved_workspace, body=body, exist_ok=resolved_exist_ok
+    )
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -125,12 +175,7 @@ def delete_configs(
 ) -> None:
     """Delete a guardrail config."""
     state: CLIContext = ctx.obj
-    client = state.get_client()
-
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-    client.guardrail.configs.delete(name, **kwargs)
+    state.typed_client(GuardrailClient).delete_guardrail_config(name=name, workspace=workspace)
 
     typer.echo("✓ Deleted successfully")
 
@@ -158,7 +203,7 @@ def list_configs(
     page: Annotated[int | None, typer.Option("--page", help="Page number.")] = None,
     page_size: Annotated[int | None, typer.Option("--page-size", help="Page size.")] = None,
     sort: Annotated[
-        Literal["created_at", "-created_at", "updated_at", "-updated_at", "name", "-name"] | None,
+        GuardrailConfigSortField | None,
         typer.Option(
             "--sort", help="The field to sort by. To sort in decreasing order, use `-` in front of the field name."
         ),
@@ -173,48 +218,41 @@ def list_configs(
 
     Lists guardrail configs for a specific workspace."""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
-    validate_stream_output_format(output_format, stream)
+    resolved_output_format = state.get_output_format(output_format)
+    validate_stream_output_format(resolved_output_format, stream)
 
-    check_output_columns_with_format(columns, output_format)
+    check_output_columns_with_format(columns, resolved_output_format)
 
     default_columns = [
         Column("name", None),
         Column("description", None),
         Column("created_at", None),
     ]
+    output_columns: str | list[Column] | None = columns
     if columns is None or str(columns).strip() == "default":
-        columns = default_columns
+        output_columns = default_columns
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-        filter=merge_filter_dict(filter, description=filter_description, name=filter_name, project=filter_project),
-        page=page,
-        page_size=page_size,
-        sort=sort,
+    filter_value = _filter_query(
+        merge_filter_dict(filter, description=filter_description, name=filter_name, project=filter_project)
     )
-
-    if handle_code_generation(["guardrail", "configs"], "list", kwargs, output_format, state):
+    query_params = _list_configs_query_params(filter_value=filter_value, page=page, page_size=page_size, sort=sort)
+    kwargs = build_kwargs(workspace=workspace, query_params=query_params)
+    if handle_code_generation(
+        GuardrailClient, "list_guardrail_configs", kwargs, resolved_output_format, state, result="list"
+    ):
         return
 
-    client = state.get_client()
-    path_args = ()
+    response = state.typed_client(GuardrailClient).list_guardrail_configs(
+        workspace=workspace, query_params=query_params
+    )
     pagination_type = PaginationType.PAGE_NUMBER
-    if all_pages:
-        items = fetch_all_pages(
-            client.guardrail.configs.list,
-            path_args=path_args,
-            body_args=kwargs,
-            pagination_type=pagination_type,
-        )
-    else:
-        items = client.guardrail.configs.list(*path_args, **kwargs)
+    items = collect_offset_pages(response, all_pages=all_pages)
 
     format_output(
         items,
         is_list=True,
-        output_format=output_format,
-        output_columns=columns,
+        output_format=resolved_output_format,
+        output_columns=output_columns,
         no_truncate=state.get_no_truncate(no_truncate),
         timestamp_format=state.get_timestamp_format(),
         stream=stream,
@@ -234,21 +272,18 @@ def retrieve_configs(
 ) -> None:
     """Get info about a guardrail configuration."""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-    if handle_code_generation(["guardrail", "configs"], "retrieve", kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=workspace)
+    if handle_code_generation(GuardrailClient, "get_guardrail_config", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.guardrail.configs.retrieve(name, **kwargs)
+    result = state.typed_client(GuardrailClient).get_guardrail_config(name=name, workspace=workspace)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -300,21 +335,26 @@ def update_configs(
     if description is not None:
         input_payload["description"] = description
 
-    all_kwargs = {"name": name, **input_payload}
+    body = build_request_body(
+        UpdateGuardrailConfigRequest, input_payload, exclude={"workspace"}, command_name="guardrail configs update"
+    )
+    resolved_workspace = input_payload.get("workspace")
 
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["guardrail", "configs"], "update", all_kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=resolved_workspace, body=body)
+    if handle_code_generation(GuardrailClient, "update_guardrail_config", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.guardrail.configs.update(**all_kwargs)
+    result = state.typed_client(GuardrailClient).update_guardrail_config(
+        name=name, workspace=resolved_workspace, body=body
+    )
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )

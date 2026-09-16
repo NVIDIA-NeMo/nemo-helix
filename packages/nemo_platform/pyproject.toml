@@ -201,6 +201,7 @@ intake-service = [
   "pydantic>=2.9.2, <3.0.0",
   "pydantic-settings>=2.6.1, <3.0.0",
   "nmp-common",
+  "nemo-platform-plugin",
   "clickhouse-connect>=0.7,<1.0",
   "docker>=7.1.0",
   "opentelemetry-proto>=1.27.0",
@@ -666,6 +667,9 @@ data-designer = "nemo_data_designer_plugin.cli.main:DataDesignerCLI"
 evaluator = "nemo_evaluator.cli:EvaluatorPluginCLI"
 insights = "nemo_insights_plugin.cli:InsightsCLI"
 customization = "nemo_customizer.cli:CustomizationCLI"
+guardrail = "nemo_guardrails_plugin.cli:GuardrailCLI"
+intake = "nmp.intake.cli:IntakeCLI"
+experiments = "nmp.intake.cli:ExperimentsCLI"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.cli.agents"]
@@ -886,7 +890,7 @@ nmp-inference-gateway = { source = "../../services/core/inference-gateway/src/nm
 nmp-guardrails = { source = "../../services/guardrails/src/nmp/guardrails", module = "nmp/guardrails", deps_group = "guardrails-service" }
 nmp-platform-seed = { source = "../../services/platform-seed/src/nmp/platform_seed", module = "nmp/platform_seed", deps_group = "platform-seed-service" }
 nmp-hello-world = { source = "../../services/hello-world/src/nmp/hello_world", module = "nmp/hello_world", deps_group = "hello-world-service" }
-nmp-intake = { source = "../../services/intake/src/nmp/intake", module = "nmp/intake", deps_group = "intake-service" }
+nmp-intake = { source = "../../services/intake/src/nmp/intake", module = "nmp/intake", deps_group = "intake-service", inherit = { "entry-points" = ["nemo.*"] } }
 # Customization task packages: compile glue and schemas only. Their container
 # entrypoint scripts are deliberately not re-exported, and the GPU stacks they
 # drive (torch, unsloth, nemo-rl) live in the training images, not this wheel.
