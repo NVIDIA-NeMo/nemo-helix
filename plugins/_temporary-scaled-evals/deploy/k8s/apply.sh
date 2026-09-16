@@ -91,13 +91,59 @@ fi
 
 echo "==> applying"
 render | kubectl apply -f -
+kubectl delete deployment -n "$NS" scaled-evals-build-worker --ignore-not-found
 
 # Create the auth Secret before waiting for workloads; the recurring CronJob
 # updates it in place without putting an empty credential into the manifests.
 echo "==> priming GAR credentials"
 JOB="gar-auth-$(date +%s)"
-kubectl create job -n "$NS" "$JOB" --from=cronjob/scaled-evals-gar-registry-auth-refresh
+kubectl create job -n "$NS" "$JOB" \
+  --from=cronjob/scaled-evals-gar-registry-auth-refresh \
+  --dry-run=client -o json |
+  python3 -c '
+import json
+import sys
+
+document = json.load(sys.stdin)
+environment = document["spec"]["template"]["spec"]["containers"][0]["env"]
+next(item for item in environment if item["name"] == "PLATFORM_SECRETS_SYNC_OPTIONAL")["value"] = "true"
+json.dump(document, sys.stdout)
+' |
+  kubectl create -f -
 kubectl wait -n "$NS" --for=condition=complete --timeout=180s "job/$JOB"
 
 echo "==> waiting for the API"
 kubectl rollout status -n "$NS" deploy/scaled-evals-api --timeout=300s
+
+# Platform Job pods cannot consume deployment-local Kubernetes Secrets
+# directly. Mirror the two required values into Platform Secrets without ever
+# placing plaintext in manifests, command arguments, or shell output.
+echo "==> configuring Platform Job secrets"
+kubectl exec -n "$NS" deploy/scaled-evals-api -- python -c '
+import json
+import os
+from pathlib import Path
+import urllib.error
+import urllib.request
+
+base = "http://127.0.0.1:8080/apis/secrets/v2/workspaces/default/secrets"
+for name, value in {
+    "scaled-evals-postgres-password": os.environ["PGPASSWORD"],
+    "scaled-evals-credentials-encryption-key": os.environ["CREDENTIALS_ENCRYPTION_KEY"],
+    "scaled-evals-registry-auth": Path(os.environ["TASK_IMAGE_REGISTRY_AUTH_FILE"]).read_text(),
+}.items():
+    body = json.dumps({"name": name, "value": value}).encode()
+    request = urllib.request.Request(base, data=body, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        urllib.request.urlopen(request).read()
+    except urllib.error.HTTPError as exc:
+        if exc.code != 409:
+            raise
+        patch = urllib.request.Request(
+            f"{base}/{name}",
+            data=json.dumps({"value": value}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="PATCH",
+        )
+        urllib.request.urlopen(patch).read()
+'

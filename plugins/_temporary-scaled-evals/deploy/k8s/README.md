@@ -20,6 +20,7 @@ cp local.env.example local.env   # then fill it in
 ./apply.sh --render      # print substituted manifests, touch nothing
 ./apply.sh               # deploy
 ./smoke.sh               # create -> upload -> Cloud Build -> ready, then verify GAR
+./eval-smoke.sh          # execute through Platform Jobs and sandbox-k8s
 kubectl delete ns nemo-platform-scaled-evals
 ```
 
@@ -81,8 +82,9 @@ V4 signed URLs possible.
 
 ## Push the image
 
-The application image is the same one the compose stack builds, for amd64. It can
-go to a new image path inside an existing GAR repository: push and pull rights
+The application image is the same one the compose stack builds, for amd64. It
+also carries the Platform Jobs launcher used by task pods. It can go to a new
+image path inside an existing GAR repository: push and pull rights
 are granted on the repository, not per image path —
 
 - push: your user needs `roles/artifactregistry.writer` on the repo (check with
@@ -123,6 +125,7 @@ sed -i.bak "s|^SE_APP_IMAGE_TAG=.*|SE_APP_IMAGE_TAG=$TAG|" local.env && rm local
 | artifacts | RustFS, S3 + HMAC keys | **GCS**, Workload Identity tokens |
 | registry | in-cluster `registry:2`, insecure | **GAR**, credentials refreshed half-hourly |
 | Postgres | compose service, named volume | in-namespace pod, 10Gi `standard-rwo` PVC |
+| execution process | Platform Jobs subprocess profile | **Platform Jobs Kubernetes Job** profile |
 
 Everything else — the image, the settings, the plugin's own startup migration
 and bucket creation — is identical.
