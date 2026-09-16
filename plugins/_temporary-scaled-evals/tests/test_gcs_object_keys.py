@@ -8,7 +8,9 @@ import pytest
 try:
     from scaled_evals.api import s3
     from scaled_evals.api.settings import settings
-except ImportError as exc:
+except ModuleNotFoundError as exc:
+    if exc.name != "scaled_evals":
+        raise
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
 
