@@ -1,12 +1,19 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# NOTE: This file is auto-generated
+"""``nemo projects`` command group, backed by the typed Projects client."""
+
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import typer
+from nemo_platform_plugin.projects.client import ProjectsClient
+from nemo_platform_plugin.projects.types import (
+    CreateProjectRequest,
+    ListProjectsQueryParams,
+    UpdateProjectRequest,
+)
 
 from nemo_platform_ext.cli.core.api import build_kwargs
 from nemo_platform_ext.cli.core.code_generator import handle_code_generation
@@ -19,8 +26,12 @@ from nemo_platform_ext.cli.core.formatters import (
     validate_stream_output_format,
 )
 from nemo_platform_ext.cli.core.help_formatter import collect_warnings, create_typer_app
-from nemo_platform_ext.cli.core.pagination import PaginationType, fetch_all_pages, warn_if_more_pages
-from nemo_platform_ext.cli.core.stdin_utils import read_data_input_with_flags, validate_required_fields
+from nemo_platform_ext.cli.core.pagination import PaginationType, collect_offset_pages, warn_if_more_pages
+from nemo_platform_ext.cli.core.stdin_utils import (
+    build_request_body,
+    read_data_input_with_flags,
+    validate_required_fields,
+)
 from nemo_platform_ext.cli.core.types import (
     EntityOutputFormatOption,
     ListOutputFormatOption,
@@ -29,7 +40,40 @@ from nemo_platform_ext.cli.core.types import (
     StreamOutputOption,
 )
 
-app = create_typer_app(name="projects", help="Manage projects")
+app = create_typer_app(name="projects", help="Manage projects.")
+
+ProjectSortField = Literal["created_at", "-created_at", "updated_at", "-updated_at", "name", "-name"]
+
+_NAME_HELP = (
+    "Project name (unique within workspace). Name must start with a lowercase letter, be 2-63 characters, "
+    "and use lowercase letters, digits, hyphens, and dots (no consecutive hyphens, cannot end with a hyphen). "
+    "(required)"
+)
+_INPUT_FILE_HELP = "Path to JSON file (use '-' for stdin)"
+_INPUT_DATA_HELP = "Input data for the request (JSON or YAML)"
+_INPUT_PANEL = "Input Options"
+
+
+def _read_input_payload(input_file: str | None, input_data: str | None) -> dict[str, Any]:
+    """Return the ``--input-file`` / ``--input-data`` payload, or an empty dict when neither is given."""
+    if input_file or input_data:
+        return read_data_input_with_flags(input_file=input_file, input_data=input_data)
+    return {}
+
+
+def _list_projects_query_params(
+    *, filter: str | None, page: int | None, page_size: int | None, sort: str | None
+) -> ListProjectsQueryParams | None:
+    query_params: ListProjectsQueryParams = {}
+    if filter is not None:
+        query_params["filter"] = filter
+    if page is not None:
+        query_params["page"] = page
+    if page_size is not None:
+        query_params["page_size"] = page_size
+    if sort is not None:
+        query_params["sort"] = sort
+    return query_params or None
 
 
 @app.command("create")
@@ -37,12 +81,7 @@ app = create_typer_app(name="projects", help="Manage projects")
 @handle_errors
 def create_projects(
     ctx: typer.Context,
-    name: Annotated[
-        str | None,
-        typer.Argument(
-            help="Project name (unique within workspace). Name must start with a lowercase letter, be 2-63 characters, and use lowercase letters, digits, hyphens, and dots (no consecutive hyphens, cannot end with a hyphen). (required)"
-        ),
-    ] = None,
+    name: Annotated[str | None, typer.Argument(help=_NAME_HELP)] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     description: Annotated[
         str | None, typer.Option("--description", help="Optional description of the project")
@@ -54,12 +93,10 @@ def create_projects(
         ),
     ] = None,
     input_file: Annotated[
-        str | None,
-        typer.Option("--input-file", help="Path to JSON file (use '-' for stdin)", rich_help_panel="Input Options"),
+        str | None, typer.Option("--input-file", help=_INPUT_FILE_HELP, rich_help_panel=_INPUT_PANEL)
     ] = None,
     input_data: Annotated[
-        str | None,
-        typer.Option("--input-data", help="Input data for the request (JSON or YAML)", rich_help_panel="Input Options"),
+        str | None, typer.Option("--input-data", help=_INPUT_DATA_HELP, rich_help_panel=_INPUT_PANEL)
     ] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:
@@ -80,13 +117,9 @@ def create_projects(
         echo '{"json": "data"}' | nemo projects create <name> --input-file -
         nemo projects create <name> --<option> "value"
     """
-    # Read base input (optional if all fields provided via flags)
-    if input_file or input_data:
-        input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
-    else:
-        input_payload = {}
-
-    # Apply CLI flag overrides (flags take precedence)
+    # Read base input (optional if all fields provided via flags), then apply
+    # CLI flag overrides (flags take precedence).
+    input_payload = _read_input_payload(input_file, input_data)
     if workspace is not None:
         input_payload["workspace"] = workspace
     if name is not None:
@@ -95,30 +128,29 @@ def create_projects(
         input_payload["description"] = description
     if exist_ok is not None:
         input_payload["exist_ok"] = exist_ok
-    # Validate required fields are present after merging
-    validate_required_fields(
-        input_payload,
-        ["name"],
-        "projects create",
-        {
-            "name": "Project name (unique within workspace). Name must start with a lowercase letter, be 2-63 characters, and use lowercase letters, digits, hyphens, and dots (no consecutive hyphens, cannot end with a hyphen). (required)",
-        },
+    validate_required_fields(input_payload, ["name"], "projects create", {"name": _NAME_HELP})
+
+    resolved_workspace = input_payload.get("workspace")
+    body = build_request_body(
+        CreateProjectRequest, input_payload, exclude={"workspace", "exist_ok"}, command_name="projects create"
     )
+    resolved_exist_ok = bool(input_payload.get("exist_ok", False))
 
-    all_kwargs = input_payload
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["projects"], "create", all_kwargs, output_format, state):
+    kwargs = build_kwargs(workspace=resolved_workspace, body=body, exist_ok=resolved_exist_ok or None)
+    if handle_code_generation(ProjectsClient, "create_project", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.projects.create(**all_kwargs)
+    result = state.typed_client(ProjectsClient).create_project(
+        workspace=resolved_workspace, body=body, exist_ok=resolved_exist_ok
+    )
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -140,12 +172,7 @@ def delete_projects(
     DELETE /apis/entities/v2/workspaces/default/projects/ml-project
     ```"""
     state: CLIContext = ctx.obj
-    client = state.get_client()
-
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-    client.projects.delete(name, **kwargs)
+    state.typed_client(ProjectsClient).delete_project(name=name, workspace=workspace)
 
     typer.echo("✓ Deleted successfully")
 
@@ -165,10 +192,7 @@ def list_projects(
     ] = None,
     page: Annotated[int | None, typer.Option("--page", help="Page number")] = None,
     page_size: Annotated[int | None, typer.Option("--page-size", help="Items per page")] = None,
-    sort: Annotated[
-        Literal["created_at", "-created_at", "updated_at", "-updated_at", "name", "-name"] | None,
-        typer.Option("--sort", help="Sort field"),
-    ] = None,
+    sort: Annotated[ProjectSortField | None, typer.Option("--sort", help="Sort field")] = None,
     output_format: ListOutputFormatOption = None,
     no_truncate: NoTruncateOption = None,
     columns: OutputColumnsOption = None,
@@ -189,48 +213,34 @@ def list_projects(
     GET /apis/entities/v2/workspaces/default/projects?sort=-created_at&page=1&page_size=10
     ```"""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
-    validate_stream_output_format(output_format, stream)
+    resolved_output_format = state.get_output_format(output_format)
+    validate_stream_output_format(resolved_output_format, stream)
 
-    check_output_columns_with_format(columns, output_format)
+    check_output_columns_with_format(columns, resolved_output_format)
 
     default_columns = [
         Column("name", None),
         Column("description", None),
         Column("created_at", None),
     ]
+    output_columns: str | list[Column] | None = columns
     if columns is None or str(columns).strip() == "default":
-        columns = default_columns
+        output_columns = default_columns
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-        filter=filter,
-        page=page,
-        page_size=page_size,
-        sort=sort,
-    )
-
-    if handle_code_generation(["projects"], "list", kwargs, output_format, state):
+    query_params = _list_projects_query_params(filter=filter, page=page, page_size=page_size, sort=sort)
+    kwargs = build_kwargs(workspace=workspace, query_params=query_params)
+    if handle_code_generation(ProjectsClient, "list_projects", kwargs, resolved_output_format, state, result="list"):
         return
 
-    client = state.get_client()
-    path_args = ()
+    response = state.typed_client(ProjectsClient).list_projects(workspace=workspace, query_params=query_params)
     pagination_type = PaginationType.PAGE_NUMBER
-    if all_pages:
-        items = fetch_all_pages(
-            client.projects.list,
-            path_args=path_args,
-            body_args=kwargs,
-            pagination_type=pagination_type,
-        )
-    else:
-        items = client.projects.list(*path_args, **kwargs)
+    items = collect_offset_pages(response, all_pages=all_pages)
 
     format_output(
         items,
         is_list=True,
-        output_format=output_format,
-        output_columns=columns,
+        output_format=resolved_output_format,
+        output_columns=output_columns,
         no_truncate=state.get_no_truncate(no_truncate),
         timestamp_format=state.get_timestamp_format(),
         stream=stream,
@@ -256,21 +266,18 @@ def retrieve_projects(
     GET /apis/entities/v2/workspaces/default/projects/ml-project
     ```"""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-    if handle_code_generation(["projects"], "retrieve", kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=workspace)
+    if handle_code_generation(ProjectsClient, "get_project", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.projects.retrieve(name, **kwargs)
+    result = state.typed_client(ProjectsClient).get_project(name=name, workspace=workspace)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -285,12 +292,10 @@ def update_projects(
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     description: Annotated[str | None, typer.Option("--description", help="Updated description")] = None,
     input_file: Annotated[
-        str | None,
-        typer.Option("--input-file", help="Path to JSON file (use '-' for stdin)", rich_help_panel="Input Options"),
+        str | None, typer.Option("--input-file", help=_INPUT_FILE_HELP, rich_help_panel=_INPUT_PANEL)
     ] = None,
     input_data: Annotated[
-        str | None,
-        typer.Option("--input-data", help="Input data for the request (JSON or YAML)", rich_help_panel="Input Options"),
+        str | None, typer.Option("--input-data", help=_INPUT_DATA_HELP, rich_help_panel=_INPUT_PANEL)
     ] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:
@@ -309,33 +314,30 @@ def update_projects(
         echo '{"json": "data"}' | nemo projects update <name> --input-file -
         nemo projects update <name> --<option> "value"
     """
-    # Read base input (optional if all fields provided via flags)
-    if input_file or input_data:
-        input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
-    else:
-        input_payload = {}
-
-    # Apply CLI flag overrides (flags take precedence)
+    input_payload = _read_input_payload(input_file, input_data)
     if workspace is not None:
         input_payload["workspace"] = workspace
     if description is not None:
         input_payload["description"] = description
 
-    all_kwargs = {"name": name, **input_payload}
+    resolved_workspace = input_payload.get("workspace")
+    body = build_request_body(
+        UpdateProjectRequest, input_payload, exclude={"workspace"}, command_name="projects update"
+    )
 
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["projects"], "update", all_kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=resolved_workspace, body=body)
+    if handle_code_generation(ProjectsClient, "update_project", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.projects.update(**all_kwargs)
+    result = state.typed_client(ProjectsClient).update_project(name=name, workspace=resolved_workspace, body=body)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
