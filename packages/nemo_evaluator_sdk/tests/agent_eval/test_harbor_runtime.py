@@ -752,6 +752,95 @@ def test_runtime_config_defaults_and_runner_requires_a_source() -> None:
         asyncio.run(runner.run_tasks([AgentEvalTask(id="t", intent="x", inputs={})]))
 
 
+def test_runtime_config_refuses_plaintext_credentials_in_agent_kwargs() -> None:
+    """A credential in ``agent_kwargs`` is refused, because Harbor would persist it beyond reach.
+
+    Harbor copies its ``JobConfig`` into the job dir's ``config.json`` and ``lock.json`` and into every
+    trial's ``config.json``, ``lock.json``, ``result.json`` and agent run spec — six durable files from
+    one run, one of which is the result file a user attaches to a bug report. Nothing downstream can
+    redact them: Harbor needs the real value to construct the agent and compares the persisted config
+    when resuming. So the value must not reach the config at all.
+    """
+    with pytest.raises(ValidationError, match=r"fabric_environment_env\.OPENAI_API_KEY"):
+        HarborRuntimeConfig(
+            jobs_dir=Path("/jobs"),
+            agent_kwargs={"fabric_environment_env": {"OPENAI_API_KEY": "nvapi-not-a-real-key"}},
+        )
+
+    with pytest.raises(ValidationError, match="agent_env_from_host"):
+        HarborRuntimeConfig(jobs_dir=Path("/jobs"), agent_kwargs={"auth": {"token": "tok"}})
+
+
+def test_runtime_config_refuses_an_issued_token_under_an_innocuous_key() -> None:
+    """A key whose name says nothing still leaks, so the value is judged too.
+
+    ``fabric_environment_env`` forwards a whole environment mapping, and the caller names those
+    variables. Keying refusal solely off the variable name would let the identical leak through under
+    ``MY_THING``, in the same six files.
+    """
+    with pytest.raises(ValidationError, match=r"fabric_environment_env\.MY_THING"):
+        HarborRuntimeConfig(
+            jobs_dir=Path("/jobs"),
+            agent_kwargs={"fabric_environment_env": {"MY_THING": "nvapi-not-a-real-key"}},
+        )
+
+    with pytest.raises(ValidationError, match=r"headers\.Authorization"):
+        HarborRuntimeConfig(
+            jobs_dir=Path("/jobs"),
+            agent_kwargs={"headers": {"Authorization": "Bearer sk-not-a-real-token"}},
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_refuses_credentials_injected_after_validation(tmp_path: Path) -> None:
+    """The guard is re-run where Harbor is handed the kwargs, not only where the config is built.
+
+    ``model_copy(update=...)`` and ``model_construct`` skip validators, and the repo already uses the
+    former to vary a config between runs — so a validator alone leaves a supported in-process route
+    to the same six files.
+    """
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="j").model_copy(
+        update={"agent_kwargs": {"api_key": "nvapi-not-a-real-key"}}
+    )
+
+    completed = tmp_path / "jobs" / "j" / "trial"
+    completed.mkdir(parents=True)
+    (completed / "result.json").write_text("{}", encoding="utf-8")
+    _, run_job = _build_native_job(
+        config.model_copy(update={"force_rerun": True}), tmp_path / "dataset", None, job_name="j"
+    )
+
+    with pytest.raises(ValueError, match="api_key"):
+        await run_job()
+
+    # The guard runs before `force_rerun` clears the job dir: refusing must not cost completed trials.
+    assert (completed / "result.json").exists()
+
+
+def test_runtime_config_accepts_kwargs_that_only_look_credential_shaped() -> None:
+    """Refusal is narrower than redaction: only a plaintext string can leak, so only one is refused.
+
+    ``max_tokens`` matches the ``token`` marker and a ``${NAME}`` template sits under a credential key
+    by design. Redacting either costs nothing; refusing either would reject a legitimate run — the
+    template case doubly so, since templates are what a refused caller is told to use.
+    """
+    config = HarborRuntimeConfig(
+        jobs_dir=Path("/jobs"),
+        agent_kwargs={
+            "max_tokens": 4096,
+            "env": {"OPENAI_API_KEY": "${OPENAI_API_KEY}"},
+            "api_key": None,
+            # An issued-token prefix counts only on a value long enough to be one.
+            "fabric_package": "nemo-fabric[codex]==0.3.0",
+            "model": "sk-tiny",
+            # A marker must stand as a word in the path, so a tokenizer is not a token.
+            "tokenizer": "o200k_base",
+        },
+    )
+
+    assert config.agent_kwargs["max_tokens"] == 4096
+
+
 def _cached_task(dataset_path: Path, task_dir: Path, task_id: str = "t") -> AgentEvalTask:
     """A task whose dataset and on-disk directory the cache stamp can resolve."""
     return AgentEvalTask(

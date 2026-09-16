@@ -61,7 +61,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.harbor_trial_adapter import (
     _iter_harbor_trial_results,
     _trial_from_harbor_result,
 )
-from nemo_evaluator_sdk.agent_eval.runtimes.provenance import redact_credentials
+from nemo_evaluator_sdk.agent_eval.runtimes.provenance import redact_credentials, require_no_plaintext_credentials
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask, AgentEvalTaskset
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, RunnerInfo
 from nemo_evaluator_sdk.enums import MetricType
@@ -154,8 +154,9 @@ class HarborRuntimeConfig(BaseModel):
         default_factory=dict,
         description=(
             "Keyword arguments forwarded to the Harbor agent's constructor, the equivalent of Harbor's "
-            "``--ak key=value``. Not for secrets: Harbor persists them unredacted in the job dir's "
-            "``config.json``; name credentials in ``agent_env_from_host`` instead."
+            "``--ak key=value``. Not for secrets: Harbor persists these unredacted across the job dir. "
+            "Credential-shaped plaintext is rejected, but that check is a heuristic — name credentials "
+            "in ``agent_env_from_host`` regardless."
         ),
     )
     agent_env_from_host: list[str] = Field(
@@ -184,6 +185,11 @@ class HarborRuntimeConfig(BaseModel):
         default=None, description="Environment-build timeout multiplier."
     )
     reward_key: str = Field(default=DEFAULT_REWARD_KEY, description="Key read from Harbor's rewards mapping.")
+
+    @model_validator(mode="after")
+    def _agent_kwargs_carry_no_credentials(self) -> HarborRuntimeConfig:
+        require_no_plaintext_credentials(self.agent_kwargs, field="agent_kwargs", alternative="agent_env_from_host")
+        return self
 
     @model_validator(mode="after")
     def _agent_dir_needs_import_path(self) -> HarborRuntimeConfig:
@@ -856,6 +862,10 @@ def _build_native_job(
     effective_force_rerun = config.force_rerun if force_rerun is None else force_rerun
 
     async def run_job() -> None:
+        # First, ahead of the Harbor import and the force_rerun rmtree below. Not redundant with the
+        # field validator: `model_copy(update=...)` skips validators, and a run that refuses after
+        # deleting the job dir has destroyed completed trials to reach the same refusal.
+        require_no_plaintext_credentials(config.agent_kwargs, field="agent_kwargs", alternative="agent_env_from_host")
         try:
             from harbor.job import DatasetConfig, Job, JobConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
             from harbor.models.job.config import RetryConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
