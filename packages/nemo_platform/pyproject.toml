@@ -217,6 +217,7 @@ jobs-service = [
   "sqlmodel>=0.0.22",
   "base58>=2.1.1",
   "pyyaml>=6.0.2",
+  "httpx>=0.23.0,<1",
   "hvac>=2.3.0",
   "nmp-common",
   "nemo-platform-plugin",
