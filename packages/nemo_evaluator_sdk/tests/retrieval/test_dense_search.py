@@ -117,7 +117,7 @@ async def test_embedding_client_does_not_retry_http_400() -> None:
         return httpx.Response(400, request=request, text="bad request")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(NimEmbeddingError, match="embedding HTTP 400"):
             await NimEmbeddingClient(model=_model(), dimensions=2).encode(
                 ["question"],
                 input_type="query",
@@ -125,6 +125,25 @@ async def test_embedding_client_does_not_retry_http_400() -> None:
             )
 
     assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_embedding_client_includes_http_error_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_sleep(delay: float) -> None:
+        del delay
+
+    monkeypatch.setattr("nemo_evaluator_sdk.retrieval.nim_embeddings.asyncio.sleep", fake_sleep)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, request=request, text='{"detail":"queue full"}')
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(NimEmbeddingError, match="queue full"):
+            await NimEmbeddingClient(model=_model(), dimensions=2, max_retries=0).encode(
+                ["question"],
+                input_type="query",
+                client=client,
+            )
 
 
 @pytest.mark.asyncio

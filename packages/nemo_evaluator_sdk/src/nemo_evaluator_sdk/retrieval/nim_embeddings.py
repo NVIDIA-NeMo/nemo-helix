@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 from typing import Literal
 from urllib.parse import urlparse, urlunparse
@@ -19,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 __all__ = ["NimEmbeddingClient", "NimEmbeddingError"]
 
 InputType = Literal["query", "passage"]
+logger = logging.getLogger(__name__)
 
 
 class NimEmbeddingError(RuntimeError):
@@ -62,8 +64,24 @@ class NimEmbeddingClient(BaseModel):
                         },
                     )
                     response.raise_for_status()
-                except (httpx.HTTPStatusError, httpx.TransportError) as error:
+                except httpx.HTTPStatusError as error:
+                    body = (error.response.text or "").strip()
+                    logger.warning(
+                        f"embedding HTTP {error.response.status_code} attempt {attempt + 1}/{self.max_retries + 1} "
+                        f"for {error.request.url}: {body or error}"
+                    )
                     if not is_retryable_error(error) or attempt >= self.max_retries:
+                        raise NimEmbeddingError(
+                            f"embedding HTTP {error.response.status_code} after {attempt + 1} attempts: {body or error}"
+                        ) from error
+                    await asyncio.sleep(backoff_seconds(attempt))
+                    continue
+                except httpx.TransportError as error:
+                    logger.warning(
+                        f"embedding transport error attempt {attempt + 1}/{self.max_retries + 1} "
+                        f"for {_embeddings_url(self.model.url)}: {error}"
+                    )
+                    if attempt >= self.max_retries:
                         raise
                     await asyncio.sleep(backoff_seconds(attempt))
                     continue
