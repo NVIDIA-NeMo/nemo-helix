@@ -126,7 +126,14 @@ class HarborRunnerTarget(BaseModel):
         default_factory=dict,
         description="Keyword arguments forwarded to the Harbor agent's constructor, the equivalent of Harbor's "
         "`--ak key=value`. Not for secrets: Harbor persists them unredacted in the job dir's `config.json`; "
-        "inject secrets through the environment instead.",
+        "use `env_secrets` instead.",
+    )
+    env_secrets: dict[str, SecretRef] = Field(
+        default_factory=dict,
+        description="Environment variables for the Harbor agent, sourced from the secrets service, as "
+        "{ENV_NAME: secret-ref}. The reference travels in the spec; the service resolves it into the job's "
+        "environment at compile time, and Harbor receives a `${ENV_NAME}` template it expands when the agent "
+        "is created, so no credential is stored on the spec, the run bundle, or the job dir's `config.json`.",
     )
     n_attempts: int = Field(default=1, ge=1, description="Number of attempts Harbor runs per task.")
     n_concurrent_trials: int = Field(default=4, ge=1, description="Maximum concurrent Harbor trials.")

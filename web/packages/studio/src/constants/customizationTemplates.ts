@@ -12,11 +12,20 @@ export interface CustomizationTemplateModel {
 }
 
 export interface CustomizationTemplateDataset {
-  hfDataset: string;
-  hfConfig: string;
-  hfSplit: string;
+  /** HuggingFace dataset repo, registered in the workspace as a read-only external fileset. */
+  hfRepoId: string;
+  /** Name of the persisted external fileset pointing at {@link hfRepoId}. */
+  sourceFilesetName: string;
+  /**
+   * Matched against fileset-relative paths to locate the split's Parquet shards. A pattern
+   * rather than a literal path: HuggingFace embeds a content hash in shard filenames, and a
+   * re-upload can change the shard count.
+   */
+  filePattern: RegExp;
+  requiresHfToken?: boolean;
   trainingRowCount: number;
   validationRowCount: number;
+  /** Name of the local fileset the converted JSONL is uploaded to. */
   name: string;
   convertRow: (row: Record<string, unknown>) => Record<string, unknown> | null;
 }
@@ -86,6 +95,27 @@ const birdSqlConvertRow = (row: Record<string, unknown>): Record<string, unknown
   return { prompt: `${schema}\n\n${question}\n${evidence}`, completion: sql };
 };
 
+/**
+ * The BIRD-SQL train split, shared by every shipped recipe.
+ *
+ * The cookbooks train on the full split. Each row embeds a complete CREATE TABLE schema
+ * (~5KB); the whole Parquet file comes through the fileset either way, but decoding and
+ * converting every row in the browser does not, so the recipes take a slice.
+ *
+ * `filePattern` targets the `train` split, tolerating both the content hash HuggingFace
+ * appends to shard filenames and a future re-shard (`-of-00003`).
+ */
+const birdSqlDataset: CustomizationTemplateDataset = {
+  hfRepoId: 'xu3kev/BIRD-SQL-data-train',
+  sourceFilesetName: 'bird-sql-data-train-hf',
+  filePattern: /(^|\/)train-\d{5}-of-\d{5}\b[^/]*\.parquet$/,
+  requiresHfToken: false,
+  trainingRowCount: 1000,
+  validationRowCount: 100,
+  name: 'bird-sql-text2sql',
+  convertRow: birdSqlConvertRow,
+};
+
 export const CUSTOMIZATION_TEMPLATES: CustomizationTemplate[] = [
   {
     // Hyperparameters from usage-cookbook/Nemotron-3.5-Lightning/lora-text2sql/
@@ -111,15 +141,7 @@ export const CUSTOMIZATION_TEMPLATES: CustomizationTemplate[] = [
         trustRemoteCode: true,
       },
     ],
-    dataset: {
-      hfDataset: 'xu3kev/BIRD-SQL-data-train',
-      hfConfig: 'default',
-      hfSplit: 'train',
-      trainingRowCount: 1000,
-      validationRowCount: 100,
-      name: 'bird-sql-text2sql',
-      convertRow: birdSqlConvertRow,
-    },
+    dataset: birdSqlDataset,
     buildFormSpec: (workspace, datasetRef) => ({
       ...FORM_DEFAULTS,
       outputName: generateDefaultName(),
@@ -197,18 +219,7 @@ export const CUSTOMIZATION_TEMPLATES: CustomizationTemplate[] = [
         trustRemoteCode: true,
       },
     ],
-    dataset: {
-      hfDataset: 'xu3kev/BIRD-SQL-data-train',
-      hfConfig: 'default',
-      hfSplit: 'train',
-      // The cookbook trains on the full BIRD train split. Each row embeds a complete
-      // CREATE TABLE schema (~5KB), and these rows are fetched and converted in the
-      // browser, so the template takes a slice: ~5.8MB instead of ~50MB.
-      trainingRowCount: 1000,
-      validationRowCount: 100,
-      name: 'bird-sql-text2sql',
-      convertRow: birdSqlConvertRow,
-    },
+    dataset: birdSqlDataset,
     buildFormSpec: (workspace, datasetRef) => ({
       ...FORM_DEFAULTS,
       outputName: generateDefaultName(),
@@ -285,15 +296,7 @@ export const CUSTOMIZATION_TEMPLATES: CustomizationTemplate[] = [
         trustRemoteCode: true,
       },
     ],
-    dataset: {
-      hfDataset: 'xu3kev/BIRD-SQL-data-train',
-      hfConfig: 'default',
-      hfSplit: 'train',
-      trainingRowCount: 1000,
-      validationRowCount: 100,
-      name: 'bird-sql-text2sql',
-      convertRow: birdSqlConvertRow,
-    },
+    dataset: birdSqlDataset,
     buildFormSpec: (workspace, datasetRef) => ({
       ...FORM_DEFAULTS,
       outputName: generateDefaultName(),

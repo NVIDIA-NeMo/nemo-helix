@@ -138,6 +138,9 @@ def test_vllm_server_command_image_args_and_gpu() -> None:
     puller_env = {item.name: item.value for item in puller.env}
     assert puller_env["HF_ENDPOINT"] == resolved.files_hf_url
     assert puller_env["HF_TOKEN"] == "service:models"
+    # HF cache bookkeeping must land on the mounted PVC, not ephemeral container
+    # storage, so large checkpoints don't overflow $HOME/.cache with ENOSPC.
+    assert puller_env["HF_HOME"] == MODEL_STORE_PATH
     assert puller.command == ["hf"]
     assert puller.args == ["download", "org/model", "--local-dir", "/model-store"]
     assert "nvidia.com/gpu" not in puller.resources.limits

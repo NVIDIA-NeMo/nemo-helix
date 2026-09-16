@@ -41,6 +41,7 @@ def _ctx(client: object) -> SimpleNamespace:
     state.get_output_format.return_value = None
     state.get_no_truncate.return_value = False
     state.get_timestamp_format.return_value = None
+    state.get_job_telemetry_custom_fields.return_value = {}
     return SimpleNamespace(obj=state)
 
 
@@ -289,6 +290,40 @@ def test_jobs_create_wait_uses_quiet_waiter_and_outputs_created_job() -> None:
     )
     jobs_client.watch_job.assert_not_called()
     render_events.assert_not_called()
+
+
+def test_jobs_create_stamps_telemetry_custom_fields() -> None:
+    client = SimpleNamespace(_get_workspace_path_param=MagicMock(return_value="default"))
+    jobs_client = MagicMock()
+    jobs_client.create_job.return_value = _Response(_CreatedJob())
+    ctx = _ctx(client)
+    ctx.obj.get_job_telemetry_custom_fields.return_value = {"_nemo_telemetry": {"session_id": "session-123"}}
+
+    with (
+        patch("nemo_platform_ext.cli.commands.jobs.handle_code_generation", return_value=False),
+        patch("nemo_platform_ext.cli.commands.jobs.client_from_platform", return_value=jobs_client),
+        patch("nemo_platform_ext.cli.commands.jobs.format_output"),
+    ):
+        create_jobs(
+            ctx,
+            name="input-job",
+            workspace="test-workspace",
+            platform_spec=PLATFORM_SPEC_JSON,
+            source="test-source",
+            spec="{}",
+            custom_fields='{"owner": "team-a", "_nemo_telemetry": {"other": "preserved"}}',
+        )
+
+    jobs_client.create_job.assert_called_once()
+    call = jobs_client.create_job.call_args
+    assert call.kwargs["workspace"] == "test-workspace"
+    body = call.kwargs["body"]
+    assert body.name == "input-job"
+    assert body.source == "test-source"
+    assert body.custom_fields == {
+        "owner": "team-a",
+        "_nemo_telemetry": {"other": "preserved", "session_id": "session-123"},
+    }
 
 
 def test_jobs_create_wait_uses_waiter_default_timeout() -> None:
