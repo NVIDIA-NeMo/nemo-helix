@@ -25,8 +25,8 @@ interface CapturedDeployment {
 const renderModal = () =>
   renderRoute(<CreateDeploymentModal open onClose={vi.fn()} workspace={workspace} agent={agent} />);
 
-const captureCreate = (): { body: CapturedDeployment } => {
-  const captured: { body: CapturedDeployment } = { body: {} };
+const captureCreate = (): { body?: CapturedDeployment } => {
+  const captured: { body?: CapturedDeployment } = {};
   server.use(
     http.post(deploymentsUrl, async ({ request }) => {
       captured.body = (await request.json()) as CapturedDeployment;
@@ -50,6 +50,41 @@ const getDeploymentDialog = async (): Promise<HTMLDialogElement> => {
 };
 
 describe('CreateDeploymentModal', () => {
+  it('creates a deployment without a name when the optional field is empty', async () => {
+    const user = userEvent.setup();
+    const captured = captureCreate();
+    renderModal();
+
+    const dialog = await getDeploymentDialog();
+    await user.click(within(dialog).getByRole('button', { name: 'Deploy' }));
+
+    await waitFor(() =>
+      expect(captured.body).toEqual({
+        agent,
+        deployment_mode: 'subprocess',
+      })
+    );
+  });
+
+  it.each([
+    ['deployment with spaces', 'Deployment name cannot contain spaces'],
+    ['Invalid-deployment', 'Deployment name must be lowercase'],
+  ])('does not submit the invalid deployment name %s', async (name, expectedError) => {
+    const user = userEvent.setup();
+    const captured = captureCreate();
+    renderModal();
+
+    const dialog = await getDeploymentDialog();
+    await user.type(
+      within(dialog).getByRole('textbox', { name: 'Deployment Name (optional)' }),
+      name
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Deploy' }));
+
+    expect(await within(dialog).findByText(new RegExp(expectedError))).toBeInTheDocument();
+    expect(captured.body).toBeUndefined();
+  });
+
   it('creates a Docker deployment with the selected container image', async () => {
     const user = userEvent.setup();
     const captured = captureCreate();
