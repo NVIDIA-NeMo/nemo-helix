@@ -4,10 +4,12 @@
 import asyncio
 import json
 import math
+import time
 from pathlib import Path
 
 import httpx
 import pytest
+from nemo_evaluator_sdk.retrieval import dense_search as dense_search_module
 from nemo_evaluator_sdk.retrieval.beir import BeirDataset
 from nemo_evaluator_sdk.retrieval.dense_search import dense_search, retrieve
 from nemo_evaluator_sdk.retrieval.nim_embeddings import NimEmbeddingClient, NimEmbeddingError
@@ -337,6 +339,74 @@ async def test_dense_search_pipelines_two_embedding_requests(tmp_path: Path) -> 
 
     assert max_in_flight == 2
     assert list(results["q1"])[0] == "d1"
+
+
+@pytest.mark.asyncio
+async def test_dense_search_breaks_top_k_ties_on_document_id(tmp_path: Path) -> None:
+    """A tie group straddling the top_k cutoff keeps the lowest document ids, not corpus order."""
+    (tmp_path / "qrels").mkdir()
+    (tmp_path / "corpus.jsonl").write_text(
+        '{"_id":"d4","text":"a"}\n{"_id":"d3","text":"b"}\n{"_id":"d1","text":"c"}\n{"_id":"d2","text":"d"}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "queries.jsonl").write_text('{"_id":"q1","text":"a?"}\n', encoding="utf-8")
+    (tmp_path / "qrels" / "test.tsv").write_text("query-id\tcorpus-id\tscore\nq1\td1\t1\n", encoding="utf-8")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        # Every passage scores identically, so only the id tie-break orders them.
+        vectors = [[1.0, 0.0] for _ in payload["input"]]
+        return _response(request, vectors)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        results = await dense_search(
+            BeirDataset.from_path(tmp_path),
+            NimEmbeddingClient(model=_model(), dimensions=2),
+            top_k=2,
+            client=client,
+        )
+
+    assert list(results["q1"]) == ["d1", "d2"]
+
+
+@pytest.mark.asyncio
+async def test_dense_search_scores_off_the_event_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Scoring must not starve a concurrently running dense search of its embedding turns."""
+    dataset = _write_beir(tmp_path)
+    ticks = 0
+
+    async def tick() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.005)
+            ticks += 1
+
+    real_score = dense_search_module._score
+
+    def slow_score(
+        document_ids: list[str],
+        document_vectors: list[list[float]],
+        query_ids: list[str],
+        query_vectors: list[list[float]],
+        top_k: int | None,
+        model_name: str,
+    ) -> dict[str, dict[str, float]]:
+        time.sleep(0.2)
+        return real_score(document_ids, document_vectors, query_ids, query_vectors, top_k, model_name)
+
+    monkeypatch.setattr(dense_search_module, "_score", slow_score)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _response(request, [[1.0, 0.0] for _ in json.loads(request.content)["input"]])
+
+    ticker = asyncio.create_task(tick())
+    try:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await dense_search(dataset, NimEmbeddingClient(model=_model(), dimensions=2), client=client)
+    finally:
+        ticker.cancel()
+
+    assert ticks > 5
 
 
 def _write_beir(tmp_path: Path, *, title: str = "", text: str = "alpha") -> BeirDataset:

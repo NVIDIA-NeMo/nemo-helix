@@ -10,6 +10,7 @@ import logging
 import math
 
 import httpx
+import numpy as np
 from nemo_evaluator_sdk.retrieval.beir import BeirDataset
 from nemo_evaluator_sdk.retrieval.nim_embeddings import InputType, NimEmbeddingClient
 from nemo_evaluator_sdk.retrieval.nim_ranking import NimRankingClient
@@ -19,6 +20,9 @@ from nemo_evaluator_sdk.values.retrieval import Retrieval
 __all__ = ["dense_search", "retrieve"]
 
 logger = logging.getLogger(__name__)
+
+# Cells in one query-chunk score block, bounding it to ~256 MB of float32.
+_SCORE_BLOCK_CELLS = 64_000_000
 
 
 async def retrieve(
@@ -106,21 +110,15 @@ async def dense_search(
         if owns_client:
             await client.aclose()
 
-    normalized_documents = [_normalize(vector) for vector in document_vectors]
-    results: dict[str, dict[str, float]] = {}
-    for query_id, query_vector in zip(query_ids, query_vectors, strict=True):
-        normalized_query = _normalize(query_vector)
-        ranked = sorted(
-            (
-                (document_id, sum(left * right for left, right in zip(normalized_query, document_vector, strict=True)))
-                for document_id, document_vector in zip(document_ids, normalized_documents, strict=True)
-            ),
-            key=lambda item: (-item[1], item[0]),
-        )
-        if top_k is not None:
-            ranked = ranked[:top_k]
-        results[query_id] = dict(ranked)
-    return results
+    return await asyncio.to_thread(
+        _score,
+        document_ids,
+        document_vectors,
+        query_ids,
+        query_vectors,
+        top_k,
+        embeddings.model.name,
+    )
 
 
 async def _rerank(
@@ -165,23 +163,35 @@ async def _encode_batches(
         f"(batch_size={batch_size}, in_flight={in_flight})"
     )
     semaphore = asyncio.Semaphore(in_flight)
+    progress_every = max(10, math.ceil(n_batches * 0.05))
+    completed = 0
+    completed_lock = asyncio.Lock()
 
     async def _encode(index: int, batch: list[str]) -> list[list[float]]:
+        nonlocal completed
         offset = index * batch_size
         chars = sum(len(text) for text in batch)
         async with semaphore:
-            logger.info(
+            logger.debug(
                 f"encode {model_name} {input_type} batch {index + 1}/{n_batches} "
                 f"offset={offset} n={len(batch)} chars={chars}"
             )
             try:
-                return await embeddings.encode(batch, input_type=input_type, client=client)
+                result = await embeddings.encode(batch, input_type=input_type, client=client)
             except Exception as error:
                 logger.error(
                     f"encode {model_name} {input_type} failed batch {index + 1}/{n_batches} "
                     f"offset={offset} n={len(batch)} chars={chars}: {error}"
                 )
                 raise
+            async with completed_lock:
+                completed += 1
+                if completed == n_batches or completed % progress_every == 0:
+                    logger.info(
+                        f"encoded {model_name} {input_type} {completed}/{n_batches} batches "
+                        f"({100 * completed / n_batches:.0f}%)"
+                    )
+            return result
 
     encoded = await asyncio.gather(*(_encode(index, batch) for index, batch in enumerate(batches)))
     vectors: list[list[float]] = []
@@ -191,8 +201,57 @@ async def _encode_batches(
     return vectors
 
 
-def _normalize(vector: list[float]) -> list[float]:
-    norm = math.sqrt(sum(value * value for value in vector))
-    if norm == 0:
+def _score(
+    document_ids: list[str],
+    document_vectors: list[list[float]],
+    query_ids: list[str],
+    query_vectors: list[list[float]],
+    top_k: int | None,
+    model_name: str,
+) -> dict[str, dict[str, float]]:
+    """Cosine-score every query against the corpus, one chunk of queries at a time.
+
+    Called on a worker thread: the matmul is the bulk of the work and BLAS both releases
+    the GIL and spreads it over every core, so a concurrent dense search keeps embedding
+    while this runs.
+    """
+    documents = _unit_rows(document_vectors)
+    queries = _unit_rows(query_vectors)
+    n_documents = len(document_ids)
+    n_queries = len(query_ids)
+    k = n_documents if top_k is None else min(top_k, n_documents)
+    # Rank of each id in lexicographic order, so score ties break on document id.
+    document_rank = np.argsort(np.argsort(np.asarray(document_ids), kind="stable")).astype(np.int32)
+    chunk = max(1, _SCORE_BLOCK_CELLS // n_documents)
+    logger.info(f"scoring {model_name}: {n_queries} queries x {n_documents} passages, top_k={k}, query_chunk={chunk}")
+
+    results: dict[str, dict[str, float]] = {}
+    progress_every = max(1, math.ceil(math.ceil(n_queries / chunk) * 0.1))
+    for number, start in enumerate(range(0, n_queries, chunk), start=1):
+        scores = queries[start : start + chunk] @ documents.T
+        negated = -scores
+        for row, query_id in enumerate(query_ids[start : start + chunk]):
+            row_scores = negated[row]
+            if k < n_documents:
+                # Partition gives the k-th best score, but splits ties arbitrarily. Widening to
+                # every document at that score keeps the whole boundary tie group, so the sort
+                # below breaks it on document id rather than on corpus order.
+                cutoff = row_scores[np.argpartition(row_scores, k - 1)[k - 1]]
+                candidates = np.flatnonzero(row_scores <= cutoff)
+            else:
+                candidates = np.arange(n_documents)
+            ordered = candidates[np.lexsort((document_rank[candidates], row_scores[candidates]))][:k]
+            results[query_id] = {document_ids[index]: float(scores[row, index]) for index in ordered}
+        if number % progress_every == 0 or len(results) == n_queries:
+            logger.info(
+                f"scored {model_name} {len(results)}/{n_queries} queries ({100 * len(results) / n_queries:.0f}%)"
+            )
+    return results
+
+
+def _unit_rows(vectors: list[list[float]]) -> np.ndarray:
+    matrix = np.asarray(vectors, dtype=np.float32)
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    if not norms.all():
         raise ValueError("cannot search with a zero-length embedding")
-    return [value / norm for value in vector]
+    return matrix / norms
