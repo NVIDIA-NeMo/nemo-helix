@@ -94,4 +94,5 @@ class CreateContextCollector(BaseContextCollector):
             "examples": self._cli_config.get_examples(resource_path, method_name),
             "wait_config": self._cli_config.get_wait_config(resource_path, method_name),
             "watch_config": self._cli_config.get_watch_config(resource_path, method_name),
+            "stamp_job_telemetry": resource_path == ["jobs"] and method_name == "create",
         }
