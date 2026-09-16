@@ -16,6 +16,8 @@ from nemo_platform_plugin.discovery import (
 )
 from nemo_platform_plugin.service import NemoService, RouterSpec
 
+from nemo_customizer.api.v2 import templates
+
 
 class CustomizationRouterError(CustomizationContributorDiscoveryError):
     """Raised when the customization router cannot start."""
@@ -95,6 +97,12 @@ class CustomizationRouterService(NemoService):
                 tag="Customization",
                 description="Customization router health.",
                 prefix="/v2",
+            ),
+            RouterSpec(
+                router=templates.router,
+                tag="Customization Job Templates",
+                description="Saved customization job inputs.",
+                prefix="/v2/workspaces/{workspace}",
             ),
         ]
 
