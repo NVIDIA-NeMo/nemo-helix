@@ -86,6 +86,22 @@ def test_json_redaction_preserves_unchanged_bytes_and_jsonl_records() -> None:
     assert redact_json_text("broken api_key=sk-synthetic-token") == "broken api_key=<redacted>"
 
 
+@pytest.mark.parametrize(
+    "value",
+    ["synthetic-value", "value with spaces, punctuation !@#$%^&*()", 'escaped "quote" and \\ slash'],
+)
+def test_json_redaction_masks_quoted_secret_fields_in_malformed_json(value: str) -> None:
+    malformed = json.dumps({"password": value})[:-1]
+
+    assert redact_json_text(malformed) == json.dumps({"password": "<redacted>"})[:-1]
+
+
+def test_json_redaction_masks_quoted_secret_fields_in_malformed_jsonl() -> None:
+    malformed = '{"password":"value with spaces"\n{"api_key":"unterminated value\n'
+
+    assert redact_json_text(malformed, lines=True) == '{"password":"<redacted>"\n{"api_key":"<redacted>\n'
+
+
 def test_json_redaction_preserves_colliding_keys_and_values() -> None:
     source = {
         "sk-synthetic-first": {"password": "first-secret", "index": 1},

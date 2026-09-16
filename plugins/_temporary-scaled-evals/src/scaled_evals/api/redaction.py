@@ -20,6 +20,10 @@ _ASSIGNMENT_RE = re.compile(
     rf"(?i)(\b(?:{_SECRET_NAMES})\b\s*[:=]\s*)"
     r"(\$\{[A-Z_][A-Z0-9_]*\}|[^,\s'\"}]+)"
 )
+_QUOTED_SECRET_FIELD_RE = re.compile(
+    rf'(?i)("(?:{_SECRET_NAMES})"\s*:\s*")'
+    r'((?:\\.|[^"\\\r\n])*)("?)'
+)
 _TOKEN_RE = re.compile(
     r"\b(?:sk-[A-Za-z0-9_-]{8,}|nvapi-[A-Za-z0-9._-]{8,}|"
     r"sha256~[A-Za-z0-9._~-]{8,}|"
@@ -44,6 +48,7 @@ def redact_json_text(text: str, *, lines: bool = False) -> str:
             value = json.loads(text)
         except ValueError:
             # Preserve protection for malformed or partially written original artifacts.
+            text = _QUOTED_SECRET_FIELD_RE.sub(r"\1<redacted>\3", text)
             return redact_secret_text(text)
         redacted = _redact_json_value(value)
         if redacted == value:
