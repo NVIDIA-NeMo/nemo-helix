@@ -204,6 +204,41 @@ describe('Assistant API helpers', () => {
     ]);
   });
 
+  it('parses a stored thinking part when loading a session', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          session_id: 'session-1',
+          items: [
+            {
+              kind: 'assistant',
+              parts: [
+                { type: 'thinking', thinking: 'The user wants a capital city.' },
+                { type: 'thinking', thinking: '' },
+                { type: 'text', text: 'Paris.' },
+              ],
+            },
+          ],
+          chat_artifacts: {},
+        }),
+        { status: 200 }
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const history = await getAssistantSessionHistory('session-1');
+
+    expect(history.items).toEqual([
+      {
+        kind: 'assistant',
+        parts: [
+          { type: 'thinking', thinking: 'The user wants a capital city.' },
+          { type: 'text', text: 'Paris.' },
+        ],
+      },
+    ]);
+  });
+
   it('preserves legacy copilot model artifacts when loading a session', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

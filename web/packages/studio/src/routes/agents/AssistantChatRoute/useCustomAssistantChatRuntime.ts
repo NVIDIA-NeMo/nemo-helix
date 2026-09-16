@@ -84,9 +84,7 @@ const mergeAssistantParts = (
           [getAssistantThinkingPartText(previousThinkingPart), getAssistantThinkingPartText(part)]
             .filter(Boolean)
             .join('\n\n'),
-          previousThinkingPart.type === 'tool-call'
-            ? previousThinkingPart.toolCallId
-            : 'assistant-thinking'
+          previousThinkingPart.toolCallId
         );
         continue;
       }
