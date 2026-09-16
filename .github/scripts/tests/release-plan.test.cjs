@@ -40,6 +40,7 @@ function manualContext(inputs) {
 test("resolves a stable Helm-only release", async () => {
   const plan = await resolveReleasePlan({
     env: environment(),
+    listTags: async () => [],
     context: manualContext({
       "release-type": "stable",
       "release-scope": "helm",
@@ -53,6 +54,7 @@ test("resolves a stable Helm-only release", async () => {
 
   assert.equal(plan.sourceSha, SHA);
   assert.equal(plan.sourceBranch, "");
+  assert.equal(plan.nightlyBaseVersion, "");
   assert.equal(plan.releaseLabel, "1.2.3");
   assert.equal(plan.includeHelm, true);
   assert.deepEqual(plan.wheelIds, []);
@@ -62,6 +64,7 @@ test("resolves a stable Helm-only release", async () => {
 test("resolves a custom nightly release and uses the supplied clock", async () => {
   const plan = await resolveReleasePlan({
     env: environment(),
+    listTags: async () => [],
     context: manualContext({
       "release-type": "nightly",
       "release-scope": "custom",
@@ -76,6 +79,7 @@ test("resolves a custom nightly release and uses the supplied clock", async () =
 
   assert.equal(plan.sourceSha, SHA);
   assert.equal(plan.sourceBranch, "release/0.10");
+  assert.equal(plan.nightlyBaseVersion, "0.10.0");
   assert.equal(plan.releaseLabel, "nightly-20260827123456");
   assert.deepEqual(plan.wheelIds, ["nemo-platform"]);
   assert.deepEqual(plan.containerIds, ["nmp-api"]);
@@ -85,6 +89,7 @@ test("rejects duplicate custom artifact IDs", async () => {
   await assert.rejects(
     resolveReleasePlan({
       env: environment(),
+      listTags: async () => [],
       context: manualContext({
         "release-type": "nightly",
         "release-scope": "custom",
@@ -104,6 +109,7 @@ for (const [label, context] of [
   test(`${label} nightlies select the highest release branch and pin its SHA`, async () => {
     const plan = await resolveReleasePlan({
       env: environment(),
+      listTags: async () => [],
       context,
       listBranches: async () => BRANCHES,
     });
@@ -116,6 +122,7 @@ for (const [label, context] of [
 test("compares major versions before minor versions and ignores unrelated branches", async () => {
   const plan = await resolveReleasePlan({
     env: environment(),
+    listTags: async () => [],
     context: manualContext({ "release-type": "nightly" }),
     listBranches: async () => [
       { name: "release/2.99", commit: { sha: "c".repeat(40) } },
@@ -139,6 +146,7 @@ for (const dryRun of ["false", "true"]) {
   test(`explicit nightly SHAs bypass branch discovery (dry-run=${dryRun})`, async () => {
     const plan = await resolveReleasePlan({
       env: environment(),
+      listTags: async () => [],
       context: manualContext({
         "release-type": "nightly",
         "source-sha": ` ${SHA.toUpperCase()} `,
@@ -150,6 +158,7 @@ for (const dryRun of ["false", "true"]) {
 
     assert.equal(plan.sourceSha, SHA);
     assert.equal(plan.sourceBranch, "");
+    assert.equal(plan.nightlyBaseVersion, "");
   });
 }
 
@@ -158,6 +167,7 @@ for (const branches of [[], [BRANCHES[2]]]) {
     await assert.rejects(
       resolveReleasePlan({
         env: environment(),
+        listTags: async () => [],
         context: manualContext({ "release-type": "nightly" }),
         listBranches: async () => branches,
       }),
@@ -171,6 +181,7 @@ test("propagates branch lookup failures instead of falling back to the workflow 
   await assert.rejects(
     resolveReleasePlan({
       env: environment(),
+      listTags: async () => [],
       context: manualContext({ "release-type": "nightly" }),
       listBranches: async () => {
         throw error;
@@ -185,6 +196,7 @@ for (const releaseType of ["nightly", "stable"]) {
     await assert.rejects(
       resolveReleasePlan({
         env: environment(),
+        listTags: async () => [],
         context: manualContext({
           "release-type": releaseType,
           "source-sha": "release/0.10",
@@ -195,5 +207,59 @@ for (const releaseType of ["nightly", "stable"]) {
       }),
       /exact 40-character.*SHA/,
     );
+  });
+}
+
+for (const [tags, expected] of [
+  [[], "0.6.0"],
+  [["0.5.0", "0.5.1", "0.7.9", "1.6.9"], "0.6.0"],
+  [["0.6.0"], "0.6.1"],
+  [["0.6.2", "0.6.0"], "0.6.3"],
+  [["0.6.9", "0.6.10", "0.6.2"], "0.6.11"],
+  [["0.6.0-rc0", "0.6.0-rc.1", "v0.6.5", "0.6.5+fix", "0.6.01"], "0.6.0"],
+  [["0.6.0", "0.6.1-rc0"], "0.6.1"],
+]) {
+  test(`plans ${expected} nightlies from stable tags ${JSON.stringify(tags)}`, async () => {
+    const plan = await resolveReleasePlan({
+      env: environment(),
+      context: { eventName: "schedule", payload: {} },
+      listBranches: async () => [{ name: "release/0.6", commit: { sha: SHA } }],
+      listTags: async () => tags.map((name) => ({ name })),
+    });
+
+    assert.equal(plan.nightlyBaseVersion, expected);
+    assert.equal(plan.sourceSha, SHA);
+  });
+}
+
+test("propagates tag lookup errors instead of publishing an incorrect version", async () => {
+  const error = new Error("GitHub tag lookup failed");
+  await assert.rejects(
+    resolveReleasePlan({
+      env: environment(),
+      context: { eventName: "schedule", payload: {} },
+      listBranches: async () => BRANCHES,
+      listTags: async () => {
+        throw error;
+      },
+    }),
+    error,
+  );
+});
+
+for (const releaseType of ["stable", "nightly"]) {
+  test(`pinned ${releaseType} releases do not discover tags`, async () => {
+    const plan = await resolveReleasePlan({
+      env: environment(),
+      context: manualContext({
+        "release-type": releaseType,
+        "source-sha": SHA,
+        version: "0.5.1",
+      }),
+      listBranches: async () => assert.fail("must not discover branches"),
+      listTags: async () => assert.fail("must not discover tags"),
+    });
+
+    assert.equal(plan.nightlyBaseVersion, "");
   });
 }

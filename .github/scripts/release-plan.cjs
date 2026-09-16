@@ -42,6 +42,7 @@ async function resolveReleasePlan({
   env,
   context,
   listBranches,
+  listTags,
   now = () => new Date(),
 }) {
   const allWheels = JSON.parse(env.RELEASE_WHEELS_JSON);
@@ -161,6 +162,22 @@ async function resolveReleasePlan({
       : "";
   const releaseLabel =
     releaseType === "nightly" ? `nightly-${nightlyTimestamp}` : version;
+  let nightlyBaseVersion = "";
+  if (sourceBranch) {
+    const [major, minor] = sourceBranch
+      .slice("release/".length)
+      .split(".")
+      .map(Number);
+    let nextPatch = 0;
+    for (const { name } of await listTags()) {
+      if (!SEMVER_CORE_PATTERN.test(name)) continue;
+      const [tagMajor, tagMinor, patch] = name.split(".").map(Number);
+      if (tagMajor === major && tagMinor === minor) {
+        nextPatch = Math.max(nextPatch, patch + 1);
+      }
+    }
+    nightlyBaseVersion = `${major}.${minor}.${nextPatch}`;
+  }
 
   return {
     releaseType,
@@ -170,6 +187,7 @@ async function resolveReleasePlan({
     version,
     releaseLabel,
     nightlyTimestamp,
+    nightlyBaseVersion,
     wheels,
     containers,
     wheelIds,
