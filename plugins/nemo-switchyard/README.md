@@ -14,7 +14,11 @@ a protocol-agnostic request/response router for LLM backends.
 
 ## Installation
 
-A snapshot of the Switchyard library is vendored at `plugins/nemo-switchyard/vendor/switchyard/`, so no separate Switchyard checkout, `PYTHONPATH` override, or `SWITCHYARD_PATH` env var is required. The plugin is installed by default through the root workspace's `enabled-plugins` group.
+The plugin wheel is published as **`nemo-switchyard-plugin`** (to avoid colliding
+with upstream PyPI `nemo-switchyard`). VirtualModels still reference the
+entry-point key **`nemo-switchyard`**.
+
+A snapshot of the Switchyard library is vendored at `plugins/nemo-switchyard/vendor/switchyard/`, so no separate Switchyard checkout, `PYTHONPATH` override, or `SWITCHYARD_PATH` env var is required. The plugin is installed by default through the root workspace's `enabled-plugins` group (`nemo-switchyard-plugin`).
 
 ```bash
 uv sync
@@ -24,7 +28,7 @@ LOG_LEVEL=DEBUG uv run nemo services run \
   --controllers models
 ```
 
-The plugin is discovered at platform startup through the `nemo.inference_middleware` entry point named `nemo-switchyard`. To pin a different upstream commit, follow the instructions in [`vendor/switchyard/README.md`](vendor/switchyard/README.md).
+The plugin is discovered at platform startup through the `nemo.inference_middleware` entry point named `nemo-switchyard`. Native `switchyard_rust` is **not** in the default image. Bake it only with Docker build-arg `SWITCHYARD_NATIVE_REF` (empty by default); that install replaces May `switchyard-vendored` instead of sitting beside it. To pin a different May vendor commit, follow [`vendor/switchyard/README.md`](vendor/switchyard/README.md).
 
 ## VirtualModel Configuration
 

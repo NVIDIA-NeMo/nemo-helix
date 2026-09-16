@@ -171,7 +171,7 @@ uv run nemo services run \
 
 ### Starting the platform with Switchyard middleware
 
-`make bootstrap-python` and bare `uv sync` install `plugins/nemo-switchyard` through the root workspace's `enabled-plugins` group. The Switchyard library is vendored in-tree at `plugins/nemo-switchyard/vendor/switchyard/` (a snapshot pinned in `tool.uv.sources`) — no separate Switchyard checkout, `SWITCHYARD_PATH` env var, or PyPI workaround is needed. Start with debug logging to see routing decisions:
+`make bootstrap-python` and bare `uv sync` install `nemo-switchyard-plugin` (path `plugins/nemo-switchyard`) through the root workspace's `enabled-plugins` group. The Switchyard library is vendored in-tree at `plugins/nemo-switchyard/vendor/switchyard/` (a snapshot pinned in `tool.uv.sources`) — no separate Switchyard checkout, `SWITCHYARD_PATH` env var, or PyPI workaround is needed. Do not `uv add` upstream `nemo-switchyard`; that package name collides with our old dist name and its `switchyard` module replaces May translate. Start with debug logging to see routing decisions:
 
 ```bash
 # Start with LOG_LEVEL=DEBUG to see routing decisions.

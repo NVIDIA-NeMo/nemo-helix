@@ -36,6 +36,25 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --active --only-group functional-services --no-editable \
     --reinstall-package annoy --refresh-package annoy --no-binary-package annoy --no-cache
 
+# Native Switchyard (switchyard_rust) is off by default. Empty ARG keeps May
+# switchyard.lib from switchyard-vendored. Do not install upstream next to vendor:
+# both ship the `switchyard` module. When set, treat the value as a git tag
+# (v0.3.0-rc.1) or a full pip spec (nemo-switchyard==0.3.0 / git+https://...).
+ARG SWITCHYARD_NATIVE_REF=
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if [ -n "${SWITCHYARD_NATIVE_REF}" ]; then \
+      VIRTUAL_ENV=/app/.venv uv pip uninstall -y switchyard-vendored || true; \
+      case "${SWITCHYARD_NATIVE_REF}" in \
+        git+*|nemo-switchyard==*) spec="${SWITCHYARD_NATIVE_REF}" ;; \
+        *) spec="git+https://github.com/NVIDIA-NeMo/Switchyard.git@${SWITCHYARD_NATIVE_REF}" ;; \
+      esac; \
+      VIRTUAL_ENV=/app/.venv uv pip install "${spec}"; \
+      /app/.venv/bin/python -c "import switchyard_rust" || { \
+        echo "FATAL: switchyard_rust import failed (missing AVX2 or incompatible wheel)"; \
+        exit 1; \
+      }; \
+    fi
+
 # Fail the build if pip is broken or duplicated (regression guard).
 RUN /app/.venv/bin/pip --version && \
     test "$(ls -d /app/.venv/lib/python3.13/site-packages/pip-*.dist-info | wc -l)" -eq 1

@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import openai.types.chat as openai_chat_types
 import pytest
+from fastapi import HTTPException
 from nemo_platform_plugin.inference_middleware import (
     BackendFormat,
     ImmediateResponse,
@@ -143,12 +144,31 @@ class TestExecuteRequestMiddleware:
 
     @pytest.mark.asyncio
     async def test_missing_plugin_raises_503(self):
-        from fastapi import HTTPException
-
         ctx = _make_ctx()
         with pytest.raises(HTTPException) as exc_info:
             await execute_request_middleware([_call("missing")], {}, ctx, _REQUEST)
         assert exc_info.value.status_code == 503
+
+    @pytest.mark.asyncio
+    async def test_missing_nemo_switchyard_plugin_raises_503(self):
+        ctx = _make_ctx()
+        with pytest.raises(HTTPException) as exc_info:
+            await execute_request_middleware([_call("nemo-switchyard")], {}, ctx, _REQUEST)
+        assert exc_info.value.status_code == 503
+        assert "nemo-switchyard" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_guardrails_only_does_not_503_when_switchyard_absent(self):
+        ctx = _make_ctx()
+        guardrails = _plugin()
+        result = await execute_request_middleware(
+            [_call("nemo-guardrails")],
+            {"nemo-guardrails": guardrails},
+            ctx,
+            _REQUEST,
+        )
+        assert result is _REQUEST
+        _request_mock(guardrails).assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_inference_middleware_error_propagates_with_status(self):

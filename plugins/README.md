@@ -30,7 +30,10 @@ Reference plugins such as `plugins/example-plugin/` are not installed by default
 
 ### Switchyard middleware
 
-`plugins/nemo-switchyard/` is an inference middleware plugin. It registers the `nemo-switchyard` middleware entry point, which can be referenced from a VirtualModel's `request_middleware` or `response_middleware`.
+`plugins/nemo-switchyard/` is an inference middleware plugin. The wheel name is
+`nemo-switchyard-plugin`. It registers the `nemo-switchyard` middleware entry
+point, which can be referenced from a VirtualModel's `request_middleware` or
+`response_middleware`. Do not change that entry-point key.
 
 The middleware is installed by default through the root workspace's `enabled-plugins` group. The plugin vendors the required subset of the Switchyard library under `plugins/nemo-switchyard/vendor/switchyard/`, so no separate checkout, `SWITCHYARD_PATH`, or PyPI-shadow workaround is needed.
 
@@ -69,7 +72,7 @@ The package name is the `name` field in the plugin's `pyproject.toml`, not the d
 | `nemo-experimentalist/` | `nemo-experimentalist-plugin` |
 | `nemo-guardrails/` | `nemo-guardrails-plugin` |
 | `nemo-insights/` | `nemo-insights-plugin` |
-| `nemo-switchyard/` | `nemo-switchyard` |
+| `nemo-switchyard/` | `nemo-switchyard` (dist: `nemo-switchyard-plugin`) |
 
 Example:
 

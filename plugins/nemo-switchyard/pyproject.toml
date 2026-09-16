@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [project]
-name = "nemo-switchyard"
+name = "nemo-switchyard-plugin"
 version = "0.1.0"
 description = "Switchyard inference middleware plugin for NeMo Inference Gateway — routing, translation, and request filtering."
 requires-python = ">=3.11,<3.15"

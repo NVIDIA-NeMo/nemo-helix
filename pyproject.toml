@@ -198,7 +198,7 @@ enabled-plugins = [
   "nemo-guardrails-plugin",
   "nemo-auditor-plugin",
   "nemo-safe-synthesizer-plugin",
-  "nemo-switchyard",
+  "nemo-switchyard-plugin",
   "nemo-agents-plugin",
   "nemo-deployments-plugin[docker,k8s]",
   "nemo-customizer-plugin",
@@ -438,7 +438,7 @@ nemo-scaled-evals-plugin = { workspace = true }
 nemo-guardrails-plugin = { workspace = true }
 nemo-auditor-plugin = { workspace = true }
 nemo-safe-synthesizer-plugin = { workspace = true }
-nemo-switchyard = { workspace = true }
+nemo-switchyard-plugin = { workspace = true }
 nemo-agents-plugin = { workspace = true }
 nemo-deployments-plugin = { workspace = true }
 nemo-agents-example-calculator = { workspace = true }
