@@ -184,17 +184,17 @@ jobs:
           script: |
             const { resolveReleasePlan } = require("./.github/scripts/release-plan.cjs");
             const plan = await resolveReleasePlan({
-              env: process.env,
-              context,
-              listBranches: () => github.paginate(
-                github.rest.repos.listBranches,
+              listTags: () => github.paginate(
+                github.rest.repos.listTags,
                 {
                   ...context.repo,
                   per_page: 100,
                 },
               ),
-              listTags: () => github.paginate(
-                github.rest.repos.listTags,
+              env: process.env,
+              context,
+              listBranches: () => github.paginate(
+                github.rest.repos.listBranches,
                 {
                   ...context.repo,
                   per_page: 100,

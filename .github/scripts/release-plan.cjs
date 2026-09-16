@@ -39,10 +39,10 @@ function selectArtifacts(value, allowedArtifacts, label, inputName) {
 }
 
 async function resolveReleasePlan({
+  listTags,
   env,
   context,
   listBranches,
-  listTags,
   now = () => new Date(),
 }) {
   const allWheels = JSON.parse(env.RELEASE_WHEELS_JSON);
