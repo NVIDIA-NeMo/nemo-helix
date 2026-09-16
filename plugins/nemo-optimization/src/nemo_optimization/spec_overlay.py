@@ -11,6 +11,17 @@ has no counterpart in the stored config, so this overlay writes only to
 locations that already exist and raises when a tuned parameter matches nothing.
 Inventing the key instead would produce an agent that looks optimized and is
 not.
+
+For the same reason, a ``models.default.<leaf>`` tuned parameter is only ever
+written when ``<leaf>`` is a field the spec->fabric translator actually
+round-trips (a declared ``ModelConfig`` field).  A leaf outside that set — e.g.
+``top_p`` — has no home in the translator's output: writing it into the
+harness model's ``settings`` looks like it worked, but re-translating the spec
+back to a Fabric package does not carry ``settings`` into the adapter fields
+harnesses actually read (the hermes adapter reads ``top_p`` from
+``extensions``, not ``settings``), so the tuned value silently never reaches
+the running agent.  Refusing it loudly is the same silent-failure prevention
+as the "write only to paths that already exist" rule above, one level deeper.
 """
 
 from __future__ import annotations
@@ -21,8 +32,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-#: Declared fields of ``nemo_agents_plugin.agent_config.ModelConfig``.  A tuned
-#: leaf outside this set is not a model field and belongs in ``settings``.
+#: Declared fields of ``nemo_agents_plugin.agent_config.ModelConfig`` that the
+#: spec->fabric translator round-trips.  A tuned leaf outside this set is refused
+#: rather than written to ``settings`` — see the module docstring for why.
 _MODEL_FIELDS = frozenset({"provider", "model", "api_key_env", "base_url", "temperature"})
 
 _FABRIC_DEFAULT_MODEL_PREFIX = "models.default."
@@ -38,6 +50,17 @@ def apply_tuned_params_to_spec(spec_config: dict[str, Any], by_path: dict[str, A
     for dotted_path, value in by_path.items():
         if dotted_path.startswith(_FABRIC_DEFAULT_MODEL_PREFIX):
             leaf = dotted_path[len(_FABRIC_DEFAULT_MODEL_PREFIX) :]
+            if leaf not in _MODEL_FIELDS:
+                raise SpecOverlayError(
+                    f"Tuned parameter {dotted_path!r} cannot be applied: {leaf!r} is not one of the "
+                    f"fields the spec->fabric translator round-trips ({sorted(_MODEL_FIELDS)}). "
+                    "Writing it into the harness model's 'settings' would look like it worked, but "
+                    "re-translating the spec back to a Fabric package would silently drop it before "
+                    "it ever reaches the running agent (e.g. the hermes adapter reads 'top_p' from "
+                    "'extensions', not 'settings'). Address a real spec location the harness actually "
+                    "reads instead, e.g. 'harnesses.<name>.model.settings.<field>' only if that "
+                    "harness genuinely consumes <field> from there."
+                )
             applied = _apply_to_model_blocks(optimized, leaf, value)
         else:
             applied = _set_if_exists(optimized, dotted_path.split("."), value)
@@ -56,7 +79,9 @@ def _apply_to_model_blocks(spec_config: dict[str, Any], leaf: str, value: Any) -
 
     Mirrors switchyard's ``_rewrite_model``: the default harness's model is the
     real target, and an explicit ``models.default`` is updated too when present
-    so the two cannot drift apart.
+    so the two cannot drift apart. Callers only reach this once *leaf* has been
+    verified to be a declared, round-trippable ``ModelConfig`` field — never
+    written blind, and never falls back to inventing a ``settings`` entry.
     """
     applied = False
     targets: list[dict[str, Any]] = []
@@ -73,13 +98,7 @@ def _apply_to_model_blocks(spec_config: dict[str, Any], leaf: str, value: Any) -
         targets.append(models["default"])
 
     for target in targets:
-        if leaf in _MODEL_FIELDS:
-            target[leaf] = value
-        else:
-            settings = target.setdefault("settings", {})
-            if not isinstance(settings, dict):
-                continue
-            settings[leaf] = value
+        target[leaf] = value
         applied = True
     return applied
 
