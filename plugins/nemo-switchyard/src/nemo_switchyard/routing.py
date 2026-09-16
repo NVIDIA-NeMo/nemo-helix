@@ -1,28 +1,20 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``switchyard`` implementation of ``nemo agents optimize --strategy``.
+"""Shared routing config and helpers for the ``switchyard`` agent optimization job.
 
 Creates a VirtualModel that routes between a strong and a weak model via the
-``nemo-switchyard`` request middleware, then rewrites the agent's model
-parameter to point at it. Routing is a two-tier weighted coin flip because that
+``nemo-switchyard`` request middleware. Routing is a two-tier weighted coin flip because that
 is what the Inference Gateway actually wires up today — see
 ``_CONFIG_TYPE_TO_SY_NAME`` in :mod:`nemo_switchyard._factory`.
 """
 
 from __future__ import annotations
 
-import copy
-import json
-from typing import Any, ClassVar, Literal
+from typing import Any, Literal
 
-import yaml
-from nemo_agent_optimization_plugin.strategies import PRIMARY_ARTIFACT_KEY
-from nemo_platform import NeMoPlatform
 from nemo_platform.types.inference.middleware_call_param import MiddlewareCallParam
 from nemo_platform.types.inference.virtual_model_inference_config_param import VirtualModelInferenceConfigParam
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.run_dependencies import LocalRunError
 from pydantic import BaseModel, Field
 
 RESULT_NAME = "switchyard_results"
@@ -39,7 +31,7 @@ DEFAULT_BACKEND_FORMAT: PlatformBackendFormat = "OPENAI_CHAT"
 #: entries against the uppercase enum, while ``RandomRoutingFactory.validate`` parses the
 #: middleware ``config`` with switchyard's lowercase ``BackendFormat``. Mirrors
 #: ``_NEMO_TO_SWITCHYARD_FORMAT`` in :mod:`nemo_switchyard._format`, duplicated here so that
-#: loading this strategy (which ``nemo agents optimize`` does for every run) does not import
+#: loading this job (which ``nemo agents optimize`` does for every run) does not import
 #: the openai/anthropic SDKs that module pulls in transitively.
 _PLATFORM_TO_SWITCHYARD_FORMAT: dict[str, str] = {
     "OPENAI_CHAT": "openai",
@@ -74,73 +66,6 @@ class SwitchyardConfig(BaseModel):
     strong_probability: float = Field(ge=0.0, le=1.0, description="Probability of routing to the strong tier.")
     rng_seed: int | None = Field(default=None, description="Seed for deterministic routing; None uses a fresh RNG.")
     enable_stats: bool = Field(default=False, description="Record per-tier routing stats in the gateway.")
-
-
-class SwitchyardOptimizationStrategy:
-    """Point a Fabric agent's model at a Switchyard-routed VirtualModel."""
-
-    name: ClassVar[str] = "switchyard"
-
-    def validate_config(self, config: dict[str, Any], *, agent: str | None) -> None:
-        if agent is None:
-            raise ValueError("The switchyard strategy requires --agent.")
-        SwitchyardConfig.model_validate(config)
-
-    def run(
-        self,
-        *,
-        agent_config: dict[str, Any] | None,
-        source_agent_config: dict[str, Any] | None = None,
-        config: dict[str, Any],
-        ctx: JobContext,
-        workspace: str,
-        sdk: NeMoPlatform | None = None,
-    ) -> dict[str, Any]:
-        parsed = SwitchyardConfig.model_validate(config)
-        if agent_config is None:
-            raise LocalRunError("The switchyard strategy requires --agent: it rewrites an agent's model parameter.")
-        if sdk is None:
-            raise LocalRunError(
-                "The switchyard strategy creates a VirtualModel on the platform, which requires a platform "
-                "SDK ('sdk: NeMoPlatform'). Set NMP_BASE_URL or pass sdk via NemoJobScheduler.run_local(sdk=...)."
-            )
-
-        virtual_model = sdk.inference.virtual_models.create(
-            workspace=workspace,
-            name=parsed.virtual_model,
-            models=_virtual_model_entries(parsed),
-            request_middleware=[_routing_middleware(parsed)],
-            exist_ok=True,
-        )
-
-        # `VirtualModel.name` is Optional[str] in the generated SDK, so falling back to the name we
-        # asked for keeps this from silently producing a "<workspace>/None" model reference.
-        # `exist_ok=True` returns the existing VirtualModel under that same name, so the requested
-        # name is canonical either way.
-        routed_model = f"{workspace}/{virtual_model.name or parsed.virtual_model}"
-        optimized_config = copy.deepcopy(source_agent_config or agent_config)
-        if not _rewrite_model(optimized_config, routed_model):
-            raise LocalRunError(
-                f"The switchyard strategy found no model parameter to rewrite in the agent config: "
-                f"neither 'models.default.model' nor any 'harnesses.<name>.model' block is present. "
-                f"VirtualModel {routed_model!r} was created before this check, so fixing the agent "
-                f"config and re-running is safe — the VirtualModel is reused, not duplicated."
-            )
-
-        output_dir = ctx.storage.persistent / "results" / RESULT_NAME
-        output_dir.mkdir(parents=True, exist_ok=True)
-        optimized_path = output_dir / "optimized_config.yml"
-        optimized_path.write_text(yaml.safe_dump(optimized_config, sort_keys=False), encoding="utf-8")
-
-        summary = {
-            "status": "completed",
-            "strategy": self.name,
-            "virtual_model": routed_model,
-            "optimized_config": optimized_path.name,
-        }
-        (output_dir / "switchyard_summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-        ref = ctx.results.save(RESULT_NAME, output_dir)
-        return {**summary, "result": ref.model_dump(mode="json"), PRIMARY_ARTIFACT_KEY: str(optimized_path)}
 
 
 def _routing_middleware(parsed: SwitchyardConfig) -> MiddlewareCallParam:

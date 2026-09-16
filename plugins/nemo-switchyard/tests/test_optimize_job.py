@@ -1,24 +1,24 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the ``switchyard`` ``nemo agents optimize`` strategy."""
+"""Tests for the ``switchyard`` agent-optimize job."""
 
 from __future__ import annotations
 
-from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any, get_args
 
 import pytest
-import yaml
-from nemo_agent_optimization_plugin.strategies import PRIMARY_ARTIFACT_KEY, OptimizationStrategy
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_switchyard.optimization_strategy import (
+from nemo_platform_plugin.run_dependencies import LocalRunError
+from nemo_switchyard.jobs.optimize import SwitchyardOptimizeJob
+from nemo_switchyard.routing import (
     _PLATFORM_TO_SWITCHYARD_FORMAT,
     PlatformBackendFormat,
-    SwitchyardOptimizationStrategy,
+    SwitchyardConfig,
 )
+from pydantic import ValidationError
 
 
 class _FakeVirtualModel:
@@ -60,14 +60,6 @@ def ctx(tmp_path: Path) -> JobContext:
     )
 
 
-def _agent_config() -> dict[str, Any]:
-    return {
-        "schema_version": "fabric.agent/v1alpha1",
-        "name": "my-agent",
-        "models": {"default": {"provider": "nvidia", "model": "my-ws/llama-strong"}},
-    }
-
-
 def _source_agent_config() -> dict[str, Any]:
     return {
         "config_format": "nemo-agents-spec-v1",
@@ -92,48 +84,32 @@ def _config() -> dict[str, Any]:
     }
 
 
-def test_strategy_is_registered_as_an_optimization_entrypoint() -> None:
-    entry = next(entry for entry in entry_points(group="nemo.optimization-strategy") if entry.name == "switchyard")
-
-    assert entry.load() is SwitchyardOptimizationStrategy
+def test_the_job_declares_its_strategy() -> None:
+    assert SwitchyardOptimizeJob.strategy == "switchyard"
 
 
-def test_satisfies_optimization_strategy_protocol() -> None:
-    assert isinstance(SwitchyardOptimizationStrategy(), OptimizationStrategy)
+def test_the_job_declares_its_task_module() -> None:
+    assert SwitchyardOptimizeJob.task_module == "nemo_switchyard.tasks.agent_optimize"
 
 
-def test_name_is_switchyard() -> None:
-    assert SwitchyardOptimizationStrategy().name == "switchyard"
+def test_switchyard_config_rejects_missing_weak_tier() -> None:
+    with pytest.raises(ValidationError):
+        SwitchyardConfig.model_validate({"virtual_model": "r", "strong": {"model": "a"}})
 
 
-def test_validate_config_rejects_missing_agent() -> None:
-    with pytest.raises(ValueError, match="--agent"):
-        SwitchyardOptimizationStrategy().validate_config(_config(), agent=None)
+def test_switchyard_config_rejects_probability_out_of_range() -> None:
+    with pytest.raises(ValidationError):
+        SwitchyardConfig.model_validate({**_config(), "strong_probability": 1.5})
 
 
-def test_validate_config_rejects_missing_weak_tier() -> None:
-    strategy = SwitchyardOptimizationStrategy()
-    with pytest.raises(ValueError):
-        strategy.validate_config({"virtual_model": "r", "strong": {"model": "a"}}, agent="my-agent")
+def test_switchyard_config_accepts_a_complete_config() -> None:
+    SwitchyardConfig.model_validate(_config())
 
 
-def test_validate_config_rejects_probability_out_of_range() -> None:
-    strategy = SwitchyardOptimizationStrategy()
-    bad = {**_config(), "strong_probability": 1.5}
-    with pytest.raises(ValueError):
-        strategy.validate_config(bad, agent="my-agent")
-
-
-def test_validate_config_accepts_a_complete_config() -> None:
-    SwitchyardOptimizationStrategy().validate_config(_config(), agent="my-agent")
-
-
-def test_run_creates_virtual_model_with_switchyard_middleware(ctx: JobContext) -> None:
+def test_optimize_creates_virtual_model_with_switchyard_middleware(ctx: JobContext) -> None:
     sdk = _FakeSdk()
-    strategy = SwitchyardOptimizationStrategy()
-    result = strategy.run(
-        agent_config=_agent_config(),
-        source_agent_config=None,
+    optimized = SwitchyardOptimizeJob().optimize(
+        source_agent_config=_source_agent_config(),
         config=_config(),
         ctx=ctx,
         workspace="my-ws",
@@ -151,19 +127,15 @@ def test_run_creates_virtual_model_with_switchyard_middleware(ctx: JobContext) -
     assert middleware["config"]["strong"]["model"] == "my-ws/llama-strong"
     assert middleware["config"]["weak"]["model"] == "my-ws/llama-weak"
     assert middleware["config"]["strong_probability"] == 0.3
-    assert result["status"] == "completed"
-    assert result["strategy"] == "switchyard"
-    assert result["virtual_model"] == "my-ws/my-agent-router"
-    assert result["result"]["name"] == "switchyard_results"
+    assert optimized["models"]["default"]["model"] == "my-ws/my-agent-router"
 
 
-def test_run_uses_each_backend_format_vocabulary_where_it_belongs(ctx: JobContext) -> None:
+def test_optimize_uses_each_backend_format_vocabulary_where_it_belongs(ctx: JobContext) -> None:
     """IGW's ``models`` list is uppercase; switchyard's tier config is lowercase."""
     sdk = _FakeSdk()
     config = {**_config(), "weak": {"model": "my-ws/claude-weak", "backend_format": "ANTHROPIC_MESSAGES"}}
-    SwitchyardOptimizationStrategy().run(
-        agent_config=_agent_config(),
-        source_agent_config=None,
+    SwitchyardOptimizeJob().optimize(
+        source_agent_config=_source_agent_config(),
         config=config,
         ctx=ctx,
         workspace="my-ws",
@@ -185,9 +157,8 @@ def test_middleware_config_validates_against_the_real_switchyard_factory(ctx: Jo
     from switchyard.lib.factories.random_routing.factory import RandomRoutingFactory
 
     sdk = _FakeSdk()
-    SwitchyardOptimizationStrategy().run(
-        agent_config=_agent_config(),
-        source_agent_config=None,
+    SwitchyardOptimizeJob().optimize(
+        source_agent_config=_source_agent_config(),
         config={**_config(), "rng_seed": 7},
         ctx=ctx,
         workspace="my-ws",
@@ -204,73 +175,64 @@ def test_middleware_config_validates_against_the_real_switchyard_factory(ctx: Jo
     assert validated.rng_seed == 7
 
 
-def test_run_rewrites_agent_model_to_the_virtual_model(ctx: JobContext) -> None:
-    strategy = SwitchyardOptimizationStrategy()
-    result = strategy.run(
-        agent_config=_agent_config(),
-        source_agent_config=None,
+def test_optimize_rewrites_the_default_model_when_no_harnesses_are_present(ctx: JobContext) -> None:
+    source = {
+        "config_format": "nemo-agents-spec-v1",
+        "name": "my-agent",
+        "models": {"default": {"provider": "nvidia", "model": "my-ws/llama-strong"}},
+    }
+    optimized = SwitchyardOptimizeJob().optimize(
+        source_agent_config=source,
         config=_config(),
         ctx=ctx,
         workspace="my-ws",
         sdk=_FakeSdk(),
     )
 
-    written = yaml.safe_load(Path(result[PRIMARY_ARTIFACT_KEY]).read_text(encoding="utf-8"))
-    assert written["models"]["default"]["model"] == "my-ws/my-agent-router"
-    assert result[PRIMARY_ARTIFACT_KEY] == str(
-        ctx.storage.persistent / "results" / "switchyard_results" / "optimized_config.yml"
-    )
+    assert optimized["models"]["default"]["model"] == "my-ws/my-agent-router"
 
 
-def test_run_rewrites_the_source_config_including_its_harness_model(ctx: JobContext) -> None:
-    agent_config = _agent_config()
-    source_agent_config = _source_agent_config()
-    result = SwitchyardOptimizationStrategy().run(
-        agent_config=agent_config,
-        source_agent_config=source_agent_config,
+def test_optimize_rewrites_the_source_config_including_its_harness_model(ctx: JobContext) -> None:
+    source = _source_agent_config()
+    optimized = SwitchyardOptimizeJob().optimize(
+        source_agent_config=source,
         config=_config(),
         ctx=ctx,
         workspace="my-ws",
         sdk=_FakeSdk(),
     )
 
-    written = yaml.safe_load(Path(result[PRIMARY_ARTIFACT_KEY]).read_text(encoding="utf-8"))
-    assert written["config_format"] == "nemo-agents-spec-v1"
-    assert written["models"]["default"]["model"] == "my-ws/my-agent-router"
-    assert written["harnesses"]["deepagents"]["model"]["model"] == "my-ws/my-agent-router"
-    # The caller's mappings are inputs, not scratch space.
-    assert source_agent_config["models"]["default"]["model"] == "my-ws/llama-strong"
-    assert agent_config["models"]["default"]["model"] == "my-ws/llama-strong"
+    assert optimized["models"]["default"]["model"] == "my-ws/my-agent-router"
+    assert optimized["harnesses"]["deepagents"]["model"]["model"] == "my-ws/my-agent-router"
+    # The caller's mapping is an input, not scratch space.
+    assert source["models"]["default"]["model"] == "my-ws/llama-strong"
 
 
-def test_run_rewrites_a_harness_only_config(ctx: JobContext) -> None:
+def test_optimize_rewrites_a_harness_only_config(ctx: JobContext) -> None:
     """A harness model block alone is a rewrite target; no ``models.default`` is fine."""
-    source_agent_config = {
+    source = {
         "config_format": "nemo-agents-spec-v1",
         "name": "my-agent",
         "default_harness": "deepagents",
         "harnesses": {"deepagents": {"kind": "deepagents", "model": {"model": "my-ws/llama-strong"}}},
     }
-    result = SwitchyardOptimizationStrategy().run(
-        agent_config=_agent_config(),
-        source_agent_config=source_agent_config,
+    optimized = SwitchyardOptimizeJob().optimize(
+        source_agent_config=source,
         config=_config(),
         ctx=ctx,
         workspace="my-ws",
         sdk=_FakeSdk(),
     )
 
-    written = yaml.safe_load(Path(result[PRIMARY_ARTIFACT_KEY]).read_text(encoding="utf-8"))
-    assert written["harnesses"]["deepagents"]["model"]["model"] == "my-ws/my-agent-router"
+    assert optimized["harnesses"]["deepagents"]["model"]["model"] == "my-ws/my-agent-router"
 
 
-def test_run_refuses_to_report_success_when_no_model_parameter_was_rewritten(ctx: JobContext) -> None:
+def test_optimize_refuses_to_report_success_when_no_model_parameter_was_rewritten(ctx: JobContext) -> None:
     """Returning the input unchanged as a "completed" optimization would be a silent failure."""
     unrecognized = {"config_format": "nemo-agents-spec-v1", "name": "my-agent", "models": {"judge": {"model": "x"}}}
-    with pytest.raises(Exception, match=r"models\.default\.model"):
-        SwitchyardOptimizationStrategy().run(
-            agent_config=unrecognized,
-            source_agent_config=None,
+    with pytest.raises(LocalRunError, match=r"models\.default\.model"):
+        SwitchyardOptimizeJob().optimize(
+            source_agent_config=unrecognized,
             config=_config(),
             ctx=ctx,
             workspace="my-ws",
@@ -282,41 +244,15 @@ def test_every_platform_backend_format_has_a_switchyard_mapping() -> None:
     assert set(_PLATFORM_TO_SWITCHYARD_FORMAT) == set(get_args(PlatformBackendFormat))
 
 
-def test_run_falls_back_to_the_requested_name_when_the_sdk_returns_none(ctx: JobContext) -> None:
+def test_optimize_falls_back_to_the_requested_name_when_the_sdk_returns_none(ctx: JobContext) -> None:
     """``VirtualModel.name`` is ``Optional[str]``; a ``None`` must not become "my-ws/None"."""
     sdk = _FakeSdk(_FakeVirtualModels(returned_name=None, use_requested_name=False))
-    result = SwitchyardOptimizationStrategy().run(
-        agent_config=_agent_config(),
-        source_agent_config=None,
+    optimized = SwitchyardOptimizeJob().optimize(
+        source_agent_config=_source_agent_config(),
         config=_config(),
         ctx=ctx,
         workspace="my-ws",
         sdk=sdk,
     )
 
-    assert result["virtual_model"] == "my-ws/my-agent-router"
-
-
-def test_run_without_an_agent_is_a_clear_error(ctx: JobContext) -> None:
-    with pytest.raises(Exception, match="--agent"):
-        SwitchyardOptimizationStrategy().run(
-            agent_config=None,
-            source_agent_config=None,
-            config=_config(),
-            ctx=ctx,
-            workspace="my-ws",
-            sdk=_FakeSdk(),
-        )
-
-
-def test_run_without_sdk_is_a_clear_error(ctx: JobContext) -> None:
-    strategy = SwitchyardOptimizationStrategy()
-    with pytest.raises(Exception, match="SDK"):
-        strategy.run(
-            agent_config=_agent_config(),
-            source_agent_config=None,
-            config=_config(),
-            ctx=ctx,
-            workspace="my-ws",
-            sdk=None,
-        )
+    assert optimized["models"]["default"]["model"] == "my-ws/my-agent-router"

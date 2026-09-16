@@ -23,8 +23,8 @@ nemo-platform = { workspace = true }
 [project.entry-points."nemo.inference_middleware"]
 nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 
-[project.entry-points."nemo.optimization-strategy"]
-switchyard = "nemo_switchyard.optimization_strategy:SwitchyardOptimizationStrategy"
+[project.entry-points."nemo.jobs"]
+"switchyard.agent_optimize" = "nemo_switchyard.jobs.optimize:SwitchyardOptimizeJob"
 
 [build-system]
 requires = ["hatchling"]
