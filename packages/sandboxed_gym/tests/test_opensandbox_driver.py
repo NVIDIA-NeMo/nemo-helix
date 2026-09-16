@@ -23,6 +23,7 @@ from sandboxed_gym.backends._opensandbox_driver import (
     OpenSandboxDriver,
     _exec_identity,
     _joined_output,
+    _resource_limits,
     _resource_requests,
 )
 from sandboxed_gym.backends.base import UnsupportedEpisodeOperationError
@@ -36,6 +37,19 @@ requires_opensandbox = pytest.mark.skipif(
 
 def spec_with(**resources: object) -> SandboxSpec:
     return SandboxSpec(image="img:1", resources=SandboxResources(**resources))  # ty: ignore[invalid-argument-type]
+
+
+def test_configured_resource_limits_are_forwarded_as_strings() -> None:
+    # `resource` is the hard cap, separate from the scheduling requests. Values arrive from
+    # operator YAML, so ints must survive as the strings the SDK expects.
+    assert _resource_limits({"resource": {"cpu": 4, "memory": "12Gi"}}) == {"cpu": "4", "memory": "12Gi"}
+
+
+def test_absent_resource_limits_are_none_rather_than_empty() -> None:
+    # None lets the SDK apply its own default; an empty dict would be forwarded as a real,
+    # zero-valued limit set.
+    assert _resource_limits({}) is None
+    assert _resource_limits({"resource": {}}) is None
 
 
 def test_resources_map_onto_the_sdk_kubernetes_style_strings() -> None:
