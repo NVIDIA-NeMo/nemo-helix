@@ -28,24 +28,23 @@ The result and bundle are the same as the
 
 This runner is **not** zero-dependency. It needs:
 
-- **The harness adapters**, from the `fabric` extra:
+- **The harness adapters and their runtime dependencies**, from the `fabric`
+  extra:
 
   ```bash
   uv sync --frozen --package nemo-evaluator-sdk --extra fabric --inexact
   ```
 
-- **The `nemo-relay` gateway binary**, which captures the trajectory for out-of-process harnesses.
-  The pip package ships bindings only, so the daemon comes from a GitHub release asset:
+- **Harness authentication**, when required. For example, authenticate Codex
+  before running an evaluation. The Fabric packages provide the supported
+  harness and `nemo-relay` binaries; no separate host CLI installation is
+  required.
 
-  ```bash
-  script/dev-install-fabric.sh
-  ```
-
-- **The harness's own CLI**, for `transport: cli` harnesses — `codex` on `PATH` and authenticated.
-
-The `fabric` extra installs the Codex, Claude, and Hermes adapters. The deepagents adapter is
-deliberately excluded from it, because that adapter does not support the Relay observability
-configuration Fabric streaming generates; install its harness separately if you need it.
+The `fabric` extra installs the Codex, Claude, and Hermes adapters and their
+supported runtime packages. The deepagents adapter is deliberately excluded
+from it, because that adapter does not support the Relay observability
+configuration Fabric streaming generates; install its harness separately if
+you need it.
 
 </Warning>
 

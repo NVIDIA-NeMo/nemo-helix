@@ -8,21 +8,15 @@
 This directory contains Platform-managed `nemo-agents-spec-v1` configs for
 NeMo Agents. Run the commands below from the repository root.
 
-The plugin installs Fabric, Relay Python bindings, and supported harness
-adapters. The Relay CLI is separate. Hermes is intentionally split out because the Hermes
-Agent runtime dependencies conflict with the Platform environment.
+The plugin installs Fabric, the supported harness adapter and harness packages,
+and the Relay Python bindings and CLI. Hermes is intentionally split out
+because the Hermes Agent runtime dependencies conflict with the Platform
+environment.
 
 Set the credentials required by the selected model provider. The examples use
-`NVIDIA_API_KEY`. Install and authenticate the selected harness CLI when
-required; for example, run `codex login` for Codex or complete the Claude CLI
-login flow.
-
-For Claude or Codex, install and verify the Relay CLI:
-
-```bash
-script/dev-install-fabric.sh
-nemo-relay --version
-```
+`NVIDIA_API_KEY`. Authenticate the selected harness when required; for example,
+run `codex login` for Codex or complete the Claude login flow. The Fabric
+dependencies provide the supported harness and Relay binaries.
 
 Shared agent capabilities live at the top level:
 

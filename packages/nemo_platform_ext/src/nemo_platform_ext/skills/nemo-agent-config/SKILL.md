@@ -126,8 +126,9 @@ Map only fields with a clear Platform equivalent:
 | Tool/function references | `skills.paths`, `mcp.servers`, `tools.blocked`, or harness settings when clearly supported |
 | Tracing or telemetry settings | `telemetry` |
 
-For a NAT `codex_agent` workflow, apply this mapping instead of copying the
-workflow fields into `harnesses.codex.settings`:
+For an older Codex NAT workflow that used the removed experimental adapter,
+apply this mapping instead of copying the workflow fields into
+`harnesses.codex.settings`:
 
 | NAT Codex field | Platform `agent.yaml` target |
 |---|---|
@@ -149,7 +150,9 @@ migration summary. For Codex, map `never` to `deny_all` only when
 
 If behavior does not map cleanly, say so directly and choose one:
 
-- Keep the agent on the NAT compatibility path.
+- Keep the agent on the NAT compatibility path only when all of its component
+  types are still installed. The removed experimental harness adapters cannot
+  use this option.
 - Preserve the original NAT YAML and create a partial `agent.yaml` starter for
   manual completion.
 - Mark it as requiring a custom adapter or a manual harness-specific migration.
