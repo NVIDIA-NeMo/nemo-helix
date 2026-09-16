@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import Iterable, Mapping
 from datetime import datetime
 from enum import Enum
@@ -39,9 +38,9 @@ def render_job_watch_events(
     start_time: float | None = None,
 ) -> JobWatchRenderResult:
     """Render job watch events and return the final watch result."""
+    _ = (resource_label, start_time)
     output = console or Console()
     errors = error_console or Console(stderr=True)
-    started_at = time.time() if start_time is None else start_time
     terminal_event: JobStatusEvent | None = None
     last_status_event: JobStatusEvent | None = None
 
@@ -64,8 +63,6 @@ def render_job_watch_events(
 
     if terminal_event is None:
         return JobWatchRenderResult.FAILED
-
-    _emit_terminal_job_run_event(terminal_event, resource_label=resource_label, start_time=started_at)
 
     if terminal_event.successful:
         output.print(f"Job {terminal_event.job_name!r} completed", style="green")
@@ -104,19 +101,6 @@ def _render_interrupted(console: Console, last_status_event: JobStatusEvent | No
         f"Interrupted watching job {last_status_event.job_name!r}; last known status: {status}. Exiting.",
         style="yellow",
     )
-
-
-def _emit_terminal_job_run_event(
-    event: JobStatusEvent,
-    *,
-    resource_label: str | None,
-    start_time: float,
-) -> None:
-    if resource_label is None:
-        return
-    from .waiters import _emit_job_run_event
-
-    _emit_job_run_event(event, resource_label=resource_label, status=event.status, start_time=start_time)
 
 
 def _render_status(console: Console, event: JobStatusEvent) -> None:

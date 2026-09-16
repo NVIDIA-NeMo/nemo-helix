@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from nemo_platform import APIConnectionError, APIStatusError, APITimeoutError, NotFoundError
@@ -43,20 +43,6 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 _TRANSIENT_GATEWAY_STATUS_CODES = {429, 502, 503, 504}
-_SAFE_JOB_TYPE_BUCKETS = frozenset(
-    {
-        "agent",
-        "agents",
-        "anonymizer",
-        "audit",
-        "customization",
-        "data-designer",
-        "evaluation",
-        "evaluator",
-        "insights",
-        "job",
-    }
-)
 
 
 def _pause(seconds: float) -> None:
@@ -138,90 +124,6 @@ def _seconds_since_creation(entry_timestamp: datetime | str | None, created_at: 
 
 def _status_text(status: Any) -> str:
     return str(status or "")
-
-
-def _datetime_timestamp(value: datetime | str | None) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        try:
-            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-    if not isinstance(value, datetime):
-        return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    try:
-        return value.timestamp()
-    except (TypeError, OSError):
-        return None
-
-
-def _job_duration_sec(job_status: Any, fallback_start_time: float) -> float:
-    now = time.time()
-    for attr in ("started_at", "start_time", "created_at"):
-        timestamp = _datetime_timestamp(getattr(job_status, attr, None))
-        if timestamp is not None:
-            return max(0.0, now - timestamp)
-    return max(0.0, now - fallback_start_time)
-
-
-def _model_data_bucket(raw_model: object) -> str:
-    model = str(raw_model).strip() if raw_model is not None else ""
-    return "defined" if model else "undefined"
-
-
-def _job_type_bucket(resource_label: str) -> str:
-    label = str(resource_label or "").strip().lower().replace("_", "-").replace(" ", "-")
-    return label if label in _SAFE_JOB_TYPE_BUCKETS else "custom"
-
-
-def _emit_job_run_event(job_status: Any, *, resource_label: str, status: str, start_time: float) -> None:
-    """Emit a ``job_run`` telemetry event for a terminal platform job.
-
-    Best effort: never raises and never affects the waiter's return value.
-    """
-    try:
-        from nemo_platform_ext.cli.telemetry.emit import emit_event
-        from nemo_platform_ext.cli.telemetry.events import JobRunEvent, TaskStatusEnum
-
-        status_map = {
-            "completed": TaskStatusEnum.COMPLETED,
-            "error": TaskStatusEnum.ERROR,
-            "cancelled": TaskStatusEnum.CANCELED,
-        }
-        task_status = status_map.get(status, TaskStatusEnum.UNDEFINED)
-
-        details = getattr(job_status, "status_details", None)
-        if not isinstance(details, dict):
-            details = {}
-
-        # Step names are user-controlled by PlatformJobStepSpec, even though our
-        # built-in compilers use static names like "audit-job" or "evaluate-suite".
-        # Emit only a low-cardinality bucket from command metadata.
-        job_type = _job_type_bucket(resource_label)
-
-        # Model names may be user-authored; emit only a coarse present/absent bucket.
-        model = _model_data_bucket(details.get("model"))
-        raw_input_tokens = details.get("input_tokens")
-        input_tokens = int(raw_input_tokens) if raw_input_tokens is not None else -1
-        raw_output_tokens = details.get("output_tokens")
-        output_tokens = int(raw_output_tokens) if raw_output_tokens is not None else -1
-
-        emit_event(
-            JobRunEvent(
-                task_status=task_status,
-                job_type=job_type,
-                duration_sec=_job_duration_sec(job_status, start_time),
-                plugins=[],
-                model=model,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-            )
-        )
-    except Exception:
-        logger.debug("Failed to emit job_run telemetry event", exc_info=True)
 
 
 def _make_history_line(
@@ -459,9 +361,6 @@ def wait_for_platform_job(
 
                 if event.terminal:
                     live.stop()
-                    _emit_job_run_event(
-                        jobs.last_status, resource_label=resource_label, status=current_status, start_time=start_time
-                    )
                     if event.successful:
                         console.print(f"\n[green]✓ {resource_label.title()} completed![/green]")
                         return True

@@ -10,6 +10,7 @@ from typing import Annotated, Literal
 import typer
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.jobs.client import JobsClient
+from nemo_platform_plugin.jobs.telemetry import merge_job_telemetry_custom_fields
 from nemo_platform_plugin.jobs.types import JobLogsQueryParams
 
 from nemo_platform_ext.cli.core.api import build_kwargs, merge_filter_dict
@@ -184,6 +185,12 @@ def create_jobs(
 
     all_kwargs = input_payload
     state: CLIContext = ctx.obj
+    telemetry_custom_fields = state.get_job_telemetry_custom_fields()
+    if telemetry_custom_fields:
+        all_kwargs["custom_fields"] = merge_job_telemetry_custom_fields(
+            all_kwargs.get("custom_fields"),
+            telemetry_custom_fields,
+        )
     output_format = state.get_output_format(output_format)
 
     if wait and watch:

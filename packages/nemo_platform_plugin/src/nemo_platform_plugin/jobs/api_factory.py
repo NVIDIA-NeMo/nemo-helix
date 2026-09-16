@@ -74,6 +74,7 @@ from nemo_platform_plugin.jobs.spec import (
 from nemo_platform_plugin.jobs.spec import (
     StepLifecycle as PlatformJobStepLifecycle,
 )
+from nemo_platform_plugin.jobs.telemetry import stamp_job_telemetry_plugins
 from nemo_platform_plugin.jobs.types import (
     CreatePlatformJobRequest,
     JobLogsQueryParams,
@@ -995,8 +996,9 @@ def job_route_factory(
                 create_fields["description"] = request.description
             if request.ownership is not None:
                 create_fields["ownership"] = request.ownership
-            if request.custom_fields is not None:
-                create_fields["custom_fields"] = request.custom_fields
+            custom_fields = stamp_job_telemetry_plugins(request.custom_fields, service_name)
+            if custom_fields:
+                create_fields["custom_fields"] = custom_fields
             if request.project:
                 create_fields["project"] = request.project
             if request.output_location is not None:

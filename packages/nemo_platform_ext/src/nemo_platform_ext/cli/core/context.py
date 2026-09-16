@@ -209,3 +209,18 @@ class CLIContext:
             return str(self.get_sdk_context().cluster.base_url)
         except Exception:
             return default
+
+    def get_job_telemetry_custom_fields(self) -> dict[str, object]:
+        """Return anonymous telemetry custom fields for jobs created by this CLI invocation."""
+        try:
+            from nemo_platform_plugin.jobs.telemetry import build_job_telemetry_custom_fields
+
+            from nemo_platform_ext.cli.telemetry.emit import telemetry_opted_in
+            from nemo_platform_ext.cli.telemetry.session import get_session_id
+
+            if not telemetry_opted_in():
+                return {}
+            return build_job_telemetry_custom_fields(get_session_id())
+        except Exception:
+            logger.debug("Failed to resolve job telemetry custom fields", exc_info=True)
+            return {}
