@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from enum import Enum
@@ -875,6 +876,21 @@ def _agent_eval_summary_header(result: AgentEvalResult) -> str:
 _MAX_ERROR_TRIAL_IDS = 5
 
 
+def _error_messages_by_occurrence(trials: Sequence[AgentEvalTrial]) -> dict[tuple[str, str], deque[str | None]]:
+    """Error messages keyed by ``(error type, trial id)``, each key holding every occurrence in order.
+
+    Trial ids are not unique -- Gym derives them from a rollout index in two separate loops -- and
+    ``error_trial_ids`` preserves each occurrence rather than deduplicating. Keying on the id alone
+    would let a later duplicate supply the message for an earlier one, printed under an error type
+    that trial never had.
+    """
+    messages: dict[tuple[str, str], deque[str | None]] = {}
+    for trial in trials:
+        if trial.error is not None:
+            messages.setdefault((trial.error.type, trial.id), deque()).append(trial.error.message)
+    return messages
+
+
 def _format_trial_errors(result: AgentEvalResult) -> list[str]:
     """Render the failed-trial section: what failed, how often, and where to read the rest.
 
@@ -886,7 +902,7 @@ def _format_trial_errors(result: AgentEvalResult) -> list[str]:
     if not error_trial_ids:
         return []
 
-    trials_by_id = {trial.id: trial for trial in result.trials}
+    messages = _error_messages_by_occurrence(result.trials)
     failed = result.summary.error_count
     parts = [
         "",
@@ -901,9 +917,10 @@ def _format_trial_errors(result: AgentEvalResult) -> list[str]:
             line += f", ... ({len(trial_ids) - len(shown)} more)"
         parts.append(line)
         for trial_id in shown:
-            trial = trials_by_id.get(trial_id)
-            if trial is not None and trial.error is not None and trial.error.message:
-                parts.append(f"    {trial_id}: {trial.error.message}")
+            occurrences = messages.get((error_type, trial_id))
+            message = occurrences.popleft() if occurrences else None
+            if message:
+                parts.append(f"    {trial_id}: {message}")
     if result.work_dir is not None:
         parts.append(f"  Trial evidence: {result.work_dir}")
     return parts

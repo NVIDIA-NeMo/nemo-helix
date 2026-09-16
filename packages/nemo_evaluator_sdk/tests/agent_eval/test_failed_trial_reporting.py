@@ -130,3 +130,29 @@ def test_a_summary_without_its_trials_states_the_count_without_a_false_denominat
 
     assert "Failed trials (3)" in rendered
     assert "of 0" not in rendered
+
+
+def test_trials_sharing_an_id_each_keep_their_own_message_and_error_type() -> None:
+    # Trial ids are not unique (Gym derives them from a rollout index in two separate loops) and the
+    # rollup preserves every occurrence. Keying messages by id alone let the last duplicate's text be
+    # printed for an earlier one, under an error type that trial never had.
+    result = _result(
+        _trial("t0", error_type="RuntimeError", message="adapter missing"),
+        _trial("t0", error_type="TimeoutError", message="timed out"),
+    )
+
+    rendered = result.format_summary()
+
+    assert "RuntimeError (1): t0\n    t0: adapter missing" in rendered
+    assert "TimeoutError (1): t0\n    t0: timed out" in rendered
+
+
+def test_repeated_occurrences_of_one_error_type_are_consumed_in_trial_order() -> None:
+    result = _result(
+        _trial("t0", error_type="RuntimeError", message="first"),
+        _trial("t0", error_type="RuntimeError", message="second"),
+    )
+
+    rendered = result.format_summary()
+
+    assert "RuntimeError (2): t0, t0\n    t0: first\n    t0: second" in rendered

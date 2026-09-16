@@ -413,6 +413,11 @@ class AggregateScalarScore(AggregateScoreBase):
 
     @property
     def headline_value(self) -> float | None:
+        """The reported ``value``, overriding :attr:`AggregateScoreBase.headline_value`.
+
+        The base returns ``mean``, which is ``None`` on a scalar score: there is no distribution
+        behind it. Without this override every backend-reported figure would read as absent.
+        """
         return self.value
 
     _include_fields: frozenset[str] | None = None
