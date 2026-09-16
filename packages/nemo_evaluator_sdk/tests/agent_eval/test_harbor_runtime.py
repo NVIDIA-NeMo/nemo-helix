@@ -803,10 +803,18 @@ async def test_run_refuses_credentials_injected_after_validation(tmp_path: Path)
         update={"agent_kwargs": {"api_key": "nvapi-not-a-real-key"}}
     )
 
-    _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="j")
+    completed = tmp_path / "jobs" / "j" / "trial"
+    completed.mkdir(parents=True)
+    (completed / "result.json").write_text("{}", encoding="utf-8")
+    _, run_job = _build_native_job(
+        config.model_copy(update={"force_rerun": True}), tmp_path / "dataset", None, job_name="j"
+    )
 
     with pytest.raises(ValueError, match="api_key"):
         await run_job()
+
+    # The guard runs before `force_rerun` clears the job dir: refusing must not cost completed trials.
+    assert (completed / "result.json").exists()
 
 
 def test_runtime_config_accepts_kwargs_that_only_look_credential_shaped() -> None:

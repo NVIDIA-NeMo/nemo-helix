@@ -862,6 +862,10 @@ def _build_native_job(
     effective_force_rerun = config.force_rerun if force_rerun is None else force_rerun
 
     async def run_job() -> None:
+        # First, ahead of the Harbor import and the force_rerun rmtree below. Not redundant with the
+        # field validator: `model_copy(update=...)` skips validators, and a run that refuses after
+        # deleting the job dir has destroyed completed trials to reach the same refusal.
+        require_no_plaintext_credentials(config.agent_kwargs, field="agent_kwargs", alternative="agent_env_from_host")
         try:
             from harbor.job import DatasetConfig, Job, JobConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
             from harbor.models.job.config import RetryConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
@@ -944,8 +948,6 @@ def _build_native_job(
                 shutil.rmtree(job_dir)
                 await _attempt()
 
-        # Not redundant with the field validator: `model_copy(update=...)` skips validators.
-        require_no_plaintext_credentials(config.agent_kwargs, field="agent_kwargs", alternative="agent_env_from_host")
         agent_options: dict[str, Any] = {
             "model_name": config.agent_model_name,
             "kwargs": dict(config.agent_kwargs),

@@ -270,6 +270,29 @@ def test_credential_shaped_settings_covers_the_credentials_a_caller_can_forward(
     assert credential_shaped_settings(settings) == expected
 
 
+def test_gym_redacts_a_token_shaped_value_under_an_innocuous_key() -> None:
+    # Gym has no rejection guard: `env_vars` and `hydra_params` are recorded, not refused. So a
+    # credential under a key the caller invented is caught only by the shape of the value, and
+    # redaction has to recognise the same shapes the Harbor config edge refuses.
+    from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
+
+    runner = GymAgentTaskRunner(
+        config=GymRuntimeConfig(
+            agent="a",
+            agent_config="c",
+            resources_server="r",
+            env_vars={"MY_SVC_CRED": "nvapi-should-not-be-recorded", "GYM_MODE": "fast"},
+            hydra_params={"model": {"creds": ["nvapi-should-not-be-recorded"], "temperature": 0.7}},
+        )
+    )
+
+    recorded = runner.runner_info().config
+
+    assert recorded["env_vars"] == {"MY_SVC_CRED": "<redacted>", "GYM_MODE": "fast"}
+    assert recorded["hydra_params"] == {"model": {"creds": ["<redacted>"], "temperature": 0.7}}
+    assert "should-not-be-recorded" not in json.dumps(recorded)
+
+
 def test_harbor_agent_kwargs_cannot_carry_a_credential_into_the_run_bundle() -> None:
     # Unlike Gym's hydra_params, redacting is not enough here: Harbor persists the same kwargs across
     # its own job dir, which the SDK does not own. So the config refuses the value outright, and what

@@ -67,6 +67,8 @@ def redact_credentials(settings: Mapping[str, Any], _prefix: str = "") -> dict[s
             redacted[key] = _REDACTED
         elif isinstance(value, (list, tuple)):
             redacted[key] = [_redact_list_item(item, path) for item in value]
+        elif is_credential_value(value):
+            redacted[key] = _REDACTED
         else:
             redacted[key] = value
     return redacted
@@ -78,7 +80,7 @@ def _redact_list_item(item: Any, path: str) -> Any:
         return redact_credentials(item, f"{path}.")
     if isinstance(item, (list, tuple)):
         return [_redact_list_item(nested, path) for nested in item]
-    return item
+    return _REDACTED if is_credential_value(item) else item
 
 
 def credential_shaped_settings(settings: Mapping[str, Any]) -> list[str]:
@@ -116,7 +118,19 @@ def _exposed_paths(path: str, value: Any) -> list[str]:
         return []
     if _SECRET_KEY_MARKER_RE.search(path.casefold()):
         return [path]
-    return [path] if len(value) >= _CREDENTIAL_VALUE_MIN_CHARS and _CREDENTIAL_VALUE.search(value) else []
+    return [path] if is_credential_value(value) else []
+
+
+def is_credential_value(value: Any) -> bool:
+    """Whether a scalar carries a recognised issued-token shape, whatever key it sits under.
+
+    Shared by detection and redaction so the two cannot drift: a value refused at a config edge must
+    also be one that never reaches the run bundle, and the runtimes that redact without refusing
+    (Gym's ``hydra_params`` and ``env_vars``) have nothing else standing between them and a leak.
+    """
+    if not isinstance(value, str) or len(value) < _CREDENTIAL_VALUE_MIN_CHARS:
+        return False
+    return not _ENV_TEMPLATE.fullmatch(value) and bool(_CREDENTIAL_VALUE.search(value))
 
 
 def require_no_plaintext_credentials(settings: Mapping[str, Any], *, field: str, alternative: str) -> None:
