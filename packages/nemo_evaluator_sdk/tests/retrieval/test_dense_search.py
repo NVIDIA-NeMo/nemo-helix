@@ -78,7 +78,60 @@ async def test_embedding_client_replaces_chat_completion_route() -> None:
 
 
 @pytest.mark.asyncio
-async def test_embedding_client_retries_non_finite_response() -> None:
+async def test_embedding_client_retries_http_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr("nemo_evaluator_sdk.retrieval.nim_embeddings.asyncio.sleep", fake_sleep)
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 4:
+            return httpx.Response(503, request=request, text="unavailable")
+        return _response(request, [[1.0, 0.0]])
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await NimEmbeddingClient(model=_model(), dimensions=2).encode(
+            ["question"],
+            input_type="query",
+            client=client,
+        )
+
+    assert attempts == 4
+    assert sleeps == [0.5, 1.0, 2.0]
+    assert result == [[1.0, 0.0]]
+
+
+@pytest.mark.asyncio
+async def test_embedding_client_does_not_retry_http_400() -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(400, request=request, text="bad request")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            await NimEmbeddingClient(model=_model(), dimensions=2).encode(
+                ["question"],
+                input_type="query",
+                client=client,
+            )
+
+    assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_embedding_client_retries_non_finite_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_sleep(delay: float) -> None:
+        del delay
+
+    monkeypatch.setattr("nemo_evaluator_sdk.retrieval.nim_embeddings.asyncio.sleep", fake_sleep)
     attempts = 0
 
     def handler(request: httpx.Request) -> httpx.Response:

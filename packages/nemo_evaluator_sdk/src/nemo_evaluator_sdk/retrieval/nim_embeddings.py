@@ -12,6 +12,7 @@ from urllib.parse import urlparse, urlunparse
 
 import httpx
 from nemo_evaluator_sdk.constants import PLACEHOLDER_INFERENCE_API_KEY
+from nemo_evaluator_sdk.retrieval.http_retry import backoff_seconds, is_retryable_error
 from nemo_evaluator_sdk.values.models import Model
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,7 +41,7 @@ class NimEmbeddingClient(BaseModel):
         input_type: InputType,
         client: httpx.AsyncClient | None = None,
     ) -> list[list[float]]:
-        """Encode ``inputs``, retrying responses containing non-finite values."""
+        """Encode ``inputs``, retrying transient HTTP failures and non-finite values."""
         if not inputs:
             return []
 
@@ -49,24 +50,30 @@ class NimEmbeddingClient(BaseModel):
             client = httpx.AsyncClient(timeout=self.timeout)
         try:
             for attempt in range(self.max_retries + 1):
-                response = await client.post(
-                    _embeddings_url(self.model.url),
-                    headers=_headers(self.model),
-                    json={
-                        "model": self.model.name,
-                        "input": inputs,
-                        "input_type": input_type,
-                        "encoding_format": "float",
-                    },
-                )
-                response.raise_for_status()
+                try:
+                    response = await client.post(
+                        _embeddings_url(self.model.url),
+                        headers=_headers(self.model),
+                        json={
+                            "model": self.model.name,
+                            "input": inputs,
+                            "input_type": input_type,
+                            "encoding_format": "float",
+                        },
+                    )
+                    response.raise_for_status()
+                except (httpx.HTTPStatusError, httpx.TransportError) as error:
+                    if not is_retryable_error(error) or attempt >= self.max_retries:
+                        raise
+                    await asyncio.sleep(backoff_seconds(attempt))
+                    continue
                 embeddings = _parse_embeddings(response, expected_count=len(inputs), dimensions=self.dimensions)
                 if embeddings and self.dimensions is None:
                     self.dimensions = len(embeddings[0])
                 if all(math.isfinite(value) for embedding in embeddings for value in embedding):
                     return embeddings
                 if attempt < self.max_retries:
-                    await asyncio.sleep(min(0.1 * 2**attempt, 1.0))
+                    await asyncio.sleep(backoff_seconds(attempt))
         finally:
             if owns_client:
                 await client.aclose()
