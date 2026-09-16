@@ -108,6 +108,205 @@ def test_upload_only_has_no_entity_calls(root, files, monkeypatch):
     assert next(iter(objects)).startswith("task/task/")
 
 
+def test_upload_only_preserves_mapped_registration_name(root, files, monkeypatch):
+    client, _ = files
+    monkeypatch.setattr("nemo_evaluator.sdk.harbor.FilesClient.from_client", lambda _: client)
+    receipt = upload_harbor_dataset(
+        root,
+        client=Mock(),
+        register=False,
+        member_names={"task": "renamed-task"},
+    )
+    assert receipt.members[0].native_name == "task"
+    assert receipt.members[0].task_name == "renamed-task"
+    assert receipt.members[0].task_ref is None
+
+
+def test_register_uploaded_dataset_creates_tasks_and_taskset(monkeypatch):
+    from types import SimpleNamespace
+
+    from nemo_evaluator.api.schemas import Task, TaskRef, Taskset, TasksetInput
+    from nemo_evaluator.sdk.harbor import (
+        HarborDatasetReceipt,
+        HarborUploadReceipt,
+        _digest,
+        register_harbor_dataset,
+    )
+    from nemo_evaluator.sdk.task_resources import EvaluatorTasksResource
+    from nemo_evaluator.sdk.taskset_resources import EvaluatorTasksetsResource
+
+    definition = HarborTaskDefinition(
+        kind="harbor",
+        source=HarborArchiveSource(fileset_ref="default/files#task_archive", files_hash="a" * 64),
+        harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
+    )
+    task = Task.model_construct(name="renamed-task", workspace="default", spec=definition, metadata=[], revision=1)
+    task_digest = _digest(TaskInput(spec=definition))
+    task_ref = TaskRef(f"default/renamed-task#{task_digest}")
+    taskset_input = TasksetInput(tasks=[task_ref])
+    taskset = Taskset.model_construct(
+        name="suite",
+        workspace="default",
+        tasks=[task_ref],
+        files_ref=None,
+        description=None,
+        metadata=[],
+        revision=1,
+    )
+    taskset_digest = _digest(taskset_input)
+
+    def page(digest):
+        return SimpleNamespace(
+            data=[SimpleNamespace(revision=1, content_hash=digest)],
+            pagination=SimpleNamespace(total_pages=1),
+        )
+
+    task_retrieve = Mock(side_effect=[NemoHTTPError(httpx.Response(404)), task, task])
+    task_create = Mock(return_value=task)
+    taskset_retrieve = Mock(side_effect=[NemoHTTPError(httpx.Response(404)), taskset])
+    taskset_create = Mock(return_value=taskset)
+    monkeypatch.setattr(EvaluatorTasksResource, "__init__", lambda self, client: None)
+    monkeypatch.setattr(EvaluatorTasksResource, "retrieve", task_retrieve)
+    monkeypatch.setattr(EvaluatorTasksResource, "create", task_create)
+    monkeypatch.setattr(EvaluatorTasksResource, "list_revisions", Mock(return_value=page(task_digest)))
+    monkeypatch.setattr(EvaluatorTasksetsResource, "__init__", lambda self, client: None)
+    monkeypatch.setattr(EvaluatorTasksetsResource, "retrieve", taskset_retrieve)
+    monkeypatch.setattr(EvaluatorTasksetsResource, "create", taskset_create)
+    monkeypatch.setattr(EvaluatorTasksetsResource, "list_revisions", Mock(return_value=page(taskset_digest)))
+    monkeypatch.setattr("nemo_evaluator.sdk.harbor.EvaluatorClient.from_client", lambda _: Mock())
+
+    receipt = HarborDatasetReceipt(
+        members=[HarborUploadReceipt(native_name="task", task_name="renamed-task", definition=definition)]
+    )
+    result = register_harbor_dataset(receipt, client=Mock(), workspace="default", taskset_name="suite")
+
+    assert result is receipt
+    assert result.taskset_ref is not None and result.taskset_ref.root == f"default/suite#{taskset_digest}"
+    assert [member.task_ref for member in result.members] == [task_ref]
+    task_create.assert_called_once()
+    taskset_create.assert_called_once()
+
+
+def test_register_uploaded_dataset_rehydrates_reused_taskset_members(monkeypatch):
+    from types import SimpleNamespace
+
+    from nemo_evaluator.api.schemas import Task, TaskRef, Taskset, TasksetInput
+    from nemo_evaluator.sdk.harbor import (
+        HarborDatasetReceipt,
+        HarborUploadReceipt,
+        _digest,
+        register_harbor_dataset,
+    )
+    from nemo_evaluator.sdk.task_resources import EvaluatorTasksResource
+    from nemo_evaluator.sdk.taskset_resources import EvaluatorTasksetsResource
+
+    def definition(seed):
+        return HarborTaskDefinition(
+            kind="harbor",
+            source=HarborArchiveSource(fileset_ref=f"default/files#{seed}", files_hash=seed * 64),
+            harbor_hash=HarborTaskHash(digest=seed * 64, harbor_version="0.20.0"),
+        )
+
+    local_definition = definition("a")
+    reused_definition = definition("b")
+    suite_definition = definition("c")
+    reused_task = Task.model_construct(
+        name="local-task", workspace="default", spec=reused_definition, metadata=[], revision=1
+    )
+    suite_task = Task.model_construct(
+        name="suite-task", workspace="default", spec=suite_definition, metadata=[], revision=1
+    )
+    reused_ref = TaskRef(f"default/local-task#{_digest(TaskInput(spec=reused_definition))}")
+    suite_ref = TaskRef(f"default/suite-task#{_digest(TaskInput(spec=suite_definition))}")
+    taskset = Taskset.model_construct(
+        name="suite",
+        workspace="default",
+        tasks=[suite_ref],
+        files_ref=None,
+        description=None,
+        metadata=[],
+        revision=1,
+    )
+    taskset_digest = _digest(TasksetInput(tasks=[suite_ref]))
+
+    tasks_by_name = {"local-task": reused_task, "suite-task": suite_task}
+    task_retrieve = Mock(side_effect=lambda name, **_: tasks_by_name[name])
+    task_create = Mock()
+    taskset_create = Mock()
+    monkeypatch.setattr(EvaluatorTasksResource, "__init__", lambda self, client: None)
+    monkeypatch.setattr(EvaluatorTasksResource, "retrieve", task_retrieve)
+    monkeypatch.setattr(EvaluatorTasksResource, "create", task_create)
+    monkeypatch.setattr(
+        EvaluatorTasksResource,
+        "list_revisions",
+        Mock(
+            side_effect=lambda name, **_: SimpleNamespace(
+                data=[SimpleNamespace(revision=1, content_hash=reused_ref.root.rsplit("#", 1)[1])],
+                pagination=SimpleNamespace(total_pages=1),
+            )
+        ),
+    )
+    monkeypatch.setattr(EvaluatorTasksetsResource, "__init__", lambda self, client: None)
+    monkeypatch.setattr(EvaluatorTasksetsResource, "retrieve", Mock(return_value=taskset))
+    monkeypatch.setattr(EvaluatorTasksetsResource, "create", taskset_create)
+    monkeypatch.setattr(
+        EvaluatorTasksetsResource,
+        "list_revisions",
+        Mock(
+            return_value=SimpleNamespace(
+                data=[SimpleNamespace(revision=1, content_hash=taskset_digest)],
+                pagination=SimpleNamespace(total_pages=1),
+            )
+        ),
+    )
+    monkeypatch.setattr("nemo_evaluator.sdk.harbor.EvaluatorClient.from_client", lambda _: Mock())
+
+    receipt = HarborDatasetReceipt(
+        members=[HarborUploadReceipt(native_name="local-task", task_name="local-task", definition=local_definition)]
+    )
+    result = register_harbor_dataset(receipt, client=Mock(), workspace="default", taskset_name="suite")
+
+    assert result.taskset_ref is not None and result.taskset_ref.root == f"default/suite#{taskset_digest}"
+    assert [(member.task_name, member.task_ref) for member in result.members] == [("suite-task", suite_ref)]
+    assert result.members[0].definition == suite_definition
+    task_create.assert_not_called()
+    taskset_create.assert_not_called()
+
+
+def test_reuse_registration_recovers_create_conflict():
+    from types import SimpleNamespace
+
+    from nemo_evaluator.api.schemas import Task
+    from nemo_evaluator.sdk.harbor import _digest, _register
+    from nemo_evaluator.sdk.task_resources import EvaluatorTasksResource
+    from nemo_platform_plugin.client.errors import ConflictError
+
+    intended = HarborTaskDefinition(
+        kind="harbor",
+        source=HarborArchiveSource(fileset_ref="default/files#intended", files_hash="a" * 64),
+        harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
+    )
+    existing = HarborTaskDefinition(
+        kind="harbor",
+        source=HarborArchiveSource(fileset_ref="default/files#existing", files_hash="c" * 64),
+        harbor_hash=HarborTaskHash(digest="d" * 64, harbor_version="0.20.0"),
+    )
+    stored = Task.model_construct(name="task", workspace="default", spec=existing, metadata=[], revision=1)
+    digest = _digest(stored)
+    resource = Mock(spec=EvaluatorTasksResource)
+    resource.retrieve.side_effect = [NemoHTTPError(httpx.Response(404)), stored]
+    resource.create.side_effect = ConflictError(httpx.Response(409))
+    resource.list_revisions.return_value = SimpleNamespace(
+        data=[SimpleNamespace(revision=1, content_hash=digest)],
+        pagination=SimpleNamespace(total_pages=1),
+    )
+
+    assert (
+        _register(resource, "task", TaskInput(spec=intended), "default", False, reuse_existing=True)
+        == f"default/task#{digest}"
+    )
+
+
 @pytest.mark.parametrize("bad", ["step", "metadata", "checksum"])
 async def test_registration_rejects_before_persistence(root, entity_store, bad):
     if bad == "step":

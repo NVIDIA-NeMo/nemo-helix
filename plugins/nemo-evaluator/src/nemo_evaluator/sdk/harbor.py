@@ -14,7 +14,7 @@ from nemo_evaluator.revisions import head_digest
 from nemo_evaluator.sdk.task_resources import EvaluatorTasksResource
 from nemo_evaluator.sdk.taskset_resources import EvaluatorTasksetsResource
 from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.client.errors import NemoClientError, NemoHTTPError
+from nemo_platform_plugin.client.errors import ConflictError, NemoClientError, NemoHTTPError
 from nemo_platform_plugin.evaluator.client import EvaluatorClient
 from nemo_platform_plugin.files.client import FilesClient
 from pydantic import BaseModel, Field
@@ -23,7 +23,10 @@ from pydantic import BaseModel, Field
 class HarborUploadReceipt(BaseModel):
     native_name: str
     definition: HarborTaskDefinition
-    task_name: str | None = None
+    task_name: str | None = Field(
+        default=None,
+        description="Target database name, available before registration so upload and registration can be separate.",
+    )
     task_ref: TaskRef | None = None
 
 
@@ -62,6 +65,8 @@ def _register(
     value: TaskInput | TasksetInput,
     workspace: str,
     replace: bool,
+    *,
+    reuse_existing: bool = False,
 ) -> str:
     intended = _digest(value)
     try:
@@ -70,7 +75,7 @@ def _register(
         if exc.status_code != 404:
             raise
         existing = None
-    if existing is not None and _digest(existing) == intended:
+    if existing is not None and (reuse_existing or _digest(existing) == intended):
         published = existing
     else:
         if existing is not None and not replace:
@@ -84,6 +89,19 @@ def _register(
                 published = operation(name, workspace=workspace, taskset=value)
             else:
                 raise TypeError("Mismatched registration resource")
+        except ConflictError:
+            if reuse_existing:
+                published = resource.retrieve(name, workspace=workspace)
+            else:
+                # A create race is only successful if history contains intended content.
+                page = 1
+                while True:
+                    history = resource.list_revisions(name, workspace=workspace, page=page)
+                    if any(item.content_hash == intended for item in history.data):
+                        return f"{workspace}/{name}#{intended}"
+                    if history.pagination is None or page >= history.pagination.total_pages:
+                        raise
+                    page += 1
         except NemoClientError:
             # A lost response or create race is only successful if history contains intended content.
             page = 1
@@ -94,14 +112,15 @@ def _register(
                 if history.pagination is None or page >= history.pagination.total_pages:
                     raise
                 page += 1
-    if _digest(published) != intended:
+    published_digest = _digest(published)
+    if not reuse_existing and published_digest != intended:
         raise ValueError("Publication response differs from intended content")
     page = 1
     while True:
         history = resource.list_revisions(name, workspace=workspace, page=page)
         for revision in history.data:
             if revision.revision == published.revision:
-                if revision.content_hash != intended:
+                if revision.content_hash != published_digest:
                     raise ValueError("Published revision content mismatch")
                 return f"{workspace}/{name}#{revision.content_hash}"
         if history.pagination is None or page >= history.pagination.total_pages:
@@ -129,7 +148,7 @@ def upload_harbor_task(
         fileset_ref=fileset_ref or f"{workspace}/harbor-tasks",
         path_prefix=path_prefix,
     )
-    receipt = HarborUploadReceipt(native_name=root.name, definition=definition)
+    receipt = HarborUploadReceipt(native_name=root.name, definition=definition, task_name=name)
     if register:
         try:
             pin = _register(
@@ -139,7 +158,7 @@ def upload_harbor_task(
                 workspace,
                 replace,
             )
-            receipt.task_name, receipt.task_ref = name, TaskRef(pin)
+            receipt.task_ref = TaskRef(pin)
         except Exception as exc:
             raise HarborUploadError(
                 f"Task registration failed: {name}", HarborDatasetReceipt(members=[receipt])
@@ -243,3 +262,88 @@ def upload_harbor_dataset(
                 "Dataset upload/registration incomplete; completed members are retained", result
             ) from exc
     return result
+
+
+def register_harbor_dataset(
+    receipt: HarborDatasetReceipt,
+    *,
+    client: NemoClient,
+    taskset_name: str,
+    workspace: str = "default",
+) -> HarborDatasetReceipt:
+    """Register an uploaded dataset, reusing existing Tasks and Tasksets by name.
+
+    The returned receipt always describes the exact pinned members of the registered or reused
+    Taskset. Completed member pins remain on ``receipt`` if registration fails partway through.
+    """
+    TasksetRef(f"{workspace}/{taskset_name}")
+    if not receipt.members:
+        raise ValueError("Dataset receipt has no tasks")
+
+    evaluator_client = EvaluatorClient.from_client(client)
+    tasks = EvaluatorTasksResource(evaluator_client)
+    tasksets = EvaluatorTasksetsResource(evaluator_client)
+
+    def retrieve_harbor_task(ref: TaskRef) -> tuple[str, HarborTaskDefinition]:
+        address, separator, revision = ref.root.partition("#")
+        task_workspace, task_name = address.split("/", 1)
+        task = tasks.retrieve(
+            task_name,
+            workspace=task_workspace,
+            revision=revision if separator else None,
+        )
+        if not isinstance(task.spec, HarborTaskDefinition):
+            raise ValueError(f"Taskset member {ref.root} is not a Harbor task")
+        return task.name, task.spec
+
+    try:
+        refs: list[TaskRef] = []
+        for member in receipt.members:
+            name = member.task_name or member.native_name
+            member.task_name = name
+            member.task_ref = TaskRef(
+                _register(
+                    tasks,
+                    name,
+                    TaskInput(spec=member.definition),
+                    workspace,
+                    False,
+                    reuse_existing=True,
+                )
+            )
+            _, member.definition = retrieve_harbor_task(member.task_ref)
+            refs.append(member.task_ref)
+
+        taskset_ref = TasksetRef(
+            _register(
+                tasksets,
+                taskset_name,
+                TasksetInput(tasks=sorted(refs, key=lambda ref: ref.root)),
+                workspace,
+                False,
+                reuse_existing=True,
+            )
+        )
+        _, _, revision = taskset_ref.root.partition("#")
+        taskset = tasksets.retrieve(taskset_name, workspace=workspace, revision=revision)
+
+        attempted = {member.task_ref.root: member for member in receipt.members if member.task_ref is not None}
+        effective_members = []
+        for task_ref in taskset.tasks:
+            task_name, definition = retrieve_harbor_task(task_ref)
+            member = attempted.get(task_ref.root)
+            if member is None:
+                member = HarborUploadReceipt(
+                    native_name=task_name,
+                    definition=definition,
+                    task_name=task_name,
+                    task_ref=task_ref,
+                )
+            else:
+                member.definition = definition
+            effective_members.append(member)
+        receipt.members = effective_members
+        receipt.taskset_ref = taskset_ref
+    except Exception as exc:
+        raise HarborUploadError("Dataset registration incomplete; completed members are retained", receipt) from exc
+    return receipt
