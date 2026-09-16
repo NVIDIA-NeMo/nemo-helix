@@ -4,6 +4,7 @@
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { entityStoreBaseModel1 } from '@studio/mocks/entity-store/models';
 import { render, renderRoute, screen } from '@studio/tests/util/render';
+import userEvent from '@testing-library/user-event';
 
 import { ModelChat } from '.';
 
@@ -45,6 +46,28 @@ describe('ModelChat', () => {
 
     expect(await screen.findByText('Tell me a story')).toBeInTheDocument();
     expect(await screen.findByText('Once upon a time...')).toBeInTheDocument();
+  });
+
+  it('offers a reasoning toggle that starts on', async () => {
+    render(<ModelChat model={modelName} />);
+
+    expect(await screen.findByRole('switch', { name: /Reasoning/i })).toBeChecked();
+  });
+
+  it('turns reasoning off when the toggle is clicked', async () => {
+    const user = userEvent.setup();
+    render(<ModelChat model={modelName} />);
+
+    await user.click(await screen.findByRole('switch', { name: /Reasoning/i }));
+
+    expect(screen.getByRole('switch', { name: /Reasoning/i })).not.toBeChecked();
+  });
+
+  it('hides the reasoning toggle when the caller opts out', async () => {
+    render(<ModelChat model={modelName} showReasoningToggle={false} />);
+
+    expect(await screen.findByPlaceholderText(`Message ${modelName}`)).toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: /Reasoning/i })).not.toBeInTheDocument();
   });
 
   it('disables the composer when modelChatStatus is not enabled', async () => {

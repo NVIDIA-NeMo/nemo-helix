@@ -10,7 +10,9 @@ import type { AssistantMessageCompletion } from '@nemo/common/src/components/Ass
 import type { ResourceRef } from '@nemo/common/src/types';
 import { handleGenericError } from '@nemo/common/src/utils/logger';
 import type { ModelChatStatus } from '@nemo/common/src/utils/models';
+import { Flex } from '@nvidia/foundations-react-core';
 import { DEFAULT_SEED_QUESTIONS } from '@studio/components/chat/defaultSeedQuestions';
+import { ReasoningToggle } from '@studio/components/chat/ReasoningToggle';
 import { SeedQuestions } from '@studio/components/chat/SeedQuestions';
 import { StatsBadge, type ChatMetrics } from '@studio/components/chat/StatsBadge';
 import { DeployModelCta } from '@studio/components/ModelChat/DeployModelCta';
@@ -49,6 +51,8 @@ interface ModelChatProps extends Pick<
   seedQuestions?: string[];
   /** When false, hides the per-response StatsBadge. Default true. */
   showMetrics?: boolean;
+  /** When false, hides the reasoning toggle. Default true. */
+  showReasoningToggle?: boolean;
   /** Rendered right-aligned at the trailing end of the seed-questions row. */
   slotComposerEnd?: ReactNode;
   /** When triggerCount changes, pre-fills the panel's composer textarea with text. */
@@ -97,6 +101,7 @@ export const ModelChat: FC<ModelChatProps> = ({
   promptData,
   seedQuestions = DEFAULT_SEED_QUESTIONS,
   showMetrics = true,
+  showReasoningToggle = true,
   slotComposerEnd,
   composerSeed,
   onEmptyChange,
@@ -184,8 +189,27 @@ export const ModelChat: FC<ModelChatProps> = ({
   const metricsInComposer = showMetrics && latestMetrics && !isBroadcastAll;
   const metricsBelow = showMetrics && latestMetrics && isBroadcastAll;
 
+  // Resets with the panel: a run that skipped reasoning should not silently
+  // outlive the session that asked for it.
+  const [reasoningEnabled, setReasoningEnabled] = useState(true);
+  const reasoningToggleInComposer = showReasoningToggle && !isBroadcastAll;
+
+  const composerEndSlot =
+    reasoningToggleInComposer || slotComposerEnd ? (
+      <Flex align="center" gap="density-md">
+        {slotComposerEnd}
+        {reasoningToggleInComposer && (
+          <ReasoningToggle
+            checked={reasoningEnabled}
+            onCheckedChange={setReasoningEnabled}
+            disabled={resolvedDisabled}
+          />
+        )}
+      </Flex>
+    ) : undefined;
+
   const chatSeedSlot =
-    showChatSeeds || metricsInComposer || (slotComposerEnd && !isBroadcastAll) ? (
+    showChatSeeds || metricsInComposer || (composerEndSlot && !isBroadcastAll) ? (
       <SeedQuestions
         questions={showChatSeeds ? seedQuestions : []}
         onSelect={seedComposer}
@@ -193,7 +217,7 @@ export const ModelChat: FC<ModelChatProps> = ({
         slotStart={
           metricsInComposer && latestMetrics ? <StatsBadge metrics={latestMetrics} /> : undefined
         }
-        slotEnd={slotComposerEnd}
+        slotEnd={composerEndSlot}
       />
     ) : undefined;
 
@@ -208,6 +232,7 @@ export const ModelChat: FC<ModelChatProps> = ({
           emptyState={resolvedEmptyState}
           onError={onError ?? handleGenericError}
           promptData={promptData}
+          reasoningEnabled={reasoningEnabled}
           onMessageComplete={handleMessageComplete}
           onEmptyChange={handleEmptyChange}
           {...rest}

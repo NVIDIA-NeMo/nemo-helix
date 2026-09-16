@@ -72,6 +72,11 @@ export interface AssistantChatProps {
    */
   promptData?: PromptData;
   /**
+   * When false, the request asks the model not to reason (`reasoning_effort: 'none'`).
+   * A model that does not support the parameter keeps reasoning as usual.
+   */
+  reasoningEnabled?: boolean;
+  /**
    * Optional OpenAI-compatible tools for the request.
    */
   tools?: ChatCompletionTool[];
