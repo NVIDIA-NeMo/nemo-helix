@@ -36,7 +36,7 @@ async def test_volume_create_failure(
     async def fail(**kwargs: object) -> VolumeStatusUpdate:
         raise RuntimeError("docker unavailable")
 
-    mock_backend.create_volume = fail  # type: ignore[method-assign]
+    mock_backend.create_volume = fail  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
 
     await volume_reconciler.reconcile_one(vol)
 
@@ -57,6 +57,40 @@ async def test_deleting_volume_removes_backend_then_entity(
 
     assert mock_backend.volume_delete_calls == [("default", "vol1")]
     mock_entities.delete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_deleting_volume_keeps_entity_when_backend_delete_fails(
+    volume_reconciler: VolumeReconciler,
+    mock_backend: MockDeploymentBackend,
+    mock_entities: AsyncMock,
+) -> None:
+    vol = make_volume()
+    vol.status = "DELETING"
+    mock_backend.delete_volume = AsyncMock(
+        return_value=VolumeStatusUpdate(status="FAILED", status_message="PVC deletion failed")
+    )
+
+    await volume_reconciler.reconcile_one(vol)
+
+    mock_backend.delete_volume.assert_awaited_once()
+    mock_entities.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_deleting_volume_keeps_entity_when_backend_returns_no_result(
+    volume_reconciler: VolumeReconciler,
+    mock_backend: MockDeploymentBackend,
+    mock_entities: AsyncMock,
+) -> None:
+    vol = make_volume()
+    vol.status = "DELETING"
+    mock_backend.delete_volume = AsyncMock(return_value=None)
+
+    await volume_reconciler.reconcile_one(vol)
+
+    mock_backend.delete_volume.assert_awaited_once()
+    mock_entities.delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -57,9 +57,20 @@ class VolumeReconciler:
 
         backend_config = volume.backend_config.model_dump(by_alias=True, exclude_none=True)
         try:
-            await backend.delete_volume(volume.workspace, volume.name, backend_config=backend_config)
+            result = await backend.delete_volume(volume.workspace, volume.name, backend_config=backend_config)
         except Exception:
             logger.warning("Backend delete failed for volume %s — will retry", volume_id, exc_info=True)
+            return
+        if result is None:
+            logger.warning("Backend delete for volume %s returned no result — will retry", volume_id)
+            return
+        if result.status != "RELEASED":
+            logger.warning(
+                "Backend delete for volume %s returned %s (%s) — will retry",
+                volume_id,
+                result.status,
+                result.status_message,
+            )
             return
 
         try:
