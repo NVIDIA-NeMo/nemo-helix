@@ -568,15 +568,15 @@ entity it creates.
 `--strategy` to the installed `AgentOptimizeJob` subclass and delegates
 `compile` to it, so the executor and entry point are the *strategy's*, not a
 shared one. For the `nat` strategy, that is `nemo_optimization.tasks.agent_optimize`;
-other strategies (`prompt-master`, `switchyard`, `experimentalist`) ship their
-own `tasks/agent_optimize.py` under their own package. Each strategy job picks
+every other strategy ships its own `tasks/agent_optimize.py` under its own
+package — `prompt-master` does today. Each strategy job picks
 its executor from the execution profiles the platform actually registered, for
 the requested profile (currently always `default`):
 
 | Registered profile | Executor | What the deployment must provide |
 |--------------------|----------|----------------------------------|
 | `subprocess` | Host subprocess running `python -m <strategy's task_module>` (e.g. `nemo_optimization.tasks.agent_optimize` for `nat`) | The jobs host venv must carry the optimization and Fabric harness dependencies (and the Docker socket, if trials need it) |
-| `cpu` (docker or `kubernetes_job`) | The `nmp-cpu-tasks` image, same entry point | The task image must carry those dependencies; `nemo-agent-optimization-plugin`, `nemo-optimization-plugin`, `nemo-switchyard`, and `prompt-master-plugin` are in the `cpu-tasks` dependency group for this reason |
+| `cpu` (docker or `kubernetes_job`) | The `nmp-cpu-tasks` image, same entry point | The task image must carry those dependencies; `nemo-agent-optimization-plugin`, `nemo-optimization-plugin`, and `prompt-master-plugin` are in the `cpu-tasks` dependency group for this reason |
 
 Subprocess wins when both are registered, because a study drives Fabric trials
 that often need the host's Docker daemon and harness adapters. If neither is

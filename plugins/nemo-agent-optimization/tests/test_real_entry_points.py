@@ -7,9 +7,8 @@ Every other test touching :func:`discover_agent_optimize_jobs` monkeypatches
 ``discover_jobs``, so a typo or stale path in any strategy plugin's
 ``pyproject.toml`` ``[project.entry-points."nemo.jobs"]`` table would never
 surface as a test failure. This test calls the real, unpatched
-``discover_agent_optimize_jobs()`` so it actually resolves the ``nat``,
-``prompt-master``, ``switchyard``, and ``experimentalist`` entry points
-installed in this environment.
+``discover_agent_optimize_jobs()`` so it actually resolves the ``nat`` and
+``prompt-master`` entry points installed in this environment.
 
 That test alone does not guard the bundled wrapper manifest
 (``packages/nemo_platform/pyproject.toml``): that package is a permanent
@@ -39,8 +38,6 @@ from nemo_agent_optimization_plugin.job_base import AgentOptimizeJob
 _REQUIRED_STRATEGY_MODULES = {
     "nat": "nemo_optimization",
     "prompt-master": "prompt_master_plugin",
-    "switchyard": "nemo_switchyard",
-    "experimentalist": "nemo_experimentalist_plugin",
 }
 
 _MISSING_PLUGINS = sorted(
@@ -54,8 +51,6 @@ _WRAPPER_PYPROJECT = _REPO_ROOT / "packages" / "nemo_platform" / "pyproject.toml
 _EXPECTED_AGENT_OPTIMIZE_KEYS = {
     "optimization.agent_optimize",
     "prompt-master.agent_optimize",
-    "switchyard.agent_optimize",
-    "experimentalist.agent_optimize",
 }
 
 
@@ -64,12 +59,12 @@ _EXPECTED_AGENT_OPTIMIZE_KEYS = {
     reason=(
         "Not all agent-optimize strategy plugins are installed in this venv, so this test "
         f"cannot exercise their real entry points. Missing plugins for strategies: {_MISSING_PLUGINS}. "
-        "Run `uv sync` from the repo root (this is a single workspace covering all four plugins) "
+        "Run `uv sync` from the repo root (this is a single workspace covering every plugin) "
         "and re-run."
     ),
 )
-def test_all_four_strategies_resolve_from_real_entry_points() -> None:
-    """discover_agent_optimize_jobs(), unpatched, must resolve all four strategies."""
+def test_every_strategy_resolves_from_real_entry_points() -> None:
+    """discover_agent_optimize_jobs(), unpatched, must resolve every shipped strategy."""
     strategies = discover_agent_optimize_jobs()
 
     for strategy in _REQUIRED_STRATEGY_MODULES:
@@ -92,7 +87,7 @@ def test_all_four_strategies_resolve_from_real_entry_points() -> None:
         f"strategies: {_MISSING_PLUGINS}. Run `uv sync` from the repo root and re-run."
     ),
 )
-def test_bundled_wrapper_manifest_declares_all_four_agent_optimize_entries() -> None:
+def test_bundled_wrapper_manifest_declares_every_agent_optimize_entry() -> None:
     """Read packages/nemo_platform/pyproject.toml as data and check it directly.
 
     This does not go through entry-point resolution at all, so it catches a typo

@@ -767,8 +767,6 @@ nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 "data-designer.retrieval-run" = "nemo_data_designer_plugin.jobs.retrieval_run:RetrievalRunJob"
 "optimization.agent_optimize" = "nemo_optimization.jobs.agent_optimize:NatAgentOptimizeJob"
 "prompt-master.agent_optimize" = "prompt_master_plugin.jobs.optimize:PromptMasterOptimizeJob"
-"switchyard.agent_optimize" = "nemo_switchyard.jobs.optimize:SwitchyardOptimizeJob"
-"experimentalist.agent_optimize" = "nemo_experimentalist_plugin.jobs.optimize:ExperimentalistOptimizeJob"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.optimization.backends"]

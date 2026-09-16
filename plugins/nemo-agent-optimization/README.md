@@ -67,10 +67,8 @@ line:
 
 ```bash
 $ nemo agents optimization-strategies list
-experimentalist
 nat
 prompt-master
-switchyard
 ```
 
 The list is whatever is installed in the current environment: each name comes
