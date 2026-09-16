@@ -20,7 +20,11 @@ from nemo_agents_plugin.entities import (
     EnvironmentSpecInline,
 )
 from nemo_platform_plugin.entity import NemoEntity
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_platform_plugin.entity_client import (
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+    NemoEntityValidationError,
+)
 
 NOW = datetime.now(timezone.utc)
 
@@ -69,6 +73,18 @@ class TestComputeSpecRoutes:
             json={"name": "c1", "resources": {}},
         )
         assert resp.status_code == 409
+
+    def test_create_validation_error_returns_422(self) -> None:
+        client_mock = AsyncMock()
+        client_mock.create = AsyncMock(side_effect=NemoEntityValidationError("name: string does not match pattern"))
+        client = _test_client(client_mock)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/compute-specs",
+            json={"name": "c 1", "resources": {}},
+        )
+        assert resp.status_code == 422
+        assert "pattern" in resp.json()["detail"]
 
     def test_get_not_found(self) -> None:
         client_mock = AsyncMock()
