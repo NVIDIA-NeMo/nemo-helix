@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from scaled_evals.api import dispatch_health, s3
+from scaled_evals.api import artifacts, dispatch_health
 from scaled_evals.api.build import buildkit, registry
 from scaled_evals.api.db import pooled_connection
 from scaled_evals.api.repositories.ops_repository import OperationsRepository
@@ -379,7 +379,7 @@ def _run_dependency_checks() -> tuple[dict[str, str], bool]:
     required_ok = True
     required_ok &= _required_check(checks, "postgres", lambda: _postgres_probe())
     required_ok &= _required_check(checks, "schema", _schema_probe)
-    required_ok &= _required_check(checks, "object_store", s3.check_bucket)
+    required_ok &= _required_check(checks, "object_store", artifacts.check_bucket)
     required_ok &= _enabled_required_check(
         checks,
         "dispatch_worker",
@@ -482,7 +482,7 @@ def _task_pack_observability_snapshot() -> dict[str, int]:
             continue
         snapshot["checked_ready_revisions"] += 1
         try:
-            if not s3.object_exists(str(object_key)):
+            if not artifacts.object_exists(str(object_key)):
                 snapshot["missing_ready_revisions"] += 1
         except Exception:  # noqa: BLE001 — unreadable is alertable, scrape must continue
             snapshot["missing_ready_revisions"] += 1
