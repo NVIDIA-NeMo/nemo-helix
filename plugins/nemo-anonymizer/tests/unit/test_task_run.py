@@ -4,10 +4,18 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import pytest
 from nemo_anonymizer_plugin.tasks.anonymizer import run as task_run
-from nemo_platform_plugin.jobs.constants import NEMO_JOB_ID_ENVVAR, NEMO_JOB_WORKSPACE_ENVVAR
+from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.job_usage import PlatformJobUsageReporter
+from nemo_platform_plugin.jobs.constants import (
+    EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
+    NEMO_JOB_ID_ENVVAR,
+    NEMO_JOB_WORKSPACE_ENVVAR,
+    PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
+)
 
 
 def _task_handlers(logger: logging.Logger) -> list[logging.Handler]:
@@ -50,3 +58,15 @@ def test_get_workspace_fails_when_workspace_env_missing(monkeypatch: pytest.Monk
 
     with pytest.raises(RuntimeError, match=NEMO_JOB_WORKSPACE_ENVVAR):
         task_run._get_workspace()
+
+
+def test_get_ctx_uses_platform_usage_reporter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(NEMO_JOB_ID_ENVVAR, "anonymizer-job")
+    monkeypatch.setenv(NEMO_JOB_WORKSPACE_ENVVAR, "team-a")
+    monkeypatch.setenv(EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, str(tmp_path / "ephemeral"))
+    monkeypatch.setenv(PERSISTENT_JOB_STORAGE_PATH_ENVVAR, str(tmp_path / "persistent"))
+    sdk = NeMoPlatform(base_url="http://platform.test", workspace="team-a")
+
+    ctx = task_run._get_ctx(sdk)
+
+    assert isinstance(ctx.usage, PlatformJobUsageReporter)
