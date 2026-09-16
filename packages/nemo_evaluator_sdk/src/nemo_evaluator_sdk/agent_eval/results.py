@@ -762,6 +762,7 @@ class AgentEvalResult(BaseModel):
                     format_table(preview),
                 ]
             )
+        parts.extend(_format_trial_errors(self))
         parts.extend(_format_score_errors(self.scores, max_error_rows=max_error_rows))
         return "\n".join(parts)
 
@@ -863,8 +864,49 @@ def _agent_eval_summary_header(result: AgentEvalResult) -> str:
         f"scores={len(result.scores)}",
         f"aggregate_scores={len(result.summary.scores.scores)}",
     ]
+    if result.summary.error_count:
+        fields.append(f"errors={result.summary.error_count}")
     fields.extend(f"{status}={count}" for status, count in sorted(status_counts.items()))
     return f"AgentEvalResult({', '.join(fields)})"
+
+
+#: Trial ids named per error type before the line truncates; the full list stays on
+#: ``summary.error_trial_ids``.
+_MAX_ERROR_TRIAL_IDS = 5
+
+
+def _format_trial_errors(result: AgentEvalResult) -> list[str]:
+    """Render the failed-trial section: what failed, how often, and where to read the rest.
+
+    Rendered from ``summary.error_trial_ids`` rather than from the scores, because a trial whose
+    agent or harness never ran produces no failed score to report — it produces a reward of zero,
+    which is indistinguishable from a genuine zero anywhere else in this output.
+    """
+    error_trial_ids = result.summary.error_trial_ids
+    if not error_trial_ids:
+        return []
+
+    trials_by_id = {trial.id: trial for trial in result.trials}
+    failed = result.summary.error_count
+    parts = [
+        "",
+        f"Failed trials ({failed} of {len(result.trials)})"
+        if len(result.trials) >= failed
+        else f"Failed trials ({failed})",
+    ]
+    for error_type, trial_ids in sorted(error_trial_ids.items()):
+        shown = trial_ids[:_MAX_ERROR_TRIAL_IDS]
+        line = f"  {error_type} ({len(trial_ids)}): {', '.join(shown)}"
+        if len(trial_ids) > len(shown):
+            line += f", ... ({len(trial_ids) - len(shown)} more)"
+        parts.append(line)
+        for trial_id in shown:
+            trial = trials_by_id.get(trial_id)
+            if trial is not None and trial.error is not None and trial.error.message:
+                parts.append(f"    {trial_id}: {trial.error.message}")
+    if result.work_dir is not None:
+        parts.append(f"  Trial evidence: {result.work_dir}")
+    return parts
 
 
 def _format_score_errors(
