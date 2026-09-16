@@ -11,12 +11,13 @@ definition module so the module-attribute call in ``setup.py`` is intercepted.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 import typer
-from nemo_platform.resources.inference.providers import ProvidersResource
 from nemo_platform_ext.cli.commands.setup import (
+    SetupClients,
     _bucket_model_count,
     _create_provider,
     _deploy_demo_agent,
@@ -27,6 +28,10 @@ from nemo_platform_ext.cli.commands.setup import (
 )
 from nemo_platform_ext.cli.commands.skills.base import Scope, Skill
 from nemo_platform_ext.cli.telemetry.events import TaskStatusEnum
+from nemo_platform_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_platform_plugin.models.client import ModelsClient
+from nemo_platform_plugin.secrets.client import SecretsClient
+from nemo_platform_plugin.workspaces.client import WorkspacesClient
 
 SETUP_MOD = "nemo_platform_ext.cli.commands.setup"
 EMIT_TARGET = "nemo_platform_ext.cli.telemetry.emit.emit_event"
@@ -42,6 +47,13 @@ class _StubWorkspaces:
         return SimpleNamespace(data=lambda: object())
 
 
+def _provider_response(provider: object) -> MagicMock:
+    """Mimic the ``NemoResponse`` ``get_provider`` returns, whose ``.data()`` is *provider*."""
+    response = MagicMock()
+    response.data.return_value = provider
+    return response
+
+
 @pytest.fixture
 def spinner_console():
     """Patch setup.console with a mock status spinner context manager."""
@@ -52,10 +64,13 @@ def spinner_console():
         yield mock_console, mock_status
 
 
-def _providers_client() -> MagicMock:
-    client = MagicMock()
-    client.inference.providers = MagicMock(spec=ProvidersResource)
-    return client
+def _providers_client() -> Any:
+    """Typed-client bundle with spec'd MagicMock service clients (typed ``Any`` to reach mock attributes)."""
+    return SetupClients(
+        models=MagicMock(spec=ModelsClient),
+        secrets=MagicMock(spec=SecretsClient),
+        gateway=MagicMock(spec=InferenceGatewayClient),
+    )
 
 
 def _skill(name: str) -> Skill:
@@ -89,7 +104,7 @@ class TestCreateProviderTelemetry:
     @patch(EMIT_TARGET)
     def test_failure_emits_error_and_reraises(self, emit):
         client = _providers_client()
-        client.inference.providers.create.side_effect = RuntimeError("boom")
+        client.models.create_provider.side_effect = RuntimeError("boom")
         with pytest.raises(RuntimeError):
             _create_provider(
                 client,
@@ -138,7 +153,7 @@ class TestUpdateProviderTelemetry:
     @patch(EMIT_TARGET)
     def test_failure_emits_error_and_reraises(self, emit):
         client = _providers_client()
-        client.inference.providers.update.side_effect = RuntimeError("boom")
+        client.models.upsert_provider.side_effect = RuntimeError("boom")
         with pytest.raises(RuntimeError):
             _update_provider(
                 client,
@@ -158,9 +173,9 @@ class TestWaitForModelsTelemetry:
     @pytest.mark.usefixtures("spinner_console")
     @patch(EMIT_TARGET)
     def test_emits_completed_with_bucket(self, emit):
-        client = MagicMock()
+        client = _providers_client()
         models = [MagicMock(model_entity_id=f"default/model-{i}") for i in range(3)]
-        client.inference.providers.retrieve.return_value = MagicMock(served_models=models)
+        client.models.get_provider.return_value = _provider_response(MagicMock(served_models=models))
 
         with (
             patch(f"{SETUP_MOD}._pause"),
@@ -178,8 +193,8 @@ class TestWaitForModelsTelemetry:
     @pytest.mark.usefixtures("spinner_console")
     @patch(EMIT_TARGET)
     def test_no_models_emits_bucket_zero(self, emit):
-        client = MagicMock()
-        client.inference.providers.retrieve.return_value = MagicMock(served_models=[])
+        client = _providers_client()
+        client.models.get_provider.return_value = _provider_response(MagicMock(served_models=[]))
 
         with (
             patch(f"{SETUP_MOD}._pause"),
@@ -337,6 +352,9 @@ class TestSetupFinishedTelemetry:
         ctx = MagicMock(spec=typer.Context)
         ctx.obj = MagicMock()
         ctx.obj.get_base_url.return_value = "http://localhost:3000"
+        ctx.obj.typed_client.side_effect = lambda client_cls, timeout=60.0: (
+            _StubWorkspaces() if client_cls is WorkspacesClient else MagicMock()
+        )
 
         interactive = MagicMock()
         if dispatch_exc is not None:
@@ -348,7 +366,6 @@ class TestSetupFinishedTelemetry:
             patch(f"{SETUP_MOD}._maybe_start_services"),
             patch(f"{SETUP_MOD}._check_platform_reachable_with_retries", return_value=True),
             patch(f"{SETUP_MOD}._bootstrap_config_if_missing"),
-            patch(f"{SETUP_MOD}.client_from_platform", return_value=_StubWorkspaces()),
             patch(f"{SETUP_MOD}._run_interactive_mode", interactive),
         ):
             setup_command(ctx)
