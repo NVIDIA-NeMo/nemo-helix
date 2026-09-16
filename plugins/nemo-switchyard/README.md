@@ -28,7 +28,18 @@ LOG_LEVEL=DEBUG uv run nemo services run \
   --controllers models
 ```
 
-The plugin is discovered at platform startup through the `nemo.inference_middleware` entry point named `nemo-switchyard`. Native `switchyard_rust` is **not** in the default image, and `SWITCHYARD_NATIVE_REF` is off by default. Setting that build argument replaces `switchyard-vendored`, but it will break today's plugin because the middleware still imports May's `switchyard.lib`; native routing requires the future libsy adapter. The image builder has no rustc, so experiments must pass a wheel or another complete pip spec rather than a bare tag. To pin a different May vendor commit, follow [`vendor/switchyard/README.md`](vendor/switchyard/README.md).
+The plugin is discovered at platform startup through the `nemo.inference_middleware` entry point named `nemo-switchyard`. Native `switchyard_rust` is **not** in the default image; `SWITCHYARD_NATIVE_REF` is off by default. Setting that build argument **replaces** `switchyard-vendored` (never beside it). Native `stage_router` / `llm_classifier` need the libsy host from the adapter PR (NVIDIA-NeMo/nemo-platform#2091) **and** rust in the IGW process. May `random_routing` / `translate` remain the default until the ARG is set.
+
+The image builder has no rustc, so experiments must pass a wheel or a complete pip spec (`git+https://…@v0.3.0-rc.2`), not a bare tag. Local overlay after this dist rename:
+
+```bash
+# Plugin first, then upstream. Do not reinstall nemo-switchyard-plugin --no-deps after,
+# or you drop switchyard_rust. Do not uv add upstream into the worktree lockfile.
+uv pip install --no-deps plugins/nemo-switchyard
+uv pip install "git+https://github.com/NVIDIA-NeMo/Switchyard.git@v0.3.0-rc.2"
+```
+
+On a tree that still names the plugin dist `nemo-switchyard`, the second command uninstalls the plugin. To pin a different May vendor commit, follow [`vendor/switchyard/README.md`](vendor/switchyard/README.md).
 
 ## Distribution collision smoke test
 
@@ -43,9 +54,8 @@ plugins/nemo-switchyard/scripts/prove_dist_collision.sh
 ```
 
 The default upstream tag is `v0.3.0-rc.2`; override it with
-`SWITCHYARD_NATIVE_TAG`. `SWITCHYARD_COLLISION_DIR` may be set to choose the
-temporary-directory prefix. The script removes only the unique directory it
-creates.
+`SWITCHYARD_NATIVE_TAG`. `SWITCHYARD_COLLISION_DIR` is a parent directory; the
+script creates a unique `run.XXXXXX` child under it and deletes only that child.
 
 ## VirtualModel Configuration
 

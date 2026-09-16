@@ -171,7 +171,7 @@ uv run nemo services run \
 
 ### Starting the platform with Switchyard middleware
 
-`make bootstrap-python` and bare `uv sync` install the `nemo-switchyard-plugin` distribution (path `plugins/nemo-switchyard`) through the root workspace's `enabled-plugins` group. The Switchyard library is vendored in-tree at `plugins/nemo-switchyard/vendor/switchyard/` (a snapshot pinned in `tool.uv.sources`) — no separate Switchyard checkout, `SWITCHYARD_PATH` env var, or PyPI workaround is needed. Do not `uv add` upstream `nemo-switchyard`: its `switchyard` module shadows the vendored May implementation and breaks May translation. Start with debug logging to see routing decisions:
+`make bootstrap-python` and bare `uv sync` install the `nemo-switchyard-plugin` distribution (path `plugins/nemo-switchyard`) through the root workspace's `enabled-plugins` group. The Switchyard library is vendored in-tree at `plugins/nemo-switchyard/vendor/switchyard/` (a snapshot pinned in `tool.uv.sources`) — no separate Switchyard checkout, `SWITCHYARD_PATH` env var, or PyPI workaround is needed. Do not `uv add` upstream `nemo-switchyard` into the workspace lock: that replaces May `switchyard` and breaks translation. After the plugin dist rename, a **throwaway** native overlay is `uv pip install --no-deps plugins/nemo-switchyard` then `uv pip install "git+https://github.com/NVIDIA-NeMo/Switchyard.git@v0.3.0-rc.2"` — do not reinstall the plugin `--no-deps` after rust, and do not `uv sync` unless you intend to restore May. Native `stage_router` / `llm_classifier` also need the IGW host from NVIDIA-NeMo/nemo-platform#2091. Start with debug logging to see routing decisions:
 
 ```bash
 # Start with LOG_LEVEL=DEBUG to see routing decisions.

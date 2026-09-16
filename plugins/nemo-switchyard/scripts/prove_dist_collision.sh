@@ -8,10 +8,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 PLUGIN="$ROOT/plugins/nemo-switchyard"
-COLLISION_PREFIX="${SWITCHYARD_COLLISION_DIR:-${TMPDIR:-/tmp}/nemo-switchyard-collision}"
-BASE="$(mktemp -d "${COLLISION_PREFIX%/}.XXXXXX")"
+COLLISION_ROOT="${SWITCHYARD_COLLISION_DIR:-${TMPDIR:-/tmp}/nemo-switchyard-collision}"
+mkdir -p "$COLLISION_ROOT"
+BASE="$(mktemp -d "${COLLISION_ROOT%/}/run.XXXXXX")"
 MAY="$BASE/may-venv"
 NATIVE="$BASE/native-venv"
+# Remove only the unique run directory, never the operator-supplied COLLISION_ROOT.
 trap 'rm -rf -- "$BASE"' EXIT
 
 python3 -m venv "$MAY"
