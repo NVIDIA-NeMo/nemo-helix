@@ -17,7 +17,7 @@ import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { DatasetPanel } from '@studio/routes/evaluation/EvaluationNewRoute/DatasetPanel';
-import { DryRunPanel } from '@studio/routes/evaluation/EvaluationNewRoute/DryRunPanel';
+import { LiveTestPanel } from '@studio/routes/evaluation/EvaluationNewRoute/LiveTestPanel';
 import { MetricPanel } from '@studio/routes/evaluation/EvaluationNewRoute/MetricPanel';
 import {
   EVALUATION_FORM_DEFAULTS,
@@ -105,7 +105,7 @@ const EvaluationForm: FC = () => {
                       metric scores and model performance.
                     </Text>
                   </Stack>
-                  <DryRunPanel />
+                  <LiveTestPanel />
                 </Stack>
               </Stack>
             </Flex>

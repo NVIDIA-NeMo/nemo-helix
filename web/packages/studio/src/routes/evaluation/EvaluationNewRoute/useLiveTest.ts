@@ -35,16 +35,16 @@ const TERMINAL_STATUSES: string[] = [
 const POLL_INTERVAL_MS = 1500;
 const POLL_TIMEOUT_MS = 120_000;
 
-export interface DryRunResult {
+export interface LiveTestResult {
   /** What the model actually answered, so a bad score can be read against it. */
   output: string;
   scores: { name: string; value: number }[];
 }
 
-export type DryRunState =
+export type LiveTestState =
   | { status: 'idle' }
   | { status: 'busy'; label: string }
-  | { status: 'done'; result: DryRunResult }
+  | { status: 'done'; result: LiveTestResult }
   | { status: 'error'; message: string };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -70,7 +70,7 @@ const detailOf = (error: unknown): string | undefined => {
   return candidate.length > 240 ? `${candidate.slice(0, 240)}…` : candidate;
 };
 
-/** Names the model that failed. The dry run calls two different models, and
+/** Names the model that failed. The live test calls two different models, and
  *  "returned 503" is not actionable without knowing which one to swap. */
 const describeModelFailure = (role: string, modelRef: string, error: unknown): string => {
   const status = statusOf(error);
@@ -86,7 +86,7 @@ const bareModelName = (modelRef: string): string =>
 
 /** The aggregate-scores artifact is a LIST of per-score statistics, not a nested
  *  record. Verified against a live run: {"scores":[{"name":"exact-match.exact-match",
- *  "mean":1.0,"count":1,...}]}. Over a single dry-run row the mean IS the row's
+ *  "mean":1.0,"count":1,...}]}. Over a single live-test row the mean IS the row's
  *  score. (Note useEvaluationJobResultV2 types this as a nested record, which does
  *  not match what the API returns.) */
 const flattenScores = (payload: {
@@ -110,21 +110,20 @@ const flattenScores = (payload: {
  * reads `row.output` and synthesises `sample.output_text`, so the metric
  * templates are identical to a real online run.
  *
- * The job is deleted once read. A dry run is an affordance, not a run of record.
+ * The job is deleted once read. A live test is an affordance, not a run of record.
  */
-export function useDryRun() {
+export function useLiveTest() {
   const workspace = useWorkspaceFromPath();
   const auth = useAuth();
-  const [state, setState] = useState<DryRunState>({ status: 'idle' });
+  const [state, setState] = useState<LiveTestState>({ status: 'idle' });
   /** Guards against a superseded run overwriting a newer one's state. */
   const runRef = useRef(0);
-  const jobRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const discardJob = useCallback(
     (name: string) => {
       // Fire and forget: the score is already read, and a failed cleanup must not
-      // present as a failed dry run.
+      // present as a failed live test.
       void evaluatorDeleteEvaluateJob(workspace, name).catch((error) => {
         logger.error(`Dry run: could not delete ephemeral job ${name}: ${String(error)}`);
       });
@@ -133,19 +132,16 @@ export function useDryRun() {
   );
 
   /** Bumping the run id makes every later `superseded()` check bail, which stops
-   *  the poll loop without unwinding it. The job is discarded here rather than
-   *  left to the loop, so cancelling cannot leak the very thing the dry run
-   *  promises to clean up. */
+   *  the poll loop without unwinding it. Deletion is left to the run's own
+   *  `finally`: cancelling while the create call is still in flight has no job
+   *  name to delete yet, so a cancel that deleted from here would miss exactly
+   *  the job it is supposed to clean up. */
   const cancel = useCallback(() => {
     runRef.current += 1;
     abortRef.current?.abort();
     abortRef.current = null;
-    if (jobRef.current) {
-      discardJob(jobRef.current);
-      jobRef.current = null;
-    }
     setState({ status: 'idle' });
-  }, [discardJob]);
+  }, []);
 
   const run = useCallback(
     async (
@@ -159,12 +155,6 @@ export function useDryRun() {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-
-      // A previous run's job is now irrelevant; do not leave it behind.
-      if (jobRef.current) {
-        discardJob(jobRef.current);
-        jobRef.current = null;
-      }
 
       const input = bindings.inputPath ? resolveKeyPath(row, bindings.inputPath) : null;
       if (typeof input !== 'string' || !input) {
@@ -243,9 +233,13 @@ export function useDryRun() {
         },
       };
 
+      // Named outside the try so `finally` can delete it on every exit --
+      // success, error, timeout, cancel, or supersession by a newer run.
+      let created: string | null = null;
+
       try {
         const job = await evaluatorCreateEvaluateJob(workspace, request);
-        jobRef.current = job.name;
+        created = job.name;
 
         const deadline = Date.now() + POLL_TIMEOUT_MS;
         let status: string | undefined;
@@ -267,8 +261,6 @@ export function useDryRun() {
                 ? 'Scoring failed. Both models responded, so check the metric configuration.'
                 : 'Scoring did not finish in time.',
           });
-          discardJob(job.name);
-          jobRef.current = null;
           return;
         }
 
@@ -281,18 +273,14 @@ export function useDryRun() {
         if (superseded()) return;
         // Read before delete: once the score is in hand the job has no further use.
         setState({ status: 'done', result: { output, scores } });
-        discardJob(job.name);
-        jobRef.current = null;
       } catch (error) {
         if (superseded()) return;
         setState({
           status: 'error',
           message: `Could not score the row: ${String((error as Error)?.message ?? error)}`,
         });
-        if (jobRef.current) {
-          discardJob(jobRef.current);
-          jobRef.current = null;
-        }
+      } finally {
+        if (created) discardJob(created);
       }
     },
     [workspace, auth.user?.access_token, discardJob]

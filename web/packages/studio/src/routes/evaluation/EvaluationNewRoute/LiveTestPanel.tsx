@@ -7,7 +7,7 @@ import { Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-co
 import { type EvaluationFormValues } from '@studio/routes/evaluation/EvaluationNewRoute/types';
 import { useDatasetBindings } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetBindings';
 import { useDatasetPreview } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetPreview';
-import { useDryRun } from '@studio/routes/evaluation/EvaluationNewRoute/useDryRun';
+import { useLiveTest } from '@studio/routes/evaluation/EvaluationNewRoute/useLiveTest';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { FC, useEffect, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -26,11 +26,11 @@ const PreviewField: FC<{ label: string; value: string }> = ({ label, value }) =>
   </Stack>
 );
 
-export const DryRunPanel: FC = () => {
+export const LiveTestPanel: FC = () => {
   const { control, handleSubmit } = useFormContext<EvaluationFormValues>();
   const dataset = useWatch({ control, name: 'dataset' });
   /** Which row gets previewed and tested. Lives here rather than in the Dataset
-   *  column because it selects the subject of the dry run, not the shape of the
+   *  column because it selects the subject of the live test, not the shape of the
    *  file. Reset on a new file so the index cannot outlive its dataset. */
   const [rowIndex, setRowIndex] = useState(0);
   useEffect(() => setRowIndex(0), [dataset]);
@@ -38,7 +38,7 @@ export const DryRunPanel: FC = () => {
   // Bindings, not fieldMapping: a messages dataset resolves its input and ground
   // truth positionally, and reading the mapping directly reports them unmapped.
   const bindings = useDatasetBindings();
-  const { state, run, cancel } = useDryRun();
+  const { state, run, cancel } = useLiveTest();
   const busy = state.status === 'busy';
 
   /** A label with nothing under it is noise. Each preview appears only once its
@@ -53,7 +53,7 @@ export const DryRunPanel: FC = () => {
    *  gated on that. With trigger() the errors it raises never clear, because RHF
    *  is still in pre-submit mode and revalidates nothing.
    *
-   *  Create never requires a dry run; sharing the resolver only means Test cannot
+   *  Create never requires a live test; sharing the resolver only means Test cannot
    *  pass on a config Create would reject. */
   const runTest = handleSubmit((values) => {
     if (!row) return;
@@ -138,7 +138,7 @@ export const DryRunPanel: FC = () => {
       ) : null}
 
       <Stack>
-        {/* type="button", never a second submit: the dry run is a separate action
+        {/* type="button", never a second submit: the live test is a separate action
             from creating the evaluation and must not trigger the form. Cancel
             replaces Test rather than sitting beside it -- a disabled Test during a
             run is a control with nothing to offer, in the narrowest column. */}
