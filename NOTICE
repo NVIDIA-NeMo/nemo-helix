@@ -56,18 +56,6 @@ plugins/nemo-switchyard/vendor/switchyard/
     plugins/nemo-switchyard/vendor/switchyard/
 
 --------------------------------------------------------------------------------
-plugins/nemo-agents/vendor/codex_agent_adapter/
-  Codex agent adapter vendored snapshot from NVIDIA NeMo Agent Toolkit commit
-  7f9c8a4a674ed2e9e14cf870cb6b7955ee00042f.
-  Home: https://github.com/NVIDIA/NeMo-Agent-Toolkit
-  License: Apache-2.0
-
-  This repository vendors the `examples/experimental/codex_agent_adapter`
-  package for use by the `nemo-agents` plugin. The vendored snapshot retains
-  its own LICENSE.md in:
-    plugins/nemo-agents/vendor/codex_agent_adapter/
-
---------------------------------------------------------------------------------
 services/guardrails/callouts/internal/server/
   callout_server.go and callout_server_test.go
   Copyright 2024 Google LLC
