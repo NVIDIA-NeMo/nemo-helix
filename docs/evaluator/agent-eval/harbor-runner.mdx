@@ -176,7 +176,7 @@ config = HarborRuntimeConfig(
     agent_import_path="nemo_fabric.integrations.harbor:FabricAgent",
     agent_kwargs={
         "fabric_adapter_id": "nvidia.fabric.codex",
-        "fabric_package": "nemo-fabric[codex]==0.3.0b1",
+        "fabric_package": "nemo-fabric[codex]==0.3.0",
         "fabric_telemetry": "relay",
     },
 )
@@ -196,7 +196,7 @@ spec, the run bundle, nor `config.json`:
     "agent_import_path": "nemo_fabric.integrations.harbor:FabricAgent",
     "agent_kwargs": {
       "fabric_adapter_id": "nvidia.fabric.codex",
-      "fabric_package": "nemo-fabric[codex]==0.3.0b1"
+      "fabric_package": "nemo-fabric[codex]==0.3.0"
     },
     "env_secrets": {
       "OPENAI_API_KEY": "my-workspace/openai-key"
