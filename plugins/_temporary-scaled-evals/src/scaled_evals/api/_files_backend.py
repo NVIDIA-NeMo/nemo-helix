@@ -61,6 +61,26 @@ class FilesetRef:
     path: str
 
 
+@dataclass(frozen=True, slots=True)
+class UploadTarget:
+    """Where a client uploads a file directly to Files (the broker-upload model).
+
+    Structural analog of the old presigned-URL block: scaled-evals hands back the fileset
+    coordinates + the SDK-facing remote path, and the client uploads out-of-band via
+    ``sdk.files.upload(local_path=..., remote_path=remote_path)``. Bytes never transit the
+    scaled-evals control plane.
+    """
+
+    workspace: str
+    fileset: str
+    path: str
+
+    @property
+    def remote_path(self) -> str:
+        """The ``<workspace>/<fileset>#<path>`` ref the Files SDK accepts directly."""
+        return f"{self.workspace}/{self.fileset}#{self.path}"
+
+
 def _sanitize_fileset_id(raw: str) -> str:
     r"""Turn an arbitrary id into a valid fileset-name component.
 
@@ -119,6 +139,32 @@ def split_key(object_key: str) -> FilesetRef:
     if match := _SWITCHYARD_KEY.match(key):
         return FilesetRef("se-build-context", match["path"])
     return FilesetRef(_SHARED_FILESET, key)
+
+
+def upload_target(object_key: str, *, ensure_fileset: bool = True) -> UploadTarget:
+    """Resolve the direct-to-Files upload coordinates for a key (broker-upload model).
+
+    Returns the ``(workspace, fileset, path)`` the client uploads to via the Files SDK. When
+    ``ensure_fileset`` (default), the fileset is created up front so the client's out-of-band
+    upload cannot 404 on a missing fileset; pass ``False`` to skip the round-trip when the
+    fileset is known to exist.
+    """
+    ref = split_key(object_key)
+    workspace = _workspace(object_key)
+    if ensure_fileset:
+        _ensure_fileset(ref.fileset, workspace)
+    return UploadTarget(workspace=workspace, fileset=ref.fileset, path=ref.path)
+
+
+def _ensure_fileset(fileset: str, workspace: str) -> None:
+    """Idempotently create a fileset so a subsequent direct upload has a target."""
+    from nemo_helix_plugin.files.types import CreateFilesetRequest
+
+    _files().client.create_fileset(
+        workspace=workspace,
+        body=CreateFilesetRequest(name=fileset),
+        exist_ok=True,
+    )
 
 
 def fileset_prefix(object_prefix: str) -> tuple[str, str]:

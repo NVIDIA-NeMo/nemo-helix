@@ -5,7 +5,6 @@ import re
 from dataclasses import dataclass
 from typing import Annotated
 
-from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from scaled_evals.api import s3
@@ -66,8 +65,15 @@ def _http_error(status: int, code: str, message: str, details: dict[str, object]
 
 
 def _upload_for(object_key: str) -> TaskUpload:
-    # Short-lived presigned PUT URL the client uploads the tarball to directly.
-    return TaskUpload(**s3.presign_put(object_key))
+    # Broker-upload model: hand the client the fileset coordinates it uploads the tarball to
+    # directly via the Files SDK. The fileset is pre-created so the client's upload can't 404.
+    target = s3.upload_target(object_key)
+    return TaskUpload(
+        workspace=target.workspace,
+        fileset=target.fileset,
+        path=target.path,
+        remote_path=target.remote_path,
+    )
 
 
 def _format_bytes(size_bytes: int) -> str:
@@ -76,10 +82,6 @@ def _format_bytes(size_bytes: int) -> str:
         return f"{gib:.2f} GiB"
     mib = size_bytes / (1024 * 1024)
     return f"{mib:.2f} MiB"
-
-
-def _client_error_code(exc: ClientError) -> str:
-    return str(exc.response.get("Error", {}).get("Code", ""))
 
 
 def _validate_uploaded_task_pack(task_id: str, db: Db, *, expected_revision: int | None = None) -> UploadedTaskPack:
@@ -95,28 +97,21 @@ def _validate_uploaded_task_pack(task_id: str, db: Db, *, expected_revision: int
 
     try:
         size_bytes = s3.object_size(revision.object_key)
-    except ClientError as exc:
-        code = _client_error_code(exc)
-        if code in {"404", "NoSuchKey", "NotFound"}:
-            raise _http_error(
-                409,
-                "task_pack_missing",
-                "task pack upload is missing; upload the tarball to the presigned URL before finalizing this revision",
-                {"object_key": revision.object_key},
-            ) from exc
+    except Exception as exc:  # noqa: BLE001 - any Files transport failure is a retryable 503
         raise _http_error(
             503,
             "object_store_unavailable",
-            "could not verify task pack size against object storage; retry finalize later",
+            "could not verify task pack size against Files; retry finalize later",
         ) from exc
 
     if size_bytes is None:
-        s3.delete_object(revision.object_key)
+        # Missing: the client has not uploaded the tarball to the fileset yet. (On Files a file
+        # always reports a size, so there is no separate "unknown content-length" case.)
         raise _http_error(
             409,
-            "task_pack_size_unknown",
-            "task pack upload did not report Content-Length; upload the tarball again so "
-            "the API can enforce size and quota limits before finalize",
+            "task_pack_missing",
+            "task pack upload is missing; upload the tarball to the fileset returned by "
+            "POST /tasks before finalizing this revision",
             {"object_key": revision.object_key},
         )
 
@@ -174,14 +169,12 @@ def _reconcile_task_packs(
     for revision in revisions:
         try:
             missing = not s3.object_exists(revision.object_key)
-        except ClientError as exc:
-            if not s3.is_missing_object_error(exc):
-                raise _http_error(
-                    503,
-                    "object_store_unavailable",
-                    "could not verify task pack objects against object storage; retry later",
-                ) from exc
-            missing = True
+        except Exception as exc:  # noqa: BLE001 - any Files transport failure is a retryable 503
+            raise _http_error(
+                503,
+                "object_store_unavailable",
+                "could not verify task pack objects against Files; retry later",
+            ) from exc
         item_repaired = False
         if missing and repair:
             item_repaired = db.tasks.mark_task_pack_missing(
@@ -342,24 +335,18 @@ def finalize_task(
         prebuilt_image is None
         and not settings.image_builder_service_url
         and settings.cloud_build_enabled
-        and not settings.cloud_build_project.strip()
     ):
+        # Cloud Build reads the task pack from a GCS storageSource, but task packs now live
+        # in the Files service, not GCS, so a Cloud Build finalize would build against an
+        # object that was never written. Refuse it: use the image-builder service or local
+        # BuildKit, or pass a prebuilt image_ref. (The Cloud Build path is slated for removal.)
         raise _http_error(
             503,
-            "cloud_build_unavailable",
-            "Google Cloud Build finalize needs CLOUD_BUILD_PROJECT configured",
-        )
-    if (
-        prebuilt_image is None
-        and not settings.image_builder_service_url
-        and settings.cloud_build_enabled
-        and settings.object_store_backend != "gcs"
-    ):
-        raise _http_error(
-            503,
-            "cloud_build_unavailable",
-            "Google Cloud Build finalize needs OBJECT_STORE_BACKEND=gcs so it can build "
-            "from the already-uploaded task pack",
+            "cloud_build_unsupported",
+            "Google Cloud Build finalize is no longer supported: task packs are stored in the "
+            "Files service, which Cloud Build cannot read as a build source. Configure the "
+            "image-builder service or local BuildKit, or pass image_ref + image_digest to "
+            "reuse an already-signed image.",
         )
 
     build_backend: str | None = None
@@ -381,9 +368,9 @@ def finalize_task(
         builder_source_commit = settings.image_builder_source_commit.strip()
         if builder_source_commit:
             build_payload["builder_source_commit"] = builder_source_commit
-    elif prebuilt_image is None and settings.cloud_build_enabled:
-        build_backend = "cloudbuild"
     elif prebuilt_image is None:
+        # Cloud Build is refused above (cloud_build_unsupported) since packs live in Files,
+        # so the only remaining unmanaged path is local BuildKit.
         build_backend = "buildkit"
 
     uploaded_pack = _validate_uploaded_task_pack(task_id, db, expected_revision=(body.revision if body else None))
@@ -465,7 +452,7 @@ def revise_task(task_id: str, db: Db) -> TaskRevisionCreateResponse:
     Allocates `revision = max(revision) + 1`, inserts a fresh
     `task_revisions` row in `uploading` status with its own tarball
     object key, and bumps `tasks.current_revision`. Mirrors the create
-    flow: returns the new `revision`, an `upload` block (presigned PUT) for
+    flow: returns the new `revision`, an `upload` block (Files upload target) for
     the new tarball, and `links` (self, finalize).
 
     The build is not triggered here — the new revision sits in `uploading`

@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     s3_access_key: str = "scaledevals"
     s3_secret_key: str = "scaledevals-dev-secret"
     s3_bucket: str = "scaled-evals"
+    # Platform workspace that owns scaled-evals' Files filesets (artifacts + task packs). All
+    # filesets live here today; scaled-evals keeps owning its own owner_id tenancy + upload
+    # quotas on top of Files. The future entity-owned-workspace model resolves this per-request
+    # in the _files_backend workspace seam instead.
+    files_workspace: str = "default"
     # Object-store backend. "s3" covers RustFS, MinIO, AWS S3, and GCS XML API
     # when HMAC credentials are available. "gcs" uses Google Cloud Storage's
     # JSON API with Application Default Credentials / Workload Identity.

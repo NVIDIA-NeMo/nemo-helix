@@ -71,7 +71,13 @@ def test_task_create_success(monkeypatch) -> None:
                 "id": "task_1",
                 "revision": 1,
                 "status": "pending",
-                "upload": {"method": "PUT", "url": "https://store/up", "headers": {}},
+                "upload": {
+                    "method": "PUT",
+                    "workspace": "default",
+                    "fileset": "se-task-task_1",
+                    "path": "rev/1/tarball.tar.gz",
+                    "remote_path": "default/se-task-task_1#rev/1/tarball.tar.gz",
+                },
             },
         )
 
@@ -81,7 +87,7 @@ def test_task_create_success(monkeypatch) -> None:
     assert seen["path"] == "/v1/tasks"
     assert seen["body"] == {"name": "My Bench"}
     assert "task_1" in result.output
-    assert "https://store/up" in result.output
+    assert "default/se-task-task_1#rev/1/tarball.tar.gz" in result.output
 
 
 def test_json_option_before_or_after_subcommands_matches(monkeypatch) -> None:
@@ -1027,7 +1033,7 @@ def test_evaluation_create_builds_framework_profile_body(monkeypatch) -> None:
     assert "ev_1" in result.output
 
 
-# ---------- presigned upload ----------------------------------------------
+# ---------- broker upload (direct to Files) --------------------------------
 
 
 def test_task_create_then_upload(monkeypatch, tmp_path) -> None:
@@ -1045,14 +1051,15 @@ def test_task_create_then_upload(monkeypatch, tmp_path) -> None:
                     "status": "pending",
                     "upload": {
                         "method": "PUT",
-                        "url": "https://store/up",
-                        "headers": {"Content-Type": "application/gzip"},
+                        "workspace": "default",
+                        "fileset": "se-task-task_1",
+                        "path": "rev/1/tarball.tar.gz",
+                        "remote_path": "default/se-task-task_1#rev/1/tarball.tar.gz",
                     },
                 },
             )
         seen["method"] = request.method
         seen["url"] = str(request.url)
-        seen["content_type"] = request.headers.get("Content-Type")
         seen["content_length"] = request.headers.get("Content-Length")
         seen["has_auth"] = "authorization" in request.headers
         seen["content"] = request.content
@@ -1064,51 +1071,13 @@ def test_task_create_then_upload(monkeypatch, tmp_path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert seen["method"] == "PUT"
-    assert seen["url"] == "https://store/up"
-    assert seen["content_type"] == "application/gzip"
+    # Uploads go directly to the Files service's v2 fileset endpoint on the same host.
+    assert seen["url"] == "https://api.example.com/v2/workspaces/default/filesets/se-task-task_1/-/rev/1/tarball.tar.gz"
     assert seen["content_length"] == str(len(b"TARBYTES"))
     assert seen["content"] == b"TARBYTES"
-    # The API bearer token must not be forwarded to the presigned target.
-    assert seen["has_auth"] is False
-
-
-def test_task_create_then_upload_gcs_resumable_adds_content_range(monkeypatch, tmp_path) -> None:
-    tarball = tmp_path / "pack.tar.gz"
-    tarball.write_bytes(b"TARBYTES")
-    seen = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.method == "POST":
-            return httpx.Response(
-                201,
-                json={
-                    "id": "task_1",
-                    "revision": 1,
-                    "status": "pending",
-                    "upload": {
-                        "method": "PUT",
-                        "url": "https://storage.googleapis.com/upload/session",
-                        "headers": {"Content-Type": "application/gzip"},
-                        "mode": "gcs_resumable",
-                    },
-                },
-            )
-        seen["content_range"] = request.headers.get("Content-Range")
-        seen["content_length"] = request.headers.get("Content-Length")
-        seen["has_auth"] = "authorization" in request.headers
-        seen["content"] = request.content
-        return httpx.Response(200)
-
-    result = runner_with(monkeypatch, handler).invoke(
-        cli,
-        ["--token", "nvapi-xyz", "task", "create", "--name", "B", "--tarball", str(tarball)],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert seen["content_range"] == "bytes 0-7/8"
-    assert seen["content_length"] == "8"
-    assert seen["content"] == b"TARBYTES"
-    assert seen["has_auth"] is False
+    # Unlike the old presigned URL, the Files endpoint authenticates via the bearer
+    # token, so it MUST be kept on the upload request.
+    assert seen["has_auth"] is True
 
 
 def test_task_upload_mints_revision(monkeypatch, tmp_path) -> None:
@@ -1125,7 +1094,13 @@ def test_task_upload_mints_revision(monkeypatch, tmp_path) -> None:
                     "id": "task_1",
                     "revision": 2,
                     "status": "uploading",
-                    "upload": {"method": "PUT", "url": "https://store/rev2", "headers": {}},
+                    "upload": {
+                        "method": "PUT",
+                        "workspace": "default",
+                        "fileset": "se-task-task_1",
+                        "path": "rev/2/tarball.tar.gz",
+                        "remote_path": "default/se-task-task_1#rev/2/tarball.tar.gz",
+                    },
                 },
             )
         seen["put_url"] = str(request.url)
@@ -1135,7 +1110,7 @@ def test_task_upload_mints_revision(monkeypatch, tmp_path) -> None:
     result = runner_with(monkeypatch, handler).invoke(cli, ["task", "upload", "task_1", str(tarball)])
     assert result.exit_code == 0, result.output
     assert seen["revisions_path"] == "/v1/tasks/task_1/revisions"
-    assert seen["put_url"] == "https://store/rev2"
+    assert seen["put_url"] == "https://api.example.com/v2/workspaces/default/filesets/se-task-task_1/-/rev/2/tarball.tar.gz"
     assert seen["content"] == b"NEWREV"
     assert "revision 2" in result.output
 
@@ -1151,7 +1126,13 @@ def test_task_upload_json_reports_local_result(monkeypatch, tmp_path) -> None:
                 json={
                     "id": "task_1",
                     "revision": 2,
-                    "upload": {"method": "PUT", "url": "https://store/rev2"},
+                    "upload": {
+                        "method": "PUT",
+                        "workspace": "default",
+                        "fileset": "se-task-task_1",
+                        "path": "rev/2/tarball.tar.gz",
+                        "remote_path": "default/se-task-task_1#rev/2/tarball.tar.gz",
+                    },
                 },
             )
         return httpx.Response(200)
