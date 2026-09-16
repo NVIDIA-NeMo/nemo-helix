@@ -61,6 +61,7 @@ class NimEmbeddingClient(BaseModel):
                             "input": inputs,
                             "input_type": input_type,
                             "encoding_format": "float",
+                            "modality": "text",
                         },
                     )
                     response.raise_for_status()

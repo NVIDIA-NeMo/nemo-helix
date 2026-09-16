@@ -53,6 +53,7 @@ async def test_embedding_client_sends_nim_input_type_and_checks_dimension() -> N
         "input": ["question"],
         "input_type": "query",
         "encoding_format": "float",
+        "modality": "text",
     }
 
 
@@ -121,6 +122,30 @@ async def test_embedding_client_does_not_retry_http_400() -> None:
             await NimEmbeddingClient(model=_model(), dimensions=2).encode(
                 ["question"],
                 input_type="query",
+                client=client,
+            )
+
+    assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_embedding_client_does_not_retry_vlm_image_503() -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            503,
+            request=request,
+            text='{"detail":"{\\"message\\":\\"image inputs require VLM serving to be enabled on this server\\"}"}',
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(NimEmbeddingError, match="image inputs require VLM"):
+            await NimEmbeddingClient(model=_model(), dimensions=2).encode(
+                ["data:image/png;base64,abc"],
+                input_type="passage",
                 client=client,
             )
 

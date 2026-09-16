@@ -21,5 +21,8 @@ def is_retryable_status(status_code: int) -> bool:
 
 def is_retryable_error(error: BaseException) -> bool:
     if isinstance(error, httpx.HTTPStatusError):
+        body = error.response.text or ""
+        if "image inputs require VLM" in body:
+            return False
         return is_retryable_status(error.response.status_code)
     return isinstance(error, httpx.TransportError)
