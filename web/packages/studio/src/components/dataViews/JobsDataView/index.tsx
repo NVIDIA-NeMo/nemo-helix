@@ -61,6 +61,7 @@ export const JobsDataView = () => {
 
   const dataViewState = useStudioDataViewState({
     defaultSort: [{ id: 'created_at', desc: true }],
+    defaultPageSize: 10,
   });
 
   const userFilter = { ...(dataViewState.apiFilter.filter ?? {}) };
