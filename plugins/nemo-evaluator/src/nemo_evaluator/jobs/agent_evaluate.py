@@ -651,8 +651,8 @@ class AgentEvalJob(NemoJob):
             tasks = prepare_stored_harbor_tasks(
                 spec.tasks,
                 destination_root=ctx.storage.persistent / "harbor-inputs",
-                sdk=sdk,
-                async_sdk=async_sdk,
+                sdk=client,
+                async_sdk=async_client,
             )
         target, prompt_template, params = self._resolve_target(spec.target, ctx)
         run_config = AgentEvalRunConfig(

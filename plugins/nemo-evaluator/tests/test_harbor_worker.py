@@ -5,6 +5,7 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import httpx
@@ -108,7 +109,10 @@ def stored_packages(tmp_path, entity_store):
 
 
 @pytest.mark.parametrize("transport", ["sync", "async", "both"])
-def test_worker_passes_verified_ordered_tasks_to_public_evaluator(tmp_path, stored_packages, monkeypatch, transport):
+@pytest.mark.parametrize("generated_sdk", [False, True])
+def test_worker_passes_verified_ordered_tasks_to_public_evaluator(
+    tmp_path, stored_packages, monkeypatch, transport, generated_sdk
+):
     source, handler, requests = stored_packages
     sync_http = httpx.Client(transport=httpx.MockTransport(handler))
     async_http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
@@ -119,8 +123,17 @@ def test_worker_passes_verified_ordered_tasks_to_public_evaluator(tmp_path, stor
     async_sdk = AsyncNemoClient(
         http_client=async_http, base_url="http://platform.test", workspace="default", default_headers=headers
     )
+    if generated_sdk:
+        from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+
+        sdk = NeMoPlatform(
+            http_client=sync_http, base_url="http://platform.test", workspace="default", default_headers=headers
+        )
+        async_sdk = AsyncNeMoPlatform(
+            http_client=async_http, base_url="http://platform.test", workspace="default", default_headers=headers
+        )
     # Isolate onto a real async transport that records requests, as the worker normally does.
-    monkeypatch.setattr("nemo_evaluator.jobs.utils.httpx.AsyncClient", lambda: async_http)
+    monkeypatch.setattr("nemo_evaluator.jobs.utils.httpx", SimpleNamespace(AsyncClient=lambda: async_http))
     if transport == "both":
         sync_http.close()  # Selecting sync when both are supplied now fails.
     ctx = JobContext(
