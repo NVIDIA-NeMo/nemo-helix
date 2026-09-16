@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient
 from nemo_platform_plugin.job import job_collection_path_for
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
@@ -102,14 +102,15 @@ class NemoJobScheduler:
                 ``input_spec_schema`` or ``spec_schema`` when declared;
                 otherwise passed through unchanged.
             workspace: Workspace scope for the local context.
-            sdk: Optional :class:`~nemo_platform.NeMoPlatform` handle.
+            sdk: Optional sync platform handle (``NeMoPlatform`` or
+                :class:`~nemo_platform_plugin.client.client.NemoClient`).
                 Bound to an ``sdk`` kwarg on ``run`` if the signature
                 declares one. Jobs obtain typed service clients via
                 ``client_from_platform(sdk, FilesClient)`` for
                 per-service operations.
-            async_sdk: Optional :class:`~nemo_platform.AsyncNeMoPlatform`
-                handle, bound the same way when an ``async_sdk`` kwarg
-                is declared. Sync ``run`` cannot consume this directly
+            async_sdk: Optional async platform handle (``AsyncNeMoPlatform``
+                or :class:`~nemo_platform_plugin.client.client.AsyncNemoClient`),
+                bound the same way when an ``async_sdk`` kwarg is declared. Sync ``run`` cannot consume this directly
                 — it's available for jobs that delegate to async
                 helpers via :func:`asyncio.run`.
             ctx: Optional :class:`JobContext`. When omitted, the
@@ -281,7 +282,7 @@ class NemoJobScheduler:
                 validated,
                 workspace=workspace,
                 entity_client=None,
-                async_sdk=cast(AsyncNeMoPlatform, async_sdk),
+                async_sdk=cast(AsyncPlatformClient, async_sdk),
                 is_local=is_local,
             )
             # Re-validate ``to_spec`` output against ``spec_schema`` so plugin

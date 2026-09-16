@@ -70,8 +70,8 @@ import logging
 from abc import abstractmethod
 from typing import Any, ClassVar
 
-from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin._base import _NamedPlugin
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient
 from nemo_platform_plugin.job_context import JobContext
 from pydantic import BaseModel
 
@@ -236,7 +236,7 @@ class NemoJob(_NamedPlugin):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncPlatformClient,
         is_local: bool,
     ) -> BaseModel:
         """Transform *input_spec* into a canonical :attr:`spec_schema` instance.
@@ -259,7 +259,9 @@ class NemoJob(_NamedPlugin):
             input_spec: Validated :attr:`input_spec_schema` instance.
             workspace: Workspace scope (used for entity-client scoping).
             entity_client: Entity client for resolving names to IDs.
-            async_sdk: ``AsyncNeMoPlatform`` handle. ``to_spec`` runs in
+            async_sdk: Async platform handle (``AsyncNeMoPlatform`` on the
+                plugin service, ``AsyncNemoClient`` from the local CLI);
+                adapt it with ``client_from_platform``. ``to_spec`` runs in
                 the API process and is itself ``async``, so the framework
                 only offers the async client here — the parameter name
                 follows the codebase convention (``sdk`` is sync,
@@ -281,7 +283,7 @@ class NemoJob(_NamedPlugin):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncPlatformClient,
         profile: str | None = None,
         options: dict[str, Any] | None = None,
     ) -> object:
@@ -299,7 +301,7 @@ class NemoJob(_NamedPlugin):
             spec: Canonical :attr:`spec_schema` instance.
             entity_client: For resolving references (datasets, models, ...).
             job_name: Optional job name supplied by the submitter.
-            async_sdk: ``AsyncNeMoPlatform`` handle. Same contract as
+            async_sdk: Async platform handle. Same contract as
                 :meth:`to_spec`: this runs in the API process so only
                 the async client is offered.
             profile: Submitter-selected profile. The factory applies

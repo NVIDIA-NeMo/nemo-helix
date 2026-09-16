@@ -23,6 +23,7 @@ from typing import Annotated, Any, Optional
 import typer
 from nemo_agents_plugin.cli_context import BaseUrlOption, resolve_base_url, resolve_context_headers
 from nemo_agents_plugin.jobs.fileset_io import split_fileset_ref, upload_to_fileset
+from nemo_platform_plugin.client.client import NemoClient
 
 logger = logging.getLogger(__name__)
 
@@ -138,11 +139,9 @@ def _preflight_models(config: dict[str, Any], *, workspace: str, agent: str | No
         typer.echo(f"Warning: model preflight did not pass: {exc}", err=True)
 
 
-def _platform_sdk(base_url: str) -> Any:
-    """An auth-aware platform SDK client for the fileset upload."""
-    from nemo_platform import NeMoPlatform
-
+def _platform_sdk(base_url: str) -> NemoClient:
+    """An auth-aware platform client for the fileset upload."""
     headers = resolve_context_headers()
     if headers:
-        return NeMoPlatform(base_url=base_url, default_headers=headers)
-    return NeMoPlatform(base_url=base_url)
+        return NemoClient(base_url=base_url, default_headers=headers)
+    return NemoClient(base_url=base_url)

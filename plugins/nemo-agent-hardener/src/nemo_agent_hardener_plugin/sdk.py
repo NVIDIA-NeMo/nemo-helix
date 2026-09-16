@@ -22,7 +22,6 @@ from nemo_agent_hardener_plugin.filesets import upload_file_to_fileset
 from nemo_agent_hardener_plugin.jobs.defenses import compose_defense
 from nemo_agent_hardener_plugin.jobs.run import AgentHardenerRunJob
 from nemo_agent_hardener_plugin.jobs.synth_benign import AgentHardenerSynthBenignJob
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.agent_hardener.client import AgentHardenerClient
 from nemo_platform_plugin.agent_hardener.types import (
     AGENT_HARDENER_MANIFEST_TYPE,
@@ -35,7 +34,7 @@ from nemo_platform_plugin.agent_hardener.types import (
     ValidateModelRequest,
     WarGameModels,
 )
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.adapter import PlatformClient, client_from_platform
 from nemo_platform_plugin.entities.client import EntitiesClient
 from nemo_platform_plugin.entities.types import Entity, ListEntitiesQueryParams
 from nemo_platform_plugin.scheduler import NemoJobScheduler
@@ -73,7 +72,7 @@ def _run_to_dict(entity: Entity) -> JsonMap:
 
 
 def _run_war_game(
-    sync_sdk: NeMoPlatform,
+    sync_sdk: PlatformClient,
     *,
     config: str | None,
     manifest_id: str | None,
@@ -127,7 +126,7 @@ def _run_war_game(
 
 
 def _run_synth_benign(
-    sync_sdk: NeMoPlatform, *, manifest_id: str, env_file: str | None, interview: str, workspace: str
+    sync_sdk: PlatformClient, *, manifest_id: str, env_file: str | None, interview: str, workspace: str
 ) -> JsonMap:
     """Blocking benign-suite synthesis for a saved manifest, shared by the sync and async resources.
 
@@ -158,7 +157,7 @@ def _list_newest(entities: EntitiesClient, entity_type: str, *, workspace: str, 
 class _RunsResource:
     """``client.agent_hardener.runs`` — read AgentHardenerRun records from the entity store."""
 
-    def __init__(self, platform: NeMoPlatform) -> None:
+    def __init__(self, platform: PlatformClient) -> None:
         self._platform = platform
 
     def list(self, *, workspace: str = "default", limit: int = 20) -> Sequence[JsonMap]:
@@ -181,7 +180,7 @@ class _ManifestsResource:
     share one implementation of manifest creation (resolution, persistence, validation).
     """
 
-    def __init__(self, platform: NeMoPlatform) -> None:
+    def __init__(self, platform: PlatformClient) -> None:
         self._platform = platform
 
     def _client(self) -> AgentHardenerClient:
@@ -236,7 +235,7 @@ class _ManifestsResource:
 class AgentHardenerPluginResource:
     """Sync SDK namespace mounted as ``client.agent_hardener``."""
 
-    def __init__(self, platform: NeMoPlatform) -> None:
+    def __init__(self, platform: PlatformClient) -> None:
         self._platform = platform
         self._runs: _RunsResource | None = None
         self._manifests: _ManifestsResource | None = None
@@ -378,7 +377,7 @@ class AgentHardenerPluginResource:
 class AsyncAgentHardenerPluginResource:
     """Async SDK namespace mounted as ``client.agent_hardener``."""
 
-    def __init__(self, platform: AsyncNeMoPlatform) -> None:
+    def __init__(self, platform: PlatformClient) -> None:
         self._platform = platform
 
     async def run(

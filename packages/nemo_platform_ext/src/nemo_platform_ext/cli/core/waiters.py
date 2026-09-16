@@ -24,7 +24,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from nemo_platform_plugin.client.adapter import PlatformClient, client_from_platform
+from nemo_platform_plugin.client.adapter import SyncPlatformClient, client_from_platform
 from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
 from nemo_platform_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_platform_plugin.client.types import CursorPagination
@@ -205,7 +205,7 @@ def _print_transient_wait_error(live: Live, resource_label: str, error: Exceptio
 
 
 def wait_for_inference_deployment(
-    client: PlatformClient,
+    client: SyncPlatformClient,
     name: str,
     *,
     workspace: str | None = None,
@@ -387,7 +387,7 @@ def wait_for_platform_job(
 
 
 def wait_for_gateway(
-    client: PlatformClient,
+    client: SyncPlatformClient,
     provider_name: str,
     workspace: str,
     timeout: float = 60,

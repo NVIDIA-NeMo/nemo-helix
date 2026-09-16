@@ -5,16 +5,19 @@ from __future__ import annotations
 
 import contextlib
 import json
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Iterator, cast
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 import yaml
 from nemo_optimization.jobs.optimize import OptimizeJob
 from nemo_optimization.schemas.optimize import FILESET_REQUIRED, OptimizeSpec, OptimizeSubmitSpec
 from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.exceptions import (
     PlatformJobCompilationError,
@@ -285,7 +288,9 @@ def test_run_expands_env_vars_in_the_config(tmp_path: Path, ctx: JobContext, mon
     assert dispatch.call_args.kwargs["optimize_config"]["models"]["default"]["model"] == "demo-model"
 
 
-def test_run_resolves_platform_agent_before_dispatch(tmp_path: Path, ctx: JobContext) -> None:
+def test_run_resolves_platform_agent_before_dispatch(
+    tmp_path: Path, ctx: JobContext, make_platform_client: Callable[..., NemoClient]
+) -> None:
     optimize_config = write_config(tmp_path, MINIMAL_CONFIG)
 
     platform_agent = {
@@ -316,14 +321,10 @@ def test_run_resolves_platform_agent_before_dispatch(tmp_path: Path, ctx: JobCon
         },
     }
 
-    class _StubAgents:
-        def get(self, *, name: str, workspace: str) -> dict[str, Any]:
-            assert name == "react-agent"
-            assert workspace == "default"
-            return {"config": platform_agent}
-
-    class _StubSDK:
-        agents = _StubAgents()
+    def _serve_agent(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/apis/agents/v2/workspaces/default/agents/react-agent"
+        return httpx.Response(200, json={"name": "react-agent", "workspace": "default", "config": platform_agent})
 
     with patch(
         "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}
@@ -331,7 +332,7 @@ def test_run_resolves_platform_agent_before_dispatch(tmp_path: Path, ctx: JobCon
         OptimizeJob().run(
             {"optimize_config": optimize_config, "workspace": "default", "agent": "react-agent"},
             ctx=ctx,
-            sdk=cast(NeMoPlatform, _StubSDK()),
+            sdk=make_platform_client(_serve_agent),
         )
 
     agent_config = dispatch.call_args.kwargs["agent_config"]

@@ -30,11 +30,10 @@ from typing import (
 from anyio import open_file, to_thread
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
-from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nemo_platform_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_platform_plugin.authz import AuthzScope, CallerKind, path_rule
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient, client_from_platform
 from nemo_platform_plugin.client.errors import NemoHTTPError
 from nemo_platform_plugin.client.types import RetryPolicy
 from nemo_platform_plugin.dependencies import get_entity_client, get_sdk_client
@@ -506,19 +505,19 @@ class PlatformJobResultRoute(BaseModel):
 # the callable's return type instead of narrowing the callable itself with
 # runtime-only typing helpers.
 PlatformJobSpecCompiler = Callable[
-    [str, JobInputT, JobOutputT, EntityClient, str | None, AsyncNeMoPlatform],
+    [str, JobInputT, JobOutputT, EntityClient, str | None, AsyncPlatformClient],
     PlatformJobSpecLike | Awaitable[PlatformJobSpecLike],
 ]
 PlatformJobSpecCompilerAsync = Callable[
-    [str, JobInputT, JobOutputT, EntityClient, str | None, AsyncNeMoPlatform], Awaitable[PlatformJobSpecLike]
+    [str, JobInputT, JobOutputT, EntityClient, str | None, AsyncPlatformClient], Awaitable[PlatformJobSpecLike]
 ]
 
 
 # Input-to-output transformer types: receives job_name to use for related fields (e.g., output)
 # Signature: (original_spec, workspace, entity_client, job_name, sdk) -> transformed_spec
-InputToOutputTransformer = Callable[[JobInputT, str, EntityClient, str | None, AsyncNeMoPlatform], JobOutputT]
+InputToOutputTransformer = Callable[[JobInputT, str, EntityClient, str | None, AsyncPlatformClient], JobOutputT]
 InputToOutputTransformerAsync = Callable[
-    [JobInputT, str, EntityClient, str | None, AsyncNeMoPlatform], Awaitable[JobOutputT]
+    [JobInputT, str, EntityClient, str | None, AsyncPlatformClient], Awaitable[JobOutputT]
 ]
 
 # Job name generator: called when user doesn't provide a name
@@ -654,7 +653,7 @@ async def _transform_input_to_output(
     entity_client: EntityClient,
     job_name: str | None,
     service_name: str,
-    sdk: AsyncNeMoPlatform,
+    sdk: AsyncPlatformClient,
 ) -> JobSchemaLike:
     """Transform a job input spec into an output spec using the provided transformer.
 
@@ -692,7 +691,7 @@ async def _compile_platform_spec(
     entity_client: EntityClient,
     job_name: str | None,
     service_name: str,
-    sdk: AsyncNeMoPlatform,
+    sdk: AsyncPlatformClient,
     profile: str | None,
     options: dict[str, Any] | None,
 ) -> PlatformJobSpec:
@@ -833,7 +832,7 @@ def job_route_factory(
             workspace: str,
             entity_client: EntityClient,
             job_name: str,
-            sdk: AsyncNeMoPlatform,
+            sdk: AsyncPlatformClient,
         ) -> CustomizationJobOutput:
             return CustomizationJobOutput(
                 ...
@@ -845,7 +844,7 @@ def job_route_factory(
             transformed_spec: CustomizationJobOutput,
             entity_client: EntityClient,
             job_name: str,
-            sdk: AsyncNeMoPlatform,
+            sdk: AsyncPlatformClient,
         ) -> PlatformJobSpec:
             ...
 
@@ -945,7 +944,7 @@ def job_route_factory(
         async def create_job(
             workspace: str,
             request: TypedJobRequest,
-            sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+            sdk: AsyncPlatformClient = Depends(get_sdk_client),
             entity_client: EntityClient = Depends(get_entity_client),
         ) -> TypedJobResponse:
             f"""Create a new job for the {service_name} microservice."""
@@ -1020,7 +1019,7 @@ def job_route_factory(
 
         async def list_jobs(
             workspace: str,
-            sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+            sdk: AsyncPlatformClient = Depends(get_sdk_client),
             page: int = Query(default=1, description="Page number.", gt=0),
             page_size: int = Query(default=10, description="Page size.", gt=0),
             sort: BaseJobsSortField = Query(
@@ -1095,7 +1094,7 @@ def job_route_factory(
         async def get_job(
             workspace: str,
             name: str,
-            sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+            sdk: AsyncPlatformClient = Depends(get_sdk_client),
         ) -> TypedJobResponse:
             f"""Get a job by name for the {service_name} microservice."""
 
@@ -1109,7 +1108,7 @@ def job_route_factory(
         async def get_job_status(
             workspace: str,
             name: str,
-            sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+            sdk: AsyncPlatformClient = Depends(get_sdk_client),
         ) -> PlatformJobStatusResponse:
             f"""Get the status of a job by name for the {service_name} microservice."""
             job_resp = (
@@ -1128,7 +1127,7 @@ def job_route_factory(
         async def delete_job(
             workspace: str,
             name: str,
-            sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+            sdk: AsyncPlatformClient = Depends(get_sdk_client),
         ) -> None:
             f"""Delete a job by name for the {service_name} microservice."""
             try:
@@ -1144,7 +1143,7 @@ def job_route_factory(
         async def cancel_job(
             workspace: str,
             name: str,
-            sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+            sdk: AsyncPlatformClient = Depends(get_sdk_client),
         ) -> TypedJobResponse:
             f"""Cancel a job by name for the {service_name} microservice."""
 
@@ -1160,7 +1159,7 @@ def job_route_factory(
         async def get_job_logs(
             workspace: str,
             name: str,
-            sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+            sdk: AsyncPlatformClient = Depends(get_sdk_client),
             limit: int | None = Query(default=None),
             page_cursor: str | None = Query(default=None),
             tail: int | None = Query(default=None, gt=0, le=10_000),
@@ -1189,7 +1188,7 @@ def job_route_factory(
             workspace: str,
             name: str,
             request: Request,
-            sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+            sdk: AsyncPlatformClient = Depends(get_sdk_client),
         ) -> PlatformJobListResultResponse:
             f"""Get the results of a job by name for the {service_name} microservice."""
 
@@ -1213,7 +1212,7 @@ def job_route_factory(
             job: str,
             name: str,
             request: Request,
-            sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+            sdk: AsyncPlatformClient = Depends(get_sdk_client),
         ) -> PlatformJobResultResponse:
             f"""Get the result of a job by name for the {service_name} microservice."""
 
@@ -1252,7 +1251,7 @@ def job_route_factory(
             job: str,
             background_tasks: BackgroundTasks,
             result_serializer: ResultSerializer,
-            sdk: AsyncNeMoPlatform,
+            sdk: AsyncPlatformClient,
             **kwargs,
         ) -> Response:
             """
@@ -1289,7 +1288,7 @@ def job_route_factory(
                     workspace: str,
                     job: str,
                     background_tasks: BackgroundTasks,
-                    sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+                    sdk: AsyncPlatformClient = Depends(get_sdk_client),
                     limit: int | None = None,
                 ) -> Response:
                     return await _download_route_helper(
@@ -1308,7 +1307,7 @@ def job_route_factory(
                 workspace: str,
                 job: str,
                 background_tasks: BackgroundTasks,
-                sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+                sdk: AsyncPlatformClient = Depends(get_sdk_client),
             ) -> Response:
                 return await _download_route_helper(
                     workspace=workspace,
@@ -1333,7 +1332,7 @@ def job_route_factory(
                 job: str,
                 name: str,
                 background_tasks: BackgroundTasks,
-                sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+                sdk: AsyncPlatformClient = Depends(get_sdk_client),
             ) -> Response:
                 return await _download_route_helper(
                     workspace=workspace,
@@ -1373,7 +1372,7 @@ def job_route_factory(
         async def pause_job(
             name: str,
             workspace: str,
-            sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+            sdk: AsyncPlatformClient = Depends(get_sdk_client),
         ) -> TypedJobResponse:
             f"""Pause a job by name for the {service_name} microservice."""
 
@@ -1388,7 +1387,7 @@ def job_route_factory(
         async def resume_job(
             name: str,
             workspace: str,
-            sdk: AsyncNeMoPlatform = Depends(get_sdk_client),
+            sdk: AsyncPlatformClient = Depends(get_sdk_client),
         ) -> TypedJobResponse:
             f"""Resume a job by name for the {service_name} microservice."""
 
