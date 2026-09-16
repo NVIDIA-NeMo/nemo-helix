@@ -73,6 +73,22 @@ Principal = Annotated[CurrentPrincipal, Depends(current_principal)]
 StreamDatabaseFactory = Annotated[Callable[[], AbstractContextManager[Database]], Depends(get_stream_database_factory)]
 
 _TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
+
+
+def _evaluation_reads(db: Database) -> Any:
+    """Return the source for evaluation list/get reads.
+
+    Entity Store reads are served by the plugin's projection. The import is
+    deferred so this package keeps working without the plugin installed, and
+    Postgres stays both the default and the fallback.
+    """
+    if not settings.entity_store_reads_enabled:
+        return db.evaluations
+    from nemo_scaled_evals_plugin.projection import evaluation_reader  # noqa: PLC0415
+
+    return evaluation_reader()
+
+
 _EVENT_STREAM_BATCH_SIZE = 100
 _sse_connection_lock = Lock()
 _sse_active_connections = 0
@@ -591,7 +607,7 @@ def list_evaluations(
     more rows exist.
     """
     _ = team_id  # Teams are deliberately deferred.
-    rows = db.evaluations.list(
+    rows = _evaluation_reads(db).list(
         limit=limit,
         cursor=cursor,
         order=order,
@@ -614,7 +630,7 @@ def get_evaluation(evaluation_id: str, db: Db) -> EvaluationResponse:
     `result` JSON once the run has reached a terminal state (all null/None until
     then). 404 if not found or soft-deleted.
     """
-    row = db.evaluations.get(evaluation_id)
+    row = _evaluation_reads(db).get(evaluation_id)
     if row is None:
         raise _http_error(404, "not_found", "evaluation not found")
     return _response(row)

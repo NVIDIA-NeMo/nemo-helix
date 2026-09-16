@@ -763,6 +763,44 @@ class EvaluationRepository:
             )
             return cur.fetchall()
 
+    def list_changed_since(
+        self,
+        updated_after: datetime | None,
+        *,
+        limit: int,
+    ) -> builtins.list[dict]:
+        """Return rows to project, oldest change first.
+
+        Includes soft-deleted rows so a deletion propagates to the projection,
+        and selects the detail columns so a projected row can answer both the
+        list and the single-evaluation read.
+        """
+        clauses = []
+        params: list[Any] = []
+        if updated_after is not None:
+            # Inclusive: rows sharing the watermark's timestamp would otherwise
+            # be skipped. Re-projecting is idempotent, so the cost is bounded to
+            # one duplicate row per pass.
+            clauses.append("e.updated_at >= %s")
+            params.append(updated_after)
+        params.append(limit)
+        where = f"WHERE {join_where(clauses)}" if clauses else ""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT {EVALUATION_DETAIL_COLUMNS}, e.deleted_at
+                FROM evaluations e
+                LEFT JOIN task_revisions r
+                  ON r.task_id = e.task_id
+                 AND r.revision = e.task_revision
+                {where}
+                ORDER BY e.updated_at ASC, e.id ASC
+                LIMIT %s
+                """,
+                params,
+            )
+            return cur.fetchall()
+
     def get(self, evaluation_id: str) -> dict | None:
         with self.conn.cursor() as cur:
             cur.execute(
