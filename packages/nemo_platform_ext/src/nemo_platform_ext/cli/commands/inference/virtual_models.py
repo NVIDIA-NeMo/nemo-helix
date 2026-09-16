@@ -1,13 +1,28 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# NOTE: This file is auto-generated
+"""``nemo inference virtual-models`` command group, backed by the typed VirtualModels client."""
+
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, cast
 
 import typer
+from nemo_platform_plugin.virtual_models.client import VirtualModelsClient
+from nemo_platform_plugin.virtual_models.types import (
+    CreateVirtualModelRequest,
+    DeleteVirtualModelQueryParams,
+    ListVirtualModelsQueryParams,
+    UpdateVirtualModelRequest,
+)
 
+from nemo_platform_ext.cli.commands.inference._common import (
+    filter_query_value,
+    offset_query_params,
+    pop_exist_ok,
+    pop_workspace,
+    read_input_payload,
+)
 from nemo_platform_ext.cli.core.api import build_kwargs, merge_filter_dict
 from nemo_platform_ext.cli.core.code_generator import handle_code_generation
 from nemo_platform_ext.cli.core.context import CLIContext
@@ -19,8 +34,8 @@ from nemo_platform_ext.cli.core.formatters import (
     validate_stream_output_format,
 )
 from nemo_platform_ext.cli.core.help_formatter import collect_warnings, create_typer_app
-from nemo_platform_ext.cli.core.pagination import PaginationType, fetch_all_pages, warn_if_more_pages
-from nemo_platform_ext.cli.core.stdin_utils import read_data_input_with_flags, read_payload, validate_required_fields
+from nemo_platform_ext.cli.core.pagination import PaginationType, collect_offset_pages, warn_if_more_pages
+from nemo_platform_ext.cli.core.stdin_utils import build_request_body, read_payload, validate_required_fields
 from nemo_platform_ext.cli.core.types import (
     EntityOutputFormatOption,
     ListOutputFormatOption,
@@ -30,6 +45,14 @@ from nemo_platform_ext.cli.core.types import (
 )
 
 app = create_typer_app(name="virtual_models", help="Manage virtual_models")
+
+_AUTOPROVISIONED_HELP = "Marks this VirtualModel as controller-managed. The Models controller will delete it once no ModelProvider serves the matching entity. Setting this manually opts the VirtualModel into that cleanup behavior."
+_DEFAULT_MODEL_ENTITY_HELP = 'Model entity to route to, in "workspace/name" format. Written into request["model"] before the request middleware pipeline runs. If omitted, a request middleware plugin must handle backend routing itself. Set to null to clear an existing value.'
+_MODELS_HELP = "Model entity references used by this VirtualModel. A per-entry backend_format overrides the referenced ModelEntity backend_format when IGW resolves the backend format for a request. (JSON string)"
+_OVERRIDE_PROXY_HELP = 'Plugin-provided proxy implementation for IGW to use instead of its default aiohttp proxy. Format: "plugin-name.proxy-name". Leave unset to use the default IGW proxy. Set to null to clear an existing value.'
+_POST_RESPONSE_MIDDLEWARE_HELP = "Ordered list of middleware plugins invoked after the response has been returned to the caller. Intended for fire-and-forget work (logging, analytics) that must not block or modify the response. (JSON string)"
+_REQUEST_MIDDLEWARE_HELP = 'Ordered list of middleware plugins applied before proxying to the backend. Each entry is a MiddlewareCall with a "name" (plugin identifier) and optional "config_type" and "config_id" fields that reference a stored plugin configuration. (JSON string)'
+_RESPONSE_MIDDLEWARE_HELP = "Ordered list of middleware plugins applied after the backend response is received, before returning it to the caller. (JSON string)"
 
 
 @app.command("create")
@@ -42,54 +65,20 @@ def create_virtual_models(
         typer.Argument(help="Name of the virtual model within the workspace. Must be unique per workspace. (required)"),
     ] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
-    autoprovisioned: Annotated[
-        bool | None,
-        typer.Option(
-            "--autoprovisioned",
-            help="Marks this VirtualModel as controller-managed. The Models controller will delete it once no ModelProvider serves the matching entity. Setting this manually opts the VirtualModel into that cleanup behavior.",
-        ),
-    ] = None,
+    autoprovisioned: Annotated[bool | None, typer.Option("--autoprovisioned", help=_AUTOPROVISIONED_HELP)] = None,
     default_model_entity: Annotated[
-        str | None,
-        typer.Option(
-            "--default-model-entity",
-            help='Model entity to route to, in "workspace/name" format. Written into request["model"] before the request middleware pipeline runs. If omitted, a request middleware plugin must handle backend routing itself. Set to null to clear an existing value.',
-        ),
+        str | None, typer.Option("--default-model-entity", help=_DEFAULT_MODEL_ENTITY_HELP)
     ] = None,
-    models: Annotated[
-        str | None,
-        typer.Option(
-            "--models",
-            help="Model entity references used by this VirtualModel. A per-entry backend_format overrides the referenced ModelEntity backend_format when IGW resolves the backend format for a request. (JSON string)",
-        ),
-    ] = None,
-    override_proxy: Annotated[
-        str | None,
-        typer.Option(
-            "--override-proxy",
-            help='Plugin-provided proxy implementation for IGW to use instead of its default aiohttp proxy. Format: "plugin-name.proxy-name". Leave unset to use the default IGW proxy. Set to null to clear an existing value.',
-        ),
-    ] = None,
+    models: Annotated[str | None, typer.Option("--models", help=_MODELS_HELP)] = None,
+    override_proxy: Annotated[str | None, typer.Option("--override-proxy", help=_OVERRIDE_PROXY_HELP)] = None,
     post_response_middleware: Annotated[
-        str | None,
-        typer.Option(
-            "--post-response-middleware",
-            help="Ordered list of middleware plugins invoked after the response has been returned to the caller. Intended for fire-and-forget work (logging, analytics) that must not block or modify the response. (JSON string)",
-        ),
+        str | None, typer.Option("--post-response-middleware", help=_POST_RESPONSE_MIDDLEWARE_HELP)
     ] = None,
     request_middleware: Annotated[
-        str | None,
-        typer.Option(
-            "--request-middleware",
-            help='Ordered list of middleware plugins applied before proxying to the backend. Each entry is a MiddlewareCall with a "name" (plugin identifier) and optional "config_type" and "config_id" fields that reference a stored plugin configuration. (JSON string)',
-        ),
+        str | None, typer.Option("--request-middleware", help=_REQUEST_MIDDLEWARE_HELP)
     ] = None,
     response_middleware: Annotated[
-        str | None,
-        typer.Option(
-            "--response-middleware",
-            help="Ordered list of middleware plugins applied after the backend response is received, before returning it to the caller. (JSON string)",
-        ),
+        str | None, typer.Option("--response-middleware", help=_RESPONSE_MIDDLEWARE_HELP)
     ] = None,
     exist_ok: Annotated[
         bool | None,
@@ -120,13 +109,8 @@ def create_virtual_models(
         echo '{"json": "data"}' | nemo inference virtual-models create <name> --input-file -
         nemo inference virtual-models create <name> --<option> "value"
     """
-    # Read base input (optional if all fields provided via flags)
-    if input_file or input_data:
-        input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
-    else:
-        input_payload = {}
+    input_payload = read_input_payload(input_file, input_data)
 
-    # Apply CLI flag overrides (flags take precedence)
     if workspace is not None:
         input_payload["workspace"] = workspace
     if name is not None:
@@ -147,7 +131,6 @@ def create_virtual_models(
         input_payload["response_middleware"] = read_payload("response_middleware", response_middleware)
     if exist_ok is not None:
         input_payload["exist_ok"] = exist_ok
-    # Validate required fields are present after merging
     validate_required_fields(
         input_payload,
         ["name"],
@@ -157,20 +140,24 @@ def create_virtual_models(
         },
     )
 
-    all_kwargs = input_payload
+    request_workspace = pop_workspace(input_payload)
+    request_exist_ok = pop_exist_ok(input_payload)
+    body = build_request_body(CreateVirtualModelRequest, input_payload, command_name="inference virtual-models create")
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["inference", "virtual_models"], "create", all_kwargs, output_format, state):
+    kwargs = build_kwargs(workspace=request_workspace, body=body, exist_ok=request_exist_ok)
+    if handle_code_generation(VirtualModelsClient, "create_virtual_model", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.inference.virtual_models.create(**all_kwargs)
+    result = state.typed_client(VirtualModelsClient).create_virtual_model(
+        workspace=request_workspace, body=body, exist_ok=bool(request_exist_ok)
+    )
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -196,13 +183,12 @@ def delete_virtual_models(
     This does not affect any in-flight requests already being routed through this
     VirtualModel. IGW's model cache is refreshed on its next polling cycle."""
     state: CLIContext = ctx.obj
-    client = state.get_client()
-
-    kwargs = build_kwargs(
-        workspace=workspace,
-        expected_db_version=expected_db_version,
+    query_params: DeleteVirtualModelQueryParams | None = None
+    if expected_db_version is not None:
+        query_params = {"expected_db_version": expected_db_version}
+    state.typed_client(VirtualModelsClient).delete_virtual_model(
+        name=name, workspace=workspace, query_params=query_params
     )
-    client.inference.virtual_models.delete(name, **kwargs)
 
     typer.echo("✓ Deleted successfully")
 
@@ -255,56 +241,57 @@ def list_virtual_models(
 
     Use `workspace=-` to list across all workspaces accessible to the caller."""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
-    validate_stream_output_format(output_format, stream)
+    resolved_output_format = state.get_output_format(output_format)
+    validate_stream_output_format(resolved_output_format, stream)
 
-    check_output_columns_with_format(columns, output_format)
+    check_output_columns_with_format(columns, resolved_output_format)
 
     default_columns = [
         Column("name", None),
         Column("workspace", None),
         Column("created_at", None),
     ]
+    output_columns: str | list[Column] | None = columns
     if columns is None or str(columns).strip() == "default":
-        columns = default_columns
+        output_columns = default_columns
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-        exclude_autoprovisioned=exclude_autoprovisioned,
-        filter=merge_filter_dict(
+    filter_value = filter_query_value(
+        merge_filter_dict(
             filter,
             default_model_entity=filter_default_model_entity,
             guardrail_config=filter_guardrail_config,
             name=filter_name,
             project=filter_project,
             workspace=filter_workspace,
-        ),
-        page=page,
-        page_size=page_size,
-        sort=sort,
+        )
     )
-
-    if handle_code_generation(["inference", "virtual_models"], "list", kwargs, output_format, state):
+    query_params = cast(
+        "ListVirtualModelsQueryParams | None",
+        offset_query_params(
+            filter_value=filter_value,
+            page=page,
+            page_size=page_size,
+            sort=sort,
+            exclude_autoprovisioned=exclude_autoprovisioned,
+        ),
+    )
+    kwargs = build_kwargs(workspace=workspace, query_params=query_params)
+    if handle_code_generation(
+        VirtualModelsClient, "list_virtual_models", kwargs, resolved_output_format, state, result="list"
+    ):
         return
 
-    client = state.get_client()
-    path_args = ()
+    response = state.typed_client(VirtualModelsClient).list_virtual_models(
+        workspace=workspace, query_params=query_params
+    )
     pagination_type = PaginationType.PAGE_NUMBER
-    if all_pages:
-        items = fetch_all_pages(
-            client.inference.virtual_models.list,
-            path_args=path_args,
-            body_args=kwargs,
-            pagination_type=pagination_type,
-        )
-    else:
-        items = client.inference.virtual_models.list(*path_args, **kwargs)
+    items = collect_offset_pages(response, all_pages=all_pages)
 
     format_output(
         items,
         is_list=True,
-        output_format=output_format,
-        output_columns=columns,
+        output_format=resolved_output_format,
+        output_columns=output_columns,
         no_truncate=state.get_no_truncate(no_truncate),
         timestamp_format=state.get_timestamp_format(),
         stream=stream,
@@ -320,54 +307,20 @@ def patch_virtual_models(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
-    autoprovisioned: Annotated[
-        bool | None,
-        typer.Option(
-            "--autoprovisioned",
-            help="Marks this VirtualModel as controller-managed. The Models controller will delete it once no ModelProvider serves the matching entity. Setting this manually opts the VirtualModel into that cleanup behavior.",
-        ),
-    ] = None,
+    autoprovisioned: Annotated[bool | None, typer.Option("--autoprovisioned", help=_AUTOPROVISIONED_HELP)] = None,
     default_model_entity: Annotated[
-        str | None,
-        typer.Option(
-            "--default-model-entity",
-            help='Model entity to route to, in "workspace/name" format. Written into request["model"] before the request middleware pipeline runs. If omitted, a request middleware plugin must handle backend routing itself. Set to null to clear an existing value.',
-        ),
+        str | None, typer.Option("--default-model-entity", help=_DEFAULT_MODEL_ENTITY_HELP)
     ] = None,
-    models: Annotated[
-        str | None,
-        typer.Option(
-            "--models",
-            help="Model entity references used by this VirtualModel. A per-entry backend_format overrides the referenced ModelEntity backend_format when IGW resolves the backend format for a request. (JSON string)",
-        ),
-    ] = None,
-    override_proxy: Annotated[
-        str | None,
-        typer.Option(
-            "--override-proxy",
-            help='Plugin-provided proxy implementation for IGW to use instead of its default aiohttp proxy. Format: "plugin-name.proxy-name". Leave unset to use the default IGW proxy. Set to null to clear an existing value.',
-        ),
-    ] = None,
+    models: Annotated[str | None, typer.Option("--models", help=_MODELS_HELP)] = None,
+    override_proxy: Annotated[str | None, typer.Option("--override-proxy", help=_OVERRIDE_PROXY_HELP)] = None,
     post_response_middleware: Annotated[
-        str | None,
-        typer.Option(
-            "--post-response-middleware",
-            help="Ordered list of middleware plugins invoked after the response has been returned to the caller. Intended for fire-and-forget work (logging, analytics) that must not block or modify the response. (JSON string)",
-        ),
+        str | None, typer.Option("--post-response-middleware", help=_POST_RESPONSE_MIDDLEWARE_HELP)
     ] = None,
     request_middleware: Annotated[
-        str | None,
-        typer.Option(
-            "--request-middleware",
-            help='Ordered list of middleware plugins applied before proxying to the backend. Each entry is a MiddlewareCall with a "name" (plugin identifier) and optional "config_type" and "config_id" fields that reference a stored plugin configuration. (JSON string)',
-        ),
+        str | None, typer.Option("--request-middleware", help=_REQUEST_MIDDLEWARE_HELP)
     ] = None,
     response_middleware: Annotated[
-        str | None,
-        typer.Option(
-            "--response-middleware",
-            help="Ordered list of middleware plugins applied after the backend response is received, before returning it to the caller. (JSON string)",
-        ),
+        str | None, typer.Option("--response-middleware", help=_RESPONSE_MIDDLEWARE_HELP)
     ] = None,
     input_file: Annotated[
         str | None,
@@ -390,13 +343,8 @@ def patch_virtual_models(
         echo '{"json": "data"}' | nemo inference virtual-models patch <name> --input-file -
         nemo inference virtual-models patch <name> --<option> "value"
     """
-    # Read base input (optional if all fields provided via flags)
-    if input_file or input_data:
-        input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
-    else:
-        input_payload = {}
+    input_payload = read_input_payload(input_file, input_data)
 
-    # Apply CLI flag overrides (flags take precedence)
     if workspace is not None:
         input_payload["workspace"] = workspace
     if autoprovisioned is not None:
@@ -414,21 +362,23 @@ def patch_virtual_models(
     if response_middleware is not None:
         input_payload["response_middleware"] = read_payload("response_middleware", response_middleware)
 
-    all_kwargs = {"name": name, **input_payload}
-
+    request_workspace = pop_workspace(input_payload)
+    body = build_request_body(UpdateVirtualModelRequest, input_payload, command_name="inference virtual-models patch")
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["inference", "virtual_models"], "patch", all_kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=request_workspace, body=body)
+    if handle_code_generation(VirtualModelsClient, "update_virtual_model", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.inference.virtual_models.patch(**all_kwargs)
+    result = state.typed_client(VirtualModelsClient).update_virtual_model(
+        name=name, workspace=request_workspace, body=body
+    )
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -445,21 +395,18 @@ def retrieve_virtual_models(
 ) -> None:
     """Get a VirtualModel by workspace and name."""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-    if handle_code_generation(["inference", "virtual_models"], "retrieve", kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=workspace)
+    if handle_code_generation(VirtualModelsClient, "get_virtual_model", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.inference.virtual_models.retrieve(name, **kwargs)
+    result = state.typed_client(VirtualModelsClient).get_virtual_model(name=name, workspace=workspace)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )

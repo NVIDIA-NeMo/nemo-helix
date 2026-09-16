@@ -1,13 +1,23 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# NOTE: This file is auto-generated
+"""``nemo inference prompts`` command group, backed by the typed Models client."""
+
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 import typer
+from nemo_platform_plugin.models.client import ModelsClient
+from nemo_platform_plugin.models.types import CreatePromptRequest, ListPromptsQueryParams, UpdatePromptRequest
 
+from nemo_platform_ext.cli.commands.inference._common import (
+    filter_query_value,
+    offset_query_params,
+    pop_exist_ok,
+    pop_workspace,
+    read_input_payload,
+)
 from nemo_platform_ext.cli.core.api import build_kwargs, merge_filter_dict
 from nemo_platform_ext.cli.core.code_generator import handle_code_generation
 from nemo_platform_ext.cli.core.context import CLIContext
@@ -19,8 +29,8 @@ from nemo_platform_ext.cli.core.formatters import (
     validate_stream_output_format,
 )
 from nemo_platform_ext.cli.core.help_formatter import collect_warnings, create_typer_app
-from nemo_platform_ext.cli.core.pagination import PaginationType, fetch_all_pages, warn_if_more_pages
-from nemo_platform_ext.cli.core.stdin_utils import read_data_input_with_flags, read_payload, validate_required_fields
+from nemo_platform_ext.cli.core.pagination import PaginationType, collect_offset_pages, warn_if_more_pages
+from nemo_platform_ext.cli.core.stdin_utils import build_request_body, read_payload, validate_required_fields
 from nemo_platform_ext.cli.core.types import (
     EntityOutputFormatOption,
     ListOutputFormatOption,
@@ -31,6 +41,8 @@ from nemo_platform_ext.cli.core.types import (
 
 app = create_typer_app(name="prompts", help="Manage prompts")
 
+_INFERENCE_PARAMS_HELP = "Parameters for model inference. Extra fields can be supplied for additional options applied to the inference request directly. Fields not supported by the model may cause inference errors during evaluation. (JSON string)"
+
 
 @app.command("create")
 @collect_warnings
@@ -40,13 +52,7 @@ def create_prompts(
     name: Annotated[str | None, typer.Argument(help="Name of the prompt. (required)")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     description: Annotated[str | None, typer.Option("--description")] = None,
-    inference_params: Annotated[
-        str | None,
-        typer.Option(
-            "--inference-params",
-            help="Parameters for model inference. Extra fields can be supplied for additional options applied to the inference request directly. Fields not supported by the model may cause inference errors during evaluation. (JSON string)",
-        ),
-    ] = None,
+    inference_params: Annotated[str | None, typer.Option("--inference-params", help=_INFERENCE_PARAMS_HELP)] = None,
     input_variables: Annotated[
         list[str] | None, typer.Option("--input-variables", help="Can be repeated for multiple values")
     ] = None,
@@ -84,13 +90,8 @@ def create_prompts(
     echo '{"json": "data"}' | nemo inference prompts create <name> --input-file -
     nemo inference prompts create <name> --<option> "value"
     """
-    # Read base input (optional if all fields provided via flags)
-    if input_file or input_data:
-        input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
-    else:
-        input_payload = {}
+    input_payload = read_input_payload(input_file, input_data)
 
-    # Apply CLI flag overrides (flags take precedence)
     if workspace is not None:
         input_payload["workspace"] = workspace
     if name is not None:
@@ -115,7 +116,6 @@ def create_prompts(
         input_payload["tools"] = read_payload("tools", tools)
     if exist_ok is not None:
         input_payload["exist_ok"] = exist_ok
-    # Validate required fields are present after merging
     validate_required_fields(
         input_payload,
         ["name"],
@@ -125,20 +125,24 @@ def create_prompts(
         },
     )
 
-    all_kwargs = input_payload
+    request_workspace = pop_workspace(input_payload)
+    request_exist_ok = pop_exist_ok(input_payload)
+    body = build_request_body(CreatePromptRequest, input_payload, command_name="inference prompts create")
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["inference", "prompts"], "create", all_kwargs, output_format, state):
+    kwargs = build_kwargs(workspace=request_workspace, body=body, exist_ok=request_exist_ok)
+    if handle_code_generation(ModelsClient, "create_prompt", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.inference.prompts.create(**all_kwargs)
+    result = state.typed_client(ModelsClient).create_prompt(
+        workspace=request_workspace, body=body, exist_ok=bool(request_exist_ok)
+    )
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -154,12 +158,7 @@ def delete_prompts(
 ) -> None:
     """Delete a prompt by workspace and name."""
     state: CLIContext = ctx.obj
-    client = state.get_client()
-
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-    client.inference.prompts.delete(name, **kwargs)
+    state.typed_client(ModelsClient).delete_prompt(name=name, workspace=workspace)
 
     typer.echo("✓ Deleted successfully")
 
@@ -203,50 +202,42 @@ def list_prompts(
 ) -> None:
     """List prompts for a specific workspace."""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
-    validate_stream_output_format(output_format, stream)
+    resolved_output_format = state.get_output_format(output_format)
+    validate_stream_output_format(resolved_output_format, stream)
 
-    check_output_columns_with_format(columns, output_format)
+    check_output_columns_with_format(columns, resolved_output_format)
 
     default_columns = [
         Column("name", None),
         Column("workspace", None),
         Column("created_at", None),
     ]
+    output_columns: str | list[Column] | None = columns
     if columns is None or str(columns).strip() == "default":
-        columns = default_columns
+        output_columns = default_columns
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-        filter=merge_filter_dict(
+    filter_value = filter_query_value(
+        merge_filter_dict(
             filter, description=filter_description, name=filter_name, project=filter_project, workspace=filter_workspace
-        ),
-        page=page,
-        page_size=page_size,
-        sort=sort,
+        )
     )
-
-    if handle_code_generation(["inference", "prompts"], "list", kwargs, output_format, state):
+    query_params = cast(
+        "ListPromptsQueryParams | None",
+        offset_query_params(filter_value=filter_value, page=page, page_size=page_size, sort=sort),
+    )
+    kwargs = build_kwargs(workspace=workspace, query_params=query_params)
+    if handle_code_generation(ModelsClient, "list_prompts", kwargs, resolved_output_format, state, result="list"):
         return
 
-    client = state.get_client()
-    path_args = ()
+    response = state.typed_client(ModelsClient).list_prompts(workspace=workspace, query_params=query_params)
     pagination_type = PaginationType.PAGE_NUMBER
-    if all_pages:
-        items = fetch_all_pages(
-            client.inference.prompts.list,
-            path_args=path_args,
-            body_args=kwargs,
-            pagination_type=pagination_type,
-        )
-    else:
-        items = client.inference.prompts.list(*path_args, **kwargs)
+    items = collect_offset_pages(response, all_pages=all_pages)
 
     format_output(
         items,
         is_list=True,
-        output_format=output_format,
-        output_columns=columns,
+        output_format=resolved_output_format,
+        output_columns=output_columns,
         no_truncate=state.get_no_truncate(no_truncate),
         timestamp_format=state.get_timestamp_format(),
         stream=stream,
@@ -266,21 +257,18 @@ def retrieve_prompts(
 ) -> None:
     """Get a prompt by workspace and name."""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-    if handle_code_generation(["inference", "prompts"], "retrieve", kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=workspace)
+    if handle_code_generation(ModelsClient, "get_prompt", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.inference.prompts.retrieve(name, **kwargs)
+    result = state.typed_client(ModelsClient).get_prompt(name=name, workspace=workspace)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -294,13 +282,7 @@ def update_prompts(
     name: Annotated[str, typer.Argument()],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     description: Annotated[str | None, typer.Option("--description")] = None,
-    inference_params: Annotated[
-        str | None,
-        typer.Option(
-            "--inference-params",
-            help="Parameters for model inference. Extra fields can be supplied for additional options applied to the inference request directly. Fields not supported by the model may cause inference errors during evaluation. (JSON string)",
-        ),
-    ] = None,
+    inference_params: Annotated[str | None, typer.Option("--inference-params", help=_INFERENCE_PARAMS_HELP)] = None,
     input_variables: Annotated[
         list[str] | None, typer.Option("--input-variables", help="Can be repeated for multiple values")
     ] = None,
@@ -330,13 +312,8 @@ def update_prompts(
     echo '{"json": "data"}' | nemo inference prompts update <name> --input-file -
     nemo inference prompts update <name> --<option> "value"
     """
-    # Read base input (optional if all fields provided via flags)
-    if input_file or input_data:
-        input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
-    else:
-        input_payload = {}
+    input_payload = read_input_payload(input_file, input_data)
 
-    # Apply CLI flag overrides (flags take precedence)
     if workspace is not None:
         input_payload["workspace"] = workspace
     if description is not None:
@@ -358,21 +335,21 @@ def update_prompts(
     if tools is not None:
         input_payload["tools"] = read_payload("tools", tools)
 
-    all_kwargs = {"name": name, **input_payload}
-
+    request_workspace = pop_workspace(input_payload)
+    body = build_request_body(UpdatePromptRequest, input_payload, command_name="inference prompts update")
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["inference", "prompts"], "update", all_kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=request_workspace, body=body)
+    if handle_code_generation(ModelsClient, "update_prompt", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.inference.prompts.update(**all_kwargs)
+    result = state.typed_client(ModelsClient).update_prompt(name=name, workspace=request_workspace, body=body)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
