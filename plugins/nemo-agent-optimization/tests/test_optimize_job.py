@@ -1,184 +1,95 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from __future__ import annotations
-
-import contextlib
-from collections.abc import Iterator
-from pathlib import Path
+import asyncio
 from typing import Any
 
 import pytest
-import yaml
+from nemo_agent_optimization_plugin.job_base import AgentOptimizeJob
+from nemo_agent_optimization_plugin.jobs import optimize as router
 from nemo_agent_optimization_plugin.jobs.optimize import OptimizeJob
-from nemo_agent_optimization_plugin.schemas.optimize import OptimizeSpec
-from nemo_agent_optimization_plugin.strategies import PRIMARY_ARTIFACT_KEY, discover_optimization_strategies
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
+from nemo_platform_plugin.jobs.api_factory import (
+    ContainerSpec,
+    CPUExecutionProviderSpec,
+    PlatformJobSpec,
+    PlatformJobStep,
+)
 from nemo_platform_plugin.run_dependencies import LocalRunError
 
-AGENT_CONFIG = {"schema_version": "fabric.agent/v1alpha1"}
+_FAKE_EXECUTOR = CPUExecutionProviderSpec(provider="cpu", profile="default", container=ContainerSpec())
 
 
-class _FakeStrategy:
-    name = "fake"
+class _Target(AgentOptimizeJob):
+    name = "agent_optimize"
+    strategy = "fake"
+    compiled: list[dict[str, Any]] = []
 
-    def __init__(self, result: dict[str, Any] | None = None) -> None:
-        self.result = result if result is not None else {"status": "completed", "strategy": "fake"}
-        self.validated: list[tuple[dict[str, Any], str | None]] = []
-        self.run_kwargs: dict[str, Any] = {}
+    def optimize(self, **kwargs):
+        return {}
 
-    def validate_config(self, config: dict[str, Any], *, agent: str | None) -> None:
-        self.validated.append((config, agent))
-
-    def run(self, **kwargs: Any) -> dict[str, Any]:
-        self.run_kwargs = kwargs
-        return dict(self.result)
+    @classmethod
+    async def compile(cls, *, workspace, spec, **kwargs):
+        cls.compiled.append({"workspace": workspace, "spec": spec})
+        return PlatformJobSpec(steps=[PlatformJobStep(name="fake-step", executor=_FAKE_EXECUTOR, config={})])
 
 
-def _ctx(root: Path) -> JobContext:
-    """A real JobContext rooted at *root* (no mocks)."""
-    persistent = root / "persistent"
-    ephemeral = root / "ephemeral"
-    persistent.mkdir(exist_ok=True)
-    ephemeral.mkdir(exist_ok=True)
-    return JobContext(
-        workspace="default",
-        storage=StoragePaths(ephemeral=ephemeral, persistent=persistent),
-        results=LocalJobResults(root=persistent / "results"),
-    )
-
-
-def _write_config(tmp_path: Path) -> Path:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(yaml.safe_dump({"any": "config"}), encoding="utf-8")
-    return config_path
-
-
-@pytest.fixture
-def strategy() -> _FakeStrategy:
-    return _FakeStrategy()
-
-
-@pytest.fixture(autouse=True)
-def _register_fake_strategy(monkeypatch: pytest.MonkeyPatch, strategy: _FakeStrategy) -> None:
-    discover_optimization_strategies.cache_clear()
-    monkeypatch.setattr(
-        "nemo_agent_optimization_plugin.jobs.optimize.discover_optimization_strategies",
-        lambda: {"fake": strategy},
-    )
-    monkeypatch.setattr(
-        "nemo_agent_optimization_plugin.jobs.optimize.resolve_agent_config",
-        lambda agent, *, workspace, sdk: dict(AGENT_CONFIG),
-    )
-
-
-def test_run_dispatches_to_discovered_strategy(tmp_path: Path, strategy: _FakeStrategy) -> None:
-    config_path = _write_config(tmp_path)
-
-    job = OptimizeJob()
-    ctx = _ctx(tmp_path)
-    result = job.run(
-        {
-            "strategy": "fake",
-            "optimize_config": str(config_path),
-            "agent": "some-agent",
-            "workspace": "default",
-        },
-        ctx=ctx,
-        sdk=None,
-    )
-
-    assert result["status"] == "completed"
-    assert result["strategy"] == "fake"
-    assert strategy.validated == [({"any": "config"}, "some-agent")]
-    assert strategy.run_kwargs == {
-        "agent_config": AGENT_CONFIG,
-        "source_agent_config": None,
-        "config": {"any": "config"},
-        "ctx": ctx,
-        "workspace": "default",
-        "sdk": None,
+def _spec(**overrides: Any) -> dict[str, Any]:
+    return {
+        "strategy": "fake",
+        "agent": "my-ws/my-agent",
+        "config_fileset": "my-ws/bundle",
+        "config": "configs/optimize.yaml",
+        "output_agent": "my-agent-opt",
+        "workspace": "my-ws",
+        **overrides,
     }
 
 
-def test_run_publishes_primary_artifact(tmp_path: Path, strategy: _FakeStrategy) -> None:
-    artifact = tmp_path / "optimized.yaml"
-    artifact.write_text(yaml.safe_dump({"schema_version": "fabric.agent/v1alpha1"}), encoding="utf-8")
-    strategy.result = {"status": "completed", PRIMARY_ARTIFACT_KEY: str(artifact)}
-    output = tmp_path / "published" / "agent.yaml"
+@pytest.fixture(autouse=True)
+def installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _Target.compiled = []
+    monkeypatch.setattr(router, "discover_agent_optimize_jobs", lambda: {"fake": _Target})
 
-    result = OptimizeJob().run(
-        {
-            "strategy": "fake",
-            "optimize_config": str(_write_config(tmp_path)),
-            "agent": "some-agent",
-            "workspace": "default",
-            "output": str(output),
-        },
-        ctx=_ctx(tmp_path),
-        sdk=None,
+
+def test_compile_delegates_to_the_strategy_job_and_splices_its_steps() -> None:
+    spec = router.OptimizeSpec.model_validate(_spec())
+    compiled = asyncio.run(
+        OptimizeJob.compile(workspace="my-ws", spec=spec, entity_client=None, job_name=None, async_sdk=None)
     )
 
-    assert PRIMARY_ARTIFACT_KEY not in result
-    assert result["output"] == {"type": "local_file", "path": str(output.resolve())}
-    assert output.read_text(encoding="utf-8") == artifact.read_text(encoding="utf-8")
+    assert [step.name for step in compiled.steps] == ["fake-step"]
+    assert _Target.compiled[0]["workspace"] == "my-ws"
 
 
-def test_run_raises_for_unknown_strategy(tmp_path: Path) -> None:
-    config_path = _write_config(tmp_path)
-    job = OptimizeJob()
-    ctx = _ctx(tmp_path)
+def test_compile_strips_strategy_from_the_child_spec() -> None:
+    spec = router.OptimizeSpec.model_validate(_spec())
+    asyncio.run(OptimizeJob.compile(workspace="my-ws", spec=spec, entity_client=None, job_name=None, async_sdk=None))
+
+    child = _Target.compiled[0]["spec"]
+    assert not hasattr(child, "strategy")
+    assert child.output_agent == "my-agent-opt"
+
+
+def test_an_unknown_strategy_is_rejected_with_the_installed_list() -> None:
+    spec = router.OptimizeSpec.model_validate(_spec(strategy="nope"))
     with pytest.raises(LocalRunError, match=r"not installed\. Available strategies: \['fake'\]"):
-        job.run(
-            {
-                "strategy": "does-not-exist",
-                "optimize_config": str(config_path),
-                "agent": "some-agent",
-                "workspace": "default",
-            },
-            ctx=ctx,
-            sdk=None,
+        asyncio.run(
+            OptimizeJob.compile(workspace="my-ws", spec=spec, entity_client=None, job_name=None, async_sdk=None)
         )
 
 
-def test_unknown_strategy_is_rejected_before_the_bundle_is_staged(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A typo in ``--strategy`` must not cost a fileset download and an agent fetch first."""
-    staged: list[str] = []
+def test_run_delegates_to_run_local_with_the_child_spec(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
 
-    @contextlib.contextmanager
-    def _record_staging(
-        spec: OptimizeSpec,
-        *,
-        ctx: JobContext,
-        sdk: NeMoPlatform | None,
-    ) -> Iterator[tuple[Path, Path | None]]:
-        staged.append(spec.strategy)
-        yield _write_config(tmp_path), None
+    class _FakeScheduler:
+        def run_local(self, job_cls, spec, *, workspace, sdk=None):
+            calls.append({"job_cls": job_cls, "spec": spec, "workspace": workspace})
+            return {"agent": "my-ws/my-agent-opt"}
 
-    monkeypatch.setattr("nemo_agent_optimization_plugin.jobs.optimize._staged_bundle", _record_staging)
+    monkeypatch.setattr(router, "NemoJobScheduler", _FakeScheduler)
+    result = OptimizeJob().run(_spec(), ctx=object(), sdk=object())  # ty: ignore[invalid-argument-type]
 
-    with pytest.raises(LocalRunError, match="Available strategies"):
-        OptimizeJob().run(
-            {
-                "strategy": "does-not-exist",
-                "optimize_config": "config.yaml",
-                "optimize_config_fileset": "default/bundle",
-                "agent": "some-agent",
-                "workspace": "default",
-            },
-            ctx=_ctx(tmp_path),
-            sdk=None,
-        )
-
-    assert staged == []
-
-
-def test_task_entrypoint_imports() -> None:
-    from nemo_agent_optimization_plugin.tasks import optimize as task_module
-
-    assert callable(task_module.main)
+    assert result == {"agent": "my-ws/my-agent-opt"}
+    assert calls[0]["job_cls"] is _Target
+    assert calls[0]["spec"]["output_agent"] == "my-agent-opt"
+    assert "strategy" not in calls[0]["spec"]
