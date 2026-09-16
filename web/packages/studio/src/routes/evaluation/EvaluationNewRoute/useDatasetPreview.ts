@@ -21,6 +21,9 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
+/** Bytes read for line-delimited formats, where a partial tail still parses. */
+const HEAD_BYTES = 65536;
+
 export interface DatasetKeyOption {
   label: string;
   value: string;
@@ -99,23 +102,32 @@ export function useDatasetPreview(datasetRef: string | null, rowIndex = 0): Data
     { query: { enabled: filesetEnabled } }
   );
 
+  const fileSize = useMemo(
+    () => filesResponse?.data?.find((file) => file.path === path)?.size,
+    [filesResponse, path]
+  );
+
   /** Byte budget for the Range request.
    *
-   *  Clamped to the file's real size on purpose: the Files endpoint rejects a
-   *  range that runs past EOF, so the 64 KB default 416s on any file smaller
-   *  than that — which is most eval datasets. ``handleInferFromExisting`` passes
-   *  the exact size for the same reason. Undefined until the listing resolves,
-   *  which also gates the row query so it never fires with a bad budget. */
+   *  Never more than the file's real size: the Files endpoint rejects a range
+   *  running past EOF, so a fixed 64 KB ask 416s on any smaller file -- which is
+   *  most eval datasets. ``handleInferFromExisting`` passes the exact size for
+   *  the same reason. Undefined until the listing resolves, which also gates the
+   *  row query so it never fires with a bad budget.
+   *
+   *  A head is only safe for line-delimited formats. A truncated JSON array
+   *  cannot be parsed at all, so ``.json`` is read whole -- the same thing
+   *  ``handleInferFromExisting`` does for every format. */
   const fileBytes = useMemo(() => {
-    const match = filesResponse?.data?.find((file) => file.path === path);
-    return match ? Math.min(match.size, 65536) : undefined;
-  }, [filesResponse, path]);
+    if (fileSize === undefined) return undefined;
+    return format === 'json' ? fileSize : Math.min(fileSize, HEAD_BYTES);
+  }, [fileSize, format]);
 
-  /** Whether the head covers the entire file, i.e. whether a row total is real. */
-  const isComplete = useMemo(() => {
-    const match = filesResponse?.data?.find((file) => file.path === path);
-    return match ? match.size <= 65536 : false;
-  }, [filesResponse, path]);
+  /** Whether the read covers the entire file, i.e. whether a row total is real. */
+  const isComplete = useMemo(
+    () => fileBytes !== undefined && fileBytes === fileSize,
+    [fileBytes, fileSize]
+  );
 
   const {
     data: preview,
@@ -206,6 +218,10 @@ export function useDatasetPreview(datasetRef: string | null, rowIndex = 0): Data
   }, [row]);
 
   const unsupportedFormat = Boolean(path) && !format;
+  /** The row helpers swallow a parse failure and return null, so a resolved
+   *  query is not proof the file was read. Row 0 only: a null row further in is
+   *  a truncated trailing line, which ``isPartial`` already explains. */
+  const unreadable = rowIndex === 0 && preview !== undefined && preview?.row === null;
 
   return {
     row,
@@ -217,7 +233,7 @@ export function useDatasetPreview(datasetRef: string | null, rowIndex = 0): Data
     isLoading: isFetching,
     error: unsupportedFormat
       ? 'Unsupported file type. Pick a .json, .jsonl, or .csv file.'
-      : error
+      : error || unreadable
         ? 'Could not read the selected file.'
         : null,
   };
