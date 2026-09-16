@@ -25,8 +25,8 @@ version = "0.0.0"
 optuna = "nemo_optimization.backends.optuna.backend:OptunaBackend"
 ga = "nemo_optimization.backends.ga.backend:GaBackend"
 
-[project.entry-points."nemo.optimization-strategy"]
-nat = "nemo_optimization.optimization_strategy:NatOptimizationStrategy"
+[project.entry-points."nemo.jobs"]
+"optimization.agent_optimize" = "nemo_optimization.jobs.agent_optimize:NatAgentOptimizeJob"
 
 [build-system]
 requires = ["hatchling"]

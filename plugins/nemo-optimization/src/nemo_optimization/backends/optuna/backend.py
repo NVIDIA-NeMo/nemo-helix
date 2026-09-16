@@ -68,6 +68,7 @@ class OptunaBackend:
             "n_trials": result.n_trials,
             "best_trial": result.best_trial.number,
             "best_params": dict(result.best_trial.params),
+            "best_params_by_path": dict(result.best_params_by_path),
             "best_values": list(result.best_trial.values or []),
             "metric_names": list(result.metric_names),
             "agent": payload.get("metadata", {}).get("name"),

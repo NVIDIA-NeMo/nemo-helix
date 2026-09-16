@@ -11,7 +11,7 @@ from __future__ import annotations
 import copy
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -85,6 +85,12 @@ class NumericStudyResult:
     metric_names: tuple[str, ...]
     n_trials: int
     output_dir: Path
+    #: The winning trial's suggestions, keyed by the Fabric dotted paths declared in
+    #: ``optimizer.search_space`` (the same mapping ``apply_suggestions`` used to build
+    #: ``optimized_config.yml``). Lets a caller apply the tuned values to something other
+    #: than the Fabric payload — e.g. the stored platform agent spec — without recomputing
+    #: the suggestion mapping itself.
+    best_params_by_path: dict[str, Any] = field(default_factory=dict)
 
 
 def parse_numeric_study_config(optimizer: Mapping[str, Any]) -> NumericStudyConfig:
@@ -260,10 +266,8 @@ def run_numeric_study(
 
     # best_trial.params is keyed by logical search-space names; map to Fabric paths
     # the same way trial configs do before writing optimized_config.yml.
-    optimized_config = apply_suggestions(
-        base_config,
-        suggestions_by_path(config.search_space, best_trial.params),
-    )
+    best_params_by_path = suggestions_by_path(config.search_space, best_trial.params)
+    optimized_config = apply_suggestions(base_config, best_params_by_path)
     write_optimized_config(output_dir, optimized_config)
     write_trials_dataframe(study=study, metric_names=metric_names, output_dir=output_dir)
     maybe_write_pareto_plots(study=study, metric_names=metric_names, directions=directions, output_dir=output_dir)
@@ -274,6 +278,7 @@ def run_numeric_study(
         metric_names=metric_names,
         n_trials=n_trials,
         output_dir=output_dir,
+        best_params_by_path=best_params_by_path,
     )
 
 

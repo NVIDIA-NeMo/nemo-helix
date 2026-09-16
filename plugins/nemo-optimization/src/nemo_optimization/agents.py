@@ -56,10 +56,10 @@ def resolve_agent_config(
     if not isinstance(agent_config, dict) or not agent_config:
         raise RuntimeError(f"Agent '{ws}/{name}' has an empty or invalid stored config; cannot optimize it.")
     logger.info("Resolved agent %r to platform agent %s/%s", agent, ws, name)
-    return _to_fabric_agent_package(agent_config, label=f"{ws}/{name}")
+    return to_fabric_agent_package(agent_config, label=f"{ws}/{name}")
 
 
-def _to_fabric_agent_package(agent_config: dict[str, Any], *, label: str) -> dict[str, Any]:
+def to_fabric_agent_package(agent_config: dict[str, Any], *, label: str) -> dict[str, Any]:
     """Normalize a stored agent config into a Fabric agent package mapping."""
     if is_fabric_agent_config(agent_config):
         return dict(agent_config)

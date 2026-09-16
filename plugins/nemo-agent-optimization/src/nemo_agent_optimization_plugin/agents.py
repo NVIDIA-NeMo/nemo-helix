@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from nemo_optimization.agents import _to_fabric_agent_package
+from nemo_optimization.agents import to_fabric_agent_package
 from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.run_dependencies import LocalRunError
 
@@ -38,7 +38,7 @@ def resolve_agent_config(
             raise LocalRunError("Loading a local agent.yaml requires nemo-agents-plugin.") from exc
         local_config = load_agent_config(local_path).model_dump(mode="json", exclude_none=True)
         logger.info("Resolved agent %r from local config %s", agent, local_path)
-        return _to_fabric_agent_package(local_config, label=str(local_path))
+        return to_fabric_agent_package(local_config, label=str(local_path))
 
     if "://" in agent:
         raise LocalRunError(
@@ -64,4 +64,4 @@ def resolve_agent_config(
     if not isinstance(agent_config, dict) or not agent_config:
         raise RuntimeError(f"Agent '{ws}/{name}' has an empty or invalid stored config; cannot optimize it.")
     logger.info("Resolved agent %r to platform agent %s/%s", agent, ws, name)
-    return _to_fabric_agent_package(agent_config, label=f"{ws}/{name}")
+    return to_fabric_agent_package(agent_config, label=f"{ws}/{name}")

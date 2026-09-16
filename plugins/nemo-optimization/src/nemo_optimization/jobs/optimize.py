@@ -10,12 +10,10 @@ are owned by the agents plugin (``agents.optimize``).
 from __future__ import annotations
 
 import contextlib
-import copy
 import logging
 import os
-import re
 import shutil
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar, cast
 
@@ -39,16 +37,12 @@ from nemo_platform_plugin.jobs.exceptions import (
 )
 from nemo_platform_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
 from nemo_platform_plugin.jobs.image import get_qualified_image
-from nemo_platform_plugin.refs import (
-    FILESET_REF_PATTERN,
-    FilesetRef,
-    LocalDir,
-    classify_output_target,
-)
+from nemo_platform_plugin.refs import FilesetRef, LocalDir, classify_output_target
 from nemo_platform_plugin.run_dependencies import LocalRunError
 from pydantic import BaseModel
 
 from nemo_optimization.agents import resolve_agent_config
+from nemo_optimization.dataset import _staged_dataset
 from nemo_optimization.preflight import preflight_validate_llm_models
 from nemo_optimization.router import OptimizeRouter
 from nemo_optimization.schemas.optimize import FILESET_REQUIRED, OptimizeSpec, OptimizeSubmitSpec
@@ -296,69 +290,6 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError(f"optimize config must be a mapping: {path}")
     return _expand_env(raw)
-
-
-@contextlib.contextmanager
-def _staged_dataset(
-    optimize_config: dict[str, Any],
-    *,
-    workspace: str,
-    ctx: JobContext,
-    sdk: NeMoPlatform | None,
-) -> Iterator[dict[str, Any]]:
-    """Yield *optimize_config* with a fileset dataset reference replaced by a local path.
-
-    ``eval.general.dataset`` may be a plain host path (CLI runs) or a
-    ``workspace/fileset#path`` reference (remote submitters, who have no host
-    filesystem).  For the reference form the fileset is downloaded to a tempdir
-    for the duration of the study and the config is rewritten in place, so
-    everything downstream keeps seeing a plain readable path.
-    """
-    ref = _dataset_fileset_ref(optimize_config)
-    if ref is None:
-        yield optimize_config
-        return
-
-    # Soft dependency, mirroring nemo_optimization.agents' lazy imports.
-    from nemo_agents_plugin.jobs.fileset_io import resolve_staged_config
-
-    fileset_ref, _, object_path = ref.partition("#")
-    with resolve_staged_config(
-        object_path,
-        fileset_ref,
-        workspace=workspace,
-        ctx=ctx,
-        sdk=sdk,
-        kind="optimize-dataset",
-    ) as local_path:
-        yield _with_dataset_path(optimize_config, str(local_path))
-
-
-def _dataset_fileset_ref(optimize_config: Mapping[str, Any]) -> str | None:
-    """Return ``eval.general.dataset`` when it is a ``workspace/fileset#path`` ref."""
-    dataset = _dataset_node(optimize_config)
-    value = dataset if isinstance(dataset, str) else None
-    if isinstance(dataset, Mapping):
-        candidate = dataset.get("file_path") or dataset.get("path")
-        value = candidate if isinstance(candidate, str) else None
-    if value is None or not re.match(FILESET_REF_PATTERN, value):
-        return None
-    return value
-
-
-def _dataset_node(optimize_config: Mapping[str, Any]) -> Any:
-    general = optimize_config.get("eval", {})
-    general = general.get("general") if isinstance(general, Mapping) else None
-    return general.get("dataset") if isinstance(general, Mapping) else None
-
-
-def _with_dataset_path(optimize_config: dict[str, Any], local_path: str) -> dict[str, Any]:
-    """Copy *optimize_config* with the dataset location swapped for *local_path*."""
-    updated = copy.deepcopy(optimize_config)
-    general = updated["eval"]["general"]
-    dataset = general.get("dataset")
-    general["dataset"] = {"file_path": local_path} if isinstance(dataset, str) else {**dataset, "file_path": local_path}
-    return updated
 
 
 def _publish_results(
