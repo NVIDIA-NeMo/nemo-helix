@@ -28,6 +28,8 @@ from nemo_evaluator.jobs.publication import publish_row_eval_result
 from nemo_evaluator.jobs.publication_spec import RowPublicationSpec
 from nemo_evaluator.jobs.result_persistence import persist_evaluate_result
 from nemo_evaluator.jobs.utils import async_client_from_sync_client, run_with_isolated_async_client
+from nemo_evaluator.jobs.token_usage import report_row_evaluation_usage
+from nemo_evaluator.jobs.utils import as_async_nemo_client, as_nemo_client, run_with_isolated_async_client
 from nemo_evaluator.metric_refs import MetricRefOrInline
 from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
 from nemo_evaluator_sdk import Evaluator
@@ -360,6 +362,7 @@ class _EvaluateJobBase(NemoJob):
                 field_mapping=spec.field_mapping,
                 prompt_template=None,
             )
+        report_row_evaluation_usage(result, ctx.usage)
         result_files = self._write_result_files(
             result, ctx.storage.persistent, run_id=ctx.job_id, started_at=started_at
         )
