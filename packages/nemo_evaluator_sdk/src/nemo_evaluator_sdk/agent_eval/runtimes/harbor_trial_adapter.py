@@ -90,6 +90,8 @@ _TRIAL_LOG_DESCRIPTIONS = {
 _MAX_TRACEBACK_CHARS = 8192
 _HARBOR_EXTRA_REQUIRED_MESSAGE = (
     "Harbor execution and result adaptation require the optional `harbor` extra on Python >=3.12. "
+    "If NeMo Platform is installed as a package, run: uv pip install 'harbor>=0.20,<0.21' "
+    "(the `all`, `services`, `plugins`, and `nemo-experimentalist-plugin` extras already include it). "
     "From a NeMo Platform source checkout's repository root, run: "
     "uv sync --frozen --package nemo-evaluator-sdk --extra harbor"
 )
