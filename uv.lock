@@ -5251,6 +5251,7 @@ nemo-optimization-plugin = [
 nemo-platform-plugin = [
     { name = "anthropic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "fastapi", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "filesets", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "jsonschema", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "lark", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-platform-sdk", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -5726,6 +5727,7 @@ requires-dist = [
     { name = "filesets", marker = "extra == 'all'", editable = "packages/filesets" },
     { name = "filesets", marker = "extra == 'core-service'", editable = "packages/filesets" },
     { name = "filesets", marker = "extra == 'files-service'", editable = "packages/filesets" },
+    { name = "filesets", marker = "extra == 'nemo-platform-plugin'", editable = "packages/filesets" },
     { name = "filesets", marker = "extra == 'services'", editable = "packages/filesets" },
     { name = "fsspec", marker = "extra == 'all'", specifier = ">=2024.10.0" },
     { name = "fsspec", marker = "extra == 'guardrails-service'", specifier = ">=2024.10.0" },
@@ -6429,6 +6431,7 @@ source = { editable = "packages/nemo_platform_plugin" }
 dependencies = [
     { name = "anthropic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "fastapi", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "filesets", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "jsonschema", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "lark", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-platform-sdk", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -6486,6 +6489,7 @@ requires-dist = [
     { name = "distro", marker = "extra == 'nemo-platform-sdk'", specifier = ">=1.7.0,<2" },
     { name = "docker", marker = "extra == 'nemo-platform-sdk'", specifier = ">=7.0.0" },
     { name = "fastapi", specifier = ">=0.115.4" },
+    { name = "filesets", editable = "packages/filesets" },
     { name = "fsspec", marker = "extra == 'nemo-platform-sdk'", specifier = ">=2023.1.0" },
     { name = "httpx", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'nemo-platform-sdk'", specifier = ">=0.23.0,<1" },
