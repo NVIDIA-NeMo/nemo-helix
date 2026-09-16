@@ -17,7 +17,7 @@ bundle portable when the platform sees only the files you staged into a fileset.
 |---------|--------------|---------------------|-------|
 | **Chat-only** | Tunes temperature on a short Q&A agent (no tools) | [`optimize-chatonly.yaml`](optimize-chatonly.yaml) | [`dataset-chatonly.json`](dataset-chatonly.json) |
 | **Chat-only + `--agent`** | Same study; agent body from a platform entity | [`optimize-chatonly-via-agent.yaml`](optimize-chatonly-via-agent.yaml) | [`agents/chatonly/agent.yaml`](agents/chatonly/agent.yaml) |
-| **MCP** | Tunes temperature / top_p on a phishing agent that calls an MCP analyzer | [`optimize-mcp.yaml`](optimize-mcp.yaml) | [`dataset-mcp.json`](dataset-mcp.json) |
+| **MCP** | Tunes temperature on a phishing agent that calls an MCP analyzer | [`optimize-mcp.yaml`](optimize-mcp.yaml) | [`dataset-mcp.json`](dataset-mcp.json) |
 
 Official docs: [Optimize Agents](../../../../docs/agents/optimization.mdx).
 
@@ -78,6 +78,14 @@ export ADAPTER_PYTHON="$REPO_ROOT/.venv/bin/python"
   first when validating examples locally. The platform command requires
   `--optimize-config-fileset` and resolves paths against the downloaded bundle
   root; see [Platform submission](#platform-submission) below.
+- **Search-space paths are Fabric-shaped, and they are validated before the
+  study starts.** Every `optimizer.search_space` entry must address a value the
+  study can really change in the Fabric package it runs (`models.default.temperature`,
+  `harness.settings.max_tokens`) *and* that can be written back onto the stored
+  agent afterwards. A path that fails either half — a spec-shaped
+  `harnesses.<name>....` (Fabric's harness block is singular `harness`), or a
+  model leaf the spec cannot carry such as `top_p` — is refused in seconds,
+  naming every offending path, rather than after a study of paid model calls.
 - **`--agent` and `--output-agent` are both required on every `optimize`
   submission.** The job always resolves `--agent` against the platform (there
   is no more "config carries its own inline agent, no `--agent` needed" path)
@@ -368,6 +376,9 @@ nemo agents optimize \
 
 **Success:** job finishes with `status: completed`, `n_trials: 4`, and a best
 score near `1.0` when the model follows the “call the analyzer once” prompt.
+The study tunes `models.default.temperature` only; this config used to declare a
+`models.default.top_p` dimension as well, which is refused (see "Common bundle
+rules" above).
 
 **Flakiness:** Hermes + 70B models often return an empty final message after a
 successful analyzer tool call, or re-call the tool (breaking the phishing
@@ -434,6 +445,7 @@ print(
 | Agent create fails on fileset size / too many files | Pass `--agent-config` to `agents/chatonly/agent.yaml` (slim dir), not the parent examples folder |
 | `delete` hangs / `Aborted!` | Pass `-y` (`nemo agents delete NAME -y`) |
 | Create `409 Conflict` / stale models | Delete with `-y`, then create again; optimize always uses the **stored** agent config |
+| `optimizer.search_space declares parameter(s) this study cannot tune end to end` | The named path is not Fabric-shaped or cannot be written back to the agent; use `models.default.<declared field>` or `harness.settings.<field the agent already sets>`. This fires in seconds, before any model call |
 | `optimize` rejected with `An agent named '<name>' already exists` | `--output-agent` names a *new* agent entity the run creates; pick a name that is not already registered |
 | `--agent ...` rejected for `http://` / `file://` | Pass a workspace agent name (e.g. `hermes-optimize-chatonly`) — `--agent` must be a platform agent, and is required on every submission |
 | MCP: many samples `trial_status: failed` / `no completed trials` | Inspect `artifacts/.fabric/hermes/runtimes/*/logs/`; empty finals / multi-call should recover via MCP audit — if not, confirm `max_turns` ≥ 4 and `nemo-evaluator-sdk` has the binding-recovery fix |

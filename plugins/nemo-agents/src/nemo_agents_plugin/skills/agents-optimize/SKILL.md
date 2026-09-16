@@ -103,8 +103,9 @@ Suggested actions:
 
 - `nemo agents optimize prepare-fileset --source <bundle-dir> --optimize-config <bundle-relative-yaml> --fileset <name>`
 - `nemo agents optimize --strategy nat --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset> --output-agent <new-name>`
-- After it completes, apply the new prompt + hyperparameters to a sibling
-  agent, deploy it, and run `nemo agents evaluate` to compare.
+- After it completes, `--output-agent` already exists as a new agent entity
+  carrying the tuned prompt + hyperparameters. Deploy it and run
+  `nemo agents evaluate` to compare it against the source agent.
 
 ### 4. New model scan
 

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # --optimize-config: Hermes + phishing analyzer MCP (separate agent checkout).
-# Broader search space than chat-only — temperature + top_p, several trials.
+# Same tuned dimension as chat-only (temperature) over a range, with more trials.
 # Dataset: full phishing-agent eval set (email-phishing-analyzer-harnesses data/smaller_test.csv).
 schema_version: fabric.agent/v1alpha1
 metadata:
@@ -82,10 +82,11 @@ optimizer:
       path: models.default.temperature
       low: 0.0
       high: 0.5
-    top_p:
-      type: fabric
-      path: models.default.top_p
-      values: [0.9, 1.0]
+    # No top_p dimension: 'models.default.top_p' cannot round-trip from the Fabric
+    # package back onto the stored nemo-agents-spec-v1 agent (ModelConfig declares no
+    # top_p, and the hermes adapter does not read it from 'settings'), so the run is
+    # refused up front. Tune a value the agent declares, e.g.
+    #   max_tokens: {type: fabric, path: harness.settings.max_tokens, values: [1024, 2048]}
 eval:
   general:
     dataset:

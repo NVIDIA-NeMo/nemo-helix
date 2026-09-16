@@ -275,8 +275,10 @@ nemo files list nemo-agent-telemetry
 
 The `nemo agents optimize` command submits Fabric-backed numeric
 optimization through `agents.optimize` (implementation in
-`nemo-optimization`). Input must be a Fabric-native agent package
-(`schema_version: fabric.agent/v1alpha1`). The golden-path harness is
+`nemo-optimization`). The input is a platform agent entity
+(`config_format: nemo-agents-spec-v1`), named with `--agent`; the job
+translates it into the Fabric package the study runs and registers the
+result as a new agent entity. The golden-path harness is
 Hermes (`nvidia.fabric.hermes`); see
 `plugins/nemo-optimization/examples/hermes-optimize/` (install steps live in
 that README).
@@ -293,6 +295,16 @@ the platform and always creates `--output-agent`, whether you submit through
 the CLI or run the job in-process with the Python SDK. Paths *inside* the YAML
 (`dataset`, `eval.fabric.base_dir`, hook and MCP configs) resolve against the
 staged bundle root.
+
+Every `optimizer.search_space` path is Fabric-shaped and is validated before the
+study starts. A path must address a value the study can really change in the
+Fabric package it runs — `models.default.<declared model field>`, or
+`harness.settings.<field the agent already sets>` — *and* one the job can write
+back onto the stored agent afterwards. Paths that fail either half are refused
+in seconds, all of them named in one error, instead of after a full study of
+paid model calls: a spec-shaped `harnesses.<name>.settings.<field>` (the Fabric
+harness block is singular, `harness`) tunes nothing, and a model leaf the agent
+spec cannot carry, such as `top_p`, cannot round-trip back to the agent.
 
 ```bash
 export BUNDLE="$(pwd)/plugins/nemo-optimization/examples/hermes-optimize"
