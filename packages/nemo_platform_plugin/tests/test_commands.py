@@ -387,6 +387,29 @@ class TestSubmitVerb:
         assert result.exit_code == 0, result.output
         assert captured["headers"] == {"Authorization": "Bearer test-token"}
 
+    def test_submit_passes_telemetry_custom_fields_as_metadata(self, monkeypatch) -> None:
+        captured: dict[str, object] = {}
+
+        def _capture(_self, _job_cls, _spec, *, metadata=None, **_kwargs) -> dict:
+            captured["metadata"] = metadata
+            return {"id": "job-123"}
+
+        class _State:
+            def get_job_telemetry_custom_fields(self) -> dict[str, object]:
+                return {"_nemo_telemetry": {"session_id": "session-123"}}
+
+        monkeypatch.setattr("nemo_platform_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
+
+        app = _app_with_jobs(_GreetJob)
+        result = runner.invoke(
+            app,
+            ["greet", "submit", "--base-url", "http://127.0.0.1:8080"],
+            obj=_State(),
+        )
+
+        assert result.exit_code == 0, result.output
+        assert captured["metadata"] == {"custom_fields": {"_nemo_telemetry": {"session_id": "session-123"}}}
+
     def test_non_legacy_job_name_submits_remotely(self, monkeypatch) -> None:
         captured: dict[str, object] = {}
 

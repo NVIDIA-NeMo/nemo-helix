@@ -384,6 +384,48 @@ def test_execute_job_get_and_list_results_paths() -> None:
     ]
 
 
+def test_execute_job_download_result_returns_bytes() -> None:
+    paths: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        paths.append(req.url.path)
+        return httpx.Response(200, content=b'{"status": "succeeded"}\n')
+
+    jobs = AgentsResource(_platform(handler)).jobs.execute
+
+    content = jobs.download_result("fabric_run_result", job="execute-a1b2", workspace="team-a")
+
+    assert content == b'{"status": "succeeded"}\n'
+    assert paths == ["/apis/agents/v2/workspaces/team-a/jobs/execute/execute-a1b2/results/fabric_run_result/download"]
+
+
+def test_execute_job_download_result_uses_client_workspace_when_unset() -> None:
+    paths: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        paths.append(req.url.path)
+        return httpx.Response(200, content=b"tarball")
+
+    jobs = AgentsResource(_platform(handler, workspace=None)).jobs.execute
+
+    assert jobs.download_result("output_workdir", job="execute-a1b2") == b"tarball"
+    assert paths == ["/apis/agents/v2/workspaces/default/jobs/execute/execute-a1b2/results/output_workdir/download"]
+
+
+@pytest.mark.asyncio
+async def test_async_execute_job_download_result_returns_bytes() -> None:
+    paths: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        paths.append(req.url.path)
+        return httpx.Response(200, content=b"tarball")
+
+    jobs = AsyncAgentsResource(_async_platform(handler)).jobs.execute
+
+    assert await jobs.download_result("output_workdir", job="execute-a1b2", workspace="team-a") == b"tarball"
+    assert paths == ["/apis/agents/v2/workspaces/team-a/jobs/execute/execute-a1b2/results/output_workdir/download"]
+
+
 def test_execute_job_get_accepts_workspace_positionally() -> None:
     """Mirrors sibling ``get``/``delete`` methods, which take workspace positional-or-keyword."""
     paths: list[str] = []
