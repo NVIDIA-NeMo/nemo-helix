@@ -11,6 +11,7 @@ from data_designer_nemo.fileset_file_seed_reader import workspace_cvar
 from nemo_data_designer_plugin._data_designer import create_data_designer
 from nemo_data_designer_plugin.jobs.result_manager import DataDesignerResultManager
 from nemo_data_designer_plugin.jobs.spec import DataDesignerStepConfig
+from nemo_data_designer_plugin.jobs.token_usage import capture_token_usage
 from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.job_results import ResultRef
@@ -80,11 +81,12 @@ def _run_step_config(
         dd_ctx=dd_ctx,
     )
     data_designer.set_run_config(dd.RunConfig(buffer_size=BUFFER_SIZE))
-    dataset_creation_results = data_designer.create(
-        config_builder,
-        num_records=step_config.job_config.num_records,
-        on_batch_complete=_on_batch_complete,
-    )
+    with capture_token_usage(ctx.usage):
+        dataset_creation_results = data_designer.create(
+            config_builder,
+            num_records=step_config.job_config.num_records,
+            on_batch_complete=_on_batch_complete,
+        )
 
     artifacts_result = result_manager.save_artifacts()
     analysis_result = result_manager.save_analysis(dataset_creation_results.load_analysis())
