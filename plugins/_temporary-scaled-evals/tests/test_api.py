@@ -161,6 +161,28 @@ def test_dependency_checks_require_fresh_build_worker(monkeypatch) -> None:  # n
     assert checks["build_worker"] == "fail: RuntimeError"
 
 
+def test_dependency_checks_require_platform_jobs_controller(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(settings, "platform_build_jobs_enabled", True)
+    monkeypatch.setattr(settings, "platform_evaluation_jobs_enabled", False)
+    monkeypatch.setattr(settings, "buildkit_enabled", False)
+    monkeypatch.setattr(settings, "registry_enabled", False)
+    monkeypatch.setattr(settings, "build_worker_required", False)
+    monkeypatch.setattr(ops, "_postgres_probe", lambda: None)
+    monkeypatch.setattr(ops, "_schema_probe", lambda: None)
+    monkeypatch.setattr(ops.s3, "check_bucket", lambda: None)
+
+    def stale_controller() -> None:
+        raise RuntimeError("no fresh Platform Jobs controller heartbeat")
+
+    monkeypatch.setattr(ops, "_platform_jobs_controller_probe", stale_controller)
+
+    checks, required_ok = ops._run_dependency_checks()
+
+    assert required_ok is False
+    assert checks["platform_jobs_controller"] == "fail: RuntimeError"
+    assert checks["build_worker"] == "skipped: disabled"
+
+
 def test_dependency_checks_require_compatible_schema(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(settings, "buildkit_enabled", False)
     monkeypatch.setattr(settings, "registry_enabled", False)

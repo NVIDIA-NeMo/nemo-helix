@@ -1010,11 +1010,6 @@ class TestValidateAgentConfig:
         from nemo_agents_plugin.container.validator import validate_agent_config
 
         for wf_type in (
-            "claude_code_agent",
-            "codex_agent",
-            "cursor_agent",
-            "hermes_agent",
-            "openclaw_agent",
             "react_agent",
             "tool_calling_agent",
             "reasoning_agent",

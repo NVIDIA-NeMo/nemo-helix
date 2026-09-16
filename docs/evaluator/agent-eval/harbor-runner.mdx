@@ -166,7 +166,7 @@ HarborRunnerTarget / HarborRuntimeConfig
 ```
 
 For example, NeMo Fabric's
-[`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.3.0-beta.2/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
+[`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.3.0/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
 is one of Harbor's [existing agents](https://www.harborframework.com/docs/agents#existing-agents);
 its constructor requires `fabric_adapter_id` and accepts `fabric_package` and `fabric_telemetry`:
 
@@ -176,7 +176,7 @@ config = HarborRuntimeConfig(
     agent_import_path="nemo_fabric.integrations.harbor:FabricAgent",
     agent_kwargs={
         "fabric_adapter_id": "nvidia.fabric.codex",
-        "fabric_package": "nemo-fabric[codex]==0.3.0b1",
+        "fabric_package": "nemo-fabric[codex]==0.3.0",
         "fabric_telemetry": "relay",
     },
 )
@@ -196,7 +196,7 @@ spec, the run bundle, nor `config.json`:
     "agent_import_path": "nemo_fabric.integrations.harbor:FabricAgent",
     "agent_kwargs": {
       "fabric_adapter_id": "nvidia.fabric.codex",
-      "fabric_package": "nemo-fabric[codex]==0.3.0b1"
+      "fabric_package": "nemo-fabric[codex]==0.3.0"
     },
     "env_secrets": {
       "OPENAI_API_KEY": "my-workspace/openai-key"

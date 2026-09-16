@@ -109,6 +109,22 @@ class DeploymentsRunnerConfig(BaseModel):
     )
 
 
+class AgentJobsConfig(BaseModel):
+    """Settings for containerized agent jobs (``agents.execute``)."""
+
+    default_image: str = Field(
+        default="",
+        description=(
+            "Default container image for agents.execute jobs when "
+            "ExecuteAgentJobConfig.image is omitted. Distinct from "
+            "deployments.default_image, which is the AgentDeployment fallback. "
+            "When both are empty the job inherits the jobs substrate's chain: "
+            "the execution profile's default_task_image, then the platform "
+            "CPU tasks image."
+        ),
+    )
+
+
 class AgentsConfig(NemoConfig):
     """Configuration for the Agents plugin."""
 
@@ -129,4 +145,8 @@ class AgentsConfig(NemoConfig):
     deployments: DeploymentsRunnerConfig = Field(
         default_factory=DeploymentsRunnerConfig,
         description="Container-mode (docker/k8s) settings for the deployments-plugin runner.",
+    )
+    jobs: AgentJobsConfig = Field(
+        default_factory=AgentJobsConfig,
+        description="Containerized agent job settings.",
     )

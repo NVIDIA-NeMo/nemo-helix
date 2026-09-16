@@ -34,6 +34,9 @@ from nemo_platform_ext.cli.core.waiters import wait_for_platform_job
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.jobs.client import JobsClient
 {% endif %}
+{% if stamp_job_telemetry %}
+from nemo_platform_plugin.jobs.telemetry import merge_job_telemetry_custom_fields
+{% endif %}
 
 
 @app.command("{{ cli_command_name }}")
@@ -127,6 +130,14 @@ def {{ function_name }}(
     all_kwargs = input_payload
 {% endif %}
     state: CLIContext = ctx.obj
+{% if stamp_job_telemetry %}
+    telemetry_custom_fields = state.get_job_telemetry_custom_fields()
+    if telemetry_custom_fields:
+        all_kwargs["custom_fields"] = merge_job_telemetry_custom_fields(
+            all_kwargs.get("custom_fields"),
+            telemetry_custom_fields,
+        )
+{% endif %}
     output_format = state.get_output_format(output_format)
 
 {% if has_wait_config and has_watch_config %}

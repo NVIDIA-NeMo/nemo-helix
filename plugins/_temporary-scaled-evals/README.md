@@ -338,14 +338,17 @@ lsof -ti tcp:8080 | xargs kill
 docker rm -f scaled-evals-pg
 ```
 
-## Workers (separate processes)
+## Background execution
 
-```bash
-scaled-evals-build-worker
-scaled-evals-dispatch-worker
-```
+With `SCALED_EVALS_PLATFORM_BUILD_JOBS_ENABLED=true` and
+`SCALED_EVALS_PLATFORM_EVALUATION_JOBS_ENABLED=true`, the
+`scaled-evals-jobs` controller submits task builds and evaluation executions to
+Platform Jobs. Postgres remains the admission queue and metadata source of
+truth during this migration.
 
-Workers read the same `SCALED_EVALS_DATABASE_URL` and S3 env as the plugin.
+`scaled-evals-dispatch-worker` remains deployed for cleanup, provenance, and
+SBOM queues. The legacy `scaled-evals-build-worker` command remains available
+only for deployments that leave Platform Jobs disabled.
 
 ## Licensing
 

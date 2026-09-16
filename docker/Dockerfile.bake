@@ -9,7 +9,7 @@ ARG DISTROLESS_BASE=nvcr.io/nvidia/distroless/python:3.11-v4.0.8
 ARG DISTROLESS_BASE_3_13=nvcr.io/nvidia/distroless/python:3.13-v4.0.9
 
 #root-uv-binary-base
-    FROM ghcr.io/astral-sh/uv:0.9.14 AS root-uv-binary-base
+    FROM ghcr.io/astral-sh/uv:0.10.10 AS root-uv-binary-base
 
 #root-lib-source-artifacts
     FROM scratch AS root-lib-source-artifacts

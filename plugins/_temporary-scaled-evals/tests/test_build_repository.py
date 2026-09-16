@@ -3,12 +3,14 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 pytest.importorskip("scaled_evals")
 
+from scaled_evals.api.build.queue_worker import TaskBuildWorker
 from scaled_evals.api.repositories.build_repository import TaskBuildRepository
 
 
@@ -67,3 +69,47 @@ def test_retry_or_fail_persists_retry_or_terminal_state(attempt: int, terminal: 
         assert "build_next_attempt_at = NOW()" in sql
         assert "status = 'failed'" not in sql
         assert params == ("builder unavailable", 30, "task_1", 2, "worker-1")
+
+
+def test_platform_job_claim_binding_and_listing() -> None:
+    conn = MagicMock()
+    cur = conn.cursor.return_value.__enter__.return_value
+    cur.rowcount = 1
+    cur.fetchall.return_value = [
+        {
+            "task_id": "task_1",
+            "revision": 2,
+            "build_attempts": 1,
+            "job_name": "scaled-evals-build-abc",
+        }
+    ]
+    repository = TaskBuildRepository(conn)
+
+    assert repository.bind_platform_job(
+        "task_1",
+        2,
+        worker_id="controller-1",
+        job_name="scaled-evals-build-abc",
+    )
+    bind_sql, bind_params = cur.execute.call_args.args
+    assert "SET build_claimed_by = %s" in bind_sql
+    assert bind_params == ("scaled-evals-build-abc", "task_1", 2, "controller-1")
+
+    assert repository.list_platform_jobs(limit=10) == cur.fetchall.return_value
+    list_sql, list_params = cur.execute.call_args.args
+    assert "build_claimed_by LIKE 'scaled-evals-build-%%'" in list_sql
+    assert list_params == (10,)
+
+
+def test_legacy_worker_does_not_claim_platform_owned_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    worker = TaskBuildWorker()
+    claim_next = MagicMock()
+    monkeypatch.setattr(worker, "claim_next", claim_next)
+    monkeypatch.setitem(
+        TaskBuildWorker.work_once.__globals__,
+        "settings",
+        SimpleNamespace(platform_build_jobs_enabled=True),
+    )
+
+    assert worker.work_once() is False
+    claim_next.assert_not_called()
