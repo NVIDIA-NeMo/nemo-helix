@@ -62,8 +62,11 @@ VirtualModel upsert returns **HTTP 400** when those types are used without
 `switchyard_rust`. Do not `uv add` upstream `nemo-switchyard` into the platform
 venv; that replaces May `switchyard` and silently breaks `translate`.
 
-Judge / classifier HTTP uses `get_inference_url_and_model` (provider-direct).
-Do not point the judge at a VirtualModel id — that re-enters this middleware.
+Judge / classifier HTTP uses `get_inference_url_and_model` (provider-direct) plus
+the provider's cached secret and extra headers. Caller request headers are not
+forwarded. Do not point the judge at a VirtualModel id — that re-enters this
+middleware. Native `run_stream` converts OpenAI Chat Completions to Switchyard's
+normalized request/response IR; RC2 has no Python translator for that hop.
 
 ### Phases (request vs. response)
 

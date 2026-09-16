@@ -6,10 +6,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-TAG="${SWITCHYARD_NATIVE_TAG:-v0.3.0-rc.1}"
+TAG="${SWITCHYARD_NATIVE_TAG:-v0.3.0-rc.2}"
 VENV="${SWITCHYARD_NATIVE_VENV:-${TMPDIR:-/tmp}/nmp-switchyard-native-venv}"
 
-python3 -m venv "$VENV"
+python3 -m venv --clear "$VENV"
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
 python -m pip install -U pip
@@ -21,5 +21,6 @@ python -c "import switchyard_rust; import switchyard_rust.libsy"
 cd "$ROOT"
 python -m pytest plugins/nemo-switchyard/tests/test_native_libsy.py \
   --noconftest \
+  -o addopts= \
   -o "markers=switchyard_native: isolated native rust" \
   -v

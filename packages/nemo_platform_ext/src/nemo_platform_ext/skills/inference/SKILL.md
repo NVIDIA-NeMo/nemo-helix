@@ -198,7 +198,7 @@ Native `stage_router` and `llm_classifier` require `switchyard_rust` in the IGW
 process. Default platform images do not ship it; upsert is HTTP 400 until the
 native wheel is installed in an isolated environment (do not overlay it on the
 May `switchyard` vendor). Judge calls must use provider-direct URLs from
-`get_inference_url_and_model`, not the VirtualModel gateway URL.
+`get_inference_url_and_model` plus the provider's cached secret, not the VirtualModel gateway URL.
 
 For VMs without a rewriting middleware: always send the real auto-discovered
 entity in the body.

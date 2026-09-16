@@ -65,14 +65,21 @@ def models_map_from_config(config: dict[str, Any], *, required: tuple[str, ...])
         if key not in mapping:
             mapping[key] = _model_names(raw, f"models.{key}")
     if "any" not in mapping:
-        mapping["any"] = list(dict.fromkeys(name for names in mapping.values() for name in names))
+        serving = [names for key, names in mapping.items() if key != "judge"]
+        mapping["any"] = list(dict.fromkeys(name for names in serving for name in names))
     return mapping
+
+
+def _require_unit_interval(value: Any, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0.0 <= float(value) <= 1.0:
+        raise InferenceMiddlewareError(f"{field} must be in [0, 1]", status_code=400)
+    return float(value)
 
 
 def map_random_routing_config(config: dict[str, Any]) -> tuple[list[float], int | None, dict[str, list[str]]]:
     """Map May-shaped random_routing JSON onto libsy ``random`` + ``models.any``.
 
-    Switchyard #700: a weight of 0 is never selected.
+    A weight of 0 is never selected.
     """
     strong = _require_mapping(config.get("strong"), "strong")
     weak = _require_mapping(config.get("weak"), "weak")
@@ -82,13 +89,10 @@ def map_random_routing_config(config: dict[str, Any]) -> tuple[list[float], int 
         raise InferenceMiddlewareError("strong.model is required", status_code=400)
     if not isinstance(weak_id, str) or not weak_id:
         raise InferenceMiddlewareError("weak.model is required", status_code=400)
-    probability = config.get("strong_probability")
-    if not isinstance(probability, (int, float)) or not 0.0 <= float(probability) <= 1.0:
-        raise InferenceMiddlewareError("strong_probability must be in [0, 1]", status_code=400)
+    strong_p = _require_unit_interval(config.get("strong_probability"), "strong_probability")
     seed = config.get("rng_seed")
-    if seed is not None and not isinstance(seed, int):
+    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int)):
         raise InferenceMiddlewareError("rng_seed must be an integer when set", status_code=400)
-    strong_p = float(probability)
     return [strong_p, 1.0 - strong_p], seed, {"any": [strong_id, weak_id]}
 
 
@@ -99,11 +103,12 @@ def validate_stage_router_config(config: dict[str, Any]) -> dict[str, Any]:
             "picker must be 'efficient_first' or 'capable_first'",
             status_code=400,
         )
-    threshold = config.get("confidence_threshold")
-    if not isinstance(threshold, (int, float)) or not 0.0 <= float(threshold) <= 1.0:
-        raise InferenceMiddlewareError("confidence_threshold must be in [0, 1]", status_code=400)
+    threshold = _require_unit_interval(config.get("confidence_threshold"), "confidence_threshold")
+    notes = config.get("handoff_notes") or {}
+    if notes.get("deescalation_note") and not notes.get("escalation_note"):
+        raise InferenceMiddlewareError("deescalation_note requires escalation_note", status_code=400)
     models_map_from_config(config, required=("capable", "efficient"))
-    return {**config, "picker": picker, "confidence_threshold": float(threshold)}
+    return {**config, "picker": picker, "confidence_threshold": threshold}
 
 
 def validate_llm_classifier_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -113,11 +118,22 @@ def validate_llm_classifier_config(config: dict[str, Any]) -> dict[str, Any]:
             "llm_classifier only supports mode='capability' in this release",
             status_code=400,
         )
-    threshold = config.get("base_threshold")
-    if not isinstance(threshold, (int, float)) or not 0.0 <= float(threshold) <= 1.0:
-        raise InferenceMiddlewareError("base_threshold must be in [0, 1]", status_code=400)
+    threshold = _require_unit_interval(config.get("base_threshold"), "base_threshold")
+    session_affinity = bool(config.get("session_affinity", False))
+    message_hash_fallback = bool(config.get("message_hash_fallback", False))
+    if message_hash_fallback and not session_affinity:
+        raise InferenceMiddlewareError(
+            "message_hash_fallback requires session_affinity=true (classify_trigger=new_session)",
+            status_code=400,
+        )
     models_map_from_config(config, required=("judge", "capable", "efficient"))
-    return {**config, "mode": mode, "base_threshold": float(threshold)}
+    return {
+        **config,
+        "mode": mode,
+        "base_threshold": threshold,
+        "session_affinity": session_affinity,
+        "message_hash_fallback": message_hash_fallback,
+    }
 
 
 def native_model_categories(config_type: str) -> tuple[str, ...]:

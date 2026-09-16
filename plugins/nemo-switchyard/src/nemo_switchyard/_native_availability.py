@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+from functools import cache
 from types import ModuleType
 
 
+@cache
 def native_rust_available() -> bool:
     """Return True when the ``switchyard_rust`` distribution is importable."""
     return importlib.util.find_spec("switchyard_rust") is not None

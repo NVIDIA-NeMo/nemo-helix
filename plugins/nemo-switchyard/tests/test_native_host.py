@@ -7,14 +7,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 from nemo_platform_plugin.inference_middleware import (
-    ImmediateResponse,
     InferenceMiddlewareContext,
     InferenceMiddlewareError,
     InferenceRequest,
@@ -23,7 +22,7 @@ from nemo_platform_plugin.inference_middleware import (
 )
 from nemo_platform_plugin.inference_middleware_models import VirtualModel
 from nemo_switchyard import _state
-from nemo_switchyard._native_config import map_random_routing_config
+from nemo_switchyard._native_config import map_random_routing_config, models_map_from_config
 from nemo_switchyard._native_host import (
     IgwJudgeTransport,
     NativeBinding,
@@ -31,6 +30,12 @@ from nemo_switchyard._native_host import (
     run_native_stream,
 )
 from nemo_switchyard.middleware import SwitchyardMiddleware
+
+
+@pytest.fixture(autouse=True)
+def clear_native_state() -> Iterator[None]:
+    yield
+    _state.clear_all()
 
 
 class FakeCall:
@@ -89,16 +94,30 @@ class InlinedResponseAlgorithm:
 
 
 class RecordingTransport:
-    def __init__(self, payload: dict[str, Any] | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        payload: dict[str, Any] | None = None,
+        error: Exception | None = None,
+        *,
+        fail_first: int | None = None,
+    ) -> None:
         self.payload = payload or {"id": "judge", "choices": []}
         self.error = error
-        self.urls: list[str] = []
+        self.fail_first = fail_first
         self.models: list[str] = []
+        self.bodies: list[dict[str, Any]] = []
+        self.headers: list[dict[str, str]] = []
 
     async def complete(self, model_entity_id: str, body: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
         self.models.append(model_entity_id)
-        if self.error:
-            raise self.error
+        self.bodies.append(body)
+        self.headers.append(headers)
+        if self.error is not None:
+            if self.fail_first is None:
+                raise self.error
+            if self.fail_first > 0:
+                self.fail_first -= 1
+                raise self.error
         return self.payload
 
 
@@ -169,23 +188,6 @@ async def test_done_none_response_does_not_call_user_model() -> None:
     )
     assert transport.models == []
     assert request.body["model"] == "workspace/llama-3-70b"
-
-
-@pytest.mark.xfail(
-    reason="ImmediateResponse is not wired until RC2 lists algorithms that fill Done.response",
-    strict=False,
-)
-@pytest.mark.asyncio
-async def test_done_response_becomes_immediate() -> None:
-    request = _openai_request()
-    out = await run_native_stream(
-        algorithm=InlinedResponseAlgorithm(),
-        request=request,
-        models={"any": ["workspace/llama-3-70b"]},
-        headers={},
-        transport=RecordingTransport(),
-    )
-    assert isinstance(out, ImmediateResponse)
 
 
 @pytest.mark.asyncio
@@ -275,13 +277,18 @@ def test_random_mapper_requires_strong_weak() -> None:
 async def test_igw_judge_uses_cache_accessor_not_localhost() -> None:
     mw = SwitchyardMiddleware()
     mw.get_inference_url_and_model = MagicMock(return_value=_provider_target())
+    mw.get_model_entity = MagicMock(return_value=None)
     transport = IgwJudgeTransport(mw, timeout=5.0)
     response = MagicMock()
     response.status_code = 200
     response.json.return_value = {"id": "ok"}
     client = _async_http_client(post=AsyncMock(return_value=response))
     with patch("nemo_switchyard._native_host.httpx.AsyncClient", return_value=client) as ctor:
-        payload = await transport.complete("ws/judge", {"messages": []}, {})
+        payload = await transport.complete(
+            "ws/judge",
+            {"messages": []},
+            {"authorization": "Bearer leaked", "x-switchyard-session-id": "s1"},
+        )
     assert payload == {"id": "ok"}
     timeout = ctor.call_args.kwargs["timeout"]
     assert isinstance(timeout, httpx.Timeout)
@@ -289,12 +296,15 @@ async def test_igw_judge_uses_cache_accessor_not_localhost() -> None:
     assert posted.args[0] == "https://provider.example/v1/chat/completions"
     assert "localhost" not in posted.args[0]
     assert posted.kwargs["json"]["model"] == "meta/llama-3.1-70b-instruct"
+    assert "authorization" not in {k.lower() for k in posted.kwargs["headers"]}
+    assert posted.kwargs["headers"] == {}
 
 
 @pytest.mark.asyncio
 async def test_igw_judge_timeout() -> None:
     mw = SwitchyardMiddleware()
     mw.get_inference_url_and_model = MagicMock(return_value=_provider_target())
+    mw.get_model_entity = MagicMock(return_value=None)
     client = _async_http_client(post=AsyncMock(side_effect=httpx.TimeoutException("slow")))
     with patch("nemo_switchyard._native_host.httpx.AsyncClient", return_value=client):
         with pytest.raises(InferenceMiddlewareError) as exc:
@@ -306,6 +316,7 @@ async def test_igw_judge_timeout() -> None:
 async def test_igw_judge_http_error_fail_closed() -> None:
     mw = SwitchyardMiddleware()
     mw.get_inference_url_and_model = MagicMock(return_value=_provider_target())
+    mw.get_model_entity = MagicMock(return_value=None)
     response = MagicMock()
     response.status_code = 503
     client = _async_http_client(post=AsyncMock(return_value=response))
@@ -374,6 +385,10 @@ async def test_upsert_without_switchyard_drops_stale_native_binding() -> None:
     await mw.on_virtual_model_upserted(vm)
     assert cfg_hash not in _state.NATIVE_BY_CONFIG_HASH
     await mw.on_shutdown()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_native_requests_share_binding() -> None:
     mw = SwitchyardMiddleware()
     await mw.on_startup()
     algorithm = CountingAlgorithm(calls=0)
@@ -392,9 +407,6 @@ async def test_upsert_without_switchyard_drops_stale_native_binding() -> None:
     await asyncio.gather(one(), one(), one())
     assert algorithm.run_count == 3
     await mw.on_shutdown()
-
-
-def test_middleware_module_does_not_import_switchyard_rust() -> None:
     import nemo_switchyard.middleware as mod
 
     source = inspect.getsource(mod)
@@ -435,3 +447,145 @@ async def test_native_missing_required_models() -> None:
     with pytest.raises(InferenceMiddlewareError) as exc:
         validate_stage_router_config({"confidence_threshold": 0.5, "models": {}})
     assert "capable" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_callmodel_falls_back_to_next_model() -> None:
+    class TwoModelCall(CountingAlgorithm):
+        async def run_stream(self, request: dict[str, Any], models: Any, headers: Any = None) -> AsyncIterator[Any]:
+            self.run_count += 1
+            yield FakeCallModel(FakeCall(["workspace/judge-a", "workspace/judge-b"], request))
+            yield FakeDone(FakeOutcome(self.selected, request, None))
+
+    transport = RecordingTransport(
+        error=InferenceMiddlewareError("first down", status_code=502),
+        fail_first=1,
+    )
+    request = _openai_request()
+    await run_native_stream(
+        algorithm=TwoModelCall(),
+        request=request,
+        models={"any": ["workspace/llama-3-70b"]},
+        headers={},
+        transport=transport,
+    )
+    assert transport.models == ["workspace/judge-a", "workspace/judge-b"]
+    assert "instructions" not in transport.bodies[0]
+
+
+@pytest.mark.asyncio
+async def test_outcome_request_rewrites_user_messages() -> None:
+    class RewriteAlgorithm:
+        async def run_stream(self, request: dict[str, Any], models: Any, headers: Any = None) -> AsyncIterator[Any]:
+            yield FakeDone(
+                FakeOutcome(
+                    "workspace/llama-3-70b",
+                    {
+                        "instructions": [{"role": "system", "content": [{"type": "text", "text": "note"}]}],
+                        "messages": request["messages"],
+                    },
+                    None,
+                )
+            )
+
+    request = _openai_request()
+    await run_native_stream(
+        algorithm=RewriteAlgorithm(),
+        request=request,
+        models={"any": ["workspace/llama-3-70b"]},
+        headers={},
+        transport=RecordingTransport(),
+    )
+    assert request.body["messages"][0]["role"] == "system"
+    assert request.body["messages"][0]["content"] == "note"
+
+
+@pytest.mark.asyncio
+async def test_igw_judge_injects_cached_provider_secret() -> None:
+    mw = SwitchyardMiddleware()
+    mw.get_inference_url_and_model = MagicMock(return_value=_provider_target())
+    provider = MagicMock()
+    provider.api_key_secret_name = "nvidia-key"
+    provider.auth_header_format = None
+    provider.default_extra_headers = {}
+    provider.required_extra_headers = {}
+    info = MagicMock()
+    info.secret_value = "sk-test"
+    info.model_provider = provider
+    entity = MagicMock()
+    entity.model_providers = [("meta/llama", info)]
+    mw.get_model_entity = MagicMock(return_value=entity)
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = {"id": "ok"}
+    client = _async_http_client(post=AsyncMock(return_value=response))
+    with patch("nemo_switchyard._native_host.httpx.AsyncClient", return_value=client):
+        await IgwJudgeTransport(mw).complete("ws/judge", {"messages": []}, {"authorization": "Bearer caller"})
+    posted = client.post.await_args
+    assert posted.kwargs["headers"]["Authorization"] == "Bearer sk-test"
+
+
+@pytest.mark.asyncio
+async def test_run_stream_overall_timeout() -> None:
+    class Stuck:
+        async def run_stream(self, request: dict[str, Any], models: Any, headers: Any = None) -> AsyncIterator[Any]:
+            await asyncio.sleep(10)
+            yield FakeDone(FakeOutcome("workspace/llama-3-70b", request, None))
+
+    with pytest.raises(InferenceMiddlewareError) as exc:
+        await run_native_stream(
+            algorithm=Stuck(),
+            request=_openai_request(),
+            models={"any": ["workspace/llama-3-70b"]},
+            headers={},
+            transport=RecordingTransport(),
+            timeout=0.01,
+        )
+    assert exc.value.status_code == 504
+
+
+def test_models_any_excludes_judge() -> None:
+    mapping = models_map_from_config(
+        {"models": {"judge": ["ws/j"], "capable": ["ws/s"], "efficient": ["ws/w"]}},
+        required=("judge", "capable", "efficient"),
+    )
+    assert mapping["any"] == ["ws/s", "ws/w"]
+
+
+def test_bool_probability_rejected() -> None:
+    with pytest.raises(InferenceMiddlewareError):
+        map_random_routing_config(
+            {
+                "strong": {"model": "ws/s"},
+                "weak": {"model": "ws/w"},
+                "strong_probability": True,
+            }
+        )
+
+
+def test_message_hash_fallback_requires_session_affinity() -> None:
+    from nemo_switchyard._native_config import validate_llm_classifier_config
+
+    with pytest.raises(InferenceMiddlewareError) as exc:
+        validate_llm_classifier_config(
+            {
+                "base_threshold": 0.5,
+                "message_hash_fallback": True,
+                "models": {"judge": ["ws/j"], "capable": ["ws/s"], "efficient": ["ws/w"]},
+            }
+        )
+    assert "session_affinity" in str(exc.value)
+
+
+def test_deescalation_note_requires_escalation_note() -> None:
+    from nemo_switchyard._native_config import validate_stage_router_config
+
+    with pytest.raises(InferenceMiddlewareError) as exc:
+        validate_stage_router_config(
+            {
+                "confidence_threshold": 0.5,
+                "handoff_notes": {"deescalation_note": "down"},
+                "models": {"capable": ["ws/s"], "efficient": ["ws/w"]},
+            }
+        )
+    assert "escalation_note" in str(exc.value)

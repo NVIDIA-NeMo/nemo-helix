@@ -358,8 +358,12 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
         else:
             _state.VM_CONFIG_MAPPING.pop(vm_id, None)
         remaining = {h for hashes in _state.VM_CONFIG_MAPPING.values() for h in hashes}
-        for cfg_hash in set(previous) - remaining:
+        released = set(previous) - remaining
+        for cfg_hash in released:
             _state.NATIVE_BY_CONFIG_HASH.pop(cfg_hash, None)
+        for key, cfg_hash in list(_state.VM_NAME_TO_CONFIG_HASH.items()):
+            if cfg_hash in released:
+                _state.VM_NAME_TO_CONFIG_HASH.pop(key, None)
 
     def _register_entry(
         self,
@@ -377,6 +381,11 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
         config = middleware_call.config or {}
 
         if config_type in NATIVE_CONFIG_TYPES:
+            if phase != "request":
+                raise InferenceMiddlewareError(
+                    f"{config_type!r} is request-only; list it under request_middleware",
+                    status_code=400,
+                )
             return self._register_native_entry(vm_key, config_type, config, phase)
 
         factory_class = CONFIG_TYPE_TO_FACTORY_CLASS.get(config_type)
@@ -591,8 +600,8 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
         required = native_model_categories(config_type)
         models = models_map_from_config(validated, required=required)
         cfg_hash = _state.config_hash(validated, config_type)
-        _state.VM_NAME_TO_CONFIG_HASH[(vm_key, config_type, phase)] = cfg_hash
         if cfg_hash in _state.NATIVE_BY_CONFIG_HASH:
+            _state.VM_NAME_TO_CONFIG_HASH[(vm_key, config_type, phase)] = cfg_hash
             return cfg_hash
         try:
             algorithm = build_native_algorithm(config_type, validated)
@@ -608,6 +617,7 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
             models=models,
             config_type=config_type,
         )
+        _state.VM_NAME_TO_CONFIG_HASH[(vm_key, config_type, phase)] = cfg_hash
         logger.info(
             "SwitchyardMiddleware: Registered native %r for VM %r (hash=%s)",
             config_type,
