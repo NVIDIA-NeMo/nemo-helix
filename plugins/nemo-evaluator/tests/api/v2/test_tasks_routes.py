@@ -9,6 +9,8 @@ Covers route wiring, the get_task_service dependency, and status-code mapping (2
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -22,6 +24,7 @@ from nemo_evaluator.api.schemas import (
     TaskInputs,
 )
 from nemo_evaluator.api.service.task_service import TaskService
+from nemo_evaluator.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash
 from nemo_evaluator.api.v2 import tasks as tasks_routes
 from nemo_platform_plugin.entity_client import NemoEntityConflictError
 
@@ -37,11 +40,22 @@ class _FakeMetricService:
         return object() if (workspace, name) == ("default", "stored-metric") else None
 
 
+@pytest.fixture(autouse=True)
+def verified_archive_projection(monkeypatch):
+    # These tests isolate entity/API semantics; real archive verification has separate tests.
+    from nemo_evaluator.harbor.archive import NativeTask
+
+    async def verify(spec, files_client):
+        return NativeTask("fixture", spec.instruction, spec.config)
+
+    monkeypatch.setattr("nemo_evaluator.api.service.task_service.verify_definition", verify)
+
+
 @pytest.fixture
 def client(entity_store) -> TestClient:
     app = FastAPI()
     app.include_router(tasks_routes.router, prefix="/v2/workspaces/{workspace}")
-    service = TaskService(entity_store, _FakeMetricService())
+    service = TaskService(entity_store, _FakeMetricService(), files_client=Mock())
     app.dependency_overrides[get_task_service] = lambda: service
     return TestClient(app)
 
@@ -307,7 +321,7 @@ def test_concurrent_replace_returns_409_not_500(entity_store) -> None:
 
     app = FastAPI()
     app.include_router(tasks_routes.router, prefix="/v2/workspaces/{workspace}")
-    service = TaskService(entity_store, _FakeMetricService())
+    service = TaskService(entity_store, _FakeMetricService(), files_client=Mock())
     app.dependency_overrides[get_task_service] = lambda: service
     client = TestClient(app)
 
@@ -324,7 +338,12 @@ def test_list_includes_harbor_tasks(client: TestClient) -> None:
         f"{_BASE}/harbor-task",
         json=TaskInput(
             spec=HarborTaskDefinition(
-                kind="harbor", archive_ref="default/harbor#packages/o-n/abc/dist.tar.gz", archive_digest="a" * 64
+                kind="harbor",
+                harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
+                source=HarborArchiveSource(
+                    fileset_ref="default/harbor#packages/o-n/abc/files",
+                    files_hash="a" * 64,
+                ),
             )
         ).model_dump(mode="json"),
     )

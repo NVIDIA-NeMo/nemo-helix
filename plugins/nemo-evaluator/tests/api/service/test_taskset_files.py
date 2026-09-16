@@ -111,7 +111,7 @@ def test_a_plain_prefix_is_accepted() -> None:
 
 
 def test_the_ref_must_be_a_fileset_reference() -> None:
-    """Including the fragment. Same shape as ``bundle_ref``/``archive_ref``, so a bare
+    """Including the fragment. Same shape as ``bundle_ref``/Harbor tree references, so a bare
     ``workspace/fileset`` is not a Files reference here and is rejected rather than quietly
     stored as something no reader can resolve."""
     for bad in ("not a ref", "", "default/my-dataset", "default/fs#bad path"):

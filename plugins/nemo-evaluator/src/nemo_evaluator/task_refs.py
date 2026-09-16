@@ -1,45 +1,35 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""References to persisted tasksets and their resolution into inline tasks.
-
-An agent-eval submission carries ``tasks`` as either an inline list of
-:class:`~nemo_evaluator.jobs.agent_spec.AgentEvalTaskInput` or a
-:class:`~nemo_evaluator.api.schemas.TasksetRef` pointing at a stored taskset. During spec resolution
-(``AgentEvalJob.to_spec``) a taskset reference is loaded from storage and its member tasks are
-expanded into the same inline task DTOs, so the rest of the pipeline (metric-ref resolution, the
-canonical :class:`~nemo_evaluator.jobs.agent_spec.AgentEvalSpec`) only ever sees inline tasks.
-
-This mirrors :mod:`nemo_evaluator.metric_refs`: references are loaded here, next to the entity types,
-so the job's ``to_spec`` stays a thin orchestration over ref-resolution helpers.
-"""
+"""Resolve evaluator inputs eagerly and pin stored Harbor sources for worker preparation."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import cast
 
-from nemo_evaluator.api.schemas import EvaluatorTaskDefinition, TasksetRef, parse_subentity_ref
+from nemo_evaluator.api.schemas import EvaluatorTaskDefinition, TaskRef, TasksetRef, parse_subentity_ref
 from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
-from nemo_evaluator.jobs.agent_spec import AgentEvalTaskInput
+from nemo_evaluator.harbor.resolution import bounded_ordered_map, harbor_member, task_revision, taskset_revision
+from nemo_evaluator.harbor.tasks import (
+    PinnedHarborSource,
+    PinnedHarborTaskList,
+    PinnedHarborTaskset,
+    qualified_task_refs,
+    require_task_kind,
+)
+from nemo_evaluator.harbor.tasks import (
+    UnsupportedTaskKindError as UnsupportedTaskKindError,
+)
+from nemo_evaluator.jobs.agent_spec import AgentEvalTaskInput, HarborRunnerTarget, Target
 from nemo_evaluator.revisions import RevisionNotFoundError, get_revision
 from nemo_platform_plugin.entities import EntityClientProtocol
 from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
 
 
-class UnsupportedTaskKindError(ValueError):
-    """A taskset member's runner kind cannot be executed by the requested target.
-
-    A taskset may group tasks of different kinds — that is the point of managing every evaluation
-    unit in one place — but a single run has one target, so expansion is where a mismatch surfaces.
-
-    Raised during ``to_spec``, which the job submit path wraps: any exception there becomes a 422
-    carrying this message (``_apply_transformer`` in ``nemo_platform_plugin.jobs.api_factory``). It
-    subclasses ``ValueError`` for local callers that catch it deliberately, not to obtain that
-    mapping — the mapping is a catch-all and would apply to any exception type.
-    """
-
-
-def _entity_to_task_input(entity: TaskEntity, revision: TaskRevisionEntity) -> AgentEvalTaskInput:
+def _entity_to_task_input(
+    entity: TaskEntity, revision: TaskRevisionEntity, *, target_kind: str = "evaluator"
+) -> AgentEvalTaskInput:
     """Project a stored task's *published revision* onto the submitter-facing inline task DTO.
 
     Identity (``id``) comes from the head record — it is the same task — while every content field
@@ -54,20 +44,8 @@ def _entity_to_task_input(entity: TaskEntity, revision: TaskRevisionEntity) -> A
     inline submissions.
     """
     spec = revision.spec
-    if not isinstance(spec, EvaluatorTaskDefinition):
-        # A Harbor task's content is a *directory of files*, not fields — the runner needs the
-        # archive materialized on disk, which this pure projection cannot do. Rejecting here means a
-        # mismatched taskset fails before the run rather than silently evaluating an empty task.
-        #
-        # Deliberately does *not* suggest picking a different target: no target can run a stored
-        # task of this kind yet, so pointing at one would send the reader in circles. Storing the
-        # kind landed ahead of the execution bridge (AALGO-481).
-        raise UnsupportedTaskKindError(
-            f"Task '{entity.workspace}/{entity.name}' is a {spec.kind!r} task. Running a stored "
-            f"{spec.kind!r} task is not supported yet — no target can execute one, so this taskset "
-            "cannot be evaluated until that lands. Remove the member, or submit an "
-            "'evaluator'-kind taskset."
-        )
+    require_task_kind(f"{entity.workspace}/{entity.name}", spec.kind, target_kind)
+    assert isinstance(spec, EvaluatorTaskDefinition)
     return AgentEvalTaskInput(
         id=entity.name,
         intent=spec.intent,
@@ -92,6 +70,7 @@ async def resolve_taskset_ref(
     *,
     workspace: str,
     entity_client: TasksetStoreProtocol | None,
+    target_kind: str = "evaluator",
 ) -> list[AgentEvalTaskInput]:
     """Load a stored taskset and expand its members into inline task DTOs.
 
@@ -165,20 +144,46 @@ async def resolve_taskset_ref(
                 "task ids must be unique within an evaluation."
             )
         seen_ids.add(entity.name)
-        tasks.append(_entity_to_task_input(entity, revision))
+        tasks.append(_entity_to_task_input(entity, revision, target_kind=target_kind))
     return tasks
 
 
 async def resolve_agent_eval_tasks(
-    tasks: TasksetRef | list[AgentEvalTaskInput],
+    tasks: TasksetRef | Sequence[AgentEvalTaskInput] | Sequence[TaskRef],
     *,
     workspace: str,
     entity_client: TasksetStoreProtocol | None,
-) -> list[AgentEvalTaskInput]:
-    """Normalize an agent-eval ``tasks`` field to an inline task list.
-
-    An inline list passes through unchanged; a :class:`TasksetRef` is loaded and expanded.
-    """
+    target: Target | None = None,
+) -> list[AgentEvalTaskInput] | PinnedHarborSource:
+    """Expand evaluator inputs or pin stored Harbor sources for worker preparation."""
+    if isinstance(tasks, TasksetRef) and isinstance(target, HarborRunnerTarget):
+        if entity_client is None:
+            raise ValueError("A TasksetRef requires a platform connection (entity store)")
+        head, revision = await taskset_revision(tasks, entity_client, workspace)
+        return PinnedHarborTaskset(taskset_ref=TasksetRef(f"{head.workspace}/{head.name}#{revision.content_hash}"))
     if isinstance(tasks, TasksetRef):
-        return await resolve_taskset_ref(tasks, workspace=workspace, entity_client=entity_client)
-    return tasks
+        return await resolve_taskset_ref(
+            tasks, workspace=workspace, entity_client=entity_client, target_kind=target.kind if target else "offline"
+        )
+    refs = [task for task in tasks if isinstance(task, TaskRef)]
+    if not refs:
+        return cast(list[AgentEvalTaskInput], tasks)
+    if len(refs) != len(tasks):
+        raise ValueError("Cannot mix inline tasks and stored task references")
+    refs = qualified_task_refs(refs, workspace)
+    if entity_client is None:
+        raise ValueError("TaskRef inputs require a platform connection (entity store)")
+    revisions = await bounded_ordered_map(lambda ref: task_revision(ref, entity_client), refs)
+    if isinstance(target, HarborRunnerTarget):
+        pins = []
+        for head, revision in revisions:
+            harbor_member(head, revision)
+            pins.append(TaskRef(f"{head.workspace}/{head.name}#{revision.content_hash}"))
+        return PinnedHarborTaskList(task_refs=pins)
+    result = [
+        _entity_to_task_input(head, revision, target_kind=target.kind if target else "offline")
+        for head, revision in revisions
+    ]
+    if len({task.id for task in result}) != len(result):
+        raise ValueError("task ids must be unique within an evaluation")
+    return result
