@@ -6,6 +6,7 @@ import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSel
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { ENTITY_NAME_HELP, entityNameSchema } from '@nemo/common/src/utils/entityName';
 import {
   getAgentsListDeploymentsQueryKey,
   useAgentsCreateDeployment,
@@ -19,7 +20,7 @@ import { z } from 'zod';
 
 const deploymentFormSchema = z
   .object({
-    name: z.string().optional(),
+    name: z.literal('').or(entityNameSchema('Deployment name')).optional(),
     agent: z.string().min(1, 'Agent is required'),
     deploymentMode: z.enum(['subprocess', 'docker', 'k8s']),
     image: z.string().optional(),
@@ -155,6 +156,7 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
           label="Deployment Name (optional)"
           formFieldProps={{
             slotError: errors.name?.message,
+            slotInfo: ENTITY_NAME_HELP,
           }}
         />
         <ControlledSelect
