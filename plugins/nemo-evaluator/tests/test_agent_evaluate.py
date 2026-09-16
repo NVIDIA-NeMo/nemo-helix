@@ -473,6 +473,17 @@ def test_resolve_target_refuses_harbor_env_secret_missing_from_environment(
         AgentEvalJob._resolve_target(harbor_target, ctx)
 
 
+def test_harbor_target_refuses_plaintext_credentials_in_agent_kwargs() -> None:
+    """A submitted spec carrying a credential in ``agent_kwargs`` is refused at the API, not mid-job.
+
+    The value would otherwise be stored on the spec and then copied by Harbor across the job dir.
+    Validating on the target means the submitter is told at submit time, while they still have the
+    key in hand to move it to `env_secrets`.
+    """
+    with pytest.raises(ValidationError, match="env_secrets"):
+        HarborRunnerTarget(agent_kwargs={"fabric_environment_env": {"OPENAI_API_KEY": "nvapi-not-a-real-key"}})
+
+
 def test_harbor_agent_kwargs_round_trip_the_wire_unchanged() -> None:
     """Nested kwargs survive JSON serialization, so what the submitter wrote is what the agent's ``__init__`` gets."""
     agent_kwargs = {

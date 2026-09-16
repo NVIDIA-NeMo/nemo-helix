@@ -141,9 +141,17 @@ Swap `agent_name` (or `agent_import_path`) for your own agent to get a real scor
 - **`agent_model_name`** — the model slug handed to the agent.
 - **`agent_kwargs`** — keyword arguments forwarded to the agent's constructor, the equivalent of
   Harbor's `--ak key=value` flags. Values must be JSON (strings, numbers, booleans, lists, mappings).
-  Do not put secrets here: Harbor persists the kwargs unredacted in the job directory's
-  `config.json`, and the run's provenance records them with only credential-looking keys
-  (`api_key`, `token`, `secret`, ...) redacted. Name credentials in `agent_env_from_host` instead.
+  Do not put secrets here. Harbor copies its config into the job directory's `config.json` and
+  `lock.json` and into every trial's `config.json`, `lock.json`, `result.json` and agent run spec, and
+  needs the real value to construct the agent, so there is no later point at which the value can be
+  taken back. Name credentials in `agent_env_from_host` instead;
+  a `${NAME}` template is fine here, since it carries no value.
+
+  A credential-shaped value fails validation before the run starts — a credential-looking key
+  (`api_key`, `token`, `secret`, `authorization`, ...) holding plaintext, or any value carrying a
+  recognised issued-token shape (`nvapi-`, `sk-`, `hf_`, a PEM block, ...). Treat that as a backstop,
+  not a guarantee: a secret under a key of your own naming, in a format the check does not know, will
+  pass straight through. The rule is still that secrets do not belong in `agent_kwargs`.
 - **`agent_env_from_host`** — host environment variables to forward to the agent. Each becomes a
   `${NAME}` template on Harbor's `AgentConfig.env`: Harbor resolves it from the host environment when
   it creates the agent and persists only the template, so the value never reaches `config.json`.
