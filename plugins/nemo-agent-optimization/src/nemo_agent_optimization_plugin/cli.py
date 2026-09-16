@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``nemo agents optimization-strategies`` — list installed nemo.optimization-strategy plugins."""
+"""``nemo agents optimization-strategies`` — list installed agent-optimize strategy jobs."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class OptimizationStrategiesCLI(NemoCLI):
 
         @app.command("list")
         def list_strategies() -> None:
-            """Print every installed nemo.optimization-strategy name."""
+            """Print the ``strategy`` name of every installed ``AgentOptimizeJob`` subclass."""
             strategies = discover_agent_optimize_jobs()
             if not strategies:
                 typer.echo("No optimization strategies are installed.")

@@ -51,8 +51,7 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
             str,
             typer.Option(
                 "--optimize-config",
-                help="Optimize YAML, as a path relative to --source. This is the value to pass to "
-                "`optimize --optimize-config`.",
+                help="Optimize YAML, as a path relative to --source. This is the value to pass to `optimize --config`.",
             ),
         ],
         fileset: Annotated[
@@ -115,9 +114,10 @@ def register_prepare_fileset_command(group: typer.Typer) -> None:
         typer.echo(
             f"  nemo agents optimize \\\n"
             f"    --strategy nat \\\n"
-            f"    --optimize-config-fileset {ws}/{name} \\\n"
-            f"    --optimize-config {optimize_config} \\\n"
+            f"    --config-fileset {ws}/{name} \\\n"
+            f"    --config {optimize_config} \\\n"
             + (f"    --agent {agent} \\\n" if agent else "")
+            + "    --output-agent <new-agent-name> \\\n"
             + f"    --workspace {workspace}"
         )
 

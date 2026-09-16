@@ -6485,96 +6485,84 @@ components:
       title: OptimizeSkillsJobsSortField
     OptimizeSpec:
       properties:
+        agent:
+          type: string
+          minLength: 1
+          title: Agent
+          description: 'Platform agent to optimize: ''name'' or ''workspace/name''.'
+        config_fileset:
+          type: string
+          minLength: 1
+          title: Config Fileset
+          description: 'Fileset holding the optimization bundle: the config named
+            by ''config'' plus every asset it references. Stage one with `nemo agents
+            optimize prepare-fileset`.'
+        config:
+          type: string
+          minLength: 1
+          title: Config
+          description: Path to the strategy configuration YAML, relative to the fileset
+            root.
+        output_agent:
+          type: string
+          minLength: 1
+          title: Output Agent
+          description: Name for the new, optimized agent entity this run creates.
+        workspace:
+          type: string
+          title: Workspace
+          description: Workspace for every entity in the run.
+          default: default
         strategy:
           type: string
           minLength: 1
           title: Strategy
-          description: Installed nemo.optimization-strategy name, e.g. 'nat' or 'prompt-master'.
-        optimize_config:
-          type: string
-          minLength: 1
-          title: Optimize Config
-          description: "Location of the strategy configuration YAML. With optimize_config_fileset\
-            \ set \u2014 required for remote submission \u2014 this is a path relative\
-            \ to the fileset root. Without it (programmatic local runs only) it is\
-            \ an absolute path on the host running the job."
-        optimize_config_fileset:
-          title: Optimize Config Fileset
-          description: 'Fileset holding the optimization bundle: the config named
-            by optimize_config plus every asset it references. Stage one with `nemo
-            agents optimize prepare-fileset`. Required for remote submissions, where
-            the job has no access to the client''s filesystem.'
-          type: string
-        agent:
-          title: Agent
-          description: 'Agent source: a platform reference (''name'' or ''workspace/name'')
-            or a local nemo-agents-spec-v1 agent.yaml path. Whether it is required
-            is decided by the selected strategy, which rejects the omission from its
-            own validate_config.'
-          type: string
-          minLength: 1
-        output:
-          title: Output
-          description: "Where to publish the optimization artifacts once the run succeeds\
-            \ \u2014 either a local directory or a NeMo Platform fileset reference\
-            \ ('name' or 'workspace/name'). Classification of which is handled by\
-            \ this plugin's own job, not by this spec."
-          type: string
-        workspace:
-          type: string
-          title: Workspace
-          description: Workspace used to fetch a platform agent.
-          default: default
+          description: Installed optimization strategy, e.g. 'nat'.
       type: object
       required:
+      - agent
+      - config_fileset
+      - config
+      - output_agent
       - strategy
-      - optimize_config
       title: OptimizeSpec
-      description: "Server-side spec \u2014 adds ``workspace``."
+      description: 'Router spec: the normalized fields plus strategy selection.'
     OptimizeSubmitSpec:
       properties:
         strategy:
           type: string
           minLength: 1
           title: Strategy
-          description: Installed nemo.optimization-strategy name, e.g. 'nat' or 'prompt-master'.
-        optimize_config:
-          type: string
-          minLength: 1
-          title: Optimize Config
-          description: "Location of the strategy configuration YAML. With optimize_config_fileset\
-            \ set \u2014 required for remote submission \u2014 this is a path relative\
-            \ to the fileset root. Without it (programmatic local runs only) it is\
-            \ an absolute path on the host running the job."
-        optimize_config_fileset:
-          title: Optimize Config Fileset
-          description: 'Fileset holding the optimization bundle: the config named
-            by optimize_config plus every asset it references. Stage one with `nemo
-            agents optimize prepare-fileset`. Required for remote submissions, where
-            the job has no access to the client''s filesystem.'
-          type: string
+          description: Installed optimization strategy, e.g. 'nat'.
         agent:
-          title: Agent
-          description: 'Agent source: a platform reference (''name'' or ''workspace/name'')
-            or a local nemo-agents-spec-v1 agent.yaml path. Whether it is required
-            is decided by the selected strategy, which rejects the omission from its
-            own validate_config.'
           type: string
           minLength: 1
-        output:
-          title: Output
-          description: "Where to publish the optimization artifacts once the run succeeds\
-            \ \u2014 either a local directory or a NeMo Platform fileset reference\
-            \ ('name' or 'workspace/name'). Classification of which is handled by\
-            \ this plugin's own job, not by this spec."
+          title: Agent
+          description: Platform agent to optimize.
+        config_fileset:
           type: string
+          minLength: 1
+          title: Config Fileset
+          description: Fileset holding the optimization bundle.
+        config:
+          type: string
+          minLength: 1
+          title: Config
+          description: Config YAML path, relative to the fileset root.
+        output_agent:
+          type: string
+          minLength: 1
+          title: Output Agent
+          description: Name for the new optimized agent entity.
       type: object
       required:
       - strategy
-      - optimize_config
+      - agent
+      - config_fileset
+      - config
+      - output_agent
       title: OptimizeSubmitSpec
-      description: Client-submitted fields for ``nemo agents optimize`` (workspace
-        added server-side).
+      description: Client-submitted router fields (workspace is added server-side).
     PackageAgentInput:
       properties:
         agent:

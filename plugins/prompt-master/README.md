@@ -53,17 +53,18 @@ uv run nemo agents create \
 uv run nemo files filesets create prompt-master-bundle
 uv run nemo files upload plugins/prompt-master/examples/ prompt-master-bundle
 
-# 3. Optimize. --optimize-config is relative to the fileset root.
+# 3. Optimize. --config is relative to the fileset root.
 uv run nemo agents optimize \
   --strategy prompt-master \
   --agent calculator-agent \
-  --optimize-config-fileset default/prompt-master-bundle \
-  --optimize-config prompt-master.yaml \
-  --output default/prompt-master-results \
+  --config-fileset default/prompt-master-bundle \
+  --config prompt-master.yaml \
+  --output-agent calculator-agent-optimized \
   --workspace default
 
-# 4. Fetch the optimized config once the job succeeds.
-uv run nemo files download prompt-master-results -o ./prompt-master-results
+# 4. The optimized prompt is live on the new agent entity once the job
+#    succeeds — confirm it exists:
+uv run nemo agents list
 ```
 
 Use `nemo files` to stage the bundle rather than
@@ -73,6 +74,6 @@ hyperparameter bundle and rejects a config with no `optimizer:` section.
 `model` selects the model used by the Fabric optimizer agent.
 `--agent` selects the platform agent whose system instructions are optimized;
 the stored agent is not modified.
-`--output` publishes the run's artifacts — including
-`prompt_master_results/optimized_config.yml`, a complete agent config carrying
-the optimized prompt — to a fileset or a local directory on the job host.
+`--output-agent` names the new agent entity the run creates — a complete
+`nemo-agents-spec-v1` config carrying the optimized
+`instructions.system.content`. It must not already exist.

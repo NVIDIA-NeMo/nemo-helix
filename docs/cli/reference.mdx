@@ -6963,11 +6963,10 @@ nemo agents optimize [OPTIONS] [COMMAND] [ARGS]...
 
 **Job Spec:**
 
-* `--strategy`: Installed nemo.optimization-strategy name, e.g. 'nat' or 'prompt-master'.
-* `--optimize-config`: Location of the strategy configuration YAML. With optimize_config_fileset set — required for remote submission — this is a path relative to the fileset root. Without it (programmatic local runs only) it is an absolute path on the host running the job.
-* `--optimize-config-fileset`: Fileset holding the optimization bundle: the config named by optimize_config plus every asset it references. Stage one with `nemo agents optimize prepare-fileset`. Required for remote submissions, where the job has no access to the client's filesystem.
-* `--agent`: Agent source: a platform reference ('name' or 'workspace/name') or a local nemo-agents-spec-v1 agent.yaml path. Whether it is required is decided by the selected strategy, which rejects the omission from its own validate_config.
-* `--output`: Where to publish the optimization artifacts once the run succeeds — either a local directory or a NeMo Platform fileset reference ('name' or 'workspace/name'). Classification of which is handled by this plugin's own job, not by this spec.
+* `--strategy`: Installed optimization strategy, e.g. 'nat'.
+* `--agent`: Platform agent to optimize.
+* `--config-fileset`: Fileset holding the optimization bundle.
+* `--output-agent`: Name for the new optimized agent entity.
 
 **Spec Source:**
 
@@ -6984,6 +6983,8 @@ nemo agents optimize [OPTIONS] [COMMAND] [ARGS]...
 * `--workspace`: Workspace scope for the submission. [default: default]
 
 Job Spec flags are generated from the OptimizeSubmitSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
+
+Some spec fields cannot be represented as CLI flags: `config`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**
@@ -7003,7 +7004,7 @@ nemo agents optimize prepare-fileset [OPTIONS]
 **Options:**
 
 * `--source <DIRECTORY>`: Directory holding the optimize config and every asset it references.
-* `--optimize-config`: Optimize YAML, as a path relative to --source. This is the value to pass to `optimize --optimize-config`.
+* `--optimize-config`: Optimize YAML, as a path relative to --source. This is the value to pass to `optimize --config`.
 * `--fileset`: Fileset to upload into ('name' or 'workspace/name'). Created if missing.
 * `--workspace`: Workspace for the fileset and for agent / model preflight. [default: default]
 * `--agent`: Platform agent supplying the Agent under Test, for configs that carry only the optimizer and eval overlay.
@@ -7395,11 +7396,11 @@ nemo agents optimization-strategies [OPTIONS] COMMAND [ARGS]...
 
 **Commands:**
 
-* `list`: Print every installed nemo.optimization-strategy name.
+* `list`: Print the ``strategy`` name of every installed...
 
 ##### nemo agents optimization-strategies list
 
-Print every installed nemo.optimization-strategy name.
+Print the ``strategy`` name of every installed ``AgentOptimizeJob`` subclass.
 
 **Usage:**
 

@@ -284,16 +284,28 @@ that README).
 After `uv sync --package nemo-agents-plugin` (and activating `.venv`), invoke
 `nemo` directly.
 
-For CLI platform runs, keep the config and everything it references in one
-directory — an *optimize bundle* — stage that bundle with `prepare-fileset`,
-and pass `--optimize-config` as a path relative to the staged fileset root.
-For local Python SDK runs, `optimize_config` must be an **absolute** host path;
-paths *inside* the YAML (`dataset`, `eval.fabric.base_dir`, hook and MCP configs)
-resolve against your current working directory.
+Keep the config and everything it references in one directory — an *optimize
+bundle* — stage that bundle with `prepare-fileset`, and pass `--config` as a
+path relative to the staged fileset root. `--agent` (the platform agent under
+test) and `--output-agent` (the name for the new, optimized agent entity the
+run creates) are both required — the job always resolves `--agent` against
+the platform and always creates `--output-agent`, whether you submit through
+the CLI or run the job in-process with the Python SDK. Paths *inside* the YAML
+(`dataset`, `eval.fabric.base_dir`, hook and MCP configs) resolve against the
+staged bundle root.
 
 ```bash
 export BUNDLE="$(pwd)/plugins/nemo-optimization/examples/hermes-optimize"
 cd "$BUNDLE"
+```
+
+Register the platform agent the study will optimize (once):
+
+```bash
+nemo agents create \
+  --name hermes-optimize-chatonly \
+  --agent-config "$BUNDLE/agents/chatonly/agent.yaml" \
+  --workspace default
 ```
 
 ### Chat-only Hermes (no MCP)
@@ -307,11 +319,14 @@ nemo agents optimize prepare-fileset \
   --source "$BUNDLE" \
   --optimize-config optimize-chatonly.yaml \
   --fileset hermes-optimize-chatonly \
+  --agent hermes-optimize-chatonly \
   --workspace default
 nemo agents optimize \
   --strategy nat \
-  --optimize-config-fileset default/hermes-optimize-chatonly \
-  --optimize-config optimize-chatonly.yaml \
+  --agent hermes-optimize-chatonly \
+  --config-fileset default/hermes-optimize-chatonly \
+  --config optimize-chatonly.yaml \
+  --output-agent hermes-optimize-chatonly-optimized \
   --workspace default
 ```
 
@@ -351,8 +366,8 @@ from nemo_platform_plugin.scheduler import NemoJobScheduler
 
 WORKSPACE = "default"
 bundle = Path("plugins/nemo-optimization/examples/hermes-optimize").resolve()
-optimize_config = bundle / "optimize-chatonly.yaml"
-os.chdir(bundle)  # dataset / base_dir are relative to the bundle
+os.chdir(bundle)  # dataset / base_dir are relative to the bundle, and the
+                   # fileset must already be staged (see the CLI tab)
 
 client = NeMoPlatform(
     base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
@@ -363,7 +378,11 @@ result = NemoJobScheduler().run_local(
     OptimizeJob,
     {
         "strategy": "nat",
-        "optimize_config": str(optimize_config),
+        "agent": "hermes-optimize-chatonly",
+        "config_fileset": "default/hermes-optimize-chatonly",
+        "config": "optimize-chatonly.yaml",
+        "output_agent": "hermes-optimize-chatonly-optimized",
+        "workspace": WORKSPACE,
     },
     workspace=WORKSPACE,
     sdk=client,
@@ -392,16 +411,23 @@ export PHISHING_AGENT_SRC="$PHISHING_AGENT_ROOT/src"
 export PHISHING_MCP_BIN="$PHISHING_AGENT_ROOT/.venv/bin/email-phishing-analyzer-mcp"
 
 # These environment variables are templated into optimize-mcp.yaml.
+# Register a platform agent for the phishing-analyzer harness first (this
+# example does not ship a standalone agent.yaml for it the way the
+# chat-only example's agents/chatonly/agent.yaml does) -- substitute your
+# own --agent-config, then use that agent's name below.
 
 nemo agents optimize prepare-fileset \
   --source "$BUNDLE" \
   --optimize-config optimize-mcp.yaml \
   --fileset hermes-optimize-mcp \
+  --agent <phishing-agent-name> \
   --workspace default
 nemo agents optimize \
   --strategy nat \
-  --optimize-config-fileset default/hermes-optimize-mcp \
-  --optimize-config optimize-mcp.yaml \
+  --agent <phishing-agent-name> \
+  --config-fileset default/hermes-optimize-mcp \
+  --config optimize-mcp.yaml \
+  --output-agent hermes-optimize-mcp-optimized \
   --workspace default
 ```
 
@@ -430,8 +456,8 @@ os.environ.setdefault(
 )
 
 bundle = Path("plugins/nemo-optimization/examples/hermes-optimize").resolve()
-optimize_config = bundle / "optimize-mcp.yaml"
-os.chdir(bundle)  # dataset / base_dir are relative to the bundle
+os.chdir(bundle)  # dataset / base_dir are relative to the bundle, and the
+                   # fileset must already be staged (see the CLI tab)
 
 client = NeMoPlatform(
     base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
@@ -442,7 +468,11 @@ result = NemoJobScheduler().run_local(
     OptimizeJob,
     {
         "strategy": "nat",
-        "optimize_config": str(optimize_config),
+        "agent": "<phishing-agent-name>",
+        "config_fileset": "default/hermes-optimize-mcp",
+        "config": "optimize-mcp.yaml",
+        "output_agent": "hermes-optimize-mcp-optimized",
+        "workspace": WORKSPACE,
     },
     workspace=WORKSPACE,
     sdk=client,
@@ -454,14 +484,15 @@ print(result)
 
 </Tabs>
 
-When `--agent` is a platform-managed agent name, the job fetches the stored
+The job always resolves `--agent` against the platform: it fetches the stored
 Fabric agent config, overlays the optimization settings, runs Inference Gateway
 model preflight, and dispatches to the Tune backend. `--agent` must be a
 workspace agent name (`hermes-optimize-chatonly` or
-`default/hermes-optimize-chatonly`). Endpoint URLs and other URI forms
-(`http://...`, `https://...`, `file://...`) are rejected -- raw HTTP endpoint
-optimize mode was removed. Use a platform-managed agent reference or an inline
-Fabric agent package in `--optimize-config`.
+`default/hermes-optimize-chatonly`) and is required on every submission along
+with `--output-agent`, the name for the new, optimized agent entity the run
+creates. Endpoint URLs and other URI forms (`http://...`, `https://...`,
+`file://...`) are rejected -- raw HTTP endpoint optimize mode was removed, and
+there is no longer an inline-agent-only path that skips `--agent`.
 
 
 ## Run a Study on the Platform
@@ -478,6 +509,7 @@ nemo agents optimize prepare-fileset \
   --source "$BUNDLE" \
   --optimize-config optimize-chatonly.yaml \
   --fileset hermes-optimize-chatonly \
+  --agent hermes-optimize-chatonly \
   --workspace default
 ```
 
@@ -505,24 +537,33 @@ the bundle before staging.
 ```bash
 nemo agents optimize \
   --strategy nat \
-  --optimize-config-fileset default/hermes-optimize-chatonly \
-  --optimize-config optimize-chatonly.yaml \
+  --agent hermes-optimize-chatonly \
+  --config-fileset default/hermes-optimize-chatonly \
+  --config optimize-chatonly.yaml \
+  --output-agent hermes-optimize-chatonly-optimized \
   --workspace default
 ```
 
-`--optimize-config-fileset` is required: passing an absolute host path fails at
-compile time with a pointer back to `prepare-fileset`. Add
-`--output <fileset-or-dir>` to publish the study's artifacts (optimized config,
-trials dataframe, ATIF evidence) somewhere addressable when it finishes.
+`--config-fileset` is required: passing an absolute host path fails at
+compile time with a pointer back to `prepare-fileset`. `--agent` and
+`--output-agent` are required too — there is no separate artifacts fileset or
+directory to publish to; the study's result *is* the new `--output-agent`
+entity it creates.
 
 ### Where the study runs
 
-`OptimizeJob` picks its executor from the execution profiles the platform
-actually registered, for the requested profile (currently always `default`):
+`nemo agents optimize` (`OptimizeJob`) does no work itself: it resolves
+`--strategy` to the installed `AgentOptimizeJob` subclass and delegates
+`compile` to it, so the executor and entry point are the *strategy's*, not a
+shared one. For the `nat` strategy, that is `nemo_optimization.tasks.agent_optimize`;
+other strategies (`prompt-master`, `switchyard`, `experimentalist`) ship their
+own `tasks/agent_optimize.py` under their own package. Each strategy job picks
+its executor from the execution profiles the platform actually registered, for
+the requested profile (currently always `default`):
 
 | Registered profile | Executor | What the deployment must provide |
 |--------------------|----------|----------------------------------|
-| `subprocess` | Host subprocess running `python -m nemo_agent_optimization_plugin.tasks.optimize` | The jobs host venv must carry the optimization and Fabric harness dependencies (and the Docker socket, if trials need it) |
+| `subprocess` | Host subprocess running `python -m <strategy's task_module>` (e.g. `nemo_optimization.tasks.agent_optimize` for `nat`) | The jobs host venv must carry the optimization and Fabric harness dependencies (and the Docker socket, if trials need it) |
 | `cpu` (docker or `kubernetes_job`) | The `nmp-cpu-tasks` image, same entry point | The task image must carry those dependencies; `nemo-agent-optimization-plugin`, `nemo-optimization-plugin`, `nemo-switchyard`, and `prompt-master-plugin` are in the `cpu-tasks` dependency group for this reason |
 
 Subprocess wins when both are registered, because a study drives Fabric trials
