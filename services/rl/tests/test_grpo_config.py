@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from nhx.rl.app.jobs.training.schemas import (
     PolicyBackend,
     TrainingBackend,
     TrainingStepConfig,
+    WandBConfig,
 )
 from nhx.rl.entities.values import FinetuningType, TrainingType
 from nhx.rl.tasks.training.backends.nemo_rl.grpo_config import compile_grpo_config
@@ -68,6 +70,7 @@ def _make_grpo_step(
     grpo: GRPOConfig | None = None,
     policy_backend: PolicyBackend = PolicyBackend.AUTOMODEL,
     v4_compatible: bool = True,
+    integrations: TrainingStepConfig.IntegrationsConfig | None = None,
 ) -> TrainingStepConfig:
     env_root = tmp_path / "environment"
     env_root.mkdir(exist_ok=True)
@@ -107,6 +110,7 @@ def _make_grpo_step(
             activation_checkpointing=activation_checkpointing,
             policy_backend=policy_backend,
         ),
+        integrations=integrations or TrainingStepConfig.IntegrationsConfig(),
         output_model="out",
         workspace_path=str(tmp_path / "workspace"),
     )
@@ -123,6 +127,7 @@ def _prepared_step(
     grpo: GRPOConfig | None = None,
     policy_backend: PolicyBackend = PolicyBackend.AUTOMODEL,
     v4_compatible: bool = True,
+    integrations: TrainingStepConfig.IntegrationsConfig | None = None,
 ) -> tuple[TrainingStepConfig, Path]:
     dataset_pvc = tmp_path / "dataset"
     dataset_pvc.mkdir(exist_ok=True)
@@ -140,6 +145,7 @@ def _prepared_step(
             grpo=grpo,
             policy_backend=policy_backend,
             v4_compatible=v4_compatible,
+            integrations=integrations,
         ),
         dataset_pvc,
     )
@@ -1475,3 +1481,169 @@ def test_router_aux_loss_coef_layers_onto_passthrough(
         "text_config": {"rope_theta": 1000.0},
         "router_aux_loss_coef": 0.0,
     }
+
+
+class TestGrpoPassthroughKnobs:
+    """Fields that exist so a caller can reach NeMo-RL config the platform models partially."""
+
+    @pytest.fixture(autouse=True)
+    def _pvc_claim(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+
+    def test_vllm_kwargs_sit_beside_vllm_cfg_not_inside_it(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
+        """NeMo-RL reads policy.generation.vllm_kwargs as a sibling; nesting it would be ignored."""
+        step, _ = _prepared_step(
+            tmp_path, grpo=GRPOConfig(num_generations_per_prompt=4, vllm_kwargs={"moe_backend": "triton"})
+        )
+
+        cfg = compile_grpo_config(step, job_ctx)
+
+        generation = cfg["policy"]["generation"]
+        assert generation["vllm_kwargs"] == {"moe_backend": "triton"}
+        assert "vllm_kwargs" not in generation["vllm_cfg"]
+
+    def test_vllm_kwargs_absent_when_unset(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
+        step, _ = _prepared_step(tmp_path)
+
+        cfg = compile_grpo_config(step, job_ctx)
+
+        assert "vllm_kwargs" not in cfg["policy"]["generation"]
+
+    def test_logprob_chunk_size_overrides_the_platform_default(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
+        step, _ = _prepared_step(tmp_path, grpo=GRPOConfig(num_generations_per_prompt=4, logprob_chunk_size=512))
+
+        assert compile_grpo_config(step, job_ctx)["policy"]["logprob_chunk_size"] == 512
+
+    def test_logprob_chunk_size_defaults_to_2048(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
+        step, _ = _prepared_step(tmp_path)
+
+        assert compile_grpo_config(step, job_ctx)["policy"]["logprob_chunk_size"] == 2048
+
+    def test_env_vars_merge_over_the_platform_default(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
+        step, _ = _prepared_step(tmp_path)
+        step.parallelism.env_vars = {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}
+
+        env = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]["env_vars"]
+
+        assert env["PYTORCH_CUDA_ALLOC_CONF"] == "expandable_segments:True"
+
+    def test_moe_parallelizer_merges_and_keeps_ignore_router_for_ac(
+        self, tmp_path: Path, job_ctx: NHXJobContext
+    ) -> None:
+        """Replacing the block wholesale would drop the flag that prevents the AC recompute crash."""
+        step, _ = _prepared_step(
+            tmp_path,
+            expert_parallel_size=2,
+            activation_checkpointing=True,
+            grpo=GRPOConfig(num_generations_per_prompt=4, moe_parallelizer={"some_other_knob": 7}),
+        )
+        step.parallelism.num_gpus_per_node = 2
+
+        moe = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]["moe_parallelizer"]
+
+        assert moe == {"ignore_router_for_ac": True, "some_other_knob": 7}
+
+
+class TestGrpoOptimizerPassthrough:
+    @pytest.fixture(autouse=True)
+    def _pvc_claim(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+
+    def test_optimizer_name_and_kwargs_reach_the_recipe(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
+        step, _ = _prepared_step(tmp_path)
+        step.optimizer.optimizer_name = "transformer_engine.pytorch.optimizers.fused_adam.FusedAdam"
+        step.optimizer.optimizer_kwargs = {"master_weights": True, "exp_avg_dtype": "torch.bfloat16"}
+
+        optimizer = compile_grpo_config(step, job_ctx)["policy"]["optimizer"]
+
+        assert optimizer["name"] == "transformer_engine.pytorch.optimizers.fused_adam.FusedAdam"
+        assert optimizer["kwargs"]["master_weights"] is True
+        assert optimizer["kwargs"]["exp_avg_dtype"] == "torch.bfloat16"
+        assert optimizer["kwargs"]["lr"] == step.optimizer.learning_rate
+        # torch.optim-only flags: FusedAdam.__init__ takes neither and has no **kwargs.
+        assert "foreach" not in optimizer["kwargs"]
+        assert "fused" not in optimizer["kwargs"]
+
+    def test_caller_kwargs_win_over_ours(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
+        """A caller asking for torch's fused kernel gets it; our default would otherwise disable it."""
+        step, _ = _prepared_step(tmp_path)
+        step.optimizer.optimizer_kwargs = {"fused": True}
+
+        assert compile_grpo_config(step, job_ctx)["policy"]["optimizer"]["kwargs"]["fused"] is True
+
+    def test_stock_optimizer_is_unchanged_when_nothing_is_passed(self, tmp_path: Path, job_ctx: NHXJobContext) -> None:
+        step, _ = _prepared_step(tmp_path)
+
+        optimizer = compile_grpo_config(step, job_ctx)["policy"]["optimizer"]
+
+        assert optimizer["name"] == "torch.optim.AdamW"
+        assert optimizer["kwargs"]["fused"] is False
+
+
+def test_full_result_tables_flag_absent_by_default(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Off means the key is not written at all, matching NeMo-RL's own reference configs."""
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(tmp_path)
+    wandb_cfg = compile_grpo_config(step, job_ctx)["logger"]["wandb"]
+
+    assert "log_nemo_gym_full_result_tables" not in wandb_cfg
+
+
+def test_full_result_tables_flag_reaches_logger_wandb(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """NeMo-RL reads ``master_config.logger["wandb"]``; anywhere else and it silently
+    never builds the Tables."""
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    monkeypatch.setenv("WANDB_API_KEY", "test-key")
+    step, _ = _prepared_step(
+        tmp_path,
+        grpo=GRPOConfig(num_generations_per_prompt=4, log_nemo_gym_full_result_tables=True),
+        integrations=TrainingStepConfig.IntegrationsConfig(wandb=WandBConfig(project="p")),
+    )
+    cfg = compile_grpo_config(step, job_ctx)
+
+    assert cfg["logger"]["wandb_enabled"] is True
+    assert cfg["logger"]["wandb"]["log_nemo_gym_full_result_tables"] is True
+    # NeMo-RL pops it before wandb.init, so it must not leak into the policy block.
+    assert "log_nemo_gym_full_result_tables" not in cfg["policy"]
+
+
+def test_full_result_tables_flag_not_written_without_wandb(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With W&B off the flag cannot work, so the compiler must not write it.
+    ``validate_for_training`` already rejects this pairing earlier."""
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    monkeypatch.delenv("WANDB_API_KEY", raising=False)
+    step, _ = _prepared_step(
+        tmp_path,
+        grpo=GRPOConfig(num_generations_per_prompt=4, log_nemo_gym_full_result_tables=True),
+    )
+    cfg = compile_grpo_config(step, job_ctx)
+
+    assert cfg["logger"]["wandb_enabled"] is False
+    assert "log_nemo_gym_full_result_tables" not in cfg["logger"]["wandb"]
+
+
+def test_full_result_tables_warn_when_the_wandb_key_never_arrives(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The schema accepts integrations.wandb without api_key_secret (the key may come from the
+    container env), so only the compiler knows W&B ended up off -- and it says so."""
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    monkeypatch.delenv("WANDB_API_KEY", raising=False)
+    step, _ = _prepared_step(
+        tmp_path,
+        grpo=GRPOConfig(num_generations_per_prompt=4, log_nemo_gym_full_result_tables=True),
+        integrations=TrainingStepConfig.IntegrationsConfig(wandb=WandBConfig(project="p")),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        cfg = compile_grpo_config(step, job_ctx)
+
+    assert cfg["logger"]["wandb_enabled"] is False
+    assert "log_nemo_gym_full_result_tables" not in cfg["logger"]["wandb"]
+    assert "rollout Tables will not be written" in caplog.text

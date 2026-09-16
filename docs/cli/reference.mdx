@@ -9845,11 +9845,13 @@ nemo customization automodel.jobs submit [OPTIONS]
 * `--dataset.training`: Training fileset as 'name', 'workspace/name', or either form with a '#path/' directory.
 * `--dataset.validation`: Override `dataset.validation` in the spec.
 * `--dataset.prompt-template`: Override `dataset.prompt_template` in the spec.
+* `--dataset.shuffle`: Reshuffle training examples each epoch. Disable only for a deliberate curriculum order.
 * `--training.lora.rank <INTEGER>`: Override `training.lora.rank` in the spec.
 * `--training.lora.alpha <INTEGER>`: Override `training.lora.alpha` in the spec.
 * `--training.lora.dropout <FLOAT>`: LoRA dropout probability for regularization.
 * `--training.lora.merge`: Override `training.lora.merge` in the spec.
 * `--training.lora.use-triton`: Use the optimized Triton LoRA kernel.
+* `--training.lora.use-memory-efficient-lora`: Use Automodel's lower-memory LoRA path. Recommended for large MoE checkpoints. Omit to use Automodel's default, which is on.
 * `--training.max-seq-length <INTEGER>`: Override `training.max_seq_length` in the spec.
 * `--training.execution-profile`: Override `training.execution_profile` in the spec.
 * `--training.teacher-model`: Override `training.teacher_model` in the spec.
@@ -9867,6 +9869,14 @@ nemo customization automodel.jobs submit [OPTIONS]
 * `--training.retrieval.export.opset <INTEGER>`: Override `training.retrieval.export.opset` in the spec.
 * `--training.retrieval.export.normalize`: L2-normalize embeddings. Ignored for cross_encoder.
 * `--training.retrieval.export.dimensions`: Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.
+* `--training.activation-checkpointing`: Recompute intermediate activations in the backward pass instead of storing them. Substantially lowers memory use for a modest slowdown, and is commonly enabled when training large MoE models.
+* `--training.mtp.num-nextn-predict-layers <INTEGER>`: How many tokens ahead to predict. Omit to keep the checkpoint's own value.
+* `--training.mtp.use-repeated-layer`: Share one weight-tied layer across the prediction depths. Only some Automodel models accept it (Nemotron-H in r0.6.0); omit it for others.
+* `--training.mtp.loss-scaling-factor <FLOAT>`: Weight of the MTP loss term relative to the main loss. Omit to keep the model's default (0.1).
+* `--training.backend.rope-fusion`: Fuse the rotary embedding into the attention kernel.
+* `--training.backend.fake-balanced-gate`: Route tokens evenly across experts instead of using the trained router. Benchmarking aid.
+* `--training.backend.enable-hf-state-dict-adapter`: Save and load checkpoints in HuggingFace layout. Needed when the trained model is consumed by HuggingFace tooling.
+* `--training.backend.enable-fsdp-optimizations`: Enable Automodel's additional FSDP2 sharding optimizations.
 * `--schedule.epochs <INTEGER>`: Override `schedule.epochs` in the spec.
 * `--schedule.max-steps <INTEGER>`: Override `schedule.max_steps` in the spec.
 * `--schedule.val-check-interval <FLOAT>`: Override `schedule.val_check_interval` in the spec.
@@ -9877,6 +9887,7 @@ nemo customization automodel.jobs submit [OPTIONS]
 * `--batch.micro-batch-size <INTEGER>`: Override `batch.micro_batch_size` in the spec.
 * `--batch.sequence-packing`: Override `batch.sequence_packing` in the spec.
 * `--batch.sequence-packing-max-samples <INTEGER>`: Samples analyzed to estimate the optimal pack size when packing is enabled.
+* `--batch.packed-sequence-size <INTEGER>`: Pin the packed sequence length instead of estimating it. Requires sequence_packing.
 * `--optimizer.learning-rate <FLOAT>`: Override `optimizer.learning_rate` in the spec.
 * `--optimizer.min-learning-rate <FLOAT>`: Minimum learning rate for the cosine decay schedule.
 * `--optimizer.weight-decay <FLOAT>`: Override `optimizer.weight_decay` in the spec.
@@ -9891,6 +9902,11 @@ nemo customization automodel.jobs submit [OPTIONS]
 * `--parallelism.context-parallel-size <INTEGER>`: Override `parallelism.context_parallel_size` in the spec.
 * `--parallelism.expert-parallel-size <INTEGER>`: Override `parallelism.expert_parallel_size` in the spec.
 * `--parallelism.sequence-parallel`: Enable sequence parallelism.
+* `--parallelism.pipeline.pp-schedule`: Pipeline schedule name, e.g. '1f1b', 'interleaved1f1b', 'gpipe'. Defaults to 'interleaved1f1b'.
+* `--parallelism.pipeline.pp-microbatch-size <INTEGER>`: Micro-batch size flowing through each pipeline stage.
+* `--parallelism.pipeline.scale-grads-in-schedule`: Scale gradients inside the schedule rather than afterwards.
+* `--parallelism.pipeline.patch-inner-model`: Apply Automodel's pipeline patch to the inner transformer module.
+* `--parallelism.pipeline.patch-causal-lm-model`: Apply Automodel's pipeline patch to the causal-LM wrapper.
 * `--output.name`: Override `output.name` in the spec.
 * `--output.description`: Override `output.description` in the spec.
 * `--integrations.wandb.project`: W&B project name (groups related runs). Defaults to output.name if not set.
@@ -9921,7 +9937,7 @@ nemo customization automodel.jobs submit [OPTIONS]
 
 Job Spec flags are generated from the AutomodelJobInput Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.retrieval.export.pooling`, `schedule.checkpoint_selection`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `deployment_config (other union forms)`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.retrieval.export.pooling`, `training.backend.attn`, `training.backend.linear`, `training.backend.rms_norm`, `training.backend.rope`, `training.backend.experts`, `training.backend.dispatcher`, `schedule.checkpoint_selection`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `parallelism.pipeline.round_virtual_stages_to_pp_multiple`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `deployment_config (other union forms)`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 ##### nemo customization automodel.jobs explain
