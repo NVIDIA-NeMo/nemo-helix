@@ -477,7 +477,7 @@ def test_harbor_agent_kwargs_round_trip_the_wire_unchanged() -> None:
     """Nested kwargs survive JSON serialization, so what the submitter wrote is what the agent's ``__init__`` gets."""
     agent_kwargs = {
         "fabric_adapter_id": "nvidia.fabric.codex",
-        "fabric_package": "nemo-fabric[codex]==0.3.0b1",
+        "fabric_package": "nemo-fabric[codex]==0.3.0",
         "fabric_harness_settings": {"max_turns": 3, "tools": ["shell", None], "strict": True},
     }
     spec = AgentEvalSpec(

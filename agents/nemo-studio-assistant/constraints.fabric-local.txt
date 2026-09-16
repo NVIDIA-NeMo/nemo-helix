@@ -1,2 +1,2 @@
 # Keep the Fabric runtime aligned with the packaged agent contract.
-nemo-fabric==0.2.0
+nemo-fabric==0.3.0
