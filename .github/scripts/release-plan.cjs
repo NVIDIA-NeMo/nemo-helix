@@ -41,7 +41,8 @@ function selectArtifacts(value, allowedArtifacts, label, inputName) {
 async function resolveReleasePlan({
   env,
   context,
-  getCommit,
+  listBranches,
+  listTags,
   now = () => new Date(),
 }) {
   const allWheels = JSON.parse(env.RELEASE_WHEELS_JSON);
@@ -57,7 +58,8 @@ async function resolveReleasePlan({
   const helmVersionOverride = isManual
     ? (inputs["helm-version"] ?? "").trim()
     : "";
-  let sourceSha = isManual ? (inputs["source-sha"] ?? "").trim() : context.sha;
+  let sourceSha = isManual ? (inputs["source-sha"] ?? "").trim() : "";
+  let sourceBranch = "";
   const version = releaseType === "stable" ? (inputs.version ?? "").trim() : "";
 
   if (releaseType === "stable") {
@@ -75,10 +77,25 @@ async function resolveReleasePlan({
         "A pinned nightly source must be an exact 40-character SHA.",
       );
     }
-    if (!sourceSha && dryRun) {
-      sourceSha = context.sha;
-    } else if (!sourceSha) {
-      sourceSha = await getCommit(context.payload.repository.default_branch);
+    if (!sourceSha) {
+      const [branch] = (await listBranches())
+        .filter(({ name }) => /^release\/\d+\.\d+$/.test(name))
+        .sort((a, b) => {
+          const [aMajor, aMinor] = a.name
+            .slice("release/".length)
+            .split(".")
+            .map(Number);
+          const [bMajor, bMinor] = b.name
+            .slice("release/".length)
+            .split(".")
+            .map(Number);
+          return bMajor - aMajor || bMinor - aMinor;
+        });
+      if (!branch) {
+        throw new Error("No release/X.X branch found for nightly publication.");
+      }
+      sourceBranch = branch.name;
+      sourceSha = branch.commit.sha;
     }
   }
 
@@ -145,14 +162,32 @@ async function resolveReleasePlan({
       : "";
   const releaseLabel =
     releaseType === "nightly" ? `nightly-${nightlyTimestamp}` : version;
+  let nightlyBaseVersion = "";
+  if (sourceBranch) {
+    const [major, minor] = sourceBranch
+      .slice("release/".length)
+      .split(".")
+      .map(Number);
+    let nextPatch = 0;
+    for (const { name } of await listTags()) {
+      if (!SEMVER_CORE_PATTERN.test(name)) continue;
+      const [tagMajor, tagMinor, patch] = name.split(".").map(Number);
+      if (tagMajor === major && tagMinor === minor) {
+        nextPatch = Math.max(nextPatch, patch + 1);
+      }
+    }
+    nightlyBaseVersion = `${major}.${minor}.${nextPatch}`;
+  }
 
   return {
     releaseType,
     releaseScope,
     sourceSha,
+    sourceBranch,
     version,
     releaseLabel,
     nightlyTimestamp,
+    nightlyBaseVersion,
     wheels,
     containers,
     wheelIds,
