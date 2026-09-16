@@ -12,6 +12,7 @@ export type AssistantToolArgs = AssistantToolCallPart['args'];
 type AssistantToolArgValue = AssistantToolArgs[string];
 
 export const ASSISTANT_COLLAPSED_THINKING_TOOL_NAME = 'AssistantCollapsedThinking';
+export const ASSISTANT_THINKING_TOOL_NAME = 'AssistantThinking';
 export const ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME = 'AssistantCollapsedStudioDetails';
 export const ASSISTANT_SUBTLE_TOOL_GROUP_NAME = 'AssistantSubtleToolGroup';
 export const ASSISTANT_WORK_DETAILS_LABEL = 'Work details';
@@ -26,6 +27,7 @@ export const isAssistantJobProgressToolName = (toolName: string): boolean =>
 
 export const isAssistantSubtleToolCallName = (toolName: string): boolean =>
   toolName !== ASSISTANT_COLLAPSED_THINKING_TOOL_NAME &&
+  toolName !== ASSISTANT_THINKING_TOOL_NAME &&
   toolName !== ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME &&
   toolName !== ASSISTANT_SUBTLE_TOOL_GROUP_NAME &&
   !FILE_CHANGE_TOOL_CALL_NAMES.has(toolName) &&
@@ -79,6 +81,30 @@ export const createAssistantToolCallPart = ({
     args,
     argsText: JSON.stringify(args),
   };
+};
+
+export const createAssistantThinkingPart = (
+  text: string,
+  toolCallId: string
+): ThreadAssistantMessagePart => {
+  const args = toAssistantToolArgs({ text });
+
+  return {
+    type: 'tool-call',
+    toolCallId,
+    toolName: ASSISTANT_THINKING_TOOL_NAME,
+    args,
+    argsText: JSON.stringify(args),
+  };
+};
+
+export const isAssistantThinkingPart = (part: ThreadAssistantMessagePart): boolean =>
+  part.type === 'tool-call' && part.toolName === ASSISTANT_THINKING_TOOL_NAME;
+
+export const getAssistantThinkingPartText = (part: ThreadAssistantMessagePart): string => {
+  if (!isAssistantThinkingPart(part) || part.type !== 'tool-call') return '';
+  const text = part.args.text;
+  return typeof text === 'string' ? text : '';
 };
 
 const createAssistantCollapsedThinkingPart = (text: string): ThreadAssistantMessagePart => {
@@ -596,13 +622,29 @@ const getCollapsedTextParts = (
   };
 };
 
+const joinCollapsedThinking = (...texts: readonly (string | undefined)[]): string | undefined => {
+  const joined = texts
+    .map((text) => text?.trim())
+    .filter(Boolean)
+    .join('\n\n');
+  return joined || undefined;
+};
+
 export const getAssistantCompletedMessageParts = (
   parts: readonly ThreadAssistantMessagePart[],
   options: AssistantCompletedMessageOptions = {}
 ): readonly ThreadAssistantMessagePart[] => {
-  const studioSummaryBlock = getStudioSummaryBlock(parts, options);
+  const reasoningText = joinCollapsedThinking(...parts.map(getAssistantThinkingPartText));
+  const remainingParts = reasoningText
+    ? parts.filter((part) => !isAssistantThinkingPart(part))
+    : parts;
+
+  const studioSummaryBlock = getStudioSummaryBlock(remainingParts, options);
   if (studioSummaryBlock) {
     const completedParts: ThreadAssistantMessagePart[] = [];
+    if (reasoningText) {
+      completedParts.push(createAssistantCollapsedThinkingPart(reasoningText));
+    }
     const collapsedDetailsPart = createAssistantCollapsedStudioDetailsPart({
       label: studioSummaryBlock.detailsLabel,
       parts: studioSummaryBlock.detailParts,
@@ -616,18 +658,22 @@ export const getAssistantCompletedMessageParts = (
   const completedParts: ThreadAssistantMessagePart[] = [];
   let lastToolIndex = -1;
 
-  parts.forEach((part, index) => {
+  remainingParts.forEach((part, index) => {
     if (part.type === 'tool-call') {
       completedParts.push(part);
       lastToolIndex = index;
     }
   });
 
-  if (lastToolIndex < 0) return parts;
+  if (lastToolIndex < 0) {
+    if (!reasoningText) return remainingParts;
+    return [createAssistantCollapsedThinkingPart(reasoningText), ...remainingParts];
+  }
 
-  const { collapsedText, summaryText } = getCollapsedTextParts(parts, lastToolIndex);
-  if (collapsedText) completedParts.unshift(createAssistantCollapsedThinkingPart(collapsedText));
-  for (const part of parts.slice(lastToolIndex + 1)) {
+  const { collapsedText, summaryText } = getCollapsedTextParts(remainingParts, lastToolIndex);
+  const thinkingText = joinCollapsedThinking(reasoningText, collapsedText);
+  if (thinkingText) completedParts.unshift(createAssistantCollapsedThinkingPart(thinkingText));
+  for (const part of remainingParts.slice(lastToolIndex + 1)) {
     if (part.type === 'text') continue;
     completedParts.push(part);
   }

@@ -5,12 +5,61 @@ import type { ThreadAssistantMessagePart } from '@assistant-ui/react';
 import { ASSISTANT_JOB_PROGRESS_MCP_TOOL_NAME } from '@studio/routes/agents/AssistantChatRoute/jobProgressConsts';
 import {
   ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
+  ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
+  createAssistantThinkingPart,
   getAssistantCompletedMessageParts,
   STUDIO_MESSAGE_SUMMARY_END,
   STUDIO_MESSAGE_SUMMARY_START,
 } from '@studio/routes/agents/AssistantChatRoute/toolParts';
 
 describe('Assistant tool parts', () => {
+  it('collapses reasoning on a completed message that made no tool call', () => {
+    const parts: readonly ThreadAssistantMessagePart[] = [
+      createAssistantThinkingPart('The user wants the capital of France.', 'thinking-1'),
+      { type: 'text', text: 'Paris.' },
+    ];
+
+    expect(getAssistantCompletedMessageParts(parts)).toMatchObject([
+      {
+        type: 'tool-call',
+        toolName: ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
+        args: { text: 'The user wants the capital of France.' },
+      },
+      { type: 'text', text: 'Paris.' },
+    ]);
+  });
+
+  it('folds reasoning into the collapsed thinking block alongside pre-tool text', () => {
+    const parts: readonly ThreadAssistantMessagePart[] = [
+      createAssistantThinkingPart('First I need the repo root.', 'thinking-1'),
+      { type: 'text', text: 'Checking the repo.' },
+      {
+        type: 'tool-call',
+        toolCallId: 'toolu_bash',
+        toolName: 'Bash',
+        args: { command: 'pwd' },
+        argsText: '{"command":"pwd"}',
+      },
+      { type: 'text', text: 'Done.' },
+    ];
+
+    expect(getAssistantCompletedMessageParts(parts)).toMatchObject([
+      {
+        type: 'tool-call',
+        toolName: ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
+        args: { text: 'First I need the repo root.\n\nChecking the repo.' },
+      },
+      { type: 'tool-call', toolName: 'Bash' },
+      { type: 'text', text: 'Done.' },
+    ]);
+  });
+
+  it('keeps a reasoning-free message without a tool call unchanged', () => {
+    const parts: readonly ThreadAssistantMessagePart[] = [{ type: 'text', text: 'Paris.' }];
+
+    expect(getAssistantCompletedMessageParts(parts)).toEqual(parts);
+  });
+
   it('collapses details before a Studio summary block and shows only the summary text', () => {
     const bashPart: ThreadAssistantMessagePart = {
       type: 'tool-call',
