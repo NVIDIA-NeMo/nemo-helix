@@ -407,22 +407,10 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
             raise RuntimeError(f"Could not fetch job step '{job}/{step_name}' to check if terminal") from e
 
     def check_job_is_terminal(self, job: str, workspace: str) -> bool:
-        """Check if a job and all declared steps are in a terminal state."""
+        """Check if a job is in a terminal state."""
         try:
             job_response = self._jobs.get_job(name=job, workspace=workspace).data()
-            terminal_statuses = {status.value for status in PlatformJobStatus.terminals()}
-            if job_response.status not in terminal_statuses:
-                return False
-
-            expected_step_names = {step.name for step in job_response.platform_spec.steps}
-            if not expected_step_names:
-                return True
-
-            steps_by_name = {step.name: step for step in self._jobs.list_steps(name=job, workspace=workspace).items()}
-            return all(
-                step_name in steps_by_name and steps_by_name[step_name].status in terminal_statuses
-                for step_name in expected_step_names
-            )
+            return job_response.status in ("cancelled", "error", "completed")
         except ClientNotFoundError:
             # If the job entity is not found, we treat it as terminal so cleanup can proceed.
             return True
