@@ -6,7 +6,7 @@ import {
   type EvaluationFormValues,
   selectedMetrics,
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
-import { useTemplateBindings } from '@studio/routes/evaluation/EvaluationNewRoute/useTemplateBindings';
+import { useDatasetBindings } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetBindings';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 export interface WizardProgress {
@@ -31,7 +31,7 @@ const statusOf = (unlocked: boolean, satisfied: boolean): StepStatus =>
 export function useWizardProgress(): WizardProgress {
   const { control } = useFormContext<EvaluationFormValues>();
   const values = useWatch({ control }) as EvaluationFormValues;
-  const bindings = useTemplateBindings();
+  const bindings = useDatasetBindings();
 
   const model = Boolean(values?.model);
 

@@ -14,7 +14,10 @@ import {
   MAPPABLE_FILE_TYPES,
   PRIMARY_CANONICAL_FIELDS,
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
-import { useDatasetPreview } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetPreview';
+import {
+  lastSelectorForRole,
+  useDatasetPreview,
+} from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetPreview';
 import { CircleCheck, CircleHelp } from 'lucide-react';
 import { FC, useEffect, useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -37,19 +40,37 @@ export const DatasetPanel: FC = () => {
   const fieldMapping = useWatch({ control, name: 'fieldMapping' });
   // Row 0 on purpose: key extraction describes the file's shape, not whichever
   // row the Dry Run is pointed at.
-  const { row, keyOptions, messagesColumn, isLoading, error } = useDatasetPreview(dataset ?? null);
+  const { row, keyOptions, messagesColumn, messageSelectors, isLoading, error } = useDatasetPreview(
+    dataset ?? null
+  );
+
+  const assistantSelector = lastSelectorForRole(messageSelectors, 'assistant') ?? '';
+  const userSelector = lastSelectorForRole(messageSelectors, 'user') ?? '';
 
   const formatLabel = (dataset?.split('.').pop() ?? '').toUpperCase() || 'File';
 
   /** An OpenAI messages array binds as a whole column, so bind it automatically:
    *  there is nothing for the user to decide, and the templates resolve the user
-   *  and assistant turns positionally. */
+   *  and assistant turns positionally.
+   *
+   *  The assistant turn is recorded as the reference so validation can tell a
+   *  conversation apart from a prompts-only file. ``toFieldMapping`` drops it
+   *  before submit, because an array path is not a legal column mapping. */
   useEffect(() => {
     if (!row) return;
-    const bound = fieldMapping?.messages ?? '';
-    const next = messagesColumn ?? '';
-    if (bound !== next) setValue('fieldMapping.messages', next);
-  }, [row, messagesColumn, fieldMapping, setValue]);
+    const boundMessages = fieldMapping?.messages ?? '';
+    const nextMessages = messagesColumn ?? '';
+    if (boundMessages !== nextMessages) setValue('fieldMapping.messages', nextMessages);
+
+    const boundReference = fieldMapping?.reference ?? '';
+    if (messagesColumn) {
+      if (boundReference !== assistantSelector)
+        setValue('fieldMapping.reference', assistantSelector);
+    } else if (boundReference && !isSupportedMappingPath(boundReference)) {
+      // Left over from a messages dataset; a flat file cannot use it.
+      setValue('fieldMapping.reference', '');
+    }
+  }, [row, messagesColumn, assistantSelector, fieldMapping, setValue]);
 
   const bindableOptions = useMemo(
     () => keyOptions.filter((option) => isSupportedMappingPath(option.value)),
@@ -105,8 +126,15 @@ export const DatasetPanel: FC = () => {
             {messagesColumn ? (
               <>
                 <Check ok label={`Standard messages array found in "${messagesColumn}"`} />
-                <Check ok label="Input mapped to the user message" />
-                <Check ok label="Ground Truth mapped to the assistant message" />
+                <Check ok={Boolean(userSelector)} label="Input mapped to the user message" />
+                <Check
+                  ok={Boolean(assistantSelector)}
+                  label={
+                    assistantSelector
+                      ? 'Ground Truth mapped to the assistant message'
+                      : 'No assistant message to use as Ground Truth'
+                  }
+                />
               </>
             ) : (
               <Check ok={false} label="Assign data fields to metrics below:" />
