@@ -4,8 +4,12 @@
 from __future__ import annotations
 
 import pytest
-from scaled_evals.api import s3
-from scaled_evals.api.settings import settings
+
+try:
+    from scaled_evals.api import s3
+    from scaled_evals.api.settings import settings
+except ImportError as exc:
+    pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
 
 def test_gcs_media_url_encodes_valid_object_key_as_one_path_component(
