@@ -46,6 +46,12 @@ class StorageImpl(ABC):
     @abstractmethod
     async def validate_storage(self): ...
 
+    async def upload_if_absent(
+        self, path: str, fstream: AsyncIterator[bytes], content_length: int | None = None
+    ) -> FileInfo:
+        """Atomically publish a complete object without replacing an existing object."""
+        raise NotImplementedError(f"Conditional uploads are unsupported by {type(self).__name__}")
+
     @abstractmethod
     async def delete(self, path: str) -> FileInfo: ...
 

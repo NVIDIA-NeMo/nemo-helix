@@ -2120,6 +2120,14 @@ paths:
         schema:
           type: string
           title: Path
+      - name: if-none-match
+        in: header
+        required: false
+        schema:
+          description: Use * to atomically create without replacing.
+          title: If-None-Match
+          type: string
+        description: Use * to atomically create without replacing.
       responses:
         '200':
           description: Successful Response
