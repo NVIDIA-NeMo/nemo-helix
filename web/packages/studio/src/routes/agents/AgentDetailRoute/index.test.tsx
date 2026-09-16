@@ -71,6 +71,16 @@ describe('AgentDetailRoute', () => {
     expect(await screen.findByRole('textbox', { name: /Task prompt/i })).toBeInTheDocument();
   });
 
+  it('omits the reasoning toggle on the chat tab, since a deployment ignores it', async () => {
+    const user = userEvent.setup();
+    renderDetail();
+
+    await user.click(await screen.findByRole('tab', { name: 'Chat' }));
+
+    expect(await screen.findByRole('textbox', { name: /Task prompt/i })).toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: /Reasoning/i })).not.toBeInTheDocument();
+  });
+
   it('shows the agent spec on the details tab and masks secrets', async () => {
     const user = userEvent.setup();
     renderDetail();

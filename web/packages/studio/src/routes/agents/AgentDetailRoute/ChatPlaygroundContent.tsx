@@ -77,6 +77,10 @@ export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
               : undefined
           }
           disabled={isDeploymentsLoading || noHealthyDeployments || !chatDeployment}
+          // An agent deployment fronts a harness, not a model: it forwards
+          // neither reasoning_effort nor chat_template_kwargs, so the toggle
+          // would promise something it cannot deliver.
+          showReasoningToggle={false}
         />
       </Block>
     </div>
