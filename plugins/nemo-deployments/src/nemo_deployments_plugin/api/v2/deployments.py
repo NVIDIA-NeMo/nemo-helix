@@ -25,7 +25,12 @@ from nemo_deployments_plugin.validation import (
 from nemo_platform_plugin.api.filters import make_filter_obj_dep
 from nemo_platform_plugin.auth import current_auth_context
 from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_platform_plugin.entity_client import (
+    NemoEntitiesClient,
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+    NemoEntityValidationError,
+)
 from nemo_platform_plugin.filter_ops import ComparisonOperation, FilterOperator
 from nemo_platform_plugin.schema import PaginationData
 
@@ -112,6 +117,8 @@ async def create_deployment(
             status_code=409,
             detail=f"Deployment '{body.name}' already exists in workspace '{workspace}'.",
         ) from exc
+    except NemoEntityValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/deployments", response_model=DeploymentPage, tags=["Deployments"])
