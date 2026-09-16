@@ -40,14 +40,13 @@ executes it through the selected harness.
 | Python | `>=3.11,<3.15` |
 | NeMo Platform | Installed and running with an inference provider and model configured |
 | Model credentials | Set the credentials required by the selected provider; the examples use `NVIDIA_API_KEY` |
-| Harness authentication | Authenticate the selected harness when required; for example, run `codex login` for Codex or complete the Claude login flow |
-| Harness and Relay packages | Installed through the plugin's Fabric dependencies; no separate host CLI installation is required |
+| Harness CLI and authentication | Install and authenticate the selected harness when required; for example, run `codex login` for Codex or complete the Claude CLI login flow |
+| NeMo Relay CLI | Required for Claude and Codex; install it with `script/dev-install-fabric.sh` after installing the plugin |
 | Hermes runtime | Required only for Hermes; use a separate Python 3.12 environment and set `ADAPTER_PYTHON` as described in the [Hermes example](examples/nemo-agent-config/README.md#hermes) |
 
 Install the plugin from the repository root, after `uv sync`. This installs
-Fabric, the supported harness adapter and harness packages, and the Relay
-Python bindings and CLI. The Hermes harness runtime remains separate as noted
-above.
+Fabric, the Relay Python bindings, and the supported harness adapters. The NeMo
+Relay CLI and Hermes harness runtime remain separate as noted above.
 
 ```bash
 uv pip install -e plugins/nemo-agents/
@@ -57,6 +56,13 @@ Verify it loaded:
 
 ```bash
 nemo --help   # should show "agents" under Plugins
+```
+
+If you are using Claude or Codex, install and verify the NeMo Relay CLI:
+
+```bash
+script/dev-install-fabric.sh
+nemo-relay --version
 ```
 
 > **Working directory:** Platform-backed examples use paths relative to the
@@ -626,12 +632,6 @@ Stop the local Platform process with `Ctrl-C` in its terminal.
 The existing NAT workflow experience remains available for agents authored as
 `nat-workflow-v1` YAML. The material below is retained as the compatibility
 guide while the recommended flow becomes the primary user-facing walkthrough.
-
-The experimental NAT adapters for Claude Code, Codex, Cursor, Hermes, and
-OpenClaw are intentionally not part of this compatibility surface. Use
-`nemo-agents-spec-v1` with the Fabric-backed Claude, Codex, DeepAgents, or
-Hermes harness instead. Cursor and OpenClaw do not currently have supported
-Fabric adapters.
 
 ### Prerequisites
 
