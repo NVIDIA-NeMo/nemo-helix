@@ -46,38 +46,23 @@ class Settings(BaseSettings):
     api_sse_max_connections: int = 20
     api_sse_max_duration_seconds: float = 3600.0
     api_sse_poll_interval_seconds: float = 1.0
-    s3_endpoint: str = "http://localhost:9000"
-    # Endpoint baked into presigned URLs handed to clients. In the cluster the
-    # API reaches RustFS at an internal address (s3_endpoint), but clients hit a
-    # different hostname; SigV4 binds Host, so the signed URL must use the host
-    # the client actually calls. Falls back to s3_endpoint when unset (prod:
-    # same value).
-    s3_public_endpoint: str | None = None
-    s3_access_key: str = "scaledevals"
-    s3_secret_key: str = "scaledevals-dev-secret"
-    s3_bucket: str = "scaled-evals"
     # Platform workspace that owns scaled-evals' Files filesets (artifacts + task packs). All
     # filesets live here today; scaled-evals keeps owning its own owner_id tenancy + upload
     # quotas on top of Files. The future entity-owned-workspace model resolves this per-request
     # in the _files_backend workspace seam instead.
     files_workspace: str = "default"
-    # Object-store backend. "s3" covers RustFS, MinIO, AWS S3, and GCS XML API
-    # when HMAC credentials are available. "gcs" uses Google Cloud Storage's
-    # JSON API with Application Default Credentials / Workload Identity.
+    # Object-store backend selector, retained ONLY for the Cloud Build task-image path, which
+    # reads the uploaded pack from GCS as a build storageSource and requires "gcs". Artifact +
+    # task-pack storage itself now goes through the Files service, not this backend.
     object_store_backend: Literal["s3", "gcs"] = "s3"
-    gcs_bucket: str = ""
-    gcs_api_base_url: str = "https://storage.googleapis.com"
-    # GCS signed URLs use XML API endpoints. They do not require HMAC, but they
-    # do require a service account that the Workload Identity principal can sign
-    # as through IAM Credentials signBlob. When unset, GCS upload falls back to
-    # resumable session URIs.
-    gcs_upload_mode: Literal["auto", "signed_url", "resumable_session"] = "auto"
-    gcs_signing_service_account: str = ""
-    gcs_signed_url_region: str = "auto"
-    gcs_iam_credentials_base_url: str = "https://iamcredentials.googleapis.com"
+    # GCS Workload-Identity token settings, retained for the Cloud Build path's metadata-server
+    # token fetch (see api/build/cloud_build.py).
     gcs_token_url: str = "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token"
     gcs_access_token: str = ""
     gcs_request_timeout_seconds: float = 30.0
+    # GCS bucket the Cloud Build task-image path reads the uploaded pack from (as a build
+    # storageSource). Retained only for that path; artifact/task-pack storage is on Files now.
+    gcs_bucket: str = ""
     # Task-pack upload guardrails. Direct-to-object-store uploads are validated
     # server-side before a revision can enter the ready/building path; oversized
     # objects are deleted as a quarantine/cleanup policy so they cannot be
@@ -562,11 +547,8 @@ class Settings(BaseSettings):
     # When false (default), Intake upload failures are warnings only.
     intake_fail_on_error: bool = False
 
-    def resolved_s3_public_endpoint(self) -> str:
-        return self.s3_public_endpoint or self.s3_endpoint
-
     def resolved_object_store_bucket(self) -> str:
-        return self.gcs_bucket or self.s3_bucket
+        return self.gcs_bucket
 
     def resolved_database_url(self) -> str:
         base = self.database_url or _STANDALONE_DATABASE_URL
