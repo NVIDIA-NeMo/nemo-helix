@@ -63,7 +63,7 @@
     #   nemo-platform-sdk
     #   nemo-rl-plugin
     #   nemo-safe-synthesizer-plugin
-    #   nemo-switchyard
+    #   nemo-switchyard-plugin
     #   nemo-unsloth-plugin
     #   nmp-automodel
     #   nmp-common
@@ -154,7 +154,7 @@
 -e ./plugins/nemo-switchyard/vendor/switchyard ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   nemo-platform
-    #   nemo-switchyard
+    #   nemo-switchyard-plugin
 -e ./plugins/nemo-unsloth ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./sdk/python/nemo-platform ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via

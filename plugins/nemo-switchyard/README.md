@@ -28,7 +28,24 @@ LOG_LEVEL=DEBUG uv run nemo services run \
   --controllers models
 ```
 
-The plugin is discovered at platform startup through the `nemo.inference_middleware` entry point named `nemo-switchyard`. Native `switchyard_rust` is **not** in the default image. Bake it only with Docker build-arg `SWITCHYARD_NATIVE_REF` (empty by default); that install replaces May `switchyard-vendored` instead of sitting beside it. To pin a different May vendor commit, follow [`vendor/switchyard/README.md`](vendor/switchyard/README.md).
+The plugin is discovered at platform startup through the `nemo.inference_middleware` entry point named `nemo-switchyard`. Native `switchyard_rust` is **not** in the default image, and `SWITCHYARD_NATIVE_REF` is off by default. Setting that build argument replaces `switchyard-vendored`, but it will break today's plugin because the middleware still imports May's `switchyard.lib`; native routing requires the future libsy adapter. The image builder has no rustc, so experiments must pass a wheel or another complete pip spec rather than a bare tag. To pin a different May vendor commit, follow [`vendor/switchyard/README.md`](vendor/switchyard/README.md).
+
+## Distribution collision smoke test
+
+`scripts/prove_dist_collision.sh` is a throwaway smoke test that creates isolated
+May and native virtual environments under a unique temporary directory. It
+requires network access. The native environment also needs rustc when building
+from the default upstream tag, or a prebuilt wheel supplied through the normal
+package tooling.
+
+```bash
+plugins/nemo-switchyard/scripts/prove_dist_collision.sh
+```
+
+The default upstream tag is `v0.3.0-rc.2`; override it with
+`SWITCHYARD_NATIVE_TAG`. `SWITCHYARD_COLLISION_DIR` may be set to choose the
+temporary-directory prefix. The script removes only the unique directory it
+creates.
 
 ## VirtualModel Configuration
 

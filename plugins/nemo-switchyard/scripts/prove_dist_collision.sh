@@ -8,11 +8,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 PLUGIN="$ROOT/plugins/nemo-switchyard"
-BASE="${SWITCHYARD_COLLISION_DIR:-${TMPDIR:-/tmp}/nmp-1183-collision}"
+COLLISION_PREFIX="${SWITCHYARD_COLLISION_DIR:-${TMPDIR:-/tmp}/nemo-switchyard-collision}"
+BASE="$(mktemp -d "${COLLISION_PREFIX%/}.XXXXXX")"
 MAY="$BASE/may-venv"
 NATIVE="$BASE/native-venv"
+trap 'rm -rf -- "$BASE"' EXIT
 
-rm -rf "$BASE"
 python3 -m venv "$MAY"
 # shellcheck disable=SC1091
 source "$MAY/bin/activate"
@@ -45,7 +46,7 @@ source "$NATIVE/bin/activate"
 python -m pip install -U pip
 # Plugin without its vendor extra: install the path with --no-deps then rust.
 python -m pip install --no-deps "$PLUGIN"
-python -m pip install "git+https://github.com/NVIDIA-NeMo/Switchyard.git@${SWITCHYARD_NATIVE_TAG:-v0.3.0-rc.1}"
+python -m pip install "git+https://github.com/NVIDIA-NeMo/Switchyard.git@${SWITCHYARD_NATIVE_TAG:-v0.3.0-rc.2}"
 python - << 'PY'
 import importlib
 import switchyard_rust

@@ -36,21 +36,22 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --active --only-group functional-services --no-editable \
     --reinstall-package annoy --refresh-package annoy --no-binary-package annoy --no-cache
 
-# Native Switchyard (switchyard_rust) is off by default. Empty ARG keeps May
-# switchyard.lib from switchyard-vendored. Do not install upstream next to vendor:
-# both ship the `switchyard` module. When set, treat the value as a git tag
-# (v0.3.0-rc.1) or a full pip spec (nemo-switchyard==0.3.0 / git+https://...).
+# Native Switchyard (switchyard_rust) is off by default. An empty ARG keeps May
+# switchyard.lib from switchyard-vendored. The current plugin imports
+# switchyard.lib, not libsy, so a native libsy-only tree intentionally fails the
+# validation below until the adapter lands. nmp-python-base has no rustc: pass a
+# wheel or another complete uv pip spec, never a bare source tag.
 ARG SWITCHYARD_NATIVE_REF=
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ -n "${SWITCHYARD_NATIVE_REF}" ]; then \
-      VIRTUAL_ENV=/app/.venv uv pip uninstall -y switchyard-vendored || true; \
       case "${SWITCHYARD_NATIVE_REF}" in \
-        git+*|nemo-switchyard==*) spec="${SWITCHYARD_NATIVE_REF}" ;; \
-        *) spec="git+https://github.com/NVIDIA-NeMo/Switchyard.git@${SWITCHYARD_NATIVE_REF}" ;; \
+        git+*|http://*|https://*|file:*|/*.whl|/*|*.whl|nemo-switchyard==*) spec="${SWITCHYARD_NATIVE_REF}" ;; \
+        *) echo "FATAL: SWITCHYARD_NATIVE_REF must be a wheel, absolute path, or complete uv pip spec; bare tags cannot build because nmp-python-base has no rustc"; exit 1 ;; \
       esac; \
-      VIRTUAL_ENV=/app/.venv uv pip install "${spec}"; \
-      /app/.venv/bin/python -c "import switchyard_rust" || { \
-        echo "FATAL: switchyard_rust import failed (missing AVX2 or incompatible wheel)"; \
+      uv pip uninstall --python /app/.venv/bin/python switchyard-vendored; \
+      uv pip install --python /app/.venv/bin/python "${spec}"; \
+      /app/.venv/bin/python -c "import switchyard_rust; import nemo_switchyard.middleware" || { \
+        echo "FATAL: native Switchyard validation failed: missing extension, incompatible ABI, or plugin/May API mismatch"; \
         exit 1; \
       }; \
     fi

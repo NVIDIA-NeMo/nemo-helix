@@ -651,10 +651,11 @@ target "nmp-api-docker" {
     fastembed-cache           = FASTEMBED_CACHE_CONTEXT
   }
   args = {
-    NMP_PLATFORM_VERSION = notequal(BAKE_TAG, "") ? BAKE_TAG : "dev"
-    NMP_CODE_REVISION    = notequal(CI_COMMIT_SHA, "") ? CI_COMMIT_SHA : "dev"
-    NMP_API_RUNTIME_BASE = NMP_API_RUNTIME_BASE
-    NMP_COLLECT_SOURCES  = NMP_COLLECT_SOURCES
+    NMP_PLATFORM_VERSION  = notequal(BAKE_TAG, "") ? BAKE_TAG : "dev"
+    NMP_CODE_REVISION     = notequal(CI_COMMIT_SHA, "") ? CI_COMMIT_SHA : "dev"
+    NMP_API_RUNTIME_BASE  = NMP_API_RUNTIME_BASE
+    NMP_COLLECT_SOURCES   = NMP_COLLECT_SOURCES
+    SWITCHYARD_NATIVE_REF = ""
   }
   cache-to   = maybe_registry_cache_to("nmp-api")
   cache-from = maybe_registry_cache_from("nmp-api")

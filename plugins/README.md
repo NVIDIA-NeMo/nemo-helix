@@ -72,7 +72,7 @@ The package name is the `name` field in the plugin's `pyproject.toml`, not the d
 | `nemo-experimentalist/` | `nemo-experimentalist-plugin` |
 | `nemo-guardrails/` | `nemo-guardrails-plugin` |
 | `nemo-insights/` | `nemo-insights-plugin` |
-| `nemo-switchyard/` | `nemo-switchyard` (dist: `nemo-switchyard-plugin`) |
+| `nemo-switchyard/` | `nemo-switchyard-plugin` |
 
 Example:
 
