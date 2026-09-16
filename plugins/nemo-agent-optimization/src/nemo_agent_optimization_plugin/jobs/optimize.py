@@ -77,11 +77,11 @@ class OptimizeJob(NemoJob):
             spec=_child_spec(spec),
             entity_client=entity_client,
             job_name=job_name,
-            async_sdk=async_sdk,  # ty: ignore[invalid-argument-type]
+            async_sdk=async_sdk,
             profile=profile,
             options=options,
         )
-        return PlatformJobSpec(steps=compiled.steps)  # ty: ignore[unresolved-attribute]
+        return PlatformJobSpec(steps=compiled.steps)
 
     def run(self, config: dict, *, ctx: JobContext, sdk: NeMoPlatform | None = None) -> dict:
         del ctx
