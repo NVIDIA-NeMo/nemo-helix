@@ -143,8 +143,11 @@ the target's fields and the job dir's cache behaviour.
   `fabric_harness_settings`.
 - **Model**: any Nemotron id from build.nvidia.com works with the `nvidia/` provider. Smaller models
   such as `nvidia/nemotron-3.5-lightning-30b-a3b` are faster per trial.
-- **Telemetry**: leave `fabric_telemetry` at its default `none` with deepagents; that adapter does
-  not support Fabric's Relay observability configuration.
+- **Telemetry**: set `fabric_telemetry` to `"relay"` and install the `relay` extra alongside the
+  harness (`nemo-fabric[deepagents,relay]`) to record the agent's ATIF trajectory into the trial.
+  Metrics then read it from `candidate.evidence`, which is how the
+  [Harbor GPA example](https://github.com/NVIDIA-NeMo/nemo-platform/tree/main/plugins/nemo-evaluator/examples/harbor_gpa)
+  scores goal fulfillment, plan quality, tool selection, and efficiency on top of the verifier reward.
 
 ## Next steps
 

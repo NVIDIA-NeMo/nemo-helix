@@ -1,0 +1,3 @@
+{
+  "goal": "python3 /app/check.py exits 0 because stats.mean divides by len(values); /app/check.py is unchanged."
+}
