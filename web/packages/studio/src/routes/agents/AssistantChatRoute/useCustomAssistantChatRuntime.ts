@@ -19,8 +19,11 @@ import {
   getMessageText,
 } from '@nemo/common/src/components/AssistantChat/messageUtils';
 import {
+  createAssistantThinkingPart,
   getAssistantCompletedMessageParts,
+  getAssistantThinkingPartText,
   groupConsecutiveAssistantSubtleToolCalls,
+  isAssistantThinkingPart,
 } from '@studio/routes/agents/AssistantChatRoute/toolParts';
 import { useCallback, useRef, useState } from 'react';
 
@@ -74,6 +77,22 @@ const mergeAssistantParts = (
   const merged = [...currentParts];
 
   for (const part of nextParts) {
+    if (isAssistantThinkingPart(part)) {
+      const previousThinkingPart = merged.at(-1);
+      if (previousThinkingPart && isAssistantThinkingPart(previousThinkingPart)) {
+        merged[merged.length - 1] = createAssistantThinkingPart(
+          [getAssistantThinkingPartText(previousThinkingPart), getAssistantThinkingPartText(part)]
+            .filter(Boolean)
+            .join('\n\n'),
+          previousThinkingPart.toolCallId
+        );
+        continue;
+      }
+
+      merged.push(part);
+      continue;
+    }
+
     if (part.type !== 'text') {
       merged.push(part);
       continue;

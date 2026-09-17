@@ -4,6 +4,7 @@
 import type { ThreadAssistantMessagePart } from '@assistant-ui/react';
 import { logger } from '@nemo/common/src/utils/logger';
 import {
+  createAssistantThinkingPart,
   createAssistantToolCallPart,
   groupConsecutiveAssistantSubtleToolCalls,
 } from '@studio/routes/agents/AssistantChatRoute/toolParts';
@@ -86,11 +87,10 @@ export const getAssistantPartsFromAssistantEvent = (
       if (part.type === 'text' && typeof part.text === 'string') {
         return part.text ? { type: 'text', text: part.text } : undefined;
       }
-      // Render the model's chain of thought as ordinary assistant text, the way
-      // Claude's narration reads between tool calls, rather than tucking it into a
-      // collapsed block.
       if (part.type === 'reasoning' && typeof part.text === 'string') {
-        return part.text ? { type: 'text', text: part.text } : undefined;
+        return part.text.trim()
+          ? createAssistantThinkingPart(part.text, `assistant-thinking-${messageId}-${index}`)
+          : undefined;
       }
       if (part.type === 'tool_use') {
         const toolName = typeof part.name === 'string' ? part.name : 'tool';

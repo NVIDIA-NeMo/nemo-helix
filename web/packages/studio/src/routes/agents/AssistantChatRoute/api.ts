@@ -259,6 +259,11 @@ const parseAssistantPart = (value: unknown): AssistantResponseHistoryPart | unde
     return text ? { type: 'text', text } : undefined;
   }
 
+  if (value.type === 'thinking') {
+    const thinking = getString(value.thinking);
+    return thinking ? { type: 'thinking', thinking } : undefined;
+  }
+
   if (value.type === 'tool_use') {
     return {
       type: 'tool_use',
