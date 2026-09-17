@@ -40,9 +40,29 @@ export interface MessageSelector {
   role: string;
 }
 
-/** The last message with a given role, which is the turn being evaluated in a
- *  multi-turn conversation. */
-export const lastSelectorForRole = (selectors: MessageSelector[], role: string): string | null =>
+/** Real array index carried by a selector, e.g. ``messages[2].content`` -> 2. */
+const selectorIndex = (selector: string): number =>
+  Number(selector.match(/\[(\d+)\]/)?.[1] ?? Number.NaN);
+
+/** The last assistant message and the user message directly before it, paired
+ *  by selector index because contentless messages never reach ``selectors``. */
+export const lastExchange = (
+  selectors: MessageSelector[]
+): { user: string | null; assistant: string | null } => {
+  const assistant = selectors.filter((entry) => entry.role === 'assistant').at(-1) ?? null;
+  if (!assistant) {
+    return { user: lastSelectorForRole(selectors, 'user'), assistant: null };
+  }
+  const preceding = selectors.find(
+    (entry) => selectorIndex(entry.selector) === selectorIndex(assistant.selector) - 1
+  );
+  return preceding?.role === 'user'
+    ? { user: preceding.selector, assistant: assistant.selector }
+    : { user: null, assistant: null };
+};
+
+/** The last message with a given role. */
+const lastSelectorForRole = (selectors: MessageSelector[], role: string): string | null =>
   selectors.filter((entry) => entry.role === role).at(-1)?.selector ?? null;
 
 export interface DatasetPreview {

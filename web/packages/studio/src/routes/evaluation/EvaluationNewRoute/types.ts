@@ -348,13 +348,15 @@ export const evaluationSchema = z
       });
     }
 
-    // A messages dataset binds the whole array instead of individual columns,
-    // and the turns are resolved positionally in the template.
-    if (!mapping.input && !mapping.messages) {
+    // Reported on the file field, because a messages dataset renders no Input
+    // select for the error to land on.
+    if (!mapping.input) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['fieldMapping', 'input'],
-        message: 'Map a dataset column to Input.',
+        path: mapping.messages ? ['dataset'] : ['fieldMapping', 'input'],
+        message: mapping.messages
+          ? 'No user turn in this file to send as Input. Its last assistant message is not preceded by one.'
+          : 'Map a dataset column to Input.',
       });
     }
 
