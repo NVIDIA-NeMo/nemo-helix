@@ -146,6 +146,40 @@ def test_model_entity_proxy_replaces_model_with_served_name(client: TestClient, 
     assert sent_json["messages"] == [{"role": "user", "content": "Hello"}]
 
 
+def test_model_entity_proxy_no_default_vm_preserves_qualified_body_model(
+    app, client: TestClient, mock_proxy_client, mock_proxy_response
+):
+    """Regression: a custom VM with NO default_model_entity keeps the client's qualified body model.
+
+    The model route must not overwrite ``body["model"]`` with a bare URL name for a
+    non-adapter request: a custom VM without ``default_model_entity`` relies on the
+    client's qualified body model (``ws/entity``) for entity resolution. Seeding the bare
+    URL name (``alias-router``) would make ``parse_model_entity_ref`` raise (unqualified,
+    no default workspace) → 422. The URL-name seed is scoped to composite (``&adapters/``)
+    names only.
+    """
+    upstream = {"response": "data"}
+    mock_proxy_response._body = [json.dumps(upstream).encode()]
+
+    # Custom VM named "alias-router" with no default_model_entity; the client supplies the
+    # real (qualified) model entity in the body.
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([_make_sdk_vm("e2e-test", "alias-router")])
+    # _make_sdk_vm falls back default_model_entity to "ws/name"; force it truly unset.
+    vm_cache.virtual_model_map[("e2e-test", "alias-router")].default_model_entity = None
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+
+    response = client.post(
+        "/v2/workspaces/e2e-test/model/alias-router/-/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "Hello"}], "model": "e2e-test/meta_llama-3.2-1b-instruct"},
+    )
+    assert response.status_code == 200
+    assert response.json() == upstream
+    # The client's body model resolved the entity; upstream got the served name.
+    sent_json = json.loads(mock_proxy_client.request.call_args.kwargs["data"])
+    assert sent_json["model"] == "meta/llama-3.2-1b-instruct"
+
+
 def test_model_entity_proxy_without_model_field(client: TestClient, mock_proxy_client, mock_proxy_response):
     """When the body has no ``model`` field, the VirtualModel pipeline seeds it from
     ``default_model_entity`` (set by the autoprovisioned VM) and the served-model rewrite

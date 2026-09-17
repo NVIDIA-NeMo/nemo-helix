@@ -128,11 +128,15 @@ async def model_entity_proxy(
     except Exception:
         json_body = {}
 
-    # The routing intent for this route is the URL ``name`` (which may be a LoRA
-    # composite ``base&adapters/{ws}/{adapter}``), not the body model. Seed it into
-    # ``body["model"]`` so the ``default_model_entity`` splice in virtual_model_proxy
-    # can preserve the adapter suffix when routing through the base model's VM.
-    json_body["model"] = name
+    # For a LoRA composite URL name (``base&adapters/{ws}/{adapter}``), the routing intent
+    # is the URL ``name``, not the body model — seed it into ``body["model"]`` so the
+    # ``default_model_entity`` splice in virtual_model_proxy can preserve the adapter suffix
+    # when routing through the base model's VM. For a plain (non-composite) name, leave the
+    # body untouched: a custom VM with no ``default_model_entity`` relies on the client's
+    # qualified body model for entity resolution, and overwriting it with a bare URL name
+    # would regress that path to a 422 (bare name, no default workspace).
+    if "&adapters/" in name:
+        json_body["model"] = name
 
     return await virtual_model_proxy(
         request=request,
