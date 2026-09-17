@@ -149,7 +149,9 @@ result = AgentEvaluator().run_sync(
 | `trajectory_extra` | no | extra fields merged into the captured trajectory |
 | `runtime_name` | no | the name recorded on `runner_info`, default `fabric` |
 | `skills` | no | skills injected into the agent's workspace |
-| `task_hook` | no | a `FabricTaskRunHook` invoked around each task run |
+| `sandbox` | no | a `SandboxProvider`; when set, each task runs inside a sandbox (see below) |
+| `image` | no | the sandbox image; only valid with `sandbox` |
+| `secrets` | no | secret references injected as environment variables inside the sandbox; only valid with `sandbox` |
 
 ## Seed files into the workspace
 
@@ -244,25 +246,35 @@ Submit it with `nemo evaluator agent-evaluate submit`, or as the `target` of an
 
 ## Running in a sandbox
 
-`FabricContainerRuntime` takes the same config and runs it inside a sandbox rather than on the host:
+Pass `sandbox=` to run the same configuration inside a sandbox rather than on the host:
 
 ```python
-from nemo_evaluator_sdk.agent_eval.runtimes.fabric.container_runtime import FabricContainerRuntime
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.providers.docker import DockerSandboxProvider
 
-runtime = FabricContainerRuntime(config=config, provider=DockerSandboxProvider())
+runtime = FabricAgentRuntime(config=config, sandbox=DockerSandboxProvider())
 ```
 
 | Field | Required | Notes |
 |---|---|---|
-| `config` | yes | the same agent config, or a `FabricConfig` |
-| `provider` | yes | a `SandboxProvider` — `DockerSandboxProvider` or `DockerComposeSandboxProvider` |
-| `secrets` | no | secret references made available inside the sandbox |
-| `image` | no | override the sandbox image |
-| `skills` | no | skills injected into the agent's workspace |
+| `sandbox` | yes | a `SandboxProvider` — `DockerSandboxProvider` or `DockerComposeSandboxProvider` |
+| `image` | no | override the sandbox image; built on first run when omitted |
+| `secrets` | no | `{env_var: SecretRef}` resolved by the orchestrator and injected into the sandbox |
+
+`model`, `timeout_s`, `capture_trajectory`, `trajectory_extra`, `skills`, `work_root`, and
+`runtime_name` behave the same in both modes. `base_dir` only applies on the host and is rejected
+together with `sandbox`; `image` and `secrets` are rejected without it.
+
+Both modes lay evidence out the same way under the per-task directory and expose the same `result`,
+`trace`, and `workspace` evidence, so the same metrics score either. Sandbox trials additionally carry
+`logs` (the harness's stderr and the OTLP receiver log) and record `image` and `sandbox_provider` in
+their metadata.
 
 Use it when the agent should not run on the host — untrusted tasks, or a workspace that must be
-discarded per task. The host runtime is otherwise the simpler choice.
+discarded per task. Host mode is otherwise the simpler choice.
+
+`FabricContainerRuntime(config, provider=...)` is a deprecated alias for
+`FabricAgentRuntime(config, sandbox=...)` and warns on construction.
 
 ## Next steps
 

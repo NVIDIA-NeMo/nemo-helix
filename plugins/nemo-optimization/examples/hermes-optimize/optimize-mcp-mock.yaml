@@ -1,19 +1,17 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# --optimize-config: Hermes + the phishing-analyzer MCP server (separate agent checkout).
-# Broader search space than chat-only — temperature + top_p, several trials.
-# The analyzer is declared statically: its console script as `url`, its
-# credential in `env`; nothing per task. Set PHISHING_MCP_BIN to the
-# email-phishing-analyzer-harnesses checkout's .venv/bin/email-phishing-analyzer-mcp;
-# the optimizer expands ${VAR} when it loads the config. Scores the
-# classification, that the tool was called exactly once, and that the email
-# reached it verbatim. optimize-mcp-mock.yaml is the same study against a
-# bundled fixture that replays results recorded from this server.
+# --optimize-config: the optimize-mcp.yaml study against a MOCK analyzer.
+# The tool is a fixture that ships in this bundle (phishing_analyzer_mcp/server.py),
+# spawned with the venv's python3; the optimizer makes the bundle-relative path
+# absolute per trial. It replays the `analysis` stored on each dataset-mcp.json
+# row, recorded from a run of optimize-mcp.yaml, so the study needs no analyzer
+# checkout or analyzer credential and CI can exercise it. To add a task, run
+# optimize-mcp.yaml on it once and store the analyzer's result on the row.
 schema_version: fabric.agent/v1alpha1
 metadata:
-  name: hermes-optimize-mcp
-  description: Hermes + analyzer MCP optimize demo with extended HPO search space.
+  name: hermes-optimize-mcp-mock
+  description: The MCP optimize demo against a bundled mock analyzer.
 harness:
   adapter_id: nvidia.fabric.hermes
   resolution: preinstalled
@@ -51,11 +49,8 @@ mcp:
   servers:
     email-phishing-analyzer:
       transport: stdio
-      url: ${PHISHING_MCP_BIN}
-      env:
-        # The analyzer calls integrate.api.nvidia.com (build.nvidia.com keys); the coordinator and
-        # judge above use inference-api.nvidia.com, so the analyzer gets its own key variable.
-        NVIDIA_API_KEY: ${PHISHING_ANALYZER_API_KEY}
+      url: python3
+      args: [phishing_analyzer_mcp/server.py]
       exposure: harness_native
 tools:
   enabled:

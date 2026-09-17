@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Live end-to-end: run a real Fabric task inside a Docker sandbox via FabricContainerRuntime.
+"""Live end-to-end: run a real Fabric task inside a Docker sandbox via FabricAgentRuntime(sandbox=...).
 
 Constructs the runtime directly (the plugin `_resolve_target` wiring is not yet in place — see
 AALGO-321) and drives one task through the hermes harness. The sandbox image is provisioned opaquely
@@ -17,7 +17,7 @@ import os
 import sys
 from pathlib import Path
 
-from nemo_evaluator_sdk.agent_eval.runtimes.fabric.container_runtime import FabricContainerRuntime
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.providers.docker import DockerSandboxProvider
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrialStatus
@@ -40,7 +40,7 @@ async def main() -> int:
     # The runner only *declares* the secret it needs (the env var the hermes adapter reads via its
     # requirements.env); it resolves via the default LocalSecretResolver (from the host env) and injects
     # the value into the container. No raw credential on the API surface.
-    runtime = FabricContainerRuntime(
+    runtime = FabricAgentRuntime(
         # Typed Hermes agent config: model-only (no codex/node). The harness is chosen by
         # harness.adapter_id, never inferred from the model; Fabric owns its execution mechanism.
         FabricConfig(
@@ -49,7 +49,7 @@ async def main() -> int:
             models={"default": {"provider": "nvidia", "model": model}},
             runtime=RuntimeConfig(input_schema="chat", output_schema="message"),
         ),
-        provider=DockerSandboxProvider(),
+        sandbox=DockerSandboxProvider(),
         secrets={"NVIDIA_API_KEY": SecretRef(root="NVIDIA_API_KEY")},
     )
 
@@ -67,7 +67,7 @@ async def main() -> int:
     print("output_text:", trial.output.output_text if trial.output else None)
     print("evidence keys:", trial.evidence.names() if trial.evidence else [])
     print("metadata:", json.dumps({key: str(value) for key, value in trial.metadata.items()}, indent=2))
-    print("evidence under:", output_dir / "evidence" / "fabric_container")
+    print("evidence under:", output_dir / "evidence" / "fabric")
     if trial.status != AgentEvalTrialStatus.COMPLETED:
         print("error:", trial.metadata.get("error"), file=sys.stderr)
         return 1

@@ -257,12 +257,10 @@ def require_unique_skill_names(skills: Sequence[AgentSkill]) -> None:
 
 @dataclass(frozen=True)
 class SkillSet:
-    """Immutable, name-validated collection of :class:`AgentSkill`\\s shared by both Fabric runtimes.
+    """Immutable, name-validated collection of :class:`AgentSkill`\\s held by a Fabric runtime.
 
-    Centralizes the uniqueness check and clone-on-mutation pattern that
-    :class:`~...FabricAgentRuntime` and :class:`~...FabricContainerRuntime` would otherwise
-    duplicate: construction validates that skill names are unique; :meth:`with_skills` and
-    :meth:`with_skill` each return a new ``SkillSet`` without modifying ``self``.
+    Construction validates that skill names are unique; :meth:`with_skills` and :meth:`with_skill`
+    each return a new ``SkillSet`` without modifying ``self``.
     """
 
     skills: tuple[AgentSkill, ...] = ()
