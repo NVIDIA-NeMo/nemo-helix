@@ -41,10 +41,6 @@ top_level:
   guardrail:
     panel: Functional plugins
     help: Manage guardrails.
-  iam:
-    panel: Core plugins
-    help: IAM operations.
-    hidden: true
   inference:
     panel: Core plugins
     help: Inference operations.
@@ -54,16 +50,9 @@ top_level:
   models:
     panel: Core plugins
     help: Manage models.
-  projects:
-    panel: Core plugins
-    help: Manage projects.
-    hidden: true
   secrets:
     panel: Core plugins
     help: Manage secrets.
-  workspaces:
-    panel: Core plugins
-    help: Manage workspaces.
 
 # Resource-specific configurations
 config:
@@ -79,21 +68,6 @@ config:
       columns:
       - name
       - description
-- resource: [workspaces, members]
-  methods:
-    list:
-      columns:
-      - principal
-      - roles
-      - granted_by
-      - granted_at
-- resource: [workspaces]
-  methods:
-    list:
-      columns:
-      - name
-      - description
-      - created_at
 - resource: [datasets]
   methods:
     list:
@@ -102,13 +76,6 @@ config:
       - description
       - format
       - files_url
-      - created_at
-- resource: [projects]
-  methods:
-    list:
-      columns:
-      - name
-      - description
       - created_at
 - resource: [evaluation, configs]
   methods:
@@ -226,11 +193,13 @@ config:
     list:
       columns:
       - name
+      - status
       - description
       - created_at
     list_workspace:
       columns:
       - name
+      - status
       - description
       - created_at
 - resource: [inference, models]
@@ -346,3 +315,9 @@ config:
   additional_methods:
     get-url:
       override: inference/get_url.py
+
+- resource: [workspaces]
+  skip: true
+
+- resource: [projects]
+  skip: true

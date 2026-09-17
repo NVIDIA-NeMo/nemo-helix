@@ -166,7 +166,8 @@ class GenerateJob(NemoJob):
             raise PlatformJobCompilationError("No steps to run")
         return PlatformJobSpec(steps=steps)
 
-    def run(self, *args: Any, **kwargs: Any) -> dict:
+    def run(self, config: dict) -> dict:
+        del config
         raise NotImplementedError("Safe Synthesizer does not support local execution.")
 
 

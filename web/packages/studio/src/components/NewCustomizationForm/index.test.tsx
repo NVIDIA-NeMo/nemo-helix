@@ -87,6 +87,8 @@ const emptyValidation: CustomizationDatasetValidationResult = {
 describe('NewCustomizationForm', () => {
   beforeEach(() => {
     // `onSubmit` chains `.catch()` onto the mutation, so these must be thenable.
+    // Resolved with a job rather than `undefined`: `onSuccess` navigates using
+    // `job.name`, which throws when the mutation resolves to nothing.
     mutateAutomodel.mockReset().mockResolvedValue({ name: 'job-1' });
     mutateUnsloth.mockReset().mockResolvedValue({ name: 'job-1' });
     mutateRl.mockReset().mockResolvedValue({ name: 'job-1' });
@@ -211,6 +213,41 @@ describe('NewCustomizationForm', () => {
     const banner = await screen.findByText(/Please fix the following errors/i);
     expect(banner.textContent).not.toMatch(/automodel/i);
     await waitFor(() => expect(mutateAutomodel).not.toHaveBeenCalled());
+  });
+
+  /**
+   * The dataset picker writes the validation reference and no field renders it, so the
+   * only thing proving it survives to the API is the request itself.
+   */
+  it('submits the validation dataset the picker resolved', async () => {
+    vi.mocked(useCustomizationDatasetValidation).mockReturnValue({
+      ...emptyValidation,
+      hasTraining: true,
+      hasValidation: true,
+    });
+
+    const initialValues: CustomizationFormFields = {
+      ...FORM_DEFAULTS,
+      backend: 'automodel',
+      outputName: 'my-output',
+      automodel: {
+        ...FORM_DEFAULTS.automodel,
+        model: 'default/qwen3-0-6b',
+        dataset: { ...FORM_DEFAULTS.automodel.dataset, training: 'default/commonsense_qa' },
+      },
+    };
+
+    const user = userEvent.setup();
+    renderRoute(<NewCustomizationForm workspace="default" initialValues={initialValues} />);
+
+    await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+
+    await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
+    const [[call]] = mutateAutomodel.mock.calls;
+    expect(call.data.spec.dataset).toMatchObject({
+      training: 'default/commonsense_qa',
+      validation: 'default/commonsense_qa',
+    });
   });
 
   it('asks the API for fine-tunable models instead of filtering the page client-side', async () => {

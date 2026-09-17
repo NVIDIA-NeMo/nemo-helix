@@ -110,7 +110,7 @@ When the job completes, access:
 
 ### Reusing a Trained Adapter
 
-For **platform jobs**, set `pretrained_model_job` in the job spec to a completed job that has an **`adapter`** result in Files. Reuse is generation-only (no retraining). Use either `pretrained_model_job` or `config.training.pretrained_model`, not both.
+For **platform jobs**, set `pretrained_model_job` in the job spec to a completed job that has an **`adapter`** result in Files. Reuse is generation-only (no retraining). `pretrained_model_job` will take precedence over `config.training.pretrained_model`.
 
 ## Job Builder API
 

@@ -5744,6 +5744,15 @@ components:
             submits the agent config as written, which still exports if the config
             says to; an agent config is the place to say a run should not be traced.
           default: true
+        image:
+          type: string
+          title: Image
+          description: Container image to execute the agent in. Mirrors CreateDeploymentRequest.image.
+            Typically the output of `nemo agents package`, which contains both the
+            agent's Fabric adapter and the execute task module. Empty falls back to
+            agents.jobs.default_image, then to the jobs substrate's chain (the execution
+            profile's default_task_image, then the platform CPU tasks image).
+          default: ''
         extension:
           allOf:
           - $ref: '#/components/schemas/ExecuteAgentExtensionConfig'

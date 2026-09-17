@@ -4,7 +4,7 @@
 import { ModelSettingsSection } from '@studio/routes/AnonymizerBuilderRoute/components/ModelSettingsSection';
 import {
   activeRolesForStrategy,
-  GLINER_ROLE,
+  DETECTOR_ROLE,
   STRATEGY_SUBSTITUTE,
 } from '@studio/routes/AnonymizerBuilderRoute/constants';
 import {
@@ -41,7 +41,7 @@ describe('ModelSettingsSection', () => {
     expect(triggers).toHaveLength(activeRolesForStrategy(STRATEGY_SUBSTITUTE).length - 1);
 
     expect(
-      within(screen.getByTestId(`role-settings-${GLINER_ROLE}`)).queryByTestId(
+      within(screen.getByTestId(`role-settings-${DETECTOR_ROLE}`)).queryByTestId(
         'params-dropdown-trigger'
       )
     ).not.toBeInTheDocument();

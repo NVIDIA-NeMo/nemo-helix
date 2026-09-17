@@ -17,6 +17,7 @@ import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMe
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
 import {
@@ -39,7 +40,7 @@ import { getTextWithCount } from '@studio/util/strings';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
 import { Trash } from 'lucide-react';
 import { ComponentProps, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 
 type AgentEvalJobRow = AgentEvaluateJob & { id: string };
 
@@ -55,7 +56,7 @@ const DEFAULT_SORT = AgentEvaluateJobsSortField['-created_at'];
 
 export const AgentEvaluationsDataView = () => {
   const workspace = useWorkspaceFromPath();
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const queryClient = useQueryClient();
 
   const [deleteJobs, setDeleteJobs] = useState<AgentEvalJobRow[]>([]);
@@ -207,9 +208,9 @@ export const AgentEvaluationsDataView = () => {
         dataViewState={dataViewState}
         searchField="name"
         makeColumns={makeColumns}
-        onRowClick={(row) => {
+        onRowClick={(row, _index, event) => {
           if (!row.name) return;
-          navigate(getAgentEvaluationDetailRoute(workspace, row.name));
+          openRow(event, getAgentEvaluationDetailRoute(workspace, row.name));
         }}
         renderBulkActions={({ selectedRows }) => (
           <Button

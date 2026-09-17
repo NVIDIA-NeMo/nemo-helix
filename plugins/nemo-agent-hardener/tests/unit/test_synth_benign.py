@@ -320,44 +320,51 @@ def test_synth_benign_job_compile_builds_synth_task_step(monkeypatch: pytest.Mon
     assert step["config"]["driver"] == "service"
 
 
-# ── SDK routing ──────────────────────────────────────────────────────────────
-
-
-class _CaptureScheduler:
-    captured: dict[str, Any] = {}
-
-    def run_local(self, job: Any, spec: dict, **kwargs: Any) -> dict:
-        _CaptureScheduler.captured = {"job": job, "spec": spec, "kwargs": kwargs}
-        return {"status": "completed", "suite_size": 3}
-
-
 def test_sdk_synth_benign_routes_to_job(monkeypatch: pytest.MonkeyPatch) -> None:
     from nemo_agent_hardener_plugin import sdk as sdk_module
 
-    monkeypatch.setattr(sdk_module, "NemoJobScheduler", _CaptureScheduler)
+    captured: dict[str, Any] = {}
+
+    class _Job:
+        name = "synth-benign"
+
+        def run(self, spec: dict, **kwargs: Any) -> dict:
+            captured.update({"spec": spec, "kwargs": kwargs})
+            return {"status": "completed", "suite_size": 3}
+
+    monkeypatch.setattr(sdk_module, "AgentHardenerSynthBenignJob", _Job)
     platform = make_sdk()
     resource = sdk_module.AgentHardenerPluginResource(platform)
 
     resource.synth_benign(manifest_id="m1", interview="auto", workspace="ws1")
 
-    cap = _CaptureScheduler.captured
-    assert cap["job"] is sdk_module.AgentHardenerSynthBenignJob
-    assert cap["spec"] == {"manifest_id": "m1", "env_file": None, "interview": "auto"}
-    assert cap["kwargs"]["workspace"] == "ws1"
-    assert cap["kwargs"]["sdk"] is platform
+    assert captured["spec"] == {"manifest_id": "m1", "env_file": None, "interview": "auto"}
+    assert captured["kwargs"]["ctx"].workspace == "ws1"
+    assert captured["kwargs"]["sdk"] is platform
 
 
 def test_sdk_run_puts_manifest_id_in_spec(monkeypatch: pytest.MonkeyPatch) -> None:
     from nemo_agent_hardener_plugin import sdk as sdk_module
 
-    monkeypatch.setattr(sdk_module, "NemoJobScheduler", _CaptureScheduler)
-    resource = sdk_module.AgentHardenerPluginResource(make_sdk())
+    captured: dict[str, Any] = {}
+
+    class _Job:
+        name = "war-game"
+
+        def run(self, spec: dict, **kwargs: Any) -> dict:
+            captured.update({"spec": spec, "kwargs": kwargs})
+            return {"status": "completed"}
+
+    monkeypatch.setattr(sdk_module, "AgentHardenerRunJob", _Job)
+    platform = make_sdk()
+    resource = sdk_module.AgentHardenerPluginResource(platform)
 
     resource.run(manifest_id="m1", workspace="ws1")
 
-    cap = _CaptureScheduler.captured
-    assert cap["spec"]["manifest_id"] == "m1"
-    assert cap["spec"]["config"] is None
+    assert captured["spec"]["manifest_id"] == "m1"
+    assert captured["spec"]["config"] is None
+    assert captured["kwargs"]["ctx"].workspace == "ws1"
+    assert captured["kwargs"]["sdk"] is platform
 
 
 def test_run_war_game_requires_config_or_manifest_id() -> None:

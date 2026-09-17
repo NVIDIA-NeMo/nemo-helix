@@ -4,7 +4,7 @@
 """End-to-end execution tests for inline-bundled metrics.
 
 These tests run real metric scoring — no mocks. The end-to-end cases drive the
-full evaluator job (`EvaluateJob`) through the local scheduler, exercising the
+full evaluator job (`EvaluateJob`) through its sync job entrypoint, exercising the
 complete inline path: bundle -> MetricInline wire DTO -> job spec -> unbundle
 (reconstruct from config) -> execute -> aggregate scores. The reconstruction
 tests round-trip each metric through the bundle and then actually invoke the
@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
 import pytest
 from nemo_evaluator.jobs.evaluate import EvaluateJob
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric, unbundle_metric
@@ -28,7 +29,9 @@ from nemo_evaluator_sdk.metrics.f1 import F1Metric
 from nemo_evaluator_sdk.metrics.number_check import NumberCheckMetric
 from nemo_evaluator_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nemo_evaluator_sdk.metrics.string_check import StringCheckMetric
-from nemo_platform_plugin.scheduler import NemoJobScheduler
+from nemo_platform_plugin.client.client import NemoClient
+from nemo_platform_plugin.job_context import JobContext, StoragePaths
+from nemo_platform_plugin.job_results import LocalJobResults
 
 
 class _CustomConstantMetric:
@@ -60,7 +63,30 @@ def _aggregate_scores(run_result: dict[str, Any]) -> list[dict[str, Any]]:
     return cast(list[dict[str, Any]], _load_artifact_payload(run_result)["aggregate_scores"]["scores"])
 
 
-def test_evaluate_job_runs_inline_bundled_exact_match_metric() -> None:
+def _sync_client() -> NemoClient:
+    return NemoClient(
+        base_url="http://platform.test",
+        workspace="dev",
+        http_client=httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(500, request=request))),
+    )
+
+
+def _job_context(tmp_path: Path) -> JobContext:
+    storage = StoragePaths(ephemeral=tmp_path / "ephemeral", persistent=tmp_path / "persistent")
+    storage.ephemeral.mkdir()
+    storage.persistent.mkdir()
+    return JobContext(
+        workspace="dev",
+        storage=storage,
+        results=LocalJobResults(root=storage.persistent / "results"),
+    )
+
+
+def _run_evaluate_job(spec: dict[str, Any], tmp_path: Path) -> dict[str, Any]:
+    return EvaluateJob().run(spec, ctx=_job_context(tmp_path), client=_sync_client())
+
+
+def test_evaluate_job_runs_inline_bundled_exact_match_metric(tmp_path: Path) -> None:
     """Full job run with an inline-bundled metric produces real aggregate scores."""
     spec = {
         "metrics": [
@@ -73,14 +99,14 @@ def test_evaluate_job_runs_inline_bundled_exact_match_metric() -> None:
         "params": {"parallelism": 2},
     }
 
-    result = NemoJobScheduler().run_local(EvaluateJob, spec)
+    result = _run_evaluate_job(spec, tmp_path)
 
     scores = _aggregate_scores(result)
     assert scores[0]["name"] == "exact-match.exact-match"
     assert scores[0]["mean"] == 0.5
 
 
-def test_evaluate_job_runs_multiple_inline_metrics() -> None:
+def test_evaluate_job_runs_multiple_inline_metrics(tmp_path: Path) -> None:
     """Multiple inline-bundled metrics in one job each execute and aggregate."""
     spec = {
         "metrics": [
@@ -100,14 +126,14 @@ def test_evaluate_job_runs_multiple_inline_metrics() -> None:
         "params": {"parallelism": 2},
     }
 
-    result = NemoJobScheduler().run_local(EvaluateJob, spec)
+    result = _run_evaluate_job(spec, tmp_path)
 
     by_name = {score["name"]: score for score in _aggregate_scores(result)}
     assert by_name["exact-match.exact-match"]["mean"] == 0.5
     assert by_name["string-check.string-check"]["mean"] == 0.5
 
 
-def test_evaluate_job_runs_hybrid_bundled_mixed_metrics() -> None:
+def test_evaluate_job_runs_hybrid_bundled_mixed_metrics(tmp_path: Path) -> None:
     """Hybrid bundling: built-in goes inline, custom is cloudpickled, and both execute in one job."""
     packager = HybridMetricBundlePackager()
     builtin_payload = bundle_metric(
@@ -128,7 +154,7 @@ def test_evaluate_job_runs_hybrid_bundled_mixed_metrics() -> None:
         "params": {"parallelism": 2},
     }
 
-    result = NemoJobScheduler().run_local(EvaluateJob, spec)
+    result = _run_evaluate_job(spec, tmp_path)
 
     by_name = {score["name"]: score for score in _aggregate_scores(result)}
     assert by_name["exact-match.exact-match"]["mean"] == 0.5

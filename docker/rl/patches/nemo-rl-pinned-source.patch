@@ -82,6 +82,34 @@ index c529cf5..c48d7b4 100644
  
  
  def _is_safetensors_checkpoint(path: str) -> bool:
+@@ -743,9 +743,18 @@ class Checkpointer:
+         if self._model_ctx.future is not None:
+             self._model_ctx.future.upload_completion.result()
+             self._model_ctx.future = None
++            self._release_async_stager(self._model_ctx)
+         if self._optim_ctx.future is not None:
+             self._optim_ctx.future.upload_completion.result()
+             self._optim_ctx.future = None
++            self._release_async_stager(self._optim_ctx)
++
++    @staticmethod
++    def _release_async_stager(context: _AsyncSaveContext) -> None:
++        """Close a completed async stager so the next save uses a fresh instance."""
++        if context.stager is not None:
++            context.stager.close()
++            context.stager = None
+ 
+     def save_on_dp_ranks(self, state: Any, state_name: str, path: str) -> None:
+         """
+@@ -849,6 +858,8 @@ class Checkpointer:
+         planner = dcp.DefaultSavePlanner(enable_plan_caching=True)
+         if self.config.is_async:
+             ctx = self._model_ctx if is_model else self._optim_ctx
++            if ctx.stager is None:
++                ctx.stager = DefaultStager()
+             ret = dcp.async_save(
+                 state_dict,
+                 checkpoint_id=path,
 diff --git a/nemo_rl/models/automodel/setup.py b/nemo_rl/models/automodel/setup.py
 index c1799ca..75db1bc 100644
 --- a/nemo_rl/models/automodel/setup.py

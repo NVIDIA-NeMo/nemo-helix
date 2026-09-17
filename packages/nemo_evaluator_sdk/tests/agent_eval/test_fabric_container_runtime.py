@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for FabricContainerRuntime over a fake sandbox provider.
+"""Tests for FabricAgentRuntime over a fake sandbox provider.
 
 No real Docker or image: a fake provider records the marshaled inputs and simulates the
 in-container ``/out`` layout on ``download_dir``, so we can assert the evidence contract
@@ -18,8 +18,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from nemo_evaluator_sdk.agent_eval.runtimes.fabric import container_runtime as crt
-from nemo_evaluator_sdk.agent_eval.runtimes.fabric.container_runtime import FabricContainerRuntime
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric import _sandbox_execution as crt
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric import runtime as fabric_runtime
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.base import (
     SandboxExecResult,
     SandboxHandle,
@@ -35,7 +36,7 @@ _CONFIG = {"metadata": {"name": "eval"}, "harness": {"adapter_id": "nvidia.fabri
 @pytest.fixture(autouse=True)
 def _stub_image_build(monkeypatch: pytest.MonkeyPatch) -> None:
     """Never build a real image in unit tests; the runtime asks for one per run."""
-    monkeypatch.setattr(crt, "ensure_fabric_image", lambda **_kwargs: "fabric-img:test")
+    monkeypatch.setattr(fabric_runtime, "ensure_fabric_image", lambda **_kwargs: "fabric-img:test")
 
 
 class _FakeResolver:
@@ -131,11 +132,11 @@ class _FakeProvider:
         self.aclosed += 1
 
 
-def _runtime(provider: _FakeProvider, **kwargs: object) -> FabricContainerRuntime:
-    return FabricContainerRuntime(_CONFIG, provider=provider, **kwargs)  # type: ignore[arg-type]
+def _runtime(provider: _FakeProvider, **kwargs: Any) -> FabricAgentRuntime:
+    return FabricAgentRuntime(_CONFIG, sandbox=provider, **kwargs)  # type: ignore[arg-type]
 
 
-async def _run(runtime: FabricContainerRuntime, tasks: list[AgentEvalTask], tmp_path: Path) -> Sequence[AgentEvalTrial]:
+async def _run(runtime: FabricAgentRuntime, tasks: list[AgentEvalTask], tmp_path: Path) -> Sequence[AgentEvalTrial]:
     return await runtime.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
 
 
@@ -241,7 +242,7 @@ async def test_supplied_image_is_used_verbatim_without_building(
     # A caller-supplied image (an escape hatch for sandboxes needing extra tooling, e.g. a
     # document-processing image) is used verbatim and short-circuits the build-if-missing path.
     builds: list[bool] = []
-    monkeypatch.setattr(crt, "ensure_fabric_image", lambda **_kwargs: builds.append(True) or "unused")
+    monkeypatch.setattr(fabric_runtime, "ensure_fabric_image", lambda **_kwargs: builds.append(True) or "unused")
     provider = _FakeProvider()
     (trial,) = await _run(_runtime(provider, image="doc-tools:1.0"), [_task()], tmp_path)
 
@@ -271,7 +272,7 @@ async def test_early_failure_trial_carries_image_metadata(tmp_path: Path) -> Non
     (trial,) = await _run(_runtime(provider, image="doc-tools:1.0"), [_task()], tmp_path)
     assert trial.status == AgentEvalTrialStatus.FAILED
     assert trial.metadata["image"] == "doc-tools:1.0"
-    assert trial.metadata["runtime"] == "fabric_container"
+    assert trial.metadata["runtime"] == "fabric"
 
 
 async def test_no_run_result_fails_trial(tmp_path: Path) -> None:
@@ -433,7 +434,7 @@ async def test_native_skill_preserves_preconfigured_skill_paths(
     config = {**_CONFIG, "skills": {"paths": ["/pre/existing-a", "/pre/existing-b"]}}
     skill = AgentSkill.from_directory(_skill_bundle(tmp_path / "src"))
     provider = _FakeProvider()
-    runtime = FabricContainerRuntime(config, provider=provider, skills=[skill])  # type: ignore[arg-type]
+    runtime = FabricAgentRuntime(config, sandbox=provider, skills=[skill])  # type: ignore[arg-type]
     await runtime.run_tasks([_task()], AgentEvalRunConfig(work_dir=tmp_path))
 
     paths = _seeded_skill_paths(provider)
@@ -450,7 +451,7 @@ async def test_native_skill_on_runtime_discovered_adapter(tmp_path: Path, monkey
     custom = {"metadata": {"name": "eval"}, "harness": {"adapter_id": "acme.custom.native"}}
     skill = AgentSkill.from_directory(_skill_bundle(tmp_path / "src"))
     provider = _FakeProvider()
-    runtime = FabricContainerRuntime(custom, provider=provider, skills=[skill])  # type: ignore[arg-type]
+    runtime = FabricAgentRuntime(custom, sandbox=provider, skills=[skill])  # type: ignore[arg-type]
     (trial,) = await runtime.run_tasks([_task()], AgentEvalRunConfig(work_dir=tmp_path))
 
     assert "/in/skills/code-review" in _seeded_skill_paths(provider)
@@ -473,7 +474,7 @@ async def test_codex_skill_seeds_workspace_and_is_excluded_from_evidence(
     _install_fake_fabric(monkeypatch)
     skill = AgentSkill.from_directory(_skill_bundle(tmp_path / "src"))
     provider = _CodexWorkspaceProvider()
-    runtime = FabricContainerRuntime(_CODEX_CONFIG, provider=provider, skills=[skill])  # type: ignore[arg-type]
+    runtime = FabricAgentRuntime(_CODEX_CONFIG, sandbox=provider, skills=[skill])  # type: ignore[arg-type]
     (trial,) = await runtime.run_tasks([_task()], AgentEvalRunConfig(work_dir=tmp_path))
 
     # Codex discovers agentskills from .agents/skills/ in its working dir, so the bundle is seeded there in
@@ -496,7 +497,7 @@ async def test_skill_on_unsupported_adapter_fails_fast(tmp_path: Path, monkeypat
     _install_fake_fabric(monkeypatch)
     unsupported = {"metadata": {"name": "eval"}, "harness": {"adapter_id": "some.other.adapter"}}
     skill = AgentSkill.from_directory(_skill_bundle(tmp_path / "src", name="s"))
-    runtime = FabricContainerRuntime(unsupported, provider=_FakeProvider(), skills=[skill])  # type: ignore[arg-type]
+    runtime = FabricAgentRuntime(unsupported, sandbox=_FakeProvider(), skills=[skill])  # type: ignore[arg-type]
 
     with pytest.raises(RuntimeError, match="no known skill-injection strategy"):
         await runtime.run_tasks([_task()], AgentEvalRunConfig(work_dir=tmp_path))
@@ -558,7 +559,7 @@ async def test_multiple_codex_skills_all_removed_from_evidence(tmp_path: Path, m
         AgentSkill.from_directory(_skill_bundle(tmp_path / "b", name="pptx")),
     ]
     provider = _CodexWorkspaceProvider()
-    runtime = FabricContainerRuntime(_CODEX_CONFIG, provider=provider, skills=skills)  # type: ignore[arg-type]
+    runtime = FabricAgentRuntime(_CODEX_CONFIG, sandbox=provider, skills=skills)  # type: ignore[arg-type]
     (trial,) = await runtime.run_tasks([_task()], AgentEvalRunConfig(work_dir=tmp_path))
 
     # Both bundles seeded under the codex discovery dir, no skills path, all scrubbed from evidence.
@@ -608,7 +609,7 @@ async def test_same_skill_from_both_injection_and_task_files_fails_task(
     _install_fake_fabric(monkeypatch)
     skill = AgentSkill.from_directory(_skill_bundle(tmp_path / "src"))
     provider = _FakeProvider()
-    runtime = FabricContainerRuntime(_CODEX_CONFIG, provider=provider, skills=[skill])  # type: ignore[arg-type]
+    runtime = FabricAgentRuntime(_CODEX_CONFIG, sandbox=provider, skills=[skill])  # type: ignore[arg-type]
     task = AgentEvalTask(
         id="collision",
         intent="...",
@@ -625,6 +626,31 @@ async def test_same_skill_from_both_injection_and_task_files_fails_task(
     assert "also injected as the runtime skill 'code-review'" in error["error"]
 
 
+async def test_same_skill_via_a_dotdot_seed_path_is_still_a_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # seed_workspace normalizes keys before writing, so a path that only reaches the injected bundle
+    # after normalization must be caught too.
+    from nemo_evaluator_sdk.agent_eval.runtimes.fabric.skills import AgentSkill
+
+    _install_fake_fabric(monkeypatch)
+    skill = AgentSkill.from_directory(_skill_bundle(tmp_path / "src"))
+    provider = _FakeProvider()
+    runtime = FabricAgentRuntime(_CODEX_CONFIG, sandbox=provider, skills=[skill])  # type: ignore[arg-type]
+    task = AgentEvalTask(
+        id="collision-normalized",
+        intent="...",
+        inputs={
+            "instruction": "Do something.",
+            "files": {".agents/skills/other/../code-review/SKILL.md": "# override"},
+        },
+    )
+    (trial,) = await runtime.run_tasks([task], AgentEvalRunConfig(work_dir=tmp_path))
+
+    assert trial.status == AgentEvalTrialStatus.FAILED
+    assert trial.metadata["error_type"] == "SkillInjectionError"
+
+
 async def test_task_seeded_skill_coexists_with_a_different_injected_skill(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -636,7 +662,7 @@ async def test_task_seeded_skill_coexists_with_a_different_injected_skill(
     _install_fake_fabric(monkeypatch)
     skill = AgentSkill.from_directory(_skill_bundle(tmp_path / "src", name="code-review"))
     provider = _FakeProvider()
-    runtime = FabricContainerRuntime(_CODEX_CONFIG, provider=provider, skills=[skill])  # type: ignore[arg-type]
+    runtime = FabricAgentRuntime(_CODEX_CONFIG, sandbox=provider, skills=[skill])  # type: ignore[arg-type]
     task = AgentEvalTask(
         id="coexist",
         intent="...",

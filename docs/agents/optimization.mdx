@@ -231,6 +231,7 @@ What it does under the hood:
 <Tab title="Python SDK">
 
 ```python
+import os
 import yaml
 from pathlib import Path
 
@@ -238,11 +239,13 @@ from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
 from nemo_platform_plugin.scheduler import NemoJobScheduler
 
 spec = yaml.safe_load(Path(".agent-improver.yml").read_text())
-NemoJobScheduler().run_local(
+result = NemoJobScheduler().submit_remote(
     OptimizeSkillsJob,
     spec,
+    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+print(result)
 ```
 
 </Tab>
@@ -343,30 +346,21 @@ What it does under the hood:
 
 ```python
 import os
-from pathlib import Path
 
 from nemo_optimization.jobs.optimize import OptimizeJob
-from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.scheduler import NemoJobScheduler
 
 WORKSPACE = "default"
-bundle = Path("plugins/nemo-optimization/examples/hermes-optimize").resolve()
-optimize_config = bundle / "optimize-chatonly.yaml"
-os.chdir(bundle)  # dataset / base_dir are relative to the bundle
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
-
-result = NemoJobScheduler().run_local(
+result = NemoJobScheduler().submit_remote(
     OptimizeJob,
     {
-        "optimize_config": str(optimize_config),
+        "optimize_config": "optimize-chatonly.yaml",
+        "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-chatonly",
         "workspace": WORKSPACE,
     },
+    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,
-    sdk=client,
 )
 print(result)
 ```
@@ -377,22 +371,22 @@ print(result)
 
 ### MCP Hermes (phishing analyzer)
 
-Point `PHISHING_AGENT_SRC` / `PHISHING_MCP_BIN` at an
-`email-phishing-analyzer-harnesses` checkout (its own `.venv` after
-`uv sync`). Do **not** pip-install that agent into the platform venv.
-Full setup steps are in `plugins/nemo-optimization/examples/hermes-optimize/README.md`.
+The agent calls the email-phishing-analyzer MCP server from the
+`email-phishing-analyzer-harnesses` checkout, declared statically like any
+production MCP server: its console script as `url` and its key in `env`
+(`PHISHING_MCP_BIN`, `PHISHING_ANALYZER_API_KEY`; the analyzer calls
+`integrate.api.nvidia.com` while the coordinator uses `inference-api.nvidia.com`). Trials are scored on the judged
+classification, on the analyzer being called exactly once, and on the email
+reaching the tool verbatim; the last two are read from the ATIF trajectory.
+`optimize-mcp-mock.yaml` runs the same study against a fixture shipped in the
+bundle that replays recorded analyzer results, so it needs no checkout or
+analyzer credential. Full steps are in `plugins/nemo-optimization/examples/hermes-optimize/README.md`.
 
 <Tabs>
 
 <Tab title="CLI">
 
 ```bash
-export PHISHING_AGENT_ROOT="${PHISHING_AGENT_ROOT:-$HOME/work/email-phishing-analyzer-harnesses}"
-export PHISHING_AGENT_SRC="$PHISHING_AGENT_ROOT/src"
-export PHISHING_MCP_BIN="$PHISHING_AGENT_ROOT/.venv/bin/email-phishing-analyzer-mcp"
-
-# These environment variables are templated into optimize-mcp.yaml.
-
 nemo agents optimize prepare-fileset \
   --source "$BUNDLE" \
   --optimize-config optimize-mcp.yaml \
@@ -412,39 +406,19 @@ import os
 from pathlib import Path
 
 from nemo_optimization.jobs.optimize import OptimizeJob
-from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.scheduler import NemoJobScheduler
 
 WORKSPACE = "default"
-agent_root = Path(
-    os.environ.get(
-        "PHISHING_AGENT_ROOT",
-        Path.home() / "work/email-phishing-analyzer-harnesses",
-    )
-)
-os.environ.setdefault("PHISHING_AGENT_SRC", str(agent_root / "src"))
-os.environ.setdefault(
-    "PHISHING_MCP_BIN",
-    str(agent_root / ".venv/bin/email-phishing-analyzer-mcp"),
-)
 
-bundle = Path("plugins/nemo-optimization/examples/hermes-optimize").resolve()
-optimize_config = bundle / "optimize-mcp.yaml"
-os.chdir(bundle)  # dataset / base_dir are relative to the bundle
-
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
-
-result = NemoJobScheduler().run_local(
+result = NemoJobScheduler().submit_remote(
     OptimizeJob,
     {
-        "optimize_config": str(optimize_config),
+        "optimize_config": "optimize-mcp.yaml",
+        "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-mcp",
         "workspace": WORKSPACE,
     },
+    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,
-    sdk=client,
 )
 print(result)
 ```
@@ -486,9 +460,9 @@ nemo agents optimize prepare-fileset \
 - the YAML parses and enables an optimizer with a non-empty search space;
 - there is an Agent under Test — either an inline
   `schema_version: fabric.agent/v1alpha1` package or a resolvable `--agent`;
-- every path the config references (dataset, `eval.fabric.base_dir`,
-  `eval.run_hook.path` / `agent_src`, MCP `config_paths`) is relative and
-  present under `--source`;
+- every path the config references (dataset, `eval.fabric.base_dir`, stdio MCP
+  server scripts in `mcp.servers.*.args`) is relative and present under
+  `--source`;
 - no absolute host path would be shipped to the worker.
 
 Use `--dry-run` to validate without uploading, and `--no-check-models` to skip

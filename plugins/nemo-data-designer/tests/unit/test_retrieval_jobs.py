@@ -15,7 +15,11 @@ import pandas as pd
 import pytest
 from nemo_data_designer_plugin.jobs.create import CreateJob
 from nemo_data_designer_plugin.jobs.retrieval_generate import RetrievalGenerateJob
-from nemo_data_designer_plugin.jobs.retrieval_prepare import RetrievalPrepareJob, _materialize_input
+from nemo_data_designer_plugin.jobs.retrieval_prepare import (
+    RetrievalPrepareJob,
+    _materialize_input,
+    _resolve_generation_input,
+)
 from nemo_data_designer_plugin.jobs.retrieval_run import RetrievalRunJob
 from nemo_data_designer_plugin.jobs.retrieval_spec import (
     RetrievalGenerateJobConfig,
@@ -28,7 +32,12 @@ from nemo_data_designer_plugin.jobs.retrieval_spec import (
 )
 from nemo_data_designer_plugin.jobs.spec import DataDesignerJobConfig
 from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec, PlatformJobStep
+from nemo_platform_plugin.sdk import AsyncNeMoPlatform
 from pydantic import ValidationError
+
+
+def _async_platform() -> AsyncNeMoPlatform:
+    return AsyncNeMoPlatform(base_url="http://platform.test", workspace="default")
 
 
 def _steps(compiled: PlatformJobSpec) -> list[PlatformJobStep]:
@@ -78,7 +87,7 @@ async def test_retrieval_generate_compile_is_cpu() -> None:
         spec=spec,
         entity_client=Mock(),
         job_name=None,
-        async_sdk=AsyncMock(),
+        async_sdk=_async_platform(),
     )
     steps = _steps(compiled)
     assert len(steps) == 1
@@ -100,7 +109,7 @@ async def test_retrieval_generate_compile_ignores_subprocess_profiles() -> None:
         spec=spec,
         entity_client=Mock(),
         job_name=None,
-        async_sdk=AsyncMock(),
+        async_sdk=_async_platform(),
     )
     executor = _executor(_steps(compiled)[0])
     assert executor["provider"] == "cpu"
@@ -120,7 +129,7 @@ async def test_retrieval_prepare_compile_uses_one_container_profile() -> None:
         spec=spec,
         entity_client=Mock(),
         job_name=None,
-        async_sdk=AsyncMock(),
+        async_sdk=_async_platform(),
         profile="gpu",
     )
     steps = _steps(compiled)
@@ -146,7 +155,7 @@ async def test_retrieval_prepare_compile_uses_one_container_profile() -> None:
             _generate_config(),
             workspace="default",
             entity_client=Mock(),
-            async_sdk=AsyncMock(),
+            async_sdk=_async_platform(),
             is_local=False,
         )
     assert isinstance(step, RetrievalGenerateStepConfig)
@@ -192,7 +201,7 @@ async def test_retrieval_prepare_convert_only_is_cpu() -> None:
         spec=spec,
         entity_client=Mock(),
         job_name=None,
-        async_sdk=AsyncMock(),
+        async_sdk=_async_platform(),
     )
     steps = _steps(compiled)
     assert len(steps) == 1
@@ -215,7 +224,7 @@ async def test_retrieval_prepare_resolves_model_fileset_for_mining() -> None:
             RetrievalPrepareJobConfig(sdg_input="default/stage0", enable_mining=True),
             workspace="default",
             entity_client=Mock(),
-            async_sdk=AsyncMock(),
+            async_sdk=_async_platform(),
             is_local=False,
         )
 
@@ -238,7 +247,7 @@ async def test_retrieval_prepare_compile_adds_gpu_mining_step() -> None:
         spec=spec,
         entity_client=Mock(),
         job_name=None,
-        async_sdk=AsyncMock(),
+        async_sdk=_async_platform(),
     )
     steps = _steps(compiled)
     assert len(steps) == 3
@@ -258,6 +267,7 @@ async def test_retrieval_prepare_compile_adds_gpu_mining_step() -> None:
         "NEMO_JOB_PERSISTENT_JOB_STORAGE_PATH": "/var/run/scratch/job",
         "HF_HUB_OFFLINE": "1",
         "TRANSFORMERS_OFFLINE": "1",
+        "PYTHONUNBUFFERED": "1",
     }
 
 
@@ -265,7 +275,7 @@ def test_retrieval_prepare_convert_emits_eval_layout(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     sdg = ctx.storage.persistent / "sdg"
     sdg.mkdir()
-    jsonl = sdg / "qa.jsonl"
+    jsonl = sdg / "generation_result.json"
     jsonl.write_text("{}\n", encoding="utf-8")
     train_file = tmp_path / "converted" / "train.json"
     train_file.parent.mkdir()
@@ -297,7 +307,48 @@ def test_retrieval_prepare_convert_emits_eval_layout(tmp_path: Path) -> None:
     staged = ctx.storage.persistent / "stage1_data_prep"
     assert (staged / "eval_beir" / "corpus.jsonl").exists()
     assert (staged / "training.jsonl").exists()
+    assert (staged / "additional" / "train.json").exists()
+    assert not (staged / "train.json").exists()
+    assert output["train_file"] == str(staged / "additional" / "train.json")
+    assert Path(output["train_file"]).exists()
+
+
+def test_retrieval_prepare_train_input_copies_corpus_for_mining(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    train_input = ctx.storage.persistent / "mined-train"
+    train_input.mkdir()
+    (train_input / "train.json").write_text(
+        json.dumps({"corpus": {}, "data": [{"question": "q", "pos_doc": ["p"], "neg_doc": []}]}),
+        encoding="utf-8",
+    )
+    corpus = train_input / "corpus"
+    corpus.mkdir()
+    (corpus / "merlin_metadata.json").write_text("{}", encoding="utf-8")
+    (corpus / "train.parquet").write_bytes(b"parq")
+    spec = RetrievalPrepareStepConfig(
+        job_config=RetrievalPrepareJobConfig(train_input_file="mined-train", enable_mining=True),
+        phase="convert",
+    )
+    output = RetrievalPrepareJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=Mock())
+    assert output["exit_code"] == 0
+    staged = ctx.storage.persistent / "stage1_data_prep"
     assert (staged / "train.json").exists()
+    assert (staged / "corpus" / "merlin_metadata.json").read_text(encoding="utf-8") == "{}"
+    assert (staged / "corpus" / "train.parquet").read_bytes() == b"parq"
+    assert not (staged / "training.jsonl").exists()
+
+
+def test_retrieval_prepare_fails_on_empty_training_split(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    train_input = ctx.storage.persistent / "empty-train"
+    train_input.mkdir()
+    (train_input / "train.json").write_text(json.dumps({"corpus": {}, "data": []}), encoding="utf-8")
+    spec = RetrievalPrepareStepConfig(
+        job_config=RetrievalPrepareJobConfig(train_input_file="empty-train", enable_mining=False),
+        phase="convert",
+    )
+    with pytest.raises(RuntimeError, match="empty training split"):
+        RetrievalPrepareJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=Mock())
 
 
 def test_retrieval_prepare_rejects_mine_phase(tmp_path: Path) -> None:
@@ -354,7 +405,7 @@ async def test_retrieval_run_compile_chains_generate_then_prepare() -> None:
             spec=spec,
             entity_client=Mock(),
             job_name=None,
-            async_sdk=AsyncMock(),
+            async_sdk=_async_platform(),
         )
     names = [step["name"] for step in _steps(compiled)]
     assert names[0] == "retrieval-generate"
@@ -389,6 +440,36 @@ def test_prepare_mining_options_are_typed() -> None:
         RetrievalPrepareJobConfig.model_validate(
             {"sdg_input": "default/stage0", "mining": {"hard_neg_margin_type": "relative"}}
         )
+
+
+def test_resolve_generation_input_uses_default_manifest(tmp_path: Path) -> None:
+    manifest = tmp_path / "generation_result.json"
+    manifest.write_text("{}\n", encoding="utf-8")
+    (tmp_path / "nv_pp_dd_sdg.json").write_text("[]\n", encoding="utf-8")
+    assert _resolve_generation_input(tmp_path, "generation_result.json") == manifest
+
+
+def test_resolve_generation_input_uses_named_file(tmp_path: Path) -> None:
+    dump = tmp_path / "nv_pp_dd_sdg.json"
+    dump.write_text("[]\n", encoding="utf-8")
+    assert _resolve_generation_input(tmp_path, "nv_pp_dd_sdg.json") == dump
+
+
+def test_resolve_generation_input_uses_materialized_file(tmp_path: Path) -> None:
+    dump = tmp_path / "nv_pp_dd_sdg.json"
+    dump.write_text("[]\n", encoding="utf-8")
+    assert _resolve_generation_input(dump, "generation_result.json") == dump
+
+
+def test_resolve_generation_input_missing_named_file(tmp_path: Path) -> None:
+    (tmp_path / "other.json").write_text("[]\n", encoding="utf-8")
+    with pytest.raises(FileNotFoundError, match="nv_pp_dd_sdg.json"):
+        _resolve_generation_input(tmp_path, "nv_pp_dd_sdg.json")
+
+
+def test_prepare_generation_file_rejects_path_escape() -> None:
+    with pytest.raises(ValidationError, match="generation_file"):
+        RetrievalPrepareJobConfig(sdg_input="default/stage0", generation_file="../secret.json")
 
 
 def test_prepare_rejects_staged_path_that_escapes_job_storage(tmp_path: Path) -> None:
@@ -509,7 +590,7 @@ async def test_retrieval_generate_compile_projects_hf_token_secret() -> None:
         spec=spec,
         entity_client=Mock(),
         job_name=None,
-        async_sdk=AsyncMock(),
+        async_sdk=_async_platform(),
     )
     step = _steps(compiled)[0]
     assert _secret_env(step) == {"HF_TOKEN": "default/hf-token"}
@@ -530,7 +611,7 @@ async def test_retrieval_generate_compile_omits_hf_token_without_secret() -> Non
         spec=spec,
         entity_client=Mock(),
         job_name=None,
-        async_sdk=AsyncMock(),
+        async_sdk=_async_platform(),
     )
     assert _secret_env(_steps(compiled)[0]) == {}
 
@@ -551,7 +632,7 @@ async def test_retrieval_prepare_compile_projects_hf_token_secret_on_convert_onl
         spec=spec,
         entity_client=Mock(),
         job_name=None,
-        async_sdk=AsyncMock(),
+        async_sdk=_async_platform(),
     )
     steps = _steps(compiled)
     assert _secret_env(steps[0]) == {"HF_TOKEN": "hf-token"}

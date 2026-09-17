@@ -30,7 +30,11 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_platform_plugin.auth import AuthContext
 from nemo_platform_plugin.client.errors import NotFoundError as PluginClientNotFoundError
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_platform_plugin.entity_client import (
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+    NemoEntityValidationError,
+)
 from nemo_platform_plugin.files.storage_config import GithubStorageConfig, LocalStorageConfig, StorageConfig
 
 NOW = datetime.now(timezone.utc)
@@ -525,6 +529,22 @@ class TestCreateDeployment:
         assert resp.status_code == 400
         assert "Invalid agent config" in resp.json()["detail"]
         mock_entity_client.create.assert_not_called()
+
+    def test_create_returns_422_when_the_store_rejects_the_name(self) -> None:
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(return_value=_make_agent())
+        mock_entity_client.create = AsyncMock(
+            side_effect=NemoEntityValidationError("name: string does not match pattern")
+        )
+        client = _test_client(mock_entity_client)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/deployments",
+            json={"agent": "fabric-agent", "name": "my deployment"},
+        )
+
+        assert resp.status_code == 422
+        assert "pattern" in resp.json()["detail"]
 
 
 class TestDeleteDeployment:

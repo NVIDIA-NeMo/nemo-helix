@@ -5,15 +5,18 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 from nemo_platform_plugin.job_context import JobContext
 from nmp.automodel.tasks.retrieval_mine.launch import run_hard_negative_mining
-from nmp.customization_common.retrieval.inline import wrapped_to_inline_jsonl
+from nmp.customization_common.retrieval.inline import move_aux_files_to_additional, wrapped_to_inline_jsonl
 from nmp.customization_common.retrieval.unroll import unroll_training_file
 from pydantic import BaseModel, ConfigDict, Field
+
+logger = logging.getLogger(__name__)
 
 
 class RetrievalMiningOptions(BaseModel):
@@ -125,7 +128,9 @@ def run_mine(
     # Written next to the outputs so the exact config lands in the job artifacts.
     config_file = output_dir / "mining_config.yaml"
     config_file.write_text(yaml.safe_dump(mining_config, sort_keys=False), encoding="utf-8")
+    logger.info("Wrote mining config %s; starting torchrun miner", config_file)
     run_hard_negative_mining(config_file=config_file)
+    logger.info("Miner finished; unrolling %s", mined)
     unrolled = unroll_training_file(mined, output_dir / "train_mined.automodel_unrolled.json")
     training_jsonl = output_dir / "training.jsonl"
     wrapped_to_inline_jsonl(
@@ -136,6 +141,8 @@ def run_mine(
     with training_jsonl.open(encoding="utf-8") as handle:
         if next(handle, None) is None:
             raise ValueError(f"No training rows written to {training_jsonl}")
+    move_aux_files_to_additional(output_dir)
+    unrolled = output_dir / "additional" / unrolled.name
     artifacts = ctx.results.save(name="artifacts", local_path=output_dir)
     return {
         "exit_code": 0,

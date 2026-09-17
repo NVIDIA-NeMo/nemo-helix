@@ -7,6 +7,7 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useAgentsListOptimizeJobs } from '@nemo/sdk/generated/agents/agents';
 import type { OptimizeJob, OptimizeJobsListFilter } from '@nemo/sdk/generated/agents/schema';
@@ -15,7 +16,6 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getAgentOptimizationDetailRoute } from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
 import { type ComponentProps, type FC, useCallback } from 'react';
-import { useNavigate } from 'react-router';
 
 /** Statuses that will not change again, so polling can stop. */
 const TERMINAL_STATUSES = new Set(['completed', 'error', 'cancelled']);
@@ -56,7 +56,7 @@ interface OptimizeJobsTableProps {
  */
 export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName }) => {
   const workspace = useWorkspaceFromPath();
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const dataViewState = useStudioDataViewState({
     defaultSort: [{ id: 'created_at', desc: true }],
   });
@@ -133,7 +133,9 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName }) => 
         dataViewState={dataViewState}
         searchField="name"
         makeColumns={makeColumns}
-        onRowClick={(row) => navigate(getAgentOptimizationDetailRoute(workspace, row.name))}
+        onRowClick={(row, _index, event) =>
+          openRow(event, getAgentOptimizationDetailRoute(workspace, row.name))
+        }
         attributes={{
           DataViewSearchBar: { placeholder: 'Search by name...' },
           DataViewRoot: {

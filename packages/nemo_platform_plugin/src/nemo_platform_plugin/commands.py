@@ -5,9 +5,9 @@
 
 Two parallel helpers, one per primitive:
 
-- :func:`add_job_commands` — three-verb subgroups
-  (``run``/``submit``/``explain``) per :class:`~nemo_platform_plugin.job.NemoJob`,
-  routed through :class:`~nemo_platform_plugin.scheduler.NemoJobScheduler`.
+- :func:`add_job_commands` — job ``submit``/``explain`` commands per
+  :class:`~nemo_platform_plugin.job.NemoJob`, routed through
+  :class:`~nemo_platform_plugin.scheduler.NemoJobScheduler`.
 - :func:`add_function_commands` — two-verb subgroups
   (``run``/``submit``) per :class:`~nemo_platform_plugin.function.NemoFunction`.
   Functions don't have an ``explain`` verb because their only schema
@@ -16,43 +16,31 @@ Two parallel helpers, one per primitive:
 
 :func:`add_job_commands` is the bridge between the ``nemo.jobs`` and
 ``nemo.cli`` surfaces. The platform calls it at startup for each plugin that
-has registered both a CLI group and jobs, injecting a generated **sub-group**
-for every job into the plugin's :class:`typer.Typer` group. Each sub-group
-exposes three verbs — ``run``, ``submit``, ``explain`` — matching
-:class:`~nemo_platform_plugin.scheduler.NemoJobScheduler`.
+has registered both a CLI group and jobs, injecting generated job commands into
+the plugin's :class:`typer.Typer` group. Legacy jobs expose a sub-group with
+``submit`` and ``explain``; non-legacy jobs expose flat submit callbacks while
+retaining ``explain`` as a compatibility subcommand.
 
 Plugin authors do **not** call this themselves — it is called automatically
 by the platform's CLI loader. The result is that each job becomes available
 as::
 
-    nemo <plugin> <job-name> run      [--config ...] [--config-file ...]
     nemo <plugin> <job-name> submit   [--profile ...] [--cluster ...] [-o ...]
     nemo <plugin> <job-name> explain  [--profile ...] [--cluster ...]
 
 The **bare form** ``nemo <plugin> <job-name>`` prints usage and exits with
 status 1. No implicit default verb — the submitter's choice of execution
 target is always explicit. This breaks the previous one-line form; the
-fix is typing ``run`` (or ``submit``) explicitly.
-
-Phase 1 MR 1.2c delivers the CLI shape. ``submit`` and ``explain`` delegate
-to :class:`NemoJobScheduler` stubs that raise
-:class:`NotImplementedError`; MR 1.3 and MR 1.4 wire them. ``run`` works
-end-to-end today.
+fix is typing ``submit`` explicitly.
 
 Generated command interface
 ---------------------------
 
-``run``
-    Execute the job in-process. Accepts ``--config <json>`` (default ``{}``)
-    and ``--config-file <path>`` (takes precedence over ``--config``). The
-    scheduler validates against :attr:`~nemo_platform_plugin.job.NemoJob.spec_schema`
-    / :attr:`~nemo_platform_plugin.job.NemoJob.input_spec_schema` when declared.
-
 ``submit``
-    Submit the job to a cluster. Phase 1 MR 1.3 wires this.
+    Submit the job to a cluster.
 
 ``explain``
-    Print the job's spec / options schemas. Phase 1 MR 1.4 wires this.
+    Print the job's spec / options schemas.
 
 Example
 -------
@@ -63,15 +51,16 @@ Given::
         name = "say-hello"
         description = "Greet a name."
 
-        def run(self, config: dict) -> dict:
+        def run(
+            self,
+            config: dict,
+            *,
+            ctx: JobContext,
+        ) -> dict:
+            del ctx
             return {"result": f"Hello, {config.get('name', 'world')}!"}
 
 The platform generates::
-
-    $ nemo example say-hello run --config '{"name": "Claude"}'
-    {
-      "result": "Hello, Claude!"
-    }
 
     $ nemo example say-hello
     Usage: nemo example say-hello [OPTIONS] COMMAND [ARGS]...
@@ -107,6 +96,7 @@ from nemo_platform_plugin.cli import NemoCLI
 from nemo_platform_plugin.cli_errors import print_http_request_error, print_http_status_error
 from nemo_platform_plugin.cli_renderer import CLIRenderer, RendererContext
 from nemo_platform_plugin.cli_state import resolve_local_cli_sdks
+from nemo_platform_plugin.errors import LocalRunError
 from nemo_platform_plugin.function import NemoFunction, returns_async_iterator
 from nemo_platform_plugin.function_context import FunctionContext
 from nemo_platform_plugin.functions.routes import DEFAULT_FUNCTION_PATH, NDJSON_MEDIA_TYPE
@@ -117,7 +107,7 @@ from nemo_platform_plugin.jobs._cli_options import (
     merge_options,
     parse_dotted_kv_list,
 )
-from nemo_platform_plugin.run_dependencies import LocalRunError
+from nemo_platform_plugin.jobs.telemetry import merge_job_telemetry_custom_fields
 from nemo_platform_plugin.scheduler import NemoJobScheduler
 from pydantic import BaseModel, ValidationError
 
@@ -129,9 +119,9 @@ logger = logging.getLogger(__name__)
 _DEFAULT_BASE_URL_ENV_VAR = "NMP_BASE_URL"
 _DEFAULT_BASE_URL = "http://localhost:8080"
 
-# Rich-help panels for the function and job CLIs. Mirror PR #160's
-# panel names but scoped per primitive so jobs and functions sharing a
-# plugin still group cleanly when both are documented in --help.
+# Rich-help panels for the function and job CLIs. Keep panel names
+# scoped per primitive so jobs and functions sharing a plugin still
+# group cleanly when both are documented in --help.
 _PANEL_SPEC_SOURCE: str = "Spec Source"
 _PANEL_FUNCTION_SPEC: str = "Function Spec"
 _PANEL_JOB_SPEC: str = "Job Spec"
@@ -146,15 +136,13 @@ _PANEL_SUBMISSION: str = "Submission"
 _FN_RUN_RESERVED_FLAGS: frozenset[str] = frozenset({"spec", "spec_file", "workspace"})
 _FN_SUBMIT_RESERVED_FLAGS: frozenset[str] = _FN_RUN_RESERVED_FLAGS | frozenset({"cluster", "base_url", "request_id"})
 
-# Static flag names declared by each job verb. ``run`` reserves the
-# spec-source flags plus the deprecated ``--config`` / ``--config-file``
-# aliases (kept during the rename transition). ``submit`` layers on the
-# submission-routing flags (``--profile`` / ``--cluster`` / ``--base-url``
-# / ``--workspace``) and the options-passthrough flags (``-o`` /
-# ``--options-file``). Reserved spec fields remain reachable via
-# ``--spec`` / ``--spec-file`` JSON.
-_JOB_RUN_RESERVED_FLAGS: frozenset[str] = frozenset({"spec", "spec_file", "config", "config_file"})
-_JOB_SUBMIT_RESERVED_FLAGS: frozenset[str] = _JOB_RUN_RESERVED_FLAGS | frozenset(
+# Static flag names declared by each job submit command. The spec-source
+# flags plus deprecated ``--config`` / ``--config-file`` aliases are reserved,
+# as are submission-routing flags (``--profile`` / ``--cluster`` /
+# ``--base-url`` / ``--workspace``) and options-passthrough flags (``-o`` /
+# ``--options-file``). Reserved spec fields remain reachable via ``--spec`` /
+# ``--spec-file`` JSON.
+_JOB_SUBMIT_RESERVED_FLAGS: frozenset[str] = frozenset({"spec", "spec_file", "config", "config_file"}) | frozenset(
     {"options", "options_file", "profile", "cluster", "base_url", "workspace"}
 )
 
@@ -188,11 +176,12 @@ def _make_renderer_context(
     cli_kwargs: Mapping[str, Any],
     verb: Literal["run", "submit"],
     is_local: bool,
+    base_url: str | None = None,
 ) -> RendererContext:
     """Build the per-invocation :class:`RendererContext` passed to renderer methods."""
     from rich.console import Console
 
-    return RendererContext(console=Console(), cli_kwargs=cli_kwargs, verb=verb, is_local=is_local)
+    return RendererContext(console=Console(), cli_kwargs=cli_kwargs, verb=verb, is_local=is_local, base_url=base_url)
 
 
 async def _drive_async_renderer(
@@ -294,12 +283,11 @@ def add_job_commands(
     *,
     cli: NemoCLI | None = None,
 ) -> None:
-    """Inject three-verb subcommand groups for each job into *cli_app*.
+    """Inject submit/explain commands for each job into *cli_app*.
 
     Each entry in *jobs* produces one :class:`typer.Typer` sub-group
     registered under :attr:`~nemo_platform_plugin.job.NemoJob.name` in a ``"Jobs"``
-    rich help panel. The sub-group owns ``run`` / ``submit`` / ``explain``
-    commands.
+    rich help panel. The sub-group owns ``submit`` / ``explain`` commands.
 
     Args:
         cli_app: The plugin's :class:`typer.Typer` group to inject
@@ -327,11 +315,18 @@ def _register_job_subgroup(
     *,
     cli: NemoCLI | None = None,
 ) -> None:
-    """Register a ``<job-name>`` sub-group with run / submit / explain verbs."""
+    """Register a ``<job-name>`` command surface for submit / explain."""
     if not job_cls.generate_legacy_verbs:
-        _add_submit_command(cli_app, job_cls, scheduler, cli=cli, command_name=job_cls.name, rich_help_panel="Jobs")
+        job_group = typer.Typer(
+            name=job_cls.name,
+            help=job_cls.description or f"Manage the {job_cls.name} job.",
+            no_args_is_help=False,
+        )
+        _add_submit_command(job_group, job_cls, scheduler, cli=cli, as_callback=True)
+        _add_explain_command(job_group, job_cls, scheduler)
         if cli is not None:
-            cli.update_job_cli(job_cls, cli_app)
+            cli.update_job_cli(job_cls, job_group)
+        cli_app.add_typer(job_group, name=job_cls.name, rich_help_panel="Jobs")
         return
 
     job_group = typer.Typer(
@@ -347,7 +342,6 @@ def _register_job_subgroup(
             typer.echo(ctx.get_help())
             raise typer.Exit(code=1)
 
-    _add_run_command(job_group, job_cls, scheduler, cli=cli)
     _add_submit_command(job_group, job_cls, scheduler, cli=cli)
     _add_explain_command(job_group, job_cls, scheduler)
 
@@ -357,178 +351,21 @@ def _register_job_subgroup(
     cli_app.add_typer(job_group, name=job_cls.name, rich_help_panel="Jobs")
 
 
-# ---------------------------------------------------------------------------
-# run — local execution, wired via NemoJobScheduler.run_local
-# ---------------------------------------------------------------------------
-
-
 def _job_input_schema(job_cls: type[NemoJob]) -> type[BaseModel] | None:
     """Pick the schema that the submitter's input is validated against.
 
-    Mirrors the precedence used by
-    :meth:`~nemo_platform_plugin.scheduler.NemoJobScheduler._validate_and_compile`:
+    Mirrors the precedence used by remote route adapters:
     :attr:`~nemo_platform_plugin.job.NemoJob.input_spec_schema` when declared,
-    else :attr:`~nemo_platform_plugin.job.NemoJob.spec_schema`. Both ``run`` and
-    ``submit`` accept the same shape from the user, so we walk a single
-    schema for both verbs. Returns ``None`` when neither attribute is
+    else :attr:`~nemo_platform_plugin.job.NemoJob.spec_schema`. Returns
+    ``None`` when neither attribute is
     declared — the auto-flag generator treats ``None`` as "no leaves",
     keeping legacy schema-less jobs unchanged.
     """
     return job_cls.input_spec_schema or job_cls.spec_schema
 
 
-def _add_run_command(
-    group: typer.Typer,
-    job_cls: type[NemoJob],
-    scheduler: NemoJobScheduler,
-    *,
-    cli: NemoCLI | None = None,
-) -> None:
-    """Register the ``run`` verb. Generates per-field flags from the input schema.
-
-    Each scalar leaf in :func:`_job_input_schema` becomes a Typer option
-    named after its dotted path, kebab-cased per segment (``--name``,
-    ``--target.url``).  Precedence at runtime is ``--spec-file`` (base)
-    → ``--spec`` JSON (overlay) → per-field flags (top overlay), with
-    the deprecated ``--config`` / ``--config-file`` aliases routed
-    through the same precedence as ``--spec`` / ``--spec-file``.
-
-    When *cli* supplies a renderer via ``get_job_renderer(verb="run")`` (and
-    ``--output-format json`` is not set), the renderer's lifecycle wraps the
-    synchronous ``run_local`` call: ``on_start`` → ``on_frame(result)`` →
-    ``on_complete``. The default-printer fallback echoes the dict result
-    when no renderer is supplied.
-    """
-    schema = _job_input_schema(job_cls)
-    unavailable: list[str] = []
-    leaves = walk_spec_leaves(schema, reserved=_JOB_RUN_RESERVED_FLAGS, unavailable=unavailable)
-
-    def _run(typer_ctx: typer.Context, **kwargs: object) -> None:
-        original_kwargs = dict(kwargs)
-        spec_str: str = cast(str, kwargs.pop("spec", "{}"))
-        spec_file: Path | None = cast("Path | None", kwargs.pop("spec_file", None))
-        config: str | None = cast("str | None", kwargs.pop("config", None))
-        config_file: Path | None = cast("Path | None", kwargs.pop("config_file", None))
-
-        effective_spec_str = config if config is not None else spec_str
-        effective_spec_file = config_file if config_file is not None else spec_file
-        base = _load_spec(effective_spec_str, effective_spec_file)
-        overlay = build_overlay(leaves, kwargs, unset_sentinel=UNSET)
-        data = deep_merge(base, overlay)
-        logger.debug("Running job %r locally with spec %r", job_cls.name, data)
-        sdk, async_sdk = resolve_local_cli_sdks(typer_ctx)
-
-        renderer_cls: type[CLIRenderer] | None = None
-        if cli is not None and not _output_format_is_json(typer_ctx):
-            renderer_cls = cli.get_job_renderer(job_cls, verb="run")
-
-        def _do_run() -> Any:
-            return scheduler.run_local(job_cls, data, sdk=sdk, async_sdk=async_sdk)
-
-        renderer: CLIRenderer | None = None
-        rctx: RendererContext | None = None
-        try:
-            if renderer_cls is not None:
-                rctx = _make_renderer_context(
-                    cli_kwargs=original_kwargs,
-                    verb="run",
-                    is_local=True,
-                )
-                renderer = _drive_single_value_renderer(_do_run, renderer_cls, rctx=rctx)
-            else:
-                result = _do_run()
-                typer.echo(json.dumps(result, indent=2))
-        except LocalRunError as exc:
-            typer.echo(f"Error: {exc}", err=True)
-            raise typer.Exit(code=1) from exc
-
-        # on_complete fires after the driver returns, in the same contract
-        # the async renderer driver follows — see _drive_sync_renderer.
-        if renderer is not None and rctx is not None:
-            renderer.on_complete(ctx=rctx)
-
-    help_text = "Run locally, in-process."
-    epilog = build_epilog(schema=schema, leaves=leaves, kind="Job", unavailable=unavailable)
-    setattr(_run, "__signature__", _build_job_run_signature(leaves))
-    group.command(name="run", help=help_text, epilog=epilog)(_run)
-
-
-def _build_job_run_signature(leaves: list[SpecLeafField]) -> inspect.Signature:
-    """Compose the synthetic signature for the job ``run`` verb.
-
-    Static flags (``--spec`` / ``--spec-file``) come first under the
-    ``Spec Source`` panel, followed by the auto-generated per-field
-    flags under ``Job Spec``, then the hidden ``--config`` /
-    ``--config-file`` deprecated aliases.
-    """
-    static_params = [
-        # ``typer.Context`` is auto-injected by Click via ``pass_context``,
-        # which passes it as the first positional argument. Hand-built
-        # rather than via ``kw()`` because ``kw()`` only emits
-        # ``KEYWORD_ONLY`` params (which Click's positional injection
-        # would reject).
-        inspect.Parameter(
-            "typer_ctx",
-            kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=typer.Context,
-        ),
-        kw(
-            "spec",
-            str,
-            typer.Option(
-                "{}",
-                "--spec",
-                help="Spec as a JSON string.",
-                rich_help_panel=_PANEL_SPEC_SOURCE,
-            ),
-        ),
-        kw(
-            "spec_file",
-            Optional[Path],
-            typer.Option(
-                None,
-                "--spec-file",
-                help="Path to a YAML or JSON spec file (used as base; per-flag values override).",
-                rich_help_panel=_PANEL_SPEC_SOURCE,
-            ),
-        ),
-    ]
-    # Deprecated aliases — kept for the transition period (MR 1.3b).
-    # Trailing so they sort below the auto-generated panel in --help,
-    # though they're hidden anyway and only matter for backwards-compatible
-    # invocations.
-    trailing_params = [
-        kw(
-            "config",
-            Optional[str],
-            typer.Option(
-                None,
-                "--config",
-                help="(Deprecated — use --spec.) Spec as a JSON string.",
-                hidden=True,
-            ),
-        ),
-        kw(
-            "config_file",
-            Optional[Path],
-            typer.Option(
-                None,
-                "--config-file",
-                help="(Deprecated — use --spec-file.) Path to a JSON spec file.",
-                hidden=True,
-            ),
-        ),
-    ]
-    return build_callback_signature(
-        static_params,
-        leaves,
-        rich_help_panel=_PANEL_JOB_SPEC,
-        trailing_params=trailing_params,
-    )
-
-
 # ---------------------------------------------------------------------------
-# submit — stub delegate to scheduler.submit_remote (wired in MR 1.3)
+# submit — delegate to scheduler.submit_remote
 # ---------------------------------------------------------------------------
 
 
@@ -538,8 +375,10 @@ def _add_submit_command(
     scheduler: NemoJobScheduler,
     *,
     cli: NemoCLI | None = None,
+    renderer_cls: type[CLIRenderer] | None = None,
     command_name: str = "submit",
     rich_help_panel: str | None = None,
+    as_callback: bool = False,
 ) -> None:
     """Register the ``submit`` verb. Generates per-field flags + static submit flags.
 
@@ -550,16 +389,22 @@ def _add_submit_command(
     the auto-generated set and remain reachable via ``--spec`` /
     ``--spec-file``.
 
-    When *cli* supplies a renderer via ``get_job_renderer(verb="submit")``
-    (and ``--output-format json`` is not set), the renderer's lifecycle
-    wraps the ``submit_remote`` call: ``on_start`` → ``on_frame(result)`` →
-    ``on_complete``.
+    A completion renderer can be supplied two ways (used only when
+    ``--output-format json`` is not set, so automation keeps the raw JSON
+    contract): via *cli*'s ``get_job_renderer(verb="submit")``, or directly via
+    *renderer_cls* for callers that register the submit verb without a full
+    :class:`~nemo_platform_plugin.cli.NemoCLI` (e.g. the customization
+    contributors). When supplied, the renderer's lifecycle wraps the
+    ``submit_remote`` call: ``on_start`` → ``on_frame(result)`` →
+    ``on_complete``. *renderer_cls* takes precedence over *cli*'s lookup.
     """
     schema = _job_input_schema(job_cls)
     unavailable: list[str] = []
     leaves = walk_spec_leaves(schema, reserved=_JOB_SUBMIT_RESERVED_FLAGS, unavailable=unavailable)
 
     def _submit(typer_ctx: typer.Context, **kwargs: object) -> None:
+        if as_callback and typer_ctx.invoked_subcommand is not None:
+            return
         original_kwargs = dict(kwargs)
         spec_str: str = cast(str, kwargs.pop("spec", "{}"))
         spec_file: Path | None = cast("Path | None", kwargs.pop("spec_file", None))
@@ -584,31 +429,39 @@ def _add_submit_command(
             typer.echo(f"Error: invalid options — {exc}", err=True)
             raise typer.Exit(code=1) from exc
 
-        renderer_cls: type[CLIRenderer] | None = None
-        if cli is not None and not _output_format_is_json(typer_ctx):
-            renderer_cls = cli.get_job_renderer(job_cls, verb="submit")
+        renderer_resolved: type[CLIRenderer] | None = None
+        if not _output_format_is_json(typer_ctx):
+            if renderer_cls is not None:
+                renderer_resolved = renderer_cls
+            elif cli is not None:
+                renderer_resolved = cli.get_job_renderer(job_cls, verb="submit")
+
+        resolved_base_url = _resolve_submit_base_url(typer_ctx, base_url=base_url, cluster=cluster)
 
         def _do_submit() -> Any:
-            return scheduler.submit_remote(
-                job_cls,
-                spec_data,
-                base_url=_resolve_submit_base_url(typer_ctx, base_url=base_url, cluster=cluster),
-                workspace=workspace,
-                profile=profile,
-                options=merged_options or None,
-                headers=_resolve_submit_auth_headers(typer_ctx) or None,
-            )
+            submit_kwargs: dict[str, Any] = {
+                "base_url": resolved_base_url,
+                "workspace": workspace,
+                "profile": profile,
+                "options": merged_options or None,
+                "headers": _resolve_submit_auth_headers(typer_ctx) or None,
+            }
+            metadata = _resolve_submit_metadata(typer_ctx)
+            if metadata is not None:
+                submit_kwargs["metadata"] = metadata
+            return scheduler.submit_remote(job_cls, spec_data, **submit_kwargs)
 
         renderer: CLIRenderer | None = None
         rctx: RendererContext | None = None
         try:
-            if renderer_cls is not None:
+            if renderer_resolved is not None:
                 rctx = _make_renderer_context(
                     cli_kwargs=original_kwargs,
                     verb="submit",
                     is_local=False,
+                    base_url=resolved_base_url,
                 )
-                renderer = _drive_single_value_renderer(_do_submit, renderer_cls, rctx=rctx)
+                renderer = _drive_single_value_renderer(_do_submit, renderer_resolved, rctx=rctx)
             else:
                 result = _do_submit()
                 typer.echo(json.dumps(result, indent=2))
@@ -628,10 +481,33 @@ def _add_submit_command(
         if renderer is not None and rctx is not None:
             renderer.on_complete(ctx=rctx)
 
-    help_text = job_cls.description if command_name == job_cls.name and job_cls.description else "Submit to a cluster."
+    help_text = (
+        job_cls.description
+        if (as_callback or command_name == job_cls.name) and job_cls.description
+        else "Submit to a cluster."
+    )
     epilog = build_epilog(schema=schema, leaves=leaves, kind="Job", unavailable=unavailable)
     setattr(_submit, "__signature__", _build_job_submit_signature(leaves))
-    group.command(name=command_name, help=help_text, epilog=epilog, rich_help_panel=rich_help_panel)(_submit)
+    if as_callback:
+        group.callback(invoke_without_command=True, help=help_text, epilog=epilog)(_submit)
+    else:
+        group.command(name=command_name, help=help_text, epilog=epilog, rich_help_panel=rich_help_panel)(_submit)
+
+
+def _resolve_submit_metadata(typer_ctx: typer.Context) -> dict[str, object] | None:
+    state = typer_ctx.obj
+    if state is None:
+        return None
+    getter = getattr(state, "get_job_telemetry_custom_fields", None)
+    if not callable(getter):
+        return None
+    try:
+        telemetry_custom_fields = getter()
+    except Exception:
+        return None
+    if not isinstance(telemetry_custom_fields, dict) or not telemetry_custom_fields:
+        return None
+    return {"custom_fields": merge_job_telemetry_custom_fields(None, telemetry_custom_fields)}
 
 
 def _build_job_submit_signature(leaves: list[SpecLeafField]) -> inspect.Signature:
@@ -757,7 +633,7 @@ def _build_job_submit_signature(leaves: list[SpecLeafField]) -> inspect.Signatur
 
 
 # ---------------------------------------------------------------------------
-# explain — stub delegate to scheduler.explain (wired in MR 1.4)
+# explain — delegate to scheduler.explain
 # ---------------------------------------------------------------------------
 
 
@@ -770,16 +646,16 @@ def _add_explain_command(
         profile: Optional[str] = typer.Option(
             None,
             "--profile",
-            help="Annotate the bundle with this profile. Profile metadata lands in MR 1.4b.",
+            help="Annotate the bundle with this profile.",
         ),
         cluster: Optional[str] = typer.Option(
             None,
             "--cluster",
-            help="Accepted for forward compatibility; unused in MR 1.4a.",
+            help="Accepted for forward compatibility.",
         ),
     ) -> None:
         """Print schemas for the job (spec / input_spec / options)."""
-        del cluster  # reserved for MR 1.4b when /execution-profiles fetch lands
+        del cluster  # reserved for execution-profile lookup when supported
         bundle = scheduler.explain(job_cls, profile=profile)
         typer.echo(json.dumps(bundle, indent=2))
 
@@ -1046,11 +922,10 @@ async def _invoke_function_locally(
 ) -> tuple[CLIRenderer, RendererContext] | None:
     """Call ``fn_cls().run(spec, ...)`` and print result(s) to stdout.
 
-    Mirrors :func:`~nemo_platform_plugin.run_dependencies.resolve_run_kwargs` for the SDK
-    parameters: inject when the caller supplied an SDK, leave the parameter
-    unbound (Python default applies) when the function's signature has a
-    default to fall back on, and raise :class:`LocalRunError` only when
-    the function declared a required SDK parameter that we can't satisfy.
+    Injects SDK parameters when the function declares them, leaves optional
+    parameters unbound so Python defaults apply, and raises
+    :class:`LocalRunError` only when the function declared a required SDK
+    parameter that we can't satisfy.
 
     When *renderer_cls* is supplied, drive the renderer's ``on_start`` +
     ``on_frame`` around the streamed iterator and return ``(renderer, rctx)``

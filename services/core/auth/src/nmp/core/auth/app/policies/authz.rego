@@ -46,10 +46,13 @@ allow := result if {
 # Default deny
 default allow_request := false
 
-# Platform admin bypass - has access to everything (if any principal is a platform admin)
+# Platform admin bypass - has access to everything, but must still pass scope_check_passed
+# first so a PlatformAdmin's own scoped Access Key stays scoped down.
 allow_request if {
 	applicable_principals := get_applicable_principals
 	count(applicable_principals) > 0
+
+	scope_check_passed
 
 	# Check if any principal is a platform admin
 	some principal in applicable_principals

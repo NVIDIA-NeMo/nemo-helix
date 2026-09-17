@@ -20,7 +20,7 @@ def load_config_builder() -> dd.DataDesignerConfigBuilder:
     model_configs = [
         dd.ModelConfig(
             provider="default/nvidia-build",
-            model="nvidia/nemotron-3-nano-30b-a3b",
+            model="nvidia/nemotron-3.5-lightning-30b-a3b",
             alias="text",
         )
     ]
@@ -35,6 +35,60 @@ nemo data-designer preview product_reviews.py --workspace default
 nemo data-designer create product_reviews.py --workspace default
 ```
 
+## Validate
+
+The `validate` command checks a configuration before you spend time on a preview or a create job. It accepts the same configuration sources as `preview` and `create`.
+
+```bash
+nemo data-designer validate product_reviews.py
+```
+
+```text
+  ────────────────────────── Data Designer Validate ──────────────────────────
+
+  Config: product_reviews.py
+
+  ✅    ✔ Configuration is valid
+```
+
+Validation covers both the configuration itself and the NeMo Platform resources it depends on: Inference Gateway provider references, Files service seed sources, Nemotron Personas filesets, and the seed source types the service supports.
+
+A single run reports every problem it detects rather than stopping at the first one:
+
+```text
+  ❌    ✘ The NeMo Platform Data Designer service only supports seed data from
+HuggingFace or the NeMo Platform Files service (FilesetFile, Directory, or
+FileContents seed sources referencing fileset paths). Upload your data to the
+Files service, adjust your config, and try again.
+  ❌    ✘ Errors in model configs: ["Cannot access provider
+'default/does-not-exist'. Check that it exists and you have access to it."]
+```
+
+The command exits `0` only when no errors are reported, so you can gate a pipeline on it.
+
+| Option | Description |
+|--------|-------------|
+| `--workspace <WORKSPACE>` | Workspace used to resolve provider references and seed sources. Defaults to the workspace of the active CLI context, or `default`. |
+| `--output <text\|json>` | Output format. Defaults to `text`. |
+
+Use `--output json` to consume results programmatically:
+
+```bash
+nemo data-designer validate product_reviews.py --output json
+```
+
+```json
+{
+  "config_source": "product_reviews.py",
+  "errors": [
+    {
+      "message": "Errors in model configs: [\"Cannot access provider 'default/does-not-exist'. Check that it exists and you have access to it.\"]"
+    }
+  ],
+  "ok": false
+}
+```
+
 ## Retrieval SDG
 
 Nemotron retrieval Stage 0/1 use dedicated jobs, not `create`. See [Retrieval SDG](/documentation/design-synthetic-data/retrieval-sdg).
@@ -43,7 +97,7 @@ Nemotron retrieval Stage 0/1 use dedicated jobs, not `create`. See [Retrieval SD
 nemo data-designer retrieval generate \
   --corpus default/my-docs \
   --provider default/nvidia-build \
-  --chat-model nvidia/nemotron-3-nano-30b-a3b \
+  --chat-model nvidia/nemotron-3.5-lightning-30b-a3b \
   --embed-model nvidia/nemotron-3-embed-1b
 nemo data-designer retrieval-prepare --spec '{"sdg_input":"default/stage0-out"}'
 ```

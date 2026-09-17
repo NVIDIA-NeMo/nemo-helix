@@ -3,11 +3,9 @@
 
 """Task entrypoint for ``agents.evaluate-suite`` (``python -m nemo_agents_plugin.tasks.evaluate_suite``).
 
-Mirrors :mod:`nemo_agents_plugin.tasks.evaluate`: delegates to
-:func:`nemo_platform_plugin.tasks.dispatcher.run_task` so step config loading,
-:class:`~nemo_platform_plugin.job_context.JobContext` construction, and
-signature-based DI into :meth:`EvaluateSuiteJob.run` are all handled by the
-framework.
+Mirrors :mod:`nemo_agents_plugin.tasks.evaluate`: loads the step config, builds
+:class:`~nemo_platform_plugin.job_context.JobContext`, and calls
+:meth:`EvaluateSuiteJob.run` with its concrete ``ctx`` signature.
 
 This module is invoked by the platform's host-subprocess executor when a
 caller submits an evaluate-suite job (``POST /apis/agents/.../jobs`` →
@@ -23,8 +21,10 @@ import sys
 from types import FrameType
 
 from nemo_agents_plugin.jobs.evaluate_suite import EvaluateSuiteJob
+from nemo_platform_plugin.errors import LocalRunError
 from nemo_platform_plugin.sdk_provider import get_task_sdk
-from nemo_platform_plugin.tasks.dispatcher import run_task
+from nemo_platform_plugin.tasks.dispatcher import build_ctx_from_env, exit_code_for, read_step_config
+from nemo_platform_plugin.tasks.logging_setup import configure_task_logging
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +35,23 @@ def _shutdown_handler(signum: int, frame: FrameType | None) -> None:
 
 
 def main() -> int:
+    configure_task_logging()
     signal.signal(signal.SIGTERM, _shutdown_handler)
     try:
         sdk = get_task_sdk("agents")
+        ctx = build_ctx_from_env(sdk)
+        config = read_step_config()
+        job = EvaluateSuiteJob()
     except Exception:
-        logger.exception("Failed to build task SDK for agents")
+        logger.exception("Failed to prepare task for agents")
         return 2
-    return run_task(EvaluateSuiteJob, sdk=sdk)
+    try:
+        return exit_code_for(job.run(config, ctx=ctx))
+    except LocalRunError:
+        raise
+    except Exception:
+        logger.exception("EvaluateSuiteJob.run raised")
+        return 1
 
 
 if __name__ == "__main__":

@@ -54,12 +54,18 @@ class RendererContext:
         is_local: ``True`` for in-process invocation (``run`` from a CLI with
             local SDKs), ``False`` for HTTP ``submit``. Distinct from ``verb``
             because future plugin types could blur the in-process/remote line.
+        base_url: The resolved platform/plugin-service base URL the verb ran
+            against (``submit`` only), or ``None`` when no base URL applies
+            (e.g. local ``run``) or none could be resolved. Renderers that
+            build deep links (e.g. a Studio job-detail URL) read it from here;
+            it is deliberately null-safe so existing renderers ignore it.
     """
 
     console: Console
     cli_kwargs: Mapping[str, Any]
     verb: Literal["run", "submit"]
     is_local: bool
+    base_url: str | None = None
 
 
 class CLIRenderer(ABC):

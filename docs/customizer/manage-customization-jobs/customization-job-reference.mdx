@@ -26,7 +26,7 @@ A customization job is submitted with a backend-specific spec (`AutomodelJobInpu
 | `spec.training.lora` | No | LoRA configuration (`{"rank": 16, "alpha": 32, ...}`). Auto-filled with defaults for LoRA regimes |
 | `spec.output` | No | Output artifact configuration (`{"name": "..."}`). Auto-generated if not provided |
 | `spec.integrations` | No | Optional W&B / MLflow tracking configuration (see below) |
-| `spec.deployment_config` | No | **Unsloth only.** Auto-deploy the trained model. Pass a string to reference an existing config by name, or an object with inline NIM deployment parameters (e.g., `{"lora_enabled": true}`). Omit to skip deployment |
+| `spec.deployment_config` | No | Auto-deploy the trained model. Pass a string to reference an existing config by name, or an object with inline NIM deployment parameters (e.g., `{"lora_enabled": true}`). Omit to skip deployment. For a LoRA job, the deployment is created against the **base** model with `lora_enabled: true`, and the adapter is served from it. The RL backend accepts the same field — see [GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments) |
 
 ---
 

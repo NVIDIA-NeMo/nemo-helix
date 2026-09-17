@@ -34,6 +34,13 @@ scaled-evals-migrate = "nemo_scaled_evals_plugin.migrations:main"
 [project.entry-points."nemo.services"]
 scaled-evals = "nemo_scaled_evals_plugin.service:ScaledEvalsService"
 
+[project.entry-points."nemo.jobs"]
+"scaled-evals.task-image-build" = "nemo_scaled_evals_plugin.jobs.task_image_build:TaskImageBuildJob"
+"scaled-evals.evaluation-execution" = "nemo_scaled_evals_plugin.jobs.evaluation_execution:EvaluationExecutionJob"
+
+[project.entry-points."nemo.controllers"]
+scaled-evals-jobs = "nemo_scaled_evals_plugin.controller:ScaledEvalsJobsController"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0.0",

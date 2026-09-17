@@ -1490,7 +1490,11 @@ class ContainerExecutorConfig(BaseModel):
         "k8s_nim_operator_config (NIM engine on k8s only). Supported keys: image, command, args, "
         "resources, env, readinessProbe, livenessProbe, startupProbe, nodeSelector, tolerations, "
         "userID, groupID, labels, initContainers, sidecarContainers. Unsupported keys are rejected "
-        "at compile time. Ignored by non-NIM engines and docker runtime.",
+        "at compile time. Ignored by non-NIM engines and docker runtime. One key is a platform "
+        "directive rather than a Spec fragment and is honored on both runtimes: nimLegacy (default "
+        "true) emits the legacy NIM_MODEL_NAME / NIM_MODEL_PATH weight env vars; set it false for "
+        "images that retired those names and expect NIM_ENGINE_MODEL_NAME / NIM_ENGINE_MODEL_PATH, "
+        "since such images fail config validation when a retired name is set.",
     )
 
 

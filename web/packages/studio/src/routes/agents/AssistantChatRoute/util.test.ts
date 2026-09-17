@@ -29,6 +29,35 @@ describe('Assistant utilities', () => {
     expect(getSelectedAssistantSessionId('?session=')).toBeUndefined();
   });
 
+  it('restores a stored thinking part as a collapsed thinking block', () => {
+    const history: AssistantSessionHistory = {
+      session_id: 'session-thinking',
+      chat_artifacts: { selections: [], files: [], links: [], jobs: [], tools: [] },
+      items: [
+        { kind: 'user', text: 'what is the capital of France?' },
+        {
+          kind: 'assistant',
+          parts: [
+            { type: 'thinking', thinking: 'The user wants a capital city.' },
+            { type: 'text', text: 'Paris.' },
+          ],
+        },
+      ],
+    };
+
+    expect(getAssistantHistoryMessages(history)[1]).toMatchObject({
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool-call',
+          toolName: ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
+          args: { text: 'The user wants a capital city.' },
+        },
+        { type: 'text', text: 'Paris.' },
+      ],
+    });
+  });
+
   it('converts stored transcript items to assistant-ui messages', () => {
     const history: AssistantSessionHistory = {
       session_id: '2dc6e5a6-acd7-43bf-b128-c9fd5cf6eb9a',

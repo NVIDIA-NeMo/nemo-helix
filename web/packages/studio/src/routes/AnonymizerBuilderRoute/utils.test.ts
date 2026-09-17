@@ -3,7 +3,8 @@
 
 import type { DataDesignerModelOption } from '@studio/components/NewDataDesignerJobForm/utils';
 import {
-  isGlinerModel,
+  detectorOptions,
+  isNerDetectorModel,
   outputHeadingForStrategy,
   tabForValidationErrors,
 } from '@studio/routes/AnonymizerBuilderRoute/utils';
@@ -11,24 +12,75 @@ import {
 const model = (name: string, servedModelName: string, id = name): DataDesignerModelOption =>
   ({ id, name, served_model_name: servedModelName }) as DataDesignerModelOption;
 
-describe('isGlinerModel', () => {
+const option = (value: string) => ({ label: value, value });
+
+describe('isNerDetectorModel', () => {
   it('matches on either identifier, regardless of case', () => {
-    expect(isGlinerModel(model('nvidia-gliner-pii', 'nvidia/gliner-PII'))).toBe(true);
-    expect(isGlinerModel(model('pii-detector', 'nvidia/GLiNER-pii'))).toBe(true);
-    expect(isGlinerModel(model('nvidia-gliner-pii', ''))).toBe(true);
+    expect(isNerDetectorModel(model('nvidia-gliner-pii', 'nvidia/gliner-PII'))).toBe(true);
+    expect(isNerDetectorModel(model('pii-detector', 'nvidia/GLiNER-pii'))).toBe(true);
+    expect(isNerDetectorModel(model('nvidia-gliner-pii', ''))).toBe(true);
+  });
+
+  it('matches privacy filters however they are punctuated', () => {
+    expect(isNerDetectorModel(model('privacy-filter', 'openai/privacy-filter'))).toBe(true);
+    expect(isNerDetectorModel(model('openai-privacy_filter', ''))).toBe(true);
+    expect(isNerDetectorModel(model('OpenAI Privacy Filter', ''))).toBe(true);
   });
 
   it('ignores the entity id, whose first segment is the workspace', () => {
     expect(
-      isGlinerModel(model('pii-detector', 'nvidia/nemotron', 'gliner-team/pii-detector'))
+      isNerDetectorModel(model('pii-detector', 'nvidia/nemotron', 'gliner-team/pii-detector'))
     ).toBe(false);
   });
 
   it('does not match general chat models', () => {
-    expect(isGlinerModel(model('nemotron-3-nano-30b-a3b', 'nvidia/nemotron-3-nano-30b-a3b'))).toBe(
-      false
+    expect(
+      isNerDetectorModel(model('nemotron-3-nano-30b-a3b', 'nvidia/nemotron-3-nano-30b-a3b'))
+    ).toBe(false);
+    expect(isNerDetectorModel(model('gpt-oss-120b', 'openai/gpt-oss-120b'))).toBe(false);
+  });
+});
+
+describe('detectorOptions', () => {
+  const models = [
+    model('nemotron-3-nano-30b-a3b', 'nvidia/nemotron-3-nano-30b-a3b'),
+    model('nvidia-gliner-pii', 'nvidia/gliner-PII'),
+    model('privacy-filter', 'openai/privacy-filter'),
+  ];
+  const items = models.map((m) => option(m.id));
+
+  it('keeps every model selectable', () => {
+    expect(detectorOptions(items, models).map((item) => item.value)).toEqual(
+      expect.arrayContaining(items.map((item) => item.value))
     );
-    expect(isGlinerModel(model('gpt-oss-120b', 'openai/gpt-oss-120b'))).toBe(false);
+  });
+
+  it('suggests every known NER family, not only GLiNER', () => {
+    const grouped = detectorOptions(items, models);
+    expect(grouped.slice(0, 2)).toMatchObject([
+      { value: 'nvidia-gliner-pii', group: 'suggested' },
+      { value: 'privacy-filter', group: 'suggested' },
+    ]);
+    expect(grouped[2]).toMatchObject({ value: 'nemotron-3-nano-30b-a3b', group: 'other' });
+  });
+
+  it('preserves the incoming order within a group', () => {
+    const twoGliners = [...models, model('gliner-small', 'nvidia/gliner-small')];
+    expect(
+      detectorOptions(
+        twoGliners.map((m) => option(m.id)),
+        twoGliners
+      ).map((item) => item.value)
+    ).toEqual(['nvidia-gliner-pii', 'privacy-filter', 'gliner-small', 'nemotron-3-nano-30b-a3b']);
+  });
+
+  it('returns every model as Other when no known detector is registered', () => {
+    const chatOnly = models.filter((m) => !isNerDetectorModel(m));
+    const grouped = detectorOptions(
+      chatOnly.map((m) => option(m.id)),
+      chatOnly
+    );
+    expect(grouped.map((item) => item.group)).toEqual(['other']);
   });
 });
 

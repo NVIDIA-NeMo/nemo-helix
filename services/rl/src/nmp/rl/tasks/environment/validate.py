@@ -29,6 +29,13 @@ class EnvironmentPackageValidationError(ValueError):
     """Raised when an environment package fails validation."""
 
 
+# Gym rebuilds every per-server venv from empty, so an offline package is the only source for
+# the agent side as well as the environment: ``uv venv --seed`` installs pip, the agent is built
+# from the image's Gym source and needs its ``build-system.requires``, and ``head_server_deps``
+# pins ray and openai into each venv. Names only -- the versions are the image's, not ours.
+SANDBOX_VENV_DISTRIBUTIONS = ("pip", "setuptools", "setuptools-scm", "ray", "openai")
+
+
 def duplicate_wheel_distributions(wheels_dir: Path) -> dict[str, list[str]]:
     """Return ``{normalized distribution: [versions]}`` for anything vendored twice.
 
@@ -99,6 +106,20 @@ def validate_manifest_against_listing(manifest: EnvironmentManifest, paths: Iter
         non_wheels = sorted(p for p in wheels if not p.endswith(".whl"))
         if non_wheels:
             raise EnvironmentPackageValidationError(f"Non-wheel files in wheels/: {', '.join(non_wheels)}")
+
+        # Warn, not raise: without these a package still installs wherever the sandbox can
+        # reach an index, and rejecting would invalidate packages already uploaded. But on a
+        # deny-default sandbox it surfaces as a 900s readiness timeout, so name it here.
+        vendored = {re.sub(r"[-_.]+", "-", Path(name).name.split("-")[0]).lower() for name in wheels}
+        missing = [name for name in SANDBOX_VENV_DISTRIBUTIONS if name not in vendored]
+        if missing:
+            logger.warning(
+                "wheels/ does not vendor %s. Gym builds each per-server venv from empty and "
+                "installs these before the environment's own code, so a sandbox without egress "
+                "would fail. Regenerate with pi-to-gym-conversion --nemo-rl-root, which "
+                "resolves them into the closure.",
+                ", ".join(missing),
+            )
 
     if isinstance(manifest, AdapterWheelsV1Manifest) and manifest.adapter.agent not in IMAGE_ADAPTER_ALLOWLIST:
         raise EnvironmentPackageValidationError(

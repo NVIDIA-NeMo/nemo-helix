@@ -16,7 +16,9 @@ Fabric owns each adapter's execution mechanism; callers select the adapter rathe
 CLI-versus-library transport.
 
 An optional ``model=`` slug (e.g. ``"openai/gpt-5.4"``) can be passed to ``FabricAgentRuntime`` to
-apply the model to each task config, mirroring Fabric's own Harbor integration.
+apply the model to each task config, mirroring Fabric's own Harbor integration. Passing
+``sandbox=<SandboxProvider>`` runs the same config inside a sandbox instead of on the host (see
+``examples/fabric_container/run_e2e.py``).
 
 The configs are built from ``nemo_fabric``'s typed config objects (``FabricConfig`` etc.), which
 validate structure at construction. That makes this module — like any real Fabric use — require the

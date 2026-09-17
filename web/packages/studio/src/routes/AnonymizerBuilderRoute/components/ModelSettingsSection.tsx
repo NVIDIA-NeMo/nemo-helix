@@ -8,13 +8,15 @@ import { Divider, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import {
   activeRolesForStrategy,
   ANONYMIZER_PARAM_METADATA,
-  GLINER_ROLE,
+  DETECTOR_GROUP_LABELS,
+  DETECTOR_MODEL_HINT,
+  DETECTOR_ROLE,
   ROLE_LABELS,
   supportsSamplingParams,
 } from '@studio/routes/AnonymizerBuilderRoute/constants';
 import type { AnonymizerFormData } from '@studio/routes/AnonymizerBuilderRoute/schema';
 import { useAnonymizerModels } from '@studio/routes/AnonymizerBuilderRoute/useAnonymizerModels';
-import { isGlinerModel } from '@studio/routes/AnonymizerBuilderRoute/utils';
+import { detectorOptions } from '@studio/routes/AnonymizerBuilderRoute/utils';
 import { useMemo, useState, type FC } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
@@ -27,12 +29,7 @@ export const ModelSettingsSection: FC = () => {
   const roles = useMemo(() => activeRolesForStrategy(strategy), [strategy]);
   const { models, items, isLoading, applyModel } = useAnonymizerModels();
 
-  const glinerItems = useMemo(
-    () => items.filter((item) => models.some((m) => m.id === item.value && isGlinerModel(m))),
-    [items, models]
-  );
-
-  const missingGliner = !isLoading && !glinerItems.length;
+  const detectorItems = useMemo(() => detectorOptions(items, models), [items, models]);
 
   return (
     <Stack gap="density-2xl">
@@ -44,7 +41,8 @@ export const ModelSettingsSection: FC = () => {
             <div className="grow">
               <ControlledSearchableSelect
                 aria-label={ROLE_LABELS[role] ?? role}
-                options={role === GLINER_ROLE ? glinerItems : items}
+                options={role === DETECTOR_ROLE ? detectorItems : items}
+                groupLabels={role === DETECTOR_ROLE ? DETECTOR_GROUP_LABELS : undefined}
                 isLoading={isLoading}
                 triggerPlaceholder="Select a model"
                 searchPlaceholder="Search models..."
@@ -57,11 +55,7 @@ export const ModelSettingsSection: FC = () => {
                 formFieldProps={{
                   slotLabel: 'Model',
                   required: true,
-                  ...(role === GLINER_ROLE &&
-                    missingGliner && {
-                      status: 'error' as const,
-                      slotError: 'Requires a GLiNER model',
-                    }),
+                  ...(role === DETECTOR_ROLE && { slotInfo: DETECTOR_MODEL_HINT }),
                 }}
               />
             </div>

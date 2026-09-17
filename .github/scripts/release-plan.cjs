@@ -11,6 +11,22 @@ const SEMVER_PATTERN = new RegExp(
     "(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
 );
 
+function resolveNightlyBaseVersion(sourceBranch, tags) {
+  const [major, minor] = sourceBranch
+    .slice("release/".length)
+    .split(".")
+    .map(Number);
+  let nextPatch = 0;
+  for (const { name } of tags) {
+    if (!SEMVER_CORE_PATTERN.test(name)) continue;
+    const [tagMajor, tagMinor, patch] = name.split(".").map(Number);
+    if (tagMajor === major && tagMinor === minor) {
+      nextPatch = Math.max(nextPatch, patch + 1);
+    }
+  }
+  return `${major}.${minor}.${nextPatch}`;
+}
+
 function selectArtifacts(value, allowedArtifacts, label, inputName) {
   if (!value.trim()) {
     return [];
@@ -182,4 +198,4 @@ async function resolveReleasePlan({
   };
 }
 
-module.exports = { resolveReleasePlan };
+module.exports = { resolveReleasePlan, resolveNightlyBaseVersion };

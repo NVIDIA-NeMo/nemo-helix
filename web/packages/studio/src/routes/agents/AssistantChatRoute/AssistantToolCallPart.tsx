@@ -25,6 +25,7 @@ import {
   ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
   ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
   ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
+  ASSISTANT_THINKING_TOOL_NAME,
   ASSISTANT_WORK_DETAILS_LABEL,
   isAssistantJobProgressToolName,
   toAssistantToolArgs,
@@ -165,6 +166,11 @@ const AssistantToolCallPartContent = ({
   if (toolName === ASSISTANT_COLLAPSED_THINKING_TOOL_NAME) {
     const text = getStringArg(args, ['text']);
     return text ? <CollapsedThinkingToolCall text={text} /> : null;
+  }
+
+  if (toolName === ASSISTANT_THINKING_TOOL_NAME) {
+    const text = getStringArg(args, ['text']);
+    return text ? <CollapsedThinkingToolCall label="Thinking" text={text} /> : null;
   }
 
   if (isAssistantJobProgressToolName(toolName)) {

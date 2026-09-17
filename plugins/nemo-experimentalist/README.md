@@ -402,7 +402,7 @@ The plugin registers two entry points: `nemo.cli.agents`, which mounts the
 `experimentalist` verb under `nemo agents`, and `nemo.skills`, which ships the
 skills bundled with the plugin.
 
-Requires `uv >=0.9.14`. Source dependencies are pinned to tagged or immutable
+Requires `uv >=0.10.10`. Source dependencies are pinned to tagged or immutable
 revisions in the workspace root `pyproject.toml` under `[tool.uv.sources]`,
 where each pin carries a comment explaining why.
 

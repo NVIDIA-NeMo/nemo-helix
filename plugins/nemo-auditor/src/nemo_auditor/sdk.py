@@ -16,16 +16,14 @@ Mounted on :class:`~nemo_platform.NeMoPlatform` as ``client.auditor`` via the
 - ``client.auditor.list_jobs(workspace=...)`` — list submitted audit jobs.
 - ``client.auditor.get_job(job_name, workspace=...)`` — fetch a single audit job.
 - ``client.auditor.run(config=..., target=..., workspace=...)`` — in-process
-  audit using :class:`~nemo_auditor.jobs.audit.AuditJob`. Delegates to
-  :meth:`~nemo_platform_plugin.scheduler.NemoJobScheduler.run_local`, which
-  constructs a tempdir-backed :class:`~nemo_platform_plugin.job_context.JobContext`
-  and writes report artifacts via
-  :class:`~nemo_platform_plugin.job_results.LocalJobResults`.
+  audit using :class:`~nemo_auditor.jobs.audit.AuditJob`.
 """
 
 from __future__ import annotations
 
 import asyncio
+import tempfile
+from pathlib import Path
 
 from nemo_auditor.entities import AuditConfig, AuditTarget
 from nemo_auditor.jobs.audit import AuditInputSpec, AuditJob
@@ -34,8 +32,21 @@ from nemo_auditor.sdk_resources.job_resources import AsyncAuditorJobResource, Au
 from nemo_auditor.sdk_resources.targets import _AsyncTargetResource, _TargetResource
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.entities import parse_qualified_name
-from nemo_platform_plugin.scheduler import NemoJobScheduler
+from nemo_platform_plugin.job_context import JobContext, StoragePaths
+from nemo_platform_plugin.job_results import LocalJobResults
 from nemo_platform_plugin.sdk import NemoPluginSDKResources
+
+
+def _local_job_context(*, workspace: str, job_name: str) -> JobContext:
+    root = Path(tempfile.mkdtemp(prefix="nemo-auditor-", suffix=f"-{job_name}"))
+    storage = StoragePaths(ephemeral=root / "ephemeral", persistent=root / "persistent")
+    storage.ephemeral.mkdir(parents=True, exist_ok=True)
+    storage.persistent.mkdir(parents=True, exist_ok=True)
+    return JobContext(
+        workspace=workspace,
+        storage=storage,
+        results=LocalJobResults(root=storage.persistent / "results"),
+    )
 
 
 class AuditorPluginResource:
@@ -141,10 +152,9 @@ class AuditorPluginResource:
         resolved_config = self._resolve_config(config, default_workspace=ws)
         resolved_target = self._resolve_target(target, default_workspace=ws)
         spec = AuditInputSpec(config=resolved_config, target=resolved_target)
-        return NemoJobScheduler().run_local(
-            AuditJob,
+        return AuditJob().run(
             spec.model_dump(mode="json"),
-            workspace=ws,
+            ctx=_local_job_context(workspace=ws, job_name=AuditJob.name),
             sdk=self._platform,
         )
 
@@ -251,21 +261,17 @@ class AsyncAuditorPluginResource:
     ) -> dict:
         """Async twin of :meth:`AuditorPluginResource.run`.
 
-        ``NemoJobScheduler.run_local`` is sync and itself calls
-        ``asyncio.run`` to drive ``to_spec``, so we push it onto a worker
-        thread to keep the caller's event loop free — same pattern as
-        :class:`nemo_evaluator.sdk._executor._AsyncEvaluatorPluginExecutor.run_local`.
+        The job body is sync and may use blocking filesystem/subprocess work,
+        so the async resource runs it on a worker thread.
         """
         ws = workspace or "default"
         resolved_config = await self._resolve_config(config, default_workspace=ws)
         resolved_target = await self._resolve_target(target, default_workspace=ws)
         spec = AuditInputSpec(config=resolved_config, target=resolved_target)
-        scheduler = NemoJobScheduler()
         return await asyncio.to_thread(
-            scheduler.run_local,
-            AuditJob,
+            AuditJob().run,
             spec.model_dump(mode="json"),
-            workspace=ws,
+            ctx=_local_job_context(workspace=ws, job_name=AuditJob.name),
             async_sdk=self._platform,
         )
 

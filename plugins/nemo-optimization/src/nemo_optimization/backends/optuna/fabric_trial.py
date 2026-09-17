@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
+from nemo_evaluator_sdk.agent_eval.metrics import ToolArgumentMatchesInputMetric, ToolCallCountMetric
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
-from nemo_evaluator_sdk.agent_eval.runtimes.fabric.hook_loading import FabricTaskHookLoadError, load_fabric_task_hook
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nemo_evaluator_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
@@ -24,6 +24,7 @@ from nemo_evaluator_sdk.metrics.tunable_rag_evaluator import TunableRagEvaluator
 from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.evidence import EVIDENCE_TRACE
 from nemo_evaluator_sdk.values.models import Model
+from pydantic import ValidationError
 
 from nemo_optimization.backends.optuna.atif_metadata import build_atif_trial_tags
 from nemo_optimization.backends.optuna.config_overlay import apply_suggestions
@@ -49,11 +50,11 @@ class FabricTrialEvaluator:
         self._experiment_id = experiment_id
         self._eval_config = _eval_config(payload)
         fabric_eval = self._eval_config.get("fabric") if isinstance(self._eval_config.get("fabric"), Mapping) else {}
-        run_hook_spec = self._eval_config.get("run_hook")
-        try:
-            self._task_hook = load_fabric_task_hook(run_hook_spec if isinstance(run_hook_spec, Mapping) else None)
-        except FabricTaskHookLoadError as exc:
-            raise StudyDriverError(str(exc)) from exc
+        if self._eval_config.get("run_hook") is not None:
+            raise StudyDriverError(
+                "eval.run_hook is no longer supported: declare MCP servers statically under mcp.servers and "
+                "score any per-run audit with an evaluator."
+            )
         self._fabric_base_dir = _optional_path(
             fabric_eval.get("base_dir") if isinstance(fabric_eval, Mapping) else None
         )
@@ -61,11 +62,9 @@ class FabricTrialEvaluator:
         self._capture_trajectory = bool(
             fabric_eval.get("capture_trajectory", True) if isinstance(fabric_eval, Mapping) else True
         )
-        # Hooks often own per-task sockets/files; default serial when a hook is configured.
-        default_parallelism = 1 if self._task_hook is not None else 4
         general = self._eval_config.get("general")
         general = general if isinstance(general, Mapping) else {}
-        self._parallelism = int(general.get("max_concurrency", default_parallelism))
+        self._parallelism = int(general.get("max_concurrency", 4))
         self._trace_map: list[dict[str, Any]] = []
         # Validate dataset/metrics once at construction so config errors fail before the study loop.
         build_agent_eval_tasks(self._payload)
@@ -94,7 +93,6 @@ class FabricTrialEvaluator:
                 trial_number=trial_number,
                 rep=rep,
             ),
-            task_hook=self._task_hook,
         )
         result = AgentEvaluator().run_sync(
             tasks=tasks,
@@ -237,12 +235,49 @@ def _build_metrics(payload: Mapping[str, Any], eval_config: Mapping[str, Any]) -
         if not isinstance(evaluator, Mapping):
             continue
         evaluator_type = evaluator.get("_type") or evaluator.get("type")
-        if evaluator_type not in {"tunable_rag_evaluator", "tunable-rag-evaluator"}:
+        if evaluator_type in {"tunable_rag_evaluator", "tunable-rag-evaluator"}:
+            metrics.append(_build_tunable_rag_metric(payload, evaluator))
+        elif evaluator_type in {"tool_call_count", "tool-call-count"}:
+            metrics.append(_build_tool_call_count_metric(evaluator))
+        elif evaluator_type in {"tool_argument_matches_input", "tool-argument-matches-input"}:
+            metrics.append(_build_tool_argument_matches_input_metric(evaluator))
+        else:
             raise StudyDriverError(f"Unsupported evaluator type for optimize trial path: {evaluator_type!r}")
-        metrics.append(_build_tunable_rag_metric(payload, evaluator))
     if not metrics:
         raise StudyDriverError("No supported eval.evaluators were found.")
     return metrics
+
+
+def _build_tool_argument_matches_input_metric(evaluator: Mapping[str, Any]) -> ToolArgumentMatchesInputMetric:
+    tool_name = _required_tool_name(evaluator, "tool_argument_matches_input")
+    fields = {key: evaluator[key] for key in ("argument", "input_key", "normalize") if key in evaluator}
+    try:
+        return ToolArgumentMatchesInputMetric(tool_name=tool_name, **fields)
+    except ValidationError as exc:
+        raise StudyDriverError(f"tool_argument_matches_input evaluator is invalid: {exc}") from exc
+
+
+def _required_tool_name(evaluator: Mapping[str, Any], evaluator_type: str) -> str:
+    tool_name = evaluator.get("tool_name")
+    if not isinstance(tool_name, str) or not tool_name.strip():
+        raise StudyDriverError(f"{evaluator_type} evaluator requires a non-empty tool_name.")
+    return tool_name.strip()
+
+
+def _build_tool_call_count_metric(evaluator: Mapping[str, Any]) -> ToolCallCountMetric:
+    tool_name = _required_tool_name(evaluator, "tool_call_count")
+    expected_calls = evaluator.get("expected_calls", 1)
+    # A bool is an int in Python and a float would silently truncate, so both are rejected.
+    if isinstance(expected_calls, bool) or not isinstance(expected_calls, int):
+        raise StudyDriverError(
+            f"tool_call_count evaluator expected_calls must be a non-negative integer, got {expected_calls!r}."
+        )
+    try:
+        return ToolCallCountMetric(tool_name=tool_name, expected_calls=expected_calls)
+    except ValidationError as exc:
+        raise StudyDriverError(
+            f"tool_call_count evaluator expected_calls must be a non-negative integer: {exc}"
+        ) from exc
 
 
 def _build_tunable_rag_metric(payload: Mapping[str, Any], evaluator: Mapping[str, Any]) -> TunableRagEvaluatorMetric:
@@ -326,7 +361,38 @@ def _runtime_agent_config(config: Mapping[str, Any]) -> dict[str, Any]:
     runtime_config = copy.deepcopy(dict(config))
     runtime_config.pop("eval", None)
     runtime_config.pop("optimizer", None)
+    resolve_mcp_server_paths(runtime_config, root=Path.cwd())
     return runtime_config
+
+
+def resolve_mcp_server_paths(config: dict[str, Any], *, root: Path) -> None:
+    """Make bundle-relative stdio MCP server paths absolute, in place.
+
+    Paths in the optimize config are bundle-relative, but the harness spawns a stdio MCP server
+    from the per-task workspace, so a relative ``args`` entry (or a relative ``url`` that names a
+    file) would not resolve there. Anything that exists under ``root`` is rewritten; flags, commands
+    on ``PATH`` and already-absolute paths are left alone.
+    """
+    mcp = config.get("mcp")
+    servers = mcp.get("servers") if isinstance(mcp, Mapping) else None
+    if not isinstance(servers, Mapping):
+        return
+    for server in servers.values():
+        if not isinstance(server, dict) or server.get("transport") != "stdio":
+            continue
+        url = server.get("url")
+        if isinstance(url, str) and _is_bundle_file(url, root):
+            server["url"] = str((root / url).resolve())
+        args = server.get("args")
+        if isinstance(args, list):
+            server["args"] = [
+                str((root / arg).resolve()) if isinstance(arg, str) and _is_bundle_file(arg, root) else arg
+                for arg in args
+            ]
+
+
+def _is_bundle_file(value: str, root: Path) -> bool:
+    return bool(value) and not value.startswith("-") and not Path(value).is_absolute() and (root / value).is_file()
 
 
 def _optional_path(value: Any) -> Path | None:

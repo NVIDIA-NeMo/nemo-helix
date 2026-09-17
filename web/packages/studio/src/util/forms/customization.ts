@@ -311,18 +311,13 @@ export const customizationFormSchema = z
   });
 
 /**
- * A job spec carrying `deployment_config`: the name of a `ModelDeploymentConfig`
- * the job's model_entity task resolves and deploys from once training finishes.
+ * `deployment_config` on a job spec: the name of a `ModelDeploymentConfig` the job's
+ * model_entity task resolves and deploys from once training finishes.
  *
- * Stated as an intersection because the field is only on `UnslothJobInput` in the
- * generated SDK today — `AutomodelJobInput` and `RlJobInput` do not declare it yet,
- * though the task that consumes it (`launch_model`) is backend-agnostic and already
- * handles all three. Delete the intersection once the automodel and RL job inputs
- * carry the field and the SDK is regenerated; nothing else here has to change.
+ * Omitted rather than sent as `undefined` because every job spec is `extra="forbid"`,
+ * and a key present with no value is not the same as an absent key to a caller that
+ * spreads the result.
  */
-type WithDeploymentConfig<T> = T & { deployment_config?: string };
-
-/** Omitted rather than sent as `undefined`: the job schemas are `extra="forbid"`. */
 const deploymentConfigField = (name: string | undefined) =>
   name ? { deployment_config: name } : {};
 
@@ -334,7 +329,7 @@ export const formToAutomodelCreate = (
   const usesLora =
     training.finetuning_type === 'lora' || training.finetuning_type === 'lora_merged';
   const isDistillation = training.training_type === 'distillation';
-  const spec: WithDeploymentConfig<AutomodelJobInput> = {
+  const spec: AutomodelJobInput = {
     ...f.automodel,
     integrations: cleanIntegrations(f.automodel.integrations),
     training: {
@@ -399,7 +394,7 @@ export const formToRlCreate = (
   if (f.grpo.trainingType === 'grpo') {
     const t = f.rl.training;
     const isLora = f.grpo.finetuning_type === RlGRPOTrainingFinetuningType.lora;
-    const spec: WithDeploymentConfig<RlJobInput> = {
+    const spec: RlJobInput = {
       model: f.rl.model,
       dataset: f.rl.dataset,
       environment: f.grpo.environmentFileset || undefined,

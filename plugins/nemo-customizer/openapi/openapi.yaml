@@ -1221,45 +1221,111 @@ components:
       required:
       - training
       title: AutomodelDatasetSpec
-    AutomodelEmbeddingSpec:
+    AutomodelDeploymentParams:
       properties:
-        train_n_passages:
+        gpu:
           type: integer
-          minimum: 2.0
-          title: Train N Passages
-          default: 5
-        eval_negative_size:
-          title: Eval Negative Size
-          type: integer
-          minimum: 1.0
-        do_gradient_checkpointing:
+          exclusiveMinimum: 0.0
+          title: Gpu
+          description: Number of GPUs required for the deployment.
+          default: 1
+        additional_envs:
+          title: Additional Envs
+          description: Additional environment variables for the deployment.
+          additionalProperties:
+            type: string
+          type: object
+        disk_size:
+          title: Disk Size
+          description: Disk size for the deployment.
+          type: string
+        image_name:
+          title: Image Name
+          description: Container image name from NGC. If not specified, defaults to
+            multi-llm.
+          type: string
+        image_tag:
+          title: Image Tag
+          description: Container image tag from NGC.
+          type: string
+        lora_enabled:
           type: boolean
-          title: Do Gradient Checkpointing
-          default: false
-        query_max_length:
-          type: integer
-          minimum: 1.0
-          title: Query Max Length
-          default: 512
-        passage_max_length:
-          type: integer
-          minimum: 1.0
-          title: Passage Max Length
-          default: 512
-        query_prefix:
-          type: string
-          title: Query Prefix
-          description: Collator-side prefix; BiEncoderCollator adds a space.
-          default: 'query:'
-        passage_prefix:
-          type: string
-          title: Passage Prefix
-          description: Collator-side prefix; BiEncoderCollator adds a space.
-          default: 'passage:'
+          title: Lora Enabled
+          description: When auto-deploying a full SFT training, setting this true
+            allows subsequent LoRA adapters to be deployed against it.
+          default: true
+        tool_call_config:
+          allOf:
+          - $ref: '#/components/schemas/AutomodelToolCallParams'
+          description: Tool calling configuration override for the NIM deployment.
       additionalProperties: false
       type: object
-      title: AutomodelEmbeddingSpec
-      description: Collator and dataset knobs for bi_encoder / cross_encoder recipes.
+      title: AutomodelDeploymentParams
+      description: 'Inline deployment parameters for auto-deploying a trained model.
+
+
+        Used in :class:`AutomodelJobInput.deployment_config` and passed through to
+
+        the model_entity task at compile time. When unset, no deployment is launched.'
+    AutomodelExportSpec:
+      properties:
+        primary:
+          type: string
+          enum:
+          - onnx
+          - hf
+          title: Primary
+          description: Artifact at the fileset root. Use 'hf' when the NIM loads PyTorch
+            weights.
+          default: onnx
+        opset:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Opset
+          default: 17
+        precision:
+          type: string
+          enum:
+          - fp32
+          - fp16
+          title: Precision
+          description: ONNX graph dtype. Defaults to fp16 to match typical Hugging
+            Face checkpoints.
+          default: fp16
+        attn_implementation:
+          type: string
+          enum:
+          - eager
+          - sdpa
+          - flash_attention_2
+          title: Attn Implementation
+          description: Attention backend for tracing. The exporter cannot trace SDPA/GQA.
+          default: eager
+        pooling:
+          type: string
+          enum:
+          - avg
+          - cls
+          - last
+          title: Pooling
+          description: Embedding pooling. Ignored for cross_encoder.
+          default: avg
+        normalize:
+          type: boolean
+          title: Normalize
+          description: L2-normalize embeddings. Ignored for cross_encoder.
+          default: true
+        dimensions:
+          type: boolean
+          title: Dimensions
+          description: Add a Matryoshka 'dimensions' input that truncates and renormalizes
+            embeddings.
+          default: false
+      additionalProperties: false
+      type: object
+      title: AutomodelExportSpec
+      description: ONNX export and fileset layout. ``primary`` is the artifact at
+        the root; the other is under ``alternates/``.
     AutomodelJobInput:
       properties:
         name:
@@ -1284,6 +1350,17 @@ components:
           $ref: '#/components/schemas/AutomodelOutputRequest'
         integrations:
           $ref: '#/components/schemas/IntegrationsSpec'
+        deployment_config:
+          anyOf:
+          - type: string
+            title: Reference
+            description: A reference to AutomodelDeploymentParams.
+          - $ref: '#/components/schemas/AutomodelDeploymentParams'
+          title: Deployment Config
+          description: Deployment configuration for auto-deploying the model after
+            training. Pass a string to reference an existing ModelDeploymentConfig
+            by name ('my-config' or 'workspace/my-config'). An object provides inline
+            NIM deployment parameters. Omit to skip deployment.
       additionalProperties: false
       type: object
       required:
@@ -1316,6 +1393,17 @@ components:
           $ref: '#/components/schemas/AutomodelOutputResponse'
         integrations:
           $ref: '#/components/schemas/IntegrationsSpec'
+        deployment_config:
+          anyOf:
+          - type: string
+            title: Reference
+            description: A reference to AutomodelDeploymentParams.
+          - $ref: '#/components/schemas/AutomodelDeploymentParams'
+          title: Deployment Config
+          description: Deployment configuration for auto-deploying the model after
+            training. Pass a string to reference an existing ModelDeploymentConfig
+            by name ('my-config' or 'workspace/my-config'). An object provides inline
+            NIM deployment parameters. Omit to skip deployment.
       additionalProperties: false
       type: object
       required:
@@ -1665,6 +1753,51 @@ components:
       additionalProperties: false
       type: object
       title: AutomodelParallelismSpec
+    AutomodelRetrievalSpec:
+      properties:
+        train_n_passages:
+          type: integer
+          minimum: 2.0
+          title: Train N Passages
+          default: 5
+        eval_negative_size:
+          title: Eval Negative Size
+          type: integer
+          minimum: 1.0
+        do_gradient_checkpointing:
+          type: boolean
+          title: Do Gradient Checkpointing
+          default: false
+        query_max_length:
+          type: integer
+          minimum: 1.0
+          title: Query Max Length
+          default: 512
+        passage_max_length:
+          type: integer
+          minimum: 1.0
+          title: Passage Max Length
+          default: 512
+        query_prefix:
+          type: string
+          title: Query Prefix
+          description: Collator-side prefix; BiEncoderCollator adds a space.
+          default: 'query:'
+        passage_prefix:
+          type: string
+          title: Passage Prefix
+          description: Collator-side prefix; BiEncoderCollator adds a space.
+          default: 'passage:'
+        export:
+          allOf:
+          - $ref: '#/components/schemas/AutomodelExportSpec'
+          description: Artifact layout and ONNX export settings. Defaults are applied
+            when omitted.
+      additionalProperties: false
+      type: object
+      title: AutomodelRetrievalSpec
+      description: Dataset, collator, and export knobs for bi_encoder / cross_encoder
+        recipes.
     AutomodelScheduleSpec:
       properties:
         epochs:
@@ -1679,6 +1812,13 @@ components:
         val_check_interval:
           title: Val Check Interval
           type: number
+        validation_split:
+          title: Validation Split
+          description: Validation split to use when a validation dataset is not provided.
+          default: 0.1
+          type: number
+          exclusiveMaximum: 1.0
+          exclusiveMinimum: 0.0
         seed:
           title: Seed
           type: integer
@@ -1687,6 +1827,27 @@ components:
       additionalProperties: false
       type: object
       title: AutomodelScheduleSpec
+    AutomodelToolCallParams:
+      properties:
+        tool_call_parser:
+          title: Tool Call Parser
+          description: Name of the tool call parser to use (e.g., 'openai', 'hermes',
+            'pythonic', 'llama3_json', 'mistral').
+          type: string
+        tool_call_plugin:
+          title: Tool Call Plugin
+          description: 'Reference to a fileset containing the custom tool call plugin
+            Python file. Expected format: ''{workspace}/{fileset_name}''.'
+          type: string
+          pattern: ^[\w\-.]+/[\w\-.]+$
+        auto_tool_choice:
+          title: Auto Tool Choice
+          description: Whether to enable automatic tool choice.
+          type: boolean
+      additionalProperties: false
+      type: object
+      title: AutomodelToolCallParams
+      description: Tool calling configuration for NIM deployments.
     AutomodelTrainingSpec:
       properties:
         training_type:
@@ -1772,11 +1933,11 @@ components:
           type: boolean
           title: Offload Teacher
           default: false
-        embedding:
+        retrieval:
           allOf:
-          - $ref: '#/components/schemas/AutomodelEmbeddingSpec'
-          description: Retrieval collator/dataset knobs. Used when recipe is bi_encoder
-            or cross_encoder.
+          - $ref: '#/components/schemas/AutomodelRetrievalSpec'
+          description: Retrieval dataset, collator, and export knobs. Used when recipe
+            is bi_encoder or cross_encoder.
       additionalProperties: false
       type: object
       title: AutomodelTrainingSpec
@@ -2383,6 +2544,52 @@ components:
       - type
       title: RlDPOTraining
       description: "Direct Preference Optimization (full-weight only \u2014 PEFT unsupported)."
+    RlDeploymentParams:
+      properties:
+        gpu:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Gpu
+          description: Number of GPUs required for the deployment.
+          default: 1
+        additional_envs:
+          title: Additional Envs
+          description: Additional environment variables for the deployment.
+          additionalProperties:
+            type: string
+          type: object
+        disk_size:
+          title: Disk Size
+          description: Disk size for the deployment.
+          type: string
+        image_name:
+          title: Image Name
+          description: Container image name from NGC. If not specified, defaults to
+            multi-llm.
+          type: string
+        image_tag:
+          title: Image Tag
+          description: Container image tag from NGC.
+          type: string
+        lora_enabled:
+          type: boolean
+          title: Lora Enabled
+          description: When auto-deploying a full-weight training, setting this true
+            allows subsequent LoRA adapters to be deployed against it.
+          default: true
+        tool_call_config:
+          allOf:
+          - $ref: '#/components/schemas/RlToolCallParams'
+          description: Tool calling configuration override for the NIM deployment.
+      additionalProperties: false
+      type: object
+      title: RlDeploymentParams
+      description: 'Inline deployment parameters for auto-deploying a trained model.
+
+
+        Used in :class:`RlJobInput.deployment_config` and passed through to the
+
+        model_entity task at compile time. When unset, no deployment is launched.'
     RlGRPOTraining:
       properties:
         optimizer_type:
@@ -2852,6 +3059,17 @@ components:
           $ref: '#/components/schemas/IntegrationsSpec'
         output:
           $ref: '#/components/schemas/RlOutputRequest'
+        deployment_config:
+          anyOf:
+          - type: string
+            title: Reference
+            description: A reference to RlDeploymentParams.
+          - $ref: '#/components/schemas/RlDeploymentParams'
+          title: Deployment Config
+          description: Deployment configuration for auto-deploying the model after
+            training. Pass a string to reference an existing ModelDeploymentConfig
+            by name ('my-config' or 'workspace/my-config'). An object provides inline
+            NIM deployment parameters. Omit to skip deployment.
       additionalProperties: false
       type: object
       required:
@@ -2893,6 +3111,17 @@ components:
           allOf:
           - $ref: '#/components/schemas/RlOutputResponse'
           description: Output artifact created by this job.
+        deployment_config:
+          anyOf:
+          - type: string
+            title: Reference
+            description: A reference to RlDeploymentParams.
+          - $ref: '#/components/schemas/RlDeploymentParams'
+          title: Deployment Config
+          description: Deployment configuration for auto-deploying the model after
+            training. Pass a string to reference an existing ModelDeploymentConfig
+            by name ('my-config' or 'workspace/my-config'). An object provides inline
+            NIM deployment parameters. Omit to skip deployment.
       additionalProperties: false
       type: object
       required:
@@ -3260,6 +3489,27 @@ components:
         ``overlong_buffer_length`` tokens before ``max_response_length``; ``stop_properly_penalty_coef``
 
         scales the reward of anything truncated outright.'
+    RlToolCallParams:
+      properties:
+        tool_call_parser:
+          title: Tool Call Parser
+          description: Name of the tool call parser to use (e.g., 'openai', 'hermes',
+            'pythonic', 'llama3_json', 'mistral').
+          type: string
+        tool_call_plugin:
+          title: Tool Call Plugin
+          description: 'Reference to a fileset containing the custom tool call plugin
+            Python file. Expected format: ''{workspace}/{fileset_name}''.'
+          type: string
+          pattern: ^[\w\-.]+/[\w\-.]+$
+        auto_tool_choice:
+          title: Auto Tool Choice
+          description: Whether to enable automatic tool choice.
+          type: boolean
+      additionalProperties: false
+      type: object
+      title: RlToolCallParams
+      description: Tool calling configuration for NIM deployments.
     SecretRef:
       type: string
       pattern: ^[a-z0-9_-]+(/[a-z0-9_-]+)?$

@@ -6,7 +6,7 @@
 Plugin authors subclass :class:`NemoJob` and register the class under the
 ``nemo.jobs`` entry-point group. The platform (or SDK) instantiates each class
 and invokes it through the :class:`~nemo_platform_plugin.scheduler.NemoJobScheduler`
-for local execution, or POSTs it to the plugin service for remote submission.
+for remote submission.
 
 Mental model — *Job = spec + profile + options*:
 
@@ -27,14 +27,12 @@ it executes — plugin authors never make a class-level sync/async choice:
   ``def``. They run in the task container, where there is no event loop
   and most work calls into sync library protocols.
 
-The scheduler runs the async lifecycle methods through a single
-``asyncio.run`` at the top of :meth:`NemoJobScheduler.run_local`; the
-sync ``run`` is invoked directly from the resulting canonical spec.
-
 Example::
 
     # my_plugin/jobs/train.py
+    from nemo_platform_plugin.client.client import NemoClient
     from nemo_platform_plugin.job import NemoJob
+    from nemo_platform_plugin.job_context import JobContext
     from pydantic import BaseModel
 
     class TrainSpec(BaseModel):
@@ -47,7 +45,13 @@ Example::
         container   = "gpu-tasks"
         spec_schema = TrainSpec
 
-        def run(self, config: dict) -> dict:
+        def run(
+            self,
+            config: dict,
+            *,
+            ctx: JobContext,
+            client: NemoClient,
+        ) -> dict:
             # config is the spec as a dict, validated server-side against spec_schema
             spec = TrainSpec.model_validate(config)
             ...
@@ -60,8 +64,7 @@ Example::
 Entry-point key convention: ``<plugin-name>.<job-name>``, e.g.
 ``example.say-hello``. This lets
 :func:`~nemo_platform_plugin.discovery.discover_jobs` resolve jobs unambiguously
-across plugins; programmatic execution goes through
-:meth:`nemo_platform_plugin.scheduler.NemoJobScheduler.run_local`.
+across plugins.
 """
 
 from __future__ import annotations
@@ -104,7 +107,7 @@ class NemoJob(_NamedPlugin):
 
         Container image key for remote execution (e.g. ``"gpu-tasks"``,
         ``"cpu-tasks"``). Used by the Jobs service to pick the right
-        container image for each step. Ignored for local execution.
+        container image for each step.
 
     .. attribute:: execution_provider
         :type: str
@@ -154,9 +157,9 @@ class NemoJob(_NamedPlugin):
         :type: bool
 
         Temporary CLI compatibility knob. ``True`` keeps the generated
-        ``<job> run|submit|explain`` command group. ``False`` registers
-        ``<job>`` itself as the remote submit command and omits the legacy
-        ``run``, ``submit``, and ``explain`` verbs.
+        ``<job> submit|explain`` command group. ``False`` registers
+        ``<job>`` itself as the remote submit command, keeps ``<job> explain``
+        for compatibility, and omits the legacy ``submit`` verb.
 
     Plugin-owned options:
 
@@ -211,19 +214,19 @@ class NemoJob(_NamedPlugin):
     def run(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         """Execute the job with the given config and return results.
 
-        The abstract signature uses ``(*args, **kwargs) -> Any`` so concrete
+        The abstract signature accepts ``*args`` / ``**kwargs`` so concrete
         jobs can expose their precise framework-managed dependencies without
         tripping method-override checks. At runtime, the first positional
         argument is still the canonical spec dict and keyword-only parameters
-        (``ctx: JobContext``, ``sdk``, ``async_sdk``, ``is_local``) are resolved
-        by name via signature-based DI.
+        (``ctx: JobContext``, typed clients, SDK handles, and other
+        framework-managed dependencies) are passed explicitly by the task
+        entrypoint.
 
         Args:
             config: The validated spec serialised to a ``dict``. When
-                :attr:`spec_schema` is declared the scheduler validates
-                the submitter's input against it and passes
-                ``spec.model_dump()``; otherwise the raw input flows
-                through unchanged.
+                :attr:`spec_schema` is declared, the service route adapter
+                validates the submitter's input and passes ``spec.model_dump()``;
+                otherwise the raw input flows through unchanged.
 
         Returns:
             A plain JSON-serialisable ``dict``.
@@ -245,10 +248,10 @@ class NemoJob(_NamedPlugin):
         async I/O is the right default — and is a class-level
         transformation that doesn't depend on instance state.
 
-        Runs on the submitter side before local ``run`` and on the plugin
-        service before custom ``compile``. The default implementation is the
-        identity function — valid only when :attr:`input_spec_schema` is
-        ``None``, which means input and canonical shapes coincide.
+        Runs in the plugin service before custom ``compile``. The default
+        implementation is the identity function — valid only when
+        :attr:`input_spec_schema` is ``None``, which means input and canonical
+        shapes coincide.
 
         Plugin authors override this when they want the submitter to type a
         human-friendly shape (e.g. dataset name) that expands to the
@@ -259,14 +262,10 @@ class NemoJob(_NamedPlugin):
             input_spec: Validated :attr:`input_spec_schema` instance.
             workspace: Workspace scope (used for entity-client scoping).
             entity_client: Entity client for resolving names to IDs.
-            async_sdk: ``AsyncNeMoPlatform`` handle. ``to_spec`` runs in
-                the API process and is itself ``async``, so the framework
-                only offers the async client here — the parameter name
-                follows the codebase convention (``sdk`` is sync,
-                ``async_sdk`` is async).
-            is_local: Whether this transformation is running for local
-                scheduler execution. The plugin-service route adapter passes
-                ``False``.
+            async_sdk: ``AsyncNeMoPlatform`` handle for platform-backed
+                resolution.
+            is_local: Compatibility flag for older submitter-side transforms.
+                The plugin-service route adapter passes ``False``.
 
         Returns:
             A :attr:`spec_schema` instance.
@@ -334,9 +333,7 @@ class NemoJob(_NamedPlugin):
 
         The default implementation logs at INFO. Service-specific
         subclasses override to publish to the Jobs service, a callback
-        URL, or another structured sink, and typically guard on injected
-        ``is_local`` to no-op when there's no platform job record to
-        report against.
+        URL, or another structured sink.
 
         The four fields cover both "samples processed" / "work-unit
         counter" reporting and "status transition + free-form details"

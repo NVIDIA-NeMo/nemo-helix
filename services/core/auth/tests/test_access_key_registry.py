@@ -128,6 +128,7 @@ async def test_registry_persists_created_key_metadata() -> None:
         status="ACTIVE",
         issuer="https://platform.example.com/apis/auth",
         audiences=["nemo-platform-access-key"],
+        scope=["intake", "entities"],
         token="secret-token",
         token_type="Bearer",
     )
@@ -139,6 +140,7 @@ async def test_registry_persists_created_key_metadata() -> None:
     assert saved.name == "ak_example"
     assert saved.key_name == "ci-build"
     assert saved.description == "CI build automation"
+    assert saved.scope == ["intake", "entities"]
     assert "secret-token" not in saved.model_dump_json()
 
 
@@ -197,7 +199,12 @@ async def test_registry_discard_unreturned_is_idempotent_when_record_is_missing(
 @pytest.mark.asyncio
 async def test_registry_lists_principals_keys_with_status_across_pages() -> None:
     entity_client = AsyncMock()
-    active_record = _record().model_copy(update={"audiences": ["nemo-platform-access-key", "nemo-platform-access-key"]})
+    active_record = _record().model_copy(
+        update={
+            "audiences": ["nemo-platform-access-key", "nemo-platform-access-key"],
+            "scope": ["intake", "intake"],
+        }
+    )
     entity_client.list.return_value = SimpleNamespace(
         data=[
             active_record,
@@ -213,6 +220,7 @@ async def test_registry_lists_principals_keys_with_status_across_pages() -> None
     assert [key.jti for key in result.data] == ["ak_example", "ak_revoked"]
     assert [key.status for key in result.data] == ["ACTIVE", "REVOKED"]
     assert result.data[0].audiences == ["nemo-platform-access-key"]
+    assert result.data[0].scope == ["intake"]
     assert result.has_more
     entity_client.list.assert_awaited_once()
     assert entity_client.list.await_args.kwargs["page"] == 1

@@ -6,6 +6,7 @@ import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { EditColumnsMenu } from '@nemo/common/src/components/DataView/internal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import type { Trace, TraceFilter } from '@nemo/sdk/generated/platform/schema';
 import { useListTraces } from '@nemo/sdk/generated/platform/traces';
@@ -15,7 +16,6 @@ import { makeIntakeTraceColumns } from '@studio/components/IntakeLists/intakeTra
 import { getIntakeSessionTraceRoute } from '@studio/routes/utils';
 import { Columns3, TriangleAlert } from 'lucide-react';
 import { type FC } from 'react';
-import { useNavigate } from 'react-router';
 
 export interface InsightTracesTableProps {
   workspace: string;
@@ -29,7 +29,7 @@ export interface InsightTracesTableProps {
  * traces by id and preserves `traceIds` order (no server sort/filter).
  */
 export const InsightTracesTable: FC<InsightTracesTableProps> = ({ workspace, traceIds }) => {
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const dataViewState = useStudioDataViewState();
   const { pageIndex, pageSize } = dataViewState.pagination.state;
   const firstVisibleIndex = pageIndex * pageSize;
@@ -69,8 +69,8 @@ export const InsightTracesTable: FC<InsightTracesTableProps> = ({ workspace, tra
       <IntakeTelemetryDataView<Trace>
         dataViewState={dataViewState}
         makeColumns={makeIntakeTraceColumns()}
-        onRowClick={(trace) =>
-          navigate(getIntakeSessionTraceRoute(workspace, trace.session_id, trace.id))
+        onRowClick={(trace, _index, event) =>
+          openRow(event, getIntakeSessionTraceRoute(workspace, trace.session_id, trace.id))
         }
         toolbarSlotEnd={
           <EditColumnsMenu

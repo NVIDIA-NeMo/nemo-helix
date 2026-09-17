@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from typing import cast
 
+import pytest
 from nemo_evaluator_sdk.agent_eval.evaluator import _describe_target
 from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.base import SandboxProvider
 from nemo_evaluator_sdk.agent_eval.trials import AgentTaskRunner, RunnerInfo
@@ -56,7 +57,6 @@ def test_every_shipped_runner_reports_a_stable_name_and_result_shaping_config() 
 
     from nemo_evaluator_sdk.agent_eval.runtimes.callable_runtime import CallableAgentTaskRunner
     from nemo_evaluator_sdk.agent_eval.runtimes.docker_sandbox import DockerSandboxAgentRuntime
-    from nemo_evaluator_sdk.agent_eval.runtimes.fabric.container_runtime import FabricContainerRuntime
     from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
     from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
     from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
@@ -77,12 +77,12 @@ def test_every_shipped_runner_reports_a_stable_name_and_result_shaping_config() 
         (
             FabricAgentRuntime(config=harness),
             "fabric",
-            {"model", "timeout_s", "adapter_id", "skills", "capture_trajectory"},
+            {"model", "timeout_s", "adapter_id", "skills", "capture_trajectory", "sandbox", "image"},
         ),
         (
-            FabricContainerRuntime(config=harness, provider=cast(SandboxProvider, _Provider())),
-            "fabric_container",
-            {"provider", "image", "adapter_id", "skills"},
+            FabricAgentRuntime(config=harness, sandbox=cast(SandboxProvider, _Provider())),
+            "fabric",
+            {"model", "timeout_s", "adapter_id", "skills", "capture_trajectory", "sandbox", "image"},
         ),
         (
             GymAgentTaskRunner(config=GymRuntimeConfig(agent="a", agent_config="c", resources_server="r")),
@@ -104,6 +104,7 @@ def test_every_shipped_runner_reports_a_stable_name_and_result_shaping_config() 
                 "agent_name",
                 "agent_import_path",
                 "agent_kwargs",
+                "agent_env_from_host",
                 "effective_agent",
                 "n_attempts",
                 "jobs_dir",
@@ -122,7 +123,7 @@ def test_every_shipped_runner_reports_a_stable_name_and_result_shaping_config() 
 
 def test_provider_identity_is_stable_not_a_repr() -> None:
     # str(provider) yields a memory address, so two identical runs would record different metadata.
-    from nemo_evaluator_sdk.agent_eval.runtimes.fabric.container_runtime import FabricContainerRuntime
+    from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 
     class _Provider:
         """Identity-only stub; see the note in the shipped-runners test above."""
@@ -130,9 +131,10 @@ def test_provider_identity_is_stable_not_a_repr() -> None:
         name = "docker"
 
     provider = cast(SandboxProvider, _Provider())
-    info = FabricContainerRuntime(config={"harness": {"adapter_id": "x"}}, provider=provider).runner_info()
-    assert info.config["provider"] == "docker"
-    assert "0x" not in info.config["provider"]
+    info = FabricAgentRuntime(config={"harness": {"adapter_id": "x"}}, sandbox=provider).runner_info()
+    assert info.config["sandbox"] == "docker"
+    assert "0x" not in info.config["sandbox"]
+    assert FabricAgentRuntime(config={"harness": {"adapter_id": "x"}}).runner_info().config["sandbox"] is None
 
 
 def test_fabric_records_a_config_supplied_model_not_just_an_explicit_one() -> None:
@@ -232,32 +234,105 @@ def test_gym_redacts_credential_looking_hydra_params() -> None:
     assert "should-not-be-recorded" not in json.dumps(recorded)
 
 
-def test_harbor_redacts_credential_looking_agent_kwargs() -> None:
-    # agent_kwargs is forwarded verbatim to the Harbor agent's constructor and RunnerInfo.config is
-    # persisted into the run bundle — the same exposure as Gym's hydra_params, so the same redaction.
+@pytest.mark.parametrize(
+    ("settings", "expected"),
+    [
+        # Named by a marker standing as a word in the path.
+        ({"env": {"SSH_PRIVATE_KEY": "not-a-real-private-key"}}, ["env.SSH_PRIVATE_KEY"]),
+        ({"env": {"AWS_ACCESS_KEY_ID": "not-a-real-access-key"}}, ["env.AWS_ACCESS_KEY_ID"]),
+        ({"env": {"KEY_PASSPHRASE": "not-a-real-passphrase"}}, ["env.KEY_PASSPHRASE"]),
+        ({"headers": {"Authorization": "Basic not-a-real-authorization-header"}}, ["headers.Authorization"]),
+        # Named by the shape of the value, for keys the caller invents.
+        ({"env": {"KEYMAT": "-----BEGIN NOT A REAL PRIVATE KEY-----"}}, ["env.KEYMAT"]),
+        ({"env": {"CI_JOB": "glpat-not-a-real-token"}}, ["env.CI_JOB"]),
+        ({"env": {"S": "xoxp-not-a-real-token"}}, ["env.S"]),
+        ({"env": {"T": "ASIANOTAREALKEYVALUE"}}, ["env.T"]),
+        ({"env": {"G": "AIzaSyN0TAREALKEYVALUE00000000000000000"}}, ["env.G"]),
+        # A prefix that is a bare run of letters collides with real words, so it is matched at its
+        # full length: an identifier that merely starts that way is not a key.
+        ({"region": "ASIAPACIFICBENCHMARKS2026"}, []),
+        ({"region": "ASIA-SOUTHEAST-1-ZONE"}, []),
+        ({"author": "AIzawaBenchmarkResults2026"}, []),
+        ({"tokenizer": "o200k_base"}, []),
+        ({"auth": "basic"}, []),
+    ],
+)
+def test_credential_shaped_settings_covers_the_credentials_a_caller_can_forward(
+    settings: dict[str, object], expected: list[str]
+) -> None:
+    """The marker and value sets are what stands between a forwarded setting and a durable leak.
+
+    They are shared with :func:`redact_credentials`, so a gap here is both a credential written to a
+    harness's own artifacts and one recorded verbatim in the run bundle.
+    """
+    from nemo_evaluator_sdk.agent_eval.runtimes.provenance import credential_shaped_settings
+
+    assert credential_shaped_settings(settings) == expected
+
+
+def test_gym_redacts_a_token_shaped_value_under_an_innocuous_key() -> None:
+    # Gym has no rejection guard: `env_vars` and `hydra_params` are recorded, not refused. So a
+    # credential under a key the caller invented is caught only by the shape of the value, and
+    # redaction has to recognise the same shapes the Harbor config edge refuses.
+    from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
+
+    runner = GymAgentTaskRunner(
+        config=GymRuntimeConfig(
+            agent="a",
+            agent_config="c",
+            resources_server="r",
+            env_vars={"MY_SVC_CRED": "nvapi-should-not-be-recorded", "GYM_MODE": "fast"},
+            hydra_params={"model": {"creds": ["nvapi-should-not-be-recorded"], "temperature": 0.7}},
+        )
+    )
+
+    recorded = runner.runner_info().config
+
+    assert recorded["env_vars"] == {"MY_SVC_CRED": "<redacted>", "GYM_MODE": "fast"}
+    assert recorded["hydra_params"] == {"model": {"creds": ["<redacted>"], "temperature": 0.7}}
+    assert "should-not-be-recorded" not in json.dumps(recorded)
+
+
+def test_harbor_agent_kwargs_cannot_carry_a_credential_into_the_run_bundle() -> None:
+    # Unlike Gym's hydra_params, redacting is not enough here: Harbor persists the same kwargs across
+    # its own job dir, which the SDK does not own. So the config refuses the value outright, and what
+    # reaches the run bundle is what a caller may safely pass.
     from pathlib import Path
 
     from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+
+    with pytest.raises(ValueError, match="extra_env.OPENAI_API_KEY"):
+        HarborRuntimeConfig(
+            jobs_dir=Path("/jobs"),
+            agent_kwargs={"extra_env": {"OPENAI_API_KEY": "sk-should-not-be-recorded"}},
+        )
 
     runner = HarborAgentTaskRunner(
         config=HarborRuntimeConfig(
             jobs_dir=Path("/jobs"),
             agent_import_path="pkg:Agent",
-            agent_kwargs={
-                "fabric_adapter_id": "nvidia.fabric.codex",
-                "extra_env": {"OPENAI_API_KEY": "sk-should-not-be-recorded", "HOME": "/root"},
-                "fabric_harness_settings": {"auth": {"token": "tok-should-not-be-recorded"}},
-            },
+            agent_kwargs={"fabric_adapter_id": "nvidia.fabric.codex", "extra_env": {"HOME": "/root"}},
         )
     )
 
     recorded = runner.runner_info().config["agent_kwargs"]
 
-    assert recorded == {
-        "fabric_adapter_id": "nvidia.fabric.codex",
-        "extra_env": {"OPENAI_API_KEY": "<redacted>", "HOME": "/root"},
-        "fabric_harness_settings": {"auth": {"token": "<redacted>"}},
-    }
+    assert recorded == {"fabric_adapter_id": "nvidia.fabric.codex", "extra_env": {"HOME": "/root"}}
+
+
+def test_harbor_records_agent_env_from_host_not_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pathlib import Path
+
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-be-recorded")
+    runner = HarborAgentTaskRunner(
+        config=HarborRuntimeConfig(jobs_dir=Path("/jobs"), agent_env_from_host=["OPENAI_API_KEY", "FABRIC_LOG"])
+    )
+
+    recorded = runner.runner_info().config
+
+    assert recorded["agent_env_from_host"] == ["OPENAI_API_KEY", "FABRIC_LOG"]
     assert "should-not-be-recorded" not in json.dumps(recorded)
 
 

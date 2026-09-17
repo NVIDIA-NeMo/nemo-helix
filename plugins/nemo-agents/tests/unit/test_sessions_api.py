@@ -20,6 +20,7 @@ from nemo_platform_plugin.dependencies import get_effective_principal_id
 from nemo_platform_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
+    NemoEntityValidationError,
     NemoPaginationInfo,
 )
 
@@ -171,6 +172,15 @@ class TestCreateSession:
         response = client.post(BASE, json={"deployment_id": "deployment-id", "name": "session-one"})
 
         assert response.status_code == 409
+
+    def test_create_returns_422_for_invalid_name(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        mock_entity_client.find_one.return_value = _make_deployment()
+        mock_entity_client.create.side_effect = NemoEntityValidationError("name: string does not match pattern")
+
+        response = client.post(BASE, json={"deployment_id": "deployment-id", "name": "session one"})
+
+        assert response.status_code == 422
+        assert "pattern" in response.json()["detail"]
 
 
 class TestListSessions:

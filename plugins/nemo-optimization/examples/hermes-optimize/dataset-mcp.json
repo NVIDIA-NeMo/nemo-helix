@@ -4,34 +4,84 @@
     "subject": "Claim Your Free iPhone Now!",
     "body": "Dear valued customer,\nCongratulations! You have been selected to receive a brand new iPhone absolutely free. To claim your prize, simply click the link below and provide your shipping address.\nhttp://malicious-link.example.com/claim\nThis offer is limited, so act fast!",
     "label": "phishing",
-    "sender": "prize@example.com"
+    "sender": "prize@example.com",
+    "analysis": {
+      "is_likely_phishing": true,
+      "label": "phishing",
+      "confidence": 0.95,
+      "indicators": [
+        "urgent_or_limited_time_offer",
+        "impersonation_or_false_claim",
+        "suspicious_link",
+        "request_for_personal_information",
+        "too_good_to_be_true"
+      ],
+      "explanation": "The email exhibits classic phishing characteristics: it promises a valuable prize (free iPhone) to entice the recipient, creates a false sense of urgency with 'limited time' language, and contains a suspicious link (http://malicious-link.example.com/claim). The request for a shipping address is a request for personal information. The claim of being 'selected' is a common impersonation tactic used to lower the recipient's guard."
+    }
   },
   {
     "id": "urgent-your-account-has-been-suspended",
     "subject": "Urgent: Your Account Has Been Suspended",
     "body": "Hello,\nWe have detected unusual activity on your account. To prevent suspension, please verify your identity by clicking the link below and entering your credentials.\nhttp://verify-account.example.com\nIf you do not verify within 24 hours, your account will be disabled.\nThank you,\nSupport Team",
     "label": "phishing",
-    "sender": "security-alerts@bank.com"
+    "sender": "security-alerts@bank.com",
+    "analysis": {
+      "is_likely_phishing": true,
+      "label": "phishing",
+      "confidence": 0.95,
+      "indicators": [
+        "urgent_or_threatening_tone",
+        "impersonation",
+        "credential_request",
+        "suspicious_link"
+      ],
+      "explanation": "The email exhibits classic phishing characteristics: it creates a false sense of urgency by claiming the account will be suspended within 24 hours, impersonates a support team, requests the recipient to enter credentials via a provided link, and uses a generic greeting. The link 'http://verify-account.example.com' is suspicious and likely leads to a credential harvesting page."
+    }
   },
   {
     "id": "important-invoice-attached",
     "subject": "Important: Invoice Attached",
     "body": "Hi there,\nPlease find the invoice attached for your recent purchase. Click here to view the details.\nhttp://invoice-example.com/view?invoice=12345\nIf you have any questions, feel free to contact us.\nBest regards,\nCustomer Service",
     "label": "phishing",
-    "sender": "accounts@shop-example.com"
+    "sender": "accounts@shop-example.com",
+    "analysis": {
+      "is_likely_phishing": true,
+      "label": "phishing",
+      "confidence": 0.75,
+      "indicators": [
+        "Suspicious link: http://invoice-example.com/view?invoice=12345",
+        "Generic greeting: Hi there",
+        "Unexpected invoice attachment"
+      ],
+      "explanation": "The email contains a suspicious link to an external domain (invoice-example.com) with invoice parameters, which is a common phishing tactic. The generic greeting and unexpected invoice attachment further support a phishing classification."
+    }
   },
   {
     "id": "benign-project-meeting-reminder",
     "subject": "Benign: Project Meeting Reminder",
     "body": "Hi Team,\nJust wanted to remind you about our project update meeting on Friday at 2pm. Please let me know if you can attend.\nThanks!\n-Bob",
     "label": "benign",
-    "sender": "bob@example.com"
+    "sender": "bob@example.com",
+    "analysis": {
+      "is_likely_phishing": false,
+      "label": "benign",
+      "confidence": 0.95,
+      "indicators": [],
+      "explanation": "The email is a benign project meeting reminder from 'Bob' with no suspicious elements. It contains no requests for personal information, no credential demands, no urgent or threatening tone, no impersonation attempts, no suspicious links, and no unusual payment requests. The content is straightforward and legitimate in nature."
+    }
   },
   {
     "id": "benign-invoice-follow-up",
     "subject": "Benign: Invoice Follow-up",
     "body": "Hi John,\nPlease find the invoice #1234 attached for your recent purchase. Let me know if you have any questions.\nBest regards,\nAlice",
     "label": "benign",
-    "sender": "alice@company.com"
+    "sender": "alice@company.com",
+    "analysis": {
+      "is_likely_phishing": false,
+      "label": "benign",
+      "confidence": 0.95,
+      "indicators": [],
+      "explanation": "The email is a benign invoice follow-up with no suspicious elements. It contains a standard invoice reference, a polite tone, and a legitimate-looking sender name. There are no requests for personal information, urgent demands, suspicious links, or impersonation indicators."
+    }
   }
 ]

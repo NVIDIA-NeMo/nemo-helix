@@ -23,7 +23,7 @@ PYTEST_EXTRA ?=
 # Default development toolchain versions. Keep these aligned with Flox; the
 # version-consistency checks validate them in pre-commit and CI.
 PYTHON_VERSION ?= 3.12
-UV_VERSION := 0.9.14
+UV_VERSION := 0.10.10
 NODE_VERSION := 22.23.2
 PNPM_VERSION := 10.34.5
 GO_VERSION := 1.26.7
@@ -136,6 +136,10 @@ docs-watch: ## Start Fern docs dev plus a repo-level watcher for docs/** changes
 .PHONY: docs-check
 docs-check: ## Validate the Fern docs (fern check + validate-mdx + gated-link check)
 	cd docs/fern && npm run check
+
+.PHONY: docs-lint-snippets
+docs-lint-snippets: ## Syntax-check Python fenced snippets across all docs
+	$(UV) run --frozen python docs/_scripts/lint_python_snippets.py docs --no-type-check
 
 .PHONY: docs-check-python-snippets
 docs-check-python-snippets: ## Syntax-check and type-check Python snippets in one doc (DOCS_PATH=...)

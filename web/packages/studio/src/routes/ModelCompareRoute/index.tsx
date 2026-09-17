@@ -138,9 +138,14 @@ export const ModelCompareRoute: FC = () => {
     });
   }, []);
 
-  const setModelRef = useCallback((id: number, modelURN: string | null) => {
-    setModels((prev) => prev.map((m) => (m.id === id ? { ...m, modelURN } : m)));
-  }, []);
+  const setModelRef = useCallback(
+    (id: number, modelURN: string | null, adapter?: string | null) => {
+      setModels((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, modelURN, adapter: adapter ?? null } : m))
+      );
+    },
+    []
+  );
 
   const resetAll = useCallback(() => {
     setStopCount((n) => n + 1); // cancel in-flight completions before remount

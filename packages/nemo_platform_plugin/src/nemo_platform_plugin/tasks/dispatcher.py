@@ -3,20 +3,17 @@
 
 """Task entrypoint dispatcher for :class:`~nemo_platform_plugin.job.NemoJob` subclasses.
 
-Mirrors :meth:`~nemo_platform_plugin.scheduler.NemoJobScheduler.run_local` for any
-process the platform spawns with the ``NEMO_JOB_*`` environment populated —
-both Docker-backed task containers and host subprocess executors land here.
-Reads the step config from the platform-injected file path, builds a
-:class:`~nemo_platform_plugin.job_context.JobContext` from the environment, and
-invokes ``job.run(...)`` with the same signature-based DI used locally
-(see :func:`~nemo_platform_plugin.run_dependencies.resolve_run_kwargs`).
+Docker-backed task containers and host subprocess executors land here with the
+``NEMO_JOB_*`` environment populated. Typed task entrypoints use
+:func:`run_task_with_client` or :func:`run_task_with_async_client` with an
+explicit context so the platform SDK used for result storage is not forwarded
+as a job client by accident.
 
-Because ``run_task`` only runs inside a platform-spawned process, the
-default ``ctx.results`` is :class:`~nemo_platform_plugin.job_results.PlatformJobResults`
-— results upload through the Files service whether the deployment is
-docker-backed or subprocess-on-local-host. Storage backend (local FS, S3,
-…) is the Files service's concern, not the plugin's. Plugins that need a
-different sink build a :class:`JobContext` and pass it via ``ctx=``.
+The default ``ctx.results`` is
+:class:`~nemo_platform_plugin.job_results.PlatformJobResults` — results upload
+through the Files service whether the deployment is docker-backed or
+subprocess-on-local-host. Storage backend (local FS, S3, …) is the Files
+service's concern, not the plugin's.
 
 Usage from a plugin's ``__main__.py``::
 
@@ -25,7 +22,7 @@ Usage from a plugin's ``__main__.py``::
     from types import FrameType
 
     from nemo_platform_plugin.sdk_provider import get_task_sdk
-    from nemo_platform_plugin.tasks.dispatcher import run_task
+    from nemo_platform_plugin.tasks.dispatcher import build_ctx_from_env, run_task_with_client
     from my_plugin.jobs.train import TrainJob
 
 
@@ -35,7 +32,9 @@ Usage from a plugin's ``__main__.py``::
 
     if __name__ == "__main__":
         signal.signal(signal.SIGTERM, _shutdown)
-        sys.exit(run_task(TrainJob, sdk=get_task_sdk("my-service")))
+        sdk = get_task_sdk("my-service")
+        client = client_from_platform(sdk, NemoClient)
+        sys.exit(run_task_with_client(TrainJob, client=client, ctx=build_ctx_from_env(sdk)))
 """
 
 from __future__ import annotations
@@ -48,7 +47,8 @@ from typing import Any
 
 from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.client import NemoClient
+from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_platform_plugin.errors import LocalRunError
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import PlatformJobResults
@@ -59,104 +59,78 @@ from nemo_platform_plugin.jobs.constants import (
     NEMO_JOB_WORKSPACE_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
-from nemo_platform_plugin.run_dependencies import LocalRunError, resolve_run_kwargs
 from nemo_platform_plugin.tasks.logging_setup import configure_task_logging
 
 logger = logging.getLogger(__name__)
 
 
-def run_task(
+def run_task_with_client(
     job_cls: type[NemoJob],
     *,
-    sdk: Any | None = None,
-    async_sdk: Any | None = None,
-    ctx: JobContext | None = None,
+    client: NemoClient,
+    ctx: JobContext,
 ) -> int:
-    """Run *job_cls* in a platform-spawned task process; return a process exit code.
-
-    Reads the step config from :data:`NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR`,
-    builds a :class:`JobContext` from the platform-injected env when *ctx* is
-    omitted, and invokes ``job.run(config, **kwargs)`` with signature DI of
-    ``ctx`` / ``sdk`` / ``async_sdk``. Exit codes follow :func:`_exit_code_for`;
-    :class:`~nemo_platform_plugin.run_dependencies.LocalRunError` propagates verbatim.
-
-    The auto-built ``ctx`` wires
-    :class:`~nemo_platform_plugin.job_results.PlatformJobResults` as ``ctx.results``,
-    so *sdk* is required when *ctx* is not supplied.
-
-    Root logging is bootstrapped via
-    :func:`~nemo_platform_plugin.tasks.logging_setup.configure_task_logging`
-    before anything else, since a task container configures none of its own.
-    A caller that already configured logging keeps it.
-
-    Args:
-        job_cls: The :class:`~nemo_platform_plugin.job.NemoJob` subclass to run.
-        sdk: :class:`~nemo_platform.NeMoPlatform` handle, typically built via
-            ``get_task_sdk("<plugin>")`` so ``NMP_PRINCIPAL`` threads through
-            as on-behalf-of auth. Required unless *ctx* is supplied.
-        async_sdk: Async SDK counterpart for jobs that delegate to async helpers.
-        ctx: Override for the auto-built :class:`JobContext` — used to inject
-            a non-default ``results`` sink (e.g. :class:`LocalJobResults` for
-            offline runs).
-
-    Returns:
-        Process exit code suitable for :func:`sys.exit`.
-    """
-    # First thing in the process: a task container configures nothing itself,
-    # so without this every message below INFO+lastResort is lost - including
-    # the failure reporting further down. Must precede the first log call.
+    """Run a task job whose ``run`` contract needs one sync client."""
     configure_task_logging()
 
     try:
-        config = _read_step_config()
+        config = read_step_config()
     except Exception:
         logger.exception("Failed to read step config")
         return 2
 
-    if ctx is None:
-        if sdk is None:
-            logger.error(
-                "%s.run_task requires sdk= when no explicit ctx is provided (default ctx wires PlatformJobResults).",
-                job_cls.__name__,
-            )
-            return 2
-        try:
-            ctx = build_ctx_from_env(sdk)
-        except Exception:
-            logger.exception("Failed to build JobContext from environment")
-            return 2
-
     try:
         job = job_cls()
     except Exception:
-        # Constructor failures are setup errors, not run errors — surface as 2.
         logger.exception("Failed to instantiate %s", job_cls.__name__)
         return 2
 
     try:
-        kwargs = resolve_run_kwargs(job_cls, job.run, sdk=sdk, async_sdk=async_sdk, ctx=ctx, is_local=False)
+        result = job.run(config, ctx=ctx, client=client)
     except LocalRunError:
-        # Plugin-author bug (e.g. required sdk param without a handle); propagate
-        # rather than collapse into the same exit-2 bucket as a missing env var.
-        raise
-    except Exception:
-        logger.exception("Failed to resolve run kwargs for %s", job_cls.__name__)
-        return 2
-
-    try:
-        result = job.run(config, **kwargs)
-    except LocalRunError:
-        # Propagate verbatim per run_task's contract.
         raise
     except Exception:
         logger.exception("%s.run raised", job_cls.__name__)
         return 1
 
     logger.info("%s result: %s", job_cls.__name__, result)
-    return _exit_code_for(result)
+    return exit_code_for(result)
 
 
-def _exit_code_for(result: Any) -> int:
+def run_task_with_async_client(
+    job_cls: type[NemoJob],
+    *,
+    async_client: AsyncNemoClient,
+    ctx: JobContext,
+) -> int:
+    """Run a task job whose ``run`` contract needs one async client."""
+    configure_task_logging()
+
+    try:
+        config = read_step_config()
+    except Exception:
+        logger.exception("Failed to read step config")
+        return 2
+
+    try:
+        job = job_cls()
+    except Exception:
+        logger.exception("Failed to instantiate %s", job_cls.__name__)
+        return 2
+
+    try:
+        result = job.run(config, ctx=ctx, async_client=async_client)
+    except LocalRunError:
+        raise
+    except Exception:
+        logger.exception("%s.run raised", job_cls.__name__)
+        return 1
+
+    logger.info("%s result: %s", job_cls.__name__, result)
+    return exit_code_for(result)
+
+
+def exit_code_for(result: Any) -> int:
     """Map a ``NemoJob.run`` return value to a process exit code.
 
     Recognises two in-tree failure shapes — ``{"status": "failed", ...}``
@@ -180,7 +154,7 @@ def _exit_code_for(result: Any) -> int:
     return 0
 
 
-def _read_step_config() -> dict:
+def read_step_config() -> dict:
     path_str = os.environ.get(NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR)
     if not path_str:
         raise RuntimeError(f"{NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR} not set; running outside the platform?")
@@ -246,4 +220,10 @@ def build_ctx_from_env(sdk: NeMoPlatform) -> JobContext:
     )
 
 
-__all__ = ["build_ctx_from_env", "run_task"]
+__all__ = [
+    "build_ctx_from_env",
+    "exit_code_for",
+    "read_step_config",
+    "run_task_with_async_client",
+    "run_task_with_client",
+]

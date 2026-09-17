@@ -53,6 +53,7 @@ Usage (once the SDK hub is wired up)::
     job = nemo.agents.jobs.execute.create(spec={"agent": "calculator", "input": "What is 2+2?"})
     job = nemo.agents.jobs.execute.get(job["name"])
     results = nemo.agents.jobs.execute.list_results(job["name"])
+    run = nemo.agents.jobs.execute.download_result("fabric_run_result", job=job["name"])
 
 An async namespace is mounted as ``client.agents`` on ``AsyncNeMoPlatform``.
 It currently exposes ``jobs`` only — agent CRUD, deployments, and ``invoke``
@@ -646,6 +647,20 @@ class _ExecuteJobsResource:
         response = self._client.list_agent_job_results(workspace=workspace, collection="execute", name=name)
         return _json_map_from_response(response)
 
+    def download_result(self, name: str, *, job: str, workspace: str | None = None) -> bytes:
+        """Download one of a finished execute-agent job's results.
+
+        *name* is a result name as reported by :meth:`list_results` --
+        ``output_workdir``, ``fabric_run_result`` and friends. Directory
+        results (the working directories, the artifacts) arrive as a gzipped
+        tarball; ``fabric_run_result`` and ``fabric_error`` arrive as JSON.
+
+        Returns the bytes rather than writing a file, so a caller can hand them
+        straight to ``tarfile``/``json`` without a temporary path.
+        """
+        response = self._client.download_agent_job_result(workspace=workspace, collection="execute", job=job, name=name)
+        return response.read()
+
 
 class _AsyncExecuteJobsResource:
     """Async ``client.agents.jobs.execute``."""
@@ -678,6 +693,13 @@ class _AsyncExecuteJobsResource:
         """List the named results a finished execute-agent job saved."""
         response = await self._client.list_agent_job_results(workspace=workspace, collection="execute", name=name)
         return _json_map_from_response(response)
+
+    async def download_result(self, name: str, *, job: str, workspace: str | None = None) -> bytes:
+        """Download one of a finished execute-agent job's results. See the sync resource."""
+        response = await self._client.download_agent_job_result(
+            workspace=workspace, collection="execute", job=job, name=name
+        )
+        return await response.read()
 
 
 class _JobsResource:

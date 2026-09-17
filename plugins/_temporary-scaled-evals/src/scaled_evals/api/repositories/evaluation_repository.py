@@ -7,7 +7,7 @@ from __future__ import annotations
 # annotations in the same class body, so those spell the type ``builtins.list``.
 import builtins
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import psycopg
 from psycopg.types.json import Json
@@ -763,6 +763,44 @@ class EvaluationRepository:
             )
             return cur.fetchall()
 
+    def list_changed_since(
+        self,
+        updated_after: datetime | None,
+        *,
+        limit: int,
+    ) -> builtins.list[dict]:
+        """Return rows to project, oldest change first.
+
+        Includes soft-deleted rows so a deletion propagates to the projection,
+        and selects the detail columns so a projected row can answer both the
+        list and the single-evaluation read.
+        """
+        clauses = []
+        params: list[Any] = []
+        if updated_after is not None:
+            # Inclusive: rows sharing the watermark's timestamp would otherwise
+            # be skipped. Re-projecting is idempotent, so the cost is bounded to
+            # one duplicate row per pass.
+            clauses.append("e.updated_at >= %s")
+            params.append(updated_after)
+        params.append(limit)
+        where = f"WHERE {join_where(clauses)}" if clauses else ""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT {EVALUATION_DETAIL_COLUMNS}, e.deleted_at
+                FROM evaluations e
+                LEFT JOIN task_revisions r
+                  ON r.task_id = e.task_id
+                 AND r.revision = e.task_revision
+                {where}
+                ORDER BY e.updated_at ASC, e.id ASC
+                LIMIT %s
+                """,
+                params,
+            )
+            return cur.fetchall()
+
     def get(self, evaluation_id: str) -> dict | None:
         with self.conn.cursor() as cur:
             cur.execute(
@@ -811,6 +849,24 @@ class EvaluationRepository:
                 (evaluation_id,),
             )
             return cur.fetchone()
+
+    def list_cancelled_platform_jobs(self, *, limit: int = 100) -> builtins.list[dict[str, Any]]:
+        """List cancelled evaluations whose outer Platform Job may still run."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, current_execution, dispatch_job_name, backend_handle
+                FROM evaluations
+                WHERE deleted_at IS NULL
+                  AND status = 'cancelled'
+                  AND dispatch_job_name LIKE 'scaled-evals-evaluation-%%'
+                  AND cancel_teardown_status = 'pending'
+                ORDER BY cancel_teardown_updated_at, id
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            return cast(builtins.list[dict[str, Any]], cur.fetchall())
 
     def load_archive_row(self, evaluation_id: str) -> dict | None:
         with self.conn.cursor() as cur:

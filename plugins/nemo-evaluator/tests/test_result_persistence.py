@@ -183,7 +183,7 @@ def test_persist_agent_eval_result_builds_entity_and_saves(tmp_path: Path, mocke
         ),
         ctx=_ctx(tmp_path, "job-1"),
         bundle_ref="fileset://dev/agent-eval-results#b",
-        async_sdk=_ASYNC_SDK,
+        async_client=_ASYNC_SDK,
     )
 
     entity_client_factory.assert_called_once()
@@ -212,7 +212,7 @@ def test_persist_evaluate_result_records_dataset_and_metric_types(tmp_path: Path
         metric_types=["exact_match"],
         ctx=_ctx(tmp_path, "job-2"),
         bundle_ref="fileset://dev/eval-results#b",
-        async_sdk=_ASYNC_SDK,
+        async_client=_ASYNC_SDK,
     )
 
     (entity,) = client.saved
@@ -227,19 +227,19 @@ def test_persist_skips_when_no_job_id(tmp_path: Path, mocker: MockerFixture) -> 
     client = _FakeClient()
     mocker.patch.object(result_persistence, "_entity_client", return_value=client)
 
-    # A platformless local run has no job id — there's no run to key the result on, so skip.
+    # Without a job id, there is no run to key the result on, so skip.
     persist_agent_eval_result(
         _agent_result(),
         target=None,
         ctx=_ctx(tmp_path, None),
         bundle_ref="x",
-        async_sdk=_ASYNC_SDK,
+        async_client=_ASYNC_SDK,
     )
 
     assert client.saved == []
 
 
-def test_persist_skips_when_no_async_sdk(tmp_path: Path) -> None:
+def test_persist_skips_when_no_async_client(tmp_path: Path) -> None:
     # No async SDK injected (offline run): _entity_client returns None and persistence is skipped.
     # Runs the real _entity_client(None) path; must not raise.
     persist_evaluate_result(
@@ -249,7 +249,7 @@ def test_persist_skips_when_no_async_sdk(tmp_path: Path) -> None:
         metric_types=[],
         ctx=_ctx(tmp_path, "job-3"),
         bundle_ref="x",
-        async_sdk=None,
+        async_client=None,
     )
 
 
@@ -263,6 +263,6 @@ def test_persist_is_best_effort_on_save_failure(tmp_path: Path, mocker: MockerFi
         target=ModelTarget(model=_model()),
         ctx=_ctx(tmp_path, "job-4"),
         bundle_ref="x",
-        async_sdk=_ASYNC_SDK,
+        async_client=_ASYNC_SDK,
     )
     assert client.saved == []

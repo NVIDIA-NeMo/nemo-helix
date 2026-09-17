@@ -134,6 +134,34 @@ Pass `--expires-in <seconds>` to request a specific finite lifetime. Pass
 `--expires-in none` only for deployments where the administrator has explicitly
 allowed unlimited keys.
 
+Restrict a key to specific services with `--scope`, and grant its principal
+workspace membership with `--workspace` (formatted `<workspace>` or
+`<workspace>:<role1>,<role2>`, repeatable) instead of a separate
+`nemo workspaces members create` call. Creating a service-bound key with
+`--service-account` requires the PlatformAdmin role; omit it to create a
+personal, user-bound key instead:
+
+```bash
+nemo auth access-keys create --name "intake-worker" --service-account service-id \
+  --scope intake,entities --workspace ml-team:Editor
+```
+
+A `--scope`-restricted key is enforced platform-wide, not just advisory: it can only
+call endpoints whose required scope is covered by the services you listed (plus any
+`platform:read`/`platform:write`-scoped endpoint). This includes the access-key
+management endpoints themselves — a key scoped to `intake,entities` cannot create,
+list, suspend, unsuspend, rotate, or revoke access keys unless `--scope` also includes
+`auth`, which prevents a restricted key from minting itself broader access. This
+applies even to a PlatformAdmin's own scoped key: the PlatformAdmin bypass only
+grants access within the key's own scope, so a PlatformAdmin who scopes down their
+own key is still restricted by it, not granted unconditional access.
+
+Rotate a personal key (one created without `--service-account`) by passing
+`--rotate <jti>` with the prior key's `jti`: once the replacement key is
+created and its requested workspace grants are provisioned, the referenced key
+is revoked. `--rotate` only accepts a key you own that has no service account
+bound to it.
+
 List keys, temporarily suspend and restore one, rotate one, or permanently revoke one by
 its stable `jti`:
 

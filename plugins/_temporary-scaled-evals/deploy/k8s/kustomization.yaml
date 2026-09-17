@@ -36,8 +36,8 @@ images:
     # reusing a floating tag.
     newTag: ${SE_APP_IMAGE_TAG}
 
-# Shared by the API and both workers, exactly as in the compose stack. Rendered
-# into a hashed ConfigMap so a settings change rolls the pods.
+# Shared by the API, auxiliary dispatch worker, and Platform Job tasks. Rendered
+# into a hashed ConfigMap so a settings change rolls the long-lived pods.
 configMapGenerator:
   - name: scaled-evals-env
     envs:

@@ -14,13 +14,24 @@ import os
 import re
 from typing import Any, Callable, Optional
 
-import jsonschema
 from jsonschema import exceptions
+from jsonschema.protocols import Validator
+from jsonschema.validators import validator_for
 from nmp.automodel.entities.values import FinetuningType, TrainingType
 from nmp.automodel.tasks.training.datasets.preparation import DatasetFormatError
 from nmp.automodel.tasks.training.datasets.schemas import SFTDatasetSchemaType
 
 logger = logging.getLogger(__name__)
+
+# jsonschema.validate() recompiles the schema on every call. Retrieval JSONL is
+# large enough that that path takes tens of minutes; compile once and reuse.
+_VALIDATE_PROGRESS_INTERVAL = 10_000
+
+
+def _compile_validator(schema: dict[str, Any]) -> Validator:
+    cls = validator_for(schema)
+    cls.check_schema(schema)
+    return cls(schema)
 
 
 def SFT_SCHEMA(prompt_template: str | None = None):
@@ -134,18 +145,18 @@ class DatasetValidator:
         self.finetuning_type = finetuning_type
         self.prompt_template = prompt_template
 
-    def _validate_json_object(self, obj: dict, schema: dict[str, Any]) -> None:
-        """Validate a JSON object against a schema.
+    def _validate_json_object(self, obj: dict, validator: Validator) -> None:
+        """Validate a JSON object against a compiled JSON Schema validator.
 
         Args:
             obj: The JSON object to validate
-            schema: The JSON schema to validate against
+            validator: Compiled jsonschema validator for the dataset schema
 
         Raises:
             TypeError: If validation fails
         """
         try:
-            jsonschema.validate(instance=obj, schema=schema)
+            validator.validate(obj)
         except exceptions.ValidationError as e:
             logger.debug(f"Dataset Schema Validation failed: {str(e)}")
             raise TypeError(f"Dataset Schema Validation failed: {e.message}")
@@ -176,8 +187,8 @@ class DatasetValidator:
 
         for schema_name, schema_factory in SCHEMAS.items():
             try:
-                validation_schema = schema_factory(self.prompt_template)
-                self._validate_json_object(obj, validation_schema)
+                validator = _compile_validator(schema_factory(self.prompt_template))
+                self._validate_json_object(obj, validator)
             except Exception as e:
                 logger.debug(f"Parsed jsonl line does not conform to schema {schema_name}. Error: {e}")
             else:
@@ -208,7 +219,8 @@ class DatasetValidator:
         if os.path.getsize(file_path) == 0:
             raise DatasetFormatError(f"{file_path} is empty")
 
-        validation_schema = schema_factory(self.prompt_template)
+        validator = _compile_validator(schema_factory(self.prompt_template))
+        validated_rows = 0
 
         # Validate each line in the JSONL file
         with open(file_path, "r", encoding="utf-8") as jsonl_file:
@@ -224,14 +236,15 @@ class DatasetValidator:
                     raise DatasetFormatError(f"{file_path} has entry which is not valid json: {e}")
 
                 try:
-                    self._validate_json_object(obj, validation_schema)
+                    self._validate_json_object(obj, validator)
                 except Exception as e:
-                    logger.debug(
-                        f"Parsed jsonl line does not conform to schema {validation_schema}. Error: {e}. Object: {obj}"
-                    )
-                    raise DatasetFormatError(
-                        f"Parsed jsonl line does not conform to schema {validation_schema}. Error: {e}"
-                    )
+                    logger.debug(f"{file_path} does not conform to the expected schema: {e}")
+                    raise DatasetFormatError(f"{file_path} does not conform to the expected schema: {e}")
+                validated_rows += 1
+                if validated_rows % _VALIDATE_PROGRESS_INTERVAL == 0:
+                    logger.info("Validated %s rows in %s", validated_rows, file_path)
+
+        logger.info("Validated %s rows in %s", validated_rows, file_path)
 
 
 # Backward compatibility: provide standalone functions that create a validator instance

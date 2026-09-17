@@ -593,7 +593,7 @@ wheels = [
 
 [[package]]
 name = "deepagents"
-version = "0.6.12"
+version = "0.7.14"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain" },
@@ -601,11 +601,12 @@ dependencies = [
     { name = "langchain-core" },
     { name = "langchain-google-genai" },
     { name = "langsmith" },
+    { name = "packaging" },
     { name = "wcmatch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e0/db/a6acdc72a9e90c3f07ed10de35c951734a02d4facb693bb59684ad368801/deepagents-0.6.12.tar.gz", hash = "sha256:1f281c0bc5a63132f62e2ee345c1dc593b23188da6e23016401f6879fbe54b5f", size = 211364, upload-time = "2026-06-25T17:26:52.775Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1f/6c/411f50acbef27e529822f35577d3207a45e4b8cf7cd4f962642694c62f75/deepagents-0.7.14.tar.gz", hash = "sha256:69b3050e3e0a1998d07d62cf70cc7c675e7674f7671a5b869fd113b9988493a9", size = 299904, upload-time = "2026-09-14T14:45:10.975Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/98/49/af7219b3c13520fee047bb807cfaefba17f8e4584c551d946773589a4f08/deepagents-0.6.12-py3-none-any.whl", hash = "sha256:28b8fa0119ca0a689e3e18e288c4634e4046062acfc87a1cb34289d3af3a1c88", size = 236120, upload-time = "2026-06-25T17:26:51.736Z" },
+    { url = "https://files.pythonhosted.org/packages/48/04/7c1573dbe3f5b48e0d39c023f79cfbd4fa65e3cb8783c9bffe7b38d08918/deepagents-0.7.14-py3-none-any.whl", hash = "sha256:65b6cf304d7cad0c5af968c53d9e69f2809ecf4b95a1aec632bfea134a735d08", size = 326918, upload-time = "2026-09-14T14:45:09.282Z" },
 ]
 
 [[package]]
@@ -1034,7 +1035,7 @@ requests = [
 
 [[package]]
 name = "google-genai"
-version = "2.17.0"
+version = "2.23.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1048,9 +1049,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/58/2e/03a0486e192cde27f7ffbb20c63fa934a132396a667b1a0e1b7e5f606ad7/google_genai-2.17.0.tar.gz", hash = "sha256:6b640a2390c82b4a240873eddb9f518c6d2c33244b2de16ed3d14526a6da7f57", size = 648676, upload-time = "2026-08-06T05:10:41.382Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ae/9a/db14adffb0144584889e05f433a4e8ce540f9ed2928ed8b23cc65ab96178/google_genai-2.23.0.tar.gz", hash = "sha256:1ceebffdcd2af30c039a922ba05de61cd4054bb61c94be7649c4bf9ff8b33c5f", size = 686707, upload-time = "2026-09-10T22:55:31.12Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b3/37/71e397a5b93d9a3c139e95acdcb00b4169ed59ae20e16616f2875170abb7/google_genai-2.17.0-py3-none-any.whl", hash = "sha256:a4835563c60aee646c9c4b261c507aa4a624710d25017012d20dc65abf3d9a54", size = 1044950, upload-time = "2026-08-06T05:10:39.308Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/b0/f6bc58a6a7c8ad7ad2b6a36b0bf4732b3504dd7d48c6674f848304548869/google_genai-2.23.0-py3-none-any.whl", hash = "sha256:1e63211d44d188b8069c2b354d92b9bde25c1e821513fdbe1948b7c0d9f6b922", size = 1093785, upload-time = "2026-09-10T22:55:29.282Z" },
 ]
 
 [[package]]
@@ -1074,7 +1075,9 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f3/04/81bd731d6d1e3a469d9a4c36f5eb069bcf0cbb2d5d342c9fec22245b91fc/greenlet-3.5.4-cp312-cp312-macosx_11_0_universal2.whl", hash = "sha256:3d66250e8b09f182ede05490998c818b5961f7a3640332d44c4927caec7bbfe4", size = 295909, upload-time = "2026-07-22T11:38:09.261Z" },
     { url = "https://files.pythonhosted.org/packages/cc/dd/f5f22903a6ae70f5ea328ed0beaec92ad903f0e3b7d2845133b354abc4b8/greenlet-3.5.4-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:c90e930c9c192e5b3ee9fb8bcd920ea3926155e2e3ded39fc697323addecee17", size = 612011, upload-time = "2026-07-22T12:26:40.69Z" },
     { url = "https://files.pythonhosted.org/packages/8e/10/92a4a88d12b915d74ea5b6d288e4afefda4771647caa34442c156f7a454f/greenlet-3.5.4-cp312-cp312-manylinux_2_24_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:791fdfeeb9c6e0c7b10fa151bf110d2a6974866f13dcb5b1c7efae698245893a", size = 624299, upload-time = "2026-07-22T12:29:02.089Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/f9/03e26be3487c5238e81f2b84714959a86ea8515a869828cf41f4fc54b34e/greenlet-3.5.4-cp312-cp312-manylinux_2_24_s390x.manylinux_2_28_s390x.whl", hash = "sha256:b7c895310363f310361e0fe2072af85269d2a2a285cd04c0c59e79a5e3670dcf", size = 629603, upload-time = "2026-07-22T12:43:43.456Z" },
     { url = "https://files.pythonhosted.org/packages/50/6d/0b14bb9db2989f32cd9fe7f76afedea01ee8bee3f87c07e69f24adfe7e63/greenlet-3.5.4-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f88193799d43dbf8c8a806d6405c9c52fe2af40bf75072a606357b33cc336c7f", size = 621541, upload-time = "2026-07-22T11:51:09.464Z" },
+    { url = "https://files.pythonhosted.org/packages/57/6b/7c55ca72ef80d57c16c4a55210f82582622462dc4485799a30f4ec6f3372/greenlet-3.5.4-cp312-cp312-manylinux_2_39_riscv64.whl", hash = "sha256:13b980043cb1b3134e81ea469da1250ddcc6bfe6d245bbaa59168d9cdc8f228f", size = 432554, upload-time = "2026-07-22T12:39:51.379Z" },
     { url = "https://files.pythonhosted.org/packages/48/3d/25e9a2d9eb6b2e8b7ca4e80a3a26cb887cce6c8e0a87c921164f11bc5574/greenlet-3.5.4-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:b7a5f095767c4493afcd06067f2bb3b8716e3f3f9e92b99c88e7e99f885b3d4d", size = 1581444, upload-time = "2026-07-22T12:25:03.818Z" },
     { url = "https://files.pythonhosted.org/packages/b9/96/4c9bf2e2c408dcc0556edce69efa9f802e82223573c53240136a086821f1/greenlet-3.5.4-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:42afdc1ab5f66da8c586c32af9224a74a706b4f0ea0dc3a4188a0860a09c65c9", size = 1645842, upload-time = "2026-07-22T11:51:12.295Z" },
     { url = "https://files.pythonhosted.org/packages/b5/41/303ecb26a3a56122c0f4d4073ee078881847bd6b6f463ae0ec57ec20223b/greenlet-3.5.4-cp312-cp312-win_amd64.whl", hash = "sha256:60149df8f462d1b230038e6590c23c3b4768bb5d6c022b3b6e82532b34b0b8a3", size = 247169, upload-time = "2026-07-22T11:38:19.893Z" },
@@ -1082,7 +1085,9 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c0/9a/e51225dcd58713f16ccbdcc501a8da21098ea14515b7870f1f94459e5ff5/greenlet-3.5.4-cp313-cp313-macosx_11_0_universal2.whl", hash = "sha256:24e61b88cb7e1b1d794b32a10cc346ac779681d6d74ff137a3e0a444d2bf1f02", size = 294831, upload-time = "2026-07-22T11:38:53.389Z" },
     { url = "https://files.pythonhosted.org/packages/9f/ea/de50a50fadf979713ab18b46f22ad5ff5f2dcfc637a3ebdecf669801e1a5/greenlet-3.5.4-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:870d730fec833f5a06906a32596cc099b9161594642a92a520b7a88911c95356", size = 614619, upload-time = "2026-07-22T12:26:42.282Z" },
     { url = "https://files.pythonhosted.org/packages/db/c7/2aae27fea41205b8650294c301f042a2a4bb6155eea48c995b890a92f2c1/greenlet-3.5.4-cp313-cp313-manylinux_2_24_ppc64le.manylinux_2_28_ppc64le.whl", hash = "sha256:ec5ff0d1878df6af3bf9b638a5a92a7d5693291de77c91bff10fa48519c604ef", size = 627021, upload-time = "2026-07-22T12:29:03.445Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/80/fb4d4788bbc8e54761f1fc88533af9523a6e86299fa113d6e8a8503ed9fc/greenlet-3.5.4-cp313-cp313-manylinux_2_24_s390x.manylinux_2_28_s390x.whl", hash = "sha256:07bd44616608d873d06735b63ef1a88191d6ca57c8d291d6559c71bc14c0893c", size = 632845, upload-time = "2026-07-22T12:43:45.19Z" },
     { url = "https://files.pythonhosted.org/packages/eb/56/79fd826f9ccaae0b84e1b4ef68dabba5e105bb044ffcd448a0b782fcba9a/greenlet-3.5.4-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d84d993f6e575c950d91a23c1345d18fe1a4310d447bf630849d7809196b52f0", size = 624002, upload-time = "2026-07-22T11:51:11.391Z" },
+    { url = "https://files.pythonhosted.org/packages/42/e3/6086fa578ebb72772722cdc4bcd628459814b42e0c2db1e3cbd6552b3271/greenlet-3.5.4-cp313-cp313-manylinux_2_39_riscv64.whl", hash = "sha256:3529a8a933582ad19e224792cac7372489526576b75b4c124e8e4f29948f4861", size = 435053, upload-time = "2026-07-22T12:39:52.715Z" },
     { url = "https://files.pythonhosted.org/packages/0a/1a/27319f97e731298513dcba1a2e91b63e9d8811d9de22130f960b129b1bf1/greenlet-3.5.4-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:58023945f421093de5e6fa108c0985a8659d43f49e0216da25099369a121bcbd", size = 1581533, upload-time = "2026-07-22T12:25:05.322Z" },
     { url = "https://files.pythonhosted.org/packages/b1/6d/24240bf562e9786dd2799ee0a4a4dadb4ded22510f41b20245099159ac8c/greenlet-3.5.4-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:bae2728e1897aa8df8cb1af38cd48b3a743aefe29372de7b8b7a9f532501e69f", size = 1645781, upload-time = "2026-07-22T11:51:14.805Z" },
     { url = "https://files.pythonhosted.org/packages/c1/5a/442ab1a9ef7ca6bf7210e5397a95972206a91a31033a03c8900866a10039/greenlet-3.5.4-cp313-cp313-win_amd64.whl", hash = "sha256:ca5726c0b08ca35ae873557266a78b2c3f3b2b7d7401aa5ff886c2045dd0111c", size = 247133, upload-time = "2026-07-22T11:39:20.661Z" },
@@ -1168,6 +1173,19 @@ wheels = [
 ]
 
 [[package]]
+name = "httpcore2"
+version = "2.13.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "h11" },
+    { name = "truststore" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/15/8c/e925b1c92018abb3a1863ce1549d76d2381e334d21d65d4ac8f65dabd78a/httpcore2-2.13.0.tar.gz", hash = "sha256:2adc8be4fb285fbcd6d894298db3b52c177e74b6674eda3a76bd36be3292a3db", size = 67740, upload-time = "2026-09-14T14:18:04.717Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7e/0d/117a771a2bb91df334b66bf4da14cd02f21aefbcfe53180f336ce55e8f90/httpcore2-2.13.0-py3-none-any.whl", hash = "sha256:35ae5be347aa40467b4a5dc032ac67ebb6d27189fc97e8cebcf99616f6a1bb9e", size = 83162, upload-time = "2026-09-14T14:18:02.529Z" },
+]
+
+[[package]]
 name = "httptools"
 version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1211,6 +1229,32 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/0f/4c/751061ffa58615a32c31b2d82e8482be8dd4a89154f003147acee90f2be9/httpx_sse-0.4.3.tar.gz", hash = "sha256:9b1ed0127459a66014aec3c56bebd93da3c1bc8bb6618c8082039a44889a755d", size = 15943, upload-time = "2025-10-10T21:48:22.271Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d2/fd/6668e5aec43ab844de6fc74927e155a3b37bf40d7c3790e49fc0406b6578/httpx_sse-0.4.3-py3-none-any.whl", hash = "sha256:0ac1c9fe3c0afad2e0ebb25a934a59f4c7823b60792691f779fad2c5568830fc", size = 8960, upload-time = "2025-10-10T21:48:21.158Z" },
+]
+
+[[package]]
+name = "httpx2"
+version = "2.13.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio", marker = "sys_platform != 'emscripten'" },
+    { name = "httpcore2", marker = "sys_platform != 'emscripten'" },
+    { name = "httpx2-jsfetch", marker = "sys_platform == 'emscripten'" },
+    { name = "idna" },
+    { name = "truststore", marker = "sys_platform != 'emscripten'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b9/a0/e9deef4654132857b5a5dbe4eddd0ac59c2814500e11f2f5044cd81103ee/httpx2-2.13.0.tar.gz", hash = "sha256:81bd07dc67a3701729ef1f777a3c00c915d4539604fdb5afd327f8682f6b7b44", size = 100290, upload-time = "2026-09-14T14:18:05.486Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fe/d1/a0c72b0e006df654709fbc366cc5bcb53e5aee13e1e3395152c6dd293376/httpx2-2.13.0-py3-none-any.whl", hash = "sha256:fc12720cedf72faa26cca6b4ca394e05c894e7d7933fc45cafe767960804e49a", size = 95565, upload-time = "2026-09-14T14:18:03.553Z" },
+]
+
+[[package]]
+name = "httpx2-jsfetch"
+version = "1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/cd/c4/0e5636363151a2a1795e0a77617168b9ca438e1748ec05fc9b5687f93d64/httpx2_jsfetch-1.0.tar.gz", hash = "sha256:70a0e3eabfef7cce5ad9c629f7d01ca05e418f586646f4ddf14782e4c1454c60", size = 6872, upload-time = "2026-08-07T00:13:07.492Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9b/43/832f631d32e4f1211caa2ba368317739fe71f0b8530e4c9d15dc454bac2a/httpx2_jsfetch-1.0-py3-none-any.whl", hash = "sha256:cb916b707601e69a07721aabc8f3f6659be3a6893bc1ff5c6f9e02241df2da32", size = 6382, upload-time = "2026-08-07T00:13:06.567Z" },
 ]
 
 [[package]]
@@ -1600,30 +1644,30 @@ wheels = [
 
 [[package]]
 name = "langchain"
-version = "1.3.14"
+version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain-core" },
     { name = "langgraph" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/29/68/a6dbad9c22df4087a0f9e79ddd46226c442b30128bfeee538d5889492a73/langchain-1.3.14.tar.gz", hash = "sha256:1b6696c72ba3bbbce54d745e0180742c9f6ece8bbc59ed5a46c3e20b9a435929", size = 645181, upload-time = "2026-07-16T13:28:18.29Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c4/5d/0ef368fdcf5df08a394787196fb7a80f473a9c7b3fc4cd2e3b53a7a5853d/langchain-1.4.0.tar.gz", hash = "sha256:08da122a439f738f4c09a5158cfa3d2c1d8bea2d0bde7fbbf4aeb4d7f7fd9d80", size = 729354, upload-time = "2026-09-03T16:59:32.442Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a9/ec/0f942e78a621f8e3162ff1ed24284f469aaf51fb4607ee5831c626f2b2bc/langchain-1.3.14-py3-none-any.whl", hash = "sha256:4d10dbe91005952cddd56d0dc77aa108964da6bae90ab20063653957e901f782", size = 139560, upload-time = "2026-07-16T13:28:16.498Z" },
+    { url = "https://files.pythonhosted.org/packages/92/fa/7da07d9977a5e292ef602c1bb911514ff8206e85dc09a66961874345d57a/langchain-1.4.0-py3-none-any.whl", hash = "sha256:af1dc0161d30944a52ec7844d9bf890d0497b12ec0703069f3503b4003cbbac3", size = 161534, upload-time = "2026-09-03T16:59:31.154Z" },
 ]
 
 [[package]]
 name = "langchain-anthropic"
-version = "1.5.4"
+version = "1.7.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
     { name = "langchain-core" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d8/9d/d56f68ec9a2c8aba3b7639e5d7a502d82cbf71c31e178a06c0955d789792/langchain_anthropic-1.5.4.tar.gz", hash = "sha256:113cb9bdac3169f2da65ea395dedb290e30dc6f899d01c205ba88aa88a2a02c2", size = 718860, upload-time = "2026-08-05T19:03:16.848Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/74/67/1a4f3b905d95192c54bf418ce50e058e2b7b330700c33f042622137b6c16/langchain_anthropic-1.7.2.tar.gz", hash = "sha256:0d39665211b3b40421de8be621536c4e32149500d20a75ee4338cac4ae97db19", size = 751259, upload-time = "2026-09-10T19:12:54.99Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/23/d8/47fb549e91f55a54ce829b5034a21360d9383342a3bf4986188e254e89e4/langchain_anthropic-1.5.4-py3-none-any.whl", hash = "sha256:730a9cb1ad384c9f1642840469c1ebbf20237066b1635f5d4fa9876e365fceaf", size = 56025, upload-time = "2026-08-05T19:03:15.579Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/84/436d1f5dea354ec7357e5cd9756a15765e828da7faebf2837cf60f3a638d/langchain_anthropic-1.7.2-py3-none-any.whl", hash = "sha256:9d114c3766f57bbffe8e84093efe396306520c51587263b96d00c055d3bb8370", size = 60957, upload-time = "2026-09-10T19:12:53.693Z" },
 ]
 
 [[package]]
@@ -1684,9 +1728,10 @@ wheels = [
 
 [[package]]
 name = "langchain-core"
-version = "1.5.3"
+version = "1.6.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "httpx" },
     { name = "jsonpatch" },
     { name = "langchain-protocol" },
     { name = "langsmith" },
@@ -1697,14 +1742,14 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uuid-utils" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/65/3e/63af6b9d76d9be907c7c524d6ec18a2efed7e0e2d123fea0230d78dbd73f/langchain_core-1.5.3.tar.gz", hash = "sha256:a56457ac444fef41e9404443c187f0ecea708d36e816ea4ba9573c027f7d1a2d", size = 972461, upload-time = "2026-07-30T14:55:55.833Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/06/d7/1482670ccebc863166852516a08a1956fc50da40fbe2fe7dd218abfef4a1/langchain_core-1.6.3.tar.gz", hash = "sha256:88b430944fbd4d40fa98135d6c873581d497b6f33515d01962337548e918df2f", size = 1006228, upload-time = "2026-09-11T17:37:45.614Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/36/e6/c7c39efe0bc7e1b7c3d8f54f85846e04c901913c3d3e99068b218558c6f1/langchain_core-1.5.3-py3-none-any.whl", hash = "sha256:48b56fa580277209594dd7baf837f5b9a2a3651613f34ff9fb1728b429df015f", size = 561687, upload-time = "2026-07-30T14:55:54.419Z" },
+    { url = "https://files.pythonhosted.org/packages/e6/18/cf18cfec118b02e003f35300b54d6a1173dc6e4905cffdf5ea49e390a7f9/langchain_core-1.6.3-py3-none-any.whl", hash = "sha256:114fe1868c9ed60606662b9dd0074bf3152cc6b0b1522ba37cbd6b04f55ca77d", size = 571753, upload-time = "2026-09-11T17:37:43.875Z" },
 ]
 
 [[package]]
 name = "langchain-google-genai"
-version = "4.3.2"
+version = "4.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filetype" },
@@ -1712,9 +1757,9 @@ dependencies = [
     { name = "langchain-core" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/79/2f/e03b63ad3a61fd1aa479bbc0f3df5d27abb8f9159d111cba96629df844ef/langchain_google_genai-4.3.2.tar.gz", hash = "sha256:6471769a4463fedb10d2d19a9b56c31de1cde505edf7fffd8cdbf98af8c1d7da", size = 286018, upload-time = "2026-07-27T16:27:39.214Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cf/4e/41798c80b574d958d189e049f13d64eb9246a66623465290f2cbfd641759/langchain_google_genai-4.4.0.tar.gz", hash = "sha256:7871beec56ac07b719f77c46997845db6ff2267b817bffb0f97877053b0895d7", size = 378415, upload-time = "2026-09-01T20:15:45.816Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/01/cb/4a2eb187b108a240d57cf8dcf67e818ca75365f769444bf5716e2823cd98/langchain_google_genai-4.3.2-py3-none-any.whl", hash = "sha256:f3b1c09b264612fd1735a9590987bfa0cccca0bc0111691543decb5a03b8667d", size = 72770, upload-time = "2026-07-27T16:27:38.052Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/10/83bb535e78c2cf767a6193c2f3b00b2894c1581a36ef85911ebaa3b9a891/langchain_google_genai-4.4.0-py3-none-any.whl", hash = "sha256:8e23a1307bd2158590bbf9d99f1d658fc84a9d9ddb77fb1b372f8875a2bafbbf", size = 81617, upload-time = "2026-09-01T20:15:44.533Z" },
 ]
 
 [[package]]
@@ -1785,7 +1830,7 @@ wheels = [
 
 [[package]]
 name = "langgraph"
-version = "1.2.10"
+version = "1.2.11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain-core" },
@@ -1795,9 +1840,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "xxhash" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/70/1d/a32f3caf4b3d60651656c0d64976b48d168653e81c71bb7512e9a31541aa/langgraph-1.2.10.tar.gz", hash = "sha256:05a183a746ed570a06c7c1b879920163509a75df9e44e92dd2238218d677fd37", size = 723404, upload-time = "2026-07-28T18:33:51.441Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/56/0d/c8e7ee98896659e1b6555db0ab115a9ca899844744645d5d894032bab1d7/langgraph-1.2.11.tar.gz", hash = "sha256:9ecfe11e50d338b34b15cf4d8a442642de103e8ae6971320efba84e4542eb363", size = 725753, upload-time = "2026-08-11T14:00:36.945Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e2/4d/3fc3e2535ee2c731130d71371848ebc6d4a9d2e8ae6060b11987ba134951/langgraph-1.2.10-py3-none-any.whl", hash = "sha256:52c48bd42fa31a1de0e1c0f0ebfe342e11ca2957b8b3563f83dbd60d8e30f921", size = 247753, upload-time = "2026-07-28T18:33:50.028Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/7f/c5c30e4be99ff821029c7ac872a480676bb179c9f3df85ea3f38d13f86d4/langgraph-1.2.11-py3-none-any.whl", hash = "sha256:8bab70de7b2d00b5300fb289bcf38d8b241400f3184c1e95e8ce706fb0e8686b", size = 248854, upload-time = "2026-08-11T14:00:35.494Z" },
 ]
 
 [[package]]
@@ -1858,12 +1903,12 @@ wheels = [
 
 [[package]]
 name = "langsmith"
-version = "0.10.16"
+version = "0.12.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "distro" },
-    { name = "httpx" },
+    { name = "httpx2" },
     { name = "orjson", marker = "platform_python_implementation != 'PyPy'" },
     { name = "packaging" },
     { name = "pydantic" },
@@ -1876,9 +1921,9 @@ dependencies = [
     { name = "xxhash" },
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b0/f1/ee288a685ae666121a5196575e56886e853b8fde9bbc5b796279cf85b2ba/langsmith-0.10.16.tar.gz", hash = "sha256:7dc5ff6477d50101b4944a985773bf9a3e2a9374e5d71ed2549ada929ca500b2", size = 4797058, upload-time = "2026-08-05T16:59:31.13Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4c/07/0ba19a70e430efd56503aebb7e58f507b09120ed9bee8efe2589ff4dcfae/langsmith-0.12.5.tar.gz", hash = "sha256:0b0440a90ce155c99125f899242a27662182d20ebfd71b5d8fe45c960b96ca48", size = 4890567, upload-time = "2026-09-15T10:36:45.138Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/95/0b/cf0a51c19f659b40351dab76b4d3f0a3554807966a912111fda3156c96fe/langsmith-0.10.16-py3-none-any.whl", hash = "sha256:f0b3882e0d2d69bda596c7b452a7857943aefb2c531c047677470b0a394cc490", size = 734191, upload-time = "2026-08-05T16:59:28.021Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/ff/aadc7eeb7be5257a4cfd023670d12e2a0ee4acbf5ed835320843157106f8/langsmith-0.12.5-py3-none-any.whl", hash = "sha256:ad9fa911c6a002d8bb53daf1064fd0484560f33ac86f334060789258c989e043", size = 768488, upload-time = "2026-09-15T10:36:42.676Z" },
 ]
 
 [[package]]
@@ -2227,6 +2272,7 @@ dependencies = [
     { name = "anthropic" },
     { name = "boto3" },
     { name = "botocore" },
+    { name = "deepagents" },
     { name = "httpx" },
     { name = "jinja2" },
     { name = "langchain-aws" },
@@ -2234,7 +2280,8 @@ dependencies = [
     { name = "nemo-agents-example-email-phishing" },
     { name = "nemo-agents-example-email-security" },
     { name = "nemo-deployments-plugin" },
-    { name = "nemo-fabric", extra = ["claude", "codex", "deepagents", "relay"] },
+    { name = "nemo-fabric", extra = ["claude", "codex", "relay"] },
+    { name = "nemo-fabric-adapters-deepagents" },
     { name = "nemo-fabric-adapters-hermes" },
     { name = "nemo-optimization-plugin" },
     { name = "nemo-platform" },
@@ -2255,6 +2302,7 @@ requires-dist = [
     { name = "anthropic", specifier = ">=0.88.0" },
     { name = "boto3", specifier = ">=1.40.46,<1.40.62" },
     { name = "botocore", specifier = ">=1.40.46,<1.40.62" },
+    { name = "deepagents", specifier = ">=0.7.8,<0.8" },
     { name = "fastapi", marker = "extra == 'test'", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27" },
@@ -2265,8 +2313,9 @@ requires-dist = [
     { name = "nemo-agents-example-email-phishing", editable = "../../plugins/nemo-agents/examples/email-phishing-analyzer" },
     { name = "nemo-agents-example-email-security", editable = "../../plugins/nemo-agents/examples/email-security-analyst" },
     { name = "nemo-deployments-plugin", editable = "../../plugins/nemo-deployments" },
-    { name = "nemo-fabric", extras = ["claude", "codex", "deepagents", "relay"], specifier = ">=0.2.0,<0.3.0" },
-    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14'", specifier = ">=0.2.0,<0.3.0" },
+    { name = "nemo-fabric", extras = ["claude", "codex", "relay"], specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapters-deepagents", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14'", specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-optimization-plugin", editable = "../../plugins/nemo-optimization" },
     { name = "nemo-platform", editable = "../../packages/nemo_platform" },
     { name = "nemo-platform-plugin", editable = "../../packages/nemo_platform_plugin" },
@@ -2337,36 +2386,42 @@ dependencies = [
     { name = "nemo-fabric" },
     { name = "nemo-relay" },
     { name = "openai" },
+    { name = "opentelemetry-proto" },
     { name = "pandas" },
     { name = "pyarrow" },
     { name = "pydantic" },
+    { name = "pytrec-eval-terrier" },
     { name = "ragas" },
     { name = "rouge-score" },
     { name = "sacrebleu" },
+    { name = "sandboxed-gym" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "harbor", marker = "python_full_version >= '3.12' and extra == 'harbor'", specifier = ">=0.16.1" },
+    { name = "harbor", marker = "python_full_version >= '3.12' and extra == 'harbor'", specifier = ">=0.20,<0.21" },
     { name = "httpx", specifier = ">=0.27.0,<1" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "jsonpath-ng", specifier = ">=1.7.0" },
     { name = "jsonschema", specifier = ">=4.23.0" },
     { name = "langchain-nvidia-ai-endpoints", specifier = ">=1.4.3,<2.0.0" },
     { name = "langchain-openai", specifier = ">=1.3.5" },
-    { name = "nemo-fabric", specifier = ">=0.2.0,<0.3.0" },
-    { name = "nemo-fabric", extras = ["claude", "codex"], marker = "extra == 'fabric'", specifier = ">=0.2.0,<0.3.0" },
-    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'fabric'", specifier = ">=0.2.0,<0.3.0" },
+    { name = "nemo-fabric", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric", extras = ["claude", "codex"], marker = "extra == 'fabric'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'fabric'", specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-platform-sdk", marker = "extra == 'nemo-platform'", editable = "../../sdk/python/nemo-platform" },
-    { name = "nemo-relay", specifier = ">=0.7.2,<0.8" },
+    { name = "nemo-relay", specifier = ">=0.7.3,<0.8" },
     { name = "openai", specifier = ">=1.61.0" },
     { name = "openai-agents", extras = ["docker"], marker = "extra == 'agent-runtimes'", specifier = ">=0.17.3,<0.18" },
+    { name = "opentelemetry-proto", specifier = ">=1.27.0" },
     { name = "pandas", specifier = ">=1.5.3" },
     { name = "pyarrow", specifier = ">=19.0.1" },
     { name = "pydantic", specifier = ">=2.10.6" },
+    { name = "pytrec-eval-terrier", specifier = "==0.5.10" },
     { name = "ragas", specifier = "==0.4.3" },
     { name = "rouge-score", specifier = "==0.1.2" },
     { name = "sacrebleu", specifier = ">=2.5.1" },
+    { name = "sandboxed-gym", editable = "../../packages/sandboxed_gym" },
 ]
 provides-extras = ["agent-runtimes", "engine", "harbor", "nemo-platform", "fabric"]
 
@@ -2378,13 +2433,13 @@ dev = [
 
 [[package]]
 name = "nemo-fabric"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nemo-fabric-runtime" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/56/f5/56ef95985c1edb884a997af31d00e6a4626e4dc58af9f3d0cca36d1c37f6/nemo_fabric-0.2.0-py3-none-any.whl", hash = "sha256:7b9805b02e71d37505ed2ae4f16af264dc20dac5ed2739b5efa0b677721f440e", size = 7692, upload-time = "2026-08-19T21:41:38.814Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/28/019f13b43a435cc37706d225c62e226b6af3eee9dafb42295b0fb0f0b9a9/nemo_fabric-0.3.0-py3-none-any.whl", hash = "sha256:342b5dcedddd8c8b4813df80762b23c7f646e632baa61307e0bb48b90221ae00", size = 7869, upload-time = "2026-09-15T16:41:47.931Z" },
 ]
 
 [package.optional-dependencies]
@@ -2394,24 +2449,21 @@ claude = [
 codex = [
     { name = "nemo-fabric-adapters-codex", extra = ["harness"] },
 ]
-deepagents = [
-    { name = "nemo-fabric-adapters-deepagents", extra = ["harness"] },
-]
 relay = [
     { name = "nemo-relay" },
 ]
 
 [[package]]
 name = "nemo-fabric-adapter-contract"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/43/98/d5abfa762254670684b19054ce3e3e8cd19df708464fdc2901a7b7aca166/nemo_fabric_adapter_contract-0.2.0-py3-none-any.whl", hash = "sha256:3783f781432382adb2d782384dc1ab367093d0bcf7ff33c2857a93f831dd5921", size = 15736, upload-time = "2026-08-19T21:41:31.986Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/8c/c3523a7e21cdc36ef8cffa2d8536c168688122ef6971c94f581a48b391af/nemo_fabric_adapter_contract-0.3.0-py3-none-any.whl", hash = "sha256:af0d61017e72a91e6f0e6afb2f7da1a6907156c369d5b9024beafb2107bab84a", size = 15738, upload-time = "2026-09-15T16:41:42.587Z" },
 ]
 
 [[package]]
 name = "nemo-fabric-adapters-claude"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nemo-fabric-adapter-contract" },
@@ -2419,7 +2471,7 @@ dependencies = [
     { name = "tomli-w" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f0/6e/770d9e3e56d5fad8afce3075cedbb9e93b6ea1cb4811f0035eefc8c33a13/nemo_fabric_adapters_claude-0.2.0-py3-none-any.whl", hash = "sha256:cf3f6feb6a65652c0b0aeeafa264e89ae24104cda1d5f60ab8e8b495d0492d9b", size = 18562, upload-time = "2026-08-19T21:41:41.405Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/90/1054fd19efc33624c57d48a1a020e948a6e7f61eb6de992d00d58aa77513/nemo_fabric_adapters_claude-0.3.0-py3-none-any.whl", hash = "sha256:a712b14ab5ea0c8cd00fcdcb539337c3bfd1b366382f510fbfdc26312ed5bcf7", size = 18677, upload-time = "2026-09-15T16:41:45.975Z" },
 ]
 
 [package.optional-dependencies]
@@ -2430,7 +2482,7 @@ harness = [
 
 [[package]]
 name = "nemo-fabric-adapters-codex"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nemo-fabric-adapter-contract" },
@@ -2438,7 +2490,7 @@ dependencies = [
     { name = "tomli-w" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/25/7e799d8a511cc62b7538fef3210b132c32487d0678fbc1f123080cabed98/nemo_fabric_adapters_codex-0.2.0-py3-none-any.whl", hash = "sha256:86a21640ae7b3c31e8b123c2872a9a43113b91df4a87e8a81200acdc45af925b", size = 19880, upload-time = "2026-08-19T21:41:35.346Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/00/596df0404c6e2242272059da2408e7df4d3cedee5449a7d5854ef1678c5c/nemo_fabric_adapters_codex-0.3.0-py3-none-any.whl", hash = "sha256:5a94e0cea504b149ab126251bada549ed79afdda143e5b24d81f375016a87c2a", size = 19928, upload-time = "2026-09-15T16:41:43.889Z" },
 ]
 
 [package.optional-dependencies]
@@ -2449,18 +2501,18 @@ harness = [
 
 [[package]]
 name = "nemo-fabric-adapters-common"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nemo-fabric-adapter-contract" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/4f/d43966b62b77a60df4650d308c96cdd0bdfcc18fa5cb9e1bf8b51fe70129/nemo_fabric_adapters_common-0.2.0-py3-none-any.whl", hash = "sha256:b11448e83236a71ee0dfc1b7421ebf80cf9fca4ee8fc5414daf547c1859dfd5a", size = 24506, upload-time = "2026-08-19T21:41:40.505Z" },
+    { url = "https://files.pythonhosted.org/packages/36/22/341b91af367c02548b0d2362a15f5c26f803106c926614358776ac0e4bcc/nemo_fabric_adapters_common-0.3.0-py3-none-any.whl", hash = "sha256:1a6777cf8a364f8ae930632154f2f1844f50dde04466b98798be1af600227a8d", size = 25630, upload-time = "2026-09-15T16:41:45.068Z" },
 ]
 
 [[package]]
 name = "nemo-fabric-adapters-deepagents"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain-mcp-adapters" },
@@ -2470,41 +2522,35 @@ dependencies = [
     { name = "nemo-fabric-adapters-common" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/52/70/d87a61abe89dbd0b4162d84aec3da22670bb6750b72c44025e04d92aea8e/nemo_fabric_adapters_deepagents-0.2.0-py3-none-any.whl", hash = "sha256:9638f57a0815148296c2c7ff7201d6b9455fd80307cc8b8181b380e77a81db60", size = 21189, upload-time = "2026-08-19T21:41:25.422Z" },
-]
-
-[package.optional-dependencies]
-harness = [
-    { name = "deepagents" },
-    { name = "langchain" },
-    { name = "langgraph" },
+    { url = "https://files.pythonhosted.org/packages/e0/2f/2bfca86e48689aa9771989417aff56b399d094abd30bd492eaa21b29594f/nemo_fabric_adapters_deepagents-0.3.0-py3-none-any.whl", hash = "sha256:ef2b3c941dd228a12e19344664d52a3fbc4157c240c60b45b926119f8cacd101", size = 21423, upload-time = "2026-09-15T16:41:36.79Z" },
 ]
 
 [[package]]
 name = "nemo-fabric-adapters-hermes"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nemo-fabric-adapter-contract" },
     { name = "nemo-fabric-adapters-common" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/79/f2/b1230a2e0af9969ce42425b3acc29aa930199595e63cf20526c731d4d726/nemo_fabric_adapters_hermes-0.2.0-py3-none-any.whl", hash = "sha256:d7c0c522a069545b6a0e49e3e84b320caddb11db02584a992486a8d938ac0ae0", size = 17582, upload-time = "2026-08-19T21:41:32.456Z" },
+    { url = "https://files.pythonhosted.org/packages/bc/1b/05cfe3fc6fdc4e0b55fb10b6e81b563796ef805005a25b11f3d1ca51bc0a/nemo_fabric_adapters_hermes-0.3.0-py3-none-any.whl", hash = "sha256:b1f86abc484295638893939dfa9d7af3a68a834f576863f563fe8269961a5e3c", size = 17673, upload-time = "2026-09-15T16:41:44.077Z" },
 ]
 
 [[package]]
 name = "nemo-fabric-runtime"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "httpx" },
     { name = "pydantic" },
     { name = "typing-extensions" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/03/f2/a42cc99737fd6927e98091f1856f757c785e6b5055c5e5d1ad22fddd8d56/nemo_fabric_runtime-0.2.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:2bfac9275c6f9ef1c5e34c647f1744fb0000bd0a0e86448441b8d6b38ae3a3c7", size = 2796801, upload-time = "2026-08-19T21:41:30.743Z" },
-    { url = "https://files.pythonhosted.org/packages/70/92/6a96475e8f0bcfed0332c587bf77835dd957953240729604b6794d71d9ab/nemo_fabric_runtime-0.2.0-cp311-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:689ded0bec073290fe80c847ec0549e596d2d7cf8747db29263d3ed7bbc969ad", size = 2681438, upload-time = "2026-08-19T21:41:55.521Z" },
-    { url = "https://files.pythonhosted.org/packages/f1/1d/1fa9522134a6e5c0a9461e73d3ecdb28ea6df86b64d0bace4122bf5f9cf3/nemo_fabric_runtime-0.2.0-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:df15419ccaec59fc35f1f68720e771b2588b2c69d658cae05289d8e597064c33", size = 2876665, upload-time = "2026-08-19T21:42:16.305Z" },
-    { url = "https://files.pythonhosted.org/packages/f9/4c/1b3c159d6a98f0650ec169025bc712c7e2374dfeda8e57cc9b09382d81d7/nemo_fabric_runtime-0.2.0-cp311-abi3-win_amd64.whl", hash = "sha256:79ff5f982bd1c551623d366902527e0254ad5efa0dc2f237168d386258109041", size = 2823868, upload-time = "2026-08-19T21:42:42.73Z" },
+    { url = "https://files.pythonhosted.org/packages/44/e0/8006977eb670404257efb18cd6c2cb6079904aee9bb5d7be94ee8c57e103/nemo_fabric_runtime-0.3.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:d49f7b7c83c8ee548f7baf53d68102db13b6fbbf3e43a998210e82505f5b19c6", size = 2796555, upload-time = "2026-09-15T16:41:34.333Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/3f/5cdd4bb42e27c33c6af065294d71e0d2cd3e9716b8ff159f2a24a2553d67/nemo_fabric_runtime-0.3.0-cp311-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e2c2bf02e5ecafe78612453b86952ae7f76008371d45d2227317ba30ff9eef94", size = 2678665, upload-time = "2026-09-15T16:41:57.427Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/30/18c4763a7536c0bcdd1b67ffa3203d2cc7cbe66c2d17ca53c215e072774f/nemo_fabric_runtime-0.3.0-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:2427487ce0e50151f1995da57de7433bd8a5bd122cf377738c76dad5891a8865", size = 2871108, upload-time = "2026-09-15T16:42:21.394Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/af/90822e57be949e045a043cee91ca9f2844fa7dfd59ec403fc1adce05f1f9/nemo_fabric_runtime-0.3.0-cp311-abi3-win_amd64.whl", hash = "sha256:e64f33323e26ac59b435d7647841bb5c86cdfd1f4c7d6fc413f2712ec5e67215", size = 2807638, upload-time = "2026-09-15T16:42:49.047Z" },
 ]
 
 [[package]]
@@ -2560,7 +2606,10 @@ requires-dist = [
     { name = "aioboto3", marker = "extra == 'core-service'", specifier = ">=15.5.0" },
     { name = "aioboto3", marker = "extra == 'files-service'", specifier = ">=15.5.0" },
     { name = "aioboto3", marker = "extra == 'services'", specifier = ">=15.5.0" },
+    { name = "aiofiles", marker = "extra == 'all'", specifier = ">=24.1.0" },
+    { name = "aiofiles", marker = "extra == 'automodel-service'", specifier = ">=24.1.0" },
     { name = "aiofiles", marker = "extra == 'nmp-common'", specifier = ">=24.1.0" },
+    { name = "aiofiles", marker = "extra == 'services'", specifier = ">=24.1.0" },
     { name = "aiohttp", marker = "extra == 'aiohttp'", specifier = ">=3.14.1" },
     { name = "aiohttp", marker = "extra == 'all'", specifier = ">=3.14.1" },
     { name = "aiohttp", marker = "extra == 'auditor-service'", specifier = ">=3.14.1" },
@@ -2637,6 +2686,10 @@ requires-dist = [
     { name = "datasets", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=3.3.1,<=4.3.0" },
     { name = "datasets", marker = "extra == 'plugins'", specifier = ">=3.3.1,<=4.3.0" },
     { name = "datasets", marker = "extra == 'services'", specifier = ">=3.3.1,<=4.3.0" },
+    { name = "deepagents", marker = "extra == 'all'", specifier = ">=0.7.8,<0.8" },
+    { name = "deepagents", marker = "extra == 'nemo-agents-plugin'", specifier = ">=0.7.8,<0.8" },
+    { name = "deepagents", marker = "extra == 'plugins'", specifier = ">=0.7.8,<0.8" },
+    { name = "deepagents", marker = "extra == 'services'", specifier = ">=0.7.8,<0.8" },
     { name = "distro", marker = "extra == 'nemo-platform-sdk'", specifier = ">=1.7.0,<2" },
     { name = "docker", marker = "extra == 'all'", specifier = ">=7.1.0" },
     { name = "docker", marker = "extra == 'core-service'", specifier = ">=7.1.0" },
@@ -2688,13 +2741,18 @@ requires-dist = [
     { name = "fastapi", extras = ["standard"], marker = "extra == 'auth-service'", specifier = ">=0.115.4" },
     { name = "fastapi", extras = ["standard"], marker = "extra == 'core-service'", specifier = ">=0.115.4" },
     { name = "fastapi", extras = ["standard"], marker = "extra == 'hello-world-service'", specifier = ">=0.115.4" },
-    { name = "fastapi", extras = ["standard"], marker = "extra == 'nmp-common'", specifier = ">=0.115.4" },
+    { name = "fastapi", extras = ["standard"], marker = "extra == 'nmp-common'", specifier = ">=0.137.2" },
     { name = "fastapi", extras = ["standard"], marker = "extra == 'services'", specifier = ">=0.115.4" },
     { name = "fastapi", extras = ["standard"], marker = "extra == 'studio-service'", specifier = ">=0.115.4" },
     { name = "fastmcp", marker = "extra == 'all'", specifier = ">=3.2.0" },
     { name = "fastmcp", marker = "extra == 'core-service'", specifier = ">=3.2.0" },
     { name = "fastmcp", marker = "extra == 'entities-service'", specifier = ">=3.2.0" },
     { name = "fastmcp", marker = "extra == 'services'", specifier = ">=3.2.0" },
+    { name = "filesets", marker = "extra == 'all'", editable = "../../packages/filesets" },
+    { name = "filesets", marker = "extra == 'core-service'", editable = "../../packages/filesets" },
+    { name = "filesets", marker = "extra == 'files-service'", editable = "../../packages/filesets" },
+    { name = "filesets", marker = "extra == 'nmp-customization-common'", editable = "../../packages/filesets" },
+    { name = "filesets", marker = "extra == 'services'", editable = "../../packages/filesets" },
     { name = "fsspec", marker = "extra == 'all'", specifier = ">=2024.10.0" },
     { name = "fsspec", marker = "extra == 'guardrails-service'", specifier = ">=2024.10.0" },
     { name = "fsspec", marker = "extra == 'nemo-platform-sdk'", specifier = ">=2023.1.0" },
@@ -2714,15 +2772,16 @@ requires-dist = [
     { name = "gunicorn", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=23.0.0" },
     { name = "gunicorn", marker = "extra == 'plugins'", specifier = ">=23.0.0" },
     { name = "gunicorn", marker = "extra == 'services'", specifier = ">=23.0.0" },
-    { name = "harbor", marker = "extra == 'all'", specifier = ">=0.16" },
-    { name = "harbor", marker = "extra == 'nemo-experimentalist-plugin'", specifier = ">=0.16" },
-    { name = "harbor", marker = "extra == 'plugins'", specifier = ">=0.16" },
-    { name = "harbor", marker = "extra == 'services'", specifier = ">=0.16" },
+    { name = "harbor", marker = "extra == 'all'", specifier = ">=0.20,<0.21" },
+    { name = "harbor", marker = "extra == 'nemo-experimentalist-plugin'", specifier = ">=0.20,<0.21" },
+    { name = "harbor", marker = "extra == 'plugins'", specifier = ">=0.20,<0.21" },
+    { name = "harbor", marker = "extra == 'services'", specifier = ">=0.20,<0.21" },
     { name = "httpx", marker = "extra == 'all'" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.27.2" },
     { name = "httpx", marker = "extra == 'auditor-service'", specifier = ">=0.28.1,<1.0.0" },
     { name = "httpx", marker = "extra == 'auth-service'", specifier = ">=0.27.0" },
+    { name = "httpx", marker = "extra == 'automodel-service'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'core-service'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'guardrails-service'", specifier = ">=0.27.2" },
     { name = "httpx", marker = "extra == 'nemo-agents-plugin'", specifier = ">=0.27" },
@@ -2735,13 +2794,16 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'nemo-insights-plugin'" },
     { name = "httpx", marker = "extra == 'nemo-platform-sdk'", specifier = ">=0.23.0,<1" },
     { name = "httpx", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=0.27.2" },
+    { name = "httpx", marker = "extra == 'nmp-customization-common'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'plugins'" },
     { name = "httpx", marker = "extra == 'plugins'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'plugins'", specifier = ">=0.27.2" },
+    { name = "httpx", marker = "extra == 'rl-service'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'services'" },
     { name = "httpx", marker = "extra == 'services'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'services'", specifier = ">=0.27.2" },
     { name = "httpx", marker = "extra == 'switchyard-vendored'", specifier = ">=0.28.1,<1.0" },
+    { name = "httpx", marker = "extra == 'unsloth-service'", specifier = ">=0.27.0" },
     { name = "httpx-aiohttp", marker = "extra == 'aiohttp'", specifier = ">=0.1.9" },
     { name = "huggingface-hub", marker = "extra == 'nmp-common'", specifier = ">=1.0.1,<2.0.0" },
     { name = "hvac", marker = "extra == 'all'", specifier = ">=2.3.0" },
@@ -2755,8 +2817,11 @@ requires-dist = [
     { name = "jinja2", marker = "extra == 'plugins'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'services'", specifier = ">=3.1" },
     { name = "jsonpath-ng", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.7.0" },
+    { name = "jsonschema", marker = "extra == 'all'", specifier = ">=4.23.0" },
+    { name = "jsonschema", marker = "extra == 'automodel-service'", specifier = ">=4.23.0" },
     { name = "jsonschema", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=4.23.0" },
     { name = "jsonschema", marker = "extra == 'nemo-platform-plugin'", specifier = ">=4.0.0" },
+    { name = "jsonschema", marker = "extra == 'services'", specifier = ">=4.23.0" },
     { name = "kubernetes", marker = "extra == 'all'", specifier = ">=30.1.0" },
     { name = "kubernetes", marker = "extra == 'core-service'", specifier = ">=30.1.0" },
     { name = "kubernetes", marker = "extra == 'jobs-service'", specifier = ">=30.1.0" },
@@ -2821,15 +2886,27 @@ requires-dist = [
     { name = "nemo-evaluator-sdk", marker = "extra == 'nemo-optimization-plugin'", editable = "../../packages/nemo_evaluator_sdk" },
     { name = "nemo-evaluator-sdk", marker = "extra == 'plugins'", editable = "../../packages/nemo_evaluator_sdk" },
     { name = "nemo-evaluator-sdk", marker = "extra == 'services'", editable = "../../packages/nemo_evaluator_sdk" },
-    { name = "nemo-fabric", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.2.0,<0.3.0" },
-    { name = "nemo-fabric", extras = ["claude", "codex", "deepagents", "relay"], marker = "extra == 'all'", specifier = ">=0.2.0,<0.3.0" },
-    { name = "nemo-fabric", extras = ["claude", "codex", "deepagents", "relay"], marker = "extra == 'nemo-agents-plugin'", specifier = ">=0.2.0,<0.3.0" },
-    { name = "nemo-fabric", extras = ["claude", "codex", "deepagents", "relay"], marker = "extra == 'plugins'", specifier = ">=0.2.0,<0.3.0" },
-    { name = "nemo-fabric", extras = ["claude", "codex", "deepagents", "relay"], marker = "extra == 'services'", specifier = ">=0.2.0,<0.3.0" },
-    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'all'", specifier = ">=0.2.0,<0.3.0" },
-    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin'", specifier = ">=0.2.0,<0.3.0" },
-    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'plugins'", specifier = ">=0.2.0,<0.3.0" },
-    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'services'", specifier = ">=0.2.0,<0.3.0" },
+    { name = "nemo-fabric", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric", extras = ["claude", "codex", "relay"], marker = "extra == 'all'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric", extras = ["claude", "codex", "relay"], marker = "extra == 'nemo-agents-plugin'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric", extras = ["claude", "codex", "relay"], marker = "extra == 'plugins'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric", extras = ["claude", "codex", "relay"], marker = "extra == 'services'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapter-contract", marker = "extra == 'all'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapter-contract", marker = "extra == 'nemo-insights-plugin'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapter-contract", marker = "extra == 'plugins'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapter-contract", marker = "extra == 'services'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapters-common", marker = "extra == 'all'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapters-common", marker = "extra == 'nemo-insights-plugin'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapters-common", marker = "extra == 'plugins'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapters-common", marker = "extra == 'services'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'all'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'nemo-agents-plugin'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'plugins'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'services'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'all'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'plugins'", specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'services'", specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-insights-plugin", marker = "extra == 'all'", editable = "../../plugins/nemo-insights" },
     { name = "nemo-insights-plugin", marker = "extra == 'nemo-experimentalist-plugin'", editable = "../../plugins/nemo-insights" },
     { name = "nemo-insights-plugin", marker = "extra == 'plugins'", editable = "../../plugins/nemo-insights" },
@@ -2840,6 +2917,7 @@ requires-dist = [
     { name = "nemo-optimization-plugin", marker = "extra == 'services'", editable = "../../plugins/nemo-optimization" },
     { name = "nemo-platform-plugin", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'all'", editable = "../../packages/nemo_platform_plugin" },
+    { name = "nemo-platform-plugin", marker = "extra == 'automodel-service'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'core-service'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'inference-gateway-service'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'jobs-service'", editable = "../../packages/nemo_platform_plugin" },
@@ -2847,6 +2925,8 @@ requires-dist = [
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-agents-plugin'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-anonymizer-plugin'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-auditor-plugin'", editable = "../../packages/nemo_platform_plugin" },
+    { name = "nemo-platform-plugin", marker = "extra == 'nemo-automodel-plugin'", editable = "../../packages/nemo_platform_plugin" },
+    { name = "nemo-platform-plugin", marker = "extra == 'nemo-customizer-plugin'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-data-designer-plugin'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-deployments-plugin'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-evaluator-plugin'", editable = "../../packages/nemo_platform_plugin" },
@@ -2855,22 +2935,31 @@ requires-dist = [
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-insights-plugin'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-optimization-plugin'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-platform-sdk'", editable = "../../packages/nemo_platform_plugin" },
+    { name = "nemo-platform-plugin", marker = "extra == 'nemo-rl-plugin'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-safe-synthesizer-plugin'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'nemo-switchyard'", editable = "../../packages/nemo_platform_plugin" },
+    { name = "nemo-platform-plugin", marker = "extra == 'nemo-unsloth-plugin'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'nmp-common'", editable = "../../packages/nemo_platform_plugin" },
+    { name = "nemo-platform-plugin", marker = "extra == 'nmp-customization-common'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'plugins'", editable = "../../packages/nemo_platform_plugin" },
+    { name = "nemo-platform-plugin", marker = "extra == 'rl-service'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-plugin", marker = "extra == 'services'", editable = "../../packages/nemo_platform_plugin" },
+    { name = "nemo-platform-plugin", marker = "extra == 'unsloth-service'", editable = "../../packages/nemo_platform_plugin" },
     { name = "nemo-platform-sdk", editable = "../../sdk/python/nemo-platform" },
     { name = "nemo-platform-sdk", marker = "extra == 'all'", editable = "../../sdk/python/nemo-platform" },
     { name = "nemo-platform-sdk", marker = "extra == 'core-service'", editable = "../../sdk/python/nemo-platform" },
     { name = "nemo-platform-sdk", marker = "extra == 'entities-service'", editable = "../../sdk/python/nemo-platform" },
     { name = "nemo-platform-sdk", marker = "extra == 'nemo-deployments-plugin'", editable = "../../sdk/python/nemo-platform" },
-    { name = "nemo-platform-sdk", marker = "extra == 'nemo-evaluator-plugin'", editable = "../../sdk/python/nemo-platform" },
     { name = "nemo-platform-sdk", marker = "extra == 'nemo-platform-plugin'", editable = "../../sdk/python/nemo-platform" },
     { name = "nemo-platform-sdk", marker = "extra == 'nmp-common'", editable = "../../sdk/python/nemo-platform" },
     { name = "nemo-platform-sdk", marker = "extra == 'plugins'", editable = "../../sdk/python/nemo-platform" },
     { name = "nemo-platform-sdk", marker = "extra == 'services'", editable = "../../sdk/python/nemo-platform" },
-    { name = "nemo-relay", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.7.2,<0.8" },
+    { name = "nemo-platform-sdk", marker = "extra == 'unsloth-service'", editable = "../../sdk/python/nemo-platform" },
+    { name = "nemo-relay", marker = "extra == 'all'", specifier = ">=0.7,<0.8" },
+    { name = "nemo-relay", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.7.3,<0.8" },
+    { name = "nemo-relay", marker = "extra == 'nemo-insights-plugin'", specifier = ">=0.7,<0.8" },
+    { name = "nemo-relay", marker = "extra == 'plugins'", specifier = ">=0.7,<0.8" },
+    { name = "nemo-relay", marker = "extra == 'services'", specifier = ">=0.7,<0.8" },
     { name = "nemo-safe-synthesizer", marker = "extra == 'all'", specifier = "==0.1.7" },
     { name = "nemo-safe-synthesizer", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = "==0.1.7" },
     { name = "nemo-safe-synthesizer", marker = "extra == 'plugins'", specifier = "==0.1.7" },
@@ -2888,9 +2977,14 @@ requires-dist = [
     { name = "nmp-auth", marker = "extra == 'all'", editable = "../../services/core/auth" },
     { name = "nmp-auth", marker = "extra == 'platform-seed-service'", editable = "../../services/core/auth" },
     { name = "nmp-auth", marker = "extra == 'services'", editable = "../../services/core/auth" },
+    { name = "nmp-automodel", marker = "extra == 'all'", editable = "../../services/automodel" },
+    { name = "nmp-automodel", marker = "extra == 'nemo-automodel-plugin'", editable = "../../services/automodel" },
+    { name = "nmp-automodel", marker = "extra == 'plugins'", editable = "../../services/automodel" },
+    { name = "nmp-automodel", marker = "extra == 'services'", editable = "../../services/automodel" },
     { name = "nmp-common", editable = "../../packages/nmp_common" },
     { name = "nmp-common", marker = "extra == 'all'", editable = "../../packages/nmp_common" },
     { name = "nmp-common", marker = "extra == 'auth-service'", editable = "../../packages/nmp_common" },
+    { name = "nmp-common", marker = "extra == 'automodel-service'", editable = "../../packages/nmp_common" },
     { name = "nmp-common", marker = "extra == 'core-service'", editable = "../../packages/nmp_common" },
     { name = "nmp-common", marker = "extra == 'entities-service'", editable = "../../packages/nmp_common" },
     { name = "nmp-common", marker = "extra == 'files-service'", editable = "../../packages/nmp_common" },
@@ -2900,13 +2994,34 @@ requires-dist = [
     { name = "nmp-common", marker = "extra == 'intake-service'", editable = "../../packages/nmp_common" },
     { name = "nmp-common", marker = "extra == 'jobs-service'", editable = "../../packages/nmp_common" },
     { name = "nmp-common", marker = "extra == 'models-service'", editable = "../../packages/nmp_common" },
+    { name = "nmp-common", marker = "extra == 'nmp-customization-common'", editable = "../../packages/nmp_common" },
     { name = "nmp-common", marker = "extra == 'platform-seed-service'", editable = "../../packages/nmp_common" },
+    { name = "nmp-common", marker = "extra == 'rl-service'", editable = "../../packages/nmp_common" },
     { name = "nmp-common", marker = "extra == 'secrets-service'", editable = "../../packages/nmp_common" },
     { name = "nmp-common", marker = "extra == 'services'", editable = "../../packages/nmp_common" },
     { name = "nmp-common", marker = "extra == 'studio-service'", editable = "../../packages/nmp_common" },
+    { name = "nmp-common", marker = "extra == 'unsloth-service'", editable = "../../packages/nmp_common" },
+    { name = "nmp-customization-common", marker = "extra == 'all'", editable = "../../packages/nmp_customization_common" },
+    { name = "nmp-customization-common", marker = "extra == 'automodel-service'", editable = "../../packages/nmp_customization_common" },
+    { name = "nmp-customization-common", marker = "extra == 'nemo-automodel-plugin'", editable = "../../packages/nmp_customization_common" },
+    { name = "nmp-customization-common", marker = "extra == 'nemo-data-designer-plugin'", editable = "../../packages/nmp_customization_common" },
+    { name = "nmp-customization-common", marker = "extra == 'nemo-rl-plugin'", editable = "../../packages/nmp_customization_common" },
+    { name = "nmp-customization-common", marker = "extra == 'nemo-unsloth-plugin'", editable = "../../packages/nmp_customization_common" },
+    { name = "nmp-customization-common", marker = "extra == 'plugins'", editable = "../../packages/nmp_customization_common" },
+    { name = "nmp-customization-common", marker = "extra == 'rl-service'", editable = "../../packages/nmp_customization_common" },
+    { name = "nmp-customization-common", marker = "extra == 'services'", editable = "../../packages/nmp_customization_common" },
+    { name = "nmp-customization-common", marker = "extra == 'unsloth-service'", editable = "../../packages/nmp_customization_common" },
     { name = "nmp-guardrails", marker = "extra == 'all'", editable = "../../services/guardrails" },
     { name = "nmp-guardrails", marker = "extra == 'platform-seed-service'", editable = "../../services/guardrails" },
     { name = "nmp-guardrails", marker = "extra == 'services'", editable = "../../services/guardrails" },
+    { name = "nmp-rl", marker = "extra == 'all'", editable = "../../services/rl" },
+    { name = "nmp-rl", marker = "extra == 'nemo-rl-plugin'", editable = "../../services/rl" },
+    { name = "nmp-rl", marker = "extra == 'plugins'", editable = "../../services/rl" },
+    { name = "nmp-rl", marker = "extra == 'services'", editable = "../../services/rl" },
+    { name = "nmp-unsloth", marker = "extra == 'all'", editable = "../../services/unsloth" },
+    { name = "nmp-unsloth", marker = "extra == 'nemo-unsloth-plugin'", editable = "../../services/unsloth" },
+    { name = "nmp-unsloth", marker = "extra == 'plugins'", editable = "../../services/unsloth" },
+    { name = "nmp-unsloth", marker = "extra == 'services'", editable = "../../services/unsloth" },
     { name = "nooa", marker = "extra == 'all'", specifier = ">=0.0.9" },
     { name = "nooa", marker = "extra == 'nemo-experimentalist-plugin'", specifier = ">=0.0.9" },
     { name = "nooa", marker = "extra == 'nemo-insights-plugin'", specifier = ">=0.0.9" },
@@ -2984,6 +3099,7 @@ requires-dist = [
     { name = "opentelemetry-proto", marker = "extra == 'core-service'", specifier = ">=1.28.2" },
     { name = "opentelemetry-proto", marker = "extra == 'files-service'", specifier = ">=1.28.2" },
     { name = "opentelemetry-proto", marker = "extra == 'intake-service'", specifier = ">=1.27.0" },
+    { name = "opentelemetry-proto", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.27.0" },
     { name = "opentelemetry-proto", marker = "extra == 'nemo-experimentalist-plugin'", specifier = ">=1.42.1" },
     { name = "opentelemetry-proto", marker = "extra == 'plugins'", specifier = ">=1.42.1" },
     { name = "opentelemetry-proto", marker = "extra == 'services'", specifier = ">=1.27.0" },
@@ -3001,6 +3117,9 @@ requires-dist = [
     { name = "optuna", marker = "extra == 'nemo-optimization-plugin'", specifier = ">=4.0.0" },
     { name = "optuna", marker = "extra == 'plugins'", specifier = ">=4.0.0" },
     { name = "optuna", marker = "extra == 'services'", specifier = ">=4.0.0" },
+    { name = "packaging", marker = "extra == 'all'", specifier = ">=24.0" },
+    { name = "packaging", marker = "extra == 'rl-service'", specifier = ">=24.0" },
+    { name = "packaging", marker = "extra == 'services'", specifier = ">=24.0" },
     { name = "pandas", marker = "extra == 'all'" },
     { name = "pandas", marker = "extra == 'all'", specifier = ">=1.5.3" },
     { name = "pandas", marker = "extra == 'core-service'", specifier = ">=1.5.3" },
@@ -3031,6 +3150,7 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'all'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'all'", specifier = ">=2.12.0" },
     { name = "pydantic", marker = "extra == 'auth-service'", specifier = ">=2.10.3" },
+    { name = "pydantic", marker = "extra == 'automodel-service'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'core-service'", specifier = ">=2.0.0" },
     { name = "pydantic", marker = "extra == 'core-service'", specifier = ">=2.10.3" },
     { name = "pydantic", marker = "extra == 'core-service'", specifier = ">=2.10.6" },
@@ -3042,6 +3162,8 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'jobs-service'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'models-service'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-auditor-plugin'", specifier = ">=2.10.6" },
+    { name = "pydantic", marker = "extra == 'nemo-automodel-plugin'", specifier = ">=2.10.6" },
+    { name = "pydantic", marker = "extra == 'nemo-customizer-plugin'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-deployments-plugin'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-evaluator-plugin'", specifier = ">=2.12.0" },
     { name = "pydantic", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=2.10.6" },
@@ -3050,16 +3172,21 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'nemo-optimization-plugin'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-platform-plugin'", specifier = ">=2.12.0" },
     { name = "pydantic", marker = "extra == 'nemo-platform-sdk'", specifier = ">=2.0.0,<3" },
+    { name = "pydantic", marker = "extra == 'nemo-rl-plugin'", specifier = ">=2.10.6" },
+    { name = "pydantic", marker = "extra == 'nemo-unsloth-plugin'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nmp-common'", specifier = ">=2.10.3" },
+    { name = "pydantic", marker = "extra == 'nmp-customization-common'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'plugins'", specifier = ">=2" },
     { name = "pydantic", marker = "extra == 'plugins'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'plugins'", specifier = ">=2.12.0" },
+    { name = "pydantic", marker = "extra == 'rl-service'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'services'", specifier = ">=2.0.0" },
     { name = "pydantic", marker = "extra == 'services'", specifier = ">=2.9.2,<3.0.0" },
     { name = "pydantic", marker = "extra == 'services'", specifier = ">=2.10.3" },
     { name = "pydantic", marker = "extra == 'services'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'services'", specifier = ">=2.12.0" },
     { name = "pydantic", marker = "extra == 'switchyard-vendored'", specifier = ">=2.13.3,<3.0" },
+    { name = "pydantic", marker = "extra == 'unsloth-service'", specifier = ">=2.10.6" },
     { name = "pydantic", extras = ["email"], marker = "extra == 'all'", specifier = ">=2.9.2" },
     { name = "pydantic", extras = ["email"], marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=2.9.2" },
     { name = "pydantic", extras = ["email"], marker = "extra == 'plugins'", specifier = ">=2.9.2" },
@@ -3070,6 +3197,7 @@ requires-dist = [
     { name = "pydantic-settings", marker = "extra == 'all'", specifier = ">=2.6.1,<3.0.0" },
     { name = "pydantic-settings", marker = "extra == 'all'", specifier = ">=2.8.1" },
     { name = "pydantic-settings", marker = "extra == 'auth-service'", specifier = ">=2.6.1" },
+    { name = "pydantic-settings", marker = "extra == 'automodel-service'", specifier = ">=2.6.1" },
     { name = "pydantic-settings", marker = "extra == 'core-service'", specifier = ">=2.0.0" },
     { name = "pydantic-settings", marker = "extra == 'core-service'", specifier = ">=2.6.1" },
     { name = "pydantic-settings", marker = "extra == 'core-service'", specifier = ">=2.8.1" },
@@ -3080,17 +3208,23 @@ requires-dist = [
     { name = "pydantic-settings", marker = "extra == 'intake-service'", specifier = ">=2.6.1,<3.0.0" },
     { name = "pydantic-settings", marker = "extra == 'jobs-service'", specifier = ">=2.8.1" },
     { name = "pydantic-settings", marker = "extra == 'models-service'", specifier = ">=2.8.1" },
+    { name = "pydantic-settings", marker = "extra == 'nemo-automodel-plugin'", specifier = ">=2.6.1" },
     { name = "pydantic-settings", marker = "extra == 'nemo-optimization-plugin'", specifier = ">=2.6.1" },
     { name = "pydantic-settings", marker = "extra == 'nemo-platform-plugin'", specifier = ">=2.8.1" },
+    { name = "pydantic-settings", marker = "extra == 'nemo-rl-plugin'", specifier = ">=2.6.1" },
     { name = "pydantic-settings", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=2.2.1" },
+    { name = "pydantic-settings", marker = "extra == 'nemo-unsloth-plugin'", specifier = ">=2.6.1" },
     { name = "pydantic-settings", marker = "extra == 'nmp-common'", specifier = ">=2.8.1" },
+    { name = "pydantic-settings", marker = "extra == 'nmp-customization-common'", specifier = ">=2.6.1" },
     { name = "pydantic-settings", marker = "extra == 'plugins'", specifier = ">=2.2.1" },
     { name = "pydantic-settings", marker = "extra == 'plugins'", specifier = ">=2.6.1" },
+    { name = "pydantic-settings", marker = "extra == 'rl-service'", specifier = ">=2.6.1" },
     { name = "pydantic-settings", marker = "extra == 'services'", specifier = ">=2.0.0" },
     { name = "pydantic-settings", marker = "extra == 'services'", specifier = ">=2.2.1" },
     { name = "pydantic-settings", marker = "extra == 'services'", specifier = ">=2.6.1" },
     { name = "pydantic-settings", marker = "extra == 'services'", specifier = ">=2.6.1,<3.0.0" },
     { name = "pydantic-settings", marker = "extra == 'services'", specifier = ">=2.8.1" },
+    { name = "pydantic-settings", marker = "extra == 'unsloth-service'", specifier = ">=2.6.1" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'nmp-common'", specifier = ">=2.13.0" },
     { name = "pyleak", marker = "extra == 'all'", specifier = ">=0.1.0" },
     { name = "pyleak", marker = "extra == 'services'", specifier = ">=0.1.0" },
@@ -3103,6 +3237,7 @@ requires-dist = [
     { name = "python-on-whales", marker = "extra == 'nemo-agents-plugin'", specifier = ">=0.60" },
     { name = "python-on-whales", marker = "extra == 'plugins'", specifier = ">=0.60" },
     { name = "python-on-whales", marker = "extra == 'services'", specifier = ">=0.60" },
+    { name = "pytrec-eval-terrier", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.5.10" },
     { name = "pyyaml", marker = "extra == 'all'", specifier = ">=6.0.0" },
     { name = "pyyaml", marker = "extra == 'all'", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'all'", specifier = ">=6.0.3" },
@@ -3168,9 +3303,13 @@ requires-dist = [
     { name = "switchyard-vendored", marker = "extra == 'plugins'" },
     { name = "switchyard-vendored", marker = "extra == 'services'" },
     { name = "tenacity", marker = "extra == 'all'", specifier = ">=8.5.0" },
+    { name = "tenacity", marker = "extra == 'automodel-service'", specifier = ">=8.5.0" },
     { name = "tenacity", marker = "extra == 'core-service'", specifier = ">=8.5.0" },
     { name = "tenacity", marker = "extra == 'models-service'", specifier = ">=8.5.0" },
+    { name = "tenacity", marker = "extra == 'nmp-customization-common'", specifier = ">=8.5.0" },
+    { name = "tenacity", marker = "extra == 'rl-service'", specifier = ">=8.5.0" },
     { name = "tenacity", marker = "extra == 'services'", specifier = ">=8.5.0" },
+    { name = "tenacity", marker = "extra == 'unsloth-service'", specifier = ">=8.5.0" },
     { name = "tomlkit", marker = "extra == 'all'", specifier = ">=0.13.3" },
     { name = "tomlkit", marker = "extra == 'nemo-experimentalist-plugin'", specifier = ">=0.13.3" },
     { name = "tomlkit", marker = "extra == 'plugins'", specifier = ">=0.13.3" },
@@ -3179,12 +3318,16 @@ requires-dist = [
     { name = "typer", marker = "extra == 'all'", specifier = ">=0.12.5" },
     { name = "typer", marker = "extra == 'all'", specifier = ">=0.20.0" },
     { name = "typer", marker = "extra == 'nemo-auditor-plugin'", specifier = ">=0.20.0" },
+    { name = "typer", marker = "extra == 'nemo-automodel-plugin'", specifier = ">=0.12.5" },
+    { name = "typer", marker = "extra == 'nemo-customizer-plugin'", specifier = ">=0.12.5" },
     { name = "typer", marker = "extra == 'nemo-evaluator-plugin'", specifier = ">=0.20.0" },
     { name = "typer", marker = "extra == 'nemo-insights-plugin'", specifier = ">=0.20.0" },
     { name = "typer", marker = "extra == 'nemo-optimization-plugin'", specifier = ">=0.12.5" },
     { name = "typer", marker = "extra == 'nemo-platform-plugin'", specifier = ">=0.20.0,<0.26" },
     { name = "typer", marker = "extra == 'nemo-platform-sdk'", specifier = ">=0.20.0" },
+    { name = "typer", marker = "extra == 'nemo-rl-plugin'", specifier = ">=0.12.5" },
     { name = "typer", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=0.9.0" },
+    { name = "typer", marker = "extra == 'nemo-unsloth-plugin'", specifier = ">=0.12.5" },
     { name = "typer", marker = "extra == 'plugins'", specifier = ">=0.9.0" },
     { name = "typer", marker = "extra == 'plugins'", specifier = ">=0.12.5" },
     { name = "typer", marker = "extra == 'plugins'", specifier = ">=0.20.0" },
@@ -3239,7 +3382,7 @@ requires-dist = [
     { name = "yara-python", marker = "extra == 'guardrails-service'", specifier = "==4.5.1" },
     { name = "yara-python", marker = "extra == 'services'", specifier = "==4.5.1" },
 ]
-provides-extras = ["aiohttp", "all", "auditor-service", "auth-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "guardrails-service", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agents-example-calculator", "nemo-agents-plugin", "nemo-anonymizer-plugin", "nemo-auditor-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evaluator-plugin", "nemo-evaluator-sdk", "nemo-experimentalist-plugin", "nemo-guardrails-plugin", "nemo-insights-plugin", "nemo-optimization-plugin", "nemo-platform-plugin", "nemo-platform-sdk", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nmp-common", "platform-seed-service", "plugins", "secrets-service", "services", "studio-service", "switchyard-vendored"]
+provides-extras = ["aiohttp", "all", "auditor-service", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "guardrails-service", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agents-example-calculator", "nemo-agents-plugin", "nemo-anonymizer-plugin", "nemo-auditor-plugin", "nemo-automodel-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evaluator-plugin", "nemo-evaluator-sdk", "nemo-experimentalist-plugin", "nemo-guardrails-plugin", "nemo-insights-plugin", "nemo-optimization-plugin", "nemo-platform-plugin", "nemo-platform-sdk", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nmp-common", "nmp-customization-common", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "switchyard-vendored", "unsloth-service"]
 
 [[package]]
 name = "nemo-platform-plugin"
@@ -3265,29 +3408,46 @@ requires-dist = [
     { name = "docker", marker = "extra == 'nemo-platform-sdk'", specifier = ">=7.0.0" },
     { name = "fastapi", specifier = ">=0.115.4" },
     { name = "fsspec", marker = "extra == 'nemo-platform-sdk'", specifier = ">=2023.1.0" },
+    { name = "httpx", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.27.0,<1" },
     { name = "httpx", marker = "extra == 'nemo-platform-sdk'", specifier = ">=0.23.0,<1" },
+    { name = "jinja2", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=3.1.6" },
+    { name = "jsonpath-ng", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.7.0" },
     { name = "jsonschema", specifier = ">=4.0.0" },
+    { name = "jsonschema", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=4.23.0" },
+    { name = "langchain-nvidia-ai-endpoints", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.4.3,<2.0.0" },
+    { name = "langchain-openai", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.3.5" },
     { name = "lark", specifier = ">=1.1.0" },
+    { name = "nemo-fabric", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-platform-sdk", editable = "../../sdk/python/nemo-platform" },
+    { name = "nemo-relay", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.7.3,<0.8" },
     { name = "ngcsdk", marker = "extra == 'nemo-platform-sdk'", specifier = ">=4.8.2" },
     { name = "nvidia-ml-py", marker = "extra == 'nemo-platform-sdk'", specifier = ">=13.0.0" },
     { name = "openai", specifier = ">=1.109.1" },
+    { name = "openai", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.61.0" },
     { name = "openai", marker = "extra == 'nemo-platform-sdk'" },
+    { name = "opentelemetry-proto", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.27.0" },
+    { name = "pandas", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.5.3" },
     { name = "prompt-toolkit", marker = "extra == 'nemo-platform-sdk'", specifier = ">=3.0.0" },
     { name = "psutil", marker = "extra == 'nemo-platform-sdk'", specifier = ">=5.9.0" },
+    { name = "pyarrow", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=19.0.1" },
     { name = "pydantic", specifier = ">=2.12.0" },
+    { name = "pydantic", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nemo-platform-sdk'", specifier = ">=2.0.0,<3" },
     { name = "pydantic-settings", specifier = ">=2.8.1" },
+    { name = "pytrec-eval-terrier", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.5.10" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'nemo-platform-sdk'", specifier = ">=6.0.0" },
+    { name = "ragas", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.4.3" },
     { name = "requests", marker = "extra == 'nemo-platform-sdk'", specifier = ">=2.31.0" },
     { name = "rich", marker = "extra == 'nemo-platform-sdk'", specifier = ">=13.7.1" },
+    { name = "rouge-score", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.1.2" },
+    { name = "sacrebleu", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=2.5.1" },
     { name = "sniffio", marker = "extra == 'nemo-platform-sdk'" },
     { name = "typer", specifier = ">=0.20.0,<0.26" },
     { name = "typer", marker = "extra == 'nemo-platform-sdk'", specifier = ">=0.20.0" },
     { name = "typing-extensions", marker = "extra == 'nemo-platform-sdk'", specifier = ">=4.14,<5" },
 ]
-provides-extras = ["nemo-platform-sdk"]
+provides-extras = ["nemo-evaluator-sdk", "nemo-platform-sdk"]
 
 [[package]]
 name = "nemo-platform-sdk"
@@ -3328,25 +3488,28 @@ requires-dist = [
     { name = "jsonschema", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=4.23.0" },
     { name = "langchain-nvidia-ai-endpoints", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.4.3,<2.0.0" },
     { name = "langchain-openai", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.3.5" },
-    { name = "nemo-fabric", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.2.0,<0.3.0" },
+    { name = "nemo-fabric", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-platform-plugin", editable = "../../packages/nemo_platform_plugin" },
-    { name = "nemo-relay", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.7.2,<0.8" },
+    { name = "nemo-relay", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.7.3,<0.8" },
     { name = "ngcsdk", specifier = ">=4.8.2" },
     { name = "nvidia-ml-py", specifier = ">=13.0.0" },
     { name = "openai" },
     { name = "openai", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.61.0" },
+    { name = "opentelemetry-proto", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.27.0" },
     { name = "pandas", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.5.3" },
     { name = "prompt-toolkit", specifier = ">=3.0.0" },
     { name = "psutil", specifier = ">=5.9.0" },
     { name = "pyarrow", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=19.0.1" },
     { name = "pydantic", specifier = ">=2.0.0,<3" },
     { name = "pydantic", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=2.10.6" },
+    { name = "pytrec-eval-terrier", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.5.10" },
     { name = "pyyaml", specifier = ">=6.0.0" },
     { name = "ragas", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.4.3" },
     { name = "requests", specifier = ">=2.31.0" },
     { name = "rich", specifier = ">=13.7.1" },
     { name = "rouge-score", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.1.2" },
     { name = "sacrebleu", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=2.5.1" },
+    { name = "sandboxed-gym", marker = "extra == 'nemo-evaluator-sdk'", editable = "../../packages/sandboxed_gym" },
     { name = "sniffio" },
     { name = "typer", specifier = ">=0.20.0" },
     { name = "typing-extensions", specifier = ">=4.14,<5" },
@@ -3540,7 +3703,7 @@ dependencies = [
 requires-dist = [
     { name = "aiofiles", specifier = ">=24.1.0" },
     { name = "base58", specifier = ">=2.1.1" },
-    { name = "fastapi", extras = ["standard"], specifier = ">=0.115.4" },
+    { name = "fastapi", extras = ["standard"], specifier = ">=0.137.2" },
     { name = "huggingface-hub", specifier = ">=1.0.1,<2.0.0" },
     { name = "hvac", specifier = ">=2.3.0" },
     { name = "kubernetes", specifier = ">=30.1.0" },
@@ -4702,6 +4865,26 @@ wheels = [
 ]
 
 [[package]]
+name = "pytrec-eval-terrier"
+version = "0.5.10"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/04/96/4925a95e4865a647bc74d3bb052243d12a3c8e8a34909d7d097b5a4d08c5/pytrec_eval_terrier-0.5.10.tar.gz", hash = "sha256:eaaf20580d17b5575a233e04dab8a4cbcc01a7e45be8cf547c07f0a2bb3e7eb9", size = 18634, upload-time = "2025-10-20T16:50:18.098Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d3/ca/f0edd9df08c08c96d2f088c298cfb824c3ee816302ac1f911ecb1bfdd681/pytrec_eval_terrier-0.5.10-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:e28c3c14728713cdbad165964e2d1aba96b0fc7445a5a13168b398e9bd3bbd08", size = 137179, upload-time = "2025-10-20T16:51:07.809Z" },
+    { url = "https://files.pythonhosted.org/packages/73/55/e02a14b0d3ac520849f66391f03c6783b3383fd23a19372d07a2280b815e/pytrec_eval_terrier-0.5.10-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:689ee541d72c27d14ae15cd1f11d2cb86cf9bdc880f5e8af9c5dbbdd47663d4d", size = 304845, upload-time = "2025-10-20T16:54:17.791Z" },
+    { url = "https://files.pythonhosted.org/packages/76/9c/9020b700199b09ebdfc6dbadae81641a49555c4ee21dedbe2aa98af601b5/pytrec_eval_terrier-0.5.10-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:3f02118dadd3c09b71462bb26e405e49bd10fe0c60bcc169fcd31454a4256dc2", size = 1327965, upload-time = "2025-10-20T16:54:18.743Z" },
+    { url = "https://files.pythonhosted.org/packages/39/9e/6e7c2b89f52e1cebeef6c3bb47272f5bd69766ddbc6e9e5445da0c876899/pytrec_eval_terrier-0.5.10-cp312-cp312-win_amd64.whl", hash = "sha256:202e48fe24948453fe45dcd73261f9865f99cb2ff4c8a3255ac2ab4c993a64ba", size = 58641, upload-time = "2025-10-20T16:51:26.148Z" },
+    { url = "https://files.pythonhosted.org/packages/93/21/71a0dee7e2cd368237432af6bf6051ffde03370730dc1666cd39494c82a7/pytrec_eval_terrier-0.5.10-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:fcf96c33446c16de8db78e829c5279f7404ceaaf6b502bb5a6a3669b06051601", size = 137186, upload-time = "2025-10-20T16:50:22.941Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/8c/2494edf20d726bdd3ee0a20dc5ed84351c6cc6ccc17b11b474e315808762/pytrec_eval_terrier-0.5.10-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8455485f1faf6759f1be11b12c904d1c749ba5db7e2b6f414aa56e19533ce069", size = 304917, upload-time = "2025-10-20T16:54:20.486Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/51/7611546afb55548e65db35354a63b90d5fd5ea593fc64e5993088bf61415/pytrec_eval_terrier-0.5.10-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:e7cc9666305281b0ca1873761dc71cd3f0863e6d759f00a12fd363aa2d558d6f", size = 1327998, upload-time = "2025-10-20T16:54:21.375Z" },
+    { url = "https://files.pythonhosted.org/packages/74/b3/20941b4dbe3b267271ed1ef80aa93b348da674aecb5d6aca8f311c4738b0/pytrec_eval_terrier-0.5.10-cp313-cp313-win_amd64.whl", hash = "sha256:9440bd4a78ee0bc5db6821d7483e962a6c494303fd26598f84f00d54cc64cdd7", size = 58631, upload-time = "2025-10-20T16:51:05.08Z" },
+]
+
+[[package]]
 name = "pytz"
 version = "2026.3.post1"
 source = { registry = "https://pypi.org/simple" }
@@ -5060,6 +5243,30 @@ wheels = [
 ]
 
 [[package]]
+name = "sandboxed-gym"
+version = "0.1.0"
+source = { editable = "../../packages/sandboxed_gym" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115.0" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
+    { name = "opensandbox", marker = "extra == 'opensandbox'", specifier = ">=0.1.15" },
+    { name = "pydantic", specifier = ">=2.10.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
+    { name = "pyyaml", marker = "extra == 'runtime'", specifier = ">=6.0.2" },
+    { name = "ray", marker = "extra == 'ray'", specifier = ">=2.40.0" },
+    { name = "sandboxed-gym", extras = ["runtime"], marker = "extra == 'server'", editable = "../../packages/sandboxed_gym" },
+    { name = "sandboxed-gym", extras = ["server", "opensandbox"], marker = "extra == 'dev'", editable = "../../packages/sandboxed_gym" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.30.0" },
+]
+provides-extras = ["server", "runtime", "opensandbox", "ray", "dev"]
+
+[[package]]
 name = "scikit-network"
 version = "0.33.5"
 source = { registry = "https://pypi.org/simple" }
@@ -5327,6 +5534,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/21/3b/6c24bec5be5e743ffd99576daa5cc077722fc7d5bbc00bd133fa0c698dc6/tqdm-4.70.0.tar.gz", hash = "sha256:55b0b0dbd97462d06ebee91e4dac24ed4d4702be82b24f07e6c1d27e08cea220", size = 795438, upload-time = "2026-07-27T11:33:15.271Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f9/1c/01bfd571a64e7f270e6bab5e33777debe0edc56759233ce84f27dec92d14/tqdm-4.70.0-py3-none-any.whl", hash = "sha256:7f585706bfddbdebf89daac705b2dfcc16890130727d3197ca62c732b4310953", size = 80184, upload-time = "2026-07-27T11:33:13.167Z" },
+]
+
+[[package]]
+name = "truststore"
+version = "0.10.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/53/a3/1585216310e344e8102c22482f6060c7a6ea0322b63e026372e6dcefcfd6/truststore-0.10.4.tar.gz", hash = "sha256:9d91bd436463ad5e4ee4aba766628dd6cd7010cf3e2461756b3303710eebc301", size = 26169, upload-time = "2025-08-12T18:49:02.73Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/19/97/56608b2249fe206a67cd573bc93cd9896e1efb9e98bce9c163bcdc704b88/truststore-0.10.4-py3-none-any.whl", hash = "sha256:adaeaecf1cbb5f4de3b1959b42d41f6fab57b2b1666adb59e89cb0b53361d981", size = 18660, upload-time = "2025-08-12T18:49:01.46Z" },
 ]
 
 [[package]]

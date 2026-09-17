@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 #
-# Image for FabricContainerRuntime: NeMo Fabric plus the harness adapters, installed from published
+# Image for FabricAgentRuntime's sandbox mode: NeMo Fabric plus the harness adapters, installed from published
 # wheels. Fabric's adapter descriptors ship inside those wheels (under `share/nemo-fabric/adapters`),
 # so a wheel-only install resolves any bundled harness with no source checkout and no build context
 # beyond the pins in requirements.txt (written by image.py).

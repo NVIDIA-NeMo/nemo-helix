@@ -36,13 +36,10 @@ uv run scripts/grpo-examples/gym_to_env_package.py \
 
 `wheels-v1` requires those three versions, because Gym pins every per-server virtualenv to the
 training image's `nemo-gym`, `ray` and `openai`. A closure built against different ones is
-ignored and resolved from an index instead. Read all three from the image:
-
-```bash
-docker run --rm <training-image> sh -c \
-  'PY=$(ls -d /opt/ray_venvs/*NemoGym*/bin/python | head -1); "${PY:-python}" -c \
-   "import importlib.metadata as m; print(m.version(\"nemo-gym\"), m.version(\"ray\"), m.version(\"openai\"))"'
-```
+ignored and resolved from an index instead. All three come from a NeMo-RL checkout at the commit
+`NEMO_RL_REF` pins in `docker-bake.hcl` -- the training image is built from it, so no access to
+the image is needed: `nemo-gym` from the Gym submodule, `ray`/`openai` from NeMo-RL's `uv.lock`.
+Not from Gym's own lock, which pins different versions.
 
 The same script emits `native-v1` — one flag, not a second script:
 

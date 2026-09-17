@@ -3,7 +3,7 @@
 
 """One Fabric run, executed inside the sandbox and printed as JSON on stdout.
 
-``FabricContainerRuntime`` seeds this file into the sandbox and runs it as a script: it reads this
+``FabricAgentRuntime`` (sandbox mode) seeds this file into the sandbox and runs it as a script: it reads this
 module's source rather than importing it, so the sandbox's Fabric is the one that has to satisfy
 these imports.
 

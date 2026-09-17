@@ -9,7 +9,10 @@ import {
   parseJsonObject,
   parseSseChunk,
 } from '@studio/routes/agents/AssistantChatRoute/stream';
-import { ASSISTANT_SUBTLE_TOOL_GROUP_NAME } from '@studio/routes/agents/AssistantChatRoute/toolParts';
+import {
+  ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
+  ASSISTANT_THINKING_TOOL_NAME,
+} from '@studio/routes/agents/AssistantChatRoute/toolParts';
 
 describe('Assistant stream utilities', () => {
   it('parses SSE events and preserves incomplete trailing data', () => {
@@ -253,7 +256,7 @@ describe('Assistant stream utilities', () => {
 
     loggerSpy.mockRestore();
   });
-  it('maps a reasoning part so the UI can render the chain of thought', () => {
+  it('maps a reasoning part to a collapsible thinking part', () => {
     const parts = getAssistantPartsFromAssistantEvent({
       type: 'assistant',
       message: {
@@ -262,14 +265,30 @@ describe('Assistant stream utilities', () => {
       },
     });
 
-    // Reads as ordinary narration between tool calls, like Claude's thoughts.
-    expect(parts).toEqual([{ type: 'text', text: 'The user asked a math question.' }]);
+    expect(parts).toEqual([
+      {
+        type: 'tool-call',
+        toolCallId: 'assistant-thinking-msg-reasoning-0',
+        toolName: ASSISTANT_THINKING_TOOL_NAME,
+        args: { text: 'The user asked a math question.' },
+        argsText: JSON.stringify({ text: 'The user asked a math question.' }),
+      },
+    ]);
   });
 
   it('drops an empty reasoning part', () => {
     const parts = getAssistantPartsFromAssistantEvent({
       type: 'assistant',
       message: { id: 'msg-empty', content: [{ type: 'reasoning', text: '' }] },
+    });
+
+    expect(parts).toEqual([]);
+  });
+
+  it('drops a whitespace-only reasoning part', () => {
+    const parts = getAssistantPartsFromAssistantEvent({
+      type: 'assistant',
+      message: { id: 'msg-whitespace', content: [{ type: 'reasoning', text: '   \n  ' }] },
     });
 
     expect(parts).toEqual([]);

@@ -15,8 +15,9 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-import jsonschema
 from jsonschema import exceptions
+from jsonschema.protocols import Validator
+from jsonschema.validators import validator_for
 from nmp.rl.entities.values import FinetuningType, TrainingType
 from nmp.rl.schemas.environment import GymDatasetRow
 from nmp.rl.tasks.training.datasets.preparation import DatasetFormatError
@@ -27,6 +28,15 @@ from nmp.rl.tasks.training.datasets.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+# jsonschema.validate() recompiles the schema on every call. Compile once and reuse.
+_VALIDATE_PROGRESS_INTERVAL = 10_000
+
+
+def _compile_validator(schema: dict[str, Any]) -> Validator:
+    cls = validator_for(schema)
+    cls.check_schema(schema)
+    return cls(schema)
 
 
 def DPO_SCHEMA(_: str | None = None) -> dict:
@@ -178,18 +188,18 @@ class DatasetValidator:
         self.finetuning_type = finetuning_type
         self.prompt_template = prompt_template
 
-    def _validate_json_object(self, obj: dict, schema: dict[str, Any]) -> None:
-        """Validate a JSON object against a schema.
+    def _validate_json_object(self, obj: dict, validator: Validator) -> None:
+        """Validate a JSON object against a compiled JSON Schema validator.
 
         Args:
             obj: The JSON object to validate
-            schema: The JSON schema to validate against
+            validator: Compiled jsonschema validator for the dataset schema
 
         Raises:
             TypeError: If validation fails
         """
         try:
-            jsonschema.validate(instance=obj, schema=schema)
+            validator.validate(obj)
         except exceptions.ValidationError as e:
             logger.debug(f"Dataset Schema Validation failed: {str(e)}")
             raise TypeError(f"Dataset Schema Validation failed: {e.message}")
@@ -222,8 +232,8 @@ class DatasetValidator:
 
         for schema_name, schema_factory in SCHEMAS.items():
             try:
-                validation_schema = schema_factory(self.prompt_template)
-                self._validate_json_object(obj, validation_schema)
+                validator = _compile_validator(schema_factory(self.prompt_template))
+                self._validate_json_object(obj, validator)
             except Exception as e:
                 logger.debug(f"Parsed jsonl line does not conform to schema {schema_name}. Error: {e}")
             else:
@@ -255,7 +265,7 @@ class DatasetValidator:
         if os.path.getsize(file_path) == 0:
             raise DatasetFormatError(f"{file_path} is empty")
 
-        validation_schema = schema_factory(self.prompt_template)
+        validator = _compile_validator(schema_factory(self.prompt_template))
         is_dpo = dataset_type == TrainingType.DPO.value
         expected_dpo_schema: str | None = None
         validated_rows = 0
@@ -288,17 +298,20 @@ class DatasetValidator:
                         )
 
                 try:
-                    self._validate_json_object(obj, validation_schema)
+                    self._validate_json_object(obj, validator)
                 except Exception as e:
                     logger.debug(f"{file_path}:{line_number} does not conform to the expected schema: {e}")
                     raise DatasetFormatError(
                         f"{file_path} line {line_number} does not conform to the expected schema: {e}"
                     )
                 validated_rows += 1
+                if validated_rows % _VALIDATE_PROGRESS_INTERVAL == 0:
+                    logger.info("Validated %s rows in %s", validated_rows, file_path)
 
         # A whitespace-only file would otherwise pass silently (no rows validated).
         if validated_rows == 0:
             raise DatasetFormatError(f"{file_path} has no non-empty rows to validate")
+        logger.info("Validated %s rows in %s", validated_rows, file_path)
 
 
 def _first_nonempty_line(file_path: str | Path) -> str | None:

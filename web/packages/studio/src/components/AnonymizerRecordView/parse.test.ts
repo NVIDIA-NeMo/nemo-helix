@@ -27,6 +27,11 @@ describe('parseEntities', () => {
     expect(parseEntities(JSON.stringify(traceRow.final_entities))).toEqual(entities);
   });
 
+  it('reads a bare entity list, the shape job artifacts persist', () => {
+    expect(parseEntities(traceRow.final_entities.entities)).toEqual(entities);
+    expect(parseEntities(JSON.stringify(traceRow.final_entities.entities))).toEqual(entities);
+  });
+
   it('drops entries missing positions', () => {
     expect(parseEntities({ entities: [{ value: 'x', label: 'y' }] })).toEqual([]);
   });

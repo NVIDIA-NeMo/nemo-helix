@@ -455,6 +455,8 @@ def test_metric_selection_lists_exactly_the_supported_metric_names() -> None:
             "agent_phase_success",
             "evidence_presence",
             "skill_used",
+            "tool_call_count",
+            "tool_argument_matches_input",
         }
     )
 

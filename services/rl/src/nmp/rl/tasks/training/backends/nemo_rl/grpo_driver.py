@@ -210,6 +210,14 @@ def main() -> None:
             except Exception as exc:
                 logger.warning("Error shutting down environment %s: %s", task_name, exc)
 
+    if config.checkpointing["enabled"] and checkpointer.get_best_checkpoint_path() is None:
+        if config.grpo.use_dynamic_sampling:
+            raise ValueError(
+                "Dynamic sampling found no prompt group with non-zero reward standard deviation, "
+                "so no training step ran and no checkpoint was saved."
+            )
+        raise ValueError("Training finished without saving a checkpoint.")
+
 
 if __name__ == "__main__":
     main()

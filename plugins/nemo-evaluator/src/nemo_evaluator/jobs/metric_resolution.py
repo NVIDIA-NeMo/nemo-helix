@@ -97,21 +97,18 @@ async def resolve_metrics_to_inline(
     *,
     workspace: str,
     entity_client: EntityClient | None,
-    async_sdk: AsyncNeMoPlatform | None,
+    async_sdk: AsyncNeMoPlatform,
 ) -> list[MetricInline]:
     """Resolve a wire metric list (inline + stored refs) into canonical inline metrics.
 
     Stored references are loaded from the entity store; any ``MetricWithModels``
-    model references are resolved through the platform. Raises if a model
-    reference is present without a usable ``async_sdk`` connection.
+    model references are resolved through the platform.
 
     Stored-ref loading awaits real file I/O, so it uses the typed Files client
     derived from the public SDK. Model-ref resolution uses the typed Models client.
     """
     has_metric_ref = any(isinstance(metric, MetricRef) for metric in metrics)
-    files_client = (
-        client_from_platform(async_sdk, AsyncFilesClient) if has_metric_ref and async_sdk is not None else None
-    )
+    files_client = client_from_platform(async_sdk, AsyncFilesClient) if has_metric_ref else None
     resolved_bundles = await resolve_metric_specs(
         metrics,
         workspace=workspace,
@@ -122,11 +119,6 @@ async def resolve_metrics_to_inline(
     final_bundles = resolved_bundles
     unresolved = unresolved_model_refs(runtime_metrics)
     if unresolved:
-        if async_sdk is None:
-            raise ValueError(
-                "ModelRef metrics require a platform connection (models + inference) to resolve: "
-                + ", ".join(unresolved)
-            )
         models_client = client_from_platform(async_sdk, AsyncModelsClient)
         resolver: ModelResolver = PlatformMetricModelResolver(models_client)
         await asyncio.gather(

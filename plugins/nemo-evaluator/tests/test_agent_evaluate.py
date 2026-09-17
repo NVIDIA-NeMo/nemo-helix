@@ -23,6 +23,7 @@ from nemo_evaluator.jobs.agent_evaluate import (
     DEFAULT_RESULT_NAME,
     SUMMARY_RESULT_NAME,
     AgentEvalJob,
+    AsyncAgentEvalJob,
     _resolve_gym_environment,
     _to_runtime_task,
 )
@@ -44,6 +45,8 @@ from nemo_evaluator.jobs.gym_sandbox import (
     SandboxUnavailableError,
     SessionBackedGymRunner,
 )
+from nemo_evaluator.jobs.publication import PublicationOutcome
+from nemo_evaluator.jobs.publication_spec import IntakePublicationSpec, PublicationSpec
 from nemo_evaluator.metric_refs import MetricRef
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundle, bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
@@ -68,6 +71,7 @@ from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_platform_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
 from nemo_platform_plugin.commands import add_job_commands
 from nemo_platform_plugin.files.types import FilesetPurpose
+from nemo_platform_plugin.intake.client import AsyncIntakeClient
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
 from nemo_platform_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
@@ -83,10 +87,10 @@ from nemo_platform_plugin.jobs.execution_profiles import (
     VolcanoJobExecutionProfileConfig,
 )
 from nemo_platform_plugin.jobs.providers import SubprocessExecutionProvider
+from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
 from nemo_platform_plugin.jobs.spec import BaseExecutionProfile, PlatformJobSpec
-from nemo_platform_plugin.scheduler import NemoJobScheduler
 from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
@@ -134,16 +138,22 @@ def _job_context(tmp_path: Path) -> JobContext:
     )
 
 
-def test_cli_agent_evaluate_still_exposes_run_during_stainless_migration() -> None:
+def test_cli_agent_evaluate_uses_flat_submit_without_local_run() -> None:
     app = EvaluatorPluginCLI().get_cli()
     add_job_commands(app, {"evaluator.agent-evaluate": AgentEvalJob}, cli=EvaluatorPluginCLI())
 
     result = CliRunner().invoke(app, ["agent-evaluate", "--help"])
 
     assert result.exit_code == 0
-    assert "run" in result.output
-    assert "submit" in result.output
-    assert "explain" in result.output
+    output = result.output
+    assert "--spec" in output
+    assert "--base-url" in output
+    assert "--profile" in output
+    assert "Run locally, in-process." not in result.output
+    assert "explain" in output
+
+    run_result = CliRunner().invoke(app, ["agent-evaluate", "run"])
+    assert run_result.exit_code != 0
 
 
 class _FakeEvaluator:
@@ -206,7 +216,9 @@ async def test_reference_round_trips_from_input_spec_to_runtime_task() -> None:
         ],
     )
 
-    spec = await AgentEvalJob.to_spec(input_spec, workspace="dev", entity_client=None, async_sdk=None, is_local=True)
+    spec = await AgentEvalJob.to_spec(
+        input_spec, workspace="dev", entity_client=None, async_sdk=_async_platform(), is_local=True
+    )
     assert isinstance(spec, AgentEvalSpec)
     assert spec.tasks[0].reference == reference
     assert _to_runtime_task(spec.tasks[0]).reference == reference
@@ -232,7 +244,9 @@ async def test_arbitrary_inputs_round_trip_from_input_spec_to_runtime_task() -> 
         ),
     )
 
-    spec = await AgentEvalJob.to_spec(input_spec, workspace="dev", entity_client=None, async_sdk=None, is_local=True)
+    spec = await AgentEvalJob.to_spec(
+        input_spec, workspace="dev", entity_client=None, async_sdk=_async_platform(), is_local=True
+    )
 
     assert isinstance(spec, AgentEvalSpec)
     assert spec.tasks[0].inputs.model_dump(exclude_none=True)["gym_row"] == gym_row
@@ -247,7 +261,7 @@ def test_agent_eval_job_reconstructs_tasks_and_persists_bundle(tmp_path: Path, m
     ctx = _job_context(tmp_path)
 
     spec = AgentEvalSpec(tasks=[_task_spec()], target=_runner_target("openai/gpt-5.4"))
-    result = AgentEvalJob().run(spec.model_dump(), ctx=ctx)
+    result = AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
 
     # The job reconstructed runtime tasks (bundled metric round-tripped) before handing off.
     assert [task.id for task in fake.received_tasks] == ["task-1"]
@@ -275,13 +289,38 @@ def test_agent_eval_job_survives_result_persistence_failure(tmp_path: Path, mock
     ctx = _job_context(tmp_path)
 
     spec = AgentEvalSpec(tasks=[_task_spec()], target=_runner_target("openai/gpt-5.4"))
-    result = AgentEvalJob().run(spec.model_dump(), ctx=ctx)
+    result = AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
 
     # Persistence was attempted and raised, yet the job still completed with its artifacts intact.
     persist.assert_called_once()
+    async_client = persist.call_args.kwargs["async_client"]
+    assert isinstance(async_client, AsyncNemoClient)
+    assert async_client.default_headers == _SDK_IDENTITY_HEADERS
     assert result["status"] == "completed"
     assert result["artifact"]["name"] == DEFAULT_RESULT_NAME
     assert (ctx.storage.persistent / "results" / DEFAULT_RESULT_NAME).exists()
+
+
+def test_agent_eval_job_passes_async_client_to_publication(tmp_path: Path, mocker: MockerFixture) -> None:
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
+    mocker.patch("nemo_evaluator.jobs.agent_evaluate.persist_agent_eval_result")
+    publish = mocker.patch(
+        "nemo_evaluator.jobs.agent_evaluate.publish_agent_eval_result",
+        return_value=PublicationOutcome(status=PlatformJobStatus.COMPLETED, evaluation_id="eval-a"),
+    )
+    ctx = _job_context(tmp_path)
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=_runner_target("openai/gpt-5.4"),
+        publication=PublicationSpec(intake=IntakePublicationSpec(evaluation_id="eval-a", agent_name="agent-a")),
+    )
+
+    result = AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
+
+    assert result["status"] == "completed"
+    intake = publish.call_args.kwargs["intake"]
+    assert isinstance(intake, AsyncIntakeClient)
+    assert intake.default_headers == _SDK_IDENTITY_HEADERS
 
 
 def test_agent_eval_spec_requires_at_least_one_task() -> None:
@@ -314,12 +353,16 @@ def test_resolve_target_builds_fabric_runtime_from_runner_target(tmp_path: Path)
     assert params is None
 
 
-def test_resolve_target_builds_harbor_runtime_from_runner_target(tmp_path: Path) -> None:
+def test_resolve_target_builds_harbor_runtime_from_runner_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ctx = _job_context(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-resolved-by-the-service")
     harbor_target = HarborRunnerTarget(
         agent_name="oracle",
         agent_model_name="openai/gpt-5.4",
         agent_kwargs={"fabric_adapter_id": "nvidia.fabric.codex", "fabric_harness_settings": {"max_turns": 3}},
+        env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
         n_attempts=2,
         n_concurrent_trials=8,
         max_retries=1,
@@ -336,6 +379,8 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(tmp_path: Path)
         "fabric_adapter_id": "nvidia.fabric.codex",
         "fabric_harness_settings": {"max_turns": 3},
     }
+    # Only the name travels; the runtime hands Harbor a `${OPENAI_API_KEY}` template it expands itself.
+    assert target._config.agent_env_from_host == ["OPENAI_API_KEY"]
     assert target._config.n_attempts == 2
     assert target._config.reward_key == "score"
     # A runner shapes its own request, so it contributes no prompt template or inference params.
@@ -455,11 +500,34 @@ def test_harbor_runner_target_is_accepted() -> None:
     assert isinstance(spec.target, HarborRunnerTarget)
 
 
+def test_resolve_target_refuses_harbor_env_secret_missing_from_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unresolved `env_secrets` entry fails by name here, not inside a Docker trial as a bare auth error."""
+    ctx = _job_context(tmp_path)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    harbor_target = HarborRunnerTarget(env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")})
+
+    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+        AgentEvalJob._resolve_target(harbor_target, ctx)
+
+
+def test_harbor_target_refuses_plaintext_credentials_in_agent_kwargs() -> None:
+    """A submitted spec carrying a credential in ``agent_kwargs`` is refused at the API, not mid-job.
+
+    The value would otherwise be stored on the spec and then copied by Harbor across the job dir.
+    Validating on the target means the submitter is told at submit time, while they still have the
+    key in hand to move it to `env_secrets`.
+    """
+    with pytest.raises(ValidationError, match="env_secrets"):
+        HarborRunnerTarget(agent_kwargs={"fabric_environment_env": {"OPENAI_API_KEY": "nvapi-not-a-real-key"}})
+
+
 def test_harbor_agent_kwargs_round_trip_the_wire_unchanged() -> None:
     """Nested kwargs survive JSON serialization, so what the submitter wrote is what the agent's ``__init__`` gets."""
-    agent_kwargs = {
+    agent_kwargs: dict[str, JsonValue] = {
         "fabric_adapter_id": "nvidia.fabric.codex",
-        "fabric_package": "nemo-fabric[codex]==0.3.0b1",
+        "fabric_package": "nemo-fabric[codex]==0.3.0",
         "fabric_harness_settings": {"max_turns": 3, "tools": ["shell", None], "strict": True},
     }
     spec = AgentEvalSpec(
@@ -599,27 +667,14 @@ def test_build_evaluator_runner_target_forwards_no_headers() -> None:
     assert AgentEvalJob._build_evaluator(sdk, _runner_target("openai/gpt-5.4")).default_headers is None
 
 
-def test_build_evaluator_without_platform_forwards_no_headers() -> None:
-    target = _model_target("http://platform/apis/inference-gateway/v2/workspaces/default/model/m/-/v1/chat/completions")
-    assert AgentEvalJob._build_evaluator(None, target).default_headers is None
-
-
-def _sync_platform_with_identity() -> NeMoPlatform:
-    return NeMoPlatform(
+def test_build_evaluator_without_identity_headers_forwards_no_headers() -> None:
+    sdk = NemoClient(
         base_url="http://platform",
         workspace="dev",
-        default_headers=_SDK_IDENTITY_HEADERS,
         http_client=MagicMock(spec=httpx.Client),
     )
-
-
-def _async_platform_with_identity() -> AsyncNeMoPlatform:
-    return AsyncNeMoPlatform(
-        base_url="http://platform",
-        workspace="dev",
-        default_headers=_SDK_IDENTITY_HEADERS,
-        http_client=AsyncMock(spec=httpx.AsyncClient),
-    )
+    target = _model_target("http://platform/apis/inference-gateway/v2/workspaces/default/model/m/-/v1/chat/completions")
+    assert AgentEvalJob._build_evaluator(sdk, target).default_headers is None
 
 
 def _capture_evaluator_headers(mocker: MockerFixture) -> dict[str, dict[str, str] | None]:
@@ -634,18 +689,11 @@ def _capture_evaluator_headers(mocker: MockerFixture) -> dict[str, dict[str, str
     return captured
 
 
-@pytest.mark.parametrize("inject_async", [False, True], ids=["sdk", "async_sdk"])
-def test_run_accepts_the_generated_sdk_the_local_cli_injects(
-    tmp_path: Path, mocker: MockerFixture, inject_async: bool
+def test_scheduler_passes_the_declared_sync_agent_eval_client(
+    tmp_path: Path,
+    mocker: MockerFixture,
 ) -> None:
-    """A local ``nemo evaluator agent-evaluate run`` is handed a generated ``NeMoPlatform``, not a
-    typed client, and every platform call in ``run`` is typed-client-only. Without adaptation the job
-    dies with ``AttributeError: 'AsyncNeMoPlatform' object has no attribute 'is_platform_url'``
-    before it issues a single target request.
-
-    Adapting must not widen what reaches the target: the allowlist still applies, so the bearer and
-    the trace header the generated SDK carried stay behind.
-    """
+    """The sync scheduler entrypoint follows the job class' single client contract."""
     captured = _capture_evaluator_headers(mocker)
     config = AgentEvalSpec(
         tasks=[_task_spec()],
@@ -655,24 +703,54 @@ def test_run_accepts_the_generated_sdk_the_local_cli_injects(
     ).model_dump()
     ctx = _job_context(tmp_path)
 
-    if inject_async:
-        result = AgentEvalJob().run(config, ctx=ctx, async_sdk=_async_platform_with_identity())
-    else:
-        result = AgentEvalJob().run(config, ctx=ctx, sdk=_sync_platform_with_identity())
+    result = AgentEvalJob().run(
+        config,
+        ctx=ctx,
+        client=_sync_sdk_with_identity(),
+    )
 
     assert result["status"] == "completed"
     assert captured["default_headers"] == _FORWARDED_IDENTITY_HEADERS
 
 
-def test_run_sends_no_identity_to_a_third_party_target_via_generated_sdk(tmp_path: Path, mocker: MockerFixture) -> None:
+def test_scheduler_passes_the_declared_async_agent_eval_client(
+    tmp_path: Path,
+    mocker: MockerFixture,
+) -> None:
+    """The async scheduler entrypoint follows the job class' single client contract."""
+    captured = _capture_evaluator_headers(mocker)
+    config = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=_model_target(
+            "http://platform/apis/inference-gateway/v2/workspaces/default/model/m/-/v1/chat/completions"
+        ),
+    ).model_dump()
+    ctx = _job_context(tmp_path)
+
+    result = AsyncAgentEvalJob().run(
+        config,
+        ctx=ctx,
+        async_client=_async_sdk_with_identity(),
+    )
+
+    assert result["status"] == "completed"
+    assert captured["default_headers"] == _FORWARDED_IDENTITY_HEADERS
+
+
+def test_run_sends_no_identity_to_a_third_party_target_via_typed_async_client(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
     """The same-origin guard is what keeps the delegated user's email and groups inside the platform.
-    Adaptation reconstructs the client the guard compares against, so a regression here would leak
-    that PII to whatever endpoint the submitter named."""
+    Scheduler adaptation reconstructs the client the guard compares against, so a regression here
+    would leak that PII to whatever endpoint the submitter named."""
     captured = _capture_evaluator_headers(mocker)
     spec = AgentEvalSpec(tasks=[_task_spec()], target=_model_target("https://api.openai.com/v1/chat/completions"))
+    ctx = _job_context(tmp_path)
 
-    result = AgentEvalJob().run(
-        spec.model_dump(), ctx=_job_context(tmp_path), async_sdk=_async_platform_with_identity()
+    result = AsyncAgentEvalJob().run(
+        spec.model_dump(),
+        ctx=ctx,
+        async_client=_async_sdk_with_identity(),
     )
 
     assert result["status"] == "completed"
@@ -703,8 +781,8 @@ def test_input_spec_rejects_empty_inline_task_list() -> None:
         AgentEvalInputSpec(tasks=[], target=_runner_target("openai/gpt-5.4"))
 
 
-async def test_to_spec_resolves_inline_task_metrics_without_a_platform() -> None:
-    # Inline metrics need no entity client/SDK; refs would, but none are used here.
+async def test_to_spec_resolves_inline_task_metrics_without_metric_refs() -> None:
+    # Inline metrics need no entity lookup or Files read; refs would, but none are used here.
     input_spec = AgentEvalInputSpec(
         tasks=[
             AgentEvalTaskInput(
@@ -717,7 +795,9 @@ async def test_to_spec_resolves_inline_task_metrics_without_a_platform() -> None
         target=_runner_target("openai/gpt-5.4"),
     )
 
-    spec = await AgentEvalJob.to_spec(input_spec, workspace="dev", entity_client=None, async_sdk=None, is_local=True)
+    spec = await AgentEvalJob.to_spec(
+        input_spec, workspace="dev", entity_client=None, async_sdk=_async_platform(), is_local=True
+    )
 
     assert isinstance(spec, AgentEvalSpec)
     assert len(spec.tasks) == 1
@@ -726,9 +806,9 @@ async def test_to_spec_resolves_inline_task_metrics_without_a_platform() -> None
     assert isinstance(_to_runtime_task(spec.tasks[0]).metrics[0], ExactMatchMetric)
 
 
-async def test_to_spec_requires_platform_to_resolve_a_metric_reference() -> None:
-    # A stored MetricRef can only be loaded with an entity store + SDK; without one, to_spec must
-    # fail loudly rather than silently drop the metric.
+async def test_to_spec_requires_entity_store_to_resolve_a_metric_reference() -> None:
+    # A stored MetricRef can only be loaded with an entity store and Files service; without one,
+    # to_spec must fail loudly rather than silently drop the metric.
     input_spec = AgentEvalInputSpec(
         tasks=[
             AgentEvalTaskInput(id="task-1", intent="Answer.", inputs=TaskInputs(), metrics=[MetricRef("stored-metric")])
@@ -736,7 +816,9 @@ async def test_to_spec_requires_platform_to_resolve_a_metric_reference() -> None
         target=_runner_target("openai/gpt-5.4"),
     )
     with pytest.raises(ValueError, match="platform connection"):
-        await AgentEvalJob.to_spec(input_spec, workspace="dev", entity_client=None, async_sdk=None, is_local=True)
+        await AgentEvalJob.to_spec(
+            input_spec, workspace="dev", entity_client=None, async_sdk=_async_platform(), is_local=True
+        )
 
 
 # --- compile: the submit/service-side path ----------------------------------
@@ -765,7 +847,7 @@ async def test_checked_fabric_spec_transforms_and_compiles() -> None:
         input_spec,
         workspace="default",
         entity_client=None,
-        async_sdk=None,
+        async_sdk=_async_platform(),
         is_local=False,
     )
 
@@ -779,7 +861,7 @@ async def test_checked_fabric_spec_transforms_and_compiles() -> None:
         spec=spec,
         entity_client=None,
         job_name=None,
-        async_sdk=None,
+        async_sdk=_async_platform(),
     )
     job_spec = PlatformJobSpec.model_validate(compiled)
     _assert_agent_eval_step_entrypoint(job_spec)
@@ -796,7 +878,13 @@ def _patch_execution_profiles(mocker: MockerFixture, profiles: list[BaseExecutio
     mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=jobs_client)
 
 
-async def _compile_harbor(*, async_sdk: AsyncNeMoPlatform | None, profile: str | None = None) -> PlatformJobSpec:
+def _kubernetes_profile_with_job_storage(pvc_name: str = "job-storage") -> KubernetesJobExecutionProfile:
+    return KubernetesJobExecutionProfile(
+        config=KubernetesJobExecutionProfileConfig(storage=KubernetesJobStorageConfig(pvc_name=pvc_name))
+    )
+
+
+async def _compile_harbor(*, async_sdk: AsyncNeMoPlatform, profile: str | None = None) -> PlatformJobSpec:
     """Compile the minimal Harbor submission every backend-guard test makes."""
     compiled = await AgentEvalJob.compile(
         workspace="default",
@@ -857,6 +945,7 @@ async def test_compile_produces_cpu_task_step_carrying_each_target(
     expected_image_name: str,
     expected_entrypoint: Sequence[str],
 ) -> None:
+    _patch_execution_profiles(mocker, [])
     mocker.patch("nemo_evaluator.jobs.agent_compiler.config.gym_tasks_image", None)
     mocker.patch(
         "nemo_evaluator.jobs.agent_compiler.get_qualified_image",
@@ -865,7 +954,7 @@ async def test_compile_produces_cpu_task_step_carrying_each_target(
     spec = AgentEvalSpec(tasks=[_task_spec()], target=target)
 
     compiled = await AgentEvalJob.compile(
-        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=None
+        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_platform()
     )
 
     job_spec = PlatformJobSpec.model_validate(compiled)
@@ -886,6 +975,7 @@ async def test_compile_produces_cpu_task_step_carrying_each_target(
 
 
 async def test_compile_gym_target_honors_configured_image_override(mocker: MockerFixture) -> None:
+    _patch_execution_profiles(mocker, [])
     image = "ghcr.io/nvidia-nemo/nemo-platform/nmp-gym-tasks:internal-test"
     mocker.patch("nemo_evaluator.jobs.agent_compiler.config.gym_tasks_image", image)
     qualify = mocker.patch("nemo_evaluator.jobs.agent_compiler.get_qualified_image")
@@ -899,7 +989,7 @@ async def test_compile_gym_target_honors_configured_image_override(mocker: Mocke
     )
 
     compiled = await AgentEvalJob.compile(
-        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=None
+        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_platform()
     )
 
     job_spec = PlatformJobSpec.model_validate(compiled)
@@ -946,6 +1036,7 @@ def _enable_fileset_sandbox(mocker: MockerFixture) -> None:
 
 
 async def test_compile_gym_environment_adds_staging_step_before_evaluation(mocker: MockerFixture) -> None:
+    _patch_execution_profiles(mocker, [_kubernetes_profile_with_job_storage()])
     mocker.patch("nemo_evaluator.jobs.agent_compiler.config.gym_tasks_image", None)
     mocker.patch(
         "nemo_evaluator.jobs.agent_compiler.get_qualified_image",
@@ -959,7 +1050,7 @@ async def test_compile_gym_environment_adds_staging_step_before_evaluation(mocke
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=None,
+        async_sdk=_async_platform(),
     )
 
     job_spec = PlatformJobSpec.model_validate(compiled)
@@ -981,6 +1072,7 @@ async def test_compile_gym_environment_adds_staging_step_before_evaluation(mocke
 async def test_compile_sandboxed_gym_uses_cpu_tasks_and_ignores_colocated_image_override(
     mocker: MockerFixture,
 ) -> None:
+    _patch_execution_profiles(mocker, [])
     mocker.patch(
         "nemo_evaluator.jobs.agent_compiler.config.gym_tasks_image",
         "registry.example/nmp-gym-tasks:colocated-only",
@@ -1004,7 +1096,7 @@ async def test_compile_sandboxed_gym_uses_cpu_tasks_and_ignores_colocated_image_
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=None,
+        async_sdk=_async_platform(),
     )
 
     job_spec = PlatformJobSpec.model_validate(compiled)
@@ -1016,6 +1108,7 @@ async def test_compile_sandboxed_gym_uses_cpu_tasks_and_ignores_colocated_image_
 
 
 async def test_compile_gym_environment_propagates_platform_sandbox_protocol(mocker: MockerFixture) -> None:
+    _patch_execution_profiles(mocker, [_kubernetes_profile_with_job_storage()])
     mocker.patch(
         "nemo_evaluator.jobs.agent_compiler.get_qualified_image",
         return_value="registry.example/nmp-gym-tasks:test",
@@ -1028,7 +1121,7 @@ async def test_compile_gym_environment_propagates_platform_sandbox_protocol(mock
         spec=AgentEvalSpec(tasks=[_task_spec()], target=_gym_environment_target()),
         entity_client=object(),
         job_name=None,
-        async_sdk=None,
+        async_sdk=_async_platform(),
     )
 
     evaluate = PlatformJobSpec.model_validate(compiled).steps[-1]
@@ -1077,6 +1170,7 @@ async def test_compile_gym_environment_uses_host_commands_for_subprocess_profile
 
 
 async def test_compile_rejects_fileset_environment_when_sandboxing_is_disabled(mocker: MockerFixture) -> None:
+    _patch_execution_profiles(mocker, [_kubernetes_profile_with_job_storage()])
     mocker.patch("nemo_evaluator.jobs.agent_compiler.config.gym_tasks_image", None)
     mocker.patch(
         "nemo_evaluator.jobs.agent_compiler.get_qualified_image",
@@ -1089,7 +1183,7 @@ async def test_compile_rejects_fileset_environment_when_sandboxing_is_disabled(m
             spec=AgentEvalSpec(tasks=[_task_spec()], target=_gym_environment_target()),
             entity_client=object(),
             job_name=None,
-            async_sdk=None,
+            async_sdk=_async_platform(),
         )
 
 
@@ -1354,7 +1448,7 @@ async def test_compile_rejects_harbor_target_for_docker_profile(mocker: MockerFi
     message = str(exc_info.value)
     assert "profile 'default'" in message
     assert "backend 'docker'" in message
-    assert "Harbor targets currently require local execution or the subprocess backend" in message
+    assert "Harbor targets currently require the subprocess backend" in message
 
 
 @pytest.mark.parametrize(
@@ -1407,11 +1501,6 @@ async def test_compile_rejects_harbor_when_profile_is_missing(mocker: MockerFixt
         await _compile_harbor(async_sdk=_async_platform())
 
 
-async def test_compile_marks_missing_platform_sdk_as_dependency_unavailable() -> None:
-    with pytest.raises(PlatformJobDependencyUnavailableError, match="Jobs service is temporarily unavailable"):
-        await _compile_harbor(async_sdk=None)
-
-
 async def test_compile_marks_profile_transport_failure_as_retryable(mocker: MockerFixture) -> None:
     request = httpx.Request("GET", "http://jobs.test/v2/execution-profiles")
     jobs_client = mocker.Mock()
@@ -1462,7 +1551,7 @@ async def test_compile_non_harbor_target_does_not_resolve_execution_profiles(moc
         spec=spec,
         entity_client=object(),
         job_name=None,
-        async_sdk=None,
+        async_sdk=_async_platform(),
     )
 
     assert cast(dict[str, Any], PlatformJobSpec.model_validate(compiled).steps[0].config)["target"]["kind"] == "fabric"
@@ -1482,7 +1571,7 @@ async def test_compile_injects_target_api_key_secret() -> None:
     )
 
     compiled = await AgentEvalJob.compile(
-        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=None
+        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_platform()
     )
 
     step = PlatformJobSpec.model_validate(compiled).steps[0]
@@ -1505,11 +1594,11 @@ async def test_compile_rejects_reserved_secret_env_name() -> None:
 
     with pytest.raises(ValueError, match="reserved"):
         await AgentEvalJob.compile(
-            workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=None
+            workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_platform()
         )
 
 
-# --- run_local: the in-process run path, across target types ----------------
+# --- sync job entrypoint: the in-process run path, across target types -------
 
 
 @pytest.mark.parametrize(
@@ -1528,9 +1617,9 @@ async def test_compile_rejects_reserved_secret_env_name() -> None:
         ),
     ],
 )
-def test_run_local_executes_each_target_type(target: Target, mocker: MockerFixture) -> None:
-    # run_local drives the full validate -> to_spec -> run path. The evaluator is faked so the target
-    # is threaded (a runner resolved to its runtime, an endpoint passed through) without real inference.
+def test_sync_job_executes_each_target_type(target: Target, tmp_path: Path, mocker: MockerFixture) -> None:
+    # The evaluator is faked so the target is threaded (a runner resolved to its runtime, an endpoint
+    # passed through) without real inference.
     fake = _FakeEvaluator()
     mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
     input_spec = AgentEvalInputSpec(
@@ -1545,7 +1634,12 @@ def test_run_local_executes_each_target_type(target: Target, mocker: MockerFixtu
         target=target,
     )
 
-    result = NemoJobScheduler().run_local(AgentEvalJob, input_spec.model_dump(mode="json"))
+    canonical = AgentEvalSpec.model_validate(input_spec.model_dump(mode="json"))
+    result = AgentEvalJob().run(
+        canonical.model_dump(mode="json"),
+        ctx=_job_context(tmp_path),
+        client=_sync_sdk_with_identity(),
+    )
 
     assert result["status"] == "completed"
     assert result["artifact"]["name"] == DEFAULT_RESULT_NAME
@@ -1563,7 +1657,7 @@ def test_run_local_executes_each_target_type(target: Target, mocker: MockerFixtu
         assert getattr(fake.received_target, "name", None) == target.agent.name
 
 
-def test_run_local_scores_precomputed_trials_offline(mocker: MockerFixture) -> None:
+def test_sync_job_scores_precomputed_trials_offline(tmp_path: Path, mocker: MockerFixture) -> None:
     # Offline eval: precomputed trials are scored directly, with no target / no generation.
     fake = _FakeEvaluator()
     mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
@@ -1577,7 +1671,12 @@ def test_run_local_scores_precomputed_trials_offline(mocker: MockerFixture) -> N
         trials=precomputed,
     )
 
-    result = NemoJobScheduler().run_local(AgentEvalJob, input_spec.model_dump(mode="json"))
+    canonical = AgentEvalSpec.model_validate(input_spec.model_dump(mode="json"))
+    result = AgentEvalJob().run(
+        canonical.model_dump(mode="json"),
+        ctx=_job_context(tmp_path),
+        client=_sync_sdk_with_identity(),
+    )
 
     assert result["status"] == "completed"
     assert fake.received_target is None
@@ -1602,34 +1701,31 @@ class TestAgentEvalTask:
 
     def test_main_dispatches_agent_eval_job_with_task_sdk(self, mocker: MockerFixture) -> None:
         sdk = NeMoPlatform(base_url="http://platform.test", workspace="default")
-        client = NemoClient(
-            base_url="http://platform.test", workspace="default", http_client=MagicMock(spec=httpx.Client)
-        )
         async_client = AsyncNemoClient(
             base_url="http://platform.test", workspace="default", http_client=AsyncMock(spec=httpx.AsyncClient)
         )
         ctx = MagicMock()
         get_platform_sdk = mocker.patch("nemo_evaluator.tasks.runner.get_task_sdk", return_value=sdk)
         build_ctx = mocker.patch("nemo_evaluator.tasks.runner.build_ctx_from_env", return_value=ctx)
-        get_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_task_nemo_client", return_value=client)
+        get_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_task_nemo_client")
         get_async_task_client = mocker.patch(
             "nemo_evaluator.tasks.runner.get_async_task_nemo_client", return_value=async_client
         )
-        run_task = mocker.patch("nemo_evaluator.tasks.runner.run_task", return_value=0)
+        run_task = mocker.patch("nemo_evaluator.tasks.runner.run_task_with_async_client", return_value=0)
 
         exit_code = agent_eval_task_main()
 
         assert exit_code == 0
         get_platform_sdk.assert_called_once_with("evaluator")
         build_ctx.assert_called_once_with(sdk)
-        get_task_client.assert_called_once_with("evaluator")
+        get_task_client.assert_not_called()
         get_async_task_client.assert_called_once_with("evaluator")
-        run_task.assert_called_once_with(AgentEvalJob, sdk=client, async_sdk=async_client, ctx=ctx)
+        run_task.assert_called_once_with(AsyncAgentEvalJob, async_client=async_client, ctx=ctx)
 
     def test_main_returns_setup_exit_code_when_task_sdk_fails(self, mocker: MockerFixture) -> None:
         get_platform_sdk = mocker.patch("nemo_evaluator.tasks.runner.get_task_sdk", side_effect=RuntimeError("boom"))
         get_task_client = mocker.patch("nemo_evaluator.tasks.runner.get_task_nemo_client")
-        run_task = mocker.patch("nemo_evaluator.tasks.runner.run_task")
+        run_task = mocker.patch("nemo_evaluator.tasks.runner.run_task_with_async_client")
 
         exit_code = agent_eval_task_main()
 
@@ -1679,7 +1775,9 @@ async def test_trial_error_survives_the_job_spec_wire_contract() -> None:
     assert error.type == "RuntimeError"
     assert error.message == "Agent process failed with exit code 127"
 
-    spec = await AgentEvalJob.to_spec(input_spec, workspace="dev", entity_client=None, async_sdk=None, is_local=True)
+    spec = await AgentEvalJob.to_spec(
+        input_spec, workspace="dev", entity_client=None, async_sdk=_async_platform(), is_local=True
+    )
     assert isinstance(spec, AgentEvalSpec)
     assert spec.trials is not None
     assert spec.trials[0].error == error
@@ -1763,12 +1861,13 @@ def test_job_specs_reject_invalid_typed_measurements_without_metadata_fallback(
         )
 
 
-async def test_compile_resolves_gym_runner_env_secrets() -> None:
+async def test_compile_resolves_gym_runner_env_secrets(mocker: MockerFixture) -> None:
     """A Gym environment's model key reaches it through the OS environment, not an endpoint spec.
 
     Without this the only route was `env_vars`, which stores the credential in plaintext on the spec
     and writes it into whatever persists that spec.
     """
+    _patch_execution_profiles(mocker, [])
     spec = AgentEvalSpec(
         tasks=[_task_spec()],
         target=GymRunnerTarget(
@@ -1781,7 +1880,7 @@ async def test_compile_resolves_gym_runner_env_secrets() -> None:
     )
 
     compiled = await AgentEvalJob.compile(
-        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=None
+        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_platform()
     )
 
     step = PlatformJobSpec.model_validate(compiled).steps[0]
@@ -1791,3 +1890,30 @@ async def test_compile_resolves_gym_runner_env_secrets() -> None:
     stored_target = cast(dict[str, Any], step.config)["target"]
     assert stored_target["env_secrets"] == {"OPENAI_API_KEY": "my-workspace/openai-key"}
     assert stored_target["env_vars"] == {"WMT_TRANSLATION_COMET_PY_CACHE": "/shared/cache"}
+
+
+async def test_compile_resolves_harbor_runner_env_secrets(mocker: MockerFixture) -> None:
+    """A Harbor agent's model key reaches it through the job environment, not through `agent_kwargs`.
+
+    `agent_kwargs` is persisted verbatim by Harbor into the job dir's config.json, so a credential there
+    lands in plaintext on disk; the secret reference is the only thing allowed to travel on the spec.
+    """
+    _patch_execution_profiles(mocker, [SubprocessJobExecutionProfile()])
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=HarborRunnerTarget(
+            agent_import_path="nemo_fabric.integrations.harbor:FabricAgent",
+            agent_kwargs={"fabric_adapter_id": "nvidia.fabric.codex"},
+            env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
+        ),
+    )
+
+    compiled = await AgentEvalJob.compile(
+        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_platform()
+    )
+
+    step = PlatformJobSpec.model_validate(compiled).steps[0]
+    secrets = {env.name: env.from_secret.name for env in step.environment or [] if env.from_secret}
+    assert secrets == {"OPENAI_API_KEY": "my-workspace/openai-key"}
+    stored_target = cast(dict[str, Any], step.config)["target"]
+    assert stored_target["env_secrets"] == {"OPENAI_API_KEY": "my-workspace/openai-key"}
