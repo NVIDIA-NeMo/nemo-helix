@@ -57,15 +57,17 @@ keep in sync with a shipped version.
   --default-model default/nvidia-nemotron-3-super-120b-a12b \
   --fast-model    default/nvidia-nemotron-3-nano-30b-a3b
   ```
-- The `nemo-insights` package installed, so Fabric discovers the analyst
-  adapter under `<sys.prefix>/share/nemo-fabric/adapters/`.
+
+- The `nemo-agents-plugin` package installed, so Fabric discovers the generic
+  `nvidia.nemo-platform.nooa` adapter (which the Analyst runs on) under
+  `<sys.prefix>/share/nemo-fabric/adapters/`.
 
   That descriptor is *copied* into the venv at install time, not symlinked, and
   a plain `uv sync` will not refresh it for an unchanged editable package. After
-  editing `insights-analyst.fabric-adapter.json`, run:
+  editing `nemo-platform-nooa.fabric-adapter.json`, run:
 
   ```bash
-  uv sync --reinstall-package nemo-insights-plugin
+  uv sync --reinstall-package nemo-agents-plugin
   ```
 
 ```bash
@@ -98,7 +100,7 @@ entity — the Analyst only matches it against each span's normalized
    28 sessions spanning ~3.6 hours:
 
    | Scenario | Sessions | Failure |
-   |---|---|---|
+   | --- | --- | --- |
    | `retrieval` | 8 | `knowledge_search` returns zero documents; the agent answers anyway |
    | `handoff` | 6 | `delegate_task` fires without the conversation summary |
    | `billing` | 5 | `billing_lookup` times out at 30s |
