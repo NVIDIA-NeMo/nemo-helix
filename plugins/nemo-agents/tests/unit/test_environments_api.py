@@ -120,6 +120,18 @@ class TestEnvironmentSpecRoutes:
         resp = client.delete("/apis/agents/v2/workspaces/default/environment-specs/e1")
         assert resp.status_code == 204
 
+    def test_create_validation_error_returns_422(self) -> None:
+        client_mock = AsyncMock()
+        client_mock.create = AsyncMock(side_effect=NemoEntityValidationError("name: string does not match pattern"))
+        client = _test_client(client_mock)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/environment-specs",
+            json={"name": "e 1", "env": {"FOO": "bar"}},
+        )
+        assert resp.status_code == 422
+        assert "pattern" in resp.json()["detail"]
+
 
 class TestEnvironmentRoutes:
     def test_create_with_refs(self) -> None:
@@ -152,6 +164,18 @@ class TestEnvironmentRoutes:
         created: AgentEnvironment = client_mock.create.call_args[0][0]
         assert isinstance(created.environment_spec, EnvironmentSpecInline)
         assert created.environment_spec.env == {"A": "1"}
+
+    def test_create_validation_error_returns_422(self) -> None:
+        client_mock = AsyncMock()
+        client_mock.create = AsyncMock(side_effect=NemoEntityValidationError("name: string does not match pattern"))
+        client = _test_client(client_mock)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/environments",
+            json={"name": "env 1", "environment_spec": "default/e1"},
+        )
+        assert resp.status_code == 422
+        assert "pattern" in resp.json()["detail"]
 
     def test_get(self) -> None:
         env = _stamp(AgentEnvironment(name="env1", workspace="default", environment_spec="default/e1"))
