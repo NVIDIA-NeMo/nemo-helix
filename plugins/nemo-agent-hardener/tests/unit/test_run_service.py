@@ -442,7 +442,7 @@ def test_service_driven_requires_a_platform_job(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setattr(run_module._common, "execute", lambda *a, **k: (SimpleNamespace(returncode=0), "", None))
 
     ctx = _ctx(tmp_path)
-    ctx.job_id = None  # local run_local: no submitted job to drive status_details HITL
+    ctx.job_id = None  # no submitted platform job to drive status_details HITL
     job = run_module.AgentHardenerRunJob()
     monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
     # run() no longer raises: the boundary classifies the failure and surfaces it as a failed result.
@@ -646,7 +646,7 @@ def test_apply_manifest_overrides_keeps_guardrails_without_a_workflow() -> None:
     `agent.workflow` made a Studio run that *selected* defenders score 0 blocked, while selecting
     none — which falls through to agent-hardener's defaults — hardened normally.
     """
-    manifest = {"agent": {"name": "x"}, "backends": []}
+    manifest: dict[str, Any] = {"agent": {"name": "x"}, "backends": []}
     manifest_mod._apply_manifest_overrides(manifest, {"defenders": ["guardrails"]})
 
     names = [entry["name"] for entry in manifest["overrides"]["defenders"]]

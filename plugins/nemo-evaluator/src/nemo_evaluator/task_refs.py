@@ -106,8 +106,7 @@ async def resolve_taskset_ref(
     """
     if entity_client is None:
         raise ValueError(
-            "A TasksetRef requires a platform connection (entity store) to resolve; it cannot be used "
-            "in local execution. Pass an inline task list instead."
+            "A TasksetRef requires a platform connection (entity store) to resolve; pass an inline task list instead."
         )
     task_store = cast(EntityClientProtocol[TaskEntity], entity_client)
     revision_store = cast(EntityClientProtocol[TaskRevisionEntity], entity_client)

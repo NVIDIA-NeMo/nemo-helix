@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Self, TypeAlias, cast
+from typing import Annotated, Any, ClassVar, Self, TypeAlias
 
 # Imported for their registration side effects: each module registers its
 # payload kind in the bundle registry so MetricBundle payloads validate.
@@ -27,11 +27,13 @@ from nemo_evaluator.jobs.metric_resolution import (
 from nemo_evaluator.jobs.publication import publish_row_eval_result
 from nemo_evaluator.jobs.publication_spec import RowPublicationSpec
 from nemo_evaluator.jobs.result_persistence import persist_evaluate_result
-from nemo_evaluator.jobs.utils import as_async_nemo_client, as_nemo_client, run_with_isolated_async_client
+from nemo_evaluator.jobs.utils import async_client_from_sync_client, run_with_isolated_async_client
 from nemo_evaluator.metric_refs import MetricRefOrInline
 from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
 from nemo_evaluator_sdk import Evaluator
 from nemo_evaluator_sdk.execution.config import resolve_params
+from nemo_evaluator_sdk.metrics.protocol import Metric
+from nemo_evaluator_sdk.metrics.utils import metric_type_name
 from nemo_evaluator_sdk.values import (
     Agent,
     AgentBase,
@@ -49,7 +51,7 @@ from nemo_platform_plugin.intake.client import AsyncIntakeClient
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
+from nemo_platform_plugin.sdk import AsyncNeMoPlatform
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
@@ -86,32 +88,50 @@ class EvaluationResultFiles:
     artifacts_dir: Path
 
 
+@dataclass(frozen=True)
+class EvaluationRunResult:
+    """Named output from running the SDK evaluator and writing its artifacts."""
+
+    result: EvaluationArtifactResult
+    started_at: datetime
+    metrics: list[Metric]
+    artifact_url: str
+    output: dict[str, object]
+
+
 def _resolve_run_dataset(
     dataset: DatasetSpec,
     *,
     ctx: JobContext,
-    client: NemoClient | None = None,
-    async_client: AsyncNemoClient | None = None,
+    client: NemoClient,
 ) -> InlineDataset | Path:
-    """Resolve an evaluator plugin dataset for local SDK execution."""
+    """Resolve an evaluator plugin dataset through the sync runtime client."""
     if not isinstance(dataset, FilesetRef):
         return dataset
 
     destination = str(ctx.storage.persistent / "dataset")
-    # Prefer sync when available; async path isolates httpx so later run_sync calls
-    # (result persistence) can reuse the injected async client.
-    if client is not None:
-        return download_dataset_sync(
-            client=client,
-            dataset=dataset,
-            destination=destination,
-        )
-    if async_client is not None:
-        return run_with_isolated_async_client(
-            async_client,
-            lambda client: download_dataset(client=client, dataset=dataset, destination=destination),
-        )
-    raise ValueError("FilesetRef datasets require an SDK client for local evaluator job execution.")
+    return download_dataset_sync(
+        client=client,
+        dataset=dataset,
+        destination=destination,
+    )
+
+
+def _resolve_run_dataset_async(
+    dataset: DatasetSpec,
+    *,
+    ctx: JobContext,
+    async_client: AsyncNemoClient,
+) -> InlineDataset | Path:
+    """Resolve an evaluator plugin dataset through the async runtime client."""
+    if not isinstance(dataset, FilesetRef):
+        return dataset
+
+    destination = str(ctx.storage.persistent / "dataset")
+    return run_with_isolated_async_client(
+        async_client,
+        lambda client: download_dataset(client=client, dataset=dataset, destination=destination),
+    )
 
 
 class _EvaluateSpecCommon(BaseModel):
@@ -189,7 +209,7 @@ class EvaluateSpec(_EvaluateSpecCommon):
         return self
 
 
-class EvaluateJob(NemoJob):
+class _EvaluateJobBase(NemoJob):
     """Run evaluator SDK metrics against inline rows or FilesetRef datasets."""
 
     name: ClassVar[str] = "evaluate"
@@ -198,6 +218,7 @@ class EvaluateJob(NemoJob):
     input_spec_schema: ClassVar[type[BaseModel] | None] = EvaluateInputSpec
     spec_schema: ClassVar[type[BaseModel] | None] = EvaluateSpec
     job_collection_path: ClassVar[str | None] = "/evaluate/jobs"
+    generate_legacy_verbs: ClassVar[bool] = False
 
     @classmethod
     async def compile(
@@ -207,7 +228,7 @@ class EvaluateJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform | None,
+        async_sdk: AsyncNeMoPlatform,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
@@ -262,7 +283,7 @@ class EvaluateJob(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform | None,
+        async_sdk: AsyncNeMoPlatform,
         is_local: bool,
     ) -> BaseModel:
         """Resolve submitter-facing model and metric references into the canonical evaluation spec."""
@@ -272,7 +293,7 @@ class EvaluateJob(NemoJob):
             if isinstance(input_spec, EvaluateInputSpec)
             else EvaluateInputSpec.model_validate_json(input_spec.model_dump_json())
         )
-        entity_client = cast(EntityClient | None, entity_client)
+        entity_client = entity_client if isinstance(entity_client, EntityClient) else None
         metrics = await resolve_metrics_to_inline(
             submit_spec.metrics,
             workspace=workspace,
@@ -289,18 +310,14 @@ class EvaluateJob(NemoJob):
             publication=submit_spec.publication,
         )
 
-    def run(
+    def _run_evaluator(
         self,
-        config: dict,
+        spec: EvaluateSpec,
         *,
         ctx: JobContext,
-        sdk: NemoClient | NeMoPlatform | None = None,
-        async_sdk: AsyncNemoClient | AsyncNeMoPlatform | None = None,
-    ) -> dict:
-        """Run the evaluator job locally and persist its result artifact."""
-        client = as_nemo_client(sdk)
-        async_client = as_async_nemo_client(async_sdk)
-        spec = EvaluateSpec.model_validate(config)
+        dataset: InlineDataset | Path,
+    ) -> EvaluationRunResult:
+        """Run the SDK evaluator and save the result files."""
         # Stamped here because the row evaluator records no timing at all and `EvaluationResult` has
         # nowhere to put it. Publication needs a start time that is a function of the run, not of
         # when it was published, or re-ingest duplicates spans instead of replacing them.
@@ -308,12 +325,6 @@ class EvaluateJob(NemoJob):
         evaluator = Evaluator()
         params = resolve_params(spec.params, spec.target)
         metrics = [unbundle_metric(to_runtime_bundle(metric)) for metric in spec.metrics]
-        dataset = _resolve_run_dataset(
-            spec.dataset,
-            ctx=ctx,
-            client=client,
-            async_client=async_client,
-        )
         if isinstance(spec.target, Model):
             if not isinstance(params, RunConfigOnlineModel):
                 raise TypeError("model target requires RunConfigOnlineModel")
@@ -358,26 +369,6 @@ class EvaluateJob(NemoJob):
         ctx.results.save(RUN_METADATA_RESULT_NAME, result_files.run_metadata)
         ctx.results.save(ARTIFACTS_RESULT_NAME, result_files.artifacts_dir, ignore_patterns=RESULT_IGNORE_PATTERNS)
 
-        # Persist the queryable result record (aggregate scores); per-row detail lives in the fileset
-        # bundle referenced by `artifact`. Best-effort: the authoritative output (result artifacts) is
-        # already saved above, so a persistence failure must not fail an otherwise-successful eval —
-        # log and continue.
-        try:
-            persist_evaluate_result(
-                result,
-                target=spec.target,
-                dataset_ref=spec.dataset.root if isinstance(spec.dataset, FilesetRef) else None,
-                metric_types=[metric.type for metric in metrics],
-                ctx=ctx,
-                bundle_ref=artifact.artifact_url,
-                async_sdk=async_client,
-            )
-        except Exception:
-            logger.warning(
-                "Failed to persist evaluate result record; the result artifacts are unaffected",
-                exc_info=True,
-            )
-
         # TODO: Implement progress reporting hook in SDK - AALGO-149
         # self.report_progress(
         #     ctx,
@@ -390,13 +381,61 @@ class EvaluateJob(NemoJob):
             "status": "completed",
             "artifact": artifact.model_dump(),
         }
+        return EvaluationRunResult(
+            result=result,
+            started_at=started_at,
+            metrics=metrics,
+            artifact_url=artifact.artifact_url,
+            output=output,
+        )
+
+    @staticmethod
+    def _persist_result(
+        result: EvaluationArtifactResult,
+        *,
+        spec: EvaluateSpec,
+        metrics: list[Metric],
+        ctx: JobContext,
+        artifact_url: str,
+        async_client: AsyncNemoClient | None,
+    ) -> None:
+        # Persist the queryable result record (aggregate scores); per-row detail lives in the fileset
+        # bundle referenced by `artifact`. Best-effort: the authoritative output (result artifacts) is
+        # already saved above, so a persistence failure must not fail an otherwise-successful eval —
+        # log and continue.
+        try:
+            persist_evaluate_result(
+                result,
+                target=spec.target,
+                dataset_ref=spec.dataset.root if isinstance(spec.dataset, FilesetRef) else None,
+                metric_types=[metric_type_name(metric) for metric in metrics],
+                ctx=ctx,
+                bundle_ref=artifact_url,
+                async_client=async_client,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to persist evaluate result record; the result artifacts are unaffected",
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _publish_result(
+        result: EvaluationArtifactResult,
+        *,
+        spec: EvaluateSpec,
+        ctx: JobContext,
+        started_at: datetime,
+        intake: AsyncIntakeClient | None,
+        output: dict[str, object],
+    ) -> None:
+        """Publish the result if the spec requested it, mutating ``output`` with the outcome."""
 
         # Publication runs last, after the artifacts and the queryable record are both durable, so a
         # failed publish costs a re-publish rather than a re-run. It is also the only step here that
         # can fail the job (when `required`).
         publication = spec.publication.intake if spec.publication is not None else None
         if publication is not None:
-            intake = AsyncIntakeClient.from_client(async_client) if async_client is not None else None
             outcome = publish_row_eval_result(
                 result,
                 spec=publication,
@@ -408,4 +447,79 @@ class EvaluateJob(NemoJob):
             )
             output["publication"] = outcome.model_dump(exclude_none=True)
 
-        return output
+    def _run_sync(
+        self,
+        config: dict,
+        *,
+        ctx: JobContext,
+        client: NemoClient,
+    ) -> dict:
+        """Run the evaluator job locally through sync typed clients."""
+        spec = EvaluateSpec.model_validate(config)
+        dataset = _resolve_run_dataset(spec.dataset, ctx=ctx, client=client)
+        run = self._run_evaluator(spec, ctx=ctx, dataset=dataset)
+        with async_client_from_sync_client(client) as async_client:
+            self._persist_result(
+                run.result,
+                spec=spec,
+                metrics=run.metrics,
+                ctx=ctx,
+                artifact_url=run.artifact_url,
+                async_client=async_client,
+            )
+            self._publish_result(
+                run.result,
+                spec=spec,
+                ctx=ctx,
+                started_at=run.started_at,
+                intake=AsyncIntakeClient.from_client(async_client),
+                output=run.output,
+            )
+        return run.output
+
+
+class EvaluateJob(_EvaluateJobBase):
+    """Public/local row-evaluation job that runs through sync typed clients."""
+
+    def run(
+        self,
+        config: dict,
+        *,
+        ctx: JobContext,
+        client: NemoClient,
+    ) -> dict:
+        """Run the evaluator job locally through sync typed clients."""
+        return self._run_sync(config, ctx=ctx, client=client)
+
+
+class AsyncEvaluateJob(_EvaluateJobBase):
+    """Task-container variant that runs row evaluation through async typed clients."""
+
+    def run(
+        self,
+        config: dict,
+        *,
+        ctx: JobContext,
+        async_client: AsyncNemoClient,
+    ) -> dict:
+        """Run the evaluator job in a task container through async typed clients."""
+        spec = EvaluateSpec.model_validate(config)
+        dataset = _resolve_run_dataset_async(spec.dataset, ctx=ctx, async_client=async_client)
+        run = self._run_evaluator(spec, ctx=ctx, dataset=dataset)
+        self._persist_result(
+            run.result,
+            spec=spec,
+            metrics=run.metrics,
+            ctx=ctx,
+            artifact_url=run.artifact_url,
+            async_client=async_client,
+        )
+        self._publish_result(
+            run.result,
+            spec=spec,
+            ctx=ctx,
+            started_at=run.started_at,
+            intake=AsyncIntakeClient.from_client(async_client),
+            output=run.output,
+        )
+        return run.output

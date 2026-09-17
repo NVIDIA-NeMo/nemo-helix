@@ -314,9 +314,7 @@ def discover_jobs() -> dict[str, type[NemoJob]]:
 
     Entry-point key convention: ``<plugin-name>.<job-name>`` (e.g.
     ``"example.say-hello"``).  The platform instantiates each class and calls
-    :meth:`~nemo_platform_plugin.job.NemoJob.run` with the job config dict — programmatic
-    callers drive that through
-    :meth:`nemo_platform_plugin.scheduler.NemoJobScheduler.run_local`.
+    :meth:`~nemo_platform_plugin.job.NemoJob.run` with the job config dict.
 
     Validates that each class's ``name`` attribute matches the job-name suffix
     of its entry-point key (the part after the first ``"."``).

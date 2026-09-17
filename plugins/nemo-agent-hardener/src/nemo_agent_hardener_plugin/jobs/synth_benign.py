@@ -93,7 +93,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
             ],
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: Any = None, **_: Any) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: Any = None) -> dict:
         """Run synthesis, classifying any failure into an operator-facing error result."""
         try:
             return self._execute(config, ctx=ctx, sdk=sdk)

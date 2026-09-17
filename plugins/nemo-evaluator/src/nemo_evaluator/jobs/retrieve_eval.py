@@ -30,7 +30,7 @@ from nemo_evaluator.jobs.evaluate import (
 )
 from nemo_evaluator.jobs.metric_resolution import PlatformMetricModelResolver
 from nemo_evaluator.jobs.secret_env import build_task_environment
-from nemo_evaluator.jobs.utils import as_async_nemo_client, as_nemo_client, run_with_isolated_async_client
+from nemo_evaluator.jobs.utils import run_with_isolated_async_client
 from nemo_evaluator_sdk import Evaluator
 from nemo_evaluator_sdk.execution.metric_execution import run_sync as run_coro_sync
 from nemo_evaluator_sdk.metrics.protocol import Metric
@@ -57,7 +57,7 @@ from nemo_platform_plugin.jobs.api_factory import (
 )
 from nemo_platform_plugin.jobs.image import get_qualified_image
 from nemo_platform_plugin.models.client import AsyncModelsClient
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
+from nemo_platform_plugin.sdk import AsyncNeMoPlatform
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 EVAL_RESULTS_FILE_NAME = "eval_results.json"
@@ -138,7 +138,7 @@ class RetrieveEvalSpec(BaseModel):
         return self
 
 
-class RetrieveEvalJob(NemoJob):
+class _RetrieveEvalJobBase(NemoJob):
     """Score a BEIR fileset with a deployed embedding NIM and optional reranker."""
 
     name: ClassVar[str] = "retrieve-eval"
@@ -147,6 +147,7 @@ class RetrieveEvalJob(NemoJob):
     input_spec_schema: ClassVar[type[BaseModel] | None] = RetrieveEvalInputSpec
     spec_schema: ClassVar[type[BaseModel] | None] = RetrieveEvalSpec
     job_collection_path: ClassVar[str | None] = "/retrieve-eval/jobs"
+    generate_legacy_verbs: ClassVar[bool] = False
 
     @classmethod
     async def to_spec(
@@ -154,7 +155,7 @@ class RetrieveEvalJob(NemoJob):
         input_spec: BaseModel,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform | None,
+        async_sdk: AsyncNeMoPlatform,
         is_local: bool,
     ) -> BaseModel:
         """Resolve a platform model reference before the job is compiled."""
@@ -174,7 +175,7 @@ class RetrieveEvalJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform | None,
+        async_sdk: AsyncNeMoPlatform,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
@@ -208,35 +209,7 @@ class RetrieveEvalJob(NemoJob):
             ]
         )
 
-    def run(
-        self,
-        config: dict,
-        ctx: JobContext,
-        sdk: NemoClient | NeMoPlatform | None = None,
-        async_sdk: AsyncNemoClient | AsyncNeMoPlatform | None = None,
-    ) -> dict:
-        """Download, validate, score, and persist a BEIR retrieval result."""
-        client = as_nemo_client(sdk)
-        async_client = as_async_nemo_client(async_sdk)
-        spec = RetrieveEvalSpec.model_validate(config)
-        if client is not None:
-            dataset_path = download_dataset_sync(
-                client=client,
-                dataset=spec.dataset,
-                destination=str(ctx.storage.persistent / "dataset"),
-            )
-        elif async_client is not None:
-            dataset_path = run_with_isolated_async_client(
-                async_client,
-                lambda isolated_client: download_dataset(
-                    client=isolated_client,
-                    dataset=spec.dataset,
-                    destination=str(ctx.storage.persistent / "dataset"),
-                ),
-            )
-        else:
-            raise ValueError("retrieve-eval requires an SDK client to download its FilesetRef")
-
+    def _score_dataset(self, spec: RetrieveEvalSpec, ctx: JobContext, dataset_path: Path) -> dict:
         dataset = load_beir_dataset(dataset_path)
         cutoffs = _metric_cutoffs(spec)
         metrics = [
@@ -311,13 +284,54 @@ def _run_pipelines(
     return run_coro_sync(_score)
 
 
+class RetrieveEvalJob(_RetrieveEvalJobBase):
+    """Public/local retrieval-evaluation job that downloads through sync typed clients."""
+
+    def run(
+        self,
+        config: dict,
+        *,
+        ctx: JobContext,
+        client: NemoClient,
+    ) -> dict:
+        """Download, validate, score, and persist a BEIR retrieval result."""
+        spec = RetrieveEvalSpec.model_validate(config)
+        dataset_path = download_dataset_sync(
+            client=client,
+            dataset=spec.dataset,
+            destination=str(ctx.storage.persistent / "dataset"),
+        )
+        return self._score_dataset(spec, ctx, dataset_path)
+
+
+class AsyncRetrieveEvalJob(_RetrieveEvalJobBase):
+    """Task-container variant that downloads retrieval datasets through async typed clients."""
+
+    def run(
+        self,
+        config: dict,
+        *,
+        ctx: JobContext,
+        async_client: AsyncNemoClient,
+    ) -> dict:
+        """Download, validate, score, and persist a BEIR retrieval result."""
+        spec = RetrieveEvalSpec.model_validate(config)
+        dataset_path = run_with_isolated_async_client(
+            async_client,
+            lambda isolated_client: download_dataset(
+                client=isolated_client,
+                dataset=spec.dataset,
+                destination=str(ctx.storage.persistent / "dataset"),
+            ),
+        )
+        return self._score_dataset(spec, ctx, dataset_path)
+
+
 async def _resolve_retrieval(
     value: RetrievalInputSpec | Model | ModelRef,
-    async_sdk: AsyncNeMoPlatform | None,
+    async_sdk: AsyncNeMoPlatform,
 ) -> Retrieval:
     if isinstance(value, ModelRef):
-        if async_sdk is None:
-            raise ValueError("a platform SDK client is required to resolve the retrieval target")
         models_client = client_from_platform(async_sdk, AsyncModelsClient)
         return Retrieval(embeddings=await PlatformMetricModelResolver(models_client).resolve_model(value))
     if isinstance(value, Model):
@@ -325,14 +339,10 @@ async def _resolve_retrieval(
     embeddings = value.embeddings
     reranker = value.reranker
     if isinstance(embeddings, ModelRef):
-        if async_sdk is None:
-            raise ValueError("a platform SDK client is required to resolve the retrieval target")
         models_client = client_from_platform(async_sdk, AsyncModelsClient)
         embeddings = await PlatformMetricModelResolver(models_client).resolve_model(embeddings)
     if isinstance(reranker, ModelRef):
         reranker_ref = reranker.root
-        if async_sdk is None:
-            raise ValueError("a platform SDK client is required to resolve the retrieval reranker")
         models_client = client_from_platform(async_sdk, AsyncModelsClient)
         reranker = await PlatformMetricModelResolver(models_client).resolve_model(reranker)
         try:
@@ -367,11 +377,10 @@ def _metric_cutoffs(spec: RetrieveEvalSpec) -> list[int]:
 
 
 def _project_eval_results(result: BenchmarkEvaluationResult) -> dict[str, float]:
-    scores = getattr(result, "aggregate_scores").scores
     projected: dict[str, float] = {}
-    for score in scores:
+    for score in result.aggregate_scores.scores:
         short = score.name.rsplit(".", 1)[-1]
-        if short.startswith(_PROJECTED_SUFFIXES):
+        if short.startswith(_PROJECTED_SUFFIXES) and score.mean is not None:
             projected[short] = score.mean
     return projected
 

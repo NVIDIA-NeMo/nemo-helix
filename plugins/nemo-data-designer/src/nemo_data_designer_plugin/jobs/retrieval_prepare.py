@@ -21,7 +21,10 @@ from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
 from nmp.customization_common.retrieval.inline import move_aux_files_to_additional, wrapped_to_inline_jsonl
-from nmp.customization_common.service.platform_client import fetch_model_entity
+from nmp.customization_common.service.platform_client import (
+    async_customization_platform_clients_from_platform,
+    fetch_model_entity,
+)
 from pydantic import BaseModel
 
 
@@ -40,7 +43,7 @@ class RetrievalPrepareJob(NemoJob):
         input_spec: BaseModel,
         workspace: str,
         entity_client: object,
-        async_sdk: object,
+        async_sdk: AsyncNeMoPlatform,
         is_local: bool,
     ) -> BaseModel:
         job_config = cast(RetrievalPrepareJobConfig, input_spec)
@@ -51,7 +54,8 @@ class RetrievalPrepareJob(NemoJob):
         if not job_config.enable_mining:
             return RetrievalPrepareStepConfig(job_config=job_config, phase="convert")
 
-        model = await fetch_model_entity(job_config.model, workspace, cast(AsyncNeMoPlatform, async_sdk))
+        platform_clients = async_customization_platform_clients_from_platform(async_sdk)
+        model = await fetch_model_entity(job_config.model, workspace, platform_clients)
         if not model.fileset:
             raise ValueError(
                 f"Model '{model.workspace}/{model.name}' has no fileset. "
@@ -71,7 +75,7 @@ class RetrievalPrepareJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: object,
+        async_sdk: AsyncNeMoPlatform,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
@@ -109,7 +113,7 @@ class RetrievalPrepareJob(NemoJob):
             )
         return PlatformJobSpec(steps=steps)
 
-    def run(self, config: dict, ctx: JobContext, sdk: NeMoPlatform) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoPlatform) -> dict:
         step = RetrievalPrepareStepConfig.model_validate(config)
         if step.phase == "mine":
             raise RuntimeError("Mining runs as nmp.automodel.tasks.retrieval_mine, not this module")

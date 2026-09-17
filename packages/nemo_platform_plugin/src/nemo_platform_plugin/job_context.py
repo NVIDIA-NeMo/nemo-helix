@@ -18,22 +18,21 @@ task container where there is no event loop and most work calls into
 sync library protocols; ``ctx.results.save(...)`` is therefore sync as
 well. This matches the shared resources/jobs/functions design rationale.
 
-Clients (files, models, ...) reach the job via signature-based DI on
-``run`` rather than through the context. Logging is not on the context
-either — use ``logging.getLogger(__name__)`` in each task module.
+Clients (files, models, ...) reach typed jobs via the runtime contract they
+inherit, not through the context. Logging is not on the context either — use
+``logging.getLogger(__name__)`` in each task module.
 Progress reporting is a virtual method on
 :class:`~nemo_platform_plugin.job.NemoJob` so each job can ship its own payload
 shape.
 
 Example::
 
-    def run(self, config: dict, *, ctx: JobContext, is_local: bool) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, client: NemoClient) -> dict:
         spec = MySpec.model_validate(config)
         out_path = ctx.storage.ephemeral / "rows.jsonl"
         ...
         ref = ctx.results.save("rows.jsonl", out_path)
-        if not is_local:
-            self.report_progress(ctx, status="done")
+        self.report_progress(ctx, status="done")
         return {"status": "completed", "result": ref.model_dump()}
 """
 

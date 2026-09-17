@@ -229,7 +229,7 @@ class AgentHardenerRunJob(NemoJob):
             ],
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: Any = None, **_: Any) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: Any = None) -> dict:
         """Run the war-game, classifying and surfacing any failure that affects the run's results.
 
         The whole run is wrapped in one error boundary: a classified :class:`AgentHardenerRunError` (or any

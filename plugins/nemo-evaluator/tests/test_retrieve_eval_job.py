@@ -5,8 +5,6 @@ import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
-from typing import cast
 
 import httpx
 import pytest
@@ -31,7 +29,7 @@ from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
 from nemo_platform_plugin.jobs.api_factory import CPUExecutionProviderSpec
 from nemo_platform_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
+from nemo_platform_plugin.sdk import AsyncNeMoPlatform
 from pydantic import ValidationError
 from pytest_mock import MockerFixture
 
@@ -53,6 +51,10 @@ def _spec() -> RetrieveEvalSpec:
         target=Retrieval(embeddings=Model(url="https://igw.example.test/v1/chat/completions", name="embed")),
         k=[1, 10],
     )
+
+
+def _async_platform() -> AsyncNeMoPlatform:
+    return AsyncNeMoPlatform(base_url="http://platform.test", workspace="default")
 
 
 def _result(*, ndcg: float = 0.75, recall: float = 1.0) -> BenchmarkEvaluationResult:
@@ -113,7 +115,7 @@ async def test_to_spec_forwards_retrieval_pipeline_fields() -> None:
         submit,
         workspace="default",
         entity_client=object(),
-        async_sdk=None,
+        async_sdk=_async_platform(),
         is_local=True,
     )
 
@@ -151,7 +153,7 @@ async def test_to_spec_preflights_and_stamps_reranker_model_ref(mocker: MockerFi
         submit,
         workspace="default",
         entity_client=object(),
-        async_sdk=cast(AsyncNeMoPlatform, mocker.MagicMock()),
+        async_sdk=_async_platform(),
         is_local=False,
     )
 
@@ -183,7 +185,7 @@ async def test_to_spec_rejects_incompatible_reranker_model_ref(mocker: MockerFix
             submit,
             workspace="default",
             entity_client=object(),
-            async_sdk=cast(AsyncNeMoPlatform, mocker.MagicMock()),
+            async_sdk=_async_platform(),
             is_local=False,
         )
 
@@ -202,7 +204,7 @@ async def test_compile_builds_cpu_retrieve_eval_task() -> None:
         spec=_spec(),
         entity_client=object(),
         job_name=None,
-        async_sdk=None,
+        async_sdk=_async_platform(),
     )
 
     step = job.steps[0]
@@ -226,9 +228,9 @@ def test_run_validates_fileset_and_persists_nemotron_keys(tmp_path: Path, mocker
     evaluator = mocker.Mock()
     evaluator.run = mocker.AsyncMock(return_value=_result())
     mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
-    sdk = SimpleNamespace()
+    sdk = mocker.Mock(spec=NemoClient)
 
-    output = RetrieveEvalJob().run(_spec().model_dump(mode="json"), ctx=ctx, sdk=cast(NemoClient, sdk))
+    output = RetrieveEvalJob().run(_spec().model_dump(mode="json"), ctx=ctx, client=sdk)
 
     download.assert_called_once()
     load.assert_called_once_with(downloaded)
@@ -270,7 +272,7 @@ def test_run_reports_relative_baseline_scores(tmp_path: Path, mocker: MockerFixt
     output = RetrieveEvalJob().run(
         spec.model_dump(mode="json"),
         ctx=ctx,
-        sdk=cast(NemoClient, SimpleNamespace()),
+        client=mocker.Mock(spec=NemoClient),
     )
 
     assert evaluator.run.await_count == 2
@@ -309,7 +311,7 @@ def test_run_scores_baseline_concurrently(tmp_path: Path, mocker: MockerFixture)
         update={"baseline": Retrieval(embeddings=Model(url="https://igw.example.test/v1", name="baseline"))}
     )
 
-    RetrieveEvalJob().run(spec.model_dump(mode="json"), ctx=ctx, sdk=cast(NemoClient, SimpleNamespace()))
+    RetrieveEvalJob().run(spec.model_dump(mode="json"), ctx=ctx, client=mocker.Mock(spec=NemoClient))
 
     assert max_in_flight == 2
 
@@ -342,7 +344,7 @@ def test_run_includes_cutoff_10_when_baseline_omits_it(tmp_path: Path, mocker: M
     output = RetrieveEvalJob().run(
         spec.model_dump(mode="json"),
         ctx=ctx,
-        sdk=cast(NemoClient, SimpleNamespace()),
+        client=mocker.Mock(spec=NemoClient),
     )
 
     metrics = evaluator.run.call_args_list[0].kwargs["metrics"]
@@ -369,16 +371,15 @@ def test_run_records_started_at_before_evaluation(tmp_path: Path, mocker: Mocker
     evaluator.run = mocker.AsyncMock(return_value=_result())
     mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
 
-    RetrieveEvalJob().run(_spec().model_dump(mode="json"), ctx=ctx, sdk=cast(NemoClient, SimpleNamespace()))
+    RetrieveEvalJob().run(_spec().model_dump(mode="json"), ctx=ctx, client=mocker.Mock(spec=NemoClient))
 
     metadata = json.loads((ctx.storage.persistent / "artifacts" / "run-metadata.json").read_text())
     assert metadata["started_at"] == started.isoformat()
     evaluator.run.assert_awaited_once()
 
 
-def test_run_adapts_the_generated_sdk_the_local_cli_injects(tmp_path: Path, mocker: MockerFixture) -> None:
-    """``nemo evaluator retrieve-eval run`` injects a generated ``NeMoPlatform``, but the BEIR
-    fileset download only accepts a typed client."""
+def test_run_passes_the_declared_typed_client_for_fileset_refs(tmp_path: Path, mocker: MockerFixture) -> None:
+    """The sync job entrypoint uses the typed client declared by the job."""
     download = mocker.patch(
         "nemo_evaluator.jobs.retrieve_eval.download_dataset_sync",
         return_value=tmp_path / "downloaded",
@@ -387,9 +388,14 @@ def test_run_adapts_the_generated_sdk_the_local_cli_injects(tmp_path: Path, mock
     evaluator = mocker.Mock()
     evaluator.run = mocker.AsyncMock(return_value=_result())
     mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
-    platform = NeMoPlatform(base_url="http://platform.test", workspace="dev", http_client=httpx.Client())
+    client = NemoClient(base_url="http://platform.test", workspace="dev", http_client=httpx.Client())
+    ctx = _context(tmp_path)
 
-    output = RetrieveEvalJob().run(_spec().model_dump(mode="json"), ctx=_context(tmp_path), sdk=platform)
+    output = RetrieveEvalJob().run(
+        _spec().model_dump(mode="json"),
+        ctx=ctx,
+        client=client,
+    )
 
-    assert isinstance(download.call_args.kwargs["client"], NemoClient)
+    assert download.call_args.kwargs["client"] is client
     assert output["eval_results"]["ndcg_cut_10"] == 0.75
