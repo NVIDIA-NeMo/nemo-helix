@@ -54,7 +54,7 @@ export const DetailsTab: FC<DetailsTabProps> = ({ workspace, agentName, agent })
               <Text kind="label/regular/sm" className="text-secondary">
                 Description
               </Text>
-              <MarkdownContent content={agent.description} />
+              <MarkdownContent content={agent.description} disableImages />
             </Stack>
           )}
           {models.length > 0 && <KVPair label="Model" value={models.join(', ')} />}
