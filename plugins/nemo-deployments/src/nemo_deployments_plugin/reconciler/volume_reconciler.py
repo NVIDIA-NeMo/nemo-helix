@@ -64,9 +64,9 @@ class VolumeReconciler:
 
         # Backends report a failed delete by returning a FAILED status rather than
         # raising, so guard on the returned status too: only remove the entity row
-        # once the backend confirms the resource is gone (RELEASED). A FAILED delete
-        # must leave the entity + backend resource intact so the next cycle retries,
-        # otherwise the entity disappears while the PVC is orphaned (AIRCORE-1211).
+        # once the backend confirms the resource is gone (RELEASED). A non-success
+        # status must leave the entity + backend resource intact so the next cycle
+        # retries, otherwise the entity disappears while the PVC is orphaned.
         if update.status != "RELEASED":
             logger.warning(
                 "Backend delete for volume %s reported %s — will retry: %s",

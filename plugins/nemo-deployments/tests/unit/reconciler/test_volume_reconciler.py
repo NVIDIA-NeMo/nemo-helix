@@ -107,8 +107,8 @@ async def test_deleting_volume_backend_failure_preserves_entity_for_retry(
 
     Backends signal a failed delete by returning a FAILED VolumeStatusUpdate
     rather than raising. Deleting the entity anyway orphans the underlying PVC
-    while the model reports DELETED (AIRCORE-1211). The entity must survive so
-    the next reconcile cycle retries the backend delete.
+    while the model reports DELETED. The entity must survive so the next
+    reconcile cycle retries the backend delete.
     """
     vol = make_volume()
     vol.status = "DELETING"
@@ -119,6 +119,32 @@ async def test_deleting_volume_backend_failure_preserves_entity_for_retry(
     # Backend was asked to delete (so a retry occurs next cycle) ...
     assert mock_backend.volume_delete_calls == [("default", "vol1")]
     # ... but the entity row survives rather than orphaning the PVC.
+    mock_entities.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delete_status", ["FAILED", "PENDING", "BOUND", "DELETING"])
+async def test_deleting_volume_non_released_status_preserves_entity(
+    volume_reconciler: VolumeReconciler,
+    mock_backend: MockDeploymentBackend,
+    mock_entities: AsyncMock,
+    delete_status: str,
+) -> None:
+    """ANY non-RELEASED backend delete status must preserve the entity for retry.
+
+    The reconciler guards on ``status != "RELEASED"`` rather than ``== "FAILED"``,
+    so the entity survives for every non-success status — pinning the
+    backend-agnostic contract against a future regression to a FAILED-only check.
+    Only RELEASED (see ``test_deleting_volume_removes_backend_then_entity``) may
+    remove the entity row.
+    """
+    vol = make_volume()
+    vol.status = "DELETING"
+    mock_backend.volume_delete_status = VolumeStatusUpdate(status=delete_status)  # type: ignore[arg-type]
+
+    await volume_reconciler.reconcile_one(vol)
+
+    assert mock_backend.volume_delete_calls == [("default", "vol1")]
     mock_entities.delete.assert_not_awaited()
 
 
