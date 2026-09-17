@@ -225,7 +225,7 @@ class DPOTraining(_TrainingBase):
     # No default: ``TrainingMethod`` is a discriminated union, so the tag has to be
     # present in the submitted JSON. Defaulting it here would make the generated
     # OpenAPI schema advertise the field as optional while the server rejects it.
-    type: Literal["dpo"]
+    type: Literal["dpo"] = Field(description="Selects direct preference optimization.")
     ref_policy_kl_penalty: float = Field(
         default=0.05, ge=0.0, description="KL penalty coefficient (beta in the DPO paper)."
     )
@@ -251,7 +251,7 @@ class GRPOTraining(_TrainingBase):
 
     # No default: ``TrainingMethod`` is a discriminated union, so the tag has to be
     # present in the submitted JSON (same as DPOTraining.type).
-    type: Literal["grpo"]
+    type: Literal["grpo"] = Field(description="Selects group relative policy optimization.")
     finetuning_type: Literal["all_weights", "lora"] = Field(
         default="all_weights",
         description="Full-weight GRPO or LoRA adapter training. lora_merged is not supported.",

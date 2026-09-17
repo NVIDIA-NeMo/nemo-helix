@@ -65,14 +65,23 @@ class ModelLoadSpec(UnslothSchema):
             "path before training."
         ),
     )
-    max_seq_length: int = Field(default=2048, gt=0)
+    max_seq_length: int = Field(
+        default=2048, gt=0, description="Maximum token sequence length for training; longer sequences are truncated."
+    )
     load_in_4bit: bool = Field(
         default=True,
         description="bitsandbytes 4-bit. Mutex with load_in_8bit. Default for Unsloth's headline path.",
     )
-    load_in_8bit: bool = False
-    dtype: Literal["auto", "bfloat16", "float16", "float32"] = "auto"
-    trust_remote_code: bool = False
+    load_in_8bit: bool = Field(
+        default=False, description="bitsandbytes 8-bit. Mutex with load_in_4bit, and unavailable for all-weights runs."
+    )
+    dtype: Literal["auto", "bfloat16", "float16", "float32"] = Field(
+        default="auto", description="Weight dtype at load time. 'auto' follows the checkpoint and the GPU."
+    )
+    trust_remote_code: bool = Field(
+        default=False,
+        description="Allow the checkpoint to execute its own modelling code. Required by some community models.",
+    )
     device_map: str | int | dict[str, int] | None = Field(
         default=None,
         description=(
@@ -101,8 +110,11 @@ class LoRAParams(UnslothSchema):
 
     rank: int = Field(default=16, gt=0, description="LoRA rank.")
     alpha: int = Field(default=16, gt=0, description="LoRA scaling factor (alpha).")
-    dropout: float = Field(default=0.0, ge=0.0, lt=1.0)
+    dropout: float = Field(
+        default=0.0, ge=0.0, lt=1.0, description="Dropout applied to the adapter while training. 0 disables it."
+    )
     target_modules: list[str] = Field(
+        description="Module names to attach adapters to. Defaults to full attention plus MLP.",
         # Unsloth's recommended 7-module set: full attention + MLP.
         default_factory=lambda: [
             "q_proj",
@@ -114,9 +126,14 @@ class LoRAParams(UnslothSchema):
             "down_proj",
         ],
     )
-    bias: Literal["none", "all", "lora_only"] = "none"
-    use_rslora: bool = False
-    random_state: int = 3407
+    bias: Literal["none", "all", "lora_only"] = Field(
+        default="none", description="Which bias terms to train alongside the adapter."
+    )
+    use_rslora: bool = Field(
+        default=False,
+        description="Rank-stabilized LoRA: scales by alpha over the square root of rank, which helps at higher ranks.",
+    )
+    random_state: int = Field(default=3407, description="Seed for adapter initialisation.")
     use_dora: bool = Field(
         default=False,
         description="DoRA (weight-decomposed LoRA). Improves quality at low ranks; adds training overhead.",
@@ -149,13 +166,27 @@ class LoRAParams(UnslothSchema):
 class TrainingSpec(UnslothSchema):
     """Algorithm + adapter shape selectors."""
 
-    training_type: Literal["sft"] = "sft"
-    finetuning_type: Literal["lora", "all_weights"] = "lora"
+    training_type: Literal["sft"] = Field(
+        default="sft", description="Supervised fine-tuning. The only algorithm this backend runs."
+    )
+    finetuning_type: Literal["lora", "all_weights"] = Field(
+        default="lora",
+        description=(
+            "'lora' trains an adapter, 'all_weights' trains every weight. All-weights runs cannot be "
+            "quantized, so 4-bit and 8-bit loading must be off."
+        ),
+    )
     lora: LoRAParams | None = Field(
         default=None,
         description="Required when finetuning_type='lora'. Auto-filled with defaults if omitted.",
     )
-    use_gradient_checkpointing: Literal["unsloth", "true", "false"] = "unsloth"
+    use_gradient_checkpointing: Literal["unsloth", "true", "false"] = Field(
+        default="unsloth",
+        description=(
+            "Recompute activations during the backward pass to save memory. 'unsloth' uses its own "
+            "implementation, which is the cheapest of the three."
+        ),
+    )
 
     @model_validator(mode="after")
     def _enforce_lora_invariant(self) -> Self:
@@ -210,27 +241,51 @@ class ScheduleSpec(UnslothSchema):
 
     # Consistent with Automodel: train for ``epochs`` (default 1) unless ``max_steps``
     # is set, in which case the trainer caps training at that many steps.
-    epochs: int = Field(default=1, gt=0)
-    max_steps: int | None = Field(default=None, gt=0)
-    warmup_steps: int = Field(default=0, ge=0)
-    warmup_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    epochs: int = Field(default=1, gt=0, description="Number of complete passes through the dataset.")
+    max_steps: int | None = Field(
+        default=None, gt=0, description="Hard cap on optimizer steps. Caps training when set, overriding epochs."
+    )
+    warmup_steps: int = Field(
+        default=0,
+        ge=0,
+        description="Steps spent ramping the learning rate up from zero. Mutually exclusive with warmup_ratio.",
+    )
+    warmup_ratio: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Warmup length as a fraction of total steps. Mutually exclusive with warmup_steps.",
+    )
     lr_scheduler_type: Literal[
         "linear",
         "cosine",
         "constant",
         "constant_with_warmup",
         "cosine_with_restarts",
-    ] = "linear"
+    ] = Field(default="linear", description="Shape of the learning-rate decay after warmup.")
     # HuggingFace's own logging cadence, which drives stdout and any configured
     # W&B/MLflow run. Deliberately *not* the Jobs-service reporting cadence: a user
     # who wants verbose HF logs should not get one Jobs report per step as a side
     # effect. 1 is the right default now that a downstream gate decides what to
     # keep -- it gives that gate the finest resolution available to sample from.
-    logging_steps: int = Field(default=1, gt=0)
-    save_steps: int | None = Field(default=None, gt=0)
-    eval_steps: int | None = Field(default=None, gt=0)
+    logging_steps: int = Field(
+        default=1,
+        gt=0,
+        description=(
+            "How often HuggingFace logs to stdout and to W&B or MLflow. Separate from the Jobs service's "
+            "own reporting cadence, which progress_reporting controls."
+        ),
+    )
+    save_steps: int | None = Field(
+        default=None, gt=0, description="Checkpoint every this many steps. Only the final model is saved when unset."
+    )
+    eval_steps: int | None = Field(
+        default=None,
+        gt=0,
+        description="Run validation every this many steps. Requires a validation fileset on the dataset.",
+    )
     progress_reporting: ProgressReportingConfig = Field(default_factory=ProgressReportingConfig)
-    seed: int = 3407
+    seed: int = Field(default=3407, description="Seed for shuffling and initialisation.")
     lr_scheduler_kwargs: dict[str, Any] | None = Field(
         default=None,
         description=(
@@ -241,13 +296,25 @@ class ScheduleSpec(UnslothSchema):
 
 
 class BatchSpec(UnslothSchema):
-    per_device_train_batch_size: int = Field(default=1, gt=0)
-    gradient_accumulation_steps: int = Field(default=1, gt=0)
+    per_device_train_batch_size: int = Field(
+        default=1,
+        gt=0,
+        description="Examples per GPU per step. Lower this first when training runs out of memory.",
+    )
+    gradient_accumulation_steps: int = Field(
+        default=1,
+        gt=0,
+        description=(
+            "Steps accumulated before an optimizer update. Raises the effective batch size without using more memory."
+        ),
+    )
 
 
 class OptimizerSpec(UnslothSchema):
-    learning_rate: float = Field(default=2e-4, gt=0.0)
-    weight_decay: float = Field(default=0.0, ge=0.0)
+    learning_rate: float = Field(default=2e-4, gt=0.0, description="Peak learning rate, reached at the end of warmup.")
+    weight_decay: float = Field(
+        default=0.0, ge=0.0, description="Penalty on large weights. Higher regularizes more; 0 disables it."
+    )
     # Unsloth's notebooks default to adamw_8bit (bitsandbytes-backed) — much
     # smaller optimizer state than adamw_torch, which lets users fit larger
     # adapters on the same GPU. Users on Hopper+ may prefer adamw_torch_fused.
@@ -257,7 +324,13 @@ class OptimizerSpec(UnslothSchema):
         "adamw_8bit",
         "paged_adamw_8bit",
         "sgd",
-    ] = "adamw_8bit"
+    ] = Field(
+        default="adamw_8bit",
+        description=(
+            "Optimizer implementation. The 8-bit variants hold much smaller optimizer state, which fits "
+            "larger adapters on the same GPU; fused variants are faster on Hopper and newer."
+        ),
+    )
     adam_beta1: float = Field(default=0.9, ge=0.0, lt=1.0, description="Adam/AdamW beta1.")
     adam_beta2: float = Field(default=0.999, ge=0.0, lt=1.0, description="Adam/AdamW beta2.")
     adam_epsilon: float = Field(default=1e-8, gt=0.0, description="Adam/AdamW epsilon for numerical stability.")

@@ -44,11 +44,29 @@ class AutomodelSchema(NamespacedModel):
 
 
 class LoRAParams(AutomodelSchema):
-    rank: int = Field(default=16, gt=0)
-    alpha: int = Field(default=32, gt=0)
+    rank: int = Field(
+        default=16,
+        gt=0,
+        description="Rank of the LoRA update matrices. Higher ranks add capacity and trainable parameters.",
+    )
+    alpha: int = Field(
+        default=32, gt=0, description="LoRA scaling factor. The update is scaled by alpha divided by rank."
+    )
     dropout: float = Field(default=0.0, ge=0.0, le=1.0, description="LoRA dropout probability for regularization.")
-    merge: bool = False
-    target_modules: list[str] | None = None
+    merge: bool = Field(
+        default=False,
+        description=(
+            "Merge the adapter into the base model after training, producing a full-weight checkpoint "
+            "rather than an adapter. Has the same effect as finetuning_type 'lora_merged'."
+        ),
+    )
+    target_modules: list[str] | None = Field(
+        default=None,
+        description=(
+            "Module name patterns to apply LoRA to (e.g. ['*.q_proj', '*.v_proj']). Applies to every "
+            "'*proj' linear layer when unset."
+        ),
+    )
     exclude_modules: list[str] | None = Field(
         default=None, description="Module name patterns to exclude from LoRA (e.g. ['*.out_proj'])."
     )
@@ -57,8 +75,20 @@ class LoRAParams(AutomodelSchema):
 
 class DatasetSpec(AutomodelSchema):
     training: str = Field(description="Training fileset as 'name' or 'workspace/name'.")
-    validation: str | None = None
-    prompt_template: str | None = None
+    validation: str | None = Field(
+        default=None,
+        description=(
+            "Validation fileset as 'name' or 'workspace/name'. When unset, schedule.validation_split "
+            "holds part of the training data out instead."
+        ),
+    )
+    prompt_template: str | None = Field(
+        default=None,
+        description=(
+            "Row template for datasets whose columns are neither 'messages' nor 'prompt'/'completion', "
+            "e.g. '{input} {output}'. Takes exactly two placeholders, each naming a column."
+        ),
+    )
 
 
 class ExportSpec(AutomodelSchema):
@@ -67,7 +97,7 @@ class ExportSpec(AutomodelSchema):
     primary: Literal["onnx", "hf"] = Field(
         default="onnx", description="Artifact at the fileset root. Use 'hf' when the NIM loads PyTorch weights."
     )
-    opset: int = Field(default=17, gt=0)
+    opset: int = Field(default=17, gt=0, description="ONNX opset version the graph is exported against.")
     precision: Literal["fp32", "fp16"] = Field(
         default="fp16",
         description="ONNX graph dtype. Defaults to fp16 to match typical Hugging Face checkpoints.",
@@ -87,11 +117,17 @@ class ExportSpec(AutomodelSchema):
 class RetrievalSpec(AutomodelSchema):
     """Dataset, collator, and export knobs for bi_encoder / cross_encoder recipes."""
 
-    train_n_passages: int = Field(default=5, ge=2)
-    eval_negative_size: int | None = Field(default=None, ge=1)
-    do_gradient_checkpointing: bool = False
-    query_max_length: int = Field(default=512, ge=1)
-    passage_max_length: int = Field(default=512, ge=1)
+    train_n_passages: int = Field(
+        default=5, ge=2, description="Passages per training example: one positive and the rest as negatives."
+    )
+    eval_negative_size: int | None = Field(
+        default=None, ge=1, description="Negatives per query at evaluation. Follows the training count when unset."
+    )
+    do_gradient_checkpointing: bool = Field(
+        default=False, description="Recompute activations during the backward pass to save memory."
+    )
+    query_max_length: int = Field(default=512, ge=1, description="Maximum token length of the query side.")
+    passage_max_length: int = Field(default=512, ge=1, description="Maximum token length of the passage side.")
     query_prefix: str = Field(default="query:", description="Collator-side prefix; BiEncoderCollator adds a space.")
     passage_prefix: str = Field(default="passage:", description="Collator-side prefix; BiEncoderCollator adds a space.")
     export: ExportSpec | None = Field(
@@ -102,7 +138,10 @@ class RetrievalSpec(AutomodelSchema):
 class TrainingSpec(AutomodelSchema):
     model_config = AutomodelSchema.model_config | {"populate_by_name": True}
 
-    training_type: Literal["sft", "distillation"] = "sft"
+    training_type: Literal["sft", "distillation"] = Field(
+        default="sft",
+        description="'distillation' trains against a teacher model and requires teacher_model; 'sft' does not.",
+    )
     recipe: Literal["auto", "sft", "bi_encoder", "cross_encoder"] = Field(
         default="auto",
         description=(
@@ -110,9 +149,20 @@ class TrainingSpec(AutomodelSchema):
             "backbone for retrieval training."
         ),
     )
-    finetuning_type: Literal["lora", "all_weights", "lora_merged"] = "lora"
-    lora: LoRAParams | None = None
-    max_seq_length: int = Field(default=2048, gt=0)
+    finetuning_type: Literal["lora", "all_weights", "lora_merged"] = Field(
+        default="lora",
+        description=(
+            "'lora' trains an adapter and ships it as one, 'all_weights' trains every weight, and "
+            "'lora_merged' trains an adapter then folds it into the base weights. Setting lora.merge "
+            "on 'lora' produces the same full-weight result as 'lora_merged'."
+        ),
+    )
+    lora: LoRAParams | None = Field(
+        default=None, description="LoRA settings. Defaulted automatically when finetuning_type is a LoRA variant."
+    )
+    max_seq_length: int = Field(
+        default=2048, gt=0, description="Maximum token sequence length for training; longer sequences are truncated."
+    )
     precision: Literal["bf16", "fp16", "fp32", "fp8"] | None = Field(
         default=None,
         description="Model precision for training. Auto-detected from the checkpoint when unset.",
@@ -121,12 +171,29 @@ class TrainingSpec(AutomodelSchema):
         default="sdpa",
         description="Attention backend: 'sdpa' (PyTorch native), 'flash_attention_2', or 'eager'.",
     )
-    execution_profile: str | None = Field(default=None, min_length=1)
-    teacher_model: str | None = None
-    distillation_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
-    distillation_temperature: float = Field(default=1.0, gt=0.0)
-    teacher_precision: Literal["bf16", "fp16", "fp32"] = "bf16"
-    offload_teacher: bool = False
+    execution_profile: str | None = Field(
+        default=None, min_length=1, description="Named tuning profile to apply. The backend chooses one when unset."
+    )
+    teacher_model: str | None = Field(
+        default=None, description="Teacher model to distill from. Required when training_type is 'distillation'."
+    )
+    distillation_ratio: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Weight of the teacher distillation loss against the ground-truth loss. 0 ignores the teacher.",
+    )
+    distillation_temperature: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Softens the teacher distribution before the student matches it. Higher values soften more.",
+    )
+    teacher_precision: Literal["bf16", "fp16", "fp32"] = Field(
+        default="bf16", description="Precision the teacher runs at. It is never trained, so this only affects memory."
+    )
+    offload_teacher: bool = Field(
+        default=False, description="Keep the teacher on CPU between forward passes, trading speed for GPU memory."
+    )
     retrieval: RetrievalSpec | None = Field(
         default=None,
         description="Retrieval dataset, collator, and export knobs. Used when recipe is bi_encoder or cross_encoder.",
@@ -144,16 +211,25 @@ class TrainingSpec(AutomodelSchema):
 
 
 class ScheduleSpec(AutomodelSchema):
-    epochs: int = Field(default=1, gt=0)
-    max_steps: int | None = Field(default=None, gt=0)
-    val_check_interval: float | None = None
+    epochs: int = Field(default=1, gt=0, description="Number of complete passes through the dataset.")
+    max_steps: int | None = Field(
+        default=None,
+        gt=0,
+        description="Hard cap on optimizer steps. Training stops at whichever comes first, this or the epoch count.",
+    )
+    val_check_interval: float | None = Field(
+        default=None,
+        description="How often to run validation: a fraction of an epoch below 1, or a step count at 1 and above.",
+    )
     validation_split: float | None = Field(
         default=0.1,
         gt=0,
         lt=1,
         description="Validation split to use when a validation dataset is not provided.",
     )
-    seed: int | None = None
+    seed: int | None = Field(
+        default=None, description="Seed for shuffling and initialisation. A run is only reproducible when this is set."
+    )
     progress_reporting: ProgressReportingConfig = Field(default_factory=ProgressReportingConfig)
 
 
@@ -167,23 +243,39 @@ RETRIEVAL_BATCH_DEFAULTS: dict[str, tuple[int, int]] = {
 
 
 class BatchSpec(AutomodelSchema):
-    global_batch_size: int = Field(default=8, gt=0)
-    micro_batch_size: int = Field(default=1, gt=0)
-    sequence_packing: bool = False
+    global_batch_size: int = Field(default=8, gt=0, description="Examples per optimizer step, summed across all GPUs.")
+    micro_batch_size: int = Field(
+        default=1,
+        gt=0,
+        description="Examples each GPU processes at once. Lower this first when training runs out of memory.",
+    )
+    sequence_packing: bool = Field(
+        default=False, description="Pack several short examples into one sequence to cut padding waste."
+    )
     sequence_packing_max_samples: int = Field(
         default=1000, gt=0, description="Samples analyzed to estimate the optimal pack size when packing is enabled."
     )
 
 
 class OptimizerSpec(AutomodelSchema):
-    learning_rate: float = Field(default=5e-6, gt=0.0)
+    learning_rate: float = Field(
+        default=5e-6,
+        gt=0.0,
+        description="Peak learning rate, reached at the end of warmup. Around 5e-5 suits full SFT and 1e-4 LoRA.",
+    )
     min_learning_rate: float | None = Field(
         default=None, ge=0.0, description="Minimum learning rate for the cosine decay schedule."
     )
-    weight_decay: float = Field(default=0.01, ge=0.0)
+    weight_decay: float = Field(
+        default=0.01, ge=0.0, description="Penalty on large weights. Higher regularizes more; 0 disables it."
+    )
     adam_beta1: float = Field(default=0.9, ge=0.0, lt=1.0, description="Adam optimizer beta1.")
     adam_beta2: float = Field(default=0.999, ge=0.0, lt=1.0, description="Adam optimizer beta2.")
-    warmup_steps: int = Field(default=0, ge=0)
+    warmup_steps: int = Field(
+        default=0,
+        ge=0,
+        description="Steps spent ramping the learning rate up from zero. Around 10% of total steps is a stable start.",
+    )
     adam_eps: float = Field(default=1e-8, gt=0.0, description="Adam/AdamW epsilon for numerical stability.")
     optimizer: Literal["auto", "Adam", "AdamW", "FusedAdam"] = Field(
         default="auto",
@@ -198,18 +290,31 @@ class OptimizerSpec(AutomodelSchema):
 
 
 class ParallelismSpec(AutomodelSchema):
-    num_nodes: int = Field(default=1, gt=0)
-    num_gpus_per_node: int = Field(default=1, gt=0)
-    tensor_parallel_size: int = Field(default=1, gt=0)
-    pipeline_parallel_size: int = Field(default=1, gt=0)
-    context_parallel_size: int = Field(default=1, gt=0)
-    expert_parallel_size: int | None = Field(default=None, gt=0)
+    num_nodes: int = Field(default=1, gt=0, description="Number of nodes to train on.")
+    num_gpus_per_node: int = Field(
+        default=1, gt=0, description="GPUs used on each node. Total GPUs is num_nodes multiplied by this."
+    )
+    tensor_parallel_size: int = Field(default=1, gt=0, description="Splits each layer across this many GPUs.")
+    pipeline_parallel_size: int = Field(
+        default=1, gt=0, description="Splits the layer stack into this many sequential stages across GPUs."
+    )
+    context_parallel_size: int = Field(
+        default=1, gt=0, description="Splits the sequence dimension across GPUs, for long-sequence training."
+    )
+    expert_parallel_size: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Expert parallel size for MoE models. Must divide data_parallel_size x context_parallel_size, and "
+            "tensor_parallel_size must be 1 when this is above 1."
+        ),
+    )
     sequence_parallel: bool = Field(default=False, description="Enable sequence parallelism.")
 
 
 class OutputRequest(AutomodelSchema):
-    name: str
-    description: str | None = None
+    name: str = Field(description="Name for the model this job produces. Generated from the inputs when omitted.")
+    description: str | None = Field(default=None, description="Free-text description stored on the output model.")
 
 
 class OutputResponse(AutomodelSchema):
@@ -222,15 +327,24 @@ class OutputResponse(AutomodelSchema):
 class AutomodelJobInput(AutomodelSchema):
     """POST body / CLI JSON."""
 
-    name: str | None = None
-    model: str
-    dataset: DatasetSpec
-    training: TrainingSpec
-    schedule: ScheduleSpec = Field(default_factory=ScheduleSpec)
-    batch: BatchSpec = Field(default_factory=BatchSpec)
-    optimizer: OptimizerSpec = Field(default_factory=OptimizerSpec)
-    parallelism: ParallelismSpec = Field(default_factory=ParallelismSpec)
-    output: OutputRequest | None = None
+    name: str | None = Field(default=None, description="Name for the job. Generated when omitted.")
+    model: str = Field(description="Model to fine-tune, as 'name' or 'workspace/name'.")
+    dataset: DatasetSpec = Field(description="Training and validation data.")
+    training: TrainingSpec = Field(description="What kind of fine-tuning to run and how the model is adapted.")
+    schedule: ScheduleSpec = Field(
+        default_factory=ScheduleSpec,
+        description="How long training runs, and how often it validates and reports progress.",
+    )
+    batch: BatchSpec = Field(default_factory=BatchSpec, description="Batch sizes and sequence packing.")
+    optimizer: OptimizerSpec = Field(
+        default_factory=OptimizerSpec, description="Optimizer choice and learning-rate schedule."
+    )
+    parallelism: ParallelismSpec = Field(
+        default_factory=ParallelismSpec, description="How the job is spread across nodes and GPUs."
+    )
+    output: OutputRequest | None = Field(
+        default=None, description="Naming for the model this job produces. Derived from the inputs when omitted."
+    )
     integrations: IntegrationsSpec | None = None
 
     @model_validator(mode="before")

@@ -41,7 +41,11 @@ __all__ = [
 class OutputRequest(RlSchema):
     """Submitter-facing output preferences. ``name`` is auto-derived if omitted."""
 
-    name: str | None = Field(default=None, max_length=255)
+    name: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Name for the model this job produces. Derived from the inputs when omitted.",
+    )
 
 
 class RlJobInput(RlSchema):
@@ -51,7 +55,7 @@ class RlJobInput(RlSchema):
     # ``model`` field.
     model_config = ConfigDict(protected_namespaces=())
 
-    name: str | None = None
+    name: str | None = Field(default=None, description="Name for the job. Generated when omitted.")
     model: str = Field(description="Model entity reference ('name' or 'workspace/name').")
     dataset: str = Field(
         description=(

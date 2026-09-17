@@ -1184,15 +1184,20 @@ components:
           type: integer
           exclusiveMinimum: 0.0
           title: Global Batch Size
+          description: Examples per optimizer step, summed across all GPUs.
           default: 8
         micro_batch_size:
           type: integer
           exclusiveMinimum: 0.0
           title: Micro Batch Size
+          description: Examples each GPU processes at once. Lower this first when
+            training runs out of memory.
           default: 1
         sequence_packing:
           type: boolean
           title: Sequence Packing
+          description: Pack several short examples into one sequence to cut padding
+            waste.
           default: false
         sequence_packing_max_samples:
           type: integer
@@ -1212,9 +1217,14 @@ components:
           description: Training fileset as 'name' or 'workspace/name'.
         validation:
           title: Validation
+          description: Validation fileset as 'name' or 'workspace/name'. When unset,
+            schedule.validation_split holds part of the training data out instead.
           type: string
         prompt_template:
           title: Prompt Template
+          description: Row template for datasets whose columns are neither 'messages'
+            nor 'prompt'/'completion', e.g. '{input} {output}'. Takes exactly two
+            placeholders, each naming a column.
           type: string
       additionalProperties: false
       type: object
@@ -1236,6 +1246,7 @@ components:
           type: integer
           exclusiveMinimum: 0.0
           title: Opset
+          description: ONNX opset version the graph is exported against.
           default: 17
         precision:
           type: string
@@ -1284,24 +1295,42 @@ components:
       properties:
         name:
           title: Name
+          description: Name for the job. Generated when omitted.
           type: string
         model:
           type: string
           title: Model
+          description: Model to fine-tune, as 'name' or 'workspace/name'.
         dataset:
-          $ref: '#/components/schemas/AutomodelDatasetSpec'
+          allOf:
+          - $ref: '#/components/schemas/AutomodelDatasetSpec'
+          description: Training and validation data.
         training:
-          $ref: '#/components/schemas/AutomodelTrainingSpec'
+          allOf:
+          - $ref: '#/components/schemas/AutomodelTrainingSpec'
+          description: What kind of fine-tuning to run and how the model is adapted.
         schedule:
-          $ref: '#/components/schemas/AutomodelScheduleSpec'
+          allOf:
+          - $ref: '#/components/schemas/AutomodelScheduleSpec'
+          description: How long training runs, and how often it validates and reports
+            progress.
         batch:
-          $ref: '#/components/schemas/AutomodelBatchSpec'
+          allOf:
+          - $ref: '#/components/schemas/AutomodelBatchSpec'
+          description: Batch sizes and sequence packing.
         optimizer:
-          $ref: '#/components/schemas/AutomodelOptimizerSpec'
+          allOf:
+          - $ref: '#/components/schemas/AutomodelOptimizerSpec'
+          description: Optimizer choice and learning-rate schedule.
         parallelism:
-          $ref: '#/components/schemas/AutomodelParallelismSpec'
+          allOf:
+          - $ref: '#/components/schemas/AutomodelParallelismSpec'
+          description: How the job is spread across nodes and GPUs.
         output:
-          $ref: '#/components/schemas/AutomodelOutputRequest'
+          allOf:
+          - $ref: '#/components/schemas/AutomodelOutputRequest'
+          description: Naming for the model this job produces. Derived from the inputs
+            when omitted.
         integrations:
           $ref: '#/components/schemas/IntegrationsSpec'
       additionalProperties: false
@@ -1508,11 +1537,15 @@ components:
           type: integer
           exclusiveMinimum: 0.0
           title: Rank
+          description: Rank of the LoRA update matrices. Higher ranks add capacity
+            and trainable parameters.
           default: 16
         alpha:
           type: integer
           exclusiveMinimum: 0.0
           title: Alpha
+          description: LoRA scaling factor. The update is scaled by alpha divided
+            by rank.
           default: 32
         dropout:
           type: number
@@ -1524,9 +1557,14 @@ components:
         merge:
           type: boolean
           title: Merge
+          description: Merge the adapter into the base model after training, producing
+            a full-weight checkpoint rather than an adapter. Has the same effect as
+            finetuning_type 'lora_merged'.
           default: false
         target_modules:
           title: Target Modules
+          description: Module name patterns to apply LoRA to (e.g. ['*.q_proj', '*.v_proj']).
+            Applies to every '*proj' linear layer when unset.
           items:
             type: string
           type: array
@@ -1550,6 +1588,8 @@ components:
           type: number
           exclusiveMinimum: 0.0
           title: Learning Rate
+          description: Peak learning rate, reached at the end of warmup. Around 5e-5
+            suits full SFT and 1e-4 LoRA.
           default: 5.0e-06
         min_learning_rate:
           title: Min Learning Rate
@@ -1560,6 +1600,8 @@ components:
           type: number
           minimum: 0.0
           title: Weight Decay
+          description: Penalty on large weights. Higher regularizes more; 0 disables
+            it.
           default: 0.01
         adam_beta1:
           type: number
@@ -1579,6 +1621,8 @@ components:
           type: integer
           minimum: 0.0
           title: Warmup Steps
+          description: Steps spent ramping the learning rate up from zero. Around
+            10% of total steps is a stable start.
           default: 0
         adam_eps:
           type: number
@@ -1614,8 +1658,11 @@ components:
         name:
           type: string
           title: Name
+          description: Name for the model this job produces. Generated from the inputs
+            when omitted.
         description:
           title: Description
+          description: Free-text description stored on the output model.
           type: string
       additionalProperties: false
       type: object
@@ -1652,29 +1699,40 @@ components:
           type: integer
           exclusiveMinimum: 0.0
           title: Num Nodes
+          description: Number of nodes to train on.
           default: 1
         num_gpus_per_node:
           type: integer
           exclusiveMinimum: 0.0
           title: Num Gpus Per Node
+          description: GPUs used on each node. Total GPUs is num_nodes multiplied
+            by this.
           default: 1
         tensor_parallel_size:
           type: integer
           exclusiveMinimum: 0.0
           title: Tensor Parallel Size
+          description: Splits each layer across this many GPUs.
           default: 1
         pipeline_parallel_size:
           type: integer
           exclusiveMinimum: 0.0
           title: Pipeline Parallel Size
+          description: Splits the layer stack into this many sequential stages across
+            GPUs.
           default: 1
         context_parallel_size:
           type: integer
           exclusiveMinimum: 0.0
           title: Context Parallel Size
+          description: Splits the sequence dimension across GPUs, for long-sequence
+            training.
           default: 1
         expert_parallel_size:
           title: Expert Parallel Size
+          description: Expert parallel size for MoE models. Must divide data_parallel_size
+            x context_parallel_size, and tensor_parallel_size must be 1 when this
+            is above 1.
           type: integer
           exclusiveMinimum: 0.0
         sequence_parallel:
@@ -1691,24 +1749,31 @@ components:
           type: integer
           minimum: 2.0
           title: Train N Passages
+          description: 'Passages per training example: one positive and the rest as
+            negatives.'
           default: 5
         eval_negative_size:
           title: Eval Negative Size
+          description: Negatives per query at evaluation. Follows the training count
+            when unset.
           type: integer
           minimum: 1.0
         do_gradient_checkpointing:
           type: boolean
           title: Do Gradient Checkpointing
+          description: Recompute activations during the backward pass to save memory.
           default: false
         query_max_length:
           type: integer
           minimum: 1.0
           title: Query Max Length
+          description: Maximum token length of the query side.
           default: 512
         passage_max_length:
           type: integer
           minimum: 1.0
           title: Passage Max Length
+          description: Maximum token length of the passage side.
           default: 512
         query_prefix:
           type: string
@@ -1736,13 +1801,18 @@ components:
           type: integer
           exclusiveMinimum: 0.0
           title: Epochs
+          description: Number of complete passes through the dataset.
           default: 1
         max_steps:
           title: Max Steps
+          description: Hard cap on optimizer steps. Training stops at whichever comes
+            first, this or the epoch count.
           type: integer
           exclusiveMinimum: 0.0
         val_check_interval:
           title: Val Check Interval
+          description: 'How often to run validation: a fraction of an epoch below
+            1, or a step count at 1 and above.'
           type: number
         validation_split:
           title: Validation Split
@@ -1753,6 +1823,8 @@ components:
           exclusiveMinimum: 0.0
         seed:
           title: Seed
+          description: Seed for shuffling and initialisation. A run is only reproducible
+            when this is set.
           type: integer
         progress_reporting:
           $ref: '#/components/schemas/ProgressReportingConfig'
@@ -1767,6 +1839,8 @@ components:
           - sft
           - distillation
           title: Training Type
+          description: '''distillation'' trains against a teacher model and requires
+            teacher_model; ''sft'' does not.'
           default: sft
         recipe:
           type: string
@@ -1786,13 +1860,22 @@ components:
           - all_weights
           - lora_merged
           title: Finetuning Type
+          description: '''lora'' trains an adapter and ships it as one, ''all_weights''
+            trains every weight, and ''lora_merged'' trains an adapter then folds
+            it into the base weights. Setting lora.merge on ''lora'' produces the
+            same full-weight result as ''lora_merged''.'
           default: lora
         lora:
-          $ref: '#/components/schemas/AutomodelLoRAParams'
+          allOf:
+          - $ref: '#/components/schemas/AutomodelLoRAParams'
+          description: LoRA settings. Defaulted automatically when finetuning_type
+            is a LoRA variant.
         max_seq_length:
           type: integer
           exclusiveMinimum: 0.0
           title: Max Seq Length
+          description: Maximum token sequence length for training; longer sequences
+            are truncated.
           default: 2048
         precision:
           title: Precision
@@ -1816,21 +1899,29 @@ components:
           default: sdpa
         execution_profile:
           title: Execution Profile
+          description: Named tuning profile to apply. The backend chooses one when
+            unset.
           type: string
           minLength: 1
         teacher_model:
           title: Teacher Model
+          description: Teacher model to distill from. Required when training_type
+            is 'distillation'.
           type: string
         distillation_ratio:
           type: number
           maximum: 1.0
           minimum: 0.0
           title: Distillation Ratio
+          description: Weight of the teacher distillation loss against the ground-truth
+            loss. 0 ignores the teacher.
           default: 0.5
         distillation_temperature:
           type: number
           exclusiveMinimum: 0.0
           title: Distillation Temperature
+          description: Softens the teacher distribution before the student matches
+            it. Higher values soften more.
           default: 1.0
         teacher_precision:
           type: string
@@ -1839,10 +1930,14 @@ components:
           - fp16
           - fp32
           title: Teacher Precision
+          description: Precision the teacher runs at. It is never trained, so this
+            only affects memory.
           default: bf16
         offload_teacher:
           type: boolean
           title: Offload Teacher
+          description: Keep the teacher on CPU between forward passes, trading speed
+            for GPU memory.
           default: false
         retrieval:
           allOf:
@@ -2415,6 +2510,7 @@ components:
           type: string
           const: dpo
           title: Type
+          description: Selects direct preference optimization.
         ref_policy_kl_penalty:
           type: number
           minimum: 0.0
@@ -2578,6 +2674,7 @@ components:
           type: string
           const: grpo
           title: Type
+          description: Selects group relative policy optimization.
         finetuning_type:
           type: string
           enum:
@@ -2894,6 +2991,7 @@ components:
       properties:
         name:
           title: Name
+          description: Name for the job. Generated when omitted.
           type: string
         model:
           type: string
@@ -3177,6 +3275,8 @@ components:
       properties:
         name:
           title: Name
+          description: Name for the model this job produces. Derived from the inputs
+            when omitted.
           type: string
           maxLength: 255
       additionalProperties: false
@@ -3372,11 +3472,15 @@ components:
           type: integer
           exclusiveMinimum: 0.0
           title: Per Device Train Batch Size
+          description: Examples per GPU per step. Lower this first when training runs
+            out of memory.
           default: 1
         gradient_accumulation_steps:
           type: integer
           exclusiveMinimum: 0.0
           title: Gradient Accumulation Steps
+          description: Steps accumulated before an optimizer update. Raises the effective
+            batch size without using more memory.
           default: 1
       additionalProperties: false
       type: object
@@ -3491,21 +3595,32 @@ components:
       properties:
         name:
           title: Name
+          description: Name for the job. Generated when omitted.
           type: string
         model:
-          $ref: '#/components/schemas/UnslothModelLoadSpec'
+          allOf:
+          - $ref: '#/components/schemas/UnslothModelLoadSpec'
+          description: Base model to fine-tune and how it is loaded.
         dataset:
-          $ref: '#/components/schemas/UnslothDatasetSpec'
+          allOf:
+          - $ref: '#/components/schemas/UnslothDatasetSpec'
+          description: Training data location and row shape.
         training:
           $ref: '#/components/schemas/UnslothTrainingSpec'
         schedule:
           $ref: '#/components/schemas/UnslothScheduleSpec'
         batch:
-          $ref: '#/components/schemas/UnslothBatchSpec'
+          allOf:
+          - $ref: '#/components/schemas/UnslothBatchSpec'
+          description: Batch size and gradient accumulation.
         optimizer:
-          $ref: '#/components/schemas/UnslothOptimizerSpec'
+          allOf:
+          - $ref: '#/components/schemas/UnslothOptimizerSpec'
+          description: Optimizer choice and its hyperparameters.
         hardware:
-          $ref: '#/components/schemas/UnslothHardwareSpec'
+          allOf:
+          - $ref: '#/components/schemas/UnslothHardwareSpec'
+          description: GPU selection and training precision.
         integrations:
           $ref: '#/components/schemas/IntegrationsSpec'
         output:
@@ -3752,12 +3867,15 @@ components:
           exclusiveMaximum: 1.0
           minimum: 0.0
           title: Dropout
+          description: Dropout applied to the adapter while training. 0 disables it.
           default: 0.0
         target_modules:
           items:
             type: string
           type: array
           title: Target Modules
+          description: Module names to attach adapters to. Defaults to full attention
+            plus MLP.
         bias:
           type: string
           enum:
@@ -3765,14 +3883,18 @@ components:
           - all
           - lora_only
           title: Bias
+          description: Which bias terms to train alongside the adapter.
           default: none
         use_rslora:
           type: boolean
           title: Use Rslora
+          description: 'Rank-stabilized LoRA: scales by alpha over the square root
+            of rank, which helps at higher ranks.'
           default: false
         random_state:
           type: integer
           title: Random State
+          description: Seed for adapter initialisation.
           default: 3407
         use_dora:
           type: boolean
@@ -3840,6 +3962,8 @@ components:
           type: integer
           exclusiveMinimum: 0.0
           title: Max Seq Length
+          description: Maximum token sequence length for training; longer sequences
+            are truncated.
           default: 2048
         load_in_4bit:
           type: boolean
@@ -3850,6 +3974,8 @@ components:
         load_in_8bit:
           type: boolean
           title: Load In 8Bit
+          description: bitsandbytes 8-bit. Mutex with load_in_4bit, and unavailable
+            for all-weights runs.
           default: false
         dtype:
           type: string
@@ -3859,10 +3985,14 @@ components:
           - float16
           - float32
           title: Dtype
+          description: Weight dtype at load time. 'auto' follows the checkpoint and
+            the GPU.
           default: auto
         trust_remote_code:
           type: boolean
           title: Trust Remote Code
+          description: Allow the checkpoint to execute its own modelling code. Required
+            by some community models.
           default: false
         device_map:
           anyOf:
@@ -3907,11 +4037,14 @@ components:
           type: number
           exclusiveMinimum: 0.0
           title: Learning Rate
+          description: Peak learning rate, reached at the end of warmup.
           default: 0.0002
         weight_decay:
           type: number
           minimum: 0.0
           title: Weight Decay
+          description: Penalty on large weights. Higher regularizes more; 0 disables
+            it.
           default: 0.0
         optim:
           type: string
@@ -3922,6 +4055,9 @@ components:
           - paged_adamw_8bit
           - sgd
           title: Optim
+          description: Optimizer implementation. The 8-bit variants hold much smaller
+            optimizer state, which fits larger adapters on the same GPU; fused variants
+            are faster on Hopper and newer.
           default: adamw_8bit
         adam_beta1:
           type: number
@@ -3968,9 +4104,12 @@ components:
       properties:
         name:
           title: Name
+          description: Name for the model this job produces. Derived from the inputs
+            when omitted.
           type: string
         description:
           title: Description
+          description: Free-text description stored on the output model.
           type: string
         save_method:
           type: string
@@ -3979,6 +4118,9 @@ components:
           - merged_16bit
           - merged_4bit
           title: Save Method
+          description: 'How the result is saved: ''lora'' ships the adapter alone,
+            while the merged variants fold it into the base weights at the given precision.
+            Merging requires a LoRA run.'
           default: lora
       additionalProperties: false
       type: object
@@ -4040,18 +4182,25 @@ components:
           type: integer
           exclusiveMinimum: 0.0
           title: Epochs
+          description: Number of complete passes through the dataset.
           default: 1
         max_steps:
           title: Max Steps
+          description: Hard cap on optimizer steps. Caps training when set, overriding
+            epochs.
           type: integer
           exclusiveMinimum: 0.0
         warmup_steps:
           type: integer
           minimum: 0.0
           title: Warmup Steps
+          description: Steps spent ramping the learning rate up from zero. Mutually
+            exclusive with warmup_ratio.
           default: 0
         warmup_ratio:
           title: Warmup Ratio
+          description: Warmup length as a fraction of total steps. Mutually exclusive
+            with warmup_steps.
           type: number
           maximum: 1.0
           minimum: 0.0
@@ -4064,18 +4213,26 @@ components:
           - constant_with_warmup
           - cosine_with_restarts
           title: Lr Scheduler Type
+          description: Shape of the learning-rate decay after warmup.
           default: linear
         logging_steps:
           type: integer
           exclusiveMinimum: 0.0
           title: Logging Steps
+          description: How often HuggingFace logs to stdout and to W&B or MLflow.
+            Separate from the Jobs service's own reporting cadence, which progress_reporting
+            controls.
           default: 1
         save_steps:
           title: Save Steps
+          description: Checkpoint every this many steps. Only the final model is saved
+            when unset.
           type: integer
           exclusiveMinimum: 0.0
         eval_steps:
           title: Eval Steps
+          description: Run validation every this many steps. Requires a validation
+            fileset on the dataset.
           type: integer
           exclusiveMinimum: 0.0
         progress_reporting:
@@ -4083,6 +4240,7 @@ components:
         seed:
           type: integer
           title: Seed
+          description: Seed for shuffling and initialisation.
           default: 3407
         lr_scheduler_kwargs:
           title: Lr Scheduler Kwargs
@@ -4121,6 +4279,7 @@ components:
           type: string
           const: sft
           title: Training Type
+          description: Supervised fine-tuning. The only algorithm this backend runs.
           default: sft
         finetuning_type:
           type: string
@@ -4128,6 +4287,9 @@ components:
           - lora
           - all_weights
           title: Finetuning Type
+          description: '''lora'' trains an adapter, ''all_weights'' trains every weight.
+            All-weights runs cannot be quantized, so 4-bit and 8-bit loading must
+            be off.'
           default: lora
         lora:
           allOf:
@@ -4141,6 +4303,8 @@ components:
           - 'true'
           - 'false'
           title: Use Gradient Checkpointing
+          description: Recompute activations during the backward pass to save memory.
+            'unsloth' uses its own implementation, which is the cheapest of the three.
           default: unsloth
       additionalProperties: false
       type: object

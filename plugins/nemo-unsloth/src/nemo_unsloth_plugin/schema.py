@@ -62,22 +62,32 @@ __all__ = [
 class OutputRequest(UnslothSchema):
     """Submitter-facing output preferences. ``name`` is auto-derived if omitted."""
 
-    name: str | None = None
-    description: str | None = None
-    save_method: Literal["lora", "merged_16bit", "merged_4bit"] = "lora"
+    name: str | None = Field(
+        default=None, description="Name for the model this job produces. Derived from the inputs when omitted."
+    )
+    description: str | None = Field(default=None, description="Free-text description stored on the output model.")
+    save_method: Literal["lora", "merged_16bit", "merged_4bit"] = Field(
+        default="lora",
+        description=(
+            "How the result is saved: 'lora' ships the adapter alone, while the merged variants fold it "
+            "into the base weights at the given precision. Merging requires a LoRA run."
+        ),
+    )
 
 
 class UnslothJobInput(UnslothSchema):
     """POST body / CLI JSON for ``nemo customization unsloth submit``."""
 
-    name: str | None = None
-    model: ModelLoadSpec
-    dataset: DatasetSpec
+    name: str | None = Field(default=None, description="Name for the job. Generated when omitted.")
+    model: ModelLoadSpec = Field(description="Base model to fine-tune and how it is loaded.")
+    dataset: DatasetSpec = Field(description="Training data location and row shape.")
     training: TrainingSpec = Field(default_factory=TrainingSpec)
     schedule: ScheduleSpec = Field(default_factory=ScheduleSpec)
-    batch: BatchSpec = Field(default_factory=BatchSpec)
-    optimizer: OptimizerSpec = Field(default_factory=OptimizerSpec)
-    hardware: HardwareSpec = Field(default_factory=HardwareSpec)
+    batch: BatchSpec = Field(default_factory=BatchSpec, description="Batch size and gradient accumulation.")
+    optimizer: OptimizerSpec = Field(
+        default_factory=OptimizerSpec, description="Optimizer choice and its hyperparameters."
+    )
+    hardware: HardwareSpec = Field(default_factory=HardwareSpec, description="GPU selection and training precision.")
     integrations: IntegrationsSpec | None = None
     output: OutputRequest | None = None
     deployment_config: str | DeploymentParams | None = Field(
