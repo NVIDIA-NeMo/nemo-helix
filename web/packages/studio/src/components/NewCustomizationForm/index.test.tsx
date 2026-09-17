@@ -64,8 +64,9 @@ const emptyValidation: CustomizationDatasetValidationResult = {
 
 describe('NewCustomizationForm', () => {
   beforeEach(() => {
-    mutateAutomodel.mockReset();
-    mutateUnsloth.mockReset();
+    mutateAutomodel.mockReset().mockResolvedValue(undefined);
+    mutateUnsloth.mockReset().mockResolvedValue(undefined);
+    mutateRl.mockReset().mockResolvedValue(undefined);
     mockUseParams({ [ROUTE_PARAMS.workspace]: 'default' });
     vi.mocked(useCustomizationDatasetValidation).mockReturnValue(emptyValidation);
     mockListModels.mockReset();
