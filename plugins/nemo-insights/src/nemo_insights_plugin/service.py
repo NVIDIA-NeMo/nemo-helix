@@ -69,7 +69,7 @@ class InsightsService(NemoService):
     """
 
     name: ClassVar[str] = "insights"
-    dependencies: ClassVar[list[str]] = ["entities", "jobs", "intake", "models"]
+    dependencies: ClassVar[list[str]] = ["entities", "jobs", "intake", "models", "agents"]
 
     def get_routers(self) -> list[RouterSpec]:
         config = get_nemo_config(InsightsConfig)
