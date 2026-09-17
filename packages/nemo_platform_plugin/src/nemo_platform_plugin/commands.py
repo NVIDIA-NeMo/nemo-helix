@@ -176,11 +176,12 @@ def _make_renderer_context(
     cli_kwargs: Mapping[str, Any],
     verb: Literal["run", "submit"],
     is_local: bool,
+    base_url: str | None = None,
 ) -> RendererContext:
     """Build the per-invocation :class:`RendererContext` passed to renderer methods."""
     from rich.console import Console
 
-    return RendererContext(console=Console(), cli_kwargs=cli_kwargs, verb=verb, is_local=is_local)
+    return RendererContext(console=Console(), cli_kwargs=cli_kwargs, verb=verb, is_local=is_local, base_url=base_url)
 
 
 async def _drive_async_renderer(
@@ -374,6 +375,7 @@ def _add_submit_command(
     scheduler: NemoJobScheduler,
     *,
     cli: NemoCLI | None = None,
+    renderer_cls: type[CLIRenderer] | None = None,
     command_name: str = "submit",
     rich_help_panel: str | None = None,
     as_callback: bool = False,
@@ -387,10 +389,14 @@ def _add_submit_command(
     the auto-generated set and remain reachable via ``--spec`` /
     ``--spec-file``.
 
-    When *cli* supplies a renderer via ``get_job_renderer(verb="submit")``
-    (and ``--output-format json`` is not set), the renderer's lifecycle
-    wraps the ``submit_remote`` call: ``on_start`` → ``on_frame(result)`` →
-    ``on_complete``.
+    A completion renderer can be supplied two ways (used only when
+    ``--output-format json`` is not set, so automation keeps the raw JSON
+    contract): via *cli*'s ``get_job_renderer(verb="submit")``, or directly via
+    *renderer_cls* for callers that register the submit verb without a full
+    :class:`~nemo_platform_plugin.cli.NemoCLI` (e.g. the customization
+    contributors). When supplied, the renderer's lifecycle wraps the
+    ``submit_remote`` call: ``on_start`` → ``on_frame(result)`` →
+    ``on_complete``. *renderer_cls* takes precedence over *cli*'s lookup.
     """
     schema = _job_input_schema(job_cls)
     unavailable: list[str] = []
@@ -423,13 +429,18 @@ def _add_submit_command(
             typer.echo(f"Error: invalid options — {exc}", err=True)
             raise typer.Exit(code=1) from exc
 
-        renderer_cls: type[CLIRenderer] | None = None
-        if cli is not None and not _output_format_is_json(typer_ctx):
-            renderer_cls = cli.get_job_renderer(job_cls, verb="submit")
+        renderer_resolved: type[CLIRenderer] | None = None
+        if not _output_format_is_json(typer_ctx):
+            if renderer_cls is not None:
+                renderer_resolved = renderer_cls
+            elif cli is not None:
+                renderer_resolved = cli.get_job_renderer(job_cls, verb="submit")
+
+        resolved_base_url = _resolve_submit_base_url(typer_ctx, base_url=base_url, cluster=cluster)
 
         def _do_submit() -> Any:
             submit_kwargs: dict[str, Any] = {
-                "base_url": _resolve_submit_base_url(typer_ctx, base_url=base_url, cluster=cluster),
+                "base_url": resolved_base_url,
                 "workspace": workspace,
                 "profile": profile,
                 "options": merged_options or None,
@@ -443,13 +454,14 @@ def _add_submit_command(
         renderer: CLIRenderer | None = None
         rctx: RendererContext | None = None
         try:
-            if renderer_cls is not None:
+            if renderer_resolved is not None:
                 rctx = _make_renderer_context(
                     cli_kwargs=original_kwargs,
                     verb="submit",
                     is_local=False,
+                    base_url=resolved_base_url,
                 )
-                renderer = _drive_single_value_renderer(_do_submit, renderer_cls, rctx=rctx)
+                renderer = _drive_single_value_renderer(_do_submit, renderer_resolved, rctx=rctx)
             else:
                 result = _do_submit()
                 typer.echo(json.dumps(result, indent=2))
