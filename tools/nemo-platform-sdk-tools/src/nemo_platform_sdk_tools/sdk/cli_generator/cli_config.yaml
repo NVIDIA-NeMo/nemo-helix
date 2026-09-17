@@ -226,11 +226,13 @@ config:
     list:
       columns:
       - name
+      - status
       - description
       - created_at
     list_workspace:
       columns:
       - name
+      - status
       - description
       - created_at
 - resource: [inference, models]
