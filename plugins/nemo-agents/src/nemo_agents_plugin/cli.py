@@ -41,6 +41,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import sys
 import tempfile
 import time
@@ -1523,13 +1524,11 @@ def _register_platform_commands(app: typer.Typer) -> None:
         else:
             typer.echo(f"No live deployments to undeploy for agent '{agent}'.")
 
-        # 5. Delete the agent entity (idempotent: skip if already gone).
-        #    Preserves the {agent}-ethos fileset. Existence is pre-checked, so a
-        #    failure inside the delete is a real error (permissions/500/conflict),
-        #    not "already absent" — let it surface rather than masking it and
-        #    marching on to a misleading recreate.
-        if existing or _agent_entity_exists(client, workspace=workspace, name=agent):
-            _delete_agent_entity(agent_name=agent, workspace=workspace, base_url=base_url)
+        # 5. Delete the agent entity (idempotent: a 404 means already gone).
+        #    Preserves the {agent}-ethos fileset. Only a not-found is swallowed;
+        #    any other failure (403/409/500) propagates rather than being masked
+        #    as "already absent" and marching on to a misleading recreate.
+        if _delete_agent_entity_if_present(client, agent_name=agent, workspace=workspace):
             typer.echo(f"Deleted agent entity '{agent}'.")
         else:
             typer.echo(f"Agent entity '{agent}' already absent; skipping delete.")
@@ -3052,23 +3051,6 @@ Excludes ``failed`` (already terminal) and ``deleting`` (already being removed).
 """
 
 
-def _agent_entity_exists(client: AgentsClient, *, workspace: str, name: str) -> bool:
-    """Return whether the named agent entity currently exists.
-
-    Used by ``redeploy`` to make the delete step idempotent: a 404 means the
-    entity is already gone, so the delete can be skipped rather than erroring.
-    """
-    try:
-        client.get_agent(workspace=workspace, name=name)
-    except PluginNotFoundError:
-        return False
-    except Exception:
-        # Any other lookup error: assume it exists and let the delete step
-        # surface the real error rather than silently skipping teardown.
-        return True
-    return True
-
-
 def _redeploy_recovery_hint(agent: str, agent_config: Path, *, stage: str, workspace: str) -> None:
     """Print an actionable recovery hint when redeploy fails after teardown.
 
@@ -3077,12 +3059,16 @@ def _redeploy_recovery_hint(agent: str, agent_config: Path, *, stage: str, works
     re-run — tell the user exactly how, preserving the non-default workspace so
     the printed command targets the same place the failed run did.
     """
-    workspace_flag = "" if workspace == _DEFAULT_WORKSPACE else f" --workspace {workspace}"
+    args = ["nemo", "agents", "redeploy", "--agent", agent, "--agent-config", str(agent_config)]
+    if workspace != _DEFAULT_WORKSPACE:
+        args += ["--workspace", workspace]
+    # shlex.join quotes any arg containing spaces/specials (e.g. a config path
+    # like '/tmp/my agent/agent.yaml'), so the printed command is copy-pasteable.
+    rerun = shlex.join(args)
     typer.echo(
         f"Error: redeploy failed during {stage} for agent {agent!r} after the old "
         f"agent was torn down; it may currently be undeployed. Your config at "
-        f"'{agent_config}' is unchanged — re-run to finish:\n"
-        f"  nemo agents redeploy --agent {agent} --agent-config {agent_config}{workspace_flag}",
+        f"'{agent_config}' is unchanged — re-run to finish:\n  {rerun}",
         err=True,
     )
 
@@ -3267,6 +3253,24 @@ def _delete_agent_entity(*, agent_name: str, workspace: str, base_url: str) -> N
         "DELETE agent API",
         lambda: client.delete_agent(workspace=workspace, name=agent_name).data(),
     )
+
+
+def _delete_agent_entity_if_present(client: AgentsClient, *, agent_name: str, workspace: str) -> bool:
+    """Delete the agent entity, treating an already-absent entity as success.
+
+    Idempotent by catching ONLY a not-found (404) — every other failure
+    (403/409/500/transport) propagates, so ``redeploy`` never mistakes a real
+    delete failure for "already gone" and marches on to a misleading recreate.
+    Catching inside the call (before ``_run_sdk`` collapses the status into a
+    generic ``typer.Exit``) also closes the check-then-delete race a separate
+    existence pre-check would leave open. Returns True if it deleted, False if
+    the entity was already absent.
+    """
+    try:
+        client.delete_agent(workspace=workspace, name=agent_name).data()
+    except PluginNotFoundError:
+        return False
+    return True
 
 
 def _load_yaml(path: Path) -> dict:

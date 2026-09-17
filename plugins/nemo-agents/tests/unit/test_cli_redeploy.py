@@ -269,19 +269,18 @@ def test_redeploy_skips_undeploy_when_no_live_deployments(tmp_path: Path) -> Non
 
 
 def test_redeploy_skips_delete_when_agent_absent(tmp_path: Path) -> None:
-    """Agent entity already gone (no deployments, 404 on lookup) -> no DELETE."""
+    """Agent entity already gone: the DELETE 404s, which is caught as idempotent
+    'already absent', and redeploy still proceeds to create+deploy."""
 
     class _AbsentRecorder(_Recorder):
         def __call__(self, req: httpx.Request) -> httpx.Response:
-            # Only the agent-entity lookup (``.../agents/{name}``) 404s; the
-            # deployments list is a normal empty-200 (an absent agent simply has
-            # no deployments). Match the entity route by its trailing
-            # ``/agents/{name}`` so the ``/apis/agents/v2/`` service prefix that
-            # every route carries is not caught.
+            # The agent-entity DELETE (``.../agents/{name}``) 404s (already gone).
+            # Match the entity route by its trailing ``/agents/{name}`` so the
+            # ``/apis/agents/v2/`` service prefix on every route is not caught.
             path = req.url.path
-            if req.method == "GET" and re.search(r"/agents/[^/]+$", path):
+            if req.method == "DELETE" and re.search(r"/agents/[^/]+$", path):
                 self.calls.append((req.method, path))
-                return httpx.Response(404)
+                return httpx.Response(404, json={"detail": "not found"})
             return super().__call__(req)
 
     rec = _AbsentRecorder(deployments=[])
@@ -303,8 +302,10 @@ def test_redeploy_skips_delete_when_agent_absent(tmp_path: Path) -> None:
             ],
         )
     assert result.exit_code == 0, result.output
-    # No deployment DELETE and no agent DELETE; proceeds straight to create+deploy.
-    assert rec.ordered_ops() == ["create", "deploy"]
+    # The DELETE was attempted (and 404'd -> treated as already-absent), then
+    # redeploy proceeded to create+deploy.
+    assert rec.ordered_ops() == ["delete", "create", "deploy"]
+    assert "already absent" in result.output
 
 
 # ---------------------------------------------------------------------------
