@@ -19,27 +19,61 @@ the verifier rewards through agent-eval — the same
 
 Unlike the quickstart, this runner is **not** zero-dependency — it shells out to Harbor and Docker:
 
-- **Python ≥ 3.12**
-- **Docker and docker daemon** installed and running
-- **Harbor**, installed from a NeMo Platform source checkout as shown below. Harbor is
-  imported lazily, so the base SDK remains usable on Python 3.11 without it; Harbor execution and
-  existing-result adaptation require Python 3.12 or newer.
+- **Python `>=3.12,<3.14`** — Harbor is imported lazily, so the base SDK remains usable on Python
+  3.11 without it; Harbor execution and existing-result adaptation require 3.12 or newer. The upper
+  bound is `nemo-platform`'s own; a source checkout resolves up to 3.14.
+- **A Docker-compatible container runtime** — Harbor invokes the `docker` executable on `PATH`
+  (`docker info` must succeed) and uses `docker compose`.
+- **Harbor** `>=0.20,<0.21` — see [Install Harbor](#install-harbor).
 
-The nemo-evaluator-sdk is not published as a standalone PyPI package. Use a NeMo Platform source checkout
-(see the repository's [setup guide](https://github.com/NVIDIA-NeMo/nemo-platform/blob/main/SETUP.md)
-for toolchain prerequisites). From the repository root, install the Harbor extra:
+</Warning>
+
+## Install Harbor
+
+`nemo-evaluator-sdk` is not published as a standalone package, so how you add Harbor depends on how
+you installed NeMo Platform.
+
+<Tabs>
+
+<Tab title="Installed package">
+
+Harbor ships with the `nemo-platform` `all` extra — `services`, `plugins`, and
+`nemo-experimentalist-plugin` include it as well:
+
+```bash
+uv pip install "nemo-platform[all]"
+```
+
+To add Harbor to an environment you already have, install it against the same constraint the SDK
+declares:
+
+```bash
+uv pip install "harbor>=0.20,<0.21"
+```
+
+Use `pip install` in place of `uv pip install` if you prefer; both work here.
+
+</Tab>
+
+<Tab title="Source checkout">
+
+`uv sync --package` resolves `nemo-evaluator-sdk` as a member of the repository's uv workspace, so
+it requires the workspace root `pyproject.toml` and does not work outside a checkout. Run it from
+the repository root (see the
+[setup guide](https://github.com/NVIDIA-NeMo/nemo-platform/blob/main/SETUP.md) for toolchain
+prerequisites):
 
 ```bash
 uv sync --frozen --package nemo-evaluator-sdk --extra harbor
 ```
 
-The runner raises a clear error pointing at this install step if `harbor` is missing.
+</Tab>
 
-Evaluator plugin submissions (`nemo evaluator agent-evaluate submit`) support the Harbor runner only
-through the host `subprocess` executor. Standalone SDK runs using `run_harbor_eval()` or
-`HarborAgentTaskRunner` invoke Harbor directly and do not use a Jobs execution profile.
+</Tabs>
 
-</Warning>
+`uv sync` has no `pip` equivalent — it resolves `nemo-evaluator-sdk` as a workspace member, which is
+why the source-checkout path needs the repository. The runner raises an error naming both of these
+install paths if `harbor` is missing.
 
 ## The dataset
 
@@ -58,6 +92,19 @@ my-suite/
 `id` and its human-readable `intent`, and `instruction.md` becomes `inputs["instruction"]` — the
 instruction the agent is prompted with. See
 [Harbor's task documentation](https://www.harborframework.com/docs/tasks) for the full task format.
+
+Those two files are the discovery contract, not a complete task — Harbor also needs an environment
+and a verifier to run the task and emit rewards. To author a new task, scaffold it with Harbor's own
+CLI rather than writing the files by hand:
+
+```bash
+harbor init my-org/my-task --task
+```
+
+This writes a populated `task.toml` alongside `instruction.md`, environment, verifier, and solution
+stubs, then prints the files to fill in. Add `--steps N` for a multi-step task, or use `-d` to
+initialize a dataset. See [Harbor's documentation](https://www.harborframework.com/docs/tasks) for
+the full task format and the rest of its CLI.
 
 <Note>
 
@@ -128,6 +175,14 @@ harbor_reward.reward: 1.0
 ```
 
 Swap `agent_name` (or `agent_import_path`) for your own agent to get a real score.
+
+<Note>
+
+Evaluator plugin submissions (`nemo evaluator agent-evaluate submit`) support the Harbor runner only
+through the host `subprocess` executor. Standalone SDK runs using `run_harbor_eval()` or
+`HarborAgentTaskRunner` invoke Harbor directly and do not use a Jobs execution profile.
+
+</Note>
 
 ## Choosing an agent
 

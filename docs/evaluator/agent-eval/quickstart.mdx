@@ -111,6 +111,8 @@ an `AgentEvalResult`. It writes nothing on its own — call `result.persist()` t
 disk. (`run()` is async, so it lives inside an `async` function — see the full script below.)
 
 ```python
+from pathlib import Path
+
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
 from nemo_evaluator_sdk.agent_eval.runtimes.callable_runtime import CallableAgentTaskRunner
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
@@ -118,7 +120,7 @@ from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
 result = await AgentEvaluator().run(
     tasks=make_tasks(),
     target=CallableAgentTaskRunner(my_agent),
-    config=AgentEvalRunConfig(work_dir="./agent-eval-run", parallelism=2),
+    config=AgentEvalRunConfig(work_dir=Path("./agent-eval-run"), parallelism=2),
 )
 result.persist()
 
@@ -157,6 +159,7 @@ programmatic follow-up, and the bundle (especially `report.html`) to inspect or 
 
 ```python
 import asyncio
+from pathlib import Path
 
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
 from nemo_evaluator_sdk.agent_eval.runtimes.callable_runtime import CallableAgentTaskRunner
@@ -208,7 +211,7 @@ async def main() -> None:
     result = await AgentEvaluator().run(
         tasks=make_tasks(),
         target=CallableAgentTaskRunner(my_agent),
-        config=AgentEvalRunConfig(work_dir="./agent-eval-run", parallelism=2),
+        config=AgentEvalRunConfig(work_dir=Path("./agent-eval-run"), parallelism=2),
     )
     result.persist()
     for aggregate in result.summary.scores.scores:
