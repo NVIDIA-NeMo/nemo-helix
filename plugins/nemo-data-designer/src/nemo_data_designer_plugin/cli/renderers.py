@@ -21,6 +21,7 @@ falls back to a plain dataframe table.
 
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -49,6 +50,9 @@ from nemo_platform_plugin.functions.frames import Done, Error, Heartbeat
 from pydantic import BaseModel, TypeAdapter
 
 _PREVIEW_FRAME_ADAPTER: TypeAdapter[PreviewFrame] = TypeAdapter(PreviewFrame)
+
+# Play nicely with the upstream library's padding
+_SUMMARY_INDENT = " " * 6
 
 
 def _coerce_preview_frame(frame: Any) -> BaseModel | None:
@@ -260,28 +264,140 @@ class PreviewRenderer(CLIRenderer):
 class CreateRenderer(CLIRenderer):
     """Renderer for ``nemo data-designer create``.
 
-    Wraps the synchronous job result with header / success messaging. The
-    full result dict is still echoed at the end so users can copy job IDs
-    or other identifiers.
+    Prints a compact submission summary — the job name, its record count,
+    and the follow-up commands needed to track it — instead of dumping the
+    whole job entity.
+
+    The job submit path is non-streaming. The framework's single-value
+    driver calls :meth:`on_frame` exactly once, with the decoded
+    ``PlatformJobResponse``, so there is no frame-kind ambiguity to resolve
+    here (unlike :class:`PreviewRenderer`, which reads an NDJSON stream of
+    mixed frames). The only guard is on the response *shape*: an unexpected
+    payload falls back to the raw dump so the job's identity is never lost.
     """
+
+    def __init__(self) -> None:
+        self._frame: Any = None
 
     def on_start(self, *, ctx: RendererContext) -> None:
         print_header("Data Designer Create")
 
     def on_frame(self, frame: Any, *, ctx: RendererContext) -> None:
         # Jobs are non-streaming; on_frame fires exactly once with the
-        # submission response. Print it directly so useful artifact
-        # paths stay visible.
-        console.print()
-        console.print(frame)
+        # submission response. Buffer it for the summary in on_complete.
+        self._frame = frame
 
     def on_complete(self, *, ctx: RendererContext) -> None:
         console.print()
         print_success("Create submitted.")
+        console.print()
+        job_name = _job_name(self._frame)
+        if job_name is None:
+            self._render_fallback()
+        else:
+            self._render_summary(job_name, ctx)
+
+    def _render_summary(self, job_name: str, ctx: RendererContext) -> None:
+        frame: dict = self._frame
+        rows: list[tuple[str, str]] = [("Job", job_name)]
+
+        num_records = _num_records(frame, ctx)
+        if num_records is not None:
+            rows.append(("Records", str(num_records)))
+
+        output_location = frame.get("output_location")
+        if isinstance(output_location, str) and output_location:
+            # Only set when the caller supplied a fileset; None when auto-created.
+            rows.append(("Output", output_location))
+
+        suffix = _workspace_suffix(frame, ctx)
+        rows.extend(
+            [
+                ("Track", f"nemo jobs get {job_name}{suffix}"),
+                ("Watch", f"nemo jobs watch {job_name}{suffix}"),
+                ("Results", f"nemo jobs results list {job_name}{suffix}"),
+            ]
+        )
+
+        width = max(len(label) for label, _ in rows) + 1
+        for label, value in rows:
+            # soft_wrap keeps the follow-up commands on one logical line;
+            # Rich's default wrapping would split them mid-flag and break
+            # the copy-paste these lines exist for.
+            console.print(f"{_SUMMARY_INDENT}[bold]{f'{label}:':<{width}}[/bold]  {value}", soft_wrap=True)
+
+        error_details = frame.get("error_details")
+        if error_details:
+            console.print()
+            console.print(f"{_SUMMARY_INDENT}[yellow]⚠ Error details: {error_details}[/yellow]", soft_wrap=True)
+
+    def _render_fallback(self) -> None:
+        """Dump the raw payload when the response shape isn't what we expect.
+
+        Better a wall of text than a job the user can no longer find.
+        """
+        console.print(self._frame)
+        console.print()
+        console.print(
+            f"{_SUMMARY_INDENT}[dim]Could not read a job name from the response; "
+            f"find the job with: nemo jobs list[/dim]"
+        )
 
     def on_error(self, error: BaseException, *, ctx: RendererContext) -> None:
         print_error(f"Create failed: {error}")
         _handle_error(error)
+
+
+def _job_name(frame: Any) -> str | None:
+    """Return the job name when *frame* looks like a job entity, else ``None``."""
+    if not isinstance(frame, dict):
+        return None
+    name = frame.get("name")
+    return name if isinstance(name, str) and name else None
+
+
+def _num_records(frame: dict, ctx: RendererContext) -> int | None:
+    """Pull the record count from the stored spec, falling back to the CLI spec.
+
+    The job entity stores a ``DataDesignerStepConfig``, so the count nests
+    under ``spec.job_config``. The wrapper in ``cli/inputs.py`` builds the
+    same count into the ``--spec`` JSON, which is the fallback when the
+    response omits or restructures the spec.
+    """
+    spec = frame.get("spec")
+    if isinstance(spec, dict):
+        job_config = spec.get("job_config")
+        if isinstance(job_config, dict):
+            value = job_config.get("num_records")
+            if isinstance(value, int):
+                return value
+
+    raw_spec = ctx.cli_kwargs.get("spec")
+    if isinstance(raw_spec, str) and raw_spec:
+        try:
+            parsed = json.loads(raw_spec)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(parsed, dict):
+            value = parsed.get("num_records")
+            if isinstance(value, int):
+                return value
+    return None
+
+
+def _workspace_suffix(frame: dict, ctx: RendererContext) -> str:
+    """Return ``" --workspace <ws>"`` for non-default workspaces, else ``""``.
+
+    Without it the printed commands are silently wrong for anyone who
+    passed ``-w``/``--workspace`` to ``create``.
+    """
+    workspace = frame.get("workspace")
+    if not isinstance(workspace, str) or not workspace:
+        candidate = ctx.cli_kwargs.get("workspace")
+        workspace = candidate if isinstance(candidate, str) else None
+    if not workspace or workspace == "default":
+        return ""
+    return f" --workspace {workspace}"
 
 
 def _print_log(frame: LogFrame) -> None:
