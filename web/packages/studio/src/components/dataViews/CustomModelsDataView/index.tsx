@@ -35,11 +35,13 @@ import {
   FINETUNING_TYPE_FILTER_OPTIONS,
   HAS_ADAPTERS,
 } from '@studio/components/dataViews/CustomModelsDataView/constants';
+import { getDeployAction } from '@studio/components/dataViews/CustomModelsDataView/deployAction';
 import { DeploymentStatusBadge } from '@studio/components/dataViews/CustomModelsDataView/DeploymentStatusBadge';
 import { KindTag } from '@studio/components/dataViews/CustomModelsDataView/KindTag';
 import { BaseModelSearchFilterField } from '@studio/components/FilterFields';
 import type { ModelPanelTab } from '@studio/components/sidePanels/ModelPanels/ModelPanel';
 import { INTAKE_ENABLED } from '@studio/constants/environment';
+import { useModelDeploymentStatuses } from '@studio/hooks/useModelDeploymentStatuses';
 import { getIntakeTracesRoute, getNewCustomizationJobRoute } from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
 import { Trash } from 'lucide-react';
@@ -199,6 +201,25 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
     return map;
   }, [modelsResponse?.data]);
 
+  /**
+   * Resolved once for the whole table: the row-actions menu is a plain callback
+   * and may not call hooks, so the badge and the Deploy action have to read the
+   * same precomputed answer rather than resolving separately.
+   */
+  const statusTargets = useMemo(
+    () =>
+      tableData.flatMap((row) => [
+        { key: row.id, model: row as ModelEntity },
+        ...(row.subRows ?? []).map((subRow) => ({
+          key: subRow.id,
+          model: subRow._parentModel as ModelEntity,
+          adapter: adapterMap.get(subRow._parentModel?.id ?? '')?.get(subRow.name),
+        })),
+      ]),
+    [tableData, adapterMap]
+  );
+  const deploymentStatuses = useModelDeploymentStatuses(statusTargets);
+
   const resetFilters = useCallback(() => {
     dataViewState.resetFilters();
   }, [dataViewState]);
@@ -290,12 +311,8 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
           size: 150,
           cell: ({ row }) => (
             <DeploymentStatusBadge
-              model={row.original._parentModel ?? row.original}
-              adapter={
-                row.original._parentModel
-                  ? adapterMap.get(row.original._parentModel.id)?.get(row.original.name)
-                  : undefined
-              }
+              state={deploymentStatuses.get(row.original.id)}
+              isAdapter={Boolean(row.original._parentModel)}
             />
           ),
         }),
@@ -326,6 +343,15 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
           rowActions: (row: ModelTableRow): DropdownEntry[] => {
             const isAdapter = Boolean(row._parentModel);
             const parentModel = row._parentModel;
+            // Adapter rows deploy their parent: an adapter is loaded by whatever serves
+            // its base model, and has no deployment of its own to create.
+            const deployAction = getDeployAction(
+              deploymentStatuses.get(row.id),
+              parentModel ?? row
+            );
+            const deployEntries: DropdownEntry[] = deployAction
+              ? [{ children: deployAction.label, onSelect: () => navigate(deployAction.href) }]
+              : [];
 
             if (isAdapter && parentModel) {
               return [
@@ -336,6 +362,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
                     onRowClick?.(parentModel, 'model-details', adapter);
                   },
                 },
+                ...deployEntries,
                 { kind: 'divider' as const },
                 {
                   children: 'Delete Adapter',
@@ -359,6 +386,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
                 children: 'Chat Playground',
                 onSelect: () => onRowClick?.(row, 'chat-playground'),
               },
+              ...deployEntries,
               ...(INTAKE_ENABLED
                 ? [
                     {
@@ -379,7 +407,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
           },
         }),
       ],
-      [adapterMap, handleKindClick, navigate, onRowClick, workspace]
+      [adapterMap, deploymentStatuses, handleKindClick, navigate, onRowClick, workspace]
     );
 
   const hasActiveFilters =
