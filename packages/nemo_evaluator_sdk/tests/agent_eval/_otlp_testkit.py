@@ -53,7 +53,7 @@ def span_names(path: Path) -> list[str]:
 
 
 def write_answer_trace(evidence_dir: Path, answer: str) -> Path:
-    """An OTLP trace at the path both Fabric runtimes capture to, with one agent span carrying ``answer``."""
+    """An OTLP trace at the path the Fabric runtime captures to, with one agent span carrying ``answer``."""
     span = Span(
         name="agent",
         trace_id=bytes(range(16)),

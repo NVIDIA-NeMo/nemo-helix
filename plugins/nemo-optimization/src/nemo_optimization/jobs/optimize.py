@@ -273,8 +273,7 @@ def _bundle_workdir(bundle_root: Path | None) -> Iterator[None]:
     """Run the study with *bundle_root* as the working directory (no-op when ``None``).
 
     Relative paths in the optimize config are documented as fileset-root-relative, and they are
-    consumed in many places — the dataset loader, Fabric's ``base_dir``, ``run_hook.path``,
-    author-supplied MCP ``config_paths``.  Rewriting each key would mean chasing every schema that
+    consumed in many places — the dataset loader, Fabric's ``base_dir``, MCP config files.  Rewriting each key would mean chasing every schema that
     can hold a path; moving the process instead makes them all resolve correctly at once.  The task
     subprocess runs exactly one job, so the process-global chdir is contained.
     """

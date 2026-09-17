@@ -82,6 +82,9 @@ navigation:
               - page: Evaluate a Harbor Task Suite
                 slug: harbor-runner
                 path: ../../evaluator/agent-eval/harbor-runner.mdx
+              - page: Run a NeMo Fabric Agent inside Harbor
+                slug: harbor-fabric-agent
+                path: ../../evaluator/agent-eval/harbor-fabric-agent.mdx
               - page: Evaluate a NeMo Gym Environment
                 slug: gym-runner
                 path: ../../evaluator/agent-eval/gym-runner.mdx

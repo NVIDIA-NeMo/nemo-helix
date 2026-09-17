@@ -67,8 +67,8 @@ harbor = [
 nemo-platform = [
   "nemo-platform-sdk",
 ]
-# NeMo Fabric HARNESS ADAPTERS for the agent-eval runtimes (FabricAgentRuntime /
-# FabricContainerRuntime). The Fabric SDK itself is a base dependency above; this extra adds the
+# NeMo Fabric HARNESS ADAPTERS for the agent-eval runtime (FabricAgentRuntime, host or
+# sandbox mode). The Fabric SDK itself is a base dependency above; this extra adds the
 # adapters needed to resolve and run a harness.
 #
 # WHY THE ADAPTERS ARE SPLIT OUT: they are the entire weight. Measured against the base SDK,
@@ -95,9 +95,6 @@ fabric = [
   "nemo-fabric[claude,codex]>=0.3.0,<0.4.0",
   "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0; python_version < '3.14'",
 ]
-
-[project.entry-points."nemo.fabric.task_hooks"]
-mcp_run_binding = "nemo_evaluator_sdk.agent_eval.runtimes.fabric.hooks_mcp_binding:McpRunBindingHook"
 
 [build-system]
 requires = ["hatchling"]

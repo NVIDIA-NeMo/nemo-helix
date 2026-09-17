@@ -3,7 +3,7 @@
 
 """Tests for recovering a Fabric trial's answer from its trace evidence.
 
-Both Fabric runtimes fall back to this when the harness ``RunResult`` carries no output payload.
+The Fabric runtime falls back to this when the harness ``RunResult`` carries no output payload.
 """
 
 from __future__ import annotations

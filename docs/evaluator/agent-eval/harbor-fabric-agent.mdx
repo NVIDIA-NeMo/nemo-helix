@@ -1,0 +1,167 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Run a NeMo Fabric Agent inside Harbor"
+description: "Evaluate a NeMo Fabric harness — here LangChain deepagents on a Nemotron model — inside Harbor's Docker sandbox, with the model API key delivered through env_secrets rather than the agent config."
+---
+
+The [Harbor runner](/documentation/evaluate-models/agent-eval/harbor-runner) runs any importable Harbor
+agent, and [NeMo Fabric](https://github.com/NVIDIA/NeMo-Fabric) ships one. Combining them gives you a
+Fabric harness inside Harbor's per-trial Docker sandbox, scored by the task's verifier, without leaving
+agent-eval. This page runs the LangChain **deepagents** harness on a **Nemotron** model from
+[build.nvidia.com](https://build.nvidia.com).
+
+Compared with the [Fabric runner](/documentation/evaluate-models/agent-eval/fabric-runner), which runs
+the harness on the host and scores with SDK metrics, this path trades the containerless loop for
+Harbor's isolation, retries, and verifier rewards. Both stay supported; pick by dataset shape.
+
+<Warning>
+
+Prerequisites are the Harbor runner's (Python ≥ 3.12, Docker, the `harbor` extra) plus:
+
+- **`NVIDIA_API_KEY`** for build.nvidia.com, exported in the process that runs the evaluation.
+- A task image with **CPython and bash**. The Fabric agent installs Fabric and the harness into the
+  task container at setup time with `python3 -m venv` and pip, so an Alpine-only image will not do. The
+  repo ships
+  [`fabric_hello_world_dataset`](https://github.com/NVIDIA-NeMo/nemo-platform/tree/main/packages/nemo_evaluator_sdk/examples/harbor/fabric_agent/fabric_hello_world_dataset)
+  on `python:3.12-slim` for exactly this.
+
+Nothing Fabric-related needs to be installed on the host: the agent class below is part of the SDK,
+and the harness is installed inside the container.
+
+</Warning>
+
+## The agent
+
+`nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent` is a thin subclass of
+`nemo_fabric.integrations.harbor:FabricAgent`, Fabric's custom Harbor agent. It accepts every `FabricAgent` constructor
+argument through `agent_kwargs`, and resolves what a non-OpenAI model provider needs from the
+`provider/model` slug in `agent_model_name`:
+
+| `agent_model_name` | provider | model sent to the endpoint | credential variable | endpoint |
+|---|---|---|---|---|
+| `nvidia/nemotron-3-super-120b-a12b` | `nvidia` | `nvidia/nemotron-3-super-120b-a12b` | `NVIDIA_API_KEY` | `https://integrate.api.nvidia.com/v1` |
+| `openai/gpt-5.4` | `openai` | `gpt-5.4` | `OPENAI_API_KEY` | OpenAI default |
+| anything else | as given | as given | `fabric_model_api_key_env` (required) | `fabric_model_base_url` |
+
+Override the defaults with `fabric_model_api_key_env` and `fabric_model_base_url` in `agent_kwargs`,
+for example to point at a self-hosted NIM.
+
+## Run it from the SDK
+
+```python
+import asyncio
+from pathlib import Path
+
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, run_harbor_eval
+
+async def main() -> None:
+    config = HarborRuntimeConfig(
+        jobs_dir=Path("./harbor-jobs"),
+        agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent",
+        agent_kwargs={
+            "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
+            "fabric_package": "nemo-fabric[deepagents]==0.3.0b1",
+            "fabric_workspace": "/app",  # the task image's working directory
+        },
+        agent_model_name="nvidia/nemotron-3.5-lightning-30b-a3b",
+        # Forwarded to the agent as a `${NVIDIA_API_KEY}` template; Harbor resolves it from this
+        # process's environment and never writes the value into the job directory.
+        agent_env_from_host=["NVIDIA_API_KEY"],
+        # Installing Fabric and the harness in the container takes a few minutes the first time.
+        agent_setup_timeout_multiplier=8.0,
+        agent_timeout_multiplier=5.0,
+    )
+    result = await run_harbor_eval(
+        config, "packages/nemo_evaluator_sdk/examples/harbor/fabric_agent/fabric_hello_world_dataset"
+    )
+    for aggregate in result.summary.scores.scores:
+        print(f"{aggregate.name}: {aggregate.mean}")
+
+asyncio.run(main())
+```
+
+The same thing is packaged as an example:
+
+```bash
+export NVIDIA_API_KEY=...
+uv run python -m packages.nemo_evaluator_sdk.examples.harbor.fabric_agent.run_fabric_deepagents_example
+```
+
+What happens per trial: Harbor builds and starts the task container, `NemoFabricAgent` creates a venv
+inside it and installs `nemo-fabric[deepagents]`, uploads a typed Fabric run spec, and runs the harness
+against the task's `instruction.md`. The deepagents harness works in the Fabric workspace through its
+filesystem tools, so it writes `/app/hello.txt` and Harbor's verifier awards `reward: 1.0`.
+
+`agent_kwargs` is persisted verbatim by Harbor in the job directory's `config.json`, which is why the
+key travels through `agent_env_from_host` instead. Inspect the persisted agent entry after a run:
+
+```json
+{
+  "import_path": "nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent",
+  "model_name": "nvidia/nemotron-3.5-lightning-30b-a3b",
+  "kwargs": {
+    "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
+    "fabric_package": "nemo-fabric[deepagents]==0.3.0b1",
+    "fabric_workspace": "/app"
+  },
+  "env": {"NVIDIA_API_KEY": "${NVIDIA_API_KEY}"}
+}
+```
+
+## Submit it as a platform job
+
+On the platform the target is a `HarborRunnerTarget`, the `target` of an `AgentEvalInputSpec`. The
+credential becomes an `env_secrets` entry: a NeMo Platform secret reference the service resolves into
+the job's environment at compile time, which the job then forwards exactly as above.
+
+```json
+{
+  "target": {
+    "kind": "harbor",
+    "agent_import_path": "nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent",
+    "agent_model_name": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "agent_kwargs": {
+      "fabric_adapter_id": "nvidia.fabric.langchain.deepagents",
+      "fabric_package": "nemo-fabric[deepagents]==0.3.0b1",
+      "fabric_workspace": "/app"
+    },
+    "env_secrets": {
+      "NVIDIA_API_KEY": "my-workspace/nvidia-api-key"
+    }
+  }
+}
+```
+
+The value appears on neither the spec, the run bundle, nor `config.json`. See
+[Evaluate a Harbor Task Suite](/documentation/evaluate-models/agent-eval/harbor-runner) for the rest of
+the target's fields and the job dir's cache behaviour.
+
+## When to use this instead of a built-in Harbor agent
+
+Harbor ships its own agents, such as `codex`, which install the agent CLI in the task container and
+drive it with Harbor's wrapper; if you only want that agent's reward on a Harbor suite, use them
+directly (`agent_name`). Run the agent through Fabric when you want Fabric's surface: one typed agent
+config that also runs in the [Fabric runner](/documentation/evaluate-models/agent-eval/fabric-runner)
+outside Harbor, Fabric's tool policy, skills, and MCP wiring, and Relay ATIF telemetry for
+trajectory-aware metrics.
+
+## Choosing the harness and model
+
+- **Harness**: `fabric_adapter_id` selects it; `fabric_package` must install the matching extra
+  (`nemo-fabric[deepagents]`, `nemo-fabric[codex]`, ...). Harness-specific settings go in
+  `fabric_harness_settings`.
+- **Model**: any Nemotron id from build.nvidia.com works with the `nvidia/` provider. The example
+  uses `nvidia/nemotron-3.5-lightning-30b-a3b` for speed; larger models such as
+  `nvidia/nemotron-3-super-120b-a12b` run the same way.
+- **Telemetry**: leave `fabric_telemetry` at its default `none` with deepagents; that adapter does
+  not support Fabric's Relay observability configuration.
+
+## Next steps
+
+<Cards>
+  <Card title="Evaluate a Harbor Task Suite" href="/documentation/evaluate-models/agent-eval/harbor-runner" />
+  <Card title="Evaluate with a NeMo Fabric Harness" href="/documentation/evaluate-models/agent-eval/fabric-runner" />
+  <Card title="Targets and Runners" href="/documentation/evaluate-models/agent-eval/targets-and-runners" />
+</Cards>

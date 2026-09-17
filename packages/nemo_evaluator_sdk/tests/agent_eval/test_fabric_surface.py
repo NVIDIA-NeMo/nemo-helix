@@ -40,10 +40,10 @@ import pytest
 pytest.importorskip("nemo_fabric")
 
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric import _common
-from nemo_evaluator_sdk.agent_eval.runtimes.fabric import container_runtime as crt
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric import _sandbox_execution as crt
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric import runtime as fabric_runtime
-from nemo_evaluator_sdk.agent_eval.runtimes.fabric.container_runtime import FabricContainerRuntime
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.skills import SkillSet
 from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.providers.docker import DockerSandboxProvider
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 
@@ -241,9 +241,9 @@ def test_codex_also_routes_skills_natively_so_the_workspace_branch_is_a_fallback
 
 
 # --------------------------------------------------------------------------------------------------
-# FabricContainerRuntime. The host runtime composes a typed ``FabricConfig`` and so is checked by
-# Fabric's own validator on every call; the container runtime marshals a plain mapping across the
-# sandbox boundary, where nothing validates it. These bind that mapping, and the in-sandbox
+# Sandbox mode. The host mode composes a typed ``FabricConfig`` and so is checked by Fabric's own
+# validator on every call; the sandbox mode marshals a plain mapping across the sandbox boundary,
+# where nothing validates it. These bind that mapping, and the in-sandbox
 # entrypoint it names, back to the installed Fabric.
 # --------------------------------------------------------------------------------------------------
 
@@ -258,8 +258,19 @@ def _composed_container_config() -> Any:
     from nemo_fabric import FabricConfig  # ty: ignore[unresolved-import]
 
     # A real provider, never used: composing the config touches no sandbox.
-    runtime = FabricContainerRuntime(_CONTAINER_CONFIG, provider=DockerSandboxProvider(), image="unused")
-    return FabricConfig.from_mapping(runtime._composed_config())
+    execution = crt.SandboxExecution(
+        config=_CONTAINER_CONFIG,
+        provider=DockerSandboxProvider(),
+        image="unused",
+        env={},
+        model=None,
+        timeout_s=600,
+        capture_trajectory=True,
+        trajectory_extra=None,
+        runtime_name="fabric",
+        skills=SkillSet(()),
+    )
+    return FabricConfig.from_mapping(execution._composed_config())
 
 
 def test_container_composed_config_enables_relay_for_installed_fabric() -> None:
