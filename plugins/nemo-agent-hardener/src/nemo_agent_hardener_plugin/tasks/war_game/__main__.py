@@ -4,8 +4,8 @@
 """Task entrypoint for the war-game (``python -m nemo_agent_hardener_plugin.tasks.war_game``).
 
 The executor spawns this module with the ``NEMO_JOB_*`` env populated; it hands off to the framework's
-the module loads the step config, builds a ``JobContext``, and calls
-:meth:`AgentHardenerRunJob.run` with its concrete ``ctx``/``sdk`` signature.
+``run_task`` dispatcher, which loads the step config, builds a ``JobContext``, and DI-injects ``ctx``/``sdk``
+into :meth:`AgentHardenerRunJob.run`. Local responsibilities here are only SIGTERM handling and SDK construction.
 """
 
 from __future__ import annotations
@@ -16,10 +16,8 @@ import sys
 from types import FrameType
 
 from nemo_agent_hardener_plugin.jobs.run import AgentHardenerRunJob
-from nemo_platform_plugin.errors import LocalRunError
 from nemo_platform_plugin.sdk_provider import get_task_sdk
-from nemo_platform_plugin.tasks.dispatcher import build_ctx_from_env, exit_code_for, read_step_config
-from nemo_platform_plugin.tasks.logging_setup import configure_task_logging
+from nemo_platform_plugin.tasks.dispatcher import run_task
 
 logger = logging.getLogger(__name__)
 
@@ -30,24 +28,14 @@ def _shutdown_handler(signum: int, _frame: FrameType | None) -> None:
 
 
 def main() -> int:
-    """Build the on-behalf-of SDK and run the war-game job."""
-    configure_task_logging()
+    """Build the on-behalf-of SDK and dispatch to ``run_task``."""
     signal.signal(signal.SIGTERM, _shutdown_handler)
     try:
         sdk = get_task_sdk("agent-hardener")
-        ctx = build_ctx_from_env(sdk)
-        config = read_step_config()
-        job = AgentHardenerRunJob()
     except Exception:
-        logger.exception("Failed to prepare task for agent-hardener")
+        logger.exception("Failed to build task SDK for agent-hardener")
         return 2
-    try:
-        return exit_code_for(job.run(config, ctx=ctx, sdk=sdk))
-    except LocalRunError:
-        raise
-    except Exception:
-        logger.exception("AgentHardenerRunJob.run raised")
-        return 1
+    return run_task(AgentHardenerRunJob, sdk=sdk)
 
 
 if __name__ == "__main__":
