@@ -29,7 +29,7 @@ from nemo_platform_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nemo_platform_plugin.virtual_models.types import CreateVirtualModelRequest, VirtualModel
 from nmp.common.datetime_utils import ensure_utc
 from nmp.common.entities.constants import NAME_PATTERN
-from nmp.common.entities.utils import parse_entity_ref
+from nmp.common.entities.utils import ModelEntityId, parse_adapters_suffix, parse_entity_ref
 from nmp.core.models.app import (
     ModelWeightsType,
     get_model_weights_type,
@@ -201,13 +201,15 @@ def _is_valid_served_model_entity_id(model_entity_id: str) -> bool:
     workspace, remainder = model_entity_id.split("/", 1)
     if not _is_valid_model_entity_name(workspace):
         return False
+    # A LoRA composite's remainder is ``base&adapters/adapter_workspace/adapter_name``.
+    # parse_adapters_suffix owns that grammar split (shared with IGW validation);
+    # here we only NAME_PATTERN-check each recovered segment. A remainder that
+    # contains ``&adapters/`` but is malformed yields None and is rejected.
     if "&adapters/" in remainder:
-        base, _, adapter_part = remainder.partition("&adapters/")
-        if not base or not adapter_part or "/" not in adapter_part:
+        adapter_parts = parse_adapters_suffix(remainder)
+        if adapter_parts is None:
             return False
-        adapter_ws, _, adapter_name = adapter_part.partition("/")
-        if not adapter_ws or not adapter_name:
-            return False
+        base, adapter_ws, adapter_name = adapter_parts
         return all(_is_valid_model_entity_name(s) for s in (base, adapter_ws, adapter_name))
     return _is_valid_model_entity_name(remainder)
 
@@ -995,7 +997,17 @@ class ModelProviderReconciler:
                     )
                     continue
 
-                model_entity_id = f"{base_id}&adapters/{adapter_ws}/{adapter_name}"
+                # Build the LoRA composite id via the shared ModelEntityId formatter
+                # (single home for the {base}&adapters/{adapter_ws}/{adapter_name} grammar,
+                # shared with IGW validation/routing). base_id is the workspace-qualified
+                # base model id; parse it and attach the recovered adapter segments.
+                base_ref = ModelEntityId.parse(base_id)
+                model_entity_id = ModelEntityId(
+                    workspace=base_ref.workspace,
+                    base_name=base_ref.base_name,
+                    adapter_workspace=adapter_ws,
+                    adapter_name=adapter_name,
+                ).to_composite()
                 served.append(ServedModelMapping(model_entity_id=model_entity_id, served_model_name=mid))
                 continue
 
