@@ -219,7 +219,7 @@ ARG UV_SYNC_MODE=--frozen
 
 # The driver installs this from PyPI rather than from RL's lock, which resolves it for the actor
 # venvs only. Keep in lockstep with the pin in NeMo-RL's pyproject.toml.
-ARG NEMO_SANDBOXED_GYM_VERSION=0.1.0rc0
+ARG NEMO_SANDBOXED_GYM_VERSION=0.1.0
 
 # Warm the uv CACHE, one extra at a time (they conflict). This is where the heavy compiles happen
 # (mamba-ssm, causal-conv1d, deep_ep, deep_gemm, and Transformer-Engine via automodel); the wheels
