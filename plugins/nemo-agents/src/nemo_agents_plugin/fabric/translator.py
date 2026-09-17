@@ -38,10 +38,9 @@ HARNESS_ADAPTER_IDS = {
 # under `nvidia.fabric.` would make us a hard break away from an upstream
 # naming choice.
 #
-# AIRCORE-1169 Workstream C promotes this to an AgentsConfig setting so an
-# operator can sanction their own prefix for in-house adapters. It is a naming
-# convention, not a security boundary: the adapter lives inside an image the
-# caller already chose.
+# This could be turned into an AgentsConfig setting so an operator can sanction
+# their own prefix for in-house adapters. It is a naming convention, not a
+# security boundary: the adapter lives inside an image the caller already chose.
 FABRIC_ADAPTER_ID_PREFIXES = ("nvidia.fabric.", "nvidia.nemo-platform.")
 
 PLATFORM_RUNTIME_ENV_VARS = ("NEMO_BASE_URL", "NMP_BASE_URL", "NMP_WORKSPACE")
