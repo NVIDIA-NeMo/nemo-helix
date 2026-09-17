@@ -5,6 +5,7 @@
 
 from typing import Annotated, Any, Dict, Literal, Optional, Self, Union
 
+from nemo_platform_plugin.deployment import DeploymentParams
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nmp.automodel.entities.validators import validate_fileset_uri
 from nmp.automodel.entities.values import FinetuningType, OutputNameType, Precision
@@ -459,69 +460,6 @@ class DPOTraining(_TrainingBase):
 
 AnyTraining = Union[SFTTraining, DistillationTraining, DPOTraining]
 TrainingMethod = Annotated[AnyTraining, Discriminator("type")]
-
-
-# ============================================================
-# Deployment Config
-# ============================================================
-
-
-class ToolCallParams(BaseModel):
-    """Tool calling configuration for NIM deployments."""
-
-    tool_call_parser: Optional[str] = Field(
-        default=None,
-        description="Name of the tool call parser to use (e.g., 'openai', 'hermes', 'pythonic', 'llama3_json', 'mistral').",
-    )
-    tool_call_plugin: Optional[str] = Field(
-        default=None,
-        pattern=r"^[\w\-.]+/[\w\-.]+$",
-        description="Reference to a fileset containing the custom tool call plugin Python file. "
-        "Expected format: '{workspace}/{fileset_name}'.",
-    )
-    auto_tool_choice: Optional[bool] = Field(
-        default=None,
-        description="Whether to enable automatic tool choice.",
-    )
-
-
-class DeploymentParams(BaseModel):
-    """Inline deployment parameters for creating a new ModelDeploymentConfig."""
-
-    gpu: int = Field(
-        default=1,
-        description="Number of GPUs required for the deployment",
-    )
-
-    additional_envs: Optional[dict[str, str]] = Field(
-        default=None,
-        description="Additional environment variables for the deployment",
-    )
-
-    disk_size: Optional[str] = Field(
-        default=None,
-        description="Disk size for the deployment",
-    )
-
-    image_name: Optional[str] = Field(
-        default=None,
-        description="Container image name from NGC. If not specified, defaults to multi-llm",
-    )
-
-    image_tag: Optional[str] = Field(
-        default=None,
-        description="Container image tag from NGC",
-    )
-
-    lora_enabled: bool = Field(
-        default=True,
-        description="When automatically deploying a full SFT training, this parameter being set to true will allow subsequent LoRA adapters to be trained and deployed against it.",
-    )
-
-    tool_call_config: Optional[ToolCallParams] = Field(
-        default=None,
-        description="Tool calling configuration override for the NIM deployment.",
-    )
 
 
 # ============================================================

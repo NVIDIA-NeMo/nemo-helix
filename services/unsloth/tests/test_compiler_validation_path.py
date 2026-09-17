@@ -6,9 +6,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
+import httpx
 import pytest
+from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.models.types import ModelEntity
 from nmp.unsloth.app.constants import DEFAULT_DATASET_PATH, DEFAULT_VALIDATION_DATASET_PATH
 from nmp.unsloth.app.jobs.compiler import platform_job_config_compiler
@@ -21,6 +23,17 @@ from nmp.unsloth.schemas import (
     TrainingSpec,
     UnslothJobOutput,
 )
+
+
+def _async_platform() -> AsyncNeMoPlatform:
+    """A real async SDK over a mock transport.
+
+    The compiler adapts the SDK into the typed client bundle before calling
+    ``fetch_model_entity``, so a bare mock no longer stands in for it. These tests
+    patch ``fetch_model_entity`` itself, so no request is ever sent.
+    """
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, request=request, json={}))
+    return AsyncNeMoPlatform(base_url="http://test", http_client=httpx.AsyncClient(transport=transport))
 
 
 def _model_entity() -> ModelEntity:
@@ -64,7 +77,7 @@ async def test_training_step_gets_local_validation_path_for_same_fileset() -> No
         job = await platform_job_config_compiler(
             workspace="default",
             job_spec=_spec(validation_path="default/commonsense_qa"),
-            sdk=MagicMock(),
+            sdk=_async_platform(),
         )
     finally:
         compiler_mod.fetch_model_entity = original_fetch
@@ -86,7 +99,7 @@ async def test_training_step_gets_separate_validation_path_for_different_fileset
         job = await platform_job_config_compiler(
             workspace="default",
             job_spec=_spec(validation_path="default/commonsense_qa_val"),
-            sdk=MagicMock(),
+            sdk=_async_platform(),
         )
     finally:
         compiler_mod.fetch_model_entity = original_fetch
@@ -108,7 +121,7 @@ async def test_upload_step_stamps_output_metadata() -> None:
         job = await platform_job_config_compiler(
             workspace="default",
             job_spec=_spec(validation_path=None),
-            sdk=MagicMock(),
+            sdk=_async_platform(),
         )
     finally:
         compiler_mod.fetch_model_entity = original_fetch
@@ -127,7 +140,7 @@ async def test_compiler_applies_profile_to_task_steps() -> None:
         job = await platform_job_config_compiler(
             workspace="default",
             job_spec=_spec(validation_path=None),
-            sdk=MagicMock(),
+            sdk=_async_platform(),
             profile="custom-gpu",
         )
     finally:

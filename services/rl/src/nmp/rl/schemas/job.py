@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, Self, Union
 
+from nemo_platform_plugin.deployment import DEPLOYMENT_CONFIG_DESCRIPTION, DeploymentParams
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nmp.customization_common.schema import NamespacedModel
 from nmp.customization_common.schemas.values import OutputNameType
@@ -649,60 +650,6 @@ class OutputResponse(_OutputBase):
     fileset: str = Field(max_length=255)
 
 
-class ToolCallParams(RlSchema):
-    """Tool calling configuration for NIM deployments."""
-
-    tool_call_parser: str | None = Field(
-        default=None,
-        description=(
-            "Name of the tool call parser to use (e.g., 'openai', 'hermes', 'pythonic', 'llama3_json', 'mistral')."
-        ),
-    )
-    tool_call_plugin: str | None = Field(
-        default=None,
-        pattern=r"^[\w\-.]+/[\w\-.]+$",
-        description=(
-            "Reference to a fileset containing the custom tool call plugin Python file. "
-            "Expected format: '{workspace}/{fileset_name}'."
-        ),
-    )
-    auto_tool_choice: bool | None = Field(
-        default=None,
-        description="Whether to enable automatic tool choice.",
-    )
-
-
-class DeploymentParams(RlSchema):
-    """Inline deployment parameters for auto-deploying a trained model.
-
-    Used in :class:`RlJobInput.deployment_config` and passed through to the
-    model_entity task at compile time. When unset, no deployment is launched.
-    """
-
-    gpu: int = Field(default=1, gt=0, description="Number of GPUs required for the deployment.")
-    additional_envs: dict[str, str] | None = Field(
-        default=None,
-        description="Additional environment variables for the deployment.",
-    )
-    disk_size: str | None = Field(default=None, description="Disk size for the deployment.")
-    image_name: str | None = Field(
-        default=None,
-        description="Container image name from NGC. If not specified, defaults to multi-llm.",
-    )
-    image_tag: str | None = Field(default=None, description="Container image tag from NGC.")
-    lora_enabled: bool = Field(
-        default=True,
-        description=(
-            "When auto-deploying a full-weight training, setting this true allows subsequent "
-            "LoRA adapters to be deployed against it."
-        ),
-    )
-    tool_call_config: ToolCallParams | None = Field(
-        default=None,
-        description="Tool calling configuration override for the NIM deployment.",
-    )
-
-
 def trains_lora_adapter(training: TrainingMethod) -> bool:
     """True when ``training`` produces a LoRA adapter rather than a full-weight model.
 
@@ -710,14 +657,6 @@ def trains_lora_adapter(training: TrainingMethod) -> bool:
     so an unmerged adapter is the only possible LoRA output.
     """
     return isinstance(training, GRPOTraining) and training.finetuning_type == "lora"
-
-
-DEPLOYMENT_CONFIG_DESCRIPTION = (
-    "Deployment configuration for auto-deploying the model after training. "
-    "Pass a string to reference an existing ModelDeploymentConfig by name "
-    "('my-config' or 'workspace/my-config'). An object provides inline NIM "
-    "deployment parameters. Omit to skip deployment."
-)
 
 
 class RlJobOutput(RlSchema):

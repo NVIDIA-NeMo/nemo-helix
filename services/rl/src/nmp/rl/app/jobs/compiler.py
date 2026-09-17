@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 
 from nemo_platform_plugin.client.errors import NotFoundError
+from nemo_platform_plugin.deployment import LORA_ENABLED_REQUIRED_MESSAGE, DeploymentParams
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nemo_platform_plugin.jobs.api_factory import (
     ContainerSpec,
@@ -49,9 +50,6 @@ from nmp.customization_common.schemas.file_io import (
     FileIOTaskConfig,
     FileSetRef,
     UploadItem,
-)
-from nmp.customization_common.schemas.model_entity import (
-    DeploymentParameters as ModelEntityDeploymentParameters,
 )
 from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
 from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients, fetch_model_entity
@@ -89,7 +87,7 @@ from nmp.rl.images import (
     get_tasks_image,
     get_training_image,
 )
-from nmp.rl.schemas import DeploymentParams, DPOTraining, GRPOTraining, RlJobOutput
+from nmp.rl.schemas import DPOTraining, GRPOTraining, RlJobOutput
 
 logger = logging.getLogger(__name__)
 
@@ -174,14 +172,6 @@ def _build_model_entity_config(
         description = f"{method}-trained LoRA adapter from nmp-rl job ({job_spec.model})"
     else:
         description = f"{method}-trained model from nmp-rl job ({job_spec.model})"
-    # String refs pass through as-is; inline params are converted from the
-    # user-facing shape to the task-side shape via model_validate(model_dump()).
-    deployment_config: str | ModelEntityDeploymentParameters | None = None
-    if isinstance(job_spec.deployment_config, str):
-        deployment_config = job_spec.deployment_config
-    elif job_spec.deployment_config is not None:
-        deployment_config = ModelEntityDeploymentParameters.model_validate(job_spec.deployment_config.model_dump())
-
     return ModelEntityTaskConfig(
         name=job_spec.output.name,
         workspace=workspace,
@@ -191,7 +181,7 @@ def _build_model_entity_config(
         base_model=job_spec.model,
         peft=peft,
         trust_remote_code=trust_remote_code,
-        deployment_config=deployment_config,
+        deployment_config=job_spec.deployment_config,
     )
 
 
@@ -262,11 +252,7 @@ async def _validate_deployment_config(
         # RlJobInput rejects this at submit, but the compiler is entered with an
         # RlJobOutput, which carries no such validator -- re-assert it here.
         if job_spec.trains_lora_adapter and not dc.lora_enabled:
-            raise PlatformJobCompilationError(
-                "deployment_config.lora_enabled must be true (or omitted) when training a LoRA adapter. "
-                "Setting lora_enabled=false would deploy the base model without LoRA support, "
-                "making the trained adapter unservable."
-            )
+            raise PlatformJobCompilationError(LORA_ENABLED_REQUIRED_MESSAGE)
         tcc = dc.tool_call_config
         if tcc and tcc.tool_call_plugin:
             await _require_tool_call_plugin_permission(workspace)

@@ -23,18 +23,21 @@ from __future__ import annotations
 
 from typing import Literal, Self
 
+from nemo_platform_plugin.deployment import (
+    DeploymentParams,
+    ToolCallParams,
+    reject_lora_without_lora_enabled,
+)
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nmp.unsloth.schemas import (
     BatchSpec,
     DatasetSpec,
-    DeploymentParams,
     HardwareSpec,
     LoRAParams,
     ModelLoadSpec,
     OptimizerSpec,
     OutputResponse,
     ScheduleSpec,
-    ToolCallParams,
     TrainingSpec,
     UnslothJobOutput,
     UnslothSchema,
@@ -115,20 +118,17 @@ class UnslothJobInput(UnslothSchema):
                 raise ValueError(
                     f"output.save_method={self.output.save_method!r} is only valid for training.finetuning_type='lora'"
                 )
-        # LoRA adapters cannot be deployed against a base model with lora_enabled=false —
-        # the deployed base would refuse to serve the adapter. Surface this at submit time
-        # rather than failing after training completes.
-        is_lora_adapter = self.training.finetuning_type == "lora" and (
-            self.output is None or self.output.save_method == "lora"
+        reject_lora_without_lora_enabled(
+            self.deployment_config,
+            trains_lora_adapter=self.trains_standalone_lora_adapter,
         )
-        if (
-            is_lora_adapter
-            and isinstance(self.deployment_config, DeploymentParams)
-            and not self.deployment_config.lora_enabled
-        ):
-            raise ValueError(
-                "deployment_config.lora_enabled must be true (or omitted) when training a LoRA adapter. "
-                "Setting lora_enabled=false would deploy the base model without LoRA support, "
-                "making the trained adapter unservable."
-            )
         return self
+
+    @property
+    def trains_standalone_lora_adapter(self) -> bool:
+        """True when the job produces a LoRA adapter rather than a full-weight model.
+
+        A merged save method folds the adapter into the base weights, which yields a
+        standalone model; only the unmerged case needs a LoRA-enabled deployment.
+        """
+        return self.training.finetuning_type == "lora" and (self.output is None or self.output.save_method == "lora")
