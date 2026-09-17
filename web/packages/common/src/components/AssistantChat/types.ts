@@ -76,6 +76,11 @@ export interface AssistantChatProps {
    */
   tools?: ChatCompletionTool[];
   /**
+   * Extra HTTP headers sent with every completion request. Memoize it: a fresh
+   * object each render rebuilds the runtime's completion callback.
+   */
+  extraHeaders?: Record<string, string>;
+  /**
    * Display name used in the composer placeholder.
    */
   assistantName?: string;
