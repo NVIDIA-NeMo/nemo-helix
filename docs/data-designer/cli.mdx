@@ -20,7 +20,7 @@ def load_config_builder() -> dd.DataDesignerConfigBuilder:
     model_configs = [
         dd.ModelConfig(
             provider="default/nvidia-build",
-            model="nvidia/nemotron-3-nano-30b-a3b",
+            model="nvidia/nemotron-3.5-lightning-30b-a3b",
             alias="text",
         )
     ]
@@ -97,7 +97,7 @@ Nemotron retrieval Stage 0/1 use dedicated jobs, not `create`. See [Retrieval SD
 nemo data-designer retrieval generate \
   --corpus default/my-docs \
   --provider default/nvidia-build \
-  --chat-model nvidia/nemotron-3-nano-30b-a3b \
+  --chat-model nvidia/nemotron-3.5-lightning-30b-a3b \
   --embed-model nvidia/nemotron-3-embed-1b
 nemo data-designer retrieval-prepare --spec '{"sdg_input":"default/stage0-out"}'
 ```
