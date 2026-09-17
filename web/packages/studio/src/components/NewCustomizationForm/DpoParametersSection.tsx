@@ -86,7 +86,7 @@ export const DpoParametersSection = () => {
                     control,
                   }}
                   formFieldProps={{
-                    slotLabel: 'Average Log-Probs (Preference)',
+                    slotLabel: 'Avg Log-Probs (Pref)',
                     labelPosition: 'left',
                     slotInfo:
                       'Average log-probabilities across tokens when computing the preference loss instead of summing.',
@@ -96,7 +96,7 @@ export const DpoParametersSection = () => {
                 <ControlledSwitch
                   useControllerProps={{ name: 'rl.training.sft_average_log_probs', control }}
                   formFieldProps={{
-                    slotLabel: 'Average Log-Probs (SFT)',
+                    slotLabel: 'Avg Log-Probs (SFT)',
                     labelPosition: 'left',
                     slotInfo:
                       'Average log-probabilities across tokens when computing the SFT regularization loss.',

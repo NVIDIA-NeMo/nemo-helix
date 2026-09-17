@@ -160,7 +160,7 @@ export const GeneralParametersSection = () => {
                   <ControlledSwitch
                     useControllerProps={{ name: 'rl.training.activation_checkpointing', control }}
                     formFieldProps={{
-                      slotLabel: 'Activation Checkpointing',
+                      slotLabel: 'Activation Checkpoints',
                       labelPosition: 'left',
                       slotInfo:
                         'Recompute activations during the backward pass to reduce memory at the cost of compute.',

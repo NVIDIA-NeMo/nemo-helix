@@ -90,7 +90,7 @@ export const GrpoParametersSection = () => {
           <ControlledSwitch
             useControllerProps={{ name: 'grpo.overlong_filtering', control }}
             formFieldProps={{
-              slotLabel: 'Drop Truncated Rollouts',
+              slotLabel: 'Drop Cut-Off Rollouts',
               labelPosition: 'left',
               slotInfo:
                 'Zero the loss contribution of rollouts cut off by the generation limit, so the policy is not penalised for responses it never got to finish. Worth enabling when a low Max New Tokens truncates many rollouts. NeMo RL key: overlong_filtering.',
@@ -501,7 +501,7 @@ export const GrpoParametersSection = () => {
                   <ControlledSwitch
                     useControllerProps={{ name: 'rl.training.activation_checkpointing', control }}
                     formFieldProps={{
-                      slotLabel: 'Activation Checkpointing',
+                      slotLabel: 'Activation Checkpoints',
                       labelPosition: 'left',
                       slotInfo:
                         'Recompute activations during the backward pass to reduce memory at the cost of compute.',
