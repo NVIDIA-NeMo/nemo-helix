@@ -31,7 +31,7 @@ MODEL_ALIAS = "text"
 model_configs = [
     dd.ModelConfig(
         provider="default/nvidia-build",
-        model="nvidia/nemotron-3-nano-30b-a3b",  # Use the `served_model_name` from the provider
+        model="nvidia/nemotron-3.5-lightning-30b-a3b",  # Use the `served_model_name` from the provider
         alias=MODEL_ALIAS,
         inference_parameters=dd.ChatCompletionInferenceParams(
             temperature=1.0,
