@@ -279,6 +279,7 @@ def list_providers(
 
     default_columns = [
         Column("name", None),
+        Column("status", None),
         Column("description", None),
         Column("created_at", None),
     ]
