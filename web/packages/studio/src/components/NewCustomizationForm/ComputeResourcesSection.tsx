@@ -28,7 +28,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
     <Stack gap="density-lg">
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'automodel.parallelism.num_nodes', control }}
-        formFieldProps={{ slotLabel: 'Nodes' }}
+        formFieldProps={{ slotLabel: 'Nodes', slotInfo: 'Number of nodes to train on.' }}
         {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_num_nodes')}
         min={1}
         max={16}
@@ -37,7 +37,10 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
       />
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'automodel.parallelism.num_gpus_per_node', control }}
-        formFieldProps={{ slotLabel: 'GPUs per Node' }}
+        formFieldProps={{
+          slotLabel: 'GPUs per Node',
+          slotInfo: 'GPUs used on each node. Total GPUs is nodes multiplied by this.',
+        }}
         {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_num_gpus_per_node')}
         min={1}
         max={8}
@@ -109,7 +112,12 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
               />
               <ControlledSwitch
                 useControllerProps={{ name: 'automodel.parallelism.sequence_parallel', control }}
-                formFieldProps={{ slotLabel: 'Sequence Parallel', labelPosition: 'left' }}
+                formFieldProps={{
+                  slotLabel: 'Sequence Parallel',
+                  slotInfo:
+                    'Shards layer-norm and dropout activations along the sequence axis to save memory.',
+                  labelPosition: 'left',
+                }}
                 disabled={disabled}
               />
             </Stack>
@@ -126,7 +134,10 @@ const RlParallelism = ({ disabled }: { disabled: boolean }) => {
     <Stack gap="density-lg">
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'rl.training.parallelism.num_nodes', control }}
-        formFieldProps={{ slotLabel: 'Nodes' }}
+        formFieldProps={{
+          slotLabel: 'Nodes',
+          slotInfo: 'Number of nodes (>1 → multi-node Ray cluster).',
+        }}
         {...specSliderProps(DPO_SPEC_DEFAULTS, 'parallelism_num_nodes')}
         min={1}
         max={16}
@@ -135,7 +146,10 @@ const RlParallelism = ({ disabled }: { disabled: boolean }) => {
       />
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'rl.training.parallelism.num_gpus_per_node', control }}
-        formFieldProps={{ slotLabel: 'GPUs per Node' }}
+        formFieldProps={{
+          slotLabel: 'GPUs per Node',
+          slotInfo: 'GPUs used on each node. Total GPUs is nodes multiplied by this.',
+        }}
         {...specSliderProps(DPO_SPEC_DEFAULTS, 'parallelism_num_gpus_per_node')}
         min={1}
         max={8}
@@ -219,7 +233,11 @@ const UnslothHardware = ({ disabled }: { disabled: boolean }) => {
       />
       <ControlledJsonInput
         useControllerProps={{ name: 'unsloth.deployment_config', control }}
-        formFieldProps={{ slotLabel: 'Deployment Config (name or JSON)' }}
+        formFieldProps={{
+          slotLabel: 'Deployment Config (name or JSON)',
+          slotInfo:
+            "Deployment configuration for auto-deploying the model after training. Pass a string to reference an existing ModelDeploymentConfig by name ('my-config' or 'workspace/my-config'). An object provides inline NIM deployment parameters. Omit to skip deployment.",
+        }}
         placeholder='"my-config"  or  { "gpu": 1 }'
         disabled={disabled}
       />

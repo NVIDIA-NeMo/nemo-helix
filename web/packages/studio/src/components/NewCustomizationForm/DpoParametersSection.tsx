@@ -70,7 +70,10 @@ export const DpoParametersSection = () => {
               <Stack gap="density-md" className="pt-density-md">
                 <ControlledSliderWithTextInput
                   useControllerProps={{ name: 'rl.training.max_grad_norm', control }}
-                  formFieldProps={{ slotLabel: 'Max Gradient Norm' }}
+                  formFieldProps={{
+                    slotLabel: 'Max Gradient Norm',
+                    slotInfo: 'Gradient clipping threshold.',
+                  }}
                   {...specSliderProps(DPO_SPEC_DEFAULTS, 'max_grad_norm')}
                   min={0}
                   max={10}

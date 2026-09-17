@@ -79,7 +79,11 @@ export const LoraParametersSection = () => {
           </FormField>
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'automodel.training.lora.alpha', control }}
-            formFieldProps={{ slotLabel: 'Alpha' }}
+            formFieldProps={{
+              slotLabel: 'Alpha',
+              slotInfo:
+                'LoRA scaling factor. The effective scale is alpha divided by rank, so it is commonly set to 1-2x the rank.',
+            }}
             {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'training_lora_alpha')}
             min={1}
             max={512}
@@ -88,7 +92,10 @@ export const LoraParametersSection = () => {
           />
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'automodel.training.lora.dropout', control }}
-            formFieldProps={{ slotLabel: 'Dropout' }}
+            formFieldProps={{
+              slotLabel: 'Dropout',
+              slotInfo: 'Dropout applied to the adapter while training. 0 disables it.',
+            }}
             {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'training_lora_dropout')}
             min={0}
             max={1}
@@ -97,7 +104,12 @@ export const LoraParametersSection = () => {
           />
           <ControlledSwitch
             useControllerProps={{ name: 'automodel.training.lora.merge', control }}
-            formFieldProps={{ slotLabel: 'Merge weights after training', labelPosition: 'left' }}
+            formFieldProps={{
+              slotLabel: 'Merge weights after training',
+              slotInfo:
+                'Merges the adapter into the base model, producing a full-weight checkpoint instead of an adapter.',
+              labelPosition: 'left',
+            }}
             disabled={disabled}
           />
           <AccordionRoot multiple>
@@ -109,7 +121,11 @@ export const LoraParametersSection = () => {
                 <Stack gap="density-md" className="pt-density-md">
                   <ControlledSwitch
                     useControllerProps={{ name: 'automodel.training.lora.use_triton', control }}
-                    formFieldProps={{ slotLabel: 'Use Triton Kernels', labelPosition: 'left' }}
+                    formFieldProps={{
+                      slotLabel: 'Use Triton Kernels',
+                      slotInfo: 'Use the optimized Triton LoRA kernel.',
+                      labelPosition: 'left',
+                    }}
                     disabled={disabled}
                   />
                   <ControlledStringListInput
@@ -120,9 +136,9 @@ export const LoraParametersSection = () => {
                     formFieldProps={{
                       slotLabel: 'Target Modules',
                       slotInfo:
-                        'Modules to attach adapters to. Left unset, the backend picks them from the model architecture.',
+                        'Name patterns to attach adapters to. Left unset, the backend applies LoRA to all *proj linear layers.',
                     }}
-                    placeholder="q_proj, v_proj"
+                    placeholder="*.q_proj, *.v_proj"
                     disabled={disabled}
                   />
                   <ControlledStringListInput
@@ -130,7 +146,10 @@ export const LoraParametersSection = () => {
                       name: 'automodel.training.lora.exclude_modules',
                       control,
                     }}
-                    formFieldProps={{ slotLabel: 'Exclude Modules' }}
+                    formFieldProps={{
+                      slotLabel: 'Exclude Modules',
+                      slotInfo: 'Name patterns to keep adapters off, applied after Target Modules.',
+                    }}
                     placeholder="*.out_proj"
                     disabled={disabled}
                   />
@@ -174,7 +193,11 @@ export const LoraParametersSection = () => {
         </FormField>
         <ControlledSliderWithTextInput
           useControllerProps={{ name: 'unsloth.training.lora.alpha', control }}
-          formFieldProps={{ slotLabel: 'Alpha' }}
+          formFieldProps={{
+            slotLabel: 'Alpha',
+            slotInfo:
+              'LoRA scaling factor. The effective scale is alpha divided by rank, so it is commonly set to 1-2x the rank.',
+          }}
           {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'training_lora_alpha')}
           min={1}
           max={512}
@@ -183,7 +206,10 @@ export const LoraParametersSection = () => {
         />
         <ControlledSliderWithTextInput
           useControllerProps={{ name: 'unsloth.training.lora.dropout', control }}
-          formFieldProps={{ slotLabel: 'Dropout' }}
+          formFieldProps={{
+            slotLabel: 'Dropout',
+            slotInfo: 'Dropout applied to the adapter while training. 0 disables it.',
+          }}
           {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'training_lora_dropout')}
           min={0}
           max={1}
@@ -225,13 +251,20 @@ export const LoraParametersSection = () => {
                   useControllerProps={{ name: 'unsloth.training.lora.use_rslora', control }}
                   formFieldProps={{
                     slotLabel: 'Use rsLoRA (rank-stabilized)',
+                    slotInfo:
+                      'Rank-stabilized LoRA. Scales by alpha over the square root of rank, which helps at higher ranks.',
                     labelPosition: 'left',
                   }}
                   disabled={disabled}
                 />
                 <ControlledSwitch
                   useControllerProps={{ name: 'unsloth.training.lora.use_dora', control }}
-                  formFieldProps={{ slotLabel: 'Use DoRA', labelPosition: 'left' }}
+                  formFieldProps={{
+                    slotLabel: 'Use DoRA',
+                    slotInfo:
+                      'DoRA (weight-decomposed LoRA). Improves quality at low ranks; adds training overhead.',
+                    labelPosition: 'left',
+                  }}
                   disabled={disabled}
                 />
                 <FormField slotLabel="Init LoRA Weights">
@@ -287,13 +320,21 @@ export const LoraParametersSection = () => {
                 />
                 <ControlledJsonInput
                   useControllerProps={{ name: 'unsloth.training.lora.modules_to_save', control }}
-                  formFieldProps={{ slotLabel: 'Modules to Save (JSON array)' }}
+                  formFieldProps={{
+                    slotLabel: 'Modules to Save (JSON array)',
+                    slotInfo:
+                      "Extra non-LoRA modules to train and save in full (e.g. ['embed_tokens', 'lm_head']). Needed for vocab changes / continued pretraining.",
+                  }}
                   placeholder='["lm_head", "embed_tokens"]'
                   disabled={disabled}
                 />
                 <ControlledJsonInput
                   useControllerProps={{ name: 'unsloth.training.lora.loftq_config', control }}
-                  formFieldProps={{ slotLabel: 'LoftQ Config (JSON)' }}
+                  formFieldProps={{
+                    slotLabel: 'LoftQ Config (JSON)',
+                    slotInfo:
+                      'LoftQ initialization config for quantized bases. None disables LoftQ.',
+                  }}
                   placeholder='{ "loftq_bits": 4 }'
                   disabled={disabled}
                 />
@@ -302,13 +343,21 @@ export const LoraParametersSection = () => {
                     name: 'unsloth.training.lora.layers_to_transform',
                     control,
                   }}
-                  formFieldProps={{ slotLabel: 'Layers to Transform (JSON)' }}
+                  formFieldProps={{
+                    slotLabel: 'Layers to Transform (JSON)',
+                    slotInfo:
+                      'Restrict LoRA to specific layer index(es). None applies to all layers.',
+                  }}
                   placeholder="[0, 1, 2] or 5"
                   disabled={disabled}
                 />
                 <ControlledJsonInput
                   useControllerProps={{ name: 'unsloth.training.lora.layer_replication', control }}
-                  formFieldProps={{ slotLabel: 'Layer Replication (JSON)' }}
+                  formFieldProps={{
+                    slotLabel: 'Layer Replication (JSON)',
+                    slotInfo:
+                      'Layer-replication ranges for stacking, e.g. [[0, 16], [8, 24]]. None disables.',
+                  }}
                   placeholder="[[0, 8], [4, 12]]"
                   disabled={disabled}
                 />

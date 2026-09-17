@@ -311,9 +311,9 @@ export const GrpoAdvancedSection = () => {
             formFieldProps={{
               slotLabel: 'Automodel Kwargs (JSON)',
               slotInfo:
-                'Selects the low-level compute kernels for mixture-of-experts models. Requires the automodel policy backend.',
+                'Requires the automodel policy backend. force_hf loads the stock HuggingFace modules; a backend block picks the Transformer-Engine or DeepEP MoE implementation. Unset lets Automodel auto-detect.',
             }}
-            placeholder="{}"
+            placeholder='{"force_hf": true}'
             disabled={disabled}
           />
         </Stack>

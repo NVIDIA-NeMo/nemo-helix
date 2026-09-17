@@ -216,7 +216,10 @@ export const GrpoParametersSection = () => {
                   </Text>
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'grpo.reward_scaling.source_min', control }}
-                    formFieldProps={{ slotLabel: 'Scale Source Min' }}
+                    formFieldProps={{
+                      slotLabel: 'Scale Source Min',
+                      slotInfo: 'Low end of the incoming reward range.',
+                    }}
                     unsetPlaceholder="0"
                     min={-10}
                     max={10}
@@ -225,7 +228,10 @@ export const GrpoParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'grpo.reward_scaling.source_max', control }}
-                    formFieldProps={{ slotLabel: 'Scale Source Max' }}
+                    formFieldProps={{
+                      slotLabel: 'Scale Source Max',
+                      slotInfo: 'High end of the incoming reward range.',
+                    }}
                     unsetPlaceholder="1"
                     min={-10}
                     max={10}
@@ -234,7 +240,10 @@ export const GrpoParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'grpo.reward_scaling.target_min', control }}
-                    formFieldProps={{ slotLabel: 'Scale Target Min' }}
+                    formFieldProps={{
+                      slotLabel: 'Scale Target Min',
+                      slotInfo: 'Low end of the rescaled range.',
+                    }}
                     unsetPlaceholder="0"
                     min={-10}
                     max={10}
@@ -243,7 +252,10 @@ export const GrpoParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'grpo.reward_scaling.target_max', control }}
-                    formFieldProps={{ slotLabel: 'Scale Target Max' }}
+                    formFieldProps={{
+                      slotLabel: 'Scale Target Max',
+                      slotInfo: 'High end of the rescaled range.',
+                    }}
                     unsetPlaceholder="1"
                     min={-10}
                     max={10}
@@ -260,7 +272,11 @@ export const GrpoParametersSection = () => {
                       name: 'grpo.reward_shaping.overlong_buffer_length',
                       control,
                     }}
-                    formFieldProps={{ slotLabel: 'Overlong Buffer Length' }}
+                    formFieldProps={{
+                      slotLabel: 'Overlong Buffer Length',
+                      slotInfo:
+                        'Tokens before max_response_length over which the penalty ramps to full.',
+                    }}
                     unsetPlaceholder="Off"
                     min={1}
                     max={16384}
@@ -272,7 +288,10 @@ export const GrpoParametersSection = () => {
                       name: 'grpo.reward_shaping.overlong_buffer_penalty',
                       control,
                     }}
-                    formFieldProps={{ slotLabel: 'Overlong Buffer Penalty' }}
+                    formFieldProps={{
+                      slotLabel: 'Overlong Buffer Penalty',
+                      slotInfo: 'Penalty applied at the end of the buffer.',
+                    }}
                     unsetPlaceholder="Off"
                     min={0}
                     max={10}
@@ -284,7 +303,11 @@ export const GrpoParametersSection = () => {
                       name: 'grpo.reward_shaping.max_response_length',
                       control,
                     }}
-                    formFieldProps={{ slotLabel: 'Max Response Length' }}
+                    formFieldProps={{
+                      slotLabel: 'Max Response Length',
+                      slotInfo:
+                        'Length beyond which a response is penalised. Usually the generation cap.',
+                    }}
                     unsetPlaceholder="Off"
                     min={1}
                     max={131072}
@@ -296,7 +319,11 @@ export const GrpoParametersSection = () => {
                       name: 'grpo.reward_shaping.stop_properly_penalty_coef',
                       control,
                     }}
-                    formFieldProps={{ slotLabel: 'Improper Stop Penalty' }}
+                    formFieldProps={{
+                      slotLabel: 'Improper Stop Penalty',
+                      slotInfo:
+                        'Scale factor on the reward of a truncated response. 0 zeroes it, 1 is no penalty.',
+                    }}
                     unsetPlaceholder="Off"
                     min={0}
                     max={1}
@@ -385,7 +412,11 @@ export const GrpoParametersSection = () => {
                 <Stack gap="density-md" className="pt-density-md">
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'rl.training.micro_batch_size', control }}
-                    formFieldProps={{ slotLabel: 'Micro Batch Size' }}
+                    formFieldProps={{
+                      slotLabel: 'Micro Batch Size',
+                      slotInfo:
+                        'Examples each GPU processes at once. Lower this first if training runs out of memory.',
+                    }}
                     {...specSliderProps(GRPO_SPEC_DEFAULTS, 'micro_batch_size')}
                     min={1}
                     max={64}
@@ -394,7 +425,11 @@ export const GrpoParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'rl.training.warmup_steps', control }}
-                    formFieldProps={{ slotLabel: 'Warmup Steps' }}
+                    formFieldProps={{
+                      slotLabel: 'Warmup Steps',
+                      slotInfo:
+                        'Steps spent ramping the learning rate up from zero. Around 10% of total steps is a stable starting point.',
+                    }}
                     {...specSliderProps(GRPO_SPEC_DEFAULTS, 'warmup_steps')}
                     min={0}
                     max={1000}
@@ -403,7 +438,10 @@ export const GrpoParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'rl.training.weight_decay', control }}
-                    formFieldProps={{ slotLabel: 'Weight Decay' }}
+                    formFieldProps={{
+                      slotLabel: 'Weight Decay',
+                      slotInfo: 'Penalty on large weights. Higher regularizes more; 0 disables it.',
+                    }}
                     {...specSliderProps(GRPO_SPEC_DEFAULTS, 'weight_decay')}
                     min={0}
                     max={1}
@@ -472,7 +510,11 @@ export const GrpoParametersSection = () => {
                   />
                   <ControlledSelect
                     useControllerProps={{ name: 'rl.training.optimizer_type', control }}
-                    formFieldProps={{ slotLabel: 'Optimizer Type' }}
+                    formFieldProps={{
+                      slotLabel: 'Optimizer Type',
+                      slotInfo:
+                        'Optimizer + LR-scheduler combination (AdamW/Adam × cosine-annealing/flat-LR). Defaults to AdamW with cosine annealing.',
+                    }}
                     items={OPTIMIZER_TYPE_ITEMS}
                     disabled={disabled}
                   />
@@ -480,7 +522,8 @@ export const GrpoParametersSection = () => {
                     useControllerProps={{ name: 'rl.training.min_learning_rate', control }}
                     formFieldProps={{
                       slotLabel: 'Min Learning Rate',
-                      slotInfo: 'Floor the cosine schedule decays to. Keep it below the peak LR.',
+                      slotInfo:
+                        'Floor the cosine schedule decays to. Keep it below the peak learning rate.',
                     }}
                     {...specSliderProps(GRPO_SPEC_DEFAULTS, 'min_learning_rate')}
                     min={0}
@@ -490,7 +533,10 @@ export const GrpoParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'rl.training.adam_beta1', control }}
-                    formFieldProps={{ slotLabel: 'Adam β₁' }}
+                    formFieldProps={{
+                      slotLabel: 'Adam β₁',
+                      slotInfo: 'Decay rate for the gradient moving average (momentum).',
+                    }}
                     {...specSliderProps(GRPO_SPEC_DEFAULTS, 'adam_beta1')}
                     min={0}
                     max={0.999}
@@ -499,7 +545,10 @@ export const GrpoParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'rl.training.adam_beta2', control }}
-                    formFieldProps={{ slotLabel: 'Adam β₂' }}
+                    formFieldProps={{
+                      slotLabel: 'Adam β₂',
+                      slotInfo: 'Decay rate for the squared-gradient moving average.',
+                    }}
                     {...specSliderProps(GRPO_SPEC_DEFAULTS, 'adam_beta2')}
                     min={0}
                     max={0.9999}
@@ -607,7 +656,10 @@ export const GrpoParametersSection = () => {
             <Stack gap="density-lg">
               <ControlledSliderWithTextInput
                 useControllerProps={{ name: 'grpo.lora.rank', control }}
-                formFieldProps={{ slotLabel: 'LoRA Rank' }}
+                formFieldProps={{
+                  slotLabel: 'LoRA Rank',
+                  slotInfo: 'LoRA rank (r); maps to NeMo-RL lora_cfg.dim.',
+                }}
                 {...specSliderProps(GRPO_SPEC_DEFAULTS, 'lora_rank')}
                 min={1}
                 max={256}
@@ -628,7 +680,10 @@ export const GrpoParametersSection = () => {
               />
               <ControlledSliderWithTextInput
                 useControllerProps={{ name: 'grpo.lora.dropout', control }}
-                formFieldProps={{ slotLabel: 'LoRA Dropout' }}
+                formFieldProps={{
+                  slotLabel: 'LoRA Dropout',
+                  slotInfo: 'Dropout applied to the adapter while training. 0 disables it.',
+                }}
                 {...specSliderProps(GRPO_SPEC_DEFAULTS, 'lora_dropout')}
                 min={0}
                 max={1}
@@ -640,7 +695,7 @@ export const GrpoParametersSection = () => {
                 formFieldProps={{
                   slotLabel: 'Target Modules',
                   slotInfo:
-                    'Modules to attach adapters to, comma separated. Leave blank for the backend default.',
+                    'Modules to attach adapters to. Left unset, the backend picks them from the model architecture.',
                 }}
                 placeholder="q_proj, k_proj, v_proj"
                 disabled={disabled}
