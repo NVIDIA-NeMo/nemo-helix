@@ -8,10 +8,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any, ClassVar
 
-from nemo_agents_plugin.jobs.execute_extensions import ExecuteAgentAfterInvokeContext
 from nemo_insights_plugin.analyst.analyst_backend import make_analyst_backend
 from nemo_insights_plugin.analyst.result import AnalystResult
 from nemo_insights_plugin.jobs.analyze import REPORT_FILE_NAME, REPORT_RESULT_NAME
+from nemo_platform_plugin.agents.execute_extensions import ExecuteAgentAfterInvokeContext
 from nemo_platform_plugin.sdk_provider import get_async_task_sdk
 from pydantic import BaseModel, ConfigDict, Field
 
