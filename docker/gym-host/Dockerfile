@@ -34,11 +34,14 @@ ENV PATH="/opt/gym-host-venv/bin:$PATH" \
     NEMO_GYM_VENV_DIR=/opt/gym_venvs \
     UV_CACHE_DIR=/home/ubuntu/.cache/uv
 RUN mkdir -p "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}"
-RUN gym env prefetch "+config_paths=[responses_api_agents/simple_agent/configs/simple_agent.yaml,responses_api_models/inference_provider/configs/inference_provider.yaml,resources_servers/mcqa/configs/mcqa.yaml]" \
+RUN if UV_LINK_MODE=copy gym env prefetch "+config_paths=[responses_api_agents/simple_agent/configs/simple_agent.yaml,responses_api_models/inference_provider/configs/inference_provider.yaml,resources_servers/mcqa/configs/mcqa.yaml]" \
       "++policy_base_url=http://127.0.0.1:9/v1" "++policy_api_key=unused" "++policy_model_name=unused" \
       "++simple_agent.responses_api_agents.simple_agent.resources_server.name=mcqa" \
-      "++uv_venv_dir=${NEMO_GYM_VENV_DIR}" "++uv_cache_dir=${UV_CACHE_DIR}" \
-    || echo "prefetch failed; venvs will be built at run time"
+      "++uv_venv_dir=${NEMO_GYM_VENV_DIR}" "++uv_cache_dir=${UV_CACHE_DIR}"; then \
+      uv cache clean mlflow ray; \
+    else \
+      echo "prefetch failed; venvs will be built at run time"; \
+    fi
 
 # Full MLflow carries gateway server CVEs, while this image only needs Gym's client-side imports.
 RUN for py in /opt/gym-host-venv/bin/python "${NEMO_GYM_VENV_DIR}"/*/bin/python; do \
