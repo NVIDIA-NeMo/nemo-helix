@@ -369,20 +369,24 @@ Differential privacy works best with larger datasets:
 
 ```python
 def check_data_requirements(dataset_size):
- """Check if dataset size is suitable for DP."""
- print(f"📏 Dataset Size Analysis: {dataset_size} records")
+    """Check if dataset size is suitable for DP."""
+    print(f"📏 Dataset Size Analysis: {dataset_size} records")
 
- if dataset_size >= 10000:
- print("✅ Excellent - Dataset size is ideal for DP")
- print(" Expected: Good quality with ε ∈ [8, 12]")
- elif dataset_size >= 5000:
- print("⚠️ Moderate - Dataset may work with DP")
- print(" Recommendation: Start with higher epsilon (ε=10-12)")
- else:
- print("❌ Small - DP may significantly reduce quality")
- print(" Consider: Collecting more data or using DP without")
+    if dataset_size <= 0:
+        print("❌ Empty dataset - collect records before applying DP")
+        return
 
- print(f"\n Recommended delta: {1 / (dataset_size ** 1.2):.2e}")
+    if dataset_size >= 10000:
+        print("✅ Excellent - Dataset size is ideal for DP")
+        print(" Expected: Good quality with ε ∈ [8, 12]")
+    elif dataset_size >= 5000:
+        print("⚠️ Moderate - Dataset may work with DP")
+        print(" Recommendation: Start with higher epsilon (ε=10-12)")
+    else:
+        print("❌ Small - DP may significantly reduce quality")
+        print(" Consider: Collecting more data or using DP without")
+
+    print(f"\n Recommended delta: {1 / (dataset_size ** 1.2):.2e}")
 
 check_data_requirements(len(df))
 ```

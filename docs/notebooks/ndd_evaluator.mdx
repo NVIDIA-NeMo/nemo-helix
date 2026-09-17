@@ -364,37 +364,30 @@ from rich import print
 def filter_by_scores(df, min_coherence=3, samples_per_complexity=100):
     indices = []
     for idx, k in enumerate(df['triage_note_quality']):
-        # If k is a string, parse it to dict
-        if isinstance(k, str):
-            try:
-                k_dict = ast.literal_eval(k)
-            except Exception:
-                continue
-            else:
-                k_dict = k
-                try:
-                    coherence_score = int(k_dict['Clinical Coherence']['score'])
-                    if coherence_score >= min_coherence:
-                        indices.append(idx)
-                    except Exception:
-                        continue
-                        filtered_df = df.iloc[indices]
-                        filtered_df = filtered_df[["esi_level_description", "content", "triage_note_quality"]]
-                        filtered_df['esi_level_complexity'] = filtered_df['triage_note_quality'].apply(
-                            lambda k: (ast.literal_eval(k) if isinstance(k, str) else k).get('ESI Level Complexity', {}).get('score')
-                        )
-                        filtered_df.drop(columns=['triage_note_quality'], inplace=True)
-                        percent_filtered = 100 * len(filtered_df) / len(df) if len(df) > 0 else 0
-                        print(f"Filtered {len(filtered_df)} out of {len(df)} records ({percent_filtered:.1f}%)")
-                        # Sample up to N per complexity
-                        sampled_df = (
-                            filtered_df
-                            .groupby('esi_level_complexity', group_keys=False)
-                            .apply(lambda x: x.sample(min(len(x), samples_per_complexity), random_state=42))
-                            .reset_index(drop=True)
-                        )
-                        print(f"Sampled {len(sampled_df)} records total, {samples_per_complexity} (or less) per complexity level.")
-                        return sampled_df
+        try:
+            k_dict = ast.literal_eval(k) if isinstance(k, str) else k
+            coherence_score = int(k_dict['Clinical Coherence']['score'])
+        except Exception:
+            continue
+        if coherence_score >= min_coherence:
+            indices.append(idx)
+    filtered_df = df.iloc[indices]
+    filtered_df = filtered_df[["esi_level_description", "content", "triage_note_quality"]]
+    filtered_df['esi_level_complexity'] = filtered_df['triage_note_quality'].apply(
+        lambda k: (ast.literal_eval(k) if isinstance(k, str) else k).get('ESI Level Complexity', {}).get('score')
+    )
+    filtered_df.drop(columns=['triage_note_quality'], inplace=True)
+    percent_filtered = 100 * len(filtered_df) / len(df) if len(df) > 0 else 0
+    print(f"Filtered {len(filtered_df)} out of {len(df)} records ({percent_filtered:.1f}%)")
+    # Sample up to N per complexity
+    sampled_df = (
+        filtered_df
+        .groupby('esi_level_complexity', group_keys=False)
+        .apply(lambda x: x.sample(min(len(x), samples_per_complexity), random_state=42))
+        .reset_index(drop=True)
+    )
+    print(f"Sampled {len(sampled_df)} records total, {samples_per_complexity} (or less) per complexity level.")
+    return sampled_df
 
 filtered_df = filter_by_scores(dataset, samples_per_complexity=100)
 ```
@@ -559,83 +552,83 @@ MODEL_SPECS = [
 COMPLEXITIES = ["simple", "moderate", "complex"]
 
 def run_evaluation(
- client: Any,
- evaluator_config: dict[str, Any],
- model_spec: dict[str, str],
- complexity: str,
- files_url_dict: dict[str, FilesetRef],
- secret_key_name: str | None = None,
+    client: Any,
+    evaluator_config: dict[str, Any],
+    model_spec: dict[str, str],
+    complexity: str,
+    files_url_dict: dict[str, FilesetRef],
+    secret_key_name: str | None = None,
 ) -> float:
- """
- Populates the evaluator_config, filling in the files_url and endpoint, then runs evaluation.
- Returns accuracy for the given model+complexity.
- """
- fileset_ref: FilesetRef = files_url_dict[complexity]
- model_kwargs = {
- "url": model_spec["url"],
- "name": model_spec["model_id"],
- }
- if secret_key_name:
- model_kwargs["api_key_secret"] = secret_key_name
+    """
+    Populates the evaluator_config, filling in the files_url and endpoint, then runs evaluation.
+    Returns accuracy for the given model+complexity.
+    """
+    fileset_ref: FilesetRef = files_url_dict[complexity]
+    model_kwargs = {
+        "url": model_spec["url"],
+        "name": model_spec["model_id"],
+    }
+    if secret_key_name:
+        model_kwargs["api_key_secret"] = secret_key_name
 
- job_spec = MetricOnlineJobParam(
- metric=StringCheckMetricParam(
- type="string-check",
- operation="contains",
- left_template="{{sample.output_text}}",
- right_template="{{item.esi_level_description}}",
- ),
- dataset=fileset_ref,
- model=ModelParam(**model_kwargs),
- prompt_template=evaluator_config["prompt_template"],
- )
- job = client.evaluation.metric_jobs.create(
- spec=job_spec,
- )
- print(f"Submitted evaluation job for model '{model_spec['name']}' on complexity '{complexity.capitalize()}' (job name: {job.name})")
- max_wait_seconds = 7200
- elapsed = 0
- while True:
- time.sleep(5)
- elapsed += 5
- status = client.evaluation.metric_jobs.retrieve(job.name)
- if status.status in ("completed", "success", "error", "failed", "cancelled"):
- break
- if elapsed >= max_wait_seconds:
- raise TimeoutError(f"Job {job.name} did not complete within {max_wait_seconds}s")
- if status.status in ("error", "failed", "cancelled"):
- raise RuntimeError(
- f"Job {job.name} for model '{model_spec['name']}' on complexity '{complexity}' ended with status: {status.status}"
- )
- print(f" ✔️ Job done for model '{model_spec['name']}' on complexity '{complexity.capitalize()}'")
+    job_spec = MetricOnlineJobParam(
+        metric=StringCheckMetricParam(
+            type="string-check",
+            operation="contains",
+            left_template="{{sample.output_text}}",
+            right_template="{{item.esi_level_description}}",
+        ),
+        dataset=fileset_ref,
+        model=ModelParam(**model_kwargs),
+        prompt_template=evaluator_config["prompt_template"],
+    )
+    job = client.evaluation.metric_jobs.create(
+        spec=job_spec,
+    )
+    print(f"Submitted evaluation job for model '{model_spec['name']}' on complexity '{complexity.capitalize()}' (job name: {job.name})")
+    max_wait_seconds = 7200
+    elapsed = 0
+    while True:
+        time.sleep(5)
+        elapsed += 5
+        status = client.evaluation.metric_jobs.retrieve(job.name)
+        if status.status in ("completed", "success", "error", "failed", "cancelled"):
+            break
+        if elapsed >= max_wait_seconds:
+            raise TimeoutError(f"Job {job.name} did not complete within {max_wait_seconds}s")
+    if status.status in ("error", "failed", "cancelled"):
+        raise RuntimeError(
+            f"Job {job.name} for model '{model_spec['name']}' on complexity '{complexity}' ended with status: {status.status}"
+        )
+    print(f" ✔️ Job done for model '{model_spec['name']}' on complexity '{complexity.capitalize()}'")
 
- # Fetch results and extract accuracy
- aggregate_scores = client.evaluation.metric_jobs.results.aggregate_scores.download(
- job=job.name,
- )
- if not aggregate_scores.scores:
- raise ValueError(f"No scores returned for job {job.name}")
- accuracy_value = next(
- (s.mean for s in aggregate_scores.scores if s.name in ("string-check", "accuracy")),
- aggregate_scores.scores[0].mean,
- )
- return accuracy_value
+    # Fetch results and extract accuracy
+    aggregate_scores = client.evaluation.metric_jobs.results.aggregate_scores.download(
+        job=job.name,
+    )
+    if not aggregate_scores.scores:
+        raise ValueError(f"No scores returned for job {job.name}")
+    accuracy_value = next(
+        (s.mean for s in aggregate_scores.scores if s.name in ("string-check", "accuracy")),
+        aggregate_scores.scores[0].mean,
+    )
+    return accuracy_value
 
 results_dict = {model_spec['name']: {} for model_spec in MODEL_SPECS}
 
 print("Starting evaluation jobs (per model, per complexity)...")
 for complexity in COMPLEXITIES:
- for spec in MODEL_SPECS:
- accuracy = run_evaluation(
- client,
- EVALUATOR_CONFIG,
- spec,
- complexity,
- files_url_dict,
- secret_key_name=SECRET_NAME if PROVIDER_API_KEY else None,
- )
- results_dict[spec['name']][complexity.capitalize()] = 100 * accuracy # Store as percentage
- print(f" --> DONE: {spec['name']}, {complexity.capitalize()} (Accuracy: {100*accuracy:.2f}%)\n")
+    for spec in MODEL_SPECS:
+        accuracy = run_evaluation(
+            client,
+            EVALUATOR_CONFIG,
+            spec,
+            complexity,
+            files_url_dict,
+            secret_key_name=SECRET_NAME if PROVIDER_API_KEY else None,
+        )
+        results_dict[spec['name']][complexity.capitalize()] = 100 * accuracy # Store as percentage
+        print(f" --> DONE: {spec['name']}, {complexity.capitalize()} (Accuracy: {100*accuracy:.2f}%)\n")
 
 ```
 
