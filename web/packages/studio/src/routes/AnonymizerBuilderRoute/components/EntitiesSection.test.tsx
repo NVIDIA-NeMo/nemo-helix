@@ -41,9 +41,9 @@ describe('EntitiesSection', () => {
     );
 
     expect(
-      await screen.findByText(/Auto-detect includes all 3 default entities/)
+      await screen.findByText(/Auto-detect includes all 3 available entities/)
     ).toBeInTheDocument();
-    expect(screen.queryByText(/Also include all 3 default entities/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Also include all 3 available entities/)).not.toBeInTheDocument();
   });
 
   it('offers the defaults checkbox in custom mode', async () => {
@@ -56,6 +56,6 @@ describe('EntitiesSection', () => {
     expect(
       await screen.findByText(/Custom mode only outputs the labels selected below/)
     ).toBeInTheDocument();
-    expect(screen.getByText('Also include all 3 default entities')).toBeInTheDocument();
+    expect(screen.getByText('Also include all 3 available entities')).toBeInTheDocument();
   });
 });
