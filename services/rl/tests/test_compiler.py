@@ -654,7 +654,13 @@ async def test_lora_job_accepts_string_ref_with_lora_enabled(
         AsyncMock(return_value=_make_model_entity()),
     )
     platform_clients.models.get_deployment_config = AsyncMock(
-        return_value=SimpleNamespace(data=lambda: _make_deployment_config(lora_enabled=True))
+        return_value=SimpleNamespace(
+            data=lambda: _make_deployment_config(
+                lora_enabled=True,
+                model_entity_id="default/base-model",
+                model_name="base-model",
+            )
+        )
     )
     job = _grpo_lora_job().model_copy(update={"deployment_config": "shared/base-cfg"})
 
@@ -747,3 +753,44 @@ async def test_inline_deployment_config_reaches_the_model_entity_step(
     spec = await platform_job_config_compiler("default", job, platform_clients)
 
     assert _steps(spec)[3]["config"]["deployment_config"]["gpu"] == 4
+
+
+@pytest.mark.asyncio
+async def test_lora_job_rejects_a_config_for_a_different_base_model(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+    authorized: AsyncMock,
+) -> None:
+    """The adapter is served from its base model's deployment, so the config must target it."""
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: _make_deployment_config(
+                lora_enabled=True, model_entity_id="default/unrelated", model_name="unrelated"
+            )
+        )
+    )
+    job = _grpo_lora_job().model_copy(update={"deployment_config": "shared/other-cfg"})
+
+    with pytest.raises(PlatformJobCompilationError, match="different model entity than the base model"):
+        await platform_job_config_compiler("default", job, platform_clients)
+
+
+@pytest.mark.asyncio
+async def test_inline_lora_enabled_false_is_rejected_at_compile(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+    authorized: AsyncMock,
+) -> None:
+    """RlJobInput rejects this at submit; the compiler takes RlJobOutput, so re-assert it."""
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    job = _grpo_lora_job().model_copy(update={"deployment_config": DeploymentParams(lora_enabled=False)})
+
+    with pytest.raises(PlatformJobCompilationError, match="lora_enabled must be true"):
+        await platform_job_config_compiler("default", job, platform_clients)

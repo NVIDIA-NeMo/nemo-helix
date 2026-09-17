@@ -231,6 +231,18 @@ async def _require_tool_call_plugin_permission(workspace: str) -> None:
         )
 
 
+def _config_targets_model(config: ModelDeploymentConfig, workspace: str, name: str) -> bool:
+    """Whether ``config`` deploys the model entity ``workspace/name``.
+
+    ``model_entity_id`` is the canonical link; older configs only carry the
+    name/namespace pair on ``model_spec``, so both are accepted.
+    """
+    model_spec = config.model_spec
+    return (config.model_entity_id == f"{workspace}/{name}") or (
+        model_spec.model_name == name and model_spec.model_namespace == workspace
+    )
+
+
 async def _validate_deployment_config(
     workspace: str,
     job_spec: RlJobOutput,
@@ -247,6 +259,14 @@ async def _validate_deployment_config(
 
     # Inline deployment params: check permission-gated fields.
     if isinstance(dc, DeploymentParams):
+        # RlJobInput rejects this at submit, but the compiler is entered with an
+        # RlJobOutput, which carries no such validator -- re-assert it here.
+        if job_spec.trains_lora_adapter and not dc.lora_enabled:
+            raise PlatformJobCompilationError(
+                "deployment_config.lora_enabled must be true (or omitted) when training a LoRA adapter. "
+                "Setting lora_enabled=false would deploy the base model without LoRA support, "
+                "making the trained adapter unservable."
+            )
         tcc = dc.tool_call_config
         if tcc and tcc.tool_call_plugin:
             await _require_tool_call_plugin_permission(workspace)
@@ -263,6 +283,15 @@ async def _validate_deployment_config(
         )
 
     if job_spec.trains_lora_adapter:
+        # The adapter is served from its base model's deployment, so a referenced
+        # config is only usable if it deploys that base model.
+        base = parse_entity_ref(job_spec.model, workspace)
+        if not _config_targets_model(resolved_config, base.workspace, base.name):
+            raise PlatformJobCompilationError(
+                f"deployment_config references '{dc}' which targets a different model entity than the base model "
+                f"'{base.workspace}/{base.name}'. A LoRA adapter is served from its base model's deployment, "
+                "so the config must target that base model, or use inline deployment parameters instead."
+            )
         return
 
     # Full-weight training creates its own model entity, so a pre-existing config can
@@ -277,11 +306,7 @@ async def _validate_deployment_config(
             'Use inline deployment parameters (e.g. {"gpu": 1, "lora_enabled": true}) instead.'
         ) from e
 
-    model_spec = resolved_config.model_spec
-    config_targets_model = (resolved_config.model_entity_id == f"{existing_me.workspace}/{existing_me.name}") or (
-        model_spec.model_name == existing_me.name and model_spec.model_namespace == existing_me.workspace
-    )
-    if not config_targets_model:
+    if not _config_targets_model(resolved_config, existing_me.workspace, existing_me.name):
         raise PlatformJobCompilationError(
             f"deployment_config references '{dc}' which targets a different model entity "
             f"than the output model '{existing_me.workspace}/{existing_me.name}'. "
