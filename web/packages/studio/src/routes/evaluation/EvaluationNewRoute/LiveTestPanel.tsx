@@ -41,6 +41,14 @@ export const LiveTestPanel: FC = () => {
   const { state, run, cancel } = useLiveTest();
   const busy = state.status === 'busy';
 
+  /** A result describes the row it was run against. Moving off that row, or
+   *  swapping the file, would leave the response and scores sitting under
+   *  previews of something else. ``cancel`` also aborts a run still in flight,
+   *  which is what a dataset change mid-run should do. */
+  useEffect(() => {
+    cancel();
+  }, [rowIndex, dataset, cancel]);
+
   /** A label with nothing under it is noise. Each preview appears only once its
    *  field actually resolves against the selected row -- what is missing is
    *  already stated where it can be fixed, in the Dataset column. */
