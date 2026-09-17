@@ -505,6 +505,9 @@ class FabricAgentRuntime:
             analysis = binding_result if binding_result is not None else extras.get("analyzer_analysis")
             if analysis is not None:
                 output_text = json.dumps(analysis, default=str)
+        evidence = self._evidence(result, result_path, workspace_dir)
+        if not output_text or not output_text.strip():
+            output_text = _common.trace_answer_text(evidence.descriptors)
         return AgentEvalTrial(
             id=f"{task.id}:fabric",
             task_id=task.id,
@@ -514,7 +517,7 @@ class FabricAgentRuntime:
                 response=output,
                 metadata={**base_metadata, "evidence_dir": str(evidence_dir)},
             ),
-            evidence=self._evidence(result, result_path, workspace_dir),
+            evidence=evidence,
             measurements=measurements,
             # AgentPhaseSuccessMetric reads agent_ok to score whether the agent phase finished cleanly
             # (an explicit bool, not just trial status).

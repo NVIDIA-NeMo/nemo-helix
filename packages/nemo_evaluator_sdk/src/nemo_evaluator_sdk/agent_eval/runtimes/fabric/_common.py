@@ -23,7 +23,17 @@ from typing import Any
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.otlp_writer import otlp_endpoint_fields
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus
-from nemo_evaluator_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
+from nemo_evaluator_sdk.values.evidence import (
+    EVIDENCE_FORMAT_ATIF,
+    EVIDENCE_FORMAT_OTLP,
+    EVIDENCE_TRACE,
+    CandidateEvidence,
+    EvidenceDescriptor,
+    final_agent_message,
+    read_atif,
+    read_otlp_spans,
+)
+from nemo_evaluator_sdk.values.otlp import final_output_text
 
 # The file-exporter output names we choose (Relay accepts these as inputs). Shared so both runtimes
 # emit the trajectory under identical names.
@@ -62,6 +72,26 @@ def extract_output_text(output: object) -> str | None:
             if isinstance(value, str):
                 return value
     return json.dumps(output, default=str)
+
+
+def trace_answer_text(descriptors: Mapping[str, EvidenceDescriptor]) -> str | None:
+    """The agent's answer read back from a trial's trace evidence, OTLP first and ATIF second.
+
+    The harness ``RunResult`` is the primary source; this is the fallback for adapters that report
+    the answer only through Relay telemetry, so a Fabric trial fills ``output.output_text`` on the
+    same terms as a Harbor one.
+    """
+    otlp = descriptors.get(f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_OTLP}")
+    if otlp is not None and otlp.ref is not None:
+        spans = read_otlp_spans(Path(otlp.ref))
+        if spans is not None:
+            answer = final_output_text(spans)
+            if answer:
+                return answer
+    atif = descriptors.get(f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}")
+    if atif is None or atif.ref is None:
+        return None
+    return final_agent_message(read_atif(Path(atif.ref)))
 
 
 def build_failed_trial(

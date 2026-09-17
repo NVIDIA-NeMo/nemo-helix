@@ -475,6 +475,10 @@ class FabricContainerRuntime:
         if status != "succeeded":
             return self._failed_trial(task, evidence_dir, _result_error(result_payload), extra_metadata=base_metadata)
 
+        evidence = self._evidence(out_dir, result_path)
+        output_text = _common.extract_output_text(result_payload.get("output"))
+        if not output_text or not output_text.strip():
+            output_text = _common.trace_answer_text(evidence.descriptors)
         return AgentEvalTrial(
             id=f"{task.id}:fabric_container",
             task_id=task.id,
@@ -482,11 +486,11 @@ class FabricContainerRuntime:
             output=AgentOutput(
                 # ``response`` is the RunResult *output* payload (matching the host FabricAgentRuntime),
                 # not the whole normalized envelope, so metrics reading ``sample.response`` see one shape.
-                output_text=_common.extract_output_text(result_payload.get("output")),
+                output_text=output_text,
                 response=cast(JsonValue, result_payload.get("output")),
                 metadata={**base_metadata, "evidence_dir": str(evidence_dir)},
             ),
-            evidence=self._evidence(out_dir, result_path),
+            evidence=evidence,
             metadata={**base_metadata, "generated": True, "agent_ok": True},
         )
 

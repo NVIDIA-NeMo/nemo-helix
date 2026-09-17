@@ -387,6 +387,37 @@ async def test_fabric_runtime_maps_atif_artifact_to_trace_evidence(
     assert "prompt_tokens" not in trials[0].metadata
 
 
+@pytest.mark.asyncio
+async def test_fabric_runtime_reads_the_answer_from_atif_when_the_harness_reports_no_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    atif = _FakeArtifact("relay_atif", "atif", tmp_path / "trajectory.atif.json", "application/json")
+    atif.path.write_text(
+        json.dumps(
+            {
+                "schema_version": "ATIF-v1.7",
+                "steps": [
+                    {"source": "agent", "message": "let me check"},
+                    {"source": "agent", "message": "PONG"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
+        return _FakeResult(status="succeeded", output=None, artifacts=[atif])
+
+    _install_fake_fabric(monkeypatch, handler)
+    runtime = fabric_runtime.FabricAgentRuntime(config=_CONFIG, work_root=tmp_path / "fabric")
+
+    trials = await runtime.run_tasks([_TASK])
+
+    assert trials[0].output is not None
+    assert trials[0].output.output_text == "PONG"
+    assert trials[0].output.response is None
+
+
 def _workspace_from_config(config: Any) -> Path:
     """Pull the staged workspace path out of the composed per-task config."""
     return Path(config.environment.workspace)
