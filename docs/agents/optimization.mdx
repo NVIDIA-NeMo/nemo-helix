@@ -67,6 +67,9 @@ nemo inference providers create nvidia-build \
   --api-key-secret-name ngc-api-key
 nemo wait inference provider nvidia-build
 
+# Choose a model entity shown by `nemo models list`.
+export NEMO_DEFAULT_MODEL=nvidia-nemotron-3-5-lightning-30b-a3b
+
 nemo agents create \
   --name react-agent \
   --agent-config examples/react-agent/react-agent.yml
@@ -74,9 +77,9 @@ nemo agents deploy --agent react-agent
 nemo agents deployments wait --agent react-agent
 ```
 
-The example agent uses `nvidia-nemotron-3-nano-30b-a3b`, so it can produce a
-model optimization suggestion when the workspace model catalog contains a
-smaller compatible model.
+The example agent reads `NEMO_DEFAULT_MODEL`, so it can produce a model
+optimization suggestion when the workspace model catalog contains a smaller
+compatible model.
 
 ## Optimize with Switchyard Routing
 

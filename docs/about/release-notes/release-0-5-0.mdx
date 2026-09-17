@@ -77,8 +77,8 @@ operations for the 0.5 release line.
 - The durable agent-intent document is now `ETHOS.md`. The old
   `AGENT-SPEC.md` contract is replaced by Ethos terminology across agent
   creation, analysis, experimentalist, and packaging workflows.
-- `nemo agents ethos migrate` provides a guided migration for platform-owned
-  legacy spec packages, Filesets, and optimizer profiles.
+- The `nemo-ethos` coding-agent skill guides migration of platform-owned legacy
+  spec packages to `ETHOS.md`.
 - The Ethos schema records `Purpose & Outcomes`, `Principles`, `Trade-offs`,
   `Constraints`, `Metric Semantics`, and `Vision`, with explicit migration
   behavior for older agent-spec packages.
@@ -170,12 +170,9 @@ nemo setup
 After setup, restart local services before using CLI, SDK, Studio, or plugin
 workflows against the upgraded checkout.
 
-If you have pre-0.5 platform-owned agent intent packages, migrate them from
-`AGENT-SPEC.md` to `ETHOS.md` before using newer optimization workflows:
-
-```bash
-nemo agents ethos migrate --name <agent-name>
-```
+If you have pre-0.5 platform-owned agent intent packages, use the `nemo-ethos`
+coding-agent skill to write `ETHOS.md`, then remove the legacy spec package
+before using newer optimization workflows.
 
 ## Compatibility
 
@@ -203,16 +200,17 @@ nemo agents ethos migrate --name <agent-name>
   are still research-preview and require developer review.
 - **GRPO runtime.** GRPO jobs require Kubernetes/Ray execution and sandboxed
   Gym configuration. They do not have a local Docker fallback.
-- **GRPO environment packaging.** `adapter-wheels-v1` packages require network
-  access at job start for the built-in `verifiers_agent` path. Fully offline
-  `wheels-v1` jobs need a complete wheel closure for the training image's
+- **GRPO environment packaging.** Converter-built `adapter-wheels-v1` packages
+  include a complete wheel closure and do not require network access at job
+  start. Conversion still requires an internet-connected host. Offline
+  `wheels-v1` jobs likewise need a complete closure for the training image's
   Python and node architecture.
 - **DPO runtime.** Customizer `rl` DPO jobs run on Kubernetes/Ray and do not
   have a local Docker fallback. DPO remains full-weight only.
 - **Eval Author migration.** Eval Author discovery is now skill-driven. The
   old `nemo agents eval-author` CLI group is no longer the supported surface.
 - **Agent intent migration.** `AGENT-SPEC.md` is legacy. Use `ETHOS.md` for
-  new work and run `nemo agents ethos migrate` for platform-owned legacy
+  new work and the `nemo-ethos` coding-agent skill for platform-owned legacy
   packages before relying on optimizer workflows.
 - **Optuna HPO runtime.** Optuna-based hyperparameter optimization runs locally
   from a developer workstation. It is not available as a horizontally scaled

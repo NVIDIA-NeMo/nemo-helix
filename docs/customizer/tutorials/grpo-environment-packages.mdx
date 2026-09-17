@@ -25,9 +25,9 @@ Before packaging an environment, ensure you have:
 
 1. **A NeMo Platform configured with `platform.runtime: kubernetes`** — GRPO provisions a Ray cluster and has no local Docker fallback
 2. **Sandboxed Gym enabled on the cluster** by your platform operator (`sandbox_cluster_capable` and a job-storage PVC claim). Refer to [Cluster prerequisites](/documentation/customizer-reference/grpo-and-reward-environments#cluster-prerequisites); installing OpenSandbox is covered in [OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox)
-3. **The `nemo` CLI on your `PATH`**, or a source checkout where `uv run --package nmp-rl` resolves
+3. **The `nemo` CLI on your `PATH`**, or a source checkout where you can create the dedicated converter environment shown below
 4. **The training image tag** your cluster runs — vendoring a wheel closure requires the `nemo-gym`, `ray`, and `openai` versions it reports
-5. **A machine with internet access** for the packaging step. Training clusters consume uploaded FileSets only. For details on which environment type require internet access too, see details below.
+5. **A machine with internet access** for the packaging step. Training clusters consume uploaded FileSets only. For details on which environment types require internet access at job start too, see below.
 
 ## Pick a format
 
@@ -115,7 +115,7 @@ Each Gym server installs into its own virtualenv when the job starts. There are 
 |---|---|
 | `native-v1` | Required (package index) |
 | `wheels-v1` | Not required **if `wheels/` also satisfies step 1** |
-| `adapter-wheels-v1` | Required (`verifiers` from GitHub) |
+| `adapter-wheels-v1` | Not required when built by the converter |
 
 For a `wheels-v1` job to start with no egress, `wheels/` must contain:
 
@@ -149,10 +149,11 @@ Do not ship an empty `requirements.txt`. The file must exist, but an empty one p
 
 Convert on a machine with internet. Upload the result; training nodes do not fetch from the hub.
 
-From a platform install, run `pi-to-gym-conversion`. From this repository:
+From a source checkout, create a dedicated conversion environment once so the optional `conversion` dependencies are installed without changing the Platform runtime environment:
 
 ```bash
-uv run --package nmp-rl pi-to-gym-conversion \
+UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nmp-rl --extra conversion
+.venv-conversion/bin/pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree \
   --hub-version 0.1.5 \
   --out-dir ./ascii-tree-pkg \
@@ -209,7 +210,7 @@ Set `adapter.agent` to `verifiers_agent`. Dataset rows use `agent_ref.name: veri
 `configs/verifiers_agent.yaml` sets `max_tokens` (default 8192). That value caps generation for this agent.
 
 ```bash
-uv run --package nmp-rl pi-to-gym-conversion --validate-only ./ascii-tree-pkg
+.venv-conversion/bin/pi-to-gym-conversion --validate-only ./ascii-tree-pkg
 ```
 
 This checks layout (manifest, `config_paths`, `wheels/`). It does not check wheel platform tags, whether the closure is complete, whether `config_paths` define the servers your rows route to, or dataset rows. Those surface at job start.
@@ -373,7 +374,7 @@ pip download --dest weather-env/wheels \
   --platform "manylinux2014_$ARCH" \
   "nemo-gym==$GYM_VERSION" "ray[default]==$RAY_VERSION" "openai==$OPENAI_VERSION" pip \
   -r resources_servers/weather_verifier/requirements.txt
-uv run --package nmp-rl pi-to-gym-conversion --validate-only ./weather-env
+.venv-conversion/bin/pi-to-gym-conversion --validate-only ./weather-env
 ```
 
 `--platform` is repeated because pip matches these tags literally rather than expanding a compatibility range.

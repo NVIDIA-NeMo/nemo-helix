@@ -41,12 +41,13 @@ For a local SDK run, this runner is **not** zero-dependency — it shells out to
 - **Model credentials** for the collector, in an `env.yaml` (below)
 
 ```bash
-uv venv ~/gym-env --python 3.12
-uv pip install --python ~/gym-env/bin/python nemo-gym tiktoken
+uv venv ~/gym-env --python 3.13.15
+uv pip install --python ~/gym-env/bin/python "nemo-gym==0.5.0" tiktoken
 export PATH="$HOME/gym-env/bin:$PATH"
 ```
 
-Install Gym into **its own environment** and put that environment's `bin` on `PATH`. Gym imports Ray
+NeMo Gym 0.5.0 requires Python 3.13.14 or newer. Pin the Gym version so the local runner matches the
+0.6 Platform job image. Install Gym into **its own environment** and put that environment's `bin` on `PATH`. Gym imports Ray
 at module load, and `nemo-platform` excludes Ray by constraint, so the two generally cannot share a
 virtualenv. The runner resolves `gym` from `PATH` only — there is deliberately no setting pointing at
 a checkout or another venv, because this config becomes a serialized job spec when Gym runs as a

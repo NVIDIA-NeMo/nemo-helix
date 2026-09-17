@@ -30,12 +30,20 @@ Safe Synthesizer jobs run through the platform Jobs service. Upload input data t
 Example:
 
 ```shell
-nemo files filesets create my-input
+nemo files filesets create my-input --exist-ok
 nemo files upload ./data.csv my-input
-cat <<EOF >> ./nss-job.json
+cat <<EOF > ./nss-job.json
 {
   "data_source": "default/my-input#data.csv",
-  "config": {}
+  "config": {
+    "replace_pii": {
+      "globals": {
+        "classify": {
+          "classify_model_provider": "default/nvidia-build"
+        }
+      }
+    }
+  }
 }
 EOF
 nemo safe-synthesizer generate \

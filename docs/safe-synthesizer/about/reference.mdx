@@ -96,13 +96,14 @@ Here's an example showing a complete job configuration using the Python SDK:
 
 ```python
 import os
+import time
+
 import pandas as pd
 
 from nemo_platform import NeMoPlatform
 from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuilder
 
-# Placeholders
-df: pd.DataFrame = pd.DataFrame()
+df = pd.DataFrame({"text": [f"sample record {i}" for i in range(200)]})
 client = NeMoPlatform(
     base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
     workspace="default",
@@ -111,6 +112,7 @@ client = NeMoPlatform(
 builder = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
+    .with_classify_model_provider("default/nvidia-build")
     .with_train(
         num_input_records_to_sample=10000,
         learning_rate=0.0005,
@@ -127,7 +129,7 @@ builder = (
     .with_replace_pii()
     .synthesize()
 )
-job = builder.create_job(name="my-job", project="my-project")
+job = builder.create_job(name=f"my-job-{int(time.time())}")
 ```
 
 ## Related Topics

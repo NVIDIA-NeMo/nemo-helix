@@ -161,7 +161,7 @@ nemo wait inference provider anthropic
 
 ```python
 # Store API key
-client.secrets.create(name="anthropic-api-key", data=os.environ["ANTHROPIC_API_KEY"])
+client.secrets.create(name="anthropic-api-key", value=os.environ["ANTHROPIC_API_KEY"])
 
 # Create provider — override the default Bearer header and pin the API version
 provider = client.inference.providers.create(
@@ -193,8 +193,7 @@ Deploy pre-built NIM containers from NGC.
 <Tab title="CLI">
 
 ```bash
-nemo inference deployment-configs create \
---name "llama-3-2-1b-config" \
+nemo inference deployment-configs create "llama-3-2-1b-config" \
 --engine "nim" \
 --model-spec '{
     "model_name": "meta/llama-3.2-1b-instruct"
@@ -205,8 +204,7 @@ nemo inference deployment-configs create \
     "image_tag": "1.8.6"
 }'
 
-nemo inference deployments create \
---name "llama-3-2-1b-deployment" \
+nemo inference deployments create "llama-3-2-1b-deployment" \
 --config "llama-3-2-1b-config"
 
 nemo wait inference deployment llama-3-2-1b-deployment
@@ -264,8 +262,7 @@ Deploy classification NIMs like NemoGuard for content safety. Uses the `/v1/clas
 <Tab title="CLI">
 
 ```bash
-nemo inference deployment-configs create \
---name "nemoguard-jailbreak-config" \
+nemo inference deployment-configs create "nemoguard-jailbreak-config" \
 --engine "nim" \
 --model-spec '{}' \
 --executor-config '{
@@ -274,14 +271,12 @@ nemo inference deployment-configs create \
     "image_tag": "1.10.1"
 }'
 
-nemo inference deployments create \
---name "nemoguard-jailbreak-deployment" \
+nemo inference deployments create "nemoguard-jailbreak-deployment" \
 --config "nemoguard-jailbreak-config"
 
 nemo wait inference deployment nemoguard-jailbreak-deployment
 
-nemo inference gateway provider post v1/classify \
---name "nemoguard-jailbreak-deployment" \
+nemo inference gateway provider post v1/classify "nemoguard-jailbreak-deployment" \
 --body '{"input": "Tell me about vacation spots in Hawaii."}'
 ```
 
@@ -756,8 +751,7 @@ This example deploys [Qwen2.5-14B-Instruct](https://huggingface.co/Qwen/Qwen2.5-
 ```bash
 # Create a fileset pointing to the HuggingFace model
 # Qwen models are public — token_secret is optional
-nemo files filesets create \
---name "qwen-2-5-14b" \
+nemo files filesets create "qwen-2-5-14b" \
 --storage '{
 "type": "huggingface",
 "repo_id": "Qwen/Qwen2.5-14B-Instruct",
@@ -765,13 +759,11 @@ nemo files filesets create \
 }'
 
 # Register a model entity referencing the fileset
-nemo models create \
---name "qwen-2-5-14b" \
+nemo models create "qwen-2-5-14b" \
 --fileset "default/qwen-2-5-14b"
 
 # Create deployment config with 2 GPUs (TP=2 by default)
-nemo inference deployment-configs create \
---name "qwen-14b-config" \
+nemo inference deployment-configs create "qwen-14b-config" \
 --engine "nim" \
 --model-spec '{
     "model_name": "default/qwen-2-5-14b"
@@ -781,8 +773,7 @@ nemo inference deployment-configs create \
 }'
 
 # Deploy
-nemo inference deployments create \
---name "qwen-14b-deployment" \
+nemo inference deployments create "qwen-14b-deployment" \
 --config "qwen-14b-config"
 
 nemo wait inference deployment qwen-14b-deployment
@@ -850,8 +841,7 @@ For larger models requiring more GPUs, you can configure specific TP/PP splits u
 <Tab title="CLI">
 
 ```bash
-nemo inference deployment-configs create \
---name "multi-gpu-custom-config" \
+nemo inference deployment-configs create "multi-gpu-custom-config" \
 --engine "nim" \
 --model-spec '{
     "model_name": "default/qwen-2-5-14b"
@@ -948,8 +938,7 @@ Set `chat_template` and tool calling configuration with fileset `metadata.model.
 ```bash
 
  # Create fileset with chat template and tool calling config via metadata
- nemo files filesets create \
- --name "llama-3-2-1b-tool" \
+ nemo files filesets create "llama-3-2-1b-tool" \
  --storage '{
  "type": "huggingface",
  "repo_id": "meta-llama/Llama-3.2-1B-Instruct",
@@ -966,13 +955,11 @@ Set `chat_template` and tool calling configuration with fileset `metadata.model.
  }'
 
  # Register model entity referencing the fileset
- nemo models create \
- --name "llama-3-2-1b-tool" \
+ nemo models create "llama-3-2-1b-tool" \
  --fileset "default/llama-3-2-1b-tool"
 
  # Deploy
- nemo inference deployment-configs create \
- --name "llama-tool-config" \
+ nemo inference deployment-configs create "llama-tool-config" \
  --engine "nim" \
  --model-spec '{
     "model_name": "default/llama-3-2-1b-tool"
@@ -981,8 +968,7 @@ Set `chat_template` and tool calling configuration with fileset `metadata.model.
     "gpu": 1
  }'
 
- nemo inference deployments create \
- --name "llama-tool-deployment" \
+ nemo inference deployments create "llama-tool-deployment" \
  --config "llama-tool-config"
 
  nemo wait inference deployment llama-tool-deployment
@@ -1065,8 +1051,7 @@ Set `chat_template` and `tool_call_config` directly on the deployment config. Th
 
 ```bash
 
- nemo inference deployment-configs create \
- --name "llama-tool-override-config" \
+ nemo inference deployment-configs create "llama-tool-override-config" \
  --engine "nim" \
  --model-spec '{
     "model_name": "default/llama-3-2-1b-tool",
@@ -1118,8 +1103,7 @@ Updating a fileset's `metadata.model.tool_calling` does **not** propagate change
 
 ```bash
 # Create a new fileset with the updated tool calling config
-nemo files filesets create \
---name "llama-3-2-1b-tool-v2" \
+nemo files filesets create "llama-3-2-1b-tool-v2" \
 --storage '{
 "type": "huggingface",
 "repo_id": "meta-llama/Llama-3.2-1B-Instruct",
@@ -1135,13 +1119,11 @@ nemo files filesets create \
 }'
 
 # Create a new model entity referencing the new fileset
-nemo models create \
---name "llama-3-2-1b-tool-v2" \
+nemo models create "llama-3-2-1b-tool-v2" \
 --fileset "default/llama-3-2-1b-tool-v2"
 
 # Update deployment config to use the new model, or create a new one
-nemo inference deployment-configs create \
---name "llama-tool-config-v2" \
+nemo inference deployment-configs create "llama-tool-config-v2" \
 --engine "nim" \
 --model-spec '{
     "model_name": "default/llama-3-2-1b-tool-v2"
@@ -1150,8 +1132,7 @@ nemo inference deployment-configs create \
     "gpu": 1
 }'
 
-nemo inference deployments create \
---name "llama-tool-deployment-v2" \
+nemo inference deployments create "llama-tool-deployment-v2" \
 --config "llama-tool-config-v2"
 
 nemo wait inference deployment llama-tool-deployment-v2
@@ -1282,8 +1263,7 @@ Some models (for example, `nvidia/nemotron-3.5-lightning-30b-a3b`) enable reason
 <Tab title="CLI">
 
 ```bash
-nemo inference gateway provider post v1/chat/completions \
---name "my-deployment" \
+nemo inference gateway provider post v1/chat/completions "my-deployment" \
 --body '{
 "model": "default/my-model",
 "messages": [{"role": "user", "content": "Hello!"}],

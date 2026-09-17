@@ -182,6 +182,7 @@ auth:
    enabled: true
    token_endpoint: "https://idp.example.com/oauth/token"
    workload_token_exchange_enabled: true
+   workload_kubernetes_token_review_enabled: true
    workload_client_id: "nemo-platform-workload"
    workload_token_endpoint: "https://idp.example.com/oauth/token"
    workload_audience: "nemo-platform"
@@ -209,6 +210,11 @@ context receive a NeMo Platform opaque workload proof token at
 For Kubernetes-backed job runtimes, the jobs backend can project a Kubernetes
 service account token into each workload pod for token exchange. The projected
 token expiration defaults to `600` seconds and must be at least `600` seconds.
+Set `auth.oidc.workload_kubernetes_token_review_enabled: true` so the auth service
+validates projected service-account tokens with the Kubernetes TokenReview API.
+The API service account must also be authorized to create
+`authentication.k8s.io/v1` `tokenreviews` (for example, by binding it to the
+built-in `system:auth-delegator` ClusterRole).
 In platform configuration, set
 `jobs.executors[].config.workload_identity.token_expiration_seconds` on the
 Kubernetes job executor profile. For example, this changes the projected token

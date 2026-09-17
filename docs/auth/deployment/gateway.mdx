@@ -13,7 +13,7 @@ For the security architecture, see [Security Model](/documentation/access-contro
 
 NeMo Platform services trust identity headers only after a bearer token has been validated. In gateway deployments, the recommended path is:
 
-1. The gateway calls `/apis/auth/authenticate` before forwarding protected API requests.
+1. The gateway calls `/apis/auth/ext-authz/<original-request-path>` before forwarding protected API requests.
 2. The auth service validates the bearer token and returns trusted `X-NMP-Principal-*` and `X-NMP-Scopes` headers.
 3. The gateway forwards those trusted headers to NeMo Platform services.
 4. Services run their normal PDP authorization checks using the trusted principal and scopes.
@@ -65,7 +65,7 @@ The following are **not** subject to authorization checks; they are always allow
 - **PDP endpoints**: Paths under `/apis/auth/v2/authz/` are restricted to service principals only. The middleware rejects external and regular-user requests automatically.
 - **Studio**: Paths under `/studio` (the Studio UI handles its own OIDC login)
 
-Configure the gateway so these paths are not sent to `/apis/auth/authenticate` when using gateway bearer-auth callout.
+Configure the gateway so these paths are not sent to `/apis/auth/ext-authz` when using gateway bearer-auth callout.
 
 ## Gateway Configuration Examples
 

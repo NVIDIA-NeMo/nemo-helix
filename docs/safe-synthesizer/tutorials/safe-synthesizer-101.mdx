@@ -39,10 +39,10 @@ If you are working from a source checkout, run `make bootstrap` from the reposit
 For a PyPI install, run the following command in a **terminal (shell)**:
 
 ```shell
-if command -v uv &> /dev/null; then
- uv pip install "nemo-platform[all]" 'kagglehub==0.3.13' matplotlib
+if command -v uv >/dev/null 2>&1 && [ -n "$VIRTUAL_ENV" ]; then
+    uv pip install "nemo-platform[all]" 'kagglehub==0.3.13' matplotlib
 else
- pip install "nemo-platform[all]" 'kagglehub==0.3.13' matplotlib
+    pip install "nemo-platform[all]" 'kagglehub==0.3.13' matplotlib
 fi
 ```
 
@@ -174,10 +174,7 @@ from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuild
 
 # Create a project for our jobs (creates if it doesn't exist)
 project_name = "test-project"
-try:
-    client.projects.create(workspace="default", name=project_name)
-except Exception:
-    pass  # Project may already exist
+client.projects.create(workspace="default", name=project_name, exist_ok=True)
 
 # Build the job configuration
 job_name = f"synthesis-test-{pd.Timestamp.now().strftime('%Y%m%d-%H%M%S')}"
@@ -349,7 +346,7 @@ all_jobs = client.safe_synthesizer.jobs.list(workspace="default")
 print(f"Total jobs: {len(all_jobs.data)}")
 
 # Delete this job (optional)
-# client.safe_synthesizer.jobs.delete(job.job_name, workspace="default")
+# client.jobs.delete(job.job_name, workspace="default")
 # print(f"✅ Job {job.job_name} deleted")
 ```
 
@@ -389,6 +386,7 @@ builder = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
     .with_data(holdout=0)  # Disable holdout for small datasets
+    .with_classify_model_provider(provider_name)
     .with_replace_pii()
     .synthesize()
 )

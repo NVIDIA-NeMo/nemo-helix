@@ -56,27 +56,41 @@ One run flows through five pieces:
 
 ## A minimal example
 
-<Note>
-
-Conceptual — for a runnable, end-to-end version see the quickstart (coming in this section).
-
-</Note>
-
 ```python
+import asyncio
+
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
+from nemo_evaluator_sdk.agent_eval.runtimes.callable_runtime import CallableAgentTaskRunner
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
+from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 
-task = AgentEvalTask(
-    id="capital-france",
-    intent="Name the capital of France.",
-    inputs={"instruction": "What is the capital of France?"},
-    reference={"expected": "Paris"},   # grader-only; never shown to the agent
-    metrics=[OutcomeMetric()],         # this task's own scorer(s)
-)
 
-# target is a Model, a deployed Agent (HTTP), or any AgentTaskRunner.
-result = await AgentEvaluator().run(tasks=[task], target=my_agent)
-print(result.summary)
+async def my_agent(task: AgentEvalTask) -> str:
+    return "Paris"
+
+
+async def main() -> None:
+    task = AgentEvalTask(
+        id="capital-france",
+        intent="Name the capital of France.",
+        inputs={"instruction": "What is the capital of France?"},
+        reference={"expected": "Paris"},  # grader-only; never shown to the agent
+        metrics=[
+            ExactMatchMetric(
+                reference="{{item.reference.expected}}",
+                candidate="{{sample.output_text}}",
+            )
+        ],
+    )
+
+    result = await AgentEvaluator().run(
+        tasks=[task],
+        target=CallableAgentTaskRunner(my_agent),
+    )
+    print(result.summary)
+
+
+asyncio.run(main())
 ```
 
 ## Key properties

@@ -82,7 +82,7 @@ There are two installs at job start:
 | --- | --- | --- |
 | `native-v1` | A package index, resolved from the server's `requirements.txt` | Yes |
 | `wheels-v1` | The package's `wheels/`, for anything it vendors | No, **if the closure also covers step 1** |
-| `adapter-wheels-v1` | The package's `wheels/`, plus the agent harness's own requirements | Yes — see below |
+| `adapter-wheels-v1` | The package's `wheels/`, plus the agent harness's own requirements | No, when built by the converter |
 
 A `wheels-v1` job runs with no egress only when `wheels/` carries all of:
 
@@ -164,10 +164,11 @@ Use the same directory layout as `native-v1` — the server's own tree, copied f
 
 A `verifiers` environment — a Prime Intellect hub package, for example — is the one case with a scripted path. `pi-to-gym-conversion` downloads the package, vendors its full wheel closure, writes the configs and manifest, and builds the prompt JSONL.
 
-Run it on a machine with internet access. Training clusters have no hub egress and consume uploaded FileSets only. From a platform install the converter is on `PATH`; from this repository:
+Run it on a machine with internet access. Training clusters have no hub egress and consume uploaded FileSets only. From a source checkout, create a dedicated conversion environment once so the optional `conversion` dependencies are installed without changing the Platform runtime environment:
 
 ```bash
-uv run --package nmp-rl pi-to-gym-conversion \
+UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nmp-rl --extra conversion
+.venv-conversion/bin/pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree \
   --hub-version 0.1.5 \
   --out-dir ./ascii-tree-pkg \
@@ -230,7 +231,7 @@ Custom implementations need `{server_type}/{implementation}/` (with `app.py` and
 ### Validate before uploading, whichever format you built
 
 ```bash
-uv run --package nmp-rl pi-to-gym-conversion --validate-only ./my-env-pkg
+.venv-conversion/bin/pi-to-gym-conversion --validate-only ./my-env-pkg
 ```
 
 Despite the command's name this validates any of the three formats, not just converter output. It prints `{"valid": true, "format": "...", "name": "..."}` or exits non-zero with the specific violation. The same checks run at submit time, so validating locally catches the failure earlier and for free.
@@ -458,7 +459,7 @@ GRPO fails at submit, before any GPU is claimed, unless the platform operator ha
 | --- | --- |
 | `NMP_SANDBOX_CLUSTER_CAPABLE=true` (Helm: `sandboxClusterCapable`) | Declares that OpenSandbox is installed. The platform chart does **not** install it. GRPO defaults to sandboxed Gym (`NMP_RL_SANDBOXED_GYM_DEFAULT`) and fails closed without this |
 | `NMP_RL_JOB_STORAGE_PVC_CLAIM` | The Gym sandbox mounts the job-storage claim itself to read the downloaded environment and dataset, and only learns the claim by name |
-| `NMP_RL_SANDBOX_ALLOW_INTERNET` | Needed whenever an environment's venv build has to reach a package index — which is every `native-v1` package, and every `adapter-wheels-v1` one |
+| `NMP_RL_SANDBOX_ALLOW_INTERNET` | Needed whenever an environment's venv build has to reach a package index — every `native-v1` package and any wheels package whose closure is incomplete. Converter-built `adapter-wheels-v1` packages do not need it at job start. |
 | `NMP_RL_SANDBOX_PUBLIC_DNS_ALLOW` | Extra hosts, consulted only when the above is on. The built-in allowance covers `*.com` and `*.org`, so a host on another TLD (for example `hub.primeintellect.ai`) must be named |
 
 If a submit fails on either of the first two, that is a platform configuration gap, not a problem with your package. Neither is settable per job.
