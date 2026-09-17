@@ -13,12 +13,13 @@ import {
 } from '@nemo/sdk/generated/platform/model-providers';
 import type {
   Adapter,
+  ModelDeployment,
   ModelDeploymentStatus,
   ModelEntity,
   ModelProvider,
 } from '@nemo/sdk/generated/platform/schema';
-import { useQueries } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useQueries, type UseQueryResult } from '@tanstack/react-query';
+import { useCallback, useMemo } from 'react';
 
 export type DeploymentIndicatorState =
   /** Still resolving providers or the deployment. */
@@ -84,7 +85,30 @@ export function useModelDeploymentStatuses(
     return [...refs].sort();
   }, [targets]);
 
-  const providerQueries = useQueries({
+  // `combine` rather than a useMemo over the results: useQueries hands back a new
+  // array on every render, so a memo keyed on it would never hold and this hook's
+  // returned Map would change identity every render -- which in turn defeats the
+  // useCallback around the table's makeColumns, since it depends on that Map.
+  const combineProviders = useCallback(
+    (results: UseQueryResult<ModelProvider>[]) => {
+      const map = new Map<
+        string,
+        { provider?: ModelProvider; isLoading: boolean; isError: boolean }
+      >();
+      providerRefs.forEach((ref, index) => {
+        const query = results[index];
+        map.set(ref, {
+          provider: query?.data,
+          isLoading: Boolean(query?.isLoading),
+          isError: Boolean(query?.isError),
+        });
+      });
+      return map;
+    },
+    [providerRefs]
+  );
+
+  const providersByRef = useQueries({
     queries: providerRefs.map((ref) => {
       const parts = getPartsFromReference(ref);
       return {
@@ -94,23 +118,8 @@ export function useModelDeploymentStatuses(
         staleTime: PROVIDER_STALE_TIME,
       };
     }),
+    combine: combineProviders,
   });
-
-  const providersByRef = useMemo(() => {
-    const map = new Map<
-      string,
-      { provider?: ModelProvider; isLoading: boolean; isError: boolean }
-    >();
-    providerRefs.forEach((ref, index) => {
-      const query = providerQueries[index];
-      map.set(ref, {
-        provider: query?.data,
-        isLoading: Boolean(query?.isLoading),
-        isError: Boolean(query?.isError),
-      });
-    });
-    return map;
-  }, [providerRefs, providerQueries]);
 
   /** For each target, which provider serves it, and which serves its base. */
   const matches = useMemo(
@@ -152,7 +161,26 @@ export function useModelDeploymentStatuses(
     return [...refs].sort();
   }, [matches]);
 
-  const deploymentQueries = useQueries({
+  const combineDeployments = useCallback(
+    (results: UseQueryResult<ModelDeployment>[]) => {
+      const map = new Map<
+        string,
+        { status?: ModelDeploymentStatus; statusMessage?: string; isLoading: boolean }
+      >();
+      deploymentRefs.forEach((ref, index) => {
+        const query = results[index];
+        map.set(ref, {
+          status: query?.data?.status,
+          statusMessage: query?.data?.status_message,
+          isLoading: Boolean(query?.isLoading),
+        });
+      });
+      return map;
+    },
+    [deploymentRefs]
+  );
+
+  const deploymentsByRef = useQueries({
     queries: deploymentRefs.map((ref) => {
       const parts = getPartsFromReference(ref);
       return {
@@ -161,23 +189,8 @@ export function useModelDeploymentStatuses(
         retry: false,
       };
     }),
+    combine: combineDeployments,
   });
-
-  const deploymentsByRef = useMemo(() => {
-    const map = new Map<
-      string,
-      { status?: ModelDeploymentStatus; statusMessage?: string; isLoading: boolean }
-    >();
-    deploymentRefs.forEach((ref, index) => {
-      const query = deploymentQueries[index];
-      map.set(ref, {
-        status: query?.data?.status,
-        statusMessage: query?.data?.status_message,
-        isLoading: Boolean(query?.isLoading),
-      });
-    });
-    return map;
-  }, [deploymentRefs, deploymentQueries]);
 
   return useMemo(() => {
     const states = new Map<string, DeploymentIndicatorState>();

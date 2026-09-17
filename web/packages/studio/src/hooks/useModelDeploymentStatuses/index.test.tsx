@@ -160,6 +160,22 @@ describe('useModelDeploymentStatuses', () => {
     expect(result.current.get('row')).toMatchObject({ hasDeployment: true, status: undefined });
   });
 
+  it('returns a stable map identity across re-renders once resolved', async () => {
+    // useQueries returns a fresh array every render, so without `combine` the
+    // derived map would change identity every render -- which defeats the
+    // useCallback around the table's makeColumns, since it depends on this map.
+    mockedGetProvider.mockResolvedValue(provider([BASE]));
+    const targets = [{ key: 'row', model }];
+    const { result, rerender } = renderHook(() => useModelDeploymentStatuses(targets), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.get('row')?.kind).toBe('served'));
+    const first = result.current;
+    rerender();
+    rerender();
+    expect(result.current).toBe(first);
+  });
+
   it('fetches each provider once even when many rows share it', async () => {
     mockedGetProvider.mockResolvedValue(provider([BASE, COMPOSITE]));
     const { result } = renderStatuses([

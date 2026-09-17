@@ -4,6 +4,13 @@
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { getDeployAction } from '@studio/components/dataViews/CustomModelsDataView/deployAction';
 
+// Deployments are a preview flag, off by default, so the action is gated off
+// unless it is turned on. Same treatment as ModelChat's deploy CTA test.
+vi.mock('@studio/constants/environment', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@studio/constants/environment')>()),
+  DEPLOYMENTS_ENABLED: true,
+}));
+
 const model = { id: 'm', name: 'my-model', workspace: 'default' } as ModelEntity;
 
 describe('getDeployAction', () => {
@@ -43,6 +50,22 @@ describe('getDeployAction', () => {
 
   it('offers nothing when status is unknown, to avoid duplicating a live deployment', () => {
     expect(getDeployAction({ kind: 'unknown' }, model)).toBeNull();
+  });
+
+  it('offers nothing when deployments are disabled', async () => {
+    // The Create Deployment route is gated on the same flag, so an entry shown
+    // here would navigate nowhere. Mirrors DeployModelCta.
+    vi.resetModules();
+    vi.doMock('@studio/constants/environment', async (importOriginal) => ({
+      ...(await importOriginal<typeof import('@studio/constants/environment')>()),
+      DEPLOYMENTS_ENABLED: false,
+    }));
+    const { getDeployAction: gated } =
+      await import('@studio/components/dataViews/CustomModelsDataView/deployAction');
+    expect(gated({ kind: 'not-deployed' }, model)).toBeNull();
+    expect(gated({ kind: 'adapter-not-loaded' }, model)).toBeNull();
+    vi.doUnmock('@studio/constants/environment');
+    vi.resetModules();
   });
 
   it('offers nothing while the row is still resolving', () => {

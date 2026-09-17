@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ModelDeploymentStatus, type ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import { DEPLOYMENTS_ENABLED } from '@studio/constants/environment';
 import type { DeploymentIndicatorState } from '@studio/hooks/useModelDeploymentStatuses';
 import { getWorkspaceNewDeploymentRoute } from '@studio/routes/utils';
 
@@ -28,6 +29,9 @@ export interface DeployActionTarget {
  * | Available                 | none — reachable through an external provider |
  * | Unknown                   | none — we could not read the providers, so offering Deploy might duplicate a live one |
  *
+ * Returns null when deployments are disabled: the wizard route is gated on the
+ * same flag, so the entry would lead nowhere. Mirrors `DeployModelCta`.
+ *
  * @param state - Resolved status for the row.
  * @param model - The model to deploy. For an adapter row this is the parent, since
  *   an adapter is loaded by whatever serves its base model.
@@ -37,6 +41,7 @@ export function getDeployAction(
   state: DeploymentIndicatorState | undefined,
   model: ModelEntity
 ): DeployActionTarget | null {
+  if (!DEPLOYMENTS_ENABLED) return null;
   if (!state) return null;
 
   const offer =
