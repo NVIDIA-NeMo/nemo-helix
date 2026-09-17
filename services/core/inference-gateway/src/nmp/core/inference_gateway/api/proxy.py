@@ -401,27 +401,33 @@ class UpstreamProviderContext:
 
 
 def _redact_url_userinfo(url: str) -> str | None:
-    """Return *url* with any embedded ``username:password`` userinfo stripped, keeping scheme+host(+port).
+    """Return *url* reduced to scheme+host(+port)+path, with any secret-bearing components stripped.
 
-    A provider ``host_url`` is a free-form string with no scheme/userinfo validation, so it
-    can carry embedded credentials (a ``username:password`` pair before an ``@`` in the URL).
-    Those must never reach a
-    client-visible error. Returns ``None`` when the URL can't be parsed into something safe
+    A provider ``host_url`` is a free-form, unvalidated string, so it can carry secrets in
+    multiple places: userinfo (a ``username:password`` pair before an ``@``), the query
+    string (``?api_key=...``), or the fragment (``#token=...``). None of those may reach a
+    client-visible error, so we keep ONLY scheme, host, port, and path and drop userinfo,
+    query, and fragment. Returns ``None`` when the URL can't be parsed into something safe
     to show (no hostname) so the caller can fall back to a non-sensitive identifier rather
     than risk emitting raw credentials.
     """
     try:
         parts = urlsplit(url)
+        # urlsplit is lazy: an out-of-range/malformed port only raises when .port is
+        # accessed, so read it INSIDE the try or a bad port escapes as a 500 instead of
+        # the intended 424.
+        port = parts.port
     except ValueError:
         return None
     if not parts.hostname:
         # Unparseable / schemeless / no host — don't risk leaking; signal fallback.
         return None
     netloc = parts.hostname
-    if parts.port is not None:
-        netloc = f"{netloc}:{parts.port}"
-    # Drop username/password entirely; keep scheme, host, port, path, query.
-    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    if port is not None:
+        netloc = f"{netloc}:{port}"
+    # Keep only scheme + host(+port) + path; drop userinfo, query, and fragment — any of
+    # which can carry a secret in an unvalidated host_url.
+    return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
 
 
 def _dependency_failure_detail(

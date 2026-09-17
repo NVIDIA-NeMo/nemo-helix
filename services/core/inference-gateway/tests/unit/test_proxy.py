@@ -1615,6 +1615,72 @@ async def test_proxy_request_424_falls_back_to_provider_name_when_host_unparseab
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("secret_component", ["?api_key=SUPERSECRET", "#token=SUPERSECRET"])
+async def test_proxy_request_424_drops_query_and_fragment_from_host_url(
+    mock_proxy_client, next_request_info, secret_component
+):
+    """A secret carried in the host URL's query string or fragment must not reach the 424 detail."""
+    import aiohttp
+    from nmp.core.inference_gateway.api.proxy import UpstreamProviderContext
+
+    mock_response = Mock(spec=aiohttp.ClientResponse)
+    mock_response.status = 401
+    mock_response.closed = False
+    mock_response.headers = CIMultiDict({"content-type": "application/json"})
+    mock_response.read = AsyncMock(return_value=b"")
+    mock_proxy_client.request = AsyncMock(return_value=mock_response)
+
+    context = UpstreamProviderContext(
+        model_provider_name="secret-provider",
+        provider_host_url=f"https://host.example.com/v1{secret_component}",
+        model_name="default/m",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await proxy_request(mock_proxy_client, next_request_info, upstream_context=context)
+
+    detail = exc_info.value.detail
+    assert exc_info.value.status_code == 424
+    # Scheme + host + path kept; the secret-bearing query/fragment dropped.
+    assert "https://host.example.com/v1" in detail
+    assert "SUPERSECRET" not in detail
+
+
+@pytest.mark.asyncio
+async def test_proxy_request_424_bad_port_falls_back_without_500(mock_proxy_client, next_request_info):
+    """An out-of-range port in host_url must not raise (500) — it degrades to the provider name and stays 424.
+
+    ``urlsplit`` defers port validation until ``.port`` is read, so an out-of-range port only
+    raises ``ValueError`` at access time. The redaction helper reads the port inside its own
+    try/except; if that regressed, this request would surface as a 500 instead of a 424.
+    """
+    import aiohttp
+    from nmp.core.inference_gateway.api.proxy import UpstreamProviderContext
+
+    mock_response = Mock(spec=aiohttp.ClientResponse)
+    mock_response.status = 404
+    mock_response.closed = False
+    mock_response.headers = CIMultiDict({"content-type": "application/json"})
+    mock_response.read = AsyncMock(return_value=b"")
+    mock_proxy_client.request = AsyncMock(return_value=mock_response)
+
+    context = UpstreamProviderContext(
+        model_provider_name="bad-port-provider",
+        provider_host_url="https://host.example.com:99999/v1",  # port > 65535 -> ValueError on .port
+        model_name="default/m",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await proxy_request(mock_proxy_client, next_request_info, upstream_context=context)
+
+    detail = exc_info.value.detail
+    # Stays a 424 (not a 500) and degrades to the provider name rather than leaking the raw URL.
+    assert exc_info.value.status_code == 424
+    assert "'bad-port-provider'" in detail
+    assert "99999" not in detail
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status_code", [400, 422, 429, 500, 502, 503])
 async def test_proxy_request_passes_through_other_backend_errors(mock_proxy_client, next_request_info, status_code):
     """Test that other backend errors (429, 422, 5xx, etc.) pass through with original status."""
