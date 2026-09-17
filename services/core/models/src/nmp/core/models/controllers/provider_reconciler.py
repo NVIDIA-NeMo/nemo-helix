@@ -49,8 +49,17 @@ _VIRTUAL_MODEL_PAGE_SIZE = 200
 # Use entity store's NAME_PATTERN so we only create/link names the entity store accepts
 _VALID_MODEL_ENTITY_NAME_PATTERN = re.compile(NAME_PATTERN)
 
-# When the backend returns 404, the gateway rewrites it to 502 with this phrase in the detail.
-_GATEWAY_BACKEND_404_DETAIL = "Backend returned 404"
+# IGW wraps an upstream backend rejection (401/403/404 during model discovery — e.g. a
+# NIM that has no GET /v1/models) as 424 Failed Dependency whose detail contains this
+# marker. We key the "backend is non-compliant" classification on this token (not on
+# 424 alone) because 424 is ALSO used for a platform-side unresolved provider secret
+# (transient), which must NOT be treated as non-compliant. Keep this in lockstep with
+# _UPSTREAM_REJECTED_DETAIL_MARKER in the inference-gateway proxy
+# (services/core/inference-gateway/src/nmp/core/inference_gateway/api/proxy.py).
+_GATEWAY_UPSTREAM_REJECTED_DETAIL = "rejected the request"
+# 424 Failed Dependency. This layer uses bare int status codes (no fastapi import in
+# the controller); named for readability, mirrors fastapi.status.HTTP_424_FAILED_DEPENDENCY.
+_HTTP_424_FAILED_DEPENDENCY = 424
 
 # Seconds a provider can stay in CREATED with transient failures before escalating to ERROR (~6 cycles at 5s)
 PROVIDER_ERROR_THRESHOLD_SECONDS = 30
@@ -761,14 +770,16 @@ class ModelProviderReconciler:
             if e.status_code == 404:
                 logger.warning(f"Provider {provider_id} not yet in gateway cache (404), preserving served_models")
                 return DiscoveryTransientError("Provider not yet in gateway cache (404)")
-            # IGW (FastAPI) returns 502 with body {"detail": "Backend returned 404: ..."} when backend has no /v1/models.
-            if e.status_code == 502 and _GATEWAY_BACKEND_404_DETAIL in e.detail:
-                # Backend (NIM) returned 404 — no GET /v1/models or similar. Mark non-compliant.
-                logger.info(
-                    f"Backend for {provider_id} returned 404 for GET /v1/models, disabling model entity routing"
-                )
+            # IGW wraps an upstream backend rejection (401/403/404 — e.g. a NIM with no
+            # GET /v1/models) as 424 Failed Dependency. A 424 whose detail carries the
+            # upstream-rejection marker means the backend answered "no" to discovery, so
+            # mark the provider non-compliant. (A 424 WITHOUT the marker is the platform-
+            # side unresolved-secret case, which falls through to transient below.)
+            if e.status_code == _HTTP_424_FAILED_DEPENDENCY and _GATEWAY_UPSTREAM_REJECTED_DETAIL in e.detail:
+                # Backend (NIM) rejected GET /v1/models — no such route. Mark non-compliant.
+                logger.info(f"Backend for {provider_id} rejected GET /v1/models (424), disabling model entity routing")
                 return DiscoveryNonCompliant()
-            # Other 4xx/5xx (e.g. 502 with other detail, 429, 5xx) — treat as transient
+            # Other 4xx/5xx (e.g. 424 unresolved-secret, 502, 429, 5xx) — treat as transient
             logger.debug(
                 "Failed to get models from provider via gateway",
                 extra={"provider": provider_id, "error": str(e), "status_code": e.status_code},

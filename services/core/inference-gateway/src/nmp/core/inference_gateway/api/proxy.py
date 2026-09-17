@@ -370,7 +370,18 @@ async def _read_error_body(response: aiohttp.ClientResponse) -> str:
 # rewriting a non-retryable 4xx as a 5xx breaks clients that retry 5xx with
 # backoff but not 4xx.
 _DEPENDENCY_FAILURE_STATUSES = (401, 403, 404)
-_DEPENDENCY_FAILURE_STATUS = 424  # Failed Dependency
+_DEPENDENCY_FAILURE_STATUS = http_status.HTTP_424_FAILED_DEPENDENCY  # 424 Failed Dependency
+
+# Stable machine-matchable marker embedded in every wrapped-upstream-rejection 424
+# detail (both the provider-named and the generic branch of
+# ``_dependency_failure_detail`` contain this phrase). It is the CROSS-SERVICE
+# contract token: the models provider-reconciler keys its "backend is non-compliant
+# (no GET /v1/models)" classification on a 424 whose detail contains this marker, to
+# distinguish an upstream *rejection* 424 from the platform-side unresolved-secret
+# 424 (``raise_unresolved_provider_secret`` in api/errors.py), which is transient.
+# If you change the wording of the message below, update the reconciler's matching
+# token in services/core/models/.../controllers/provider_reconciler.py in lockstep.
+_UPSTREAM_REJECTED_DETAIL_MARKER = "rejected the request"
 
 
 @dataclass(frozen=True)
@@ -406,12 +417,12 @@ def _dependency_failure_detail(
 
     if provider and host and model:
         first = (
-            f"Model provider {provider!r} at upstream {host!r} rejected the request "
+            f"Model provider {provider!r} at upstream {host!r} {_UPSTREAM_REJECTED_DETAIL_MARKER} "
             f"for model {model!r} with HTTP status {status_code}"
         )
     else:
         # Degrade gracefully when full provider context is unavailable.
-        first = f"The upstream model provider rejected the request with HTTP status {status_code}"
+        first = f"The upstream model provider {_UPSTREAM_REJECTED_DETAIL_MARKER} with HTTP status {status_code}"
     if context.purpose:
         first += f" while {context.purpose}"
     first += "."
