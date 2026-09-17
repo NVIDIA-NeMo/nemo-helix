@@ -92,6 +92,10 @@
     path: ../../safe-synthesizer/tutorials/index.mdx
   - page: Safe Synthesizer 101
     path: ../../safe-synthesizer/tutorials/safe-synthesizer-101.mdx
+- section: Studio
+  contents:
+  - page: Monitor
+    path: ../../studio/monitor.mdx
 - section: evaluator
   contents:
   - page: Job Management
