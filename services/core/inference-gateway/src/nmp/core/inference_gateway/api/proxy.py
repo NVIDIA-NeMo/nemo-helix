@@ -9,6 +9,7 @@ import uuid
 from collections.abc import AsyncIterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncIterator, Union
+from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 from aiohttp import ClientSession
@@ -399,6 +400,30 @@ class UpstreamProviderContext:
     purpose: str | None = None
 
 
+def _redact_url_userinfo(url: str) -> str | None:
+    """Return *url* with any embedded ``username:password`` userinfo stripped, keeping scheme+host(+port).
+
+    A provider ``host_url`` is a free-form string with no scheme/userinfo validation, so it
+    can carry embedded credentials (a ``username:password`` pair before an ``@`` in the URL).
+    Those must never reach a
+    client-visible error. Returns ``None`` when the URL can't be parsed into something safe
+    to show (no hostname) so the caller can fall back to a non-sensitive identifier rather
+    than risk emitting raw credentials.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    if not parts.hostname:
+        # Unparseable / schemeless / no host — don't risk leaking; signal fallback.
+        return None
+    netloc = parts.hostname
+    if parts.port is not None:
+        netloc = f"{netloc}:{parts.port}"
+    # Drop username/password entirely; keep scheme, host, port, path, query.
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
 def _dependency_failure_detail(
     status_code: int,
     error_body: str,
@@ -412,12 +437,20 @@ def _dependency_failure_detail(
     """
     context = context or UpstreamProviderContext()
     provider = context.model_provider_name
-    host = context.provider_host_url
     model = context.model_name
+    # Redact any embedded credentials from the host URL before it reaches the client.
+    # If it can't be safely parsed, fall back to naming the provider only (no host).
+    host = _redact_url_userinfo(context.provider_host_url) if context.provider_host_url else None
 
     if provider and host and model:
         first = (
             f"Model provider {provider!r} at upstream {host!r} {_UPSTREAM_REJECTED_DETAIL_MARKER} "
+            f"for model {model!r} with HTTP status {status_code}"
+        )
+    elif provider and model:
+        # Host URL unavailable or unsafe to show — name the provider + model without a host.
+        first = (
+            f"Model provider {provider!r} {_UPSTREAM_REJECTED_DETAIL_MARKER} "
             f"for model {model!r} with HTTP status {status_code}"
         )
     else:
