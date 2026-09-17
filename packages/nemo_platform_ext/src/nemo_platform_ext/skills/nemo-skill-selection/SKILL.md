@@ -18,6 +18,9 @@ triggers:
   - tear down nemo
   - what is running on nemo
   - help me ship an agent
+  - fine-tune embedding
+  - retrieval recipe
+  - domain retrieval
 not-for:
   - setup (use to verify install or to be told how to run the CLI install)
   - nemo-build-agent (use for the actual scaffold/deploy flow)
@@ -64,7 +67,8 @@ Match the user's intent to one downstream skill. Pick exactly one.
 | "create an experiment", "publish evaluation runs", "evaluation leaderboard" | `nemo-experiments-upload` | Create Experiments and Evaluations, ingest their telemetry and scores, and verify leaderboard rollups |
 | "status", "what is running", "platform health", "is the platform up", "what's deployed", "show me what's running" | `nemo-status` | Read-only dashboard: platform, agents, providers, models |
 | "shut down", "stop NeMo", "tear down", "clean up" | `nemo-teardown` | Stop the cluster (keep data, delete platform data, or full cleanup) |
-| "fine-tune", "customize the model", "train on my data", "SFT", "LoRA" | `nemo-customizer` | Model customization via installed customization contributor plugins (`nemo-customizer-plugin`). Requires plugin skills to be installed (`nemo skills install` / enabled-plugins). |
+| "fine-tune embedding", "fine-tune rerank", "retrieval recipe", "domain corpus retrieval", "Nemotron embed", "Nemotron rerank", "retrieve-eval", "nDCG on my documents" | `nemo-retrieval-recipes` | Cross-plugin embed/rerank recipe: Data Designer retrieval jobs, Automodel `bi_encoder`/`cross_encoder`, Evaluator `retrieve-eval`. Not chat SFT. |
+| "fine-tune", "customize the model", "train on my data", "SFT", "LoRA" | `nemo-customizer` | Chat/SFT/LoRA/DPO/GRPO via customization contributor plugins. Embedding/rerank domain pipelines go to `nemo-retrieval-recipes` first. |
 | "why does my agent keep failing", "analyze my agent's traces", "find recurring failure patterns", "generate insights for my agent" | `nemo-analyst` (plugin-owned, in `plugins/nemo-insights`) | Reads an agent's existing telemetry and files each recurring failure pattern as an Insight citing the traces that evidence it. Requires the Insights plugin; produces the Insight `nemo-experimentalist` acts on. |
 | "improve the agent's own code", "fix my agent harness", "candidate code change", "optimize from an Insight", "improve on train and validation datasets" | `nemo-experimentalist` (plugin-owned, in `plugins/nemo-experimentalist`) | Source/harness optimization: generate and validate candidate code changes against Harbor-compatible evaluation data. Requires the Experimentalist plugin; use after `agents analyst` has created an Insight, or with explicit datasets. |
 | "optimize my agent", "make it cheaper", "reduce latency", "smaller model", "switchyard", "routing split", "compare against a newer model" | `agents-optimize` (plugin-owned, in `plugins/nemo-agents`) | Cost / latency / quality optimization for a **deployed** agent. Routing splits, skill tuning, prompt tuning, new-model scans. |
@@ -131,17 +135,18 @@ NeMo Platform skills I can route to:
   nemo-experiments-upload  publish named evaluation runs to an Experiments leaderboard
   nemo-status     read-only platform health dashboard
   nemo-teardown   guided shutdown
+  nemo-retrieval-recipes  embedding/rerank domain fine-tune on Platform plugin jobs
 
 Plugin-owned skills:
   agents-optimize   cost / latency / quality optimization for a deployed agent
   agents-secure     safety and security audit for a deployed agent
-  nemo-evaluator    evaluation metrics, LLM-judge, benchmark jobs
-  nemo-customizer   fine-tuning of models
+  nemo-evaluator-plugin  evaluation metrics, LLM-judge, retrieve-eval, benchmark jobs
+  nemo-customizer   fine-tuning of chat/SFT/RL models (not the retrieval recipe)
   nemo-analyst      analyze agent telemetry and file recurring problems as Insights
   nemo-experimentalist  source/harness optimization from Insights or evaluation datasets
   guardrails        content-safety middleware via virtual models
   auditor           red-team vulnerability scanning (garak)
-  data-designer     synthetic dataset generation
+  nemo-data-designer-plugin  synthetic dataset generation (tabular `create`; retrieval SDG is the retrieval recipe)
   anonymizer        PII handling for datasets
 
 Which one fits what you're trying to do?
@@ -179,7 +184,7 @@ Do not proactively suggest Studio as the path for anything a skill already cover
 - **One skill at a time.** Do not load more than one downstream skill in the same turn. Each downstream skill is a full procedure with its own context budget.
 - **Install must happen before any skill can do useful work.** Build, try, and status all assume the platform is up. If the user has not run the CLI install (`make bootstrap` + `nemo setup`), the skills cannot work around that; hand them to `setup` for instructions.
 - **NeMo Platform is the product name.** Capital N, e, M, o, P. Not "nemo" or "Nemo." NAT on first mention is "NVIDIA NeMo Agent Toolkit (NAT)."
-- **Model customization** goes to the `nemo-customizer` plugin skill when `nemo-customizer-plugin` (and a training backend) are installed. If that skill is not available, tell the user to enable customization plugins and install skills — do not improvise training with an external library.
+- **Model customization** for chat/SFT/RL goes to the `nemo-customizer` plugin skill when `nemo-customizer-plugin` (and a training backend) are installed. **Embedding and reranking recipes** (domain corpus, retrieval SDG, `bi_encoder` / `cross_encoder`, `retrieve-eval`) go to `nemo-retrieval-recipes`. If those skills are not available, tell the user to enable the plugins and install skills — do not improvise training with an external library.
 - **Execution compatibility.** New Platform configs must select a supported
   harness. Existing NAT workflows may remain on the NAT compatibility path.
   For another framework or an arbitrary Python entrypoint, inspect whether a

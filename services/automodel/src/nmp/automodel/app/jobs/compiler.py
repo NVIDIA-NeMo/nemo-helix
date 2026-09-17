@@ -424,14 +424,14 @@ async def platform_job_config_compiler(
     file_io_download_config = _build_file_download_config(transformed_spec, me, teacher_me)
     training_recipe = _resolve_training_recipe(me, transformed_spec.training.recipe)
 
-    # The embedding NIM requires ONNX format, which cannot represent standalone LoRA adapters.
+    # Embedding and ranking NIMs require ONNX, which cannot represent standalone LoRA adapters.
     # LoRA with merge=True (lora_merged) is allowed because it produces a full-weight model after training.
     if training_recipe.value in ("bi_encoder", "cross_encoder") and (
         transformed_spec.training.finetuning_type == FinetuningType.LORA
     ):
         raise PlatformJobCompilationError(
             "NeMo Platform does not support unmerged LoRA for embedding or cross-encoder models. "
-            "Embedding NIM requires ONNX (no standalone adapters); ranking NIM expects a full-weight checkpoint. "
+            "Embedding and ranking NIMs require ONNX, which cannot represent standalone adapters. "
             "Use peft with merge=True (lora_merged) or omit peft for all_weights training."
         )
 

@@ -138,6 +138,10 @@ docs-watch: ## Start Fern docs dev plus a repo-level watcher for docs/** changes
 docs-check: ## Validate the Fern docs (fern check + validate-mdx + gated-link check)
 	cd docs/fern && npm run check
 
+.PHONY: docs-lint-snippets
+docs-lint-snippets: ## Syntax-check Python fenced snippets across all docs
+	$(UV) run --frozen python docs/_scripts/lint_python_snippets.py docs --no-type-check
+
 .PHONY: docs-check-python-snippets
 docs-check-python-snippets: ## Syntax-check and type-check Python snippets in one doc (DOCS_PATH=...)
 	@if [ -z "$(strip $(DOCS_PATH))" ]; then echo "Usage: make docs-check-python-snippets DOCS_PATH=docs/customizer/tutorials/import-hf-model.mdx" >&2; exit 2; fi

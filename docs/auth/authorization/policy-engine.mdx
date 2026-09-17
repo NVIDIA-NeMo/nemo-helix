@@ -133,6 +133,7 @@ Services use this for fine-grained authorization beyond the middleware.
 ```python
 if await auth_client.has_permissions(workspace_id, ["models.create"]):
     # Allow model creation
+    ...
 ```
 
 ### `has_role` — Role Checks
