@@ -1485,8 +1485,8 @@ def test_normalize_proxy_url(host_url, trailing_uri, expected):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status_code", [401, 403, 404])
-async def test_proxy_request_wraps_certain_errors_in_502(mock_proxy_client, next_request_info, status_code):
-    """Test that certain backend errors (401/403/404) are wrapped in 502."""
+async def test_proxy_request_wraps_certain_errors_in_424(mock_proxy_client, next_request_info, status_code):
+    """Test that certain backend rejections (401/403/404) are wrapped in 424 Failed Dependency."""
     import aiohttp
 
     mock_response = Mock(spec=aiohttp.ClientResponse)
@@ -1501,13 +1501,47 @@ async def test_proxy_request_wraps_certain_errors_in_502(mock_proxy_client, next
     with pytest.raises(HTTPException) as exc_info:
         await proxy_request(mock_proxy_client, next_request_info)
 
-    assert exc_info.value.status_code == 502
-    assert f"Backend returned {status_code}" in exc_info.value.detail
+    assert exc_info.value.status_code == 424
+    assert f"HTTP status {status_code}" in exc_info.value.detail
+    assert "will not resolve by retrying" in exc_info.value.detail
     assert "model not found on backend" in exc_info.value.detail
     assert exc_info.value.headers is not None
     assert exc_info.value.headers.get("retry-after") == "30"
     assert "content-type" not in exc_info.value.headers
     assert "content-length" not in exc_info.value.headers
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [401, 403, 404])
+async def test_proxy_request_424_names_provider_and_host(mock_proxy_client, next_request_info, status_code):
+    """With upstream context, the 424 detail names the provider, host URL and model."""
+    import aiohttp
+    from nmp.core.inference_gateway.api.proxy import UpstreamProviderContext
+
+    mock_response = Mock(spec=aiohttp.ClientResponse)
+    mock_response.status = status_code
+    mock_response.closed = False
+    mock_response.headers = CIMultiDict({"content-type": "application/json"})
+    mock_response.read = AsyncMock(return_value=b"")
+    mock_proxy_client.request = AsyncMock(return_value=mock_response)
+
+    context = UpstreamProviderContext(
+        model_provider_name="my-openai",
+        provider_host_url="https://api.openai.com/v1",
+        model_name="default/gpt-4o",
+        purpose="proxying 'v1/chat/completions'",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await proxy_request(mock_proxy_client, next_request_info, upstream_context=context)
+
+    assert exc_info.value.status_code == 424
+    detail = exc_info.value.detail
+    assert "'my-openai'" in detail
+    assert "'https://api.openai.com/v1'" in detail
+    assert "'default/gpt-4o'" in detail
+    assert f"HTTP status {status_code}" in detail
+    assert "proxying 'v1/chat/completions'" in detail
 
 
 @pytest.mark.asyncio
@@ -2163,8 +2197,8 @@ async def test_fetch_proxy_response_rewrites_plain_text_5xx(mock_proxy_client, n
 
 
 @pytest.mark.asyncio
-async def test_fetch_proxy_response_rewrites_401_wrapped_in_502(mock_proxy_client, next_request_info):
-    """A 401 is wrapped as 502; the served name is still scrubbed from the wrapped detail."""
+async def test_fetch_proxy_response_rewrites_401_wrapped_in_424(mock_proxy_client, next_request_info):
+    """A 401 is wrapped as 424; the served name is still scrubbed from the wrapped detail."""
     body = json.dumps({"error": {"message": "invalid key for served-name"}}).encode()
     mock_proxy_client.request = AsyncMock(return_value=_error_response(401, body))
 
@@ -2176,7 +2210,7 @@ async def test_fetch_proxy_response_rewrites_401_wrapped_in_502(mock_proxy_clien
             restored_model_id="ws/entity",
         )
 
-    assert exc_info.value.status_code == 502
+    assert exc_info.value.status_code == 424
     assert "served-name" not in exc_info.value.detail
     assert "ws/entity" in exc_info.value.detail
 
