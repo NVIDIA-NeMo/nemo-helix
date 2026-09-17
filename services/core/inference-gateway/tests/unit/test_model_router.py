@@ -312,10 +312,10 @@ def test_model_router_routes_cross_workspace_lora(
     """Cross-workspace LoRA via the model entity router: ``base_ws="ws-a"``,
     ``adapter_ws="ws-b"``, ``provider.workspace="ws-a"``.
 
-    The autoprovisioned-VM reconciler skips LoRA composites (provider_reconciler.py:440),
-    so we explicitly pre-populate a ``VirtualModel`` whose ``default_model_entity`` matches
-    the composite entity id — this is the manual-VM-as-escape-hatch path. ``parse_model_entity_ref``
-    in the proxy is composite-aware (split on first '/' only), so the lookup succeeds and the
+    No per-adapter VM is created; the request routes through the **base model's** VM
+    (keyed ``("ws-a", "base")``) via ``resolve_vm_for_model``, and the
+    ``default_model_entity`` splice preserves the ``&adapters/ws-b/adapter`` suffix so
+    ``parse_model_entity_ref`` (split on first '/') resolves the composite entity and the
     served-model rewrite still resolves to the flat-dir encoded backend id.
     """
     upstream = {"choices": []}
@@ -342,15 +342,15 @@ def test_model_router_routes_cross_workspace_lora(
     cache.rebuild_model_entity_map()
     app.dependency_overrides[global_model_cache] = lambda: cache
 
-    # Manual VM for the LoRA composite (controller skips this case — see
-    # provider_reconciler.py:440 — so operators must create it explicitly today).
+    # Base model's VM (keyed ("ws-a", "base")) — the adapter request routes through it;
+    # the controller creates no per-adapter VM (provider_reconciler.py:440).
     vm_cache = VirtualModelCache()
     vm_cache.rebuild(
         [
             _make_sdk_vm(
                 workspace="ws-a",
-                name="base&adapters/ws-b/adapter",
-                default_model_entity="ws-a/base&adapters/ws-b/adapter",
+                name="base",
+                default_model_entity="ws-a/base",
             )
         ]
     )
@@ -382,9 +382,10 @@ def test_model_router_routes_url_encoded_cross_workspace_lora(
     """Cross-workspace LoRA with the ``&adapters/`` separators URL-encoded as ``%2F``.
 
     Guard against a client that url-encodes its own output of ``GET /v1/models`` —
-    the path ``base&adapters%2Fws-b%2Fadapter`` must resolve to the same cache key
-    ``("ws-a", "base&adapters/ws-b/adapter")`` as the unencoded form. As with the
-    unencoded variant, this requires a manual VirtualModel for the LoRA composite.
+    the path ``base&adapters%2Fws-b%2Fadapter`` must resolve through the base model's VM
+    (keyed ``("ws-a", "base")``) and, after the splice, reach the composite cache key
+    ``("ws-a", "base&adapters/ws-b/adapter")`` — the same as the unencoded form. No
+    per-adapter VM exists.
     """
     upstream = {"choices": []}
     mock_proxy_response._body = [json.dumps(upstream).encode()]
@@ -414,8 +415,8 @@ def test_model_router_routes_url_encoded_cross_workspace_lora(
         [
             _make_sdk_vm(
                 workspace="ws-a",
-                name="base&adapters/ws-b/adapter",
-                default_model_entity="ws-a/base&adapters/ws-b/adapter",
+                name="base",
+                default_model_entity="ws-a/base",
             )
         ]
     )
@@ -435,6 +436,53 @@ def test_model_router_routes_url_encoded_cross_workspace_lora(
     assert sent_body["model"] == "ws-b--adapter"
     assert urlparse(call_args.kwargs["url"]).hostname == "nim.workspace-a.example.com"
     assert "ws-b" not in call_args.kwargs["url"]
+
+
+def test_model_router_adapter_routes_through_base_vm(
+    app: FastAPI, client: TestClient, mock_proxy_client, mock_proxy_response
+):
+    """The model-entity route sends an adapter through the **base** model's VM.
+
+    The URL name is the composite ``base&adapters/ws/adder``; there is no per-adapter VM.
+    ``resolve_vm_for_model`` keys the VM by the base segment (``base``), the URL composite
+    is seeded into ``body["model"]``, and the splice preserves the suffix so the served
+    name resolves. Complements the openai-route adapter tests — same behavior, model route.
+    """
+    upstream = {"choices": []}
+    mock_proxy_response._body = [json.dumps(upstream).encode()]
+    cache = ModelCache()
+    cache.update_model_info(
+        ModelProviderInfo(
+            model_provider=ModelProvider(
+                workspace="ws",
+                name="nim-provider",
+                host_url="http://nim.example.com",
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+                served_models=[
+                    ServedModelMapping(
+                        model_entity_id="ws/base&adapters/ws/adder",
+                        served_model_name="adder-backend-id",
+                    ),
+                ],
+            )
+        )
+    )
+    cache.rebuild_model_entity_map()
+    app.dependency_overrides[global_model_cache] = lambda: cache
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([_make_sdk_vm("ws", "base", default_model_entity="ws/base")])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+
+    response = client.post(
+        "/v2/workspaces/ws/model/base&adapters/ws/adder/-/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "Hello"}]},
+    )
+    assert response.status_code == 200
+    assert response.json() == upstream
+    # Served-model-name rewrite writes the adapter's served name upstream.
+    sent_body = json.loads(mock_proxy_client.request.call_args.kwargs["data"])
+    assert sent_body["model"] == "adder-backend-id"
 
 
 # ---------------------------------------------------------------------------

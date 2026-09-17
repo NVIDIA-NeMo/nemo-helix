@@ -31,6 +31,7 @@ from nmp.core.inference_gateway.api.proxy import (
     PROXY_OPENAPI_EXTRA,
     virtual_model_proxy,
 )
+from nmp.core.inference_gateway.api.v2.openai import resolve_vm_for_model
 from nmp.core.inference_gateway.api.validation import validate_entity_name, validate_model_entity_name
 from nmp.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 
@@ -115,9 +116,9 @@ async def model_entity_proxy(
     validate_model_entity_name(name, field_name="name")
     logger.info(f"Model entity proxy request: {workspace}/{name}/-/{trailing_uri}")
 
-    virtual_model = virtual_model_cache.get(workspace, name)
+    virtual_model = resolve_vm_for_model(virtual_model_cache, workspace, name)
 
-    if virtual_model is None:
+    if virtual_model is None or virtual_model.name is None:
         raise_virtual_model_not_found(workspace, name)
 
     # Parse body before handing off — bodyless requests (e.g. GET) get an
@@ -127,10 +128,16 @@ async def model_entity_proxy(
     except Exception:
         json_body = {}
 
+    # The routing intent for this route is the URL ``name`` (which may be a LoRA
+    # composite ``base&adapters/{ws}/{adapter}``), not the body model. Seed it into
+    # ``body["model"]`` so the ``default_model_entity`` splice in virtual_model_proxy
+    # can preserve the adapter suffix when routing through the base model's VM.
+    json_body["model"] = name
+
     return await virtual_model_proxy(
         request=request,
         workspace=workspace,
-        vm_name=name,
+        vm_name=virtual_model.name,
         virtual_model=virtual_model,
         trailing_uri=trailing_uri,
         json_body=json_body,

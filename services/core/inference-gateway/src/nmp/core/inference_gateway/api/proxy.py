@@ -896,8 +896,22 @@ async def virtual_model_proxy(
     )
 
     # Seed body["model"] if a default is set on the virtual model.
+    #
+    # For a LoRA adapter, the request model is a composite
+    # ``{base}&adapters/{adapter_ws}/{adapter_name}`` routed through the *base* model's
+    # VM (see resolve_vm_for_model). In that case, splice the VM's default_model_entity
+    # into ONLY the base segment and preserve the ``&adapters/...`` suffix, so the request
+    # inherits the base VM's middleware while still resolving to the adapter's served model
+    # entity. Example: body ``myvm-ws/myvm&adapters/a-ws/a-name`` + default ``base-ws/base``
+    # → ``base-ws/base&adapters/a-ws/a-name``. A non-composite body is replaced wholesale
+    # (the existing behavior); if default_model_entity is unset, body["model"] is left as-is.
     if virtual_model.default_model_entity:
-        json_body["model"] = virtual_model.default_model_entity
+        body_model = json_body.get("model")
+        if isinstance(body_model, str) and "&adapters/" in body_model:
+            adapter_suffix = body_model.split("&adapters/", 1)[1]
+            json_body["model"] = f"{virtual_model.default_model_entity}&adapters/{adapter_suffix}"
+        else:
+            json_body["model"] = virtual_model.default_model_entity
 
     # Build per-request context.  original_request captures the state after model
     # seeding but before any plugin runs; plugins receive a separate InferenceRequest
