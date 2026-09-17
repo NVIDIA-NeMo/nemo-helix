@@ -5537,6 +5537,13 @@ components:
           title: Batch Size
           description: Embedding HTTP batch size.
           default: 32
+        embedding_in_flight:
+          type: integer
+          minimum: 1.0
+          title: Embedding In Flight
+          description: Concurrent embedding POSTs to one NIM so the GPU is not idle
+            between batches.
+          default: 2
         embedding_dimensions:
           title: Embedding Dimensions
           description: Expected embedding width. Omit to accept the model's native
@@ -5584,6 +5591,13 @@ components:
           title: Batch Size
           description: Embedding HTTP batch size.
           default: 32
+        embedding_in_flight:
+          type: integer
+          minimum: 1.0
+          title: Embedding In Flight
+          description: Concurrent embedding POSTs to one NIM so the GPU is not idle
+            between batches.
+          default: 2
         embedding_dimensions:
           title: Embedding Dimensions
           description: Expected embedding width. Omit to accept the model's native

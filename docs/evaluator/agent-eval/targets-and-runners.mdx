@@ -20,8 +20,7 @@ description: "Reference for what an agent-eval run can point at — a Model, a d
 | `CallableAgentTaskRunner` | an in-process async function | none | [Quickstart](/documentation/evaluate-models/agent-eval/quickstart) |
 | `HarborAgentTaskRunner` | a Harbor task suite | `harbor` + Docker | [Harbor Task Suite](/documentation/evaluate-models/agent-eval/harbor-runner) |
 | `GymAgentTaskRunner` | a NeMo Gym environment + agent | the `gym` CLI on `PATH` | [NeMo Gym Environment](/documentation/evaluate-models/agent-eval/gym-runner) |
-| `FabricAgentRuntime` | a NeMo Fabric harness (Codex, Claude, Hermes, deepagents) | the `fabric` extra | [NeMo Fabric Harness](/documentation/evaluate-models/agent-eval/fabric-runner) |
-| `FabricContainerRuntime` | the same harnesses, run inside a sandbox | the `fabric` extra + a sandbox provider | [NeMo Fabric Harness](/documentation/evaluate-models/agent-eval/fabric-runner) |
+| `FabricAgentRuntime` | a NeMo Fabric harness (Codex, Claude, Hermes, deepagents), on the host or in a sandbox | the `fabric` extra (+ a sandbox provider for `sandbox=`) | [NeMo Fabric Harness](/documentation/evaluate-models/agent-eval/fabric-runner) |
 | *your* `AgentTaskRunner` | anything that turns tasks into trials | up to you | *(this page)* |
 
 The union is `AgentEvalTarget = Model | Agent | AgentTaskRunner`, where `Agent = GenericAgent |
@@ -167,13 +166,11 @@ covers several agent frontends:
 | `nvidia.fabric.hermes` | Hermes SDK (`transport="library"`) |
 | `nvidia.fabric.langchain.deepagents` | LangChain deepagents — **not** installed by this SDK's `fabric` extra (see below) |
 
-Two runtimes share that config:
+`FabricAgentRuntime` runs that config on the host by default, capturing an ATIF trajectory. Pass
+`sandbox=<SandboxProvider>` to run the same configuration inside a sandbox instead; `image` and
+`secrets` apply there.
 
-- **`FabricAgentRuntime`** runs the harness directly, capturing an ATIF trajectory.
-- **`FabricContainerRuntime`** runs the same configuration inside a sandbox, and additionally
-  accepts `skills` and `secrets`.
-
-Both need the `fabric` extra, which pulls the Codex, Claude, and Hermes adapters:
+It needs the `fabric` extra, which pulls the Codex, Claude, and Hermes adapters:
 
 ```bash
 uv sync --frozen --package nemo-evaluator-sdk --extra fabric --inexact

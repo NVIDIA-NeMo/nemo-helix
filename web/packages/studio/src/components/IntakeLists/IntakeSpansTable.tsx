@@ -7,6 +7,7 @@ import * as DataView from '@nemo/common/src/components/DataView/internal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
 import {
@@ -40,7 +41,7 @@ import {
 } from '@studio/util/intakeTelemetry';
 import { keepPreviousData } from '@tanstack/react-query';
 import { type ComponentProps, type FC, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 
 const SPAN_STATUS_FILTER_OPTIONS = [
   { value: 'success', label: 'Success' },
@@ -144,7 +145,7 @@ const SeededIntakeSpansTable: FC<
   onRowClick,
   defaultStartedAtFilter,
 }) => {
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const routeWorkspace = useWorkspaceFromPathIfExists();
   const workspace = workspaceProp ?? routeWorkspace;
   const hasWorkspace = Boolean(workspace);
@@ -153,9 +154,10 @@ const SeededIntakeSpansTable: FC<
     onRowClick === null
       ? undefined
       : (onRowClick ??
-        ((span: SpanTableRow) => {
+        ((span: SpanTableRow, _index: number, event: React.MouseEvent) => {
           if (span.trace_id) {
-            navigate(
+            openRow(
+              event,
               getIntakeSessionTraceRoute(requestWorkspace, span.session_id, span.trace_id, {
                 spanId: span.span_id,
               })

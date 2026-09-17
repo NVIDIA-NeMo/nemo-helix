@@ -5,20 +5,25 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, PropertyMock, patch
+from unittest.mock import AsyncMock, PropertyMock, call, patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_platform_plugin.auth.access_keys.issuer import AccessKeyOperationNotImplementedError
 from nemo_platform_plugin.auth.access_keys.types import AccessKeyCreateResponse
+from nemo_platform_plugin.workspaces.client import AsyncWorkspacesClient
+from nemo_platform_plugin.workspaces.types import CreateWorkspaceMemberRequest, UpdateWorkspaceMemberRequest
+from nmp.common.auth.access_keys import AccessKeyValidationError
 from nmp.common.auth.client import AuthClient
 from nmp.common.auth.dependencies import auth_client_context
 from nmp.common.auth.models import Principal
+from nmp.common.auth.token_claims import TokenClaims
+from nmp.common.auth.token_resolver import ResolvedBearerToken
 from nmp.common.config import AuthConfig
 from nmp.common.config.base import AccessKeyConfig, TokenSigningConfig
 from nmp.common.entities import EntityConflictError
-from nmp.core.auth.api.v2.access_keys.endpoints import get_access_key_issuer, router
+from nmp.core.auth.api.v2.access_keys.endpoints import get_access_key_issuer, get_workspaces_client, router
 from nmp.core.auth.app.access_keys import AccessKeyNotFoundError, AccessKeyStateConflictError, get_access_key_registry
 
 
@@ -119,6 +124,18 @@ class InMemoryAccessKeyRegistry:
         self.suspended.discard(jti)
         return revoked
 
+    async def get_for_rotation(self, jti, principal, *, admin_override=None):
+        key = await self._may_manage(jti, principal, admin_override=admin_override)
+        if key is None:
+            raise AccessKeyValidationError(
+                f"rotates references a Scoped Access Key that does not exist or is not owned by the caller: {jti}"
+            )
+        if key.entity_type == "SERVICE_ACCOUNT":
+            raise AccessKeyValidationError(
+                "rotates only supports personal Scoped Access Keys without a service account"
+            )
+        return key
+
     async def suspend(self, jti, principal, *, admin_override=None):
         key = await self._may_manage(jti, principal, admin_override=admin_override)
         if key is None:
@@ -165,6 +182,7 @@ class InMemoryAccessKeyRegistry:
             principal=owner,
             subject_principal=key.principal if key.principal != owner else None,
             entity_type=key.entity_type,
+            scope=key.scope or [],
             issued_at=key.created_at,
             expires_at=key.expires_at,
             status=self._status(jti, key),
@@ -223,8 +241,26 @@ class InMemoryAccessKeyRegistry:
         return self._as_entity_view(jti, key)
 
 
+def _members_response(members: list) -> SimpleNamespace:
+    # Matches the real client: awaiting list_workspace_members() returns a NemoResponse
+    # whose sync .data() unwraps to a WorkspaceMemberListResponse, which has a plain
+    # `data: list[WorkspaceMember]` attribute.
+    return SimpleNamespace(data=lambda: SimpleNamespace(data=members))
+
+
 @pytest.fixture
-def client(tmp_path):
+def access_key_workspaces_client():
+    client = AsyncMock(spec=AsyncWorkspacesClient)
+    # An unconfigured AsyncMock returns more AsyncMocks for any attribute or call, so
+    # `.data()` on the default return value would itself be an unawaited coroutine rather
+    # than a callable returning a list. Default to "no prior members" so tests that don't
+    # care about prior state don't need to configure this every time.
+    client.list_workspace_members.return_value = _members_response([])
+    return client
+
+
+@pytest.fixture
+def client(tmp_path, access_key_workspaces_client):
     config = AuthConfig(
         enabled=True,
         token_signing=TokenSigningConfig(
@@ -254,6 +290,7 @@ def client(tmp_path):
     app.include_router(router)
     registry = InMemoryAccessKeyRegistry()
     app.dependency_overrides[get_access_key_registry] = lambda: registry
+    app.dependency_overrides[get_workspaces_client] = lambda: access_key_workspaces_client
 
     token = auth_client_context.set(
         AuthClient(
@@ -267,11 +304,12 @@ def client(tmp_path):
 
 
 @pytest.fixture
-def disabled_client():
+def disabled_client(access_key_workspaces_client):
     config = AuthConfig(enabled=True, access_keys=AccessKeyConfig())
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_access_key_registry] = lambda: InMemoryAccessKeyRegistry()
+    app.dependency_overrides[get_workspaces_client] = lambda: access_key_workspaces_client
     token = auth_client_context.set(
         AuthClient(
             principal=Principal(id="alice@example.com", email="alice@example.com", groups=["team-ml"]),
@@ -300,8 +338,631 @@ def test_create_access_key_returns_token_for_current_principal(client):
     assert body["description"] == "CI intake automation"
     assert body["token_type"] == "Bearer"
     assert body["principal"] == "alice@example.com"
+    assert body["scope"] == []
     assert body["expires_at"] is not None
     assert body["token"].count(".") == 2
+
+
+def test_create_access_key_rotates_prior_owned_key(client):
+    prior = client.post("/v2/access-keys", json={"name": "prior"}).json()
+
+    response = client.post(
+        "/v2/access-keys",
+        json={"name": "replacement", "rotates": prior["jti"]},
+    )
+
+    assert response.status_code == 200
+    listed = client.get("/v2/access-keys").json()["data"]
+    assert next(key for key in listed if key["jti"] == prior["jti"])["status"] == "REVOKED"
+
+
+def test_create_access_key_with_rotates_inherits_predecessor_scope_when_scope_omitted(client):
+    prior = client.post("/v2/access-keys", json={"name": "prior", "scope": ["intake", "entities"]}).json()
+
+    response = client.post(
+        "/v2/access-keys",
+        json={"name": "replacement", "rotates": prior["jti"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["scope"] == ["intake", "entities"]
+
+
+def test_create_access_key_with_rotates_rejects_explicit_scope_that_differs_from_predecessor(client):
+    prior = client.post("/v2/access-keys", json={"name": "prior", "scope": ["intake"]}).json()
+
+    response = client.post(
+        "/v2/access-keys",
+        json={"name": "replacement", "rotates": prior["jti"], "scope": ["entities"]},
+    )
+
+    assert response.status_code == 400
+    assert "rotates requires the replacement scope to match the predecessor's scope" in response.json()["detail"]
+    listed = client.get("/v2/access-keys").json()["data"]
+    assert next(key for key in listed if key["jti"] == prior["jti"])["status"] == "ACTIVE"
+
+
+def test_create_access_key_with_rotates_rejects_explicit_scope_when_predecessor_unscoped(client):
+    prior = client.post("/v2/access-keys", json={"name": "prior"}).json()
+
+    response = client.post(
+        "/v2/access-keys",
+        json={"name": "replacement", "rotates": prior["jti"], "scope": ["entities"]},
+    )
+
+    assert response.status_code == 400
+    assert "rotates requires the replacement scope to match the predecessor's scope" in response.json()["detail"]
+
+
+def test_create_access_key_with_rotates_allows_explicit_scope_matching_predecessor(client):
+    prior = client.post("/v2/access-keys", json={"name": "prior", "scope": ["intake", "entities"]}).json()
+
+    response = client.post(
+        "/v2/access-keys",
+        # Order shouldn't matter: the check compares scope as a set.
+        json={"name": "replacement", "rotates": prior["jti"], "scope": ["entities", "intake"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["scope"] == ["entities", "intake"]
+
+
+def test_create_access_key_with_rotates_keeps_unscoped_predecessor_unscoped(client):
+    prior = client.post("/v2/access-keys", json={"name": "prior"}).json()
+
+    response = client.post(
+        "/v2/access-keys",
+        json={"name": "replacement", "rotates": prior["jti"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["scope"] == []
+
+
+def test_create_access_key_rejects_rotation_of_missing_key(client):
+    missing_jti = "ak_00000000000000000000000000000000"
+
+    response = client.post(
+        "/v2/access-keys",
+        json={"name": "replacement", "rotates": missing_jti},
+    )
+
+    assert response.status_code == 400
+    listed = client.get("/v2/access-keys").json()["data"]
+    assert [key["name"] for key in listed] == []
+
+
+def test_create_access_key_rejects_rotation_of_service_bound_key(client):
+    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+        service_key = client.post(
+            "/v2/access-keys",
+            json={"name": "service-key", "service_account_id": "otel-collector"},
+        ).json()
+
+        response = client.post(
+            "/v2/access-keys",
+            json={"name": "replacement", "rotates": service_key["jti"]},
+        )
+
+    assert response.status_code == 400
+    assert "service account" in response.json()["detail"]
+
+
+def test_create_access_key_rotation_revoke_failure_fails_the_request_and_compensates(client, caplog, monkeypatch):
+    prior = client.post("/v2/access-keys", json={"name": "prior"}).json()
+
+    # Simulate an unexpected failure revoking just the rotation target (e.g. a concurrent
+    # delete), while revoking any other jti (the compensating self-revoke of the new key)
+    # keeps working normally.
+    from nmp.core.auth.app.access_keys import PersistentAccessKeyIssuer
+
+    original_revoke_async = PersistentAccessKeyIssuer.revoke_async
+
+    async def _boom_for_target_only(self, jti):
+        if jti == prior["jti"]:
+            raise RuntimeError("entity storage unavailable")
+        return await original_revoke_async(self, jti)
+
+    monkeypatch.setattr(
+        "nmp.core.auth.app.access_keys.PersistentAccessKeyIssuer.revoke_async",
+        _boom_for_target_only,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        # The request fails instead of silently returning a key while the predecessor stays live.
+        with pytest.raises(RuntimeError, match="entity storage unavailable"):
+            client.post(
+                "/v2/access-keys",
+                json={"name": "replacement", "rotates": prior["jti"]},
+            )
+
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "audit_event", None) == "access_key.rotation_revoke_failed"
+    )
+    assert record.rotated_from_jti == prior["jti"]
+
+    listed = client.get("/v2/access-keys").json()["data"]
+    prior_listed = next(key for key in listed if key["jti"] == prior["jti"])
+    assert prior_listed["status"] == "ACTIVE"
+    # The half-created replacement was revoked rather than left dangling.
+    replacement_listed = next(key for key in listed if key["name"] == "replacement")
+    assert replacement_listed["status"] == "REVOKED"
+
+
+def test_create_access_key_rotation_revoke_failure_rolls_back_granted_workspace_memberships(
+    client, access_key_workspaces_client, caplog, monkeypatch
+):
+    # Workspace grant succeeds, but revoking the predecessor then fails, so the grant on the
+    # now-revoked replacement must be undone too.
+    prior = client.post("/v2/access-keys", json={"name": "prior"}).json()
+
+    from nmp.core.auth.app.access_keys import PersistentAccessKeyIssuer
+
+    original_revoke_async = PersistentAccessKeyIssuer.revoke_async
+
+    async def _boom_for_target_only(self, jti):
+        if jti == prior["jti"]:
+            raise RuntimeError("entity storage unavailable")
+        return await original_revoke_async(self, jti)
+
+    monkeypatch.setattr(
+        "nmp.core.auth.app.access_keys.PersistentAccessKeyIssuer.revoke_async",
+        _boom_for_target_only,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(RuntimeError, match="entity storage unavailable"):
+            client.post(
+                "/v2/access-keys",
+                json={
+                    "name": "replacement",
+                    "rotates": prior["jti"],
+                    "workspaces": [{"workspace": "team-a", "roles": ["Editor"]}],
+                },
+            )
+
+    access_key_workspaces_client.create_workspace_member.assert_awaited_once_with(
+        workspace="team-a",
+        body=CreateWorkspaceMemberRequest(principal="alice@example.com", roles=["Editor"]),
+    )
+    access_key_workspaces_client.delete_workspace_member.assert_awaited_once_with(
+        workspace="team-a",
+        principal_id="alice@example.com",
+    )
+
+    listed = client.get("/v2/access-keys").json()["data"]
+    prior_listed = next(key for key in listed if key["jti"] == prior["jti"])
+    assert prior_listed["status"] == "ACTIVE"
+    replacement_listed = next(key for key in listed if key["name"] == "replacement")
+    assert replacement_listed["status"] == "REVOKED"
+
+
+def test_create_access_key_rotation_revoke_failure_logs_when_compensation_also_fails(client, caplog, monkeypatch):
+    prior = client.post("/v2/access-keys", json={"name": "prior"}).json()
+
+    async def _boom(self, jti):
+        raise RuntimeError("entity storage unavailable")
+
+    monkeypatch.setattr(
+        "nmp.core.auth.app.access_keys.PersistentAccessKeyIssuer.revoke_async",
+        _boom,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(RuntimeError, match="entity storage unavailable"):
+            client.post(
+                "/v2/access-keys",
+                json={"name": "replacement", "rotates": prior["jti"]},
+            )
+
+    assert any(
+        getattr(record, "audit_event", None) == "access_key.compensating_revoke_failed" for record in caplog.records
+    )
+
+
+def test_create_access_key_rejects_rotation_combined_with_service_account(client):
+    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+        prior = client.post("/v2/access-keys", json={"name": "prior"}).json()
+
+        response = client.post(
+            "/v2/access-keys",
+            json={
+                "name": "replacement",
+                "rotates": prior["jti"],
+                "service_account_id": "otel-collector",
+            },
+        )
+
+    assert response.status_code == 400
+    assert "rotates cannot be combined with service_account_id" in response.json()["detail"]
+    listed = client.get("/v2/access-keys").json()["data"]
+    assert [key["name"] for key in listed] == ["prior"]
+
+
+def test_create_access_key_grants_workspace_membership(client, access_key_workspaces_client):
+    response = client.post(
+        "/v2/access-keys",
+        json={
+            "name": "workspace-key",
+            "workspaces": [{"workspace": "team-a", "roles": ["Viewer"]}],
+        },
+    )
+
+    assert response.status_code == 200
+    access_key_workspaces_client.create_workspace_member.assert_awaited_once_with(
+        workspace="team-a",
+        body=CreateWorkspaceMemberRequest(
+            principal="alice@example.com",
+            roles=["Viewer"],
+        ),
+    )
+
+
+def test_create_access_key_workspace_grant_failure_fails_the_request_and_revokes_the_key(
+    client,
+    access_key_workspaces_client,
+    caplog,
+):
+    access_key_workspaces_client.create_workspace_member.side_effect = RuntimeError("workspace not found")
+
+    with caplog.at_level(logging.WARNING):
+        # Fails instead of returning a 200 for a key missing its requested access.
+        with pytest.raises(RuntimeError, match="workspace not found"):
+            client.post(
+                "/v2/access-keys",
+                json={"name": "workspace-key", "workspaces": [{"workspace": "missing"}]},
+            )
+
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "audit_event", None) == "access_key.workspace_grant_failed"
+    )
+    assert record.workspace == "missing"
+    assert record.roles == ["Editor"]
+
+    listed = client.get("/v2/access-keys").json()["data"]
+    workspace_key_listed = next(key for key in listed if key["name"] == "workspace-key")
+    assert workspace_key_listed["status"] == "REVOKED"
+
+
+def test_create_access_key_partial_workspace_grant_failure_rolls_back_the_successful_grants(
+    client,
+    access_key_workspaces_client,
+    caplog,
+):
+    # First grant (team-a) succeeds; second (team-b) reports a failure. Rollback treats team-b
+    # as uncertain, since the mutation may have committed before the error, and undoes both
+    # attempts in reverse order.
+    access_key_workspaces_client.create_workspace_member.side_effect = [None, RuntimeError("workspace not found")]
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(RuntimeError, match="workspace not found"):
+            client.post(
+                "/v2/access-keys",
+                json={
+                    "name": "workspace-key",
+                    "workspaces": [{"workspace": "team-a"}, {"workspace": "team-b"}],
+                },
+            )
+
+    assert access_key_workspaces_client.delete_workspace_member.await_args_list == [
+        call(workspace="team-b", principal_id="alice@example.com"),
+        call(workspace="team-a", principal_id="alice@example.com"),
+    ]
+    access_key_workspaces_client.update_workspace_member.assert_not_awaited()
+
+    listed = client.get("/v2/access-keys").json()["data"]
+    workspace_key_listed = next(key for key in listed if key["name"] == "workspace-key")
+    assert workspace_key_listed["status"] == "REVOKED"
+
+
+def test_create_access_key_partial_workspace_grant_failure_restores_prior_roles(
+    client,
+    access_key_workspaces_client,
+    caplog,
+):
+    # team-a already has alice as a Viewer before this request; the Editor grant to team-a
+    # succeeds but team-b then fails. Rollback must restore team-a's prior Viewer role instead
+    # of deleting the pre-existing membership outright. The uncertain team-b grant had no
+    # prior membership, so it gets deleted first.
+    async def list_members(*, workspace):
+        members = [SimpleNamespace(principal="alice@example.com", roles=["Viewer"])] if workspace == "team-a" else []
+        return _members_response(members)
+
+    access_key_workspaces_client.list_workspace_members.side_effect = list_members
+    access_key_workspaces_client.create_workspace_member.side_effect = [None, RuntimeError("workspace not found")]
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(RuntimeError, match="workspace not found"):
+            client.post(
+                "/v2/access-keys",
+                json={
+                    "name": "workspace-key",
+                    "workspaces": [{"workspace": "team-a", "roles": ["Editor"]}, {"workspace": "team-b"}],
+                },
+            )
+
+    access_key_workspaces_client.update_workspace_member.assert_awaited_once_with(
+        workspace="team-a",
+        principal_id="alice@example.com",
+        body=UpdateWorkspaceMemberRequest(roles=["Viewer"]),
+    )
+    access_key_workspaces_client.delete_workspace_member.assert_awaited_once_with(
+        workspace="team-b",
+        principal_id="alice@example.com",
+    )
+
+
+def test_create_access_key_apply_then_error_rolls_back_all_attempts_in_reverse_order(
+    client,
+    access_key_workspaces_client,
+    caplog,
+):
+    workspace_roles = {"team-b": ["Viewer"]}
+
+    async def list_members(*, workspace):
+        roles = workspace_roles.get(workspace)
+        members = [] if roles is None else [SimpleNamespace(principal="alice@example.com", roles=roles)]
+        return _members_response(members)
+
+    async def create_member(*, workspace, body):
+        if workspace in workspace_roles:
+            workspace_roles[workspace][:] = body.roles
+        else:
+            workspace_roles[workspace] = list(body.roles)
+        if workspace == "team-b":
+            # Model an ambiguous transport failure after the membership mutation committed.
+            raise RuntimeError("response lost after workspace mutation")
+
+    rollback_order: list[tuple[str, str]] = []
+
+    async def update_member(*, workspace, principal_id, body):
+        workspace_roles[workspace] = list(body.roles)
+        rollback_order.append(("update", workspace))
+
+    async def delete_member(*, workspace, principal_id):
+        workspace_roles.pop(workspace, None)
+        rollback_order.append(("delete", workspace))
+
+    access_key_workspaces_client.list_workspace_members.side_effect = list_members
+    access_key_workspaces_client.create_workspace_member.side_effect = create_member
+    access_key_workspaces_client.update_workspace_member.side_effect = update_member
+    access_key_workspaces_client.delete_workspace_member.side_effect = delete_member
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(RuntimeError, match="response lost after workspace mutation"):
+            client.post(
+                "/v2/access-keys",
+                json={
+                    "name": "workspace-key",
+                    "workspaces": [
+                        {"workspace": "team-a", "roles": ["Editor"]},
+                        {"workspace": "team-b", "roles": ["Editor"]},
+                    ],
+                },
+            )
+
+    access_key_workspaces_client.update_workspace_member.assert_awaited_once_with(
+        workspace="team-b",
+        principal_id="alice@example.com",
+        body=UpdateWorkspaceMemberRequest(roles=["Viewer"]),
+    )
+    access_key_workspaces_client.delete_workspace_member.assert_awaited_once_with(
+        workspace="team-a",
+        principal_id="alice@example.com",
+    )
+    assert rollback_order == [("update", "team-b"), ("delete", "team-a")]
+    assert workspace_roles == {"team-b": ["Viewer"]}
+
+    listed = client.get("/v2/access-keys").json()["data"]
+    workspace_key_listed = next(key for key in listed if key["name"] == "workspace-key")
+    assert workspace_key_listed["status"] == "REVOKED"
+
+
+def test_create_access_key_grant_aborts_without_mutating_when_prior_role_read_fails(
+    client,
+    access_key_workspaces_client,
+    caplog,
+):
+    # If team-a's prior membership can't be read, granting anyway and later deleting it on
+    # rollback could destroy real pre-existing access. Don't touch this workspace at all.
+    access_key_workspaces_client.list_workspace_members.side_effect = RuntimeError("workspace unreachable")
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(RuntimeError, match="workspace unreachable"):
+            client.post(
+                "/v2/access-keys",
+                json={"name": "workspace-key", "workspaces": [{"workspace": "team-a"}]},
+            )
+
+    access_key_workspaces_client.create_workspace_member.assert_not_awaited()
+    access_key_workspaces_client.delete_workspace_member.assert_not_awaited()
+    access_key_workspaces_client.update_workspace_member.assert_not_awaited()
+
+    listed = client.get("/v2/access-keys").json()["data"]
+    workspace_key_listed = next(key for key in listed if key["name"] == "workspace-key")
+    assert workspace_key_listed["status"] == "REVOKED"
+
+
+def test_create_access_key_grant_rolls_back_earlier_grant_when_later_prior_role_read_fails(
+    client,
+    access_key_workspaces_client,
+    caplog,
+):
+    # team-a's grant succeeds first; team-b's prior-role read then fails. team-b must never be
+    # mutated, and team-a's just-applied grant (which had no prior membership) must be unwound.
+    async def list_members(*, workspace):
+        if workspace == "team-b":
+            raise RuntimeError("workspace unreachable")
+        return _members_response([])
+
+    access_key_workspaces_client.list_workspace_members.side_effect = list_members
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(RuntimeError, match="workspace unreachable"):
+            client.post(
+                "/v2/access-keys",
+                json={
+                    "name": "workspace-key",
+                    "workspaces": [{"workspace": "team-a"}, {"workspace": "team-b"}],
+                },
+            )
+
+    access_key_workspaces_client.create_workspace_member.assert_awaited_once_with(
+        workspace="team-a",
+        body=CreateWorkspaceMemberRequest(principal="alice@example.com", roles=["Editor"]),
+    )
+    access_key_workspaces_client.delete_workspace_member.assert_awaited_once_with(
+        workspace="team-a",
+        principal_id="alice@example.com",
+    )
+
+    listed = client.get("/v2/access-keys").json()["data"]
+    workspace_key_listed = next(key for key in listed if key["name"] == "workspace-key")
+    assert workspace_key_listed["status"] == "REVOKED"
+
+
+def _scoped_caller_auth_client(services: list[str] | None) -> AuthClient:
+    """An AuthClient for a caller authenticated via a Scoped Access Key with `services` scope.
+
+    `services=None` simulates an unscoped access key (no platform scope claims at all).
+    """
+    scopes = [f"{service}:{verb}" for service in (services or []) for verb in ("read", "write")]
+    claims = TokenClaims(
+        subject="alice@example.com",
+        email="alice@example.com",
+        groups=["team-ml"],
+        scopes=scopes,
+        raw_claims={},
+    )
+    return AuthClient(
+        principal=Principal(id="alice@example.com", email="alice@example.com", groups=["team-ml"]),
+        config=AuthConfig(enabled=True, access_keys=AccessKeyConfig(enabled=True)),
+        resolved_bearer_token=ResolvedBearerToken(claims=claims, token_kind="access_key"),
+    )
+
+
+def test_scope_restricted_access_key_cannot_create_unscoped_replacement(client):
+    token = auth_client_context.set(_scoped_caller_auth_client(["auth"]))
+    try:
+        response = client.post("/v2/access-keys", json={"name": "escalated"})
+    finally:
+        auth_client_context.reset(token)
+
+    assert response.status_code == 400
+    listed = client.get("/v2/access-keys").json()["data"]
+    assert [key["name"] for key in listed] == []
+
+
+def test_auth_only_scope_restricted_access_key_cannot_grant_workspace(
+    client,
+    access_key_workspaces_client,
+):
+    token = auth_client_context.set(_scoped_caller_auth_client(["auth"]))
+    try:
+        response = client.post(
+            "/v2/access-keys",
+            json={
+                "name": "workspace-key",
+                "scope": ["auth"],
+                "workspaces": [{"workspace": "team-a"}],
+            },
+        )
+    finally:
+        auth_client_context.reset(token)
+
+    assert response.status_code == 400
+    access_key_workspaces_client.create_workspace_member.assert_not_awaited()
+    access_key_workspaces_client.update_workspace_member.assert_not_awaited()
+    access_key_workspaces_client.delete_workspace_member.assert_not_awaited()
+    listed = client.get("/v2/access-keys").json()["data"]
+    assert [key["name"] for key in listed] == []
+
+
+@pytest.mark.parametrize("workspace_service", ["entities", "platform"])
+def test_scope_restricted_access_key_with_workspace_service_can_grant_workspace(
+    client,
+    access_key_workspaces_client,
+    workspace_service,
+):
+    token = auth_client_context.set(_scoped_caller_auth_client(["auth", workspace_service]))
+    try:
+        response = client.post(
+            "/v2/access-keys",
+            json={
+                "name": "workspace-key",
+                "scope": ["auth"],
+                "workspaces": [{"workspace": "team-a"}],
+            },
+        )
+    finally:
+        auth_client_context.reset(token)
+
+    assert response.status_code == 200
+    access_key_workspaces_client.create_workspace_member.assert_awaited_once_with(
+        workspace="team-a",
+        body=CreateWorkspaceMemberRequest(principal="alice@example.com", roles=["Editor"]),
+    )
+
+
+def test_scope_restricted_access_key_cannot_create_key_scoped_to_other_service(client):
+    token = auth_client_context.set(_scoped_caller_auth_client(["auth"]))
+    try:
+        response = client.post("/v2/access-keys", json={"name": "escalated", "scope": ["intake"]})
+    finally:
+        auth_client_context.reset(token)
+
+    assert response.status_code == 400
+    listed = client.get("/v2/access-keys").json()["data"]
+    assert [key["name"] for key in listed] == []
+
+
+def test_scope_restricted_access_key_can_create_key_scoped_to_subset_of_its_own_scope(client):
+    token = auth_client_context.set(_scoped_caller_auth_client(["auth", "intake"]))
+    try:
+        response = client.post("/v2/access-keys", json={"name": "narrower", "scope": ["auth"]})
+    finally:
+        auth_client_context.reset(token)
+
+    assert response.status_code == 200
+    assert response.json()["scope"] == ["auth"]
+
+
+def test_unscoped_access_key_can_create_unscoped_replacement(client):
+    token = auth_client_context.set(_scoped_caller_auth_client(None))
+    try:
+        response = client.post("/v2/access-keys", json={"name": "unrestricted"})
+    finally:
+        auth_client_context.reset(token)
+
+    assert response.status_code == 200
+    assert response.json()["scope"] == []
+
+
+def test_oidc_caller_scopes_do_not_restrict_access_key_creation(client):
+    claims = TokenClaims(
+        subject="alice@example.com",
+        email="alice@example.com",
+        groups=["team-ml"],
+        scopes=["auth:read", "auth:write"],
+        raw_claims={},
+    )
+    auth_client = AuthClient(
+        principal=Principal(id="alice@example.com", email="alice@example.com", groups=["team-ml"]),
+        config=AuthConfig(enabled=True, access_keys=AccessKeyConfig(enabled=True)),
+        resolved_bearer_token=ResolvedBearerToken(claims=claims, token_kind="oidc_access_token"),
+    )
+    token = auth_client_context.set(auth_client)
+    try:
+        response = client.post("/v2/access-keys", json={"name": "from-oidc-session"})
+    finally:
+        auth_client_context.reset(token)
+
+    assert response.status_code == 200
+    assert response.json()["scope"] == []
 
 
 def test_access_key_issuer_uses_effective_principal_for_delegated_requests():
@@ -314,7 +975,11 @@ def test_access_key_issuer_uses_effective_principal_for_delegated_requests():
         config=AuthConfig(enabled=True),
     )
 
-    issuer = get_access_key_issuer(auth_client=auth_client, registry=InMemoryAccessKeyRegistry())
+    issuer = get_access_key_issuer(
+        auth_client=auth_client,
+        registry=InMemoryAccessKeyRegistry(),
+        workspaces_client=AsyncMock(),
+    )
 
     assert issuer.principal == "admin@example.com"
 
@@ -1020,6 +1685,7 @@ def test_list_access_keys_returns_current_principals_persisted_keys(client):
             "status": "ACTIVE",
             "issuer": "http://testserver/apis/auth",
             "audiences": ["nemo-platform-access-key"],
+            "scope": [],
         }
     ]
     assert response.json()["has_more"] is False
@@ -1178,6 +1844,72 @@ def test_rotate_access_key_mints_successor_and_starts_grace_period(client):
     assert listing[jti]["grace_period_expires_at"] == body["grace_period_expires_at"]
     assert listing[new_key["jti"]]["status"] == "ACTIVE"
     assert listing[new_key["jti"]]["grace_period_expires_at"] is None
+
+
+def test_rotate_access_key_preserves_scope(client):
+    created = client.post("/v2/access-keys", json={"name": "intake-worker", "scope": ["intake", "entities"]}).json()
+    jti = created["jti"]
+
+    response = client.post(f"/v2/access-keys/{jti}/rotate")
+
+    assert response.status_code == 200
+    new_key = response.json()["new_key"]
+    assert new_key["scope"] == ["intake", "entities"]
+
+    listing = {entry["jti"]: entry for entry in client.get("/v2/access-keys").json()["data"]}
+    assert listing[new_key["jti"]]["scope"] == ["intake", "entities"]
+
+
+def test_rotate_access_key_keeps_unscoped_successor_unscoped(client):
+    created = client.post("/v2/access-keys", json={"name": "ci-intake"}).json()
+    jti = created["jti"]
+
+    response = client.post(f"/v2/access-keys/{jti}/rotate")
+
+    assert response.status_code == 200
+    new_key = response.json()["new_key"]
+    assert new_key["scope"] == []
+
+
+def test_scope_restricted_access_key_cannot_rotate_an_unscoped_owned_key(client):
+    prior = client.post("/v2/access-keys", json={"name": "prior"}).json()
+
+    token = auth_client_context.set(_scoped_caller_auth_client(["auth"]))
+    try:
+        response = client.post(f"/v2/access-keys/{prior['jti']}/rotate")
+    finally:
+        auth_client_context.reset(token)
+
+    assert response.status_code == 400
+    listed = client.get("/v2/access-keys").json()["data"]
+    assert next(key for key in listed if key["jti"] == prior["jti"])["status"] == "ACTIVE"
+
+
+def test_scope_restricted_access_key_cannot_rotate_a_differently_scoped_owned_key(client):
+    prior = client.post("/v2/access-keys", json={"name": "prior", "scope": ["intake"]}).json()
+
+    token = auth_client_context.set(_scoped_caller_auth_client(["auth"]))
+    try:
+        response = client.post(f"/v2/access-keys/{prior['jti']}/rotate")
+    finally:
+        auth_client_context.reset(token)
+
+    assert response.status_code == 400
+    listed = client.get("/v2/access-keys").json()["data"]
+    assert next(key for key in listed if key["jti"] == prior["jti"])["status"] == "ACTIVE"
+
+
+def test_scope_restricted_access_key_can_rotate_a_key_within_its_own_scope(client):
+    prior = client.post("/v2/access-keys", json={"name": "prior", "scope": ["auth"]}).json()
+
+    token = auth_client_context.set(_scoped_caller_auth_client(["auth", "intake"]))
+    try:
+        response = client.post(f"/v2/access-keys/{prior['jti']}/rotate")
+    finally:
+        auth_client_context.reset(token)
+
+    assert response.status_code == 200
+    assert response.json()["new_key"]["scope"] == ["auth"]
 
 
 def test_rotate_access_key_accepts_explicit_grace_period_seconds(client):

@@ -320,7 +320,6 @@ def test_fabric_trial_evaluator_invokes_agent_evaluator(monkeypatch: pytest.Monk
         "nemo.optimizer.rep": 0,
     }
     assert "profiles" not in captured["runtime"]
-    assert captured["runtime"]["task_hook"] is None
     assert captured["runtime"]["config"]["models"]["default"]["temperature"] == 0.2
     assert "optimizer" not in captured["runtime"]["config"]
     assert "eval" not in captured["runtime"]["config"]
@@ -332,3 +331,96 @@ def test_fabric_trial_evaluator_invokes_agent_evaluator(monkeypatch: pytest.Monk
     trace_map = json.loads((tmp_path / "out" / "trial_trace_map.json").read_text(encoding="utf-8"))
     assert trace_map[0]["experiment_id"] == "exp-test"
     assert trace_map[0]["row_id"] == "1"
+
+
+def test_fabric_trial_evaluator_rejects_a_removed_run_hook(tmp_path: Path) -> None:
+    """A config written for the retired per-task hook must fail at construction, not run hook-less.
+
+    Silently dropping ``eval.run_hook`` would score an agent whose MCP binding was never set up
+    and report it as the tuned configuration's result.
+    """
+    dataset = tmp_path / "rows.json"
+    dataset.write_text('[{"id": "1", "question": "q?", "answer": "a"}]\n', encoding="utf-8")
+    payload = _payload(dataset)
+    payload["eval"]["run_hook"] = {"type": "mcp_run_binding", "bindings": []}
+
+    with pytest.raises(StudyDriverError, match="eval.run_hook is no longer supported"):
+        FabricTrialEvaluator(
+            payload=payload, metric_names=["average_score"], output_dir=tmp_path / "out", experiment_id="exp"
+        )
+
+
+def test_build_metrics_rejects_a_tool_call_count_evaluator_without_a_tool_name() -> None:
+    from nemo_optimization.backends.optuna.fabric_trial import _build_metrics
+
+    with pytest.raises(StudyDriverError, match="requires a non-empty tool_name"):
+        _build_metrics({}, {"evaluators": {"once": {"_type": "tool_call_count", "expected_calls": 1}}})
+
+
+def test_build_metrics_rejects_a_negative_tool_call_count_expectation() -> None:
+    from nemo_optimization.backends.optuna.fabric_trial import _build_metrics
+
+    with pytest.raises(StudyDriverError, match="non-negative integer"):
+        _build_metrics(
+            {}, {"evaluators": {"once": {"_type": "tool_call_count", "tool_name": "t", "expected_calls": -1}}}
+        )
+
+
+@pytest.mark.parametrize("value", [1.9, "1", True])
+def test_build_metrics_rejects_a_non_integer_tool_call_count_expectation(value: object) -> None:
+    from nemo_optimization.backends.optuna.fabric_trial import _build_metrics
+
+    with pytest.raises(StudyDriverError, match="non-negative integer"):
+        _build_metrics(
+            {}, {"evaluators": {"once": {"_type": "tool_call_count", "tool_name": "t", "expected_calls": value}}}
+        )
+
+
+def test_resolve_mcp_server_paths_absolutizes_only_bundle_files(tmp_path: Path) -> None:
+    from nemo_optimization.backends.optuna.fabric_trial import resolve_mcp_server_paths
+
+    (tmp_path / "mcps").mkdir()
+    (tmp_path / "mcps" / "server.py").write_text("print(1)\n", encoding="utf-8")
+    config: dict[str, Any] = {
+        "mcp": {
+            "servers": {
+                "bundled": {
+                    "transport": "stdio",
+                    "url": "python3",
+                    "args": ["mcps/server.py", "--verbose", "missing.py"],
+                },
+                "script": {"transport": "stdio", "url": "mcps/server.py"},
+                "remote": {"transport": "http", "url": "mcps/server.py"},
+            }
+        }
+    }
+    resolve_mcp_server_paths(config, root=tmp_path)
+
+    servers = config["mcp"]["servers"]
+    assert servers["bundled"]["url"] == "python3"  # a command on PATH is not a bundle file
+    assert servers["bundled"]["args"] == [str(tmp_path.resolve() / "mcps" / "server.py"), "--verbose", "missing.py"]
+    assert servers["script"]["url"] == str(tmp_path.resolve() / "mcps" / "server.py")
+    assert servers["remote"]["url"] == "mcps/server.py"  # only stdio servers are launched from a path
+
+
+def test_build_metrics_accepts_tool_argument_matches_input_and_rejects_bad_normalize() -> None:
+    from nemo_evaluator_sdk.agent_eval.metrics import ToolArgumentMatchesInputMetric
+    from nemo_optimization.backends.optuna.fabric_trial import _build_metrics
+
+    (metric,) = _build_metrics(
+        {},
+        {"evaluators": {"v": {"_type": "tool_argument_matches_input", "tool_name": "t", "input_key": "email"}}},
+    )
+    assert isinstance(metric, ToolArgumentMatchesInputMetric)
+    assert (metric.tool_name, metric.argument, metric.input_key, metric.normalize) == (
+        "t",
+        "text",
+        "email",
+        "whitespace",
+    )
+    with pytest.raises(StudyDriverError, match="tool_argument_matches_input evaluator is invalid"):
+        _build_metrics(
+            {}, {"evaluators": {"v": {"_type": "tool_argument_matches_input", "tool_name": "t", "normalize": "fuzzy"}}}
+        )
+    with pytest.raises(StudyDriverError, match="requires a non-empty tool_name"):
+        _build_metrics({}, {"evaluators": {"v": {"_type": "tool_argument_matches_input"}}})

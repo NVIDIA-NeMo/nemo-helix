@@ -20,10 +20,15 @@ _JOB_JSON_HELP = "Path to Automodel job JSON (AutomodelJobInput schema)."
 
 
 def load_job_json(path: Path) -> str:
-    """Load and validate job JSON; return canonical JSON string for ``--spec``."""
+    """Load and validate job JSON; return canonical JSON string for ``--spec``.
+
+    ``exclude_unset`` is load-bearing: ``with_resolved_recipe`` fills recipe
+    defaults only for fields absent from ``model_fields_set``, so a full dump
+    presents every schema default as an explicit choice and suppresses them.
+    """
     data = json.loads(path.read_text())
     validated = AutomodelJobInput.model_validate(data)
-    return validated.model_dump_json()
+    return validated.model_dump_json(exclude_unset=True)
 
 
 def apply_automodel_job_cli_overrides(group: typer.Typer) -> None:

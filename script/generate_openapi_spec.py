@@ -131,8 +131,17 @@ def bounded_worker_count(
 
 
 def plugin_multiprocessing_context():
-    """Use the cheapest process start method that preserves plugin isolation."""
-    start_method = "fork" if "fork" in multiprocessing.get_all_start_methods() else "spawn"
+    """Use the cheapest process start method that preserves plugin isolation.
+
+    macOS is excluded from ``fork``: the plugin imports pull in libraries that
+    start threads and touch Objective-C frameworks, and the ObjC runtime aborts
+    (SIGABRT) in a forked child when a framework initializer may have been
+    running on another thread at fork time. Workers die with exit code -6 after
+    printing ``+[NSCharacterSet initialize] may have been in progress in another
+    thread when fork() was called``.
+    """
+    available = multiprocessing.get_all_start_methods()
+    start_method = "fork" if ("fork" in available and sys.platform != "darwin") else "spawn"
     return multiprocessing.get_context(start_method)
 
 

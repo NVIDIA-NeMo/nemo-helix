@@ -9,6 +9,19 @@ description: ""
 
 This page provides detailed technical specifications for the embedding model family supported by NeMo Customizer. For information about supported features and capabilities, refer to [Tested Models](/documentation/customizer-reference/models/model-catalog).
 
+The **retrieval recipe default** is Nemotron 3 Embed 1B (`training.recipe: bi_encoder`). Llama Nemotron Embed 1B v2 remains supported. Domain nDCG/Recall eval is `retrieve-eval` on frozen `eval_beir`, not chat F1. See [Retrieval SDG](/documentation/design-synthetic-data/retrieval-sdg) for the end-to-end data workflow.
+
+## Nemotron 3 Embed 1B
+
+| Property | Value |
+|----------|--------|
+| Default Name | nvidia/Nemotron-3-Embed-1B-BF16 |
+| Training recipe | `bi_encoder` |
+| Embedding dimensions | 2048 |
+| Stage 4 export | No-op. Promote the Hugging Face consolidated checkpoint (`NIM_MODEL_PATH`). |
+| NIM | `nvcr.io/nim/nvidia/nemotron-3-embed-1b:2.2.0` (`/v1/embeddings` with `input_type` query vs document) |
+| Finetuning | `all_weights` or `lora_merged` only. Unmerged LoRA cannot be served. |
+
 ## Llama Nemotron Embedding 1B v2
 
 | Property | Value |

@@ -16,7 +16,7 @@ Runner choices:
 
 * `--runtime host`      — `FabricAgentRuntime` (host workspaces). The document toolchain (pandoc,
   libreoffice, python-docx, ...) that the skills rely on must be on the host.
-* `--runtime container` — `FabricContainerRuntime` (Docker sandbox). Pass `--image` to supply a
+* `--runtime container` — `FabricAgentRuntime(sandbox=DockerSandboxProvider())`. Pass `--image` to supply a
   prebuilt image that includes the document toolchain (image *building* is your concern); without it,
   the stock Fabric image is used and the skills' scripts will fail for lack of tooling.
 
@@ -110,17 +110,18 @@ def _build_runtime(args: argparse.Namespace):
         # differs from the SDK's (newer Fabric dropped the `config=` kwarg for `observability=`).
         return FabricAgentRuntime(config=config, work_root=args.work_root, capture_trajectory=not args.no_trajectory)
     # Container: isolated sandbox. Pass a doc-tooling image via --image (build it yourself).
-    from nemo_evaluator_sdk.agent_eval.runtimes.fabric.container_runtime import FabricContainerRuntime
     from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.providers.docker import DockerSandboxProvider
     from nemo_evaluator_sdk.values.common import SecretRef
 
     if not args.image:
         logger.warning("No --image given: the stock Fabric image lacks LAB's doc toolchain; skill scripts will fail.")
-    return FabricContainerRuntime(
+    return FabricAgentRuntime(
         config,
-        provider=DockerSandboxProvider(),
+        sandbox=DockerSandboxProvider(),
         secrets={args.agent_api_key_env: SecretRef(root=args.agent_api_key_env)},
         image=args.image,  # None -> build-if-missing stock image
+        work_root=args.work_root,
+        capture_trajectory=not args.no_trajectory,
     )
 
 

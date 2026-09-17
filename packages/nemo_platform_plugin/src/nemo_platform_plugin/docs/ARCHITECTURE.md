@@ -93,20 +93,28 @@ class SayHelloJob(NemoJob):
 Dispatch programmatically:
 
 ```python
+import os
+
 from nemo_platform_plugin.discovery import discover_jobs
 from nemo_platform_plugin.scheduler import NemoJobScheduler
 
 job_cls = discover_jobs()["example.say-hello"]
-NemoJobScheduler().run_local(job_cls, {"name": "Alice"})
+NemoJobScheduler().submit_remote(
+    job_cls,
+    {"name": "Alice"},
+    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+    workspace="default",
+)
 ```
 
-## Auto-generated three-verb CLI for jobs
+## Auto-generated CLI for jobs
 
-At startup, for every plugin that registers both `nemo.cli` and `nemo.jobs`, the platform injects three CLI subcommands per job into the plugin's Typer group: `run`, `submit`, `explain`. Plugin authors write no CLI code for their jobs.
+At startup, for every plugin that registers both `nemo.cli` and `nemo.jobs`, the platform injects job commands into the plugin's Typer group. Plugin authors write no CLI code for their jobs.
 
-- `run` delegates to `NemoJobScheduler.run_local` — in-process, no platform.
 - `submit` delegates to `NemoJobScheduler.submit_remote` — POSTs to the plugin service's per-job endpoint; the cluster executes.
 - `explain` delegates to `NemoJobScheduler.explain` — reads schemas locally from the `NemoJob` class.
+
+Jobs can set `generate_legacy_verbs = False` to expose submission as a flat command named after the job instead of a nested `<job> submit` command. The `<job> explain` command remains available for compatibility.
 
 Plugin services mount the matching POST/GET/LIST/DELETE endpoints with the `add_job_routes(job_cls)` helper from `nemo_platform_plugin.jobs.routes` — a one-liner that replaces the multi-arg `job_route_factory(...)` pattern.
 

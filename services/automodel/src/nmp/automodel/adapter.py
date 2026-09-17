@@ -10,6 +10,7 @@ from typing import Any, Literal
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nmp.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
+    DeploymentParams,
     DistillationTraining,
     LoRAParams,
     OutputResponse,
@@ -54,7 +55,6 @@ def _build_training_block(spec: dict[str, Any]) -> SFTTraining | DistillationTra
     common: dict[str, Any] = {
         "recipe": training.get("recipe", "auto"),
         "peft": _build_peft(training),
-        "learning_rate": optimizer.get("learning_rate", 1e-4),
         "min_learning_rate": optimizer.get("min_learning_rate"),
         "weight_decay": optimizer.get("weight_decay", 0.01),
         "adam_beta1": optimizer.get("adam_beta1", 0.9),
@@ -62,23 +62,21 @@ def _build_training_block(spec: dict[str, Any]) -> SFTTraining | DistillationTra
         "adam_eps": optimizer.get("adam_eps", 1e-8),
         "optimizer": optimizer.get("optimizer", "auto"),
         "lr_decay_style": optimizer.get("lr_decay_style", "cosine"),
-        "warmup_steps": optimizer.get("warmup_steps", 0),
         "epochs": schedule.get("epochs", 1),
         "max_steps": schedule.get("max_steps"),
         "val_check_interval": schedule.get("val_check_interval"),
+        "validation_split": schedule.get("validation_split"),
         # Absent from a spec compiled before this knob existed, and `or` rather
         # than a `.get` default because model_dump renders an unset nested model
         # as None on some paths; either way the field's own default applies.
         "progress_reporting": schedule.get("progress_reporting") or ProgressReportingConfig(),
-        "batch_size": batch.get("global_batch_size", 8),
-        "micro_batch_size": batch.get("micro_batch_size", 1),
         "sequence_packing": batch.get("sequence_packing", False),
         "sequence_packing_max_samples": batch.get("sequence_packing_max_samples", 1000),
         "max_seq_length": training.get("max_seq_length", 2048),
         "precision": training.get("precision"),
         "attn_implementation": training.get("attn_implementation", "sdpa"),
         "seed": schedule.get("seed"),
-        "embedding": training.get("embedding"),
+        "retrieval": training.get("retrieval"),
         "parallelism": ParallelismParams(
             num_nodes=parallelism.get("num_nodes", 1),
             num_gpus_per_node=parallelism.get("num_gpus_per_node", 1),
@@ -90,6 +88,18 @@ def _build_training_block(spec: dict[str, Any]) -> SFTTraining | DistillationTra
         ),
         "execution_profile": training.get("execution_profile"),
     }
+
+    # Only keys the stored spec actually carries: anything set here lands in
+    # `model_fields_set`, which `with_resolved_recipe` reads as an explicit choice
+    # and then skips its recipe defaults for.
+    for target, source, key in (
+        ("batch_size", batch, "global_batch_size"),
+        ("micro_batch_size", batch, "micro_batch_size"),
+        ("learning_rate", optimizer, "learning_rate"),
+        ("warmup_steps", optimizer, "warmup_steps"),
+    ):
+        if source.get(key) is not None:
+            common[target] = source[key]
 
     training_type: Literal["sft", "distillation"] = training.get("training_type", "sft")
     if training_type == "distillation":
@@ -108,6 +118,20 @@ def _build_integrations(spec: dict[str, Any]) -> IntegrationsSpec | None:
     if not raw:
         return None
     return IntegrationsSpec.model_validate(raw)
+
+
+def _build_deployment_config(data: dict[str, Any]) -> str | DeploymentParams | None:
+    """Map the plugin's ``deployment_config`` onto the legacy compiler shape.
+
+    String references pass through untouched; inline params arrive as a plain dict
+    because the caller dumped the plugin model, so they are re-validated here.
+    """
+    raw = data.get("deployment_config")
+    if raw is None or isinstance(raw, str):
+        return raw
+    if isinstance(raw, BaseModel):
+        raw = raw.model_dump(mode="python")
+    return DeploymentParams.model_validate(raw)
 
 
 def automodel_spec_to_compiler_output(spec: dict[str, Any] | BaseModel) -> CustomizationJobOutput:
@@ -136,6 +160,6 @@ def automodel_spec_to_compiler_output(spec: dict[str, Any] | BaseModel) -> Custo
         dataset=training_uri,
         training=_build_training_block(data),
         integrations=_build_integrations(data),
-        deployment_config=None,
+        deployment_config=_build_deployment_config(data),
         output=output_resp,
     )

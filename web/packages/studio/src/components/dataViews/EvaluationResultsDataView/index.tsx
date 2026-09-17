@@ -9,6 +9,7 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import {
   type ApiFilter,
   useStudioDataViewState,
@@ -25,7 +26,6 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationResultDetailsRoute } from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
 import { ComponentProps } from 'react';
-import { useNavigate } from 'react-router';
 
 const STATUS_OPTIONS_WITH_ALL = [{ value: '', label: 'All' }, ...STATUS_FILTER_OPTIONS];
 
@@ -57,7 +57,7 @@ const buildFilter = (apiFilter: ApiFilter<EvaluateJobsListFilter>): EvaluateJobs
 
 export const EvaluationResultsDataView = () => {
   const workspace = useWorkspaceFromPath();
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
 
   const dataViewState = useStudioDataViewState<EvaluateJobsListFilter>({
     defaultSort: [{ id: 'created_at', desc: true }],
@@ -131,9 +131,9 @@ export const EvaluationResultsDataView = () => {
       dataViewState={dataViewState}
       searchField="name"
       makeColumns={makeColumns}
-      onRowClick={(row) => {
+      onRowClick={(row, _index, event) => {
         if (!row.name) return;
-        navigate(getEvaluationResultDetailsRoute(workspace, row.name));
+        openRow(event, getEvaluationResultDetailsRoute(workspace, row.name));
       }}
       attributes={{
         DataViewSearchBar: {

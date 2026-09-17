@@ -15,6 +15,7 @@ Run these from the repo root (they wrap `cd docs/fern && npm run …`):
 | `make docs` | Local dev server (live preview) |
 | `make docs-watch` | Local dev server plus repo-level watcher for `docs/**` changes outside `docs/fern/` |
 | `make docs-check` | `fern check` + MDX validation + NotebookViewer artifact validation + gated-link check (what CI runs) |
+| `make docs-lint-snippets` | Syntax-check Python fenced snippets across all docs |
 | `make docs-check-python-snippets DOCS_PATH=...` | Syntax-check and type-check Python fenced snippets in one doc |
 | `make docs-run-notebook DOCS_PATH=...` | Execute the source notebook for one Fern `.mdx`/`.ipynb` doc using `nemo-nb` markers |
 | `make docs-broken-links` | Report broken links |

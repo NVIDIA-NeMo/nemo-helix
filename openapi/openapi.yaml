@@ -8426,6 +8426,32 @@ components:
           maxLength: 240
           minLength: 1
           pattern: ^[a-zA-Z0-9][a-zA-Z0-9._+/-]*$
+        scope:
+          items:
+            type: string
+            pattern: ^\s*[^\s:]+\s*$
+          title: Scope
+          description: Optional service names that restrict this key to read and write
+            access for those services.
+          nullable: true
+          type: array
+          minItems: 1
+        rotates:
+          title: Rotates
+          description: JTI of a prior Scoped Access Key owned by the caller to revoke
+            after creation. Intended primarily for personal keys without a service-account
+            identity.
+          nullable: true
+          type: string
+          pattern: ^ak_[0-9a-f]{32}$
+        workspaces:
+          title: Workspaces
+          description: Optional workspace memberships to grant to the newly created
+            key principal.
+          nullable: true
+          items:
+            $ref: '#/components/schemas/AccessKeyWorkspaceGrant'
+          type: array
       type: object
       title: AccessKeyCreateRequest
       description: Request body for creating a Scoped Access Key.
@@ -8477,6 +8503,13 @@ components:
           uniqueItems: true
           title: Audiences
           description: Audiences accepted for the Scoped Access Key JWT.
+        scope:
+          items:
+            type: string
+          type: array
+          title: Scope
+          description: Services this key is restricted to. An empty list means the
+            key is unscoped.
         created_at:
           type: string
           format: date-time
@@ -8600,6 +8633,13 @@ components:
           uniqueItems: true
           title: Audiences
           description: Audiences accepted for the Scoped Access Key JWT.
+        scope:
+          items:
+            type: string
+          type: array
+          title: Scope
+          description: Services this key is restricted to. An empty list means the
+            key is unscoped.
         created_at:
           type: string
           format: date-time
@@ -8745,6 +8785,30 @@ components:
       - changed
       title: AccessKeyStatusChangeResponse
       description: Response returned after a reversible Scoped Access Key status change.
+    AccessKeyWorkspaceGrant:
+      properties:
+        workspace:
+          type: string
+          pattern: ^\s*\S.*$
+          title: Workspace
+          description: Workspace name. Must not be blank.
+        roles:
+          items:
+            type: string
+          contains:
+            pattern: ^\s*\S.*$
+          type: array
+          minContains: 1
+          title: Roles
+          description: Roles to grant in the workspace. Defaults to ['Editor'] when
+            omitted.
+          default:
+          - Editor
+      type: object
+      required:
+      - workspace
+      title: AccessKeyWorkspaceGrant
+      description: Workspace membership to grant to a newly created access key principal.
     ActionRails:
       properties:
         instant_actions:
@@ -10299,7 +10363,12 @@ components:
             keys: image, command, args, resources, env, readinessProbe, livenessProbe,
             startupProbe, nodeSelector, tolerations, userID, groupID, labels, initContainers,
             sidecarContainers. Unsupported keys are rejected at compile time. Ignored
-            by non-NIM engines and docker runtime.'
+            by non-NIM engines and docker runtime. One key is a platform directive
+            rather than a Spec fragment and is honored on both runtimes: nimLegacy
+            (default true) emits the legacy NIM_MODEL_NAME / NIM_MODEL_PATH weight
+            env vars; set it false for images that retired those names and expect
+            NIM_ENGINE_MODEL_NAME / NIM_ENGINE_MODEL_PATH, since such images fail
+            config validation when a retired name is set.'
           additionalProperties: true
           type: object
       type: object

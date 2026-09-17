@@ -82,6 +82,9 @@ navigation:
               - page: Evaluate a Harbor Task Suite
                 slug: harbor-runner
                 path: ../../evaluator/agent-eval/harbor-runner.mdx
+              - page: Run a NeMo Fabric Agent inside Harbor
+                slug: harbor-fabric-agent
+                path: ../../evaluator/agent-eval/harbor-fabric-agent.mdx
               - page: Evaluate a NeMo Gym Environment
                 slug: gym-runner
                 path: ../../evaluator/agent-eval/gym-runner.mdx
@@ -375,6 +378,8 @@ navigation:
         contents:
           - page: Agents
             path: ../../studio/agents.mdx
+          - page: Anonymizer
+            path: ../../studio/anonymizer.mdx
           - page: Custom Models
             slug: customization
             path: ../../studio/customization.mdx
@@ -386,8 +391,6 @@ navigation:
             path: ../../studio/insights.mdx
           - page: Model Evaluations
             path: ../../studio/model-evaluations.mdx
-          - page: Monitor
-            path: ../../studio/monitor.mdx
           - page: Plugin UIs
             slug: plugins
             path: ../../studio/plugins.mdx

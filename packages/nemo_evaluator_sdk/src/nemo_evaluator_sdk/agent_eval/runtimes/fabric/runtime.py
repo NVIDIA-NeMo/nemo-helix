@@ -9,23 +9,28 @@ NeMo Fabric Python SDK and adapts each normalized Fabric ``RunResult`` into an
 ``harness.adapter_id`` (never inferred from a model); an optional ``model`` slug
 is applied as the config's default model, mirroring Fabric's own Harbor integration.
 
-Per-task settings (workspace, model, trajectory capture) are composed directly onto
-a copy of the supplied config via the SDK's config helpers (``model_copy`` +
-``enable_relay`` + ``environment``). Fabric removed profile overlays in 0.1.0rc2 —
-``FabricConfig`` rejects a ``profiles`` key and ``Fabric.run`` takes no ``profiles``
-argument — so a run is described by exactly one complete typed config, and the
-evaluator-owned per-task settings are authoritative simply by being applied last.
+Where the harness process runs is chosen by ``sandbox``:
 
-Every task runs in its own fresh workspace: the runtime seeds it from
-``inputs['files']`` (a no-op when there are none), runs the harness in it (via
-``environment.workspace``), and exposes its final file tree as ``workspace``
-filesystem evidence, so workspace-reading metrics score a Fabric trial alongside
-the ATIF trajectory. Any ``environment.workspace`` set in the supplied config is
-overridden per task.
+* **No sandbox** (the default): ``Fabric().run(...)`` in-process on the host.
+* **A** :class:`~nemo_evaluator_sdk.agent_eval.runtimes.sandbox.base.SandboxProvider`: each task runs
+  inside a fresh sandbox from that provider and its ``/out`` tree is downloaded into the task's
+  evidence dir (:mod:`~nemo_evaluator_sdk.agent_eval.runtimes.fabric._sandbox_execution`).
 
-``nemo_fabric`` is an optional native dependency: its types are imported for
-annotations under ``TYPE_CHECKING`` and the package is loaded lazily at runtime,
-so this module stays importable without it.
+Both modes lay evidence out the same way — ``fabric_result.json``, ``workspace/``, ``relay/``,
+``traces/`` under one per-task dir — and map it through one trial-building step, so a metric sees the
+same ``result``, ``trace`` and ``workspace`` evidence whichever mode produced the trial.
+
+Per-task settings (workspace, model, trajectory capture) are composed onto a copy of the supplied
+config. Fabric removed profile overlays in 0.1.0rc2, so a run is described by exactly one complete
+typed config, and the evaluator-owned per-task settings are authoritative simply by being applied last.
+
+Every task runs in its own fresh workspace: the runtime seeds it from ``inputs['files']`` (a no-op
+when there are none), runs the harness in it, and exposes its final file tree as ``workspace``
+filesystem evidence. Any ``environment.workspace`` set in the supplied config is overridden per task.
+
+``nemo_fabric`` is an optional native dependency: its types are imported for annotations under
+``TYPE_CHECKING`` and the package is loaded lazily at runtime, so this module stays importable
+without it.
 """
 
 from __future__ import annotations
@@ -43,7 +48,8 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric import _common
-from nemo_evaluator_sdk.agent_eval.runtimes.fabric.hooks import FabricTaskRunHook, FabricTaskRunSession
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric._sandbox_execution import SandboxExecution
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.image import ensure_fabric_image
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.otlp_receiver import OTLPReceiver
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.otlp_writer import (
     fold_exports,
@@ -60,6 +66,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.fabric.skills import (
     install_skills,
     resolve_skill_mode,
 )
+from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.base import SandboxProvider
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import (
     AgentEvalTrial,
@@ -69,11 +76,14 @@ from nemo_evaluator_sdk.agent_eval.trials import (
     TrialMeasurements,
 )
 from nemo_evaluator_sdk.agent_eval.workspace_seeds import SEED_FILES_INPUT_KEY, seed_workspace
+from nemo_evaluator_sdk.resolver_protocols import SecretResolver
+from nemo_evaluator_sdk.resolvers import LocalSecretResolver
+from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.evidence import (
+    EVIDENCE_LOGS,
     CandidateEvidence,
     EvidenceDescriptor,
 )
-from pydantic import JsonValue
 
 if TYPE_CHECKING:
     # Annotations use nemo_fabric's real types (single source of truth). nemo_fabric is an optional
@@ -84,8 +94,6 @@ if TYPE_CHECKING:
         Fabric,
         FabricConfig,
         RelayObservabilityConfig,
-        RunOutput,
-        RunResult,
     )
 
 DEFAULT_FABRIC_TIMEOUT_S = 600
@@ -98,13 +106,13 @@ _MISSING_RELAY_MSG = (
 
 logger = logging.getLogger(__name__)
 
-# Evidence-dir layout for trajectory capture. These subdir names are our own local layout — we create
-# them and hand them to Fabric/Relay, so they are not derived from either library.
+# Evidence-dir layout. These subdir names are our own local layout — we create them and hand them to
+# Fabric/Relay, so they are not derived from either library.
 _RELAY_SUBDIR = "relay"
 _ARTIFACTS_SUBDIR = "artifacts"
-# Per-task workspace: where seed files are staged and where the harness reads/writes. We
-# create it, point Fabric's ``environment.workspace`` at it, and expose it as ``workspace`` evidence.
 _WORKSPACE_SUBDIR = "workspace"
+_LOGS_SUBDIR = "logs"
+_RESULT_FILENAME = "fabric_result.json"
 # Per-task skill staging dir (native injection): the skill's files are resolved here and the staged
 # root is added to the task config's ``skills.paths``. For codex self-injection the skill lands in the
 # workspace instead (no path added).
@@ -113,13 +121,8 @@ _SKILL_SUBDIR = "skill"
 # skills routing (see ``_resolve_skill_mode``). Never staged and need not exist on disk — the planner
 # just reports how it would route a skill for this adapter.
 _SKILL_PROBE_PATH = "nemo-eval-skill-capability-probe"
-# Evidence key + descriptor kind for the staged workspace, consumed by the
-# workspace-reading metrics.
 _WORKSPACE_EVIDENCE_KEY = "workspace"
 _WORKSPACE_EVIDENCE_KIND = "filesystem"
-# File-exporter output names we choose for the Relay ATIF/ATOF trajectory (Relay accepts these as inputs).
-# ``kind`` Fabric stamps on the promoted Relay ATIF artifact; used to surface it as trace evidence.
-_ATIF_ARTIFACT_KIND = "atif"
 
 
 class FabricAgentRuntime:
@@ -129,12 +132,15 @@ class FabricAgentRuntime:
     config shape differs mainly in that ``adapter_id``, optional input/output schemas, and any
     harness-specific ``harness.settings``. Fabric owns each adapter's execution mechanism. See
     ``examples/fabric_harness_runtimes.py`` for full Codex and Hermes config examples.
+
+    Pass ``sandbox=`` to run each task inside a sandbox from that provider instead of on the host.
+    ``image`` and ``secrets`` only apply there; ``base_dir`` only applies on the host.
     """
 
     def __init__(
         self,
+        config: FabricConfig | Mapping[str, Any],
         *,
-        config: Mapping[str, Any],
         model: str | None = None,
         base_dir: str | Path | None = None,
         work_root: str | Path | None = None,
@@ -143,9 +149,18 @@ class FabricAgentRuntime:
         trajectory_extra: Mapping[str, Any] | None = None,
         runtime_name: str = _RUNTIME_NAME,
         skills: Sequence[AgentSkill] | None = None,
-        task_hook: FabricTaskRunHook | None = None,
+        sandbox: SandboxProvider | None = None,
+        image: str | None = None,
+        secrets: Mapping[str, SecretRef] | None = None,
     ) -> None:
-        self._config = config
+        if sandbox is None:
+            if image is not None:
+                raise ValueError("image= selects the sandbox image; pass sandbox=<SandboxProvider> with it")
+            if secrets:
+                raise ValueError("secrets= are injected into a sandbox; pass sandbox=<SandboxProvider> with them")
+        elif base_dir is not None:
+            raise ValueError("base_dir is not supported in sandbox mode: the config is seeded into /in")
+        self._config = _common.to_mapping(config)
         self._model = model
         self._base_dir = Path(base_dir).expanduser() if base_dir is not None else None
         self._work_root = Path(work_root).expanduser() if work_root is not None else None
@@ -154,7 +169,16 @@ class FabricAgentRuntime:
         self._trajectory_extra = dict(trajectory_extra) if trajectory_extra else None
         self._runtime_name = runtime_name
         self._skill_set = SkillSet(tuple(skills or ()))
-        self._task_hook = task_hook
+        self._sandbox = sandbox
+        # Optional prebuilt image: the trial runs inside it, so it must contain the Fabric CLI + adapter.
+        # None -> stock harness-agnostic image built on first run.
+        self._image = image
+        # ``secrets`` maps the env-var name a Fabric harness reads its credential from (declared by the
+        # adapter's ``requirements.env``) to a SecretRef. The runner only *declares* them; the resolver
+        # is owned by the orchestrator (see ``resolve_secrets``), mirroring ``MetricWithSecrets``.
+        self._secrets = dict(secrets or {})
+        self._resolved_env: dict[str, str] = {}
+        self._secrets_resolved = False
 
     def with_skills(self, skills: Sequence[AgentSkill]) -> FabricAgentRuntime:
         """Return a copy of this runtime with ``skills`` *added* to its skill set; ``self`` is not modified.
@@ -163,7 +187,9 @@ class FabricAgentRuntime:
         eval derive a treated runtime from a skill-free baseline (``baseline.with_skills(the_skills)``) so
         the two arms differ in exactly the injected skills. Skill names must be unique across the combined
         set — two bundles claiming the same ``<name>/`` would collide — so re-adding a skill already
-        present raises. A shallow copy suffices — the shared fields are immutable config/paths.
+        present raises. A shallow copy suffices — the shared fields are immutable config/paths/provider.
+        (``run_tasks`` disposes a sandbox provider on completion, so an A/B run over two arms should give
+        each arm its own provider.)
         """
         clone = copy.copy(self)
         clone._skill_set = self._skill_set.with_skills(skills)
@@ -177,9 +203,25 @@ class FabricAgentRuntime:
         """
         return self.with_skills([skill])
 
+    async def resolve_secrets(self, secret_resolver: SecretResolver) -> None:
+        """Resolve declared ``SecretRef``\\ s to values, keyed by the env var each harness reads.
+
+        Mirrors ``MetricWithSecrets.resolve_secrets``: the resolver is owned by the orchestrator (the
+        AgentEvaluator / execution backend), not the runner. Call before :meth:`run_tasks`; a standalone
+        ``run_tasks`` falls back to local env resolution when this was not called.
+        """
+        env: dict[str, str] = {}
+        for env_var, secret_ref in self._secrets.items():
+            value = await secret_resolver.resolve_secret(secret_ref)
+            if value is None:
+                raise ValueError(f"could not resolve secret {secret_ref.root!r} for env var {env_var!r}")
+            env[env_var] = value
+        self._resolved_env = env
+        self._secrets_resolved = True
+
     def _adapter_id(self) -> str:
         """Harness adapter selected by the Fabric config (empty when unset)."""
-        harness = self._config.get("harness") if isinstance(self._config, Mapping) else None
+        harness = self._config.get("harness")
         adapter_id = harness.get("adapter_id") if isinstance(harness, Mapping) else None
         return str(adapter_id) if adapter_id is not None else ""
 
@@ -193,13 +235,16 @@ class FabricAgentRuntime:
         """
         if self._model:
             return self._model
-        models = self._config.get("models") if isinstance(self._config, Mapping) else None
+        models = self._config.get("models")
         default = models.get("default") if isinstance(models, Mapping) else None
         model = default.get("model") if isinstance(default, Mapping) else getattr(default, "model", None)
         return str(model) if model is not None else None
 
     def runner_info(self) -> RunnerInfo:
-        """Identify this runner and the Fabric settings that shape its results."""
+        """Identify this runner and the Fabric settings that shape its results.
+
+        Records the sandbox provider's name only — never ``self._secrets``, which is persisted nowhere.
+        """
         return RunnerInfo(
             name=self._runtime_name,
             kind="runner",
@@ -211,6 +256,8 @@ class FabricAgentRuntime:
                 # Off means no relay/ATIF exporter, so the run captures no trajectory evidence — a
                 # metric that scores trajectories sees something different.
                 "capture_trajectory": self._capture_trajectory,
+                "sandbox": self._sandbox.name if self._sandbox is not None else None,
+                "image": self._image,
             },
         )
 
@@ -219,19 +266,63 @@ class FabricAgentRuntime:
         tasks: Sequence[AgentEvalTask],
         config: AgentEvalRunConfig | None = None,
     ) -> Sequence[AgentEvalTrial]:
-        try:
-            # nemo_fabric ships a native (pyo3) core and is an optional dependency, so it is imported
-            # lazily here rather than at module load.
-            from nemo_fabric import Fabric, FabricConfig  # ty: ignore[unresolved-import]
-        except ImportError as exc:
-            raise RuntimeError(_MISSING_FABRIC_MSG) from exc
-
         resolved_config = config or AgentEvalRunConfig()
         # Assign a run id once per run so two runs (e.g. an A/B baseline vs. skilled variant) written
         # under the same work_root/output_dir land in distinct, non-colliding evidence trees. Callers
         # that set run_id keep their identifier.
         if resolved_config.run_id is None:
             resolved_config = resolved_config.model_copy(update={"run_id": _new_run_id()})
+
+        sandbox_execution: SandboxExecution | None = None
+        host: tuple[Fabric, FabricConfig] | None = None
+        try:
+            if self._sandbox is None:
+                host = self._open_host()
+            else:
+                sandbox_execution = await self._open_sandbox(self._sandbox)
+
+            # Resolve once how a skill would reach this harness (the adapter is constant across tasks) by
+            # asking Fabric's own capability planner, so any adapter that declares native skills support —
+            # ours or an end-user's — is picked up automatically instead of via a hardcoded allow-list. Fail
+            # fast rather than silently run a skill-free trial mislabeled as "with skill", which would
+            # corrupt an A/B comparison. Blocking pyo3 planning, so off the shared event loop.
+            skill_mode: SkillMode | None = None
+            if self._skill_set.skills:
+                skill_mode = await asyncio.to_thread(self._resolve_skill_mode)
+                if skill_mode is None:
+                    raise RuntimeError(
+                        f"FabricAgentRuntime received one or more skills but adapter {self._adapter_id()!r} has "
+                        "no known skill-injection strategy: Fabric does not route skills to it natively and it "
+                        "is not a codex harness. Use a skills-native or codex harness, or drop the skills."
+                    )
+
+            semaphore = asyncio.Semaphore(resolved_config.parallelism)
+
+            async def run_one(index: int, task: AgentEvalTask) -> AgentEvalTrial:
+                async with semaphore:
+                    evidence_dir = self._evidence_dir(index, task, resolved_config)
+                    evidence_dir.mkdir(parents=True, exist_ok=True)
+                    if sandbox_execution is not None:
+                        run = await sandbox_execution.run_task(task, evidence_dir, skill_mode)
+                    else:
+                        assert host is not None
+                        run = await self._run_task_on_host(*host, task, evidence_dir, skill_mode)
+                    return await self._finish_task(task, evidence_dir, run, skill_mode)
+
+            return await asyncio.gather(*(run_one(index, task) for index, task in enumerate(tasks)))
+        finally:
+            if self._sandbox is not None:
+                # Each sandbox tears itself down; the provider is shared across the batch, so its
+                # process-wide resources are disposed once here, even when setup itself raised.
+                await self._sandbox.aclose()
+
+    def _open_host(self) -> tuple[Fabric, FabricConfig]:
+        try:
+            # nemo_fabric ships a native (pyo3) core and is an optional dependency, so it is imported
+            # lazily here rather than at module load.
+            from nemo_fabric import Fabric, FabricConfig  # ty: ignore[unresolved-import]
+        except ImportError as exc:
+            raise RuntimeError(_MISSING_FABRIC_MSG) from exc
         agent_config = FabricConfig.from_mapping(self._config)
         # Fail fast (once) if trajectory capture is requested but the nemo-relay gateway isn't
         # importable, rather than failing every task the same way inside the per-task guard.
@@ -240,35 +331,31 @@ class FabricAgentRuntime:
                 import nemo_relay.observability  # noqa: F401  # ty: ignore[unresolved-import]
             except ImportError as exc:
                 raise RuntimeError(_MISSING_RELAY_MSG) from exc
-        # ``Fabric`` (formerly ``FabricClient``) is a lightweight, reusable facade — not a lifecycle
-        # context manager — so it is created once and reused across tasks with no cleanup.
-        client = Fabric()
+        # ``Fabric`` is a lightweight, reusable facade — not a lifecycle context manager — so it is
+        # created once and reused across tasks with no cleanup.
+        return Fabric(), agent_config
 
-        # Resolve once how a skill would reach this harness (the adapter is constant across tasks) by
-        # asking Fabric's own capability planner, so any adapter that declares native skills support — ours
-        # or an end-user's — is picked up automatically instead of via a hardcoded allow-list. Fail fast
-        # rather than silently run a skill-free trial mislabeled as "with skill", which would corrupt an
-        # A/B comparison. Only touched when a skill is set, so the no-skill path is unaffected.
-        skill_mode: SkillMode | None = None
-        if self._skill_set.skills:
-            skill_mode = self._resolve_skill_mode(client, agent_config)
-            if skill_mode is None:
-                adapter_id = agent_config.harness.adapter_id
-                raise RuntimeError(
-                    f"FabricAgentRuntime received one or more skills but adapter {adapter_id!r} has no known "
-                    "skill-injection strategy: Fabric does not route skills to it natively and it is not a "
-                    "codex harness. Use a skills-native or codex harness, or drop the skills."
-                )
+    async def _open_sandbox(self, provider: SandboxProvider) -> SandboxExecution:
+        if self._image is None:
+            # Build-if-missing; a first build compiles nemo-fabric (minutes), so keep it off the event loop.
+            self._image = await asyncio.to_thread(ensure_fabric_image)
+        if self._secrets and not self._secrets_resolved:
+            # No orchestrator resolved our secrets (standalone run) — fall back to local env resolution.
+            await self.resolve_secrets(LocalSecretResolver())
+        return SandboxExecution(
+            config=self._config,
+            provider=provider,
+            image=self._image,
+            env=self._resolved_env,
+            model=self._model,
+            timeout_s=self._timeout_s,
+            capture_trajectory=self._capture_trajectory,
+            trajectory_extra=self._trajectory_extra,
+            runtime_name=self._runtime_name,
+            skills=self._skill_set,
+        )
 
-        semaphore = asyncio.Semaphore(resolved_config.parallelism)
-
-        async def run_one(index: int, task: AgentEvalTask) -> AgentEvalTrial:
-            async with semaphore:
-                return await self._run_task(client, agent_config, index, task, resolved_config, skill_mode)
-
-        return await asyncio.gather(*(run_one(index, task) for index, task in enumerate(tasks)))
-
-    def _resolve_skill_mode(self, client: Fabric, agent_config: FabricConfig) -> SkillMode | None:
+    def _resolve_skill_mode(self) -> SkillMode | None:
         """Ask Fabric how a skill would reach the selected harness, or ``None`` if it can't.
 
         Probes Fabric's capability planner: plan a copy of the config with a sentinel skill path attached
@@ -276,84 +363,61 @@ class FabricAgentRuntime:
         source at runtime means adapters that declare native skills support — ours or an end-user's — are
         detected without a hardcoded list. See :func:`~...skills.resolve_skill_mode`.
         """
-        probe_config = agent_config.model_copy(deep=True)
+        try:
+            from nemo_fabric import Fabric, FabricConfig  # ty: ignore[unresolved-import]
+        except ImportError as exc:
+            raise RuntimeError(_MISSING_FABRIC_MSG) from exc
+        probe_config = FabricConfig.from_mapping(self._config)
         probe_config.add_skill_path(_SKILL_PROBE_PATH)
-        plan = client.plan(probe_config, base_dir=self._base_dir)
-        return resolve_skill_mode(
-            capability_plan=plan.capability_plan,
-            adapter_id=agent_config.harness.adapter_id,
-        )
+        plan = Fabric().plan(probe_config, base_dir=self._base_dir)
+        return resolve_skill_mode(capability_plan=plan.capability_plan, adapter_id=self._adapter_id())
 
-    async def _run_task(
+    async def _run_task_on_host(
         self,
         client: Fabric,
         agent_config: FabricConfig,
-        index: int,
         task: AgentEvalTask,
-        config: AgentEvalRunConfig,
+        evidence_dir: Path,
         skill_mode: SkillMode | None,
-    ) -> AgentEvalTrial:
-        # nemo_fabric is already imported+validated in ``run_tasks``; this is a cached sys.modules
+    ) -> _common.TaskRun:
+        # nemo_fabric is already imported+validated in ``_open_host``; this is a cached sys.modules
         # lookup, not a re-load, so the types are used where they're constructed instead of threaded down.
         from nemo_fabric import RunRequest  # ty: ignore[unresolved-import]
 
-        evidence_dir = self._evidence_dir(index, task, config)
-        evidence_dir.mkdir(parents=True, exist_ok=True)
-
-        # Every task runs in its own fresh workspace: seed any ``inputs['files']`` into it (a no-op when
-        # there are none), point the harness at it, and expose it as ``workspace`` filesystem evidence —
-        # a uniform per-task dir that maps cleanly onto a per-task container volume later. Seeding runs
-        # inside the guarded block so a bad seed (a path escaping the workspace, an unresolvable fileset)
-        # fails just this task, not the whole run; it is synchronous and may block (a fileset handler
-        # downloads), so it is offloaded off the shared event loop.
         workspace_dir = evidence_dir / _WORKSPACE_SUBDIR
         workspace_dir.mkdir(parents=True, exist_ok=True)
-        skill_provenances: list[SkillProvenance] = []
-        hook_session = FabricTaskRunSession()
-        hook_extras: dict[str, Any] | None = None
+        run = _common.TaskRun(workspace_dir=workspace_dir, relay_dir=evidence_dir / _RELAY_SUBDIR)
         trace_receiver: OTLPReceiver | None = None
         try:
             # Inside the guarded block: a port it cannot bind costs this trial its trace, like any
             # other per-task failure, rather than aborting every task in the gather.
             trace_receiver = self._start_trace_receiver(evidence_dir)
-            # Stage seed files into the workspace for their on-disk side effect; the prompt is the task
-            # instruction only, so the returned paths are unused.
+            # Seeding runs inside the guarded block so a bad seed (a path escaping the workspace, an
+            # unresolvable fileset) fails just this task, not the whole run; it is synchronous and may
+            # block (a fileset handler downloads), so it is offloaded off the shared event loop.
             await asyncio.to_thread(seed_workspace, workspace_dir, task.inputs.get(SEED_FILES_INPUT_KEY))
 
-            # Inject the skill set (if any) for this task. A native harness gets each staged bundle added
-            # to the config's ``skills.paths``; codex self-injection stages each bundle into the
-            # workspace and adds no path. One provenance per skill is stamped on the trial for the A/B
-            # diff. Blocking file I/O, off the event loop.
+            # A native harness gets each staged bundle added to the config's ``skills.paths``; codex
+            # self-injection stages each bundle into the workspace and adds no path.
             skill_paths: list[str] = []
             if self._skill_set.skills and skill_mode is not None:
                 installation = await asyncio.to_thread(
                     install_skills,
                     skills=self._skill_set.skills,
-                    adapter_id=agent_config.harness.adapter_id,
+                    adapter_id=self._adapter_id(),
                     mode=skill_mode,
                     workspace_dir=workspace_dir,
                     skill_stage_dir=(evidence_dir / _SKILL_SUBDIR).resolve(),
                 )
-                skill_provenances = installation.provenances
+                run.skill_provenances = installation.provenances
                 skill_paths = installation.skill_paths
 
-            # Everything the run needs lives in one typed config: Fabric no longer layers profile
-            # overlays, so the per-task workspace/model/trajectory settings are composed on last and are
-            # authoritative by construction. ``add_skill_path`` appends, so config-declared skills survive.
+            # ``add_skill_path`` appends, so config-declared skills survive.
             task_config = self._compose_config(
                 agent_config, evidence_dir, workspace_dir, task=task, trace_receiver=trace_receiver
             )
             for skill_path in skill_paths:
                 task_config.add_skill_path(skill_path)
-
-            if self._task_hook is not None:
-                task_config = self._task_hook.prepare(
-                    config=task_config,
-                    task=task,
-                    evidence_dir=evidence_dir,
-                    workspace_dir=workspace_dir,
-                    session=hook_session,
-                )
 
             result = await asyncio.wait_for(
                 # ``Fabric.run`` folds the per-invocation input + request id into a ``RunRequest``.
@@ -364,68 +428,44 @@ class FabricAgentRuntime:
                 ),
                 timeout=self._timeout_s,
             )
-            # Always try to harvest MCP binding results. Hermes often ends with
-            # ``completed=false`` / empty finals after a successful tool call; the binding
-            # audit is still the authoritative analyzer output for scoring.
-            if self._task_hook is not None:
-                try:
-                    hook_extras = self._task_hook.after_success(task=task, result=result, session=hook_session)
-                except Exception as exc:  # noqa: BLE001 - binding harvest must not abort the batch
-                    logger.warning("Fabric task hook after_success failed: %s", exc)
-                    if result.status == "succeeded":
-                        raise
-                    hook_extras = None
-        except TimeoutError as exc:
-            return self._failed_trial(
-                task,
-                evidence_dir,
-                exc,
-                extra_metadata=self._skill_metadata(skill_provenances),
-                measurements=_atif_measurements(_relay_atif_path(evidence_dir)),
-            )
+            run.result = _common.ResultView.from_result(result)
         except Exception as exc:  # noqa: BLE001 - a task failure must not abort the whole run
-            return self._failed_trial(
-                task,
-                evidence_dir,
-                exc,
-                extra_metadata=self._skill_metadata(skill_provenances),
-                measurements=_atif_measurements(_relay_atif_path(evidence_dir)),
-            )
+            run.error = exc
         finally:
             if trace_receiver is not None:
-                # Stopped before the fold, and both before `_to_trial` reads the evidence: the
+                # Stopped before the fold, and both before the trial reads the evidence: the
                 # spans arrive on the exporter's own schedule, and a trace folded before the last
                 # flush looks complete.
                 trace_receiver.__exit__(None, None, None)
-                # Guarded because this runs in `finally`, where a raise escapes the handlers above
+                # Guarded because this runs in `finally`, where a raise escapes the handler above
                 # and aborts the whole gather instead of failing this one task.
                 try:
                     fold_exports(traces_dir(evidence_dir))
                 except Exception as exc:  # noqa: BLE001 - any fold failure costs the trace, not the trial
                     logger.warning("Could not fold the OTLP trace for task %s: %s", task.id, exc)
-            if self._task_hook is not None:
-                try:
-                    self._task_hook.cleanup(session=hook_session)
-                except Exception:  # noqa: BLE001 - hook cleanup must not mask the trial outcome
-                    pass
-            # Codex self-injection staged each bundle *inside* the workspace so the harness could discover
-            # it. Remove them once the run is over (it is already captured in the trajectory) so the injected
-            # files don't linger in the durable workspace and, on any path that exposes it as filesystem
-            # evidence, read as agent output and skew workspace-reading metrics. In ``finally`` so a
-            # timed-out or errored run cleans up too, not just the success path. Best-effort per
-            # ``_remove_injected_bundle``; a no-op for native mode and when nothing was staged.
-            if skill_mode == SKILL_MODE_CODEX_SKILLS_DIR:
-                for provenance in skill_provenances:
-                    await asyncio.to_thread(_remove_injected_bundle, workspace_dir, provenance["location"])
+        return run
 
-        return self._to_trial(
-            task,
-            result,
-            evidence_dir,
-            workspace_dir,
-            skill_provenances=skill_provenances,
-            hook_extras=hook_extras,
-        )
+    async def _finish_task(
+        self, task: AgentEvalTask, evidence_dir: Path, run: _common.TaskRun, skill_mode: SkillMode | None
+    ) -> AgentEvalTrial:
+        # Codex self-injection staged each bundle *inside* the workspace so the harness could discover
+        # it. Remove them once the run is over (it is already captured in the trajectory) so the injected
+        # files don't read as agent output to workspace-reading metrics. Runs for failed tasks too.
+        if skill_mode == SKILL_MODE_CODEX_SKILLS_DIR:
+            for provenance in run.skill_provenances:
+                await asyncio.to_thread(_remove_injected_bundle, run.workspace_dir, provenance["location"])
+        skill_metadata = self._skill_metadata(run.skill_provenances)
+        atif_path = _atif_path(run)
+        measurements = _atif_measurements(atif_path)
+        if run.error is not None or run.result is None:
+            return self._failed_trial(
+                task,
+                evidence_dir,
+                run.error if run.error is not None else RuntimeError("Fabric produced no result"),
+                extra_metadata={**run.metadata, **skill_metadata},
+                measurements=measurements,
+            )
+        return self._to_trial(task, run, run.result, evidence_dir, atif_path=atif_path, measurements=measurements)
 
     @staticmethod
     def _skill_metadata(provenances: list[SkillProvenance]) -> dict[str, Any]:
@@ -440,19 +480,18 @@ class FabricAgentRuntime:
     def _to_trial(
         self,
         task: AgentEvalTask,
-        result: RunResult,
+        run: _common.TaskRun,
+        result: _common.ResultView,
         evidence_dir: Path,
-        workspace_dir: Path,
-        skill_provenances: list[SkillProvenance] | None = None,
-        hook_extras: Mapping[str, Any] | None = None,
+        *,
+        atif_path: Path | None,
+        measurements: TrialMeasurements,
     ) -> AgentEvalTrial:
         # Persist the full normalized Fabric result so graders (and debugging) can see the raw
         # envelope, and expose it as an evidence descriptor.
-        result_path = evidence_dir / "fabric_result.json"
-        result_path.write_text(json.dumps(result.to_mapping(), indent=2, default=str), encoding="utf-8")
+        result_path = evidence_dir / _RESULT_FILENAME
+        result_path.write_text(json.dumps(result.payload, indent=2, default=str), encoding="utf-8")
 
-        extras = dict(hook_extras) if hook_extras else {}
-        measurements = _atif_measurements(_atif_artifact_path(result))
         base_metadata: dict[str, Any] = {
             "runtime": self._runtime_name,
             "harness": result.harness,
@@ -460,97 +499,69 @@ class FabricAgentRuntime:
             "adapter_kind": result.adapter_kind,
             "invocation_id": result.invocation_id,
             "agent_model": self._model,
+            **run.metadata,
             # Skill provenance (name + content hash + injection mode) for the A/B diff.
-            **self._skill_metadata(skill_provenances or []),
-            **extras,
+            **self._skill_metadata(run.skill_provenances),
         }
 
         if result.status != "succeeded":
-            # Hermes may report a non-success final message after a successful MCP tool
-            # call. Prefer the binding audit result over a hard fail when present.
-            binding_result = _first_mcp_binding_result(extras)
-            analysis = binding_result if binding_result is not None else extras.get("analyzer_analysis")
-            if analysis is not None:
-                base_metadata = {
-                    **base_metadata,
-                    "fabric_status": result.status,
-                    "recovered_from_mcp_binding": True,
-                }
-                return AgentEvalTrial(
-                    id=f"{task.id}:fabric",
-                    task_id=task.id,
-                    status=AgentEvalTrialStatus.COMPLETED,
-                    output=AgentOutput(
-                        output_text=json.dumps(analysis, default=str),
-                        response=_normalize_output(result.output),
-                        metadata={**base_metadata, "evidence_dir": str(evidence_dir)},
-                    ),
-                    evidence=self._evidence(result, result_path, workspace_dir),
-                    measurements=measurements,
-                    metadata={**base_metadata, "generated": True, "agent_ok": True},
-                )
             return self._failed_trial(
-                task, evidence_dir, _result_error(result), extra_metadata=base_metadata, measurements=measurements
+                task, evidence_dir, result.failure(), extra_metadata=base_metadata, measurements=measurements
             )
 
-        # Fabric wraps the output in a ``RunOutput`` mapping (RunOutput response contract, #52),
-        # which is not itself a JSON value; normalize it to a plain mapping so it round-trips through the
-        # trial's ``JsonValue``-typed response.
-        output = _normalize_output(result.output)
-        # Author / mcp_run_binding hooks may attach a structured result. Prefer that when the
-        # harness returns an empty final message after a successful tool call.
-        output_text = _extract_output_text(output)
-        if not output_text or not str(output_text).strip():
-            binding_result = _first_mcp_binding_result(extras)
-            analysis = binding_result if binding_result is not None else extras.get("analyzer_analysis")
-            if analysis is not None:
-                output_text = json.dumps(analysis, default=str)
+        output_text = _common.extract_output_text(result.output)
         return AgentEvalTrial(
-            id=f"{task.id}:fabric",
+            id=f"{task.id}:{self._runtime_name}",
             task_id=task.id,
             status=AgentEvalTrialStatus.COMPLETED,
             output=AgentOutput(
                 output_text=output_text,
-                response=output,
+                response=result.output,
                 metadata={**base_metadata, "evidence_dir": str(evidence_dir)},
             ),
-            evidence=self._evidence(result, result_path, workspace_dir),
+            evidence=self._evidence(run, result, result_path, evidence_dir, atif_path=atif_path),
             measurements=measurements,
             # AgentPhaseSuccessMetric reads agent_ok to score whether the agent phase finished cleanly
             # (an explicit bool, not just trial status).
             metadata={**base_metadata, "generated": True, "agent_ok": True},
         )
 
-    def _evidence(self, result: RunResult, result_path: Path, workspace_dir: Path) -> CandidateEvidence:
-        # The workspace is a host directory the harness ran in, so its final file tree is available on
-        # disk — expose it as filesystem evidence so workspace-reading metrics can score a Fabric trial.
+    def _evidence(
+        self,
+        run: _common.TaskRun,
+        result: _common.ResultView,
+        result_path: Path,
+        evidence_dir: Path,
+        *,
+        atif_path: Path | None,
+    ) -> CandidateEvidence:
         descriptors: dict[str, EvidenceDescriptor] = {
             "result": EvidenceDescriptor(kind="json", format="json", ref=str(result_path)),
-            _WORKSPACE_EVIDENCE_KEY: EvidenceDescriptor(kind=_WORKSPACE_EVIDENCE_KIND, ref=str(workspace_dir)),
         }
-        atif_path: Path | None = None
-        for artifact in result.artifacts.artifacts:
+        # The workspace is where the harness ran, so its final file tree is on disk — expose it as
+        # filesystem evidence so workspace-reading metrics can score a Fabric trial.
+        if run.workspace_dir.is_dir():
+            descriptors[_WORKSPACE_EVIDENCE_KEY] = EvidenceDescriptor(
+                kind=_WORKSPACE_EVIDENCE_KIND, ref=str(run.workspace_dir)
+            )
+        logs_dir = evidence_dir / _LOGS_SUBDIR
+        if logs_dir.is_dir():
+            descriptors[EVIDENCE_LOGS] = EvidenceDescriptor(kind="logs", ref=str(logs_dir))
+        for artifact in result.artifacts:
             descriptors[artifact.name] = EvidenceDescriptor(
                 kind=artifact.kind or "file",
-                ref=str(artifact.path),
+                ref=artifact.path,
                 metadata={"media_type": artifact.media_type},
             )
-            # Surface the Relay ATIF trajectory under the standard trace evidence key so graders
-            # that consume a normalized trajectory find it.
-            if artifact.kind == _ATIF_ARTIFACT_KIND:
-                atif_path = Path(artifact.path)
-
-        register_trace_evidence(descriptors, atif=atif_path, otlp=otlp_trace_path(result_path.parent))
+        register_trace_evidence(descriptors, atif=atif_path, otlp=otlp_trace_path(evidence_dir))
         return CandidateEvidence(
             descriptors=descriptors,
             metadata={
                 "runtime": self._runtime_name,
                 "harness": result.harness,
-                "telemetry": [
-                    {"provider": ref.provider, "kind": ref.kind, "uri": ref.uri, "trace_id": ref.trace_id}
-                    for ref in result.telemetry
-                ],
-                "events": [{"kind": event.kind, "message": event.message} for event in result.events],
+                **run.metadata,
+                "telemetry": list(result.telemetry),
+                "events": list(result.events),
             },
         )
 
@@ -562,31 +573,14 @@ class FabricAgentRuntime:
         extra_metadata: Mapping[str, Any] | None = None,
         measurements: TrialMeasurements | None = None,
     ) -> AgentEvalTrial:
-        if isinstance(error, Mapping):
-            error_type = str(error.get("code") or error.get("stage") or "FabricError")
-            error_message = str(error.get("message") or error)
-        else:
-            error_type = error.__class__.__name__
-            error_message = str(error)
-        error_path = evidence_dir / "error.json"
-        error_path.write_text(json.dumps({"error_type": error_type, "error": error_message}) + "\n", encoding="utf-8")
-        return AgentEvalTrial(
-            id=f"{task.id}:fabric",
-            task_id=task.id,
-            status=AgentEvalTrialStatus.FAILED,
-            output=None,
-            evidence=CandidateEvidence(
-                descriptors={"error": EvidenceDescriptor(kind="error", format="json", ref=str(error_path))},
-                metadata={"runtime": self._runtime_name},
-            ),
-            measurements=measurements if measurements is not None else TrialMeasurements(),
-            metadata={
-                **(dict(extra_metadata) if extra_metadata else {}),
-                "runtime": self._runtime_name,
-                "agent_ok": False,
-                "error_type": error_type,
-                "error": error_message,
-            },
+        return _common.build_failed_trial(
+            task,
+            evidence_dir,
+            error,
+            runtime_name=self._runtime_name,
+            trial_id_suffix=self._runtime_name,
+            extra_metadata=extra_metadata,
+            measurements=measurements,
         )
 
     def _start_trace_receiver(self, evidence_dir: Path) -> OTLPReceiver | None:
@@ -603,7 +597,7 @@ class FabricAgentRuntime:
         task: AgentEvalTask,
         trace_receiver: OTLPReceiver | None = None,
     ) -> FabricConfig:
-        # nemo_fabric is already imported+validated in ``run_tasks``; this is a cached sys.modules
+        # nemo_fabric is already imported+validated in ``_open_host``; this is a cached sys.modules
         # lookup, not a re-load, so the type is used where it's constructed instead of threaded down.
         from nemo_fabric import EnvironmentConfig, ModelConfig  # ty: ignore[unresolved-import]
 
@@ -663,13 +657,11 @@ class FabricAgentRuntime:
     def _evidence_dir(self, index: int, task: AgentEvalTask, config: AgentEvalRunConfig) -> Path:
         root = self._work_root
         if root is None:
-            root = (config.work_dir or Path.cwd()) / "evidence" / "fabric"
+            root = (config.work_dir or Path.cwd()) / "evidence" / _RUNTIME_NAME
         # The run id isolates this run's evidence from other runs sharing the same root (A/B baseline
         # vs. skilled); run_tasks always populates it, so the fallback only guards a direct call.
         run_id = config.run_id or _new_run_id()
-        safe_task_id = _safe_path_name(task.id)
-        task_dir = f"{index:06d}-{safe_task_id}" if safe_task_id else f"task-{index:06d}"
-        return Path(root) / _safe_path_name(run_id) / task_dir
+        return Path(root) / _common.safe_path_name(run_id) / _common.task_subdir_name(index, task.id)
 
 
 def _remove_injected_bundle(workspace_dir: Path, location: str) -> None:
@@ -679,6 +671,8 @@ def _remove_injected_bundle(workspace_dir: Path, location: str) -> None:
     captured in the run's trajectory, so SkillUsedMetric (which reads the trace, not the workspace) is
     unaffected, and any filesystem error here must not fail an otherwise-successful trial.
     """
+    if not workspace_dir.is_dir():
+        return
     workspace_root = workspace_dir.resolve()
     injected = (workspace_dir / location).resolve()
     # Guard against a location escaping the workspace (defensive; provenance is evaluator-authored).
@@ -695,74 +689,25 @@ def _remove_injected_bundle(workspace_dir: Path, location: str) -> None:
         parent = parent.parent
 
 
-def _normalize_output(output: RunOutput | JsonValue) -> JsonValue:
-    """Unwrap a Fabric ``RunResult.output`` into the plain JSON value the trial response stores.
+def _atif_path(run: _common.TaskRun) -> Path | None:
+    """The ATIF trajectory to grade this task from: the promoted artifact, else Relay's own output.
 
-    Newer Fabric wraps output in a ``RunOutput`` (the RunOutput response contract), which is a
-    ``Mapping``; copy it into a plain dict (equivalent to its ``to_mapping()``). Raw/older JSON outputs
-    are already JSON values and pass through unchanged.
+    Relay's filename template is per-session, so more than one file can land under ``relay/`` when
+    subagents emit their own sessions. Picking one under-reports and summing double-counts a root
+    that already aggregates, so anything other than a single match reports nothing rather than a
+    wrong trajectory.
     """
-    if isinstance(output, Mapping):
-        return dict(output)
-    return output
-
-
-def _first_mcp_binding_result(extras: Mapping[str, Any]) -> Any | None:
-    """Return the first ``mcp_bindings.<server>.result`` payload, if any."""
-    bindings = extras.get("mcp_bindings")
-    if not isinstance(bindings, Mapping):
+    if run.result is not None:
+        for artifact in run.result.artifacts:
+            if artifact.kind == _common.ATIF_ARTIFACT_KIND:
+                return Path(artifact.path)
+    if not run.relay_dir.is_dir():
         return None
-    for entry in bindings.values():
-        if isinstance(entry, Mapping) and "result" in entry:
-            return entry.get("result")
-    return None
-
-
-def _extract_output_text(output: object) -> str | None:
-    """Pull the user-visible message out of a Fabric ``RunResult.output`` (JSON-shaped).
-
-    Harness outputs vary; adapters commonly nest the final message under ``response`` (the codex-cli
-    adapter does). Prefer a string ``response``/``output_text``, else stringify the whole value.
-    """
-    if output is None:
-        return None
-    if isinstance(output, str):
-        return output
-    if isinstance(output, Mapping):
-        for key in ("response", "output_text", "text", "message"):
-            value = output.get(key)
-            if isinstance(value, str):
-                return value
-    return json.dumps(output, default=str)
-
-
-def _result_error(result: RunResult) -> Mapping[str, Any]:
-    error = result.error
-    if error is None:
-        return {"code": result.status, "message": "Fabric run did not succeed"}
-    return {"stage": error.stage, "code": error.code, "message": error.message}
-
-
-def _atif_artifact_path(result: RunResult) -> Path | None:
-    """Path of the ATIF trajectory Fabric promoted as an artifact, if any."""
-    for artifact in result.artifacts.artifacts:
-        if artifact.kind == _ATIF_ARTIFACT_KIND:
-            return Path(artifact.path)
-    return None
-
-
-def _relay_atif_path(evidence_dir: Path) -> Path | None:
-    """Path of the Relay-written ATIF trajectory, used when no ``RunResult`` exists (timeout/error).
-
-    Relay's filename template is per-session, so more than one file can land when subagents emit
-    their own sessions. Picking one under-reports and summing double-counts a root that already
-    aggregates, so anything other than a single match reports nothing rather than a wrong number.
-    """
-    matches = sorted((evidence_dir / _RELAY_SUBDIR).glob(_common.ATIF_FILENAME_TEMPLATE.format(session_id="*")))
+    matches = sorted(run.relay_dir.rglob(_common.ATIF_FILENAME_TEMPLATE.format(session_id="*")))
     if len(matches) == 1:
         return matches[0]
     if matches:
-        logger.warning("Fabric token capture: %d ATIF trajectories under %s; skipping", len(matches), evidence_dir)
+        logger.warning("Fabric token capture: %d ATIF trajectories under %s; skipping", len(matches), run.relay_dir)
     return None
 
 
@@ -851,10 +796,6 @@ def _valid_atif_measurement(value: Any, *, is_float: bool) -> bool:
         return math.isfinite(value)
     except OverflowError:
         return False
-
-
-def _safe_path_name(value: str) -> str:
-    return "".join(char if char.isalnum() or char in "._-" else "-" for char in value).strip(".-")[:120]
 
 
 def _new_run_id() -> str:

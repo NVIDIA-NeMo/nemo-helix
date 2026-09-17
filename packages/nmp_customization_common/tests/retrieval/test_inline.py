@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-from nmp.customization_common.retrieval.inline import wrapped_to_inline_jsonl
+from nmp.customization_common.retrieval.inline import move_aux_files_to_additional, wrapped_to_inline_jsonl
 from nmp.customization_common.retrieval.unroll import unroll_training_data
 
 
@@ -177,3 +177,22 @@ def test_unroll_skips_null_pos_doc_and_missing_question_id() -> None:
     assert unrolled[0]["pos_doc"] is None
     assert [row["question_id"] for row in unrolled[1:]] == ["_0", "_1"]
     assert [row["pos_doc"] for row in unrolled[1:]] == [["a"], ["b"]]
+
+
+def test_move_aux_files_to_additional_keeps_training_and_eval(tmp_path: Path) -> None:
+    (tmp_path / "training.jsonl").write_text("{}\n", encoding="utf-8")
+    eval_beir = tmp_path / "eval_beir"
+    eval_beir.mkdir()
+    (eval_beir / "queries.jsonl").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "train.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "cache_embeddings").mkdir()
+    (tmp_path / "cache_embeddings" / "x.npz").write_bytes(b"x")
+
+    move_aux_files_to_additional(tmp_path)
+
+    assert (tmp_path / "training.jsonl").is_file()
+    assert (tmp_path / "eval_beir" / "queries.jsonl").is_file()
+    assert (tmp_path / "additional" / "train.json").is_file()
+    assert (tmp_path / "additional" / "cache_embeddings" / "x.npz").is_file()
+    assert not (tmp_path / "train.json").exists()
+    assert not (tmp_path / "cache_embeddings").exists()

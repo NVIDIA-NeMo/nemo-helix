@@ -37,7 +37,8 @@ def test_access_key_lifecycle_routes_are_available_to_authenticated_owners(
 
     for action in ["suspend", "unsuspend"]:
         rule = endpoints[f"/apis/auth/v2/access-keys/{{jti}}/{action}"]["post"]
-        assert rule == {"permissions": [], "scopes": []}
+        # No RBAC permission needed (self-service), but scope still gates self-escalation.
+        assert rule == {"permissions": [], "scopes": ["auth:write", "platform:write"]}
 
 
 @pytest.fixture

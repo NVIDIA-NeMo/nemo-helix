@@ -77,11 +77,12 @@ def _download_hf(corpus: str, dest: Path, token: str | None) -> Path:
             repo_type="dataset",
             local_dir=str(dest),
             revision=revision,
-            allow_patterns=f"{subdir}/**" if subdir else None,
+            allow_patterns=[subdir, f"{subdir}/**"] if subdir else None,
             token=token,
         )
     )
-    return local_dir / subdir if subdir else local_dir
+    staged = local_dir / subdir if subdir else local_dir
+    return staged
 
 
 def _download_fileset(corpus: str, dest: Path, sdk: NeMoPlatform, workspace: str) -> Path:
@@ -97,4 +98,8 @@ def _download_fileset(corpus: str, dest: Path, sdk: NeMoPlatform, workspace: str
     dest.mkdir(parents=True, exist_ok=True)
     fs = make_filesystem(sdk)
     fs.get(root, str(dest), recursive=True)
+    if fragment:
+        targeted = dest / fragment
+        if targeted.exists():
+            return targeted
     return dest

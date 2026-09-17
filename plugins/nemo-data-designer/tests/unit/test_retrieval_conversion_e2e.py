@@ -131,6 +131,11 @@ def test_prepare_job_convert_phase_runs_unmocked(stage0_jsonl: Path, tmp_path: P
     ctx.storage.ephemeral = ephemeral
     ctx.results.save.return_value = SimpleNamespace(model_dump=lambda: {"name": "artifacts"})
     shutil.copytree(stage0_jsonl.parent, persistent / "stage0_sdg")
+    write_generation_manifest(
+        output_dir=persistent / "stage0_sdg",
+        output_path=persistent / "stage0_sdg" / stage0_jsonl.name,
+        dataset_name="retrieval_sdg",
+    )
 
     step = RetrievalPrepareStepConfig(
         job_config=RetrievalPrepareJobConfig(sdg_input="stage0_sdg", enable_mining=False),
@@ -142,7 +147,8 @@ def test_prepare_job_convert_phase_runs_unmocked(stage0_jsonl: Path, tmp_path: P
     out = persistent / "stage1_data_prep"
     assert (out / "eval_beir" / "corpus.jsonl").exists()
     assert (out / "eval_beir" / "qrels" / "test.tsv").exists()
-    assert (out / "train.json").exists()
+    assert (out / "additional" / "train.json").exists()
+    assert (out / "training.jsonl").exists()
 
     rows = [json.loads(line) for line in (out / "training.jsonl").read_text(encoding="utf-8").splitlines()]
     assert rows

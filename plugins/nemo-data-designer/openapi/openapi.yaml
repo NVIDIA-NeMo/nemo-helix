@@ -4432,8 +4432,17 @@ components:
       properties:
         sdg_input:
           title: Sdg Input
-          description: Fileset or hf:// URI to Stage 0 output or generation_result.json.
+          description: Fileset or hf:// URI to Stage 0 output. Name a file with fileset#path
+            or hf://org/dataset[@revision]/path; otherwise generation_file is used
+            inside the directory.
           type: string
+        generation_file:
+          type: string
+          title: Generation File
+          description: Relative path to the Stage 0 file inside sdg_input when the
+            ref is a directory. Live generate writes generation_result.json. Skip-SDG
+            dumps set this (e.g. nv_pp_dd_sdg.json) or put the filename on sdg_input.
+          default: generation_result.json
         train_input_file:
           title: Train Input File
           description: Fileset containing a pre-converted wrapped train.json; skips

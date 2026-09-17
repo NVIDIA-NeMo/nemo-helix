@@ -3,12 +3,8 @@
 
 """Task entrypoint for ``agents.evaluate`` (``python -m nemo_agents_plugin.tasks.evaluate``).
 
-Delegates to :func:`nemo_platform_plugin.tasks.dispatcher.run_task` so step
-config loading, :class:`~nemo_platform_plugin.job_context.JobContext` construction,
-and signature-based DI of ``ctx`` / ``sdk`` into
-:meth:`EvaluateAgentJob.run` are all handled by the framework.  This
-module's only local responsibilities are SIGTERM handling and SDK
-construction (the ``"agents"`` service identity is plugin-specific).
+Loads the step config, builds :class:`~nemo_platform_plugin.job_context.JobContext`,
+and calls :meth:`EvaluateAgentJob.run` with its concrete ``ctx``/``sdk`` signature.
 """
 
 from __future__ import annotations
@@ -19,8 +15,10 @@ import sys
 from types import FrameType
 
 from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob
+from nemo_platform_plugin.errors import LocalRunError
 from nemo_platform_plugin.sdk_provider import get_task_sdk
-from nemo_platform_plugin.tasks.dispatcher import run_task
+from nemo_platform_plugin.tasks.dispatcher import build_ctx_from_env, exit_code_for, read_step_config
+from nemo_platform_plugin.tasks.logging_setup import configure_task_logging
 
 logger = logging.getLogger(__name__)
 
@@ -34,22 +32,29 @@ def _shutdown_handler(signum: int, frame: FrameType | None) -> None:
 
 
 def main() -> int:
-    """Build the on-behalf-of SDK and dispatch to ``run_task``.
+    """Build the on-behalf-of SDK and run ``EvaluateAgentJob``.
 
     SDK construction lives here (not as an inline argument to
-    ``run_task``) so failures during ``get_task_sdk`` — missing
-    ``NMP_PRINCIPAL``, malformed base URL, network errors building the
-    internal-auth client — collapse to the same setup-error exit code
-    (``2``) the dispatcher uses for env / step-config setup failures
-    rather than crashing with an uncaught exception.
+    the job call) so failures during ``get_task_sdk`` collapse to the
+    same setup-error exit code as env and step-config setup failures.
     """
+    configure_task_logging()
     signal.signal(signal.SIGTERM, _shutdown_handler)
     try:
         sdk = get_task_sdk("agents")
+        ctx = build_ctx_from_env(sdk)
+        config = read_step_config()
+        job = EvaluateAgentJob()
     except Exception:
-        logger.exception("Failed to build task SDK for agents")
+        logger.exception("Failed to prepare task for agents")
         return 2
-    return run_task(EvaluateAgentJob, sdk=sdk)
+    try:
+        return exit_code_for(job.run(config, ctx=ctx, sdk=sdk))
+    except LocalRunError:
+        raise
+    except Exception:
+        logger.exception("EvaluateAgentJob.run raised")
+        return 1
 
 
 if __name__ == "__main__":

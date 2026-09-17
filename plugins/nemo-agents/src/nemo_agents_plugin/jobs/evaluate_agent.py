@@ -39,6 +39,7 @@ from nemo_agents_plugin.utils import (
 )
 from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.errors import LocalRunError
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
@@ -51,7 +52,6 @@ from nemo_platform_plugin.refs import (
     OutputTarget,
     classify_output_target,
 )
-from nemo_platform_plugin.run_dependencies import LocalRunError
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -233,18 +233,13 @@ class EvaluateAgentJob(NemoJob):
 
         Args:
             config: Dict matching :class:`EvaluateAgentSpec`.
-            sdk: Platform SDK handle, injected by the
-                :class:`~nemo_platform_plugin.scheduler.NemoJobScheduler` (locally) or
-                :func:`~nemo_platform_plugin.tasks.dispatcher.run_task`
-                (in-container) from the ambient SDK handle.  Required when
+            sdk: Platform SDK handle passed by the task entrypoint. Required when
                 ``cfg.eval_config_fileset`` or a fileset-shaped ``cfg.output``
                 is set (download / upload respectively); a local-directory
                 output runs without it, so the parameter is declared optional
                 and validated at the point of use.
-            ctx: Runtime context bound by signature DI.  Both
-                :class:`~nemo_platform_plugin.scheduler.NemoJobScheduler.run_local`
-                and :func:`~nemo_platform_plugin.tasks.dispatcher.run_task`
-                always supply one; the no-output fallback writes to
+            ctx: Runtime context passed by the task entrypoint. The no-output
+                fallback writes to
                 ``ctx.storage.persistent / "results"`` and tempdirs land
                 under ``ctx.storage.ephemeral`` so they sit on the
                 platform-injected scratch volume.
@@ -356,7 +351,7 @@ class EvaluateAgentJob(NemoJob):
             raise LocalRunError(
                 "EvaluateAgentJob.run requires a 'sdk: NeMoPlatform' to download "
                 "eval_config_fileset contents, but no platform SDK was available. "
-                "Set NMP_BASE_URL or pass sdk via NemoJobScheduler.run_local(sdk=...)."
+                "Set NMP_BASE_URL before using fileset inputs."
             )
 
         ref = FilesetRef(cfg.eval_config_fileset)
@@ -449,9 +444,7 @@ class EvaluateAgentJob(NemoJob):
             raise LocalRunError(
                 "EvaluateAgentJob.run requires a 'sdk: NeMoPlatform' to upload "
                 "results to a fileset, but no platform SDK was available. "
-                "Set NMP_BASE_URL (so the local CLI can build a default SDK), "
-                "pass an explicit sdk via NemoJobScheduler.run_local(sdk=...), "
-                "or use --output <path> to write results to a local directory instead."
+                "Set NMP_BASE_URL or use --output <path> to write results to a local directory instead."
             )
 
         ref = FilesetRef(output)

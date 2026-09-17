@@ -5,6 +5,8 @@
 from collections.abc import Iterator
 from unittest.mock import MagicMock
 
+import anyio
+import httpx
 import pytest
 
 pytest.importorskip("scaled_evals")
@@ -70,6 +72,26 @@ def test_healthz() -> None:
     response = client.get("/v1/healthz")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_healthz_responds_when_worker_thread_capacity_is_exhausted() -> None:
+    async def probe() -> None:
+        limiter = anyio.to_thread.current_default_thread_limiter()  # type: ignore[unresolved-attribute]
+        original_capacity = limiter.total_tokens
+        occupied_worker = object()
+        limiter.total_tokens = 1
+        await limiter.acquire_on_behalf_of(occupied_worker)
+        try:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as connection:
+                with anyio.fail_after(1):
+                    response = await connection.get("/v1/healthz")
+            assert response.status_code == 200
+            assert response.json() == {"status": "ok"}
+        finally:
+            limiter.release_on_behalf_of(occupied_worker)
+            limiter.total_tokens = original_capacity
+
+    anyio.run(probe)
 
 
 def test_metrics(monkeypatch) -> None:  # noqa: ANN001

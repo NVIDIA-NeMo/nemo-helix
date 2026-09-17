@@ -9,7 +9,7 @@ import logging
 from typing import Any
 
 from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.run_dependencies import LocalRunError
+from nemo_platform_plugin.errors import LocalRunError
 
 from nemo_optimization.fabric import FABRIC_AGENT_SCHEMA_VERSION, is_fabric_agent_config
 
@@ -48,7 +48,7 @@ def resolve_agent_config(
     if sdk is None:
         raise LocalRunError(
             f"An optimize study with --agent {agent!r} requires a platform SDK to fetch the "
-            "stored agent config. Set NEMO_BASE_URL or pass sdk via NemoJobScheduler.run_local(sdk=...)."
+            "stored agent config. Set NEMO_BASE_URL or include an inline Fabric agent package in optimize_config."
         )
 
     agent_dict = sdk.agents.get(name=name, workspace=ws)

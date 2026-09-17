@@ -3,7 +3,7 @@
 
 import json
 import logging
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from aiohttp import ClientSession
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -37,6 +37,9 @@ from nmp.core.inference_gateway.api.proxy import (
 from nmp.core.inference_gateway.api.validation import validate_entity_name, validate_model_entity_name
 from nmp.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from nemo_platform.types.inference.virtual_model import VirtualModel as SDKVirtualModel
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +85,40 @@ def parse_igw_openai_model(igw_openai_model: str) -> tuple[str, str]:
             f"Expected format: workspace/model_entity_name"
         )
     return parts[0], parts[1]
+
+
+def resolve_vm_for_model(
+    virtual_model_cache: VirtualModelCache,
+    workspace: str,
+    model_name: str,
+) -> "SDKVirtualModel | None":
+    """Resolve the VirtualModel a request should route through, LoRA-composite aware.
+
+    A fine-tuned LoRA adapter is a *parented* entity whose composite model id has the
+    shape ``{base}&adapters/{adapter_workspace}/{adapter_name}``. That composite is not
+    a legal VirtualModel entity name, so no per-adapter VM is created; instead the request
+    routes through the **base model's** VirtualModel and inherits its middleware
+    (guardrails, Switchyard routing, translate). This helper implements that mapping:
+
+    - **Composite name** (contains ``&adapters/``): the VM is keyed by the pre-``&adapters/``
+      base segment only (``model_name.split("&adapters/", 1)[0]``), so a request for
+      ``base&adapters/aws/aname`` resolves the VM named ``base``. The adapter suffix is
+      preserved elsewhere (the ``default_model_entity`` splice in :func:`virtual_model_proxy`).
+    - **Plain name**: looked up as-is.
+
+    The composite-awareness lives here, *outside* the cache layer:
+    :meth:`VirtualModelCache.get` stays a dumb exact-match dict lookup.
+
+    Args:
+        virtual_model_cache: The in-memory VirtualModel cache.
+        workspace: The request workspace (always taken from the URL path).
+        model_name: The model entity name, possibly a LoRA composite.
+
+    Returns:
+        The matching :class:`VirtualModel`, or ``None`` if none is cached.
+    """
+    base_model_name = model_name.split("&adapters/", 1)[0]
+    return virtual_model_cache.get(workspace, base_model_name)
 
 
 class OpenAIModelResp(BaseModel):
@@ -156,7 +193,7 @@ async def openai_get_model(
     validate_entity_name(workspace, field_name="workspace")
     validate_model_entity_name(model_name, field_name="model")
     await enforce_delegated_workspace_access(workspace, OPENAI_EXEC_PERMISSION)
-    if virtual_model_cache.get(workspace, model_name) is None:
+    if resolve_vm_for_model(virtual_model_cache, workspace, model_name) is None:
         raise_virtual_model_not_found(workspace, model_name)
 
     return OpenAIModelResp(
@@ -252,7 +289,7 @@ async def openai_proxy(
 
     validate_model_entity_name(model_name, field_name="model")
 
-    virtual_model = virtual_model_cache.get(workspace, model_name)
+    virtual_model = resolve_vm_for_model(virtual_model_cache, workspace, model_name)
     logger.debug(
         "openai_proxy: workspace=%s model_name=%s body_model=%s vm_hit=%s",
         workspace,
@@ -261,13 +298,13 @@ async def openai_proxy(
         virtual_model is not None,
     )
 
-    if virtual_model is None:
+    if virtual_model is None or virtual_model.name is None:
         raise_virtual_model_not_found(workspace, model_name)
 
     return await virtual_model_proxy(
         request=request,
         workspace=workspace,
-        vm_name=model_name,
+        vm_name=virtual_model.name,
         virtual_model=virtual_model,
         trailing_uri=trailing_uri,
         json_body=json_body,

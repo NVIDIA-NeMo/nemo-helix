@@ -10,13 +10,11 @@ from pathlib import Path
 from typing import ClassVar, Literal
 
 from data_designer_nemo.context import create_validation_context
-from data_designer_nemo.errors import NDDInvalidConfigError
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPreviewSpec
 from nemo_data_designer_plugin.retrieval.corpus import materialize_corpus
 from nemo_data_designer_plugin.retrieval.providers import build_retrieval_model_configs, resolve_retrieval_providers
 from nemo_data_designer_plugin.retrieval.secrets import resolve_hf_token
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.errors import NemoClientError
 from nemo_platform_plugin.function import NemoFunction
 from nemo_platform_plugin.function_context import FunctionContext
 from nemo_platform_plugin.functions.frames import Done, Error
@@ -27,18 +25,6 @@ class RetrievalPreviewFrame(BaseModel):
     kind: Literal["retrieval_preview"] = "retrieval_preview"
     num_seed_records: int
     num_preview_records: int
-
-
-async def _resolve_hf_token_or_raise(
-    async_sdk: AsyncNeMoPlatform,
-    hf_token_secret: str | None,
-    workspace: str,
-) -> str | None:
-    """Resolve the spec's secret reference, reporting a bad reference as invalid config."""
-    try:
-        return await resolve_hf_token(async_sdk, hf_token_secret, workspace)
-    except NemoClientError as exc:
-        raise NDDInvalidConfigError(f"Could not access secret {hf_token_secret!r} named by hf_token_secret.") from exc
 
 
 class RetrievalPreviewFunction(NemoFunction[RetrievalPreviewSpec]):
@@ -70,7 +56,7 @@ class RetrievalPreviewFunction(NemoFunction[RetrievalPreviewSpec]):
         # appropriate error-coded responses rather than returning a 200 with a
         # response stream that only holds an Error frame
         model_providers = await resolve_retrieval_providers(validation_ctx, model_configs)
-        hf_token = await _resolve_hf_token_or_raise(async_sdk, job.hf_token_secret, ctx.workspace)
+        hf_token = await resolve_hf_token(async_sdk, job.hf_token_secret, ctx.workspace)
 
         def run_preview() -> BaseModel:
             from nemo_data_designer_plugin.retrieval.generation import (
@@ -119,8 +105,8 @@ class RetrievalPreviewFunction(NemoFunction[RetrievalPreviewSpec]):
                 )
                 result = execute_generation(run_config, preview=True, num_records=spec.num_records)
                 return RetrievalPreviewFrame(
-                    num_seed_records=getattr(result, "num_seed_records", 0),
-                    num_preview_records=getattr(result, "num_preview_records", spec.num_records),
+                    num_seed_records=result.num_seed_records,
+                    num_preview_records=result.num_preview_records,
                 )
 
         try:

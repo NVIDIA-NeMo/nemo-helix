@@ -42,9 +42,9 @@ from nemo_agents_plugin.utils import (
 )
 from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
+from nemo_platform_plugin.errors import LocalRunError
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.refs import EndpointURL, FilesetRef, LocalDir
-from nemo_platform_plugin.run_dependencies import LocalRunError
 
 # ---------------------------------------------------------------------------
 # inject_gateway_url

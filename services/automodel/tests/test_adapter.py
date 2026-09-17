@@ -3,7 +3,7 @@
 
 from nemo_automodel_plugin.schema import AutomodelJobOutput
 from nmp.automodel.adapter import automodel_spec_to_compiler_output
-from nmp.automodel.api.v2.jobs.schemas import DistillationTraining, SFTTraining
+from nmp.automodel.api.v2.jobs.schemas import DeploymentParams, DistillationTraining, SFTTraining
 from nmp.customization_common.integrations import collect_integration_secret_envs
 
 
@@ -52,10 +52,10 @@ def test_adapter_plumbs_previously_dropped_fields() -> None:
     assert spec.training.parallelism.sequence_parallel is True
     assert spec.training.peft is not None
     assert spec.training.peft.dropout == 0.1
-    assert spec.training.embedding is None
+    assert spec.training.retrieval is None
 
 
-def test_adapter_plumbs_embedding_spec() -> None:
+def test_adapter_plumbs_retrieval_spec() -> None:
     spec = automodel_spec_to_compiler_output(
         {
             "model": "meta/llama",
@@ -64,20 +64,43 @@ def test_adapter_plumbs_embedding_spec() -> None:
                 "training_type": "sft",
                 "recipe": "bi_encoder",
                 "finetuning_type": "all_weights",
-                "embedding": {
+                "retrieval": {
                     "train_n_passages": 7,
                     "query_prefix": "query:",
                     "passage_prefix": "passage:",
+                    "export": {"dimensions": True, "opset": 18},
                 },
             },
             "output": {"name": "out", "type": "model", "fileset": "out-fs"},
         },
     )
     assert isinstance(spec.training, SFTTraining)
-    assert spec.training.embedding is not None
-    assert spec.training.embedding.train_n_passages == 7
-    assert spec.training.embedding.query_prefix == "query:"
-    assert spec.training.embedding.passage_prefix == "passage:"
+    assert spec.training.retrieval is not None
+    assert spec.training.retrieval.train_n_passages == 7
+    assert spec.training.retrieval.query_prefix == "query:"
+    assert spec.training.retrieval.passage_prefix == "passage:"
+    assert spec.training.retrieval.export is not None
+    assert spec.training.retrieval.export.dimensions is True
+    assert spec.training.retrieval.export.opset == 18
+
+
+def test_adapter_drops_legacy_embedding_block() -> None:
+    """The removed ``training.embedding`` alias must not populate retrieval."""
+    spec = automodel_spec_to_compiler_output(
+        {
+            "model": "meta/llama",
+            "dataset": {"training": "default/train"},
+            "training": {
+                "training_type": "sft",
+                "recipe": "bi_encoder",
+                "finetuning_type": "all_weights",
+                "embedding": {"train_n_passages": 7, "query_prefix": "query:"},
+            },
+            "output": {"name": "out", "type": "model", "fileset": "out-fs"},
+        },
+    )
+    assert isinstance(spec.training, SFTTraining)
+    assert spec.training.retrieval is None
 
 
 def test_adapter_new_fields_default_when_omitted() -> None:
@@ -253,3 +276,67 @@ def test_adapter_integrations_from_automodel_job_output() -> None:
     assert spec.integrations is not None
     assert spec.integrations.wandb is not None
     assert spec.integrations.wandb.project == "plugin-project"
+
+
+def test_adapter_plumbs_inline_deployment_config() -> None:
+    """Inline deployment params must survive the plugin -> legacy compiler hop."""
+    spec = automodel_spec_to_compiler_output(
+        {
+            "model": "meta/llama",
+            "dataset": {"training": "default/train"},
+            "training": {"training_type": "sft", "finetuning_type": "lora"},
+            "output": {"name": "out", "type": "adapter", "fileset": "out-fs"},
+            "deployment_config": {"gpu": 2, "image_name": "img", "lora_enabled": True},
+        },
+    )
+    assert isinstance(spec.deployment_config, DeploymentParams)
+    assert spec.deployment_config.gpu == 2
+    assert spec.deployment_config.image_name == "img"
+    assert spec.deployment_config.lora_enabled is True
+
+
+def test_adapter_plumbs_deployment_config_string_ref() -> None:
+    spec = automodel_spec_to_compiler_output(
+        {
+            "model": "meta/llama",
+            "dataset": {"training": "default/train"},
+            "training": {"training_type": "sft", "finetuning_type": "lora"},
+            "output": {"name": "out", "type": "adapter", "fileset": "out-fs"},
+            "deployment_config": "shared/existing-cfg",
+        },
+    )
+    assert spec.deployment_config == "shared/existing-cfg"
+
+
+def test_adapter_deployment_config_defaults_to_none() -> None:
+    spec = automodel_spec_to_compiler_output(
+        {
+            "model": "meta/llama",
+            "dataset": {"training": "default/train"},
+            "training": {"training_type": "sft", "finetuning_type": "lora"},
+            "output": {"name": "out", "type": "adapter", "fileset": "out-fs"},
+        },
+    )
+    assert spec.deployment_config is None
+
+
+def test_adapter_plumbs_deployment_config_from_automodel_job_output() -> None:
+    """The model (not dict) path is what the service actually hands the adapter."""
+    job_output = AutomodelJobOutput.model_validate(
+        {
+            "model": "meta/llama",
+            "dataset": {"training": "default/train"},
+            "training": {"training_type": "sft", "finetuning_type": "lora"},
+            "schedule": {},
+            "batch": {},
+            "optimizer": {},
+            "parallelism": {},
+            "output": {"name": "out", "type": "adapter", "fileset": "out-fs"},
+            "deployment_config": {"gpu": 4, "tool_call_config": {"tool_call_parser": "hermes"}},
+        }
+    )
+    spec = automodel_spec_to_compiler_output(job_output)
+    assert isinstance(spec.deployment_config, DeploymentParams)
+    assert spec.deployment_config.gpu == 4
+    assert spec.deployment_config.tool_call_config is not None
+    assert spec.deployment_config.tool_call_config.tool_call_parser == "hermes"

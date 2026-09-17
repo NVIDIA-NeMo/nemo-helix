@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from .authz_format import validate_permission_strings, validate_runtime_authorize_scopes
 from .exceptions import InvalidPermissionFormatError
 from .models import Principal
+from .token_resolver import ResolvedBearerToken
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,15 @@ class AuthClient(BaseModel):
     service_name: Optional[str] = Field(
         default=None,
         description="Name of the calling service. Used to build service principal headers for PDP requests.",
+    )
+    resolved_bearer_token: Optional[ResolvedBearerToken] = Field(
+        default=None,
+        description=(
+            "The trusted bearer token this request was authenticated with, when authenticated via a "
+            "Bearer token (as opposed to internal principal headers). Lets handlers distinguish a caller "
+            "authenticated via a Scoped Access Key from an ordinary OIDC session and read its validated "
+            "scope claims, e.g. to prevent a scope-restricted access key from minting a broader one."
+        ),
     )
 
     model_config = {"arbitrary_types_allowed": True, "validate_assignment": False}

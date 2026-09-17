@@ -399,7 +399,7 @@ class SessionBackedGymRunner:
     failed collection reclaims it too.
     """
 
-    #: Job id used when the run has none -- a local run outside the platform. The broker requires a
+    #: Job id used when the run has none -- an in-process run outside the platform. The broker requires a
     #: non-empty id because it scopes episode ownership and orphan reconciliation by it.
     LOCAL_JOB_ID = "agent-eval-local"
 

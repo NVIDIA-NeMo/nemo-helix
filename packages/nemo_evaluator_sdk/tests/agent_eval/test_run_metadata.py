@@ -57,7 +57,6 @@ def test_every_shipped_runner_reports_a_stable_name_and_result_shaping_config() 
 
     from nemo_evaluator_sdk.agent_eval.runtimes.callable_runtime import CallableAgentTaskRunner
     from nemo_evaluator_sdk.agent_eval.runtimes.docker_sandbox import DockerSandboxAgentRuntime
-    from nemo_evaluator_sdk.agent_eval.runtimes.fabric.container_runtime import FabricContainerRuntime
     from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
     from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
     from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
@@ -78,12 +77,12 @@ def test_every_shipped_runner_reports_a_stable_name_and_result_shaping_config() 
         (
             FabricAgentRuntime(config=harness),
             "fabric",
-            {"model", "timeout_s", "adapter_id", "skills", "capture_trajectory"},
+            {"model", "timeout_s", "adapter_id", "skills", "capture_trajectory", "sandbox", "image"},
         ),
         (
-            FabricContainerRuntime(config=harness, provider=cast(SandboxProvider, _Provider())),
-            "fabric_container",
-            {"provider", "image", "adapter_id", "skills"},
+            FabricAgentRuntime(config=harness, sandbox=cast(SandboxProvider, _Provider())),
+            "fabric",
+            {"model", "timeout_s", "adapter_id", "skills", "capture_trajectory", "sandbox", "image"},
         ),
         (
             GymAgentTaskRunner(config=GymRuntimeConfig(agent="a", agent_config="c", resources_server="r")),
@@ -124,7 +123,7 @@ def test_every_shipped_runner_reports_a_stable_name_and_result_shaping_config() 
 
 def test_provider_identity_is_stable_not_a_repr() -> None:
     # str(provider) yields a memory address, so two identical runs would record different metadata.
-    from nemo_evaluator_sdk.agent_eval.runtimes.fabric.container_runtime import FabricContainerRuntime
+    from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 
     class _Provider:
         """Identity-only stub; see the note in the shipped-runners test above."""
@@ -132,9 +131,10 @@ def test_provider_identity_is_stable_not_a_repr() -> None:
         name = "docker"
 
     provider = cast(SandboxProvider, _Provider())
-    info = FabricContainerRuntime(config={"harness": {"adapter_id": "x"}}, provider=provider).runner_info()
-    assert info.config["provider"] == "docker"
-    assert "0x" not in info.config["provider"]
+    info = FabricAgentRuntime(config={"harness": {"adapter_id": "x"}}, sandbox=provider).runner_info()
+    assert info.config["sandbox"] == "docker"
+    assert "0x" not in info.config["sandbox"]
+    assert FabricAgentRuntime(config={"harness": {"adapter_id": "x"}}).runner_info().config["sandbox"] is None
 
 
 def test_fabric_records_a_config_supplied_model_not_just_an_explicit_one() -> None:

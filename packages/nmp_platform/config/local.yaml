@@ -31,6 +31,8 @@ auth:
   policy_data_refresh_interval: 2
   bundle_cache_seconds: 15 # 0 = refresh on every authz call for instant permission changes
   admin_email: "admin@example.com"
+  access_keys:
+    enabled: false
 
   # --- Azure AD OIDC (NeMo Platform dev deployment) ---
   # This config mirrors the dev deployment's Azure AD app registration.
