@@ -10,7 +10,7 @@ from nemo_platform_plugin.auth.access_keys.types import AccessKeyEntityType
 from nmp.common.auth.access_keys import SERVICE_ACCOUNT_PRINCIPAL_PREFIX
 from nmp.common.auth.models import Principal
 from nmp.common.entities import EntityBase
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 
 class RoleBindingEntity(EntityBase):
@@ -54,6 +54,7 @@ class AccessKeyEntity(EntityBase):
     entity_type: AccessKeyEntityType = "USER"
     issuer: str
     audiences: list[str]
+    scope: list[str] = Field(default_factory=list)
     issued_at: datetime
     expires_at: datetime | None = None
     last_used_at: datetime | None = None
