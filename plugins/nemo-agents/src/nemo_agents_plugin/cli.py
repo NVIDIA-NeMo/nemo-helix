@@ -1147,74 +1147,16 @@ def _register_platform_commands(app: typer.Typer) -> None:
     ) -> None:
         """Register an agent on the platform."""
         base_url = _resolve_base_url(base_url)
-        from nemo_agents_plugin.utils import inject_default_model
-
-        config_dict = _load_yaml(agent_config)
-        config_format = config_dict.get("config_format", NAT_WORKFLOW_CONFIG_FORMAT)
-        if config_format in {NEMO_AGENTS_SPEC_CONFIG_FORMAT, NAT_WORKFLOW_CONFIG_FORMAT}:
-            # Resolve ${NEMO_DEFAULT_MODEL} client-side — the agents service has
-            # no user context at deploy time.
-            config_dict = inject_default_model(config_dict)
-            if _contains_default_model_placeholder(config_dict):
-                typer.echo(
-                    "Error: agent config references ${NEMO_DEFAULT_MODEL} but no "
-                    "default model is selected. Run `nemo setup` to pick one, or "
-                    "replace the placeholder in the config with an explicit model name.",
-                    err=True,
-                )
-                raise typer.Exit(code=1)
-        if config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
-            config_dict = _validate_platform_agent_config_for_cli(config_dict, base_dir=agent_config.parent)
-            for line in _spec_package_warning(name, agent_config):
-                typer.echo(line, err=True)
-        elif config_format != NAT_WORKFLOW_CONFIG_FORMAT:
-            typer.echo(f"Error: unsupported config_format {config_format!r}", err=True)
-            raise typer.Exit(code=1)
-        payload = {
-            "name": name,
-            "description": description,
-            "config": config_dict,
-            "config_format": config_format,
-        }
-        client = _agents_client(base_url, workspace)
-        resp = _run_sdk(
-            "POST agent API",
-            lambda: _json_from_response(
-                client.create_agent(workspace=workspace, body=CreateAgentRequest.model_validate(payload))
-            ),
+        config_dict, config_format = _validate_agent_config_for_create(agent_config, name=name)
+        resp = _create_agent_from_validated(
+            name=name,
+            description=description,
+            config_dict=config_dict,
+            config_format=config_format,
+            agent_config=agent_config,
+            workspace=workspace,
+            base_url=base_url,
         )
-        if config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
-            try:
-                _upload_ethos_fileset(
-                    agent_name=name,
-                    workspace=workspace,
-                    agent_root=agent_config.parent,
-                    base_url=base_url,
-                )
-            except Exception as exc:
-                typer.echo(
-                    f"Error: failed to upload Ethos fileset for {name!r}: {exc}",
-                    err=True,
-                )
-                try:
-                    _delete_agent_entity(
-                        agent_name=name,
-                        workspace=workspace,
-                        base_url=base_url,
-                    )
-                # ``typer.Exit`` subclasses ``Exception``, so this also covers
-                # the exit raised by ``_run_sdk`` on an HTTP error.
-                except Exception:
-                    logger.exception(
-                        "Failed to roll back agent %r after fileset upload failure",
-                        name,
-                    )
-                    typer.echo(
-                        f"Error: failed to roll back agent {name!r}; it may still exist on the "
-                        f"platform. Remove it with `nemo agents delete {name}`.",
-                        err=True,
-                    )
-                raise typer.Exit(code=1) from exc
         typer.echo(json.dumps(resp, indent=2))
 
     @app.command(name="list", rich_help_panel="Agent Resources (requires running cluster)")
@@ -1391,6 +1333,233 @@ def _register_platform_commands(app: typer.Typer) -> None:
         deployment_name = resp.get("name") if isinstance(resp, dict) else None
         if not deployment_name:
             # Defensive: should never happen if the API contract holds.
+            typer.echo(json.dumps(resp, indent=2))
+            typer.echo(
+                "Warning: deployment created but its name was missing from the response; "
+                "skipping --wait. Use `nemo agents deployments list` to find it.",
+                err=True,
+            )
+            return
+
+        success = _wait_for_deployment(client, workspace, deployment_name, timeout=timeout)
+        raise typer.Exit(code=0 if success else 1)
+
+    @app.command(rich_help_panel="Agent Resources (requires running cluster)")
+    def redeploy(
+        agent: str = typer.Option(..., "--agent", "-a", help="Name of the deployed agent to rebuild."),
+        agent_config: Path = typer.Option(
+            ...,
+            "--agent-config",
+            "-c",
+            help="Path to the new agent YAML config file to redeploy from.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+        ),
+        description: str = typer.Option("", "--description", help="Agent description (as on create)."),
+        name: Optional[str] = typer.Option(
+            None, "--name", "-n", help="Deployment name for the new deployment (auto-generated if omitted)."
+        ),
+        mode: Optional[str] = typer.Option(
+            None,
+            "--mode",
+            help=(
+                "Runtime backend: subprocess, docker, or k8s. Auto-detected from the existing deployment when omitted."
+            ),
+        ),
+        image: Optional[str] = typer.Option(
+            None,
+            "--image",
+            "-i",
+            help="Container image for docker/k8s modes. Auto-detected from the existing deployment when omitted.",
+        ),
+        use_image_entrypoint: Optional[bool] = typer.Option(
+            None,
+            "--use-image-entrypoint/--no-use-image-entrypoint",
+            help=(
+                "For docker/k8s modes, preserve the image ENTRYPOINT/CMD instead of "
+                "injecting the platform-owned agent server command. Auto-detected "
+                "from the existing deployment when omitted."
+            ),
+        ),
+        environment: Optional[str] = typer.Option(
+            None,
+            "--environment",
+            "-e",
+            help=(
+                "AgentEnvironment to deploy under, as a 'workspace/name' ref. "
+                "Auto-detected from the existing deployment when omitted; pass "
+                "an empty string to deploy with no environment."
+            ),
+        ),
+        wait: bool = typer.Option(
+            True,
+            "--wait/--no-wait",
+            help=(
+                "Wait for the new deployment to reach a terminal status (running or "
+                "failed) before returning. Exits 0 only on running; exits 1 on "
+                "failure or timeout. Pass --no-wait to return the pending deployment "
+                "immediately as JSON."
+            ),
+        ),
+        timeout: int = typer.Option(
+            300,
+            "--timeout",
+            "-t",
+            help="Maximum seconds to wait for a terminal status (only with --wait).",
+        ),
+        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+        workspace: str = typer.Option(_DEFAULT_WORKSPACE, "--workspace", "-w"),
+        base_url: BaseUrlOption = None,
+    ) -> None:
+        """Redeploy an agent from a new config, in one command.
+
+        Wraps the four steps you would otherwise run by hand to push a changed
+        agent config to a running agent: ``undeploy`` → ``delete`` → ``create``
+        → ``deploy``. The agent entity is immutable by name (``create`` returns
+        409 on a duplicate), so redeploy tears the old agent down and rebuilds it
+        from ``--agent-config``. The durable ``{agent}-ethos`` fileset is
+        preserved across the delete and re-uploaded from the new config.
+
+        Safety contract: the new config is validated **client-side before any
+        teardown**, so a bad config is a safe no-op (nothing is torn down). Once
+        teardown begins the operation is **not atomic** — if a later step fails
+        the agent may be left undeployed; each step is check-first, so it is
+        **safe to re-run** ``redeploy`` to finish.
+
+        Runtime flags (``--mode``/``--image``/``--use-image-entrypoint``/
+        ``--environment``) are auto-detected from the agent's existing
+        deployment when omitted; pass them explicitly to override. If the agent
+        has multiple deployments that disagree on an omitted field, redeploy
+        errors and asks you to specify it.
+        """
+        base_url = _resolve_base_url(base_url)
+
+        # 1. Fail-fast: validate the new config client-side, before any teardown.
+        #    A bad config aborts here with zero side effects.
+        config_dict, config_format = _validate_agent_config_for_create(agent_config, name=agent)
+
+        client = _agents_client(base_url, workspace)
+
+        # 2. Auto-detect runtime args from the agent's existing deployment(s).
+        #    Explicit flags always win; omitted flags are filled from the
+        #    existing deployment, erroring if multiple deployments disagree.
+        existing = [
+            dep
+            for dep in _run_sdk(
+                "GET agent API",
+                lambda: _list_deployment_maps(client, workspace),
+            )
+            if dep.get("agent") == agent
+        ]
+
+        def _detect(field: str, explicit: Any, *, default: Any) -> Any:
+            if explicit is not None:
+                return explicit
+            values = {dep.get(field) for dep in existing if dep.get(field) not in (None, "")}
+            if len(values) > 1:
+                typer.echo(
+                    f"Error: agent {agent!r} has multiple deployments that disagree on "
+                    f"{field!r}; pass the corresponding flag explicitly to disambiguate.",
+                    err=True,
+                )
+                raise typer.Exit(code=2)
+            if values:
+                return next(iter(values))
+            return default
+
+        resolved_mode = _detect("deployment_mode", mode, default="subprocess")
+        resolved_image = _detect("image", image, default=None)
+        resolved_use_entrypoint = bool(_detect("use_image_entrypoint", use_image_entrypoint, default=False))
+        resolved_environment = _detect("environment", environment, default=None)
+
+        valid_modes: tuple[str, ...] = ("subprocess", *sorted(CONTAINER_DEPLOYMENT_MODES))
+        if resolved_mode not in valid_modes:
+            typer.echo(f"Invalid --mode {resolved_mode!r}; expected {', '.join(valid_modes)}.", err=True)
+            raise typer.Exit(code=2)
+        if resolved_image and resolved_mode == "subprocess":
+            typer.echo("--image requires --mode docker or k8s.", err=True)
+            raise typer.Exit(code=2)
+        if resolved_use_entrypoint and resolved_mode == "subprocess":
+            typer.echo("--use-image-entrypoint requires --mode docker or k8s.", err=True)
+            raise typer.Exit(code=2)
+        if resolved_environment is not None and not str(resolved_environment).strip():
+            resolved_environment = None
+
+        live = [dep for dep in existing if dep.get("status") in _LIVE_DEPLOYMENT_STATUSES]
+
+        # 3. Confirm once, before any destructive step (unless --yes).
+        if not yes:
+            summary = f"Redeploy agent '{agent}' from '{agent_config}'? This tears down and recreates it"
+            if live:
+                summary += f" (undeploying {len(live)} live deployment(s))"
+            typer.confirm(f"{summary}.", abort=True)
+
+        # 4. Undeploy every live deployment (idempotent: skip if none).
+        if live:
+            for dep in live:
+                dep_name = dep["name"]
+                _run_sdk(
+                    "DELETE agent API",
+                    lambda dep_name=dep_name: client.delete_deployment(workspace=workspace, name=dep_name).data(),
+                )
+            typer.echo(f"Undeployed {len(live)} deployment(s) for agent '{agent}'.")
+        else:
+            typer.echo(f"No live deployments to undeploy for agent '{agent}'.")
+
+        # 5. Delete the agent entity (idempotent: skip if already gone).
+        #    Preserves the {agent}-ethos fileset.
+        if existing or _agent_entity_exists(client, workspace=workspace, name=agent):
+            try:
+                _delete_agent_entity(agent_name=agent, workspace=workspace, base_url=base_url)
+                typer.echo(f"Deleted agent entity '{agent}'.")
+            except typer.Exit:
+                # A 404 here means it was already gone — idempotent, keep going.
+                typer.echo(f"Agent entity '{agent}' already absent; skipping delete.")
+
+        # 6. Recreate the agent from the new config (re-uploads the ethos fileset).
+        try:
+            _create_agent_from_validated(
+                name=agent,
+                description=description,
+                config_dict=config_dict,
+                config_format=config_format,
+                agent_config=agent_config,
+                workspace=workspace,
+                base_url=base_url,
+            )
+            typer.echo(f"Recreated agent '{agent}'.")
+        except typer.Exit:
+            _redeploy_recovery_hint(agent, agent_config, stage="recreate")
+            raise
+
+        # 7. Deploy the recreated agent.
+        payload: dict[str, Any] = {"agent": agent, "deployment_mode": resolved_mode}
+        if name:
+            payload["name"] = name
+        if resolved_image:
+            payload["image"] = resolved_image
+        if resolved_use_entrypoint:
+            payload["use_image_entrypoint"] = True
+        if resolved_environment is not None:
+            payload["environment"] = resolved_environment
+        try:
+            resp = _run_sdk(
+                "POST agent API",
+                lambda: _json_from_response(
+                    client.create_deployment(workspace=workspace, body=CreateDeploymentRequest.model_validate(payload))
+                ),
+            )
+        except typer.Exit:
+            _redeploy_recovery_hint(agent, agent_config, stage="deploy")
+            raise
+
+        if not wait:
+            typer.echo(json.dumps(resp, indent=2))
+            return
+
+        deployment_name = resp.get("name") if isinstance(resp, dict) else None
+        if not deployment_name:
             typer.echo(json.dumps(resp, indent=2))
             typer.echo(
                 "Warning: deployment created but its name was missing from the response; "
@@ -2857,6 +3026,144 @@ def _clear_existing_ethos_artifacts(
         except (FileNotFoundError, PluginNotFoundError):
             # Another client may have removed the same stale file after the list.
             continue
+
+
+_LIVE_DEPLOYMENT_STATUSES = frozenset({"pending", "starting", "running"})
+"""Deployment statuses that represent a live deployment worth undeploying.
+
+Excludes ``failed`` (already terminal) and ``deleting`` (already being removed).
+"""
+
+
+def _agent_entity_exists(client: AgentsClient, *, workspace: str, name: str) -> bool:
+    """Return whether the named agent entity currently exists.
+
+    Used by ``redeploy`` to make the delete step idempotent: a 404 means the
+    entity is already gone, so the delete can be skipped rather than erroring.
+    """
+    try:
+        client.get_agent(workspace=workspace, name=name)
+    except PluginNotFoundError:
+        return False
+    except Exception:
+        # Any other lookup error: assume it exists and let the delete step
+        # surface the real error rather than silently skipping teardown.
+        return True
+    return True
+
+
+def _redeploy_recovery_hint(agent: str, agent_config: Path, *, stage: str) -> None:
+    """Print an actionable recovery hint when redeploy fails after teardown.
+
+    Once the old agent has been deleted, a failed recreate/deploy leaves the
+    agent torn down. The config file is untouched, so the operation is safe to
+    re-run — tell the user exactly how.
+    """
+    typer.echo(
+        f"Error: redeploy failed during {stage} for agent {agent!r} after the old "
+        f"agent was torn down; it may currently be undeployed. Your config at "
+        f"'{agent_config}' is unchanged — re-run to finish:\n"
+        f"  nemo agents redeploy --agent {agent} --agent-config {agent_config}",
+        err=True,
+    )
+
+
+def _validate_agent_config_for_create(agent_config: Path, *, name: str) -> tuple[dict[str, Any], str]:
+    """Load and validate an agent config **client-side**, with zero network calls.
+
+    Returns the resolved ``(config_dict, config_format)`` ready to POST, or raises
+    ``typer.Exit`` on any problem. This is the exact validation the ``create``
+    command runs before it touches the API; ``redeploy`` reuses it as a
+    fail-fast gate so a bad config aborts before any destructive teardown.
+    """
+    from nemo_agents_plugin.utils import inject_default_model
+
+    config_dict = _load_yaml(agent_config)
+    config_format = config_dict.get("config_format", NAT_WORKFLOW_CONFIG_FORMAT)
+    if config_format in {NEMO_AGENTS_SPEC_CONFIG_FORMAT, NAT_WORKFLOW_CONFIG_FORMAT}:
+        # Resolve ${NEMO_DEFAULT_MODEL} client-side — the agents service has
+        # no user context at deploy time.
+        config_dict = inject_default_model(config_dict)
+        if _contains_default_model_placeholder(config_dict):
+            typer.echo(
+                "Error: agent config references ${NEMO_DEFAULT_MODEL} but no "
+                "default model is selected. Run `nemo setup` to pick one, or "
+                "replace the placeholder in the config with an explicit model name.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+    if config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
+        config_dict = _validate_platform_agent_config_for_cli(config_dict, base_dir=agent_config.parent)
+        for line in _spec_package_warning(name, agent_config):
+            typer.echo(line, err=True)
+    elif config_format != NAT_WORKFLOW_CONFIG_FORMAT:
+        typer.echo(f"Error: unsupported config_format {config_format!r}", err=True)
+        raise typer.Exit(code=1)
+    return config_dict, config_format
+
+
+def _create_agent_from_validated(
+    *,
+    name: str,
+    description: str,
+    config_dict: dict[str, Any],
+    config_format: str,
+    agent_config: Path,
+    workspace: str,
+    base_url: str,
+) -> Any:
+    """Register the agent entity and (for spec agents) upload its Ethos fileset.
+
+    Returns the created-agent API response. Mirrors the second half of the
+    ``create`` command: on a fileset-upload failure it rolls the entity back so a
+    half-created agent is not left behind. Shared by ``create`` and ``redeploy``.
+    """
+    payload = {
+        "name": name,
+        "description": description,
+        "config": config_dict,
+        "config_format": config_format,
+    }
+    client = _agents_client(base_url, workspace)
+    resp = _run_sdk(
+        "POST agent API",
+        lambda: _json_from_response(
+            client.create_agent(workspace=workspace, body=CreateAgentRequest.model_validate(payload))
+        ),
+    )
+    if config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
+        try:
+            _upload_ethos_fileset(
+                agent_name=name,
+                workspace=workspace,
+                agent_root=agent_config.parent,
+                base_url=base_url,
+            )
+        except Exception as exc:
+            typer.echo(
+                f"Error: failed to upload Ethos fileset for {name!r}: {exc}",
+                err=True,
+            )
+            try:
+                _delete_agent_entity(
+                    agent_name=name,
+                    workspace=workspace,
+                    base_url=base_url,
+                )
+            # ``typer.Exit`` subclasses ``Exception``, so this also covers
+            # the exit raised by ``_run_sdk`` on an HTTP error.
+            except Exception:
+                logger.exception(
+                    "Failed to roll back agent %r after fileset upload failure",
+                    name,
+                )
+                typer.echo(
+                    f"Error: failed to roll back agent {name!r}; it may still exist on the "
+                    f"platform. Remove it with `nemo agents delete {name}`.",
+                    err=True,
+                )
+            raise typer.Exit(code=1) from exc
+    return resp
 
 
 def _spec_package_warning(agent: str, agent_config: Path) -> tuple[str, ...]:

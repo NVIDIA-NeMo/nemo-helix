@@ -679,6 +679,34 @@ mode provides, so invocation is identical across modes.
 
 ---
 
+## Iterate on a Deployed Agent
+
+When you change an agent's config and want to push the new version to the same
+agent name, use `nemo agents redeploy` instead of running undeploy, delete,
+create, and deploy by hand:
+
+```bash
+nemo agents redeploy --agent calculator-agent --agent-config ./calculator/agent.yaml
+```
+
+The agent entity is immutable by name (`create` returns 409 on a duplicate) and
+there is no in-place update route, so `redeploy` orchestrates the full teardown
+and rebuild in one command: it undeploys every live deployment, deletes the
+agent entity (preserving the durable `{agent}-ethos` fileset), recreates the
+agent from `--agent-config`, and deploys it again.
+
+Runtime flags (`--mode`, `--image`, `--use-image-entrypoint`, `--environment`)
+are auto-detected from the agent's existing deployment when omitted; pass them
+explicitly to override. Like `deploy`, `redeploy` waits for the new deployment
+to reach `running` (exit 0) or `failed`/timeout (exit 1) by default; pass
+`--no-wait` for fire-and-forget.
+
+**Safety contract.** The new config is validated client-side *before* any
+teardown, so a bad config is a safe no-op — nothing is torn down. Once teardown
+begins the operation is **not atomic**: if a later step fails, the agent may be
+left undeployed. Each step is check-first, so `redeploy` is safe to re-run to
+finish; on a post-delete failure it prints the exact re-run command.
+
 ## Deployment Cleanup
 
 <Tabs>

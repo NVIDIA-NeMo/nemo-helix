@@ -5914,6 +5914,7 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 * `get`: Get an agent by name.
 * `delete`: Delete an agent from the platform.
 * `deploy`: Deploy an agent on the platform.
+* `redeploy`: Redeploy an agent from a new config, in one command.
 * `logs`: Show logs for an agent deployment.
 * `undeploy`: Stop and remove a deployment (or all deployments for an...
 * `deployments`: Manage agent deployments.
@@ -6079,6 +6080,55 @@ nemo agents deploy [OPTIONS]
 * `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref (e.g. 'default/repo-research-ben'). Its EnvironmentSpec is merged into the agent config and its ComputeSpec/secret refs are snapshotted onto the deployment at create time.
 * `--wait, --no-wait`: Wait for the deployment to reach a terminal status (running or failed) before returning.  Exits 0 only on running; exits 1 with the failure reason if runtime startup fails or readiness times out. Pass --no-wait for fire-and-forget behaviour (the original default — returns the pending deployment immediately as JSON).
 * `--timeout, -t <INTEGER>`: Maximum seconds to wait for a terminal status (only with --wait). [default: 300]
+* `--workspace, -w`: [default: default]
+* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo agents redeploy
+
+Redeploy an agent from a new config, in one command.
+
+Wraps the four steps you would otherwise run by hand to push a changed
+agent config to a running agent: ``undeploy`` → ``delete`` → ``create``
+→ ``deploy``. The agent entity is immutable by name (``create`` returns
+409 on a duplicate), so redeploy tears the old agent down and rebuilds it
+from ``--agent-config``. The durable ``\{agent}-ethos`` fileset is
+preserved across the delete and re-uploaded from the new config.
+
+Safety contract: the new config is validated **client-side before any
+teardown**, so a bad config is a safe no-op (nothing is torn down). Once
+teardown begins the operation is **not atomic** — if a later step fails
+the agent may be left undeployed; each step is check-first, so it is
+**safe to re-run** ``redeploy`` to finish.
+
+Runtime flags (``--mode``/``--image``/``--use-image-entrypoint``/
+``--environment``) are auto-detected from the agent's existing
+deployment when omitted; pass them explicitly to override. If the agent
+has multiple deployments that disagree on an omitted field, redeploy
+errors and asks you to specify it.
+
+**Usage:**
+
+```shell
+nemo agents redeploy [OPTIONS]
+```
+
+**Options:**
+
+* `--agent, -a`: Name of the deployed agent to rebuild.
+* `--agent-config, -c <FILE>`: Path to the new agent YAML config file to redeploy from.
+* `--description`: Agent description (as on create). [default: ]
+* `--name, -n`: Deployment name for the new deployment (auto-generated if omitted).
+* `--mode`: Runtime backend: subprocess, docker, or k8s. Auto-detected from the existing deployment when omitted.
+* `--image, -i`: Container image for docker/k8s modes. Auto-detected from the existing deployment when omitted.
+* `--use-image-entrypoint, --no-use-image-entrypoint`: For docker/k8s modes, preserve the image ENTRYPOINT/CMD instead of injecting the platform-owned agent server command. Auto-detected from the existing deployment when omitted.
+* `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref. Auto-detected from the existing deployment when omitted; pass an empty string to deploy with no environment.
+* `--wait, --no-wait`: Wait for the new deployment to reach a terminal status (running or failed) before returning. Exits 0 only on running; exits 1 on failure or timeout. Pass --no-wait to return the pending deployment immediately as JSON.
+* `--timeout, -t <INTEGER>`: Maximum seconds to wait for a terminal status (only with --wait). [default: 300]
+* `--yes, -y`: Skip confirmation prompt.
 * `--workspace, -w`: [default: default]
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
