@@ -323,7 +323,7 @@ export const LoraParametersSection = () => {
                   formFieldProps={{
                     slotLabel: 'Modules to Save (JSON array)',
                     slotInfo:
-                      "Extra non-LoRA modules to train and save in full (e.g. ['embed_tokens', 'lm_head']). Needed for vocab changes / continued pretraining.",
+                      'Extra non-LoRA modules to train and save in full (e.g. ["embed_tokens", "lm_head"]). Needed for vocab changes / continued pretraining.',
                   }}
                   placeholder='["lm_head", "embed_tokens"]'
                   disabled={disabled}
@@ -333,7 +333,7 @@ export const LoraParametersSection = () => {
                   formFieldProps={{
                     slotLabel: 'LoftQ Config (JSON)',
                     slotInfo:
-                      'LoftQ initialization config for quantized bases. None disables LoftQ.',
+                      'LoftQ initialization config for quantized bases. Leave blank to disable LoftQ.',
                   }}
                   placeholder='{ "loftq_bits": 4 }'
                   disabled={disabled}
@@ -346,7 +346,7 @@ export const LoraParametersSection = () => {
                   formFieldProps={{
                     slotLabel: 'Layers to Transform (JSON)',
                     slotInfo:
-                      'Restrict LoRA to specific layer index(es). None applies to all layers.',
+                      'Restrict LoRA to specific layer index(es). Leave blank to apply to all layers.',
                   }}
                   placeholder="[0, 1, 2] or 5"
                   disabled={disabled}
@@ -356,7 +356,7 @@ export const LoraParametersSection = () => {
                   formFieldProps={{
                     slotLabel: 'Layer Replication (JSON)',
                     slotInfo:
-                      'Layer-replication ranges for stacking, e.g. [[0, 16], [8, 24]]. None disables.',
+                      'Layer-replication ranges for stacking, e.g. [[0, 16], [8, 24]]. Leave blank to disable.',
                   }}
                   placeholder="[[0, 8], [4, 12]]"
                   disabled={disabled}

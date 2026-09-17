@@ -837,7 +837,8 @@ export const GeneralParametersSection = () => {
                   useControllerProps={{ name: 'unsloth.optimizer.neftune_noise_alpha', control }}
                   formFieldProps={{
                     slotLabel: 'NEFTune Noise Alpha',
-                    slotInfo: 'NEFTune embedding-noise alpha (quality boost). None disables.',
+                    slotInfo:
+                      'NEFTune embedding-noise alpha (quality boost). Leave blank to disable.',
                   }}
                   {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'optimizer_neftune_noise_alpha')}
                   min={0}
@@ -850,7 +851,7 @@ export const GeneralParametersSection = () => {
                   formFieldProps={{
                     slotLabel: 'LR Scheduler Kwargs (JSON)',
                     slotInfo:
-                      "Extra kwargs for the LR scheduler, e.g. {'num_cycles': 3} for cosine_with_restarts. None uses scheduler defaults.",
+                      'Extra kwargs for the LR scheduler, e.g. {"num_cycles": 3} for cosine_with_restarts. Leave blank to use the scheduler defaults.',
                   }}
                   placeholder='{ "num_cycles": 1 }'
                   disabled={disabled}
@@ -960,7 +961,7 @@ export const GeneralParametersSection = () => {
                   formFieldProps={{
                     slotLabel: 'RoPE Scaling (JSON)',
                     slotInfo:
-                      "RoPE scaling config for long-context extension, passed to FastLanguageModel.from_pretrained (e.g. {'type': 'linear', 'factor': 2.0}). None uses the model's native context length.",
+                      'RoPE scaling config for long-context extension, passed to FastLanguageModel.from_pretrained (e.g. {"type": "linear", "factor": 2.0}). Leave blank to use the model\'s native context length.',
                   }}
                   placeholder='{ "type": "linear", "factor": 2.0 }'
                   disabled={disabled}
