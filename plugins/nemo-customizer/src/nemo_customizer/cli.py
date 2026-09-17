@@ -19,7 +19,7 @@ from nemo_platform_plugin.discovery import (
 # rl. Backend-specific text comes from each contributor's get_cli_summary().
 _OVERVIEW = """Train a model on your own data.
 
-Choose a backend, write a job JSON for it, and submit the file. The platform
+Choose a backend, write a job JSON for it, and submit it. The platform
 creates the job and runs the training on a GPU execution profile. Each backend
 trains a different way, and the schema of the job JSON depends on the backend
 you choose."""

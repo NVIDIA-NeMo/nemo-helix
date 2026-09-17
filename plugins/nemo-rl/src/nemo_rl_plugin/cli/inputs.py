@@ -31,8 +31,8 @@ reported immediately. The platform then creates the job and runs it on the
 execution profile resolved for this backend.
 
 Submit prints the created job as JSON on stdout. The 'name' field is the job
-id. Track the job with 'nemo jobs watch <job id>', or check its status once
-with 'nemo jobs get-status <job id>'.
+id. Track the job with 'nemo jobs watch <job id>', or check its status with
+'nemo jobs get-status <job id>'.
 
 Run 'nemo customization rl explain' to print the job JSON schema."""
 

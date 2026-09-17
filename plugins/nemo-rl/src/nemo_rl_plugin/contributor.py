@@ -29,8 +29,8 @@ from nemo_rl_plugin.jobs.jobs import RlJob
 _CLI_HELP = """Align a model with NeMo-RL, using DPO or GRPO.
 
 The platform runs the job on the kubernetes_job backend only, starting a Ray
-cluster for it. There is no docker path. Run
-'nemo jobs list-execution-profiles' to see the profiles on this platform.
+cluster for it. There is no docker path. Run 'nemo jobs list-execution-profiles'
+to see the profiles on this platform.
 
 A single command covers both algorithms: training.type in the job JSON selects
 between 'dpo' and 'grpo'. DPO trains on preference pairs, full weights only.
