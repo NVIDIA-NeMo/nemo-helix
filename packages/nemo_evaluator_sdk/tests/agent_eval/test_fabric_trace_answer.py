@@ -65,6 +65,23 @@ def test_an_unreadable_otlp_trace_falls_through_to_atif(tmp_path: Path) -> None:
     assert trace_answer_text(descriptors) == "final"
 
 
+def test_a_whitespace_only_otlp_answer_falls_through_to_atif(tmp_path: Path) -> None:
+    descriptors = _descriptors(otlp=write_answer_trace(tmp_path, "  \n "), atif=_write_atif(tmp_path, "final"))
+
+    assert trace_answer_text(descriptors) == "final"
+
+
+def test_a_whitespace_only_answer_is_no_answer(tmp_path: Path) -> None:
+    """Blank is answerless, so a trial reports no answer rather than whitespace.
+
+    The format readers hand back a trace's last agent text verbatim; a caller asking whether the
+    agent answered at all has to apply the presence rule itself.
+    """
+    descriptors = _descriptors(otlp=write_answer_trace(tmp_path, " "), atif=_write_atif(tmp_path, "\t"))
+
+    assert trace_answer_text(descriptors) is None
+
+
 def test_a_trial_with_no_trace_evidence_has_no_answer() -> None:
     assert trace_answer_text(_descriptors()) is None
 

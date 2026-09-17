@@ -93,18 +93,28 @@ def trace_answer_text(descriptors: Mapping[str, EvidenceDescriptor]) -> str | No
     The harness ``RunResult`` is the primary source; this is the fallback for adapters that report
     the answer only through Relay telemetry, so a Fabric trial fills ``output.output_text`` on the
     same terms as a Harbor one.
+
+    A blank answer is no answer, in either format. The format readers return a trace's last agent
+    text verbatim, whitespace included, because "what did the agent say" and "did the agent answer"
+    are different questions; this asks the second, and holds the trace to the same presence rule the
+    caller applies to the harness output.
     """
     otlp = descriptors.get(f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_OTLP}")
     if otlp is not None and otlp.ref is not None:
         spans = read_otlp_spans(Path(otlp.ref))
         if spans is not None:
-            answer = final_output_text(spans)
-            if answer:
+            answer = _nonblank(final_output_text(spans))
+            if answer is not None:
                 return answer
     atif = descriptors.get(f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}")
     if atif is None or atif.ref is None:
         return None
-    return final_agent_message(read_atif(Path(atif.ref)))
+    return _nonblank(final_agent_message(read_atif(Path(atif.ref))))
+
+
+def _nonblank(text: str | None) -> str | None:
+    """``text`` unchanged when it carries visible characters, else ``None``."""
+    return text if text is not None and text.strip() else None
 
 
 def normalize_output(output: Any) -> JsonValue:
