@@ -50,11 +50,12 @@ export const DetailsTab: FC<DetailsTabProps> = ({ workspace, agentName, agent })
             <KVPair label="Project" value={agent.project} />
           )}
           {isDefined(agent?.description) && agent.description && (
-            <KVPair
-              label="Description"
-              orientation="vertical"
-              value={<MarkdownContent content={agent.description} />}
-            />
+            <Stack gap="1">
+              <Text kind="label/regular/sm" className="text-secondary">
+                Description
+              </Text>
+              <MarkdownContent content={agent.description} />
+            </Stack>
           )}
           {models.length > 0 && <KVPair label="Model" value={models.join(', ')} />}
           {isDefined(agent?.config_format) && (
