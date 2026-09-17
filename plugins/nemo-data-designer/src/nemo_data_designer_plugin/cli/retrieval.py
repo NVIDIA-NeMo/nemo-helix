@@ -52,7 +52,7 @@ def retrieval_prepare(
     sdg_input: str | None = typer.Option(
         None,
         "--sdg-input",
-        help="Stage 0 fileset, fileset#file, or hf:// URI (optionally /path to a file).",
+        help="Stage 0 file or directory: a fileset, fileset#file, local path, or hf:// URI.",
     ),
     generation_file: str | None = typer.Option(
         None,

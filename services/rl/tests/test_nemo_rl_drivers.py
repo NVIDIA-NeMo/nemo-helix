@@ -140,27 +140,62 @@ def test_for_schedule_keyword_detector_discriminates() -> None:
 
 
 def _raises_value_error_after_best_checkpoint_lookup(source: str) -> bool:
-    """Whether the module looks up the best checkpoint and raises a ValueError."""
-    tree = ast.parse(source)
-    looks_up = any(
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "get_best_checkpoint_path"
-        for node in ast.walk(tree)
-    )
-    raises_value_error = False
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Raise) or node.exc is None:
+    """Whether the `get_best_checkpoint_path() is None` branch raises ValueError."""
+
+    def tests_missing_best_checkpoint(test: ast.expr) -> bool:
+        for node in ast.walk(test):
+            if not (
+                isinstance(node, ast.Compare)
+                and len(node.ops) == 1
+                and isinstance(node.ops[0], ast.Is)
+                and len(node.comparators) == 1
+                and isinstance(node.comparators[0], ast.Constant)
+                and node.comparators[0].value is None
+                and isinstance(node.left, ast.Call)
+                and isinstance(node.left.func, ast.Attribute)
+                and node.left.func.attr == "get_best_checkpoint_path"
+            ):
+                continue
+            return True
+        return False
+
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.If) or not tests_missing_best_checkpoint(node.test):
             continue
-        if isinstance(node.exc, ast.Call) and isinstance(node.exc.func, ast.Name) and node.exc.func.id == "ValueError":
-            raises_value_error = True
-    return looks_up and raises_value_error
+        for stmt in node.body:
+            for inner in ast.walk(stmt):
+                if (
+                    isinstance(inner, ast.Raise)
+                    and isinstance(inner.exc, ast.Call)
+                    and isinstance(inner.exc.func, ast.Name)
+                    and inner.exc.func.id == "ValueError"
+                ):
+                    return True
+    return False
 
 
 def test_postcondition_detector_discriminates() -> None:
     """The tripwire is only worth having if it can actually trip."""
     assert _raises_value_error_after_best_checkpoint_lookup("raise ValueError('x')\n") is False
     assert _raises_value_error_after_best_checkpoint_lookup("checkpointer.get_best_checkpoint_path()\n") is False
+    assert (
+        _raises_value_error_after_best_checkpoint_lookup(
+            "checkpointer.get_best_checkpoint_path()\nraise ValueError('x')\n"
+        )
+        is False
+    )
+    assert (
+        _raises_value_error_after_best_checkpoint_lookup(
+            "if checkpointer.get_best_checkpoint_path() is not None:\n    raise ValueError('x')\n"
+        )
+        is False
+    )
+    assert (
+        _raises_value_error_after_best_checkpoint_lookup(
+            "if checkpointer.get_best_checkpoint_path() is None:\n    raise RuntimeError('x')\n"
+        )
+        is False
+    )
     assert (
         _raises_value_error_after_best_checkpoint_lookup(
             "if checkpointer.get_best_checkpoint_path() is None:\n    raise ValueError('x')\n"

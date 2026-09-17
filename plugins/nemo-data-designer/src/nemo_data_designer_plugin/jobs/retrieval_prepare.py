@@ -183,6 +183,7 @@ def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobConte
         inline_path = output_dir / "training.jsonl"
         wrapped_to_inline_jsonl(train_file, inline_path, output_dir / "corpus" / "train.parquet")
         move_aux_files_to_additional(output_dir)
+        train_file = output_dir / "additional" / train_file.name
 
     artifacts = ctx.results.save(name="artifacts", local_path=output_dir)
     return {

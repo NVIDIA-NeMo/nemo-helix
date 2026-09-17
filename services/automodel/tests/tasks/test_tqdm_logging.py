@@ -20,9 +20,12 @@ def test_line_tqdm_writes_newlines_not_carriage_returns() -> None:
     bar.close()
 
 
-def test_install_line_tqdm_replaces_module_class() -> None:
+def test_install_line_tqdm_replaces_module_class(monkeypatch: pytest.MonkeyPatch) -> None:
     import tqdm
 
+    # Register the original class with monkeypatch so the global install is
+    # undone at test teardown.
+    monkeypatch.setattr(tqdm, "tqdm", tqdm.tqdm)
     install_line_tqdm()
     assert tqdm.tqdm is LineTqdm
 

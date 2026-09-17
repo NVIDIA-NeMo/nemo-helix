@@ -205,9 +205,10 @@ at the root. Wrapped `train.json`, corpus parquet, and mining caches live under
 samples `train_n_passages - 1` negatives (default 4) and raises
 `neg_doc must contain at least 1 document to sample N negatives`. Count
 `len(neg_doc)` on a sample of `training.jsonl` (see `nemo-retrieval-recipes`
-`references/sdg.md`). If every row is empty, run `retrieval-prepare` with
-`enable_mining: true` before `automodel submit`. Do not paper over this by
-lowering `train_n_passages`.
+`references/sdg.md`). Every checked row must contain a non-empty list: a single
+empty `neg_doc` can be selected by the collator and fail the run. If any row is
+empty, run `retrieval-prepare` with `enable_mining: true` before `automodel
+submit`. Do not paper over this by lowering `train_n_passages`.
 
 The base model must be a model entity with a non-null `fileset`. An Inference
 Gateway auto-discovered entity with only `api_endpoint` cannot be downloaded for
@@ -233,9 +234,9 @@ Use `"recipe": "cross_encoder"` and the rerank model entity for ranking. Leave b
 
 ### `training.retrieval`
 
-Dataset, collator, and export knobs for `bi_encoder` / `cross_encoder`. The old `training.embedding` key still validates.
+Dataset, collator, and export knobs for `bi_encoder` / `cross_encoder`. Use `training.retrieval` only; `training.embedding` is rejected.
 
-`retrieval.export` writes ONNX plus the HF checkpoint. `primary` (`onnx` by default, or `hf`) selects the fileset root; the other artifact goes under `alternates/`. Embeddings emit pooled `embeddings`; cross-encoders emit `logits`. Set `dimensions: true` for Matryoshka truncation. Unmerged LoRA is not exported.
+`retrieval.export` writes ONNX plus the HF checkpoint. `primary` (`onnx` by default, or `hf`) selects the fileset root; the other artifact goes under `alternates/`. `precision` defaults to `fp16` to match typical Hugging Face checkpoints. Embeddings emit pooled `embeddings`; cross-encoders emit `logits`. Set `dimensions: true` for Matryoshka truncation. Unmerged LoRA is not exported.
 
 ### `parallelism`
 

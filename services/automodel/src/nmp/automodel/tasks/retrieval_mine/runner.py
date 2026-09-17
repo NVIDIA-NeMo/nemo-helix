@@ -142,6 +142,7 @@ def run_mine(
         if next(handle, None) is None:
             raise ValueError(f"No training rows written to {training_jsonl}")
     move_aux_files_to_additional(output_dir)
+    unrolled = output_dir / "additional" / unrolled.name
     artifacts = ctx.results.save(name="artifacts", local_path=output_dir)
     return {
         "exit_code": 0,

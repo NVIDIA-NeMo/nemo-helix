@@ -84,8 +84,8 @@ def test_adapter_plumbs_retrieval_spec() -> None:
     assert spec.training.retrieval.export.opset == 18
 
 
-def test_adapter_accepts_legacy_embedding_block() -> None:
-    """Accept the pre-rename ``training.embedding`` key."""
+def test_adapter_drops_legacy_embedding_block() -> None:
+    """The removed ``training.embedding`` alias must not populate retrieval."""
     spec = automodel_spec_to_compiler_output(
         {
             "model": "meta/llama",
@@ -100,9 +100,7 @@ def test_adapter_accepts_legacy_embedding_block() -> None:
         },
     )
     assert isinstance(spec.training, SFTTraining)
-    assert spec.training.retrieval is not None
-    assert spec.training.retrieval.train_n_passages == 7
-    assert spec.training.retrieval.query_prefix == "query:"
+    assert spec.training.retrieval is None
 
 
 def test_adapter_new_fields_default_when_omitted() -> None:

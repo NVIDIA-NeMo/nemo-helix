@@ -15,7 +15,6 @@ from nmp.common.entities.constants import (
 from nmp.customization_common.training.reporting import ProgressReportingConfig
 from pydantic import (
     AfterValidator,
-    AliasChoices,
     BaseModel,
     ConfigDict,
     Discriminator,
@@ -139,9 +138,9 @@ class ExportParams(BaseModel):
         description="Artifact at the fileset root. Use 'hf' when the NIM loads the PyTorch checkpoint.",
     )
     opset: int = Field(default=17, gt=0, description="ONNX opset version.")
-    precision: Literal["fp32", "fp16", "bf16"] = Field(
-        default="fp32",
-        description="Trace precision. fp16 has no CPU kernels for much of the graph.",
+    precision: Literal["fp32", "fp16"] = Field(
+        default="fp16",
+        description="ONNX graph dtype. Defaults to fp16 to match typical Hugging Face checkpoints.",
     )
     attn_implementation: Literal["eager", "sdpa", "flash_attention_2"] = Field(
         default="eager",
@@ -347,7 +346,6 @@ class _TrainingBase(BaseModel):
     )
     retrieval: Optional[RetrievalParams] = Field(
         default=None,
-        validation_alias=AliasChoices("retrieval", "embedding"),
         description="Retrieval dataset, collator, and export knobs. Used when recipe is bi_encoder or cross_encoder.",
     )
 

@@ -84,6 +84,30 @@ def test_compile_nim_server_env_non_legacy_name_is_served_fqdn() -> None:
     assert "NIM_MODEL_PATH" not in env
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (False, False),
+        (True, True),
+        ("false", False),
+        ("0", False),
+        ("off", False),
+        ("true", True),
+        ("1", True),
+        ("on", True),
+    ],
+)
+def test_nim_legacy_weight_env_parses_untyped_override(value: object, expected: bool) -> None:
+    view = DeploymentConfigView(override_config={"nimLegacy": value})
+    assert nim_compiler.nim_legacy_weight_env(view) is expected
+
+
+def test_nim_legacy_weight_env_rejects_invalid_override() -> None:
+    view = DeploymentConfigView(override_config={"nimLegacy": "sometimes"})
+    with pytest.raises(ValueError, match="nimLegacy must be a boolean-like value"):
+        nim_compiler.nim_legacy_weight_env(view)
+
+
 def test_compile_nim_server_env_additional_envs_override_ngc_api_key() -> None:
     resolved = _resolved()
     resolved = ResolvedPluginDeployment(

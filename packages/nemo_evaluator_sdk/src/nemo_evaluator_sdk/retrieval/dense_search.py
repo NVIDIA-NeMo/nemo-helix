@@ -21,6 +21,7 @@ __all__ = ["dense_search", "retrieve"]
 
 logger = logging.getLogger(__name__)
 
+
 # Cells in one query-chunk score block, bounding it to ~256 MB of float32.
 _SCORE_BLOCK_CELLS = 64_000_000
 
@@ -193,7 +194,14 @@ async def _encode_batches(
                     )
             return result
 
-    encoded = await asyncio.gather(*(_encode(index, batch) for index, batch in enumerate(batches)))
+    tasks = [asyncio.create_task(_encode(index, batch)) for index, batch in enumerate(batches)]
+    try:
+        encoded = await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
     vectors: list[list[float]] = []
     for part in encoded:
         vectors.extend(part)
@@ -229,19 +237,19 @@ def _score(
     progress_every = max(1, math.ceil(math.ceil(n_queries / chunk) * 0.1))
     for number, start in enumerate(range(0, n_queries, chunk), start=1):
         scores = queries[start : start + chunk] @ documents.T
-        negated = -scores
         for row, query_id in enumerate(query_ids[start : start + chunk]):
-            row_scores = negated[row]
+            row_scores = scores[row]
             if k < n_documents:
                 # Partition gives the k-th best score, but splits ties arbitrarily. Widening to
                 # every document at that score keeps the whole boundary tie group, so the sort
                 # below breaks it on document id rather than on corpus order.
-                cutoff = row_scores[np.argpartition(row_scores, k - 1)[k - 1]]
-                candidates = np.flatnonzero(row_scores <= cutoff)
+                cutoff_index = n_documents - k
+                cutoff = row_scores[np.argpartition(row_scores, cutoff_index)[cutoff_index]]
+                candidates = np.flatnonzero(row_scores >= cutoff)
             else:
                 candidates = np.arange(n_documents)
-            ordered = candidates[np.lexsort((document_rank[candidates], row_scores[candidates]))][:k]
-            results[query_id] = {document_ids[index]: float(scores[row, index]) for index in ordered}
+            ordered = candidates[np.lexsort((document_rank[candidates], -row_scores[candidates]))][:k]
+            results[query_id] = {document_ids[index]: float(row_scores[index]) for index in ordered}
         if number % progress_every == 0 or len(results) == n_queries:
             logger.info(
                 f"scored {model_name} {len(results)}/{n_queries} queries ({100 * len(results) / n_queries:.0f}%)"

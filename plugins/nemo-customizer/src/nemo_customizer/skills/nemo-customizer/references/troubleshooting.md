@@ -302,12 +302,13 @@ Cause: Data Designer convert-only Stage 1 (`enable_mining: false`) writes
 `training.jsonl` with `neg_doc: []`. Dataset validation still accepts empty
 lists. The collator then samples `train_n_passages - 1` negatives (default 4).
 
-Fix: sample `training.jsonl` and count `len(neg_doc)` before submit. If every
-row is empty, run `nemo data-designer retrieval-prepare` with
+Fix: sample `training.jsonl` and require `neg_doc` to be a non-empty list on
+every checked row. A single empty list can be selected by the collator and fail
+the run. If any row is empty, run `nemo data-designer retrieval-prepare` with
 `enable_mining: true` (or `train_input_file` on the existing convert-only
 fileset so frozen `eval_beir` is not regenerated). Do not lower
-`train_n_passages` to hide an unmined fileset. Conductor: `nemo-retrieval-recipes`
-`references/sdg.md`.
+`train_n_passages` to hide an unmined fileset. Conductor:
+`nemo-retrieval-recipes` `references/sdg.md`.
 
 ## CLI quick reference
 

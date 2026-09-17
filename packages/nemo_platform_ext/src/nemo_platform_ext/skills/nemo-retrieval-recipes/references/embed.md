@@ -12,11 +12,14 @@
 | 0+1 | `nemo data-designer retrieval-run` | both |
 | 2 Finetune | `nemo customization automodel submit` `recipe: bi_encoder` | model entity |
 | 3 Eval | `nemo evaluator retrieve-eval submit` | `eval_results.json` |
-| 4 Export | Automodel ONNX export (`embeddings`) + `alternates/hf/` | Retriever NIM layout |
+| 4 Export | Automodel job writes both layouts. Set `training.retrieval.export.primary` to `onnx` or `hf`. Newer Retriever NIMs (2.2.0+) need `hf` at the fileset root. | Retriever NIM layout |
 | 5 Deploy | ModelDeployment + Retriever NIM 2.2.0 | `/v1/embeddings` |
 
 Default stop after `retrieve-eval`. Fileset-backed models must be served first
-(`deploy.md`). Stage 4 ONNX/HF layout is written by the Automodel job.
+(`deploy.md`). Do not run a separate export step. Primary vs alternate is a
+job setting: `training.retrieval.export.primary: hf` puts Hugging Face weights
+at the fileset root (ONNX under `alternates/onnx`). Retriever NIM 2.2.0 and
+newer require that HF-primary layout.
 
 ## Commands
 
@@ -49,6 +52,10 @@ A model entity auto-discovered from Inference Gateway is an endpoint: its
 `fileset` is null and it cannot be trained. Register the checkpoint as a
 fileset-backed entity and confirm the fileset before submitting.
 
+`<model-revision>` means the Hugging Face model revision to pin: use a commit
+SHA or tag from the model repository. For a non-reproducible latest-revision
+fileset, remove the `"revision"` field instead of leaving the placeholder.
+
 ```bash
 nemo files filesets create nemotron-3-embed-1b \
   --workspace default --purpose model --exist-ok \
@@ -77,7 +84,8 @@ Stage 2 (`dataset.training` is the Stage 1 `artifacts` fileset):
   "training": {
     "recipe": "bi_encoder",
     "training_type": "sft",
-    "finetuning_type": "lora_merged"
+    "finetuning_type": "lora_merged",
+    "retrieval": {"export": {"primary": "hf"}}
   },
   "output": {"name": "nemotron-3-embed-1b-tuned"}
 }
@@ -101,10 +109,11 @@ nemo evaluator retrieve-eval submit --spec '{
 
 ## Stage 4 / deploy
 
-Automodel post-processing exports ONNX at the fileset root and HF weights under
-`alternates/hf/`. Set `training.retrieval.export.primary: hf` when the target NIM
-loads PyTorch weights. Set `training.retrieval.export.dimensions: true` for
-Matryoshka.
+Confirm the fileset layout after the job; do not re-export. Newer Retriever
+NIMs load PyTorch weights, so set `training.retrieval.export.primary: hf` on
+the Automodel job (HF at the root, ONNX under `alternates/onnx`). Leave
+`primary: onnx` only for NIMs that still expect ONNX at the fileset root.
+Set `training.retrieval.export.dimensions: true` for Matryoshka.
 
 Create Deployment Manager configs and wait for `READY` using `deploy.md`
 (baked base `model_spec: {}`, tuned fileset mount, Retriever NIM 2.2.0).

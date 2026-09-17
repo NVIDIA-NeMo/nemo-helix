@@ -46,7 +46,7 @@ Data Designer `create` workflow chaining for this path.
 
 Tiny corpora (one source file / `num_files: 1`) can place every query in the test split and leave train empty. Conversion must fail before mining when `train.json` has no records. Generate with enough documents (50+ recommended) or raise `train_ratio`.
 
-Convert-only prepare (`enable_mining: false`) writes `training.jsonl` with empty `neg_doc` lists. Automodel `bi_encoder` / `cross_encoder` still samples `train_n_passages - 1` negatives (default 4) and fails with `neg_doc must contain at least 1 document to sample N negatives`. Before handing off to Automodel, download a sample of `training.jsonl` and confirm `len(neg_doc) > 0`. If every row is empty, re-run prepare with `enable_mining: true` (or `train_input_file` on the existing convert-only fileset so frozen `eval_beir` is not regenerated).
+Convert-only prepare (`enable_mining: false`) writes `training.jsonl` with empty `neg_doc` lists. Automodel `bi_encoder` / `cross_encoder` still samples `train_n_passages - 1` negatives (default 4) and fails with `neg_doc must contain at least 1 document to sample N negatives`. Before handing off to Automodel, check a representative sample of `training.jsonl` and require `neg_doc` to be a non-empty list on every checked row. A single empty list can be selected by the collator and fail the run. Re-run prepare with `enable_mining: true` (or `train_input_file` on the existing convert-only fileset so frozen `eval_beir` is not regenerated) if any row is empty.
 
 ## Stage 1 output
 

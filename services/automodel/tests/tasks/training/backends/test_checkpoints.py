@@ -4,12 +4,14 @@
 """process_checkpoint merge, ONNX dispatch, and fileset layout."""
 
 from pathlib import Path
+from typing import Literal
 from unittest.mock import MagicMock
 
 import pytest
 from nmp.automodel.entities.values import FinetuningType
 from nmp.automodel.tasks.training.backends.checkpoints import (
     ModelType,
+    _build_export_module,
     _probe_bidirectional_mask,
     _restructure_encoder_output,
     process_checkpoint,
@@ -165,3 +167,34 @@ def test_probe_bidirectional_mask_missing_attribute_is_none() -> None:
     import types
 
     assert _probe_bidirectional_mask(types.ModuleType("bare_pkg")) is None
+
+
+@pytest.mark.parametrize(
+    ("pooling", "padding_side", "expected"),
+    [
+        ("avg", "right", [1.0, 10.5]),
+        ("cls", "right", [0.0, 10.0]),
+        ("last", "right", [2.0, 11.0]),
+        ("avg", "left", [2.0, 12.5]),
+        ("cls", "left", [1.0, 12.0]),
+        ("last", "left", [3.0, 13.0]),
+    ],
+)
+def test_embedding_pooling_supports_both_padding_sides(
+    pooling: Literal["avg", "cls", "last"], padding_side: str, expected: list[float]
+) -> None:
+    torch = pytest.importorskip("torch")
+    mask = {
+        "right": [[1, 1, 1, 0], [1, 1, 0, 0]],
+        "left": [[0, 1, 1, 1], [0, 0, 1, 1]],
+    }[padding_side]
+    hidden = torch.tensor([[[0.0], [1.0], [2.0], [3.0]], [[10.0], [11.0], [12.0], [13.0]]])
+    export_model = _build_export_module(
+        torch.nn.Identity(),
+        ModelType.EMBEDDING,
+        ExportConfig(pooling=pooling, normalize=False),
+    )
+
+    actual = export_model._pool(hidden, torch.tensor(mask))
+
+    torch.testing.assert_close(actual[:, 0], torch.tensor(expected))

@@ -36,6 +36,7 @@ from nmp.core.models.controllers.backends.common import DeploymentConfigView
 from nmp.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
 from nmp.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
 from nmp.core.models.controllers.backends.engine import ENGINE_GENERIC, ENGINE_NIM, ENGINE_VLLM
+from pydantic import TypeAdapter
 
 _WEIGHTS_MOUNT = "/model-store"
 _SCRATCH_MOUNT = "/scratch"
@@ -64,6 +65,7 @@ fi
 # NIM_MODEL_NAME / NIM_MODEL_PATH reject them even alongside the
 # NIM_ENGINE_MODEL_* replacements, so only one generation can be emitted.
 _NIM_LEGACY_OVERRIDE_KEY = "nimLegacy"
+_BOOL_ADAPTER = TypeAdapter(bool)
 
 _SUPPORTED_NIM_OVERRIDE_CONFIG_KEYS = frozenset(
     {
@@ -89,7 +91,12 @@ _SUPPORTED_NIM_OVERRIDE_CONFIG_KEYS = frozenset(
 def nim_legacy_weight_env(view: DeploymentConfigView) -> bool:
     """Whether the NIM image still expects the legacy weight env var names."""
     value = (view.override_config or {}).get(_NIM_LEGACY_OVERRIDE_KEY)
-    return True if value is None else bool(value)
+    if value is None:
+        return True
+    try:
+        return _BOOL_ADAPTER.validate_python(value)
+    except ValueError as error:
+        raise ValueError(f"{_NIM_LEGACY_OVERRIDE_KEY} must be a boolean-like value; got {value!r}") from error
 
 
 _NIM_WEIGHT_PATH_ENV_KEYS = ("NIM_ENGINE_MODEL_PATH", "NIM_MODEL_PATH")

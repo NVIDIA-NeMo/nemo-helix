@@ -5,7 +5,7 @@ import json
 
 import pytest
 from nemo_automodel_plugin.cli.inputs import load_job_json
-from nemo_automodel_plugin.schema import AutomodelJobInput
+from nemo_automodel_plugin.schema import AutomodelJobInput, ExportSpec
 
 
 def test_reject_output_model() -> None:
@@ -42,6 +42,26 @@ def test_training_recipe_defaults_to_auto() -> None:
 
     assert spec.training.recipe == "auto"
     assert spec.optimizer.optimizer == "auto"
+
+
+def test_export_precision_rejects_unverified_bf16() -> None:
+    with pytest.raises(ValueError, match="precision"):
+        ExportSpec.model_validate({"precision": "bf16"})
+
+
+def test_legacy_embedding_block_is_rejected() -> None:
+    with pytest.raises(ValueError, match="embedding"):
+        AutomodelJobInput.model_validate(
+            {
+                "model": "llama",
+                "dataset": {"training": "default/train"},
+                "training": {
+                    "training_type": "sft",
+                    "finetuning_type": "all_weights",
+                    "embedding": {"train_n_passages": 7},
+                },
+            }
+        )
 
 
 @pytest.mark.parametrize("optimizer", ["auto", "Adam", "AdamW", "FusedAdam"])

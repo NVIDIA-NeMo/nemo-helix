@@ -8,11 +8,12 @@ import time
 from pathlib import Path
 
 import httpx
+import numpy as np
 import pytest
 from nemo_evaluator_sdk.retrieval import dense_search as dense_search_module
 from nemo_evaluator_sdk.retrieval.beir import BeirDataset
 from nemo_evaluator_sdk.retrieval.dense_search import dense_search, retrieve
-from nemo_evaluator_sdk.retrieval.nim_embeddings import NimEmbeddingClient, NimEmbeddingError
+from nemo_evaluator_sdk.retrieval.nim_embeddings import InputType, NimEmbeddingClient, NimEmbeddingError
 from nemo_evaluator_sdk.values.models import Model
 from nemo_evaluator_sdk.values.retrieval import Retrieval
 
@@ -31,6 +32,47 @@ def _response(request: httpx.Request, vectors: list[list[float]]) -> httpx.Respo
         ),
         headers={"content-type": "application/json"},
     )
+
+
+@pytest.mark.asyncio
+async def test_encode_batches_cancels_siblings_on_first_failure() -> None:
+    sibling_started = asyncio.Event()
+    sibling_cancelled = asyncio.Event()
+    completed: list[str] = []
+
+    class FailingEmbeddings(NimEmbeddingClient):
+        async def encode(
+            self,
+            inputs: list[str],
+            input_type: InputType,
+            client: httpx.AsyncClient | None = None,
+        ) -> list[list[float]]:
+            text = inputs[0]
+            if text == "bad":
+                await sibling_started.wait()
+                raise RuntimeError("encode failed")
+            sibling_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                sibling_cancelled.set()
+                raise
+            completed.append(text)
+            return [[1.0]]
+
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(RuntimeError, match="encode failed"):
+            await dense_search_module._encode_batches(
+                FailingEmbeddings(model=_model()),
+                ["bad", "slow", "queued"],
+                input_type="query",
+                batch_size=1,
+                in_flight=2,
+                client=client,
+            )
+
+    assert sibling_cancelled.is_set()
+    assert completed == []
 
 
 @pytest.mark.asyncio
@@ -367,6 +409,32 @@ async def test_dense_search_breaks_top_k_ties_on_document_id(tmp_path: Path) -> 
         )
 
     assert list(results["q1"]) == ["d1", "d2"]
+
+
+def test_score_top_k_matches_full_deterministic_sort() -> None:
+    rng = np.random.default_rng(42)
+    document_ids = ["d07", "d02", "d09", "d01", "d05", "d03", "d08", "d04", "d06", "d00"]
+    document_vectors = rng.normal(size=(len(document_ids), 5)).tolist()
+    # Duplicate vectors exercise score ties as well as ordinary random rankings.
+    document_vectors[7] = document_vectors[1]
+    query_ids = ["q0", "q1", "q2"]
+    query_vectors = rng.normal(size=(len(query_ids), 5)).tolist()
+
+    documents = dense_search_module._unit_rows(document_vectors)
+    queries = dense_search_module._unit_rows(query_vectors)
+    scores = queries @ documents.T
+    for top_k in (1, 3, 7):
+        actual = dense_search_module._score(
+            document_ids,
+            document_vectors,
+            query_ids,
+            query_vectors,
+            top_k,
+            "test-model",
+        )
+        for row, query_id in enumerate(query_ids):
+            expected = sorted(range(len(document_ids)), key=lambda index: (-scores[row, index], document_ids[index]))
+            assert list(actual[query_id]) == [document_ids[index] for index in expected[:top_k]]
 
 
 @pytest.mark.asyncio

@@ -141,7 +141,6 @@ Plugin-owned skills:
   agents-optimize   cost / latency / quality optimization for a deployed agent
   agents-secure     safety and security audit for a deployed agent
   nemo-evaluator-plugin  evaluation metrics, LLM-judge, retrieve-eval, benchmark jobs
-  nemo-retrieval-recipes  embedding/rerank domain fine-tune (SDG → train → retrieve-eval)
   nemo-customizer   fine-tuning of chat/SFT/RL models (not the retrieval recipe)
   nemo-analyst      analyze agent telemetry and file recurring problems as Insights
   nemo-experimentalist  source/harness optimization from Insights or evaluation datasets

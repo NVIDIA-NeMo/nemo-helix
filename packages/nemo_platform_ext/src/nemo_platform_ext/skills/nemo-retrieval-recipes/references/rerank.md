@@ -5,6 +5,14 @@
 
 Keep the first-stage retriever fixed while comparing base and tuned rerankers.
 
+## Prerequisites
+
+- A Stage 1 `artifacts` fileset from `sdg.md` whose every `training.jsonl` row
+  has a non-empty `neg_doc` list.
+- A fileset-backed reranker model entity for training.
+- A fixed embedding model and base reranker served through Inference Gateway
+  for the baseline and target evaluation.
+
 ## Stage map
 
 | Stage | Platform command | Output |
@@ -12,12 +20,13 @@ Keep the first-stage retriever fixed while comparing base and tuned rerankers.
 | 0–1 | Same Data Designer jobs as embed | `training.jsonl` + `eval_beir/` |
 | 2 | `nemo customization automodel submit` `recipe: cross_encoder` | HF sequence-classification entity |
 | 3 | `retrieve-eval` with `target.embeddings` + `target.reranker`, `first_stage_k: 100` | `eval_results.json` |
-| 4 | Automodel ONNX export (`logits`) + `alternates/hf/` | Ranking NIM layout |
+| 4 | Produced automatically by the successful Automodel job: ONNX (`logits`) + `alternates/hf/` | Ranking NIM layout |
 | 5 | Ranking NIM `llama-nemotron-rerank-1b-v2:1.10.0` `/v1/ranking` | Deploy the **output** model entity |
 
 Default stop after `retrieve-eval` (checkpoint / IGW model-ref eval). Fileset-backed
 rerankers need the same Deployment Manager path (`deploy.md`) before submit.
-Stage 4 ONNX/HF layout is written by the Automodel job.
+Do not run a separate export step: a successful Automodel job already writes
+the Stage 4 ONNX/HF layout.
 
 ## Commands
 
@@ -28,6 +37,10 @@ fileset directly.
 
 Register a fileset-backed reranker checkpoint if it does not already exist; an
 Inference Gateway endpoint entity has no fileset and cannot be trained:
+
+`<model-revision>` means the Hugging Face model revision to pin: use a commit
+SHA or tag from the model repository. For a non-reproducible latest-revision
+fileset, remove the `"revision"` field instead of leaving the placeholder.
 
 ```bash
 nemo files filesets create llama-nemotron-rerank-1b-v2 \
@@ -98,3 +111,10 @@ Unmerged LoRA cannot be served.
 ## Invariants
 
 Primary KPI is nDCG@10. Use Recall@100 on the embedder to decide whether to tune embed instead.
+
+## Next Steps
+
+- Compare base and tuned nDCG@10 in `eval_results.json`.
+- If reranking improves, use `deploy.md` to serve the tuned output model.
+- If Recall@100 is the bottleneck, keep the reranker fixed and follow
+  `embed.md`.

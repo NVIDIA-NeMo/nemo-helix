@@ -3,6 +3,8 @@
 
 """ONNX export vs HuggingFace parity. Skipped unless torch/onnxruntime are installed."""
 
+from typing import Literal, cast
+
 import numpy as np
 import pytest
 
@@ -16,6 +18,7 @@ from nmp.automodel.tasks.training.backends.checkpoints import (  # noqa: E402
 )
 from nmp.automodel.tasks.training.schemas import ExportConfig  # noqa: E402
 from transformers import AutoModel, AutoModelForSequenceClassification, AutoTokenizer  # noqa: E402
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase  # noqa: E402
 
 pytestmark = [pytest.mark.gpu_integration, pytest.mark.slow]
 
@@ -74,15 +77,23 @@ def _tokenize(checkpoint, texts):
     return tokenizer(texts, return_tensors="pt", padding=True, truncation=True)
 
 
-def _hf_pooled_embeddings(checkpoint, batch, normalize: bool = True):
+def _hf_pooled_embeddings(checkpoint, batch, pooling: str = "avg", normalize: bool = True):
     """Pooled HuggingFace embeddings for the given batch."""
     model = AutoModel.from_pretrained(str(checkpoint), torch_dtype=torch.float32).eval()
     with torch.no_grad():
         hidden = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]).last_hidden_state
 
-    mask = batch["attention_mask"]
-    masked = hidden.masked_fill(~mask[..., None].bool(), 0.0)
-    pooled = masked.sum(dim=1) / mask.sum(dim=1)[..., None]
+    valid = batch["attention_mask"].bool()
+    masked = hidden.masked_fill(~valid[..., None], 0.0)
+    if pooling == "avg":
+        pooled = masked.sum(dim=1) / valid.sum(dim=1)[..., None]
+    else:
+        positions = torch.arange(hidden.shape[1]).expand_as(valid)
+        if pooling == "cls":
+            indices = positions.masked_fill(~valid, hidden.shape[1]).min(dim=1).values
+        else:
+            indices = positions.masked_fill(~valid, -1).max(dim=1).values
+        pooled = hidden[torch.arange(hidden.shape[0]), indices]
     if normalize:
         pooled = torch.nn.functional.normalize(pooled, p=2, dim=1)
     return pooled.numpy()
@@ -116,6 +127,42 @@ class TestEmbeddingExport:
         assert [inp.name for inp in session.get_inputs()] == ["input_ids", "attention_mask"]
         assert [result.name for result in session.get_outputs()] == ["embeddings"]
         assert (out / "tokenizer").is_dir()
+
+    @pytest.mark.parametrize("pooling", ["avg", "cls", "last"])
+    @pytest.mark.parametrize("padding_side", ["left", "right"])
+    def test_pooling_matches_hf_for_each_padding_side(
+        self,
+        embedding_checkpoint,
+        tmp_path,
+        pooling: Literal["avg", "cls", "last"],
+        padding_side: Literal["left", "right"],
+    ):
+        tokenizer = cast(PreTrainedTokenizerBase, AutoTokenizer.from_pretrained(str(embedding_checkpoint)))
+        tokenizer.padding_side = padding_side
+        tokenizer.save_pretrained(embedding_checkpoint)
+
+        out = tmp_path / f"out-{pooling}-{padding_side}"
+        onnx_path = export_onnx(
+            model_path=embedding_checkpoint,
+            output_path=out,
+            tokenizer_path=str(embedding_checkpoint),
+            model_type=ModelType.EMBEDDING,
+            cfg=ExportConfig(pooling=pooling),
+        )
+
+        batch = _tokenize(embedding_checkpoint, ["hello", "an example sentence for tracing"])
+        expected = _hf_pooled_embeddings(embedding_checkpoint, batch, pooling=pooling)
+        actual = _session(onnx_path).run(
+            ["embeddings"],
+            {
+                "input_ids": batch["input_ids"].numpy(),
+                "attention_mask": batch["attention_mask"].numpy(),
+            },
+        )[0]
+
+        np.testing.assert_allclose(actual, expected, atol=1e-4)
+        saved_tokenizer = cast(PreTrainedTokenizerBase, AutoTokenizer.from_pretrained(out / "tokenizer"))
+        assert saved_tokenizer.padding_side == padding_side
 
     def test_dimensions_input_truncates_and_renormalizes(self, embedding_checkpoint, tmp_path):
         """`dimensions` truncates then L2-renormalizes."""

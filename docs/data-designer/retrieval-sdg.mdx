@@ -133,10 +133,12 @@ Convert-only prepare (`enable_mining: false`) writes `neg_doc: []` on every
 training row. Encoder fine-tuning still samples `train_n_passages - 1` negatives
 (default 4) and fails with `neg_doc must contain at least 1 document to sample N
 negatives`. Before `nemo customization automodel submit`, download
-`training.jsonl` and confirm a sample has non-empty `neg_doc`. If every row is
-empty, re-run `retrieval-prepare` with `"enable_mining": true` and a fileset-backed
-encoder `model`. To mine an existing convert-only fileset without regenerating
-frozen `eval_beir`, set `train_input_file` to that fileset instead of `sdg_input`.
+`training.jsonl` and require a non-empty `neg_doc` list on every checked row.
+A single empty list can be selected by the collator and fail the run. If any row
+is empty, re-run `retrieval-prepare` with `"enable_mining": true` and a
+fileset-backed encoder `model`. To mine an existing convert-only fileset without
+regenerating frozen `eval_beir`, set `train_input_file` to that fileset instead
+of `sdg_input`.
 
 ```bash
 nemo files list <artifacts-fileset> --workspace default

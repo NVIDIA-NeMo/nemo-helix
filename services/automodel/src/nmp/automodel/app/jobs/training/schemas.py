@@ -12,7 +12,7 @@ from nmp.automodel.app.constants import (
 )
 from nmp.automodel.entities.values import CheckpointFormat, FinetuningType, Precision, TrainingType
 from nmp.customization_common.training.reporting import ProgressReportingConfig
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import BaseModel, Field
 
 
 class OptimizerType(str, Enum):
@@ -131,9 +131,9 @@ class ExportConfig(BaseModel):
         description="Artifact at the fileset root. Use 'hf' when the NIM loads the PyTorch checkpoint.",
     )
     opset: int = Field(default=17, gt=0, description="ONNX opset version.")
-    precision: Literal["fp32", "fp16", "bf16"] = Field(
-        default="fp32",
-        description="Trace precision. fp16 has no CPU kernels for much of the graph.",
+    precision: Literal["fp32", "fp16"] = Field(
+        default="fp16",
+        description="ONNX graph dtype. Defaults to fp16 to match typical Hugging Face checkpoints.",
     )
     attn_implementation: str = Field(
         default="eager",
@@ -264,7 +264,6 @@ class TrainingStepConfig(BaseModel):
     training_timeout: Optional[int] = None
     retrieval: Optional[RetrievalConfig] = Field(
         default=None,
-        validation_alias=AliasChoices("retrieval", "embedding"),
         description="Retrieval dataset, collator, and export knobs for bi_encoder / cross_encoder recipes.",
     )
 

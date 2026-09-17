@@ -10,7 +10,7 @@ from typing import Literal, Self
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nmp.customization_common.schema import NamespacedModel
 from nmp.customization_common.training.reporting import ProgressReportingConfig
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import Field, model_validator
 
 __all__ = [
     "AutomodelJobInput",
@@ -68,8 +68,9 @@ class ExportSpec(AutomodelSchema):
         default="onnx", description="Artifact at the fileset root. Use 'hf' when the NIM loads PyTorch weights."
     )
     opset: int = Field(default=17, gt=0)
-    precision: Literal["fp32", "fp16", "bf16"] = Field(
-        default="fp32", description="Trace precision. fp16 has no CPU kernels for much of the graph."
+    precision: Literal["fp32", "fp16"] = Field(
+        default="fp16",
+        description="ONNX graph dtype. Defaults to fp16 to match typical Hugging Face checkpoints.",
     )
     attn_implementation: Literal["eager", "sdpa", "flash_attention_2"] = Field(
         default="eager", description="Attention backend for tracing. The exporter cannot trace SDPA/GQA."
@@ -128,7 +129,6 @@ class TrainingSpec(AutomodelSchema):
     offload_teacher: bool = False
     retrieval: RetrievalSpec | None = Field(
         default=None,
-        validation_alias=AliasChoices("retrieval", "embedding"),
         description="Retrieval dataset, collator, and export knobs. Used when recipe is bi_encoder or cross_encoder.",
     )
 

@@ -304,6 +304,8 @@ def test_retrieval_prepare_convert_emits_eval_layout(tmp_path: Path) -> None:
     assert (staged / "training.jsonl").exists()
     assert (staged / "additional" / "train.json").exists()
     assert not (staged / "train.json").exists()
+    assert output["train_file"] == str(staged / "additional" / "train.json")
+    assert Path(output["train_file"]).exists()
 
 
 def test_retrieval_prepare_train_input_copies_corpus_for_mining(tmp_path: Path) -> None:

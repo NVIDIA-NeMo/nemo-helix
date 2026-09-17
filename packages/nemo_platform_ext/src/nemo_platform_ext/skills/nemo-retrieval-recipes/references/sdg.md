@@ -7,6 +7,14 @@ Stage 0 (`retrieval-generate`) turns a document corpus into judged Q&A pairs.
 Stage 1 (`retrieval-prepare`) converts those pairs into `training.jsonl` plus a
 BEIR `eval_beir/` split, and optionally mines hard negatives on GPU.
 
+## Prerequisites
+
+- NeMo CLI access to a running platform and the target workspace.
+- A corpus fileset or pinned `hf://` dataset URI.
+- Inference Gateway providers for the chat and embedding model roles.
+- For hard-negative mining, a model entity with an attached encoder fileset and
+  a GPU-capable execution profile.
+
 ## Resolve the base URL first
 
 ```bash
@@ -119,7 +127,7 @@ Convert-only (`enable_mining: false`, the default) writes `training.jsonl` with
 `neg_doc must contain at least 1 document to sample N negatives`. Mine before
 any encoder fine-tune. To fill an existing convert-only split without
 regenerating frozen `eval_beir`, point `train_input_file` at that fileset and
-set `enable_mining: true`. `nemo files list` must still show `corpus/`
+set `enable_mining: true`. `nemo files list` must still show `additional/corpus/`
 (convert-only artifacts already do); missing it fails with
 `Metadata File for Corpus does not exist`.
 
@@ -145,14 +153,18 @@ with open("/tmp/training.jsonl") as f:
             break
 need = 4  # default train_n_passages=5
 print({"sampled": n, "neg_lens": dict(lens)})
-if lens.get(0, 0) == n:
-    raise SystemExit("empty neg_doc: enable_mining true before Automodel")
+if lens.get("bad", 0):
+    raise SystemExit("malformed neg_doc: expected a JSON list on every row")
+if lens.get(0, 0):
+    raise SystemExit("empty neg_doc: every row must have negatives before Automodel")
 if any(isinstance(k, int) and k < need for k in lens):
     print("warn: some rows have fewer than", need, "negatives")
 PY
 ```
 
-If every sampled row has `neg_doc: []`, stop and mine. Do not lower
+If any sampled row has malformed or empty `neg_doc`, stop and fix the dataset;
+for convert-only output, mine before training. A single empty list can be
+selected by the collator and fail the run. Do not lower
 `train_n_passages` to paper over an unmined convert-only fileset.
 
 ## Reuse an existing Stage 0 dump
@@ -187,3 +199,9 @@ and to `retrieve-eval` as `dataset`.
 nemo jobs get-status <prepare-job> -f json
 nemo files list <artifacts-fileset> --workspace default
 ```
+
+## Next Steps
+
+- Choose `embed.md` for a bi-encoder or `rerank.md` for a cross-encoder.
+- Pass the unchanged Stage 1 `artifacts` fileset to Automodel training and
+  `retrieve-eval` so base and tuned models use the same frozen `eval_beir`.

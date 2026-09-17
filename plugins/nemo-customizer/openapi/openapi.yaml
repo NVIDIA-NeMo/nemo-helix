@@ -1242,10 +1242,10 @@ components:
           enum:
           - fp32
           - fp16
-          - bf16
           title: Precision
-          description: Trace precision. fp16 has no CPU kernels for much of the graph.
-          default: fp32
+          description: ONNX graph dtype. Defaults to fp16 to match typical Hugging
+            Face checkpoints.
+          default: fp16
         attn_implementation:
           type: string
           enum:

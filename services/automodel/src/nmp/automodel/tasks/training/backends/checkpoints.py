@@ -406,7 +406,6 @@ _EXPORT_SAMPLES = {
 _TORCH_DTYPES = {
     "fp32": "float32",
     "fp16": "float16",
-    "bf16": "bfloat16",
 }
 
 
@@ -477,14 +476,20 @@ def _build_export_module(inner, model_type: ModelType, cfg: ExportConfig):
             self.normalize = normalize
 
         def _pool(self, hidden, attention_mask):
-            masked = hidden.masked_fill(~attention_mask[..., None].bool(), 0.0)
+            valid_tokens = attention_mask.bool()
+            masked = hidden.masked_fill(~valid_tokens[..., None], 0.0)
             if self.pooling == "avg":
                 return masked.sum(dim=1) / (attention_mask.sum(dim=1)[..., None] + 1e-9)
+
+            # Define cls as the first valid token and last as the final valid
+            # token. Position reductions work for either tokenizer padding side
+            # and avoid data-dependent nonzero indices in the ONNX graph.
+            positions = torch.arange(hidden.shape[1], device=hidden.device).expand_as(attention_mask)
             if self.pooling == "cls":
-                return masked[:, 0]
-            # Last non-padded token (right-padded batches).
-            last_index = attention_mask.sum(dim=1).long() - 1
-            return masked[torch.arange(masked.shape[0], device=masked.device), last_index]
+                token_index = valid_tokens.to(torch.int64).argmax(dim=1)
+            else:
+                token_index = positions.masked_fill(~valid_tokens, -1).argmax(dim=1)
+            return hidden[torch.arange(hidden.shape[0], device=hidden.device), token_index]
 
         def forward(self, input_ids, attention_mask, dimensions=None):
             outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
@@ -520,6 +525,7 @@ def export_onnx(
     output_path.mkdir(parents=True, exist_ok=True)
 
     torch_dtype = getattr(torch, _TORCH_DTYPES[cfg.precision])
+
     loader = AutoModelForSequenceClassification if is_cross_encoder else AutoModel
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
     inner = loader.from_pretrained(
@@ -530,7 +536,7 @@ def export_onnx(
     ).eval()
 
     export_model = _build_export_module(inner, model_type, cfg)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda")
     export_model = export_model.to(device=device, dtype=torch_dtype).eval()
 
     tokenized = tokenizer(_EXPORT_SAMPLES[model_type], return_tensors="pt", padding=True, truncation=True)
@@ -582,16 +588,14 @@ def export_onnx(
     tokenizer_dir.mkdir(parents=True, exist_ok=True)
     tokenizer.save_pretrained(tokenizer_dir)
 
-    # ORT verification uses CPUExecutionProvider; compare against a CPU forward
-    # so GPU/CPU kernel drift on 1B encoders does not fail a correct graph.
-    cpu_args = [tensor.detach().cpu() for tensor in args]
     with torch.no_grad():
-        reference = export_model.to("cpu").eval()(*cpu_args)
+        reference = export_model.eval()(*args)
+    feed_args = [tensor.detach().cpu() for tensor in args]
     verify_onnx_matches_reference(
         onnx_path=onnx_path,
-        feed={name: tensor.numpy() for name, tensor in zip(input_names, cpu_args)},
-        reference=reference.float().numpy(),
-        atol=1e-3,
+        feed={name: tensor.numpy() for name, tensor in zip(input_names, feed_args)},
+        reference=reference.float().cpu().numpy(),
+        atol=1e-2 if cfg.precision == "fp16" else 1e-3,
     )
 
     logger.info("ONNX %s exported to %s", model_type.value, onnx_path)
@@ -603,12 +607,16 @@ def verify_onnx_matches_reference(
     feed: dict,
     reference,
     atol: float,
+    providers: list[str] | None = None,
 ) -> float:
     """Return max abs diff. Raise ``ValueError`` on shape mismatch or diff > *atol*."""
     import numpy as np
     import onnxruntime
 
-    session = onnxruntime.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
+    session = onnxruntime.InferenceSession(
+        str(onnx_path),
+        providers=providers or ["CUDAExecutionProvider"],
+    )
     expected_inputs = {inp.name for inp in session.get_inputs()}
     missing = expected_inputs - feed.keys()
     if missing:

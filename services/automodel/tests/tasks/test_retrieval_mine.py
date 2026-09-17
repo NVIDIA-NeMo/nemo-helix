@@ -66,6 +66,8 @@ def test_run_mine_launches_torchrun_then_unrolls(tmp_path: Path) -> None:
     assert (output_dir / "additional" / "train_mined.automodel.json").exists()
     assert (output_dir / "additional" / "mining_config.yaml").exists()
     assert not (output_dir / "train.json").exists()
+    assert result["train_file"] == str(output_dir / "additional" / "train_mined.automodel_unrolled.json")
+    assert Path(result["train_file"]).exists()
     ctx.results.save.assert_called_once()
 
 
