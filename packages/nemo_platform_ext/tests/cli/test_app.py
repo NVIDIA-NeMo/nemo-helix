@@ -9,7 +9,7 @@ import click
 import pytest
 import typer
 from click.testing import CliRunner as ClickCliRunner
-from nemo_platform_ext.cli.app import app
+from nemo_platform_ext.cli.app import app, cli
 from nemo_platform_ext.cli.commands.manifest_registry import TOP_LEVEL_ENTRIES
 from nemo_platform_ext.cli.core.lazy_load import (
     ManifestBackedNmpGroup,
@@ -677,3 +677,16 @@ def test_token_refresh_runs_when_quickstart_auth_enabled():
         runner.invoke(app, ["workspaces", "--help"])
 
     mock_ensure.assert_called_once()
+
+
+def test_cli_entry_point_discards_the_command_return_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The console script runs ``sys.exit(cli())``, so ``cli()`` must return None.
+
+    Command callbacks may return a value: a job ``submit`` returns the created
+    job so a wrapper can follow it, and ``NmpErrorHandlingMixin.main`` passes
+    that value back out of ``app()``. Returning it from ``cli()`` would make
+    every such command exit 1 and print the object.
+    """
+    monkeypatch.setattr("nemo_platform_ext.cli.app.app", lambda: SimpleNamespace(name="job-1"))
+
+    assert cli() is None

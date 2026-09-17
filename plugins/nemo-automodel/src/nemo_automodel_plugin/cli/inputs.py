@@ -32,6 +32,10 @@ Submit prints the created job as JSON on stdout. The 'name' field is the job
 id. Track the job with 'nemo jobs watch <job id>', or check its status with
 'nemo jobs get-status <job id>'.
 
+Pass --wait to stay with the job until it finishes, or --watch to do the same
+and print its logs as they arrive. Both report the final status, and exit
+non-zero when the job does not complete.
+
 Run 'nemo customization automodel explain' to print the job JSON schema."""
 
 
@@ -51,6 +55,7 @@ def apply_automodel_job_cli_overrides(group: typer.Typer) -> None:
     """Flat ``automodel`` CLI: ``submit JOB.json``."""
     apply_job_cli_overrides(
         group,
+        backend="automodel",
         load_job_json=load_job_json,
         job_json_help=_JOB_JSON_HELP,
         submit_help=_SUBMIT_HELP,
