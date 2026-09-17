@@ -5,6 +5,7 @@ from abc import ABC
 from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated, Any, Dict, List, Literal, Optional, Self, Union
+from urllib.parse import urlparse
 
 from jinja2 import Environment
 from jinja2 import nodes as jinja_nodes
@@ -373,6 +374,20 @@ def _validate_auth_header_format(v: str | None) -> str | None:
     return v
 
 
+def _validate_host_url(v: str) -> str:
+    """Validate that a provider ``host_url`` includes an ``http://`` or ``https://`` scheme.
+
+    A scheme-less URL like ``"inference-api.nvidia.com"`` is accepted as an entity
+    but fails downstream at model discovery with an opaque 502 backend networking
+    error (the discovery HTTP client cannot build a request from a bare host). We
+    reject it here at the API boundary so the user gets a clear, actionable 4xx
+    naming the missing scheme instead of a late, confusing failure.
+    """
+    if urlparse(v).scheme not in ("http", "https"):
+        raise ValueError(f"Model provider host_url must include a scheme (http:// or https://); got '{v}'")
+    return v
+
+
 class ModelProviderStatus(str, Enum):
     """Status enum for ModelProvider objects."""
 
@@ -478,6 +493,11 @@ class ModelProvider(ModelEntityBaseModel):
     def validate_auth_header_format(cls, v: str | None) -> str | None:
         return _validate_auth_header_format(v)
 
+    @field_validator("host_url")
+    @classmethod
+    def validate_host_url(cls, v: str) -> str:
+        return _validate_host_url(v)
+
 
 class ModelProviderSort(StrEnum):
     """Sort fields for ModelProvider queries."""
@@ -565,6 +585,11 @@ class CreateModelProviderRequest(BaseModel):
     def validate_auth_header_format(cls, v: str | None) -> str | None:
         return _validate_auth_header_format(v)
 
+    @field_validator("host_url")
+    @classmethod
+    def validate_host_url(cls, v: str) -> str:
+        return _validate_host_url(v)
+
 
 class UpsertModelProviderRequest(BaseModel):
     """Request model for upserting a ModelProvider (PUT /apis/models/v2/workspaces/{workspace}/providers/{name}).
@@ -634,6 +659,11 @@ class UpsertModelProviderRequest(BaseModel):
     @classmethod
     def validate_auth_header_format(cls, v: str | None) -> str | None:
         return _validate_auth_header_format(v)
+
+    @field_validator("host_url")
+    @classmethod
+    def validate_host_url(cls, v: str) -> str:
+        return _validate_host_url(v)
 
 
 class UpdateModelProviderStatusRequest(BaseModel):
