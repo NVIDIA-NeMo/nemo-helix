@@ -112,5 +112,15 @@ class ModelSpec(TypedDict, total=False):
     sliding_window_config: SlidingWindowConfig
     """Sliding window attention configuration."""
 
+    supports_reasoning_toggle: bool
+    """
+    Whether a caller can turn reasoning off for this model through
+    chat_template_kwargs, determined by rendering the served chat template with the
+    kwarg on and off and comparing the result.
+
+    None when undetermined (checkpoint not analyzed, or the template could not be
+    rendered), which is not the same as False.
+    """
+
     tool_call_config: ToolCallConfig
     """Configuration for tool calling support in NIM deployments."""
