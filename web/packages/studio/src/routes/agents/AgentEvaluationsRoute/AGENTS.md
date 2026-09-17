@@ -298,10 +298,15 @@ per-task bundle (trials, evidence, traces) lives in the fileset referenced by `b
   names a task-row field, not a chat field — it happens to be rendered inside the `messages`
   wrapper the agent's endpoint expects. `render_template` recurses through dicts and lists, so
   nesting it is fine.
-- **Every eval request opens a new Fabric session.** Fabric starts a fresh runtime per
-  chat-completions call that carries no `X-Nemo-Session-Id`, and the evaluator sends none.
-  Sessions are reclaimed only by the 30-minute idle sweep, so a long task list leaves that many
-  runtimes alive and pays a cold start per task.
+- **Each eval task runs in its own Platform session.** The job opens one session per task for a
+  deployed-agent target and sends its id as `X-Nemo-Session-Id`
+  (`nemo_evaluator/jobs/agent_sessions.py`), so Fabric keys the runtime and its exported trace on
+  an id Platform named, and the sessions are closed when the run ends rather than waiting on the
+  30-minute idle sweep. A task whose session could not be opened still runs, unsessioned.
+- **Scores still publish against an adapter-minted trajectory.** Publication mints its own session
+  id (`run_id:trial_id`) and republishes, so the Fabric-exported trace and the scored one remain
+  two views of the same task. Joining them needs the evaluation identity that Intake's rollup keys
+  on (`nemo.evaluation.name`) to reach the live trace.
 
 ---
 

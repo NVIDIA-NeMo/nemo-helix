@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -32,6 +33,7 @@ from nemo_evaluator.jobs.agent_compiler import (
     _compile_agent_eval_cpu_job,
     compile_agent_eval_job,
 )
+from nemo_evaluator.jobs.agent_sessions import AgentSessionBroker, broker_for_target
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
@@ -486,7 +488,30 @@ class _AgentEvalJobBase(NemoJob):
         return None
 
     @staticmethod
-    def _build_evaluator(client: NemoClient | AsyncNemoClient, target: Target | None) -> AgentEvaluator:
+    def _open_sessions(
+        client: NemoClient | AsyncNemoClient,
+        target: Target | None,
+        tasks: Sequence[AgentEvalTask],
+    ) -> AgentSessionBroker | None:
+        """Open one Platform session per task when the target is a deployed Platform agent.
+
+        Only ``AgentTarget`` qualifies: a runner drives its own harness in-process and never
+        crosses the agents gateway, and a model target has no session concept at all.
+        """
+        if not isinstance(target, AgentTarget):
+            return None
+        broker = broker_for_target(client, url=str(target.agent.url))
+        if broker is None:
+            return None
+        broker.open([task.id for task in tasks])
+        return broker
+
+    @staticmethod
+    def _build_evaluator(
+        client: NemoClient | AsyncNemoClient,
+        target: Target | None,
+        sessions: AgentSessionBroker | None = None,
+    ) -> AgentEvaluator:
         """Construct the evaluator, forwarding the job's platform identity to online inference.
 
         Online generation against a *platform-routed* Model/Agent target must act as the job's
@@ -516,6 +541,11 @@ class _AgentEvalJobBase(NemoJob):
                 for key, value in headers.items()
                 if key in _FORWARDED_IDENTITY_HEADERS and isinstance(value, str)
             }
+        if sessions is not None:
+            return AgentEvaluator(
+                agent_inference_fn_factory=sessions.inference_fn_factory(),
+                default_headers=identity_headers or None,
+            )
         return AgentEvaluator(default_headers=identity_headers or None)
 
     @staticmethod
@@ -641,6 +671,7 @@ class _AgentEvalJobBase(NemoJob):
         spec = AgentEvalSpec.model_validate(config)
         tasks = [_to_runtime_task(task) for task in spec.tasks]
         target, prompt_template, params = self._resolve_target(spec.target, ctx)
+        sessions = self._open_sessions(platform_client, spec.target, tasks)
         run_config = AgentEvalRunConfig(
             params=params,
             prompt_template=prompt_template,
@@ -648,8 +679,14 @@ class _AgentEvalJobBase(NemoJob):
             labels=spec.labels,
             fail_fast=spec.fail_fast,
         )
-        evaluator = self._build_evaluator(platform_client, spec.target)
-        result = evaluator.run_sync(tasks=tasks, trials=spec.trials, target=target, config=run_config)
+        evaluator = self._build_evaluator(platform_client, spec.target, sessions)
+        try:
+            result = evaluator.run_sync(tasks=tasks, trials=spec.trials, target=target, config=run_config)
+        finally:
+            # Closing frees each task's Fabric runtime immediately; the trajectories it already
+            # exported are Intake's, and outlive the session.
+            if sessions is not None:
+                sessions.close()
 
         files = self._write_result_files(result, ctx.storage.persistent)
         artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir)
