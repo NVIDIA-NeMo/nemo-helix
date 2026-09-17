@@ -43,7 +43,7 @@ export const ProgressReportingFields = ({
           slotInfo: 'Floor on how often progress is reported, to keep long runs from flooding.',
         }}
         {...specSliderProps(defaults, `${defaultsPrefix}_min_report_interval_seconds`)}
-        min={1}
+        min={0}
         max={600}
         step={1}
         disabled={disabled}
