@@ -107,7 +107,7 @@ export const ENTITY_MODE_OPTIONS: { value: EntityMode; children: string }[] = [
 
 /** The count comes from the entity-labels endpoint, so it is unknown until that call lands. */
 export const defaultEntitiesLabel = (count: number): string =>
-  count ? `all ${count} default entities` : 'all default entities';
+  count ? `all ${count} available entities` : 'all available entities';
 
 export const ENTITY_MODE_DESCRIPTIONS: Record<EntityMode, (defaults: string) => string> = {
   [ENTITY_MODE_AUTO]: (defaults) =>

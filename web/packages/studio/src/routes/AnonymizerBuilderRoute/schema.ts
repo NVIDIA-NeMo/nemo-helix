@@ -105,7 +105,7 @@ export const anonymizerFormSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['entityLabels'],
-        message: 'Select at least one entity label, or include the default entities',
+        message: 'Select at least one entity label, or include the available entities',
       });
     }
   });

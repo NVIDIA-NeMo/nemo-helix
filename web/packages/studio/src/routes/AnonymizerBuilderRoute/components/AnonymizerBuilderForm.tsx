@@ -40,7 +40,7 @@ import {
   outputHeadingForStrategy,
   tabForValidationErrors,
 } from '@studio/routes/AnonymizerBuilderRoute/utils';
-import { getWorkspaceAnonymizerRoute, getWorkspaceJobDetailRoute } from '@studio/routes/utils';
+import { getAnonymizerJobRoute, getWorkspaceAnonymizerRoute } from '@studio/routes/utils';
 import { useCallback, useState, type FC } from 'react';
 import { useFormContext, useWatch, type FieldErrors } from 'react-hook-form';
 import { useAuth } from 'react-oidc-context';
@@ -66,7 +66,7 @@ export const AnonymizerBuilderForm: FC = () => {
       onSuccess: (job: RunJob) =>
         navigate(
           job.name
-            ? getWorkspaceJobDetailRoute(workspace, job.name)
+            ? getAnonymizerJobRoute(workspace, job.name)
             : getWorkspaceAnonymizerRoute(workspace)
         ),
       onError: (error) => {
