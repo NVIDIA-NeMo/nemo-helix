@@ -159,18 +159,28 @@ def _raises_value_error_after_best_checkpoint_lookup(source: str) -> bool:
             return True
         return False
 
+    def raises_value_error(stmt: ast.stmt) -> bool:
+        """Whether running *stmt* raises ValueError.
+
+        A ``raise`` inside a nested function, lambda, or class body does not run
+        when the branch runs, so those scopes are not descended into.
+        """
+        if (
+            isinstance(stmt, ast.Raise)
+            and isinstance(stmt.exc, ast.Call)
+            and isinstance(stmt.exc.func, ast.Name)
+            and stmt.exc.func.id == "ValueError"
+        ):
+            return True
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            return False
+        return any(raises_value_error(child) for child in ast.iter_child_nodes(stmt) if isinstance(child, ast.stmt))
+
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.If) or not tests_missing_best_checkpoint(node.test):
             continue
-        for stmt in node.body:
-            for inner in ast.walk(stmt):
-                if (
-                    isinstance(inner, ast.Raise)
-                    and isinstance(inner.exc, ast.Call)
-                    and isinstance(inner.exc.func, ast.Name)
-                    and inner.exc.func.id == "ValueError"
-                ):
-                    return True
+        if any(raises_value_error(stmt) for stmt in node.body):
+            return True
     return False
 
 
@@ -199,6 +209,20 @@ def test_postcondition_detector_discriminates() -> None:
     assert (
         _raises_value_error_after_best_checkpoint_lookup(
             "if checkpointer.get_best_checkpoint_path() is None:\n    raise ValueError('x')\n"
+        )
+        is True
+    )
+    # A raise the branch only defines, never executes.
+    assert (
+        _raises_value_error_after_best_checkpoint_lookup(
+            "if checkpointer.get_best_checkpoint_path() is None:\n    def _later():\n        raise ValueError('x')\n"
+        )
+        is False
+    )
+    # A raise nested in control flow the branch does execute.
+    assert (
+        _raises_value_error_after_best_checkpoint_lookup(
+            "if checkpointer.get_best_checkpoint_path() is None:\n    if strict:\n        raise ValueError('x')\n"
         )
         is True
     )

@@ -71,6 +71,17 @@ def _session(onnx_path):
     return onnxruntime.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
 
 
+def _parity_config(**overrides) -> ExportConfig:
+    """Export config for HF-parity checks.
+
+    The references below run in float32 on CPU, so these tests pin the graph to
+    fp32 rather than taking the fp16 job default; fp16 only agrees to the 1e-2
+    that ``export_onnx`` itself applies, which is too loose to catch a pooling
+    or layout regression.
+    """
+    return ExportConfig(precision="fp32", **overrides)
+
+
 def _tokenize(checkpoint, texts):
     tokenizer = AutoTokenizer.from_pretrained(str(checkpoint))
     assert tokenizer is not None
@@ -107,7 +118,7 @@ class TestEmbeddingExport:
             output_path=out,
             tokenizer_path=str(embedding_checkpoint),
             model_type=ModelType.EMBEDDING,
-            cfg=ExportConfig(),
+            cfg=_parity_config(),
         )
 
         # Different batch/sequence dimensions from the trace sample exercise dynamic axes.
@@ -147,7 +158,7 @@ class TestEmbeddingExport:
             output_path=out,
             tokenizer_path=str(embedding_checkpoint),
             model_type=ModelType.EMBEDDING,
-            cfg=ExportConfig(pooling=pooling),
+            cfg=_parity_config(pooling=pooling),
         )
 
         batch = _tokenize(embedding_checkpoint, ["hello", "an example sentence for tracing"])
@@ -171,7 +182,7 @@ class TestEmbeddingExport:
             output_path=tmp_path / "out-dims",
             tokenizer_path=str(embedding_checkpoint),
             model_type=ModelType.EMBEDDING,
-            cfg=ExportConfig(dimensions=True),
+            cfg=_parity_config(dimensions=True),
         )
 
         session = _session(onnx_path)
@@ -205,7 +216,7 @@ class TestCrossEncoderExport:
             output_path=out,
             tokenizer_path=str(cross_encoder_checkpoint),
             model_type=ModelType.CROSS_ENCODER,
-            cfg=ExportConfig(),
+            cfg=_parity_config(),
         )
 
         pairs = [
