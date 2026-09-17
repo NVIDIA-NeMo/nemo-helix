@@ -1478,251 +1478,6 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
-    ApplyMitigationRequest:
-      properties:
-        workflow_yaml:
-          type: string
-          title: Workflow Yaml
-          description: Hardened NAT workflow YAML (the mitigations 'after' document).
-      type: object
-      required:
-      - workflow_yaml
-      title: ApplyMitigationRequest
-      description: "Body for ``POST /v2/workspaces/{workspace}/runs/{name}/apply-mitigation``\
-        \ \u2014 adopt the hardened workflow.\n\nThe client passes the hardened workflow\
-        \ YAML from the run's mitigations artifact. The endpoint reverses\nthe Inference-Gateway\
-        \ injection and writes it onto the run's target agent config (no redeploy)."
-    ApplyMitigationResponse:
-      properties:
-        applied:
-          type: boolean
-          title: Applied
-          description: True when the agent config was updated.
-        agent:
-          type: string
-          title: Agent
-          description: Name of the agent whose config was updated.
-        detail:
-          type: string
-          title: Detail
-          description: Human-readable note (e.g. a reminder to redeploy).
-      type: object
-      required:
-      - applied
-      - agent
-      - detail
-      title: ApplyMitigationResponse
-      description: Result of applying a hardened workflow to an agent.
-    ComposeDefenseRequest:
-      properties:
-        mitigations:
-          additionalProperties: true
-          type: object
-          title: Mitigations
-          description: The run's mitigations artifact (its 'defenses'/workflow/policy).
-        selected_defense_ids:
-          items:
-            type: string
-          type: array
-          title: Selected Defense Ids
-          description: Ids of the defenses to keep (guardrail ids and/or 'openshell_policy').
-      type: object
-      required:
-      - mitigations
-      title: ComposeDefenseRequest
-      description: "Body for ``POST /v2/workspaces/{workspace}/runs/{name}/compose-defense``\
-        \ \u2014 build a chosen defense subset.\n\nThe client passes the run's ``mitigations``\
-        \ artifact (which it already fetched for the recommendations\nview) plus the\
-        \ ids of the defenses to keep. The endpoint composes the workflow with only\
-        \ the selected\nguardrails and picks the hardened-vs-baseline policy, for\
-        \ live preview and to feed a sanity-check run."
-    ComposeDefenseResponse:
-      properties:
-        workflow_yaml:
-          title: Workflow Yaml
-          description: Workflow with only the selected guardrails, or null.
-          type: string
-        policy_yaml:
-          title: Policy Yaml
-          description: Hardened policy if selected, else the baseline, or null.
-          type: string
-      type: object
-      title: ComposeDefenseResponse
-      description: The composed workflow + policy for the selected defenses.
-    DatetimeFilter:
-      additionalProperties: false
-      properties:
-        $gte:
-          description: Filter for results greater than or equal to this datetime.
-          title: $Gte
-          format: date-time
-          type: string
-        $lte:
-          description: Filter for results less than or equal to this datetime.
-          title: $Lte
-          format: date-time
-          type: string
-      title: DatetimeFilter
-      type: object
-    EventIn:
-      properties:
-        event:
-          type: string
-          title: Event
-        payload:
-          additionalProperties: true
-          type: object
-          title: Payload
-          default: {}
-      type: object
-      required:
-      - event
-      title: EventIn
-      description: "Body for ``POST /runs/{name}/events`` \u2014 one event emitted\
-        \ by the run's EventBus."
-    EventsResponse:
-      properties:
-        events:
-          items:
-            additionalProperties: true
-            type: object
-          type: array
-          title: Events
-      type: object
-      required:
-      - events
-      title: EventsResponse
-      description: "Response for GET /runs/{name}/events \u2014 events after the given\
-        \ sequence id."
-    FileStorageType:
-      type: string
-      enum:
-      - fileset
-      title: FileStorageType
-    HTTPValidationError:
-      properties:
-        detail:
-          items:
-            $ref: '#/components/schemas/ValidationError'
-          type: array
-          title: Detail
-      type: object
-      title: HTTPValidationError
-    InspectAgentRequest:
-      properties:
-        agent:
-          type: string
-          title: Agent
-          description: Deployed agent reference (``workspace/name`` or ``name``).
-      type: object
-      required:
-      - agent
-      title: InspectAgentRequest
-      description: "Body for ``POST /v2/workspaces/{workspace}/manifests/inspect-agent``\
-        \ \u2014 a deployed agent ref."
-    InspectAgentResponse:
-      properties:
-        agent:
-          type: string
-          title: Agent
-          description: Resolved ``workspace/name`` of the agent.
-        port:
-          type: integer
-          title: Port
-          description: Victim port derived from the running deployment (else the default).
-        secrets:
-          items:
-            type: string
-          type: array
-          title: Secrets
-          description: Secret names derived from the agent config.
-        warnings:
-          items:
-            type: string
-          type: array
-          title: Warnings
-          description: Non-fatal notes (e.g. no running deployment).
-      type: object
-      required:
-      - agent
-      - port
-      title: InspectAgentResponse
-      description: Auto-derived defaults for the deployed-agent create form (port
-        + secret names, editable).
-    InspectProjectRequest:
-      properties:
-        project_fileset:
-          type: string
-          title: Project Fileset
-          description: Fileset ref of the uploaded NAT project bundle to inspect.
-      type: object
-      required:
-      - project_fileset
-      title: InspectProjectRequest
-      description: "Body for ``POST /v2/workspaces/{workspace}/manifests/inspect``\
-        \ \u2014 detect an uploaded project."
-    InspectProjectResponse:
-      properties:
-        project_dir:
-          type: string
-          title: Project Dir
-          description: Detected installable project root (relative to the bundle).
-          default: ''
-        workflows:
-          items:
-            type: string
-          type: array
-          title: Workflows
-          description: Discovered workflow paths (project-relative).
-        dockerfiles:
-          items:
-            type: string
-          type: array
-          title: Dockerfiles
-          description: Discovered Dockerfile paths (project-relative).
-        suggested_launch_mode:
-          type: string
-          title: Suggested Launch Mode
-          description: '''workflow'' or ''byo''.'
-          default: workflow
-        default_agent_name:
-          type: string
-          title: Default Agent Name
-          description: Suggested agent name.
-          default: ''
-        default_port:
-          type: integer
-          title: Default Port
-          description: Suggested victim port.
-          default: 8000
-        secrets_file:
-          type: string
-          title: Secrets File
-          description: Detected dotenv path (project-relative), or empty.
-          default: ''
-        secret_names:
-          items:
-            type: string
-          type: array
-          title: Secret Names
-          description: Secret names found in the dotenv file.
-        egress:
-          items:
-            type: string
-          type: array
-          title: Egress
-          description: External hosts the agent reaches (allow-list).
-        backend_ports:
-          items:
-            type: integer
-          type: array
-          title: Backend Ports
-          description: Local host-backend ports detected in the workflow (localhost:PORT
-            the tools call).
-      type: object
-      title: InspectProjectResponse
-      description: Detection facts + defaults for the upload wizard (the parsed ``agent-hardener
-        inspect --json`` output).
     AgentHardenerManifest:
       properties:
         name:
@@ -1789,8 +1544,8 @@ components:
           type: array
           title: Binaries
           description: In-container glob patterns scoping which processes may egress
-            ('byo' launch mode); agent-hardener requires them because a BYO image's layout
-            cannot be inferred.
+            ('byo' launch mode); agent-hardener requires them because a BYO image's
+            layout cannot be inferred.
         manifest_yaml:
           type: string
           title: Manifest Yaml
@@ -2097,6 +1852,251 @@ components:
       - db_version
       title: AgentHardenerRun
       description: A record of one Agent Hardener war-game run.
+    ApplyMitigationRequest:
+      properties:
+        workflow_yaml:
+          type: string
+          title: Workflow Yaml
+          description: Hardened NAT workflow YAML (the mitigations 'after' document).
+      type: object
+      required:
+      - workflow_yaml
+      title: ApplyMitigationRequest
+      description: "Body for ``POST /v2/workspaces/{workspace}/runs/{name}/apply-mitigation``\
+        \ \u2014 adopt the hardened workflow.\n\nThe client passes the hardened workflow\
+        \ YAML from the run's mitigations artifact. The endpoint reverses\nthe Inference-Gateway\
+        \ injection and writes it onto the run's target agent config (no redeploy)."
+    ApplyMitigationResponse:
+      properties:
+        applied:
+          type: boolean
+          title: Applied
+          description: True when the agent config was updated.
+        agent:
+          type: string
+          title: Agent
+          description: Name of the agent whose config was updated.
+        detail:
+          type: string
+          title: Detail
+          description: Human-readable note (e.g. a reminder to redeploy).
+      type: object
+      required:
+      - applied
+      - agent
+      - detail
+      title: ApplyMitigationResponse
+      description: Result of applying a hardened workflow to an agent.
+    ComposeDefenseRequest:
+      properties:
+        mitigations:
+          additionalProperties: true
+          type: object
+          title: Mitigations
+          description: The run's mitigations artifact (its 'defenses'/workflow/policy).
+        selected_defense_ids:
+          items:
+            type: string
+          type: array
+          title: Selected Defense Ids
+          description: Ids of the defenses to keep (guardrail ids and/or 'openshell_policy').
+      type: object
+      required:
+      - mitigations
+      title: ComposeDefenseRequest
+      description: "Body for ``POST /v2/workspaces/{workspace}/runs/{name}/compose-defense``\
+        \ \u2014 build a chosen defense subset.\n\nThe client passes the run's ``mitigations``\
+        \ artifact (which it already fetched for the recommendations\nview) plus the\
+        \ ids of the defenses to keep. The endpoint composes the workflow with only\
+        \ the selected\nguardrails and picks the hardened-vs-baseline policy, for\
+        \ live preview and to feed a sanity-check run."
+    ComposeDefenseResponse:
+      properties:
+        workflow_yaml:
+          title: Workflow Yaml
+          description: Workflow with only the selected guardrails, or null.
+          type: string
+        policy_yaml:
+          title: Policy Yaml
+          description: Hardened policy if selected, else the baseline, or null.
+          type: string
+      type: object
+      title: ComposeDefenseResponse
+      description: The composed workflow + policy for the selected defenses.
+    DatetimeFilter:
+      additionalProperties: false
+      properties:
+        $gte:
+          description: Filter for results greater than or equal to this datetime.
+          title: $Gte
+          format: date-time
+          type: string
+        $lte:
+          description: Filter for results less than or equal to this datetime.
+          title: $Lte
+          format: date-time
+          type: string
+      title: DatetimeFilter
+      type: object
+    EventIn:
+      properties:
+        event:
+          type: string
+          title: Event
+        payload:
+          additionalProperties: true
+          type: object
+          title: Payload
+          default: {}
+      type: object
+      required:
+      - event
+      title: EventIn
+      description: "Body for ``POST /runs/{name}/events`` \u2014 one event emitted\
+        \ by the run's EventBus."
+    EventsResponse:
+      properties:
+        events:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Events
+      type: object
+      required:
+      - events
+      title: EventsResponse
+      description: "Response for GET /runs/{name}/events \u2014 events after the given\
+        \ sequence id."
+    FileStorageType:
+      type: string
+      enum:
+      - fileset
+      title: FileStorageType
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    InspectAgentRequest:
+      properties:
+        agent:
+          type: string
+          title: Agent
+          description: Deployed agent reference (``workspace/name`` or ``name``).
+      type: object
+      required:
+      - agent
+      title: InspectAgentRequest
+      description: "Body for ``POST /v2/workspaces/{workspace}/manifests/inspect-agent``\
+        \ \u2014 a deployed agent ref."
+    InspectAgentResponse:
+      properties:
+        agent:
+          type: string
+          title: Agent
+          description: Resolved ``workspace/name`` of the agent.
+        port:
+          type: integer
+          title: Port
+          description: Victim port derived from the running deployment (else the default).
+        secrets:
+          items:
+            type: string
+          type: array
+          title: Secrets
+          description: Secret names derived from the agent config.
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+          description: Non-fatal notes (e.g. no running deployment).
+      type: object
+      required:
+      - agent
+      - port
+      title: InspectAgentResponse
+      description: Auto-derived defaults for the deployed-agent create form (port
+        + secret names, editable).
+    InspectProjectRequest:
+      properties:
+        project_fileset:
+          type: string
+          title: Project Fileset
+          description: Fileset ref of the uploaded NAT project bundle to inspect.
+      type: object
+      required:
+      - project_fileset
+      title: InspectProjectRequest
+      description: "Body for ``POST /v2/workspaces/{workspace}/manifests/inspect``\
+        \ \u2014 detect an uploaded project."
+    InspectProjectResponse:
+      properties:
+        project_dir:
+          type: string
+          title: Project Dir
+          description: Detected installable project root (relative to the bundle).
+          default: ''
+        workflows:
+          items:
+            type: string
+          type: array
+          title: Workflows
+          description: Discovered workflow paths (project-relative).
+        dockerfiles:
+          items:
+            type: string
+          type: array
+          title: Dockerfiles
+          description: Discovered Dockerfile paths (project-relative).
+        suggested_launch_mode:
+          type: string
+          title: Suggested Launch Mode
+          description: '''workflow'' or ''byo''.'
+          default: workflow
+        default_agent_name:
+          type: string
+          title: Default Agent Name
+          description: Suggested agent name.
+          default: ''
+        default_port:
+          type: integer
+          title: Default Port
+          description: Suggested victim port.
+          default: 8000
+        secrets_file:
+          type: string
+          title: Secrets File
+          description: Detected dotenv path (project-relative), or empty.
+          default: ''
+        secret_names:
+          items:
+            type: string
+          type: array
+          title: Secret Names
+          description: Secret names found in the dotenv file.
+        egress:
+          items:
+            type: string
+          type: array
+          title: Egress
+          description: External hosts the agent reaches (allow-list).
+        backend_ports:
+          items:
+            type: integer
+          type: array
+          title: Backend Ports
+          description: Local host-backend ports detected in the workflow (localhost:PORT
+            the tools call).
+      type: object
+      title: InspectProjectResponse
+      description: Detection facts + defaults for the upload wizard (the parsed ``agent-hardener
+        inspect --json`` output).
     ManifestFilter:
       additionalProperties: false
       description: Query filter for ``GET /v2/workspaces/{workspace}/manifests``.
@@ -2135,10 +2135,10 @@ components:
           type: string
         manifest_yaml:
           title: Manifest Yaml
-          description: Pre-built agent-hardener manifest (project source). The CLI runs
-            agent-hardener's own interactive `init` at the operator's terminal and sends
-            the result; omit it and the server builds one with `init --yes`, which
-            is what Studio does since it has no TTY.
+          description: Pre-built agent-hardener manifest (project source). The CLI
+            runs agent-hardener's own interactive `init` at the operator's terminal
+            and sends the result; omit it and the server builds one with `init --yes`,
+            which is what Studio does since it has no TTY.
           type: string
         workflow:
           title: Workflow
@@ -2294,7 +2294,8 @@ components:
         api_key_secret:
           title: Api Key Secret
           description: Name of a NeMo Secret holding the provider API key for a custom
-            endpoint; null uses the platform's provisioned agent-hardener inference key.
+            endpoint; null uses the platform's provisioned agent-hardener inference
+            key.
           type: string
       type: object
       title: ModelChoice
@@ -3059,8 +3060,8 @@ components:
         safety:
           allOf:
           - $ref: '#/components/schemas/ModelChoice'
-          description: "Guardrail middleware LLM (agent-hardener's `safety_llm`); unset\
-            \ copies the victim's own LLM. Only `model` applies \u2014 agent-hardener\
+          description: "Guardrail middleware LLM (agent-hardener's `safety_llm`);\
+            \ unset copies the victim's own LLM. Only `model` applies \u2014 agent-hardener\
             \ pins this LLM's endpoint and key when it writes the guardrail."
       type: object
       title: WarGameModels
