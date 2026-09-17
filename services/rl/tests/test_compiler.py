@@ -7,25 +7,40 @@ and the 4-step PlatformJobSpec shape."""
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
+from nemo_platform_plugin.client.errors import NotFoundError
 from nemo_platform_plugin.integrations import IntegrationsSpec, MlflowIntegration, WandbIntegration
 from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
 from nemo_platform_plugin.models.types import ModelEntity
 from nmp.common.entities.utils import get_random_id
+from nmp.customization_common.schemas.model_entity import (
+    DeploymentParameters as ModelEntityDeploymentParameters,
+)
 from nmp.customization_common.schemas.values import OutputNameType
 from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
 from nmp.rl.app.jobs.compiler import (
     _build_download_config,
+    _build_model_entity_config,
     _build_training_step,
     _build_training_step_config,
     platform_job_config_compiler,
 )
 from nmp.rl.app.jobs.training.schemas import OptimizerType, TrainingType
 from nmp.rl.entities.values import FinetuningType
-from nmp.rl.schemas import DPOTraining, GRPOTraining, OutputResponse, ParallelismParams, RlJobOutput
+from nmp.rl.schemas import (
+    DeploymentParams,
+    DPOTraining,
+    GRPOTraining,
+    OutputResponse,
+    ParallelismParams,
+    RlJobOutput,
+    ToolCallParams,
+)
 
 
 def _make_model_entity(fileset: str | None = "default/base-model") -> ModelEntity:
@@ -449,3 +464,333 @@ def test_grpo_training_step_injects_egress_env(monkeypatch: pytest.MonkeyPatch) 
     env_names = {env["name"] for env in step["environment"]}
     assert "NMP_VLLM_SERVICE_HOST" in env_names
     assert "NMP_BROKER_SERVICE_PORT" in env_names
+
+
+# --------------------------------------------------------------------------- #
+# deployment_config: auto-deploy after training
+# --------------------------------------------------------------------------- #
+
+
+def test_model_entity_config_omits_deployment_config_by_default() -> None:
+    config = _build_model_entity_config("default", _make_job_output(), trust_remote_code=False)
+
+    assert config.deployment_config is None
+
+
+def test_model_entity_config_forwards_inline_deployment_config() -> None:
+    job = _make_job_output().model_copy(
+        update={"deployment_config": DeploymentParams(gpu=2, image_name="img", lora_enabled=True)}
+    )
+    config = _build_model_entity_config("default", job, trust_remote_code=False)
+
+    assert isinstance(config.deployment_config, ModelEntityDeploymentParameters)
+    assert config.deployment_config.gpu == 2
+    assert config.deployment_config.image_name == "img"
+    assert config.deployment_config.lora_enabled is True
+
+
+def test_model_entity_config_forwards_deployment_config_string_ref() -> None:
+    job = _make_job_output().model_copy(update={"deployment_config": "shared/existing-cfg"})
+    config = _build_model_entity_config("default", job, trust_remote_code=False)
+
+    assert config.deployment_config == "shared/existing-cfg"
+
+
+def _make_deployment_config(
+    *,
+    lora_enabled: bool = True,
+    model_entity_id: str = "default/my-dpo",
+    model_name: str = "my-dpo",
+    model_namespace: str = "default",
+) -> Any:
+    return SimpleNamespace(
+        workspace="default",
+        name="existing-cfg",
+        model_entity_id=model_entity_id,
+        model_spec=SimpleNamespace(
+            lora_enabled=lora_enabled,
+            model_name=model_name,
+            model_namespace=model_namespace,
+        ),
+    )
+
+
+def _grpo_lora_job() -> RlJobOutput:
+    return RlJobOutput(
+        model="default/base-model",
+        dataset="default/prefs",
+        environment="default/my-env",
+        training=GRPOTraining(type="grpo", finetuning_type=FinetuningType.LORA.value),
+        output=OutputResponse(name="my-lora", type=OutputNameType.ADAPTER, fileset="my-lora-fs"),
+    )
+
+
+def _not_found() -> NotFoundError:
+    return NotFoundError(httpx.Response(status_code=404, request=httpx.Request("GET", "http://test")))
+
+
+@pytest.fixture
+def authorized(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Install an auth client that grants everything, as a live request would."""
+    auth_client = AsyncMock()
+    auth_client.has_permissions = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.auth_client_context",
+        SimpleNamespace(get=lambda: auth_client),
+    )
+    return auth_client
+
+
+@pytest.mark.asyncio
+async def test_inline_deployment_config_compiles_without_an_auth_context(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+) -> None:
+    """Only tool_call_plugin is permission-gated; plain params must not demand auth."""
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    monkeypatch.setattr("nmp.rl.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
+    job = _make_job_output().model_copy(update={"deployment_config": DeploymentParams(gpu=2)})
+
+    spec = await platform_job_config_compiler("default", job, platform_clients)
+
+    assert _steps(spec)[3]["config"]["deployment_config"]["gpu"] == 2
+
+
+@pytest.mark.asyncio
+async def test_string_deployment_config_compiles_without_an_auth_context(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    monkeypatch.setattr("nmp.rl.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(data=lambda: _make_deployment_config())
+    )
+    platform_clients.models.get_model = AsyncMock(
+        return_value=SimpleNamespace(data=lambda: SimpleNamespace(workspace="default", name="my-dpo"))
+    )
+    job = _make_job_output().model_copy(update={"deployment_config": "shared/some-cfg"})
+
+    spec = await platform_job_config_compiler("default", job, platform_clients)
+
+    assert _steps(spec)[3]["config"]["deployment_config"] == "shared/some-cfg"
+
+
+@pytest.mark.asyncio
+async def test_tool_call_plugin_without_an_auth_context_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    monkeypatch.setattr("nmp.rl.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
+    job = _make_job_output().model_copy(
+        update={
+            "deployment_config": DeploymentParams(tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin"))
+        }
+    )
+
+    with pytest.raises(PlatformJobCompilationError, match="No auth context available"):
+        await platform_job_config_compiler("default", job, platform_clients)
+
+
+@pytest.mark.asyncio
+async def test_inline_tool_call_plugin_requires_permission(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+    authorized: AsyncMock,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    authorized.has_permissions = AsyncMock(return_value=False)
+    job = _make_job_output().model_copy(
+        update={
+            "deployment_config": DeploymentParams(tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin"))
+        }
+    )
+
+    with pytest.raises(PlatformJobCompilationError, match="models.tool-call-plugin.set"):
+        await platform_job_config_compiler("default", job, platform_clients)
+
+
+@pytest.mark.asyncio
+async def test_lora_job_rejects_string_ref_without_lora_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+    authorized: AsyncMock,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(data=lambda: _make_deployment_config(lora_enabled=False))
+    )
+    job = _grpo_lora_job().model_copy(update={"deployment_config": "shared/base-cfg"})
+
+    with pytest.raises(PlatformJobCompilationError, match="lora_enabled=false"):
+        await platform_job_config_compiler("default", job, platform_clients)
+
+
+@pytest.mark.asyncio
+async def test_lora_job_accepts_string_ref_with_lora_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+    authorized: AsyncMock,
+    sandbox_capable: None,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: _make_deployment_config(
+                lora_enabled=True,
+                model_entity_id="default/base-model",
+                model_name="base-model",
+            )
+        )
+    )
+    job = _grpo_lora_job().model_copy(update={"deployment_config": "shared/base-cfg"})
+
+    spec = await platform_job_config_compiler("default", job, platform_clients)
+
+    assert _steps(spec)[3]["config"]["deployment_config"] == "shared/base-cfg"
+
+
+@pytest.mark.asyncio
+async def test_full_weight_job_rejects_string_ref_for_a_new_model_entity(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+    authorized: AsyncMock,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(data=lambda: _make_deployment_config())
+    )
+    platform_clients.models.get_model = AsyncMock(side_effect=_not_found())
+    job = _make_job_output().model_copy(update={"deployment_config": "shared/some-cfg"})
+
+    with pytest.raises(PlatformJobCompilationError, match="cannot be a string reference"):
+        await platform_job_config_compiler("default", job, platform_clients)
+
+
+@pytest.mark.asyncio
+async def test_full_weight_retrain_rejects_a_config_for_a_different_model(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+    authorized: AsyncMock,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: _make_deployment_config(
+                model_entity_id="default/other", model_name="other", model_namespace="default"
+            )
+        )
+    )
+    platform_clients.models.get_model = AsyncMock(
+        return_value=SimpleNamespace(data=lambda: SimpleNamespace(workspace="default", name="my-dpo"))
+    )
+    job = _make_job_output().model_copy(update={"deployment_config": "shared/some-cfg"})
+
+    with pytest.raises(PlatformJobCompilationError, match="targets a different model entity"):
+        await platform_job_config_compiler("default", job, platform_clients)
+
+
+@pytest.mark.asyncio
+async def test_full_weight_retrain_accepts_a_config_targeting_the_output_model(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+    authorized: AsyncMock,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(data=lambda: _make_deployment_config())
+    )
+    platform_clients.models.get_model = AsyncMock(
+        return_value=SimpleNamespace(data=lambda: SimpleNamespace(workspace="default", name="my-dpo"))
+    )
+    job = _make_job_output().model_copy(update={"deployment_config": "shared/some-cfg"})
+
+    spec = await platform_job_config_compiler("default", job, platform_clients)
+
+    assert _steps(spec)[3]["config"]["deployment_config"] == "shared/some-cfg"
+
+
+@pytest.mark.asyncio
+async def test_inline_deployment_config_reaches_the_model_entity_step(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+    authorized: AsyncMock,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    job = _make_job_output().model_copy(update={"deployment_config": DeploymentParams(gpu=4)})
+
+    spec = await platform_job_config_compiler("default", job, platform_clients)
+
+    assert _steps(spec)[3]["config"]["deployment_config"]["gpu"] == 4
+
+
+@pytest.mark.asyncio
+async def test_lora_job_rejects_a_config_for_a_different_base_model(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+    authorized: AsyncMock,
+) -> None:
+    """The adapter is served from its base model's deployment, so the config must target it."""
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: _make_deployment_config(
+                lora_enabled=True, model_entity_id="default/unrelated", model_name="unrelated"
+            )
+        )
+    )
+    job = _grpo_lora_job().model_copy(update={"deployment_config": "shared/other-cfg"})
+
+    with pytest.raises(PlatformJobCompilationError, match="different model entity than the base model"):
+        await platform_job_config_compiler("default", job, platform_clients)
+
+
+@pytest.mark.asyncio
+async def test_inline_lora_enabled_false_is_rejected_at_compile(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+    authorized: AsyncMock,
+) -> None:
+    """RlJobInput rejects this at submit; the compiler takes RlJobOutput, so re-assert it."""
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    job = _grpo_lora_job().model_copy(update={"deployment_config": DeploymentParams(lora_enabled=False)})
+
+    with pytest.raises(PlatformJobCompilationError, match="lora_enabled must be true"):
+        await platform_job_config_compiler("default", job, platform_clients)

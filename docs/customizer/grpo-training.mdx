@@ -379,6 +379,53 @@ The adapter hot-reloads onto a **READY** deployment of the base model that has `
 
 A full-weight GRPO job instead registers a new model entity, which does need its own deployment.
 
+## Deploy automatically when the job finishes
+
+Set `deployment_config` on the job spec and the platform deploys once training completes, instead of leaving you to create the deployment by hand. Omit it and nothing is deployed.
+
+Pass a string to reuse an existing `ModelDeploymentConfig`:
+
+```json
+{
+  "model": "default/qwen3-0.6b",
+  "dataset": "default/ascii-tree-env-dataset",
+  "environment": "default/ascii-tree-env",
+  "training": { "type": "grpo", "finetuning_type": "lora" },
+  "deployment_config": "default/qwen3-base-cfg"
+}
+```
+
+Or an object to have one created inline:
+
+```json
+{
+  "deployment_config": {
+    "gpu": 1,
+    "lora_enabled": true,
+    "image_name": "nvcr.io/nim/nvidia/llm-nim",
+    "image_tag": "1.13"
+  }
+}
+```
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `gpu` | `1` | GPUs the deployment requests. |
+| `lora_enabled` | `true` | Whether the deployment can load LoRA adapters. |
+| `image_name` | multi-llm NIM | Container image from NGC. |
+| `image_tag` | image default | Container image tag. |
+| `disk_size` | unset | Disk size for the deployment. |
+| `additional_envs` | unset | Extra environment variables. |
+| `tool_call_config` | unset | Tool-calling overrides for the NIM. Setting `tool_call_plugin` requires the `models.tool-call-plugin.set` permission. |
+
+A LoRA job deploys the **base** model with `lora_enabled: true` and serves the adapter from it, so `lora_enabled: false` on a LoRA job is rejected at submit — that deployment could never load the adapter. A full-weight job deploys the new model entity it registers.
+
+Bad configurations fail before training starts, not after the run. These are rejected at submit:
+
+- A string reference that does not resolve to a deployment config.
+- On a LoRA job, a referenced config with `lora_enabled: false`.
+- On a full-weight job, a string reference at all — the job registers a new model entity, so a pre-existing config cannot target it. The exception is retraining, where the config already targets that entity. Use inline parameters otherwise.
+
 ## Key hyperparameters
 
 All GRPO knobs live under `training`, including `policy_backend` (a sibling of `parallelism`, not a field on it).
