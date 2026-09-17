@@ -119,6 +119,23 @@ async def test_a_typo_in_the_entrypoint_fails_at_start_not_at_first_invoke(agent
     assert "has no attribute 'run'" in str(excinfo.value)
 
 
+async def test_a_sync_entrypoint_fails_at_start_not_at_first_invoke(agent_module) -> None:
+    """The contract is one async callable; a `def` must fail the runtime
+    immediately rather than surfacing as a TypeError on the first request."""
+
+    def run(invocation: NooaInvocation) -> contract.AgentRunResult:  # not async
+        return _succeeded()
+
+    agent_module.run = run
+
+    runtime = fabric_adapter.PlatformNooaRuntime()
+
+    with pytest.raises(fabric_adapter.PlatformNooaAdapterConfigError) as excinfo:
+        await runtime.start({"config": _agent_config({"entrypoint": "fake_user_agent:run"})})
+
+    assert "not an async callable" in str(excinfo.value)
+
+
 @pytest.mark.parametrize("spec", ["fake_user_agent", "fake_user_agent:", ":run", "   "])
 async def test_a_malformed_entrypoint_is_rejected(agent_module, spec: str) -> None:
     runtime = fabric_adapter.PlatformNooaRuntime()

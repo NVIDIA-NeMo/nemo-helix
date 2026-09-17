@@ -18,6 +18,7 @@ model clients; see the ``models`` field on ``NooaInvocation`` for why.
 from __future__ import annotations
 
 import importlib
+import inspect
 import json
 import logging
 import os
@@ -168,6 +169,14 @@ def _load_entrypoint(spec: str) -> NooaEntrypoint:
         ) from error
     if not callable(entrypoint):
         raise PlatformNooaAdapterConfigError(f"{spec!r} resolved to {type(entrypoint).__name__}, which is not callable")
+    # The contract is one async callable. Check at start -- not on first invoke --
+    # so a `def` instead of `async def` fails the runtime immediately rather than
+    # surfacing as a TypeError on the first request.
+    if not inspect.iscoroutinefunction(entrypoint):
+        raise PlatformNooaAdapterConfigError(
+            f"{spec!r} resolved to {type(entrypoint).__name__}, which is not an async callable; "
+            "a platform NOOA entrypoint must be `async def`"
+        )
     return entrypoint
 
 
