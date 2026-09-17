@@ -90,7 +90,10 @@ def test_the_example_config_declares_the_bundled_server_and_the_exactly_once_eva
 
     metrics = _build_metrics(_CONFIG, _CONFIG["eval"])
     (exactly_once,) = [metric for metric in metrics if isinstance(metric, ToolCallCountMetric)]
-    assert (exactly_once.tool_name, exactly_once.expected_calls) == ("email_phishing_analyzer", 1)
+    assert (exactly_once.tool_name, exactly_once.expected_calls) == (
+        "mcp__email_phishing_analyzer__email_phishing_analyzer",
+        1,
+    )
     # Every study objective must be an output some evaluator actually emits.
     emitted = {spec.name for metric in metrics for spec in metric.output_spec()}
     for objective in _CONFIG["optimizer"]["eval_metrics"].values():

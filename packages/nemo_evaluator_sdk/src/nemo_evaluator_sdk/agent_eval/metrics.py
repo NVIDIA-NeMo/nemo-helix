@@ -187,9 +187,9 @@ class SkillUsedMetric(MetricBase):
 class ToolCallCountMetric(MetricBase):
     """Count how often the agent called one tool, and whether that matches an expected count.
 
-    * ``tool_call_count`` — the number of trajectory tool calls whose ``function_name`` is
-      ``tool_name`` or ends with ``-<tool_name>`` / ``_<tool_name>``, since harnesses prefix MCP tool
-      names with their server (Hermes records ``mcp__<server>__<tool>``).
+    * ``tool_call_count`` — the number of trajectory tool calls whose ``function_name`` equals
+      ``tool_name`` exactly. Give the name as the harness records it: Hermes exposes an MCP tool as
+      ``mcp__<server>__<tool>``, so a bare ``<tool>`` would not match its calls.
     * ``tool_call_count_matches`` — ``True`` when that count equals ``expected_calls``.
 
     Reads the ATIF view of the trace. Without a readable trajectory the count is ``0``, so an agent
@@ -198,7 +198,9 @@ class ToolCallCountMetric(MetricBase):
     """
 
     type: Literal[MetricType.TOOL_CALL_COUNT] = MetricType.TOOL_CALL_COUNT
-    tool_name: str = Field(description="Tool to count, without any harness or MCP server prefix.")
+    tool_name: str = Field(
+        description="Tool to count, exactly as the harness records it (Hermes: ``mcp__<server>__<tool>``)."
+    )
     expected_calls: int = Field(default=1, ge=0, description="Call count that scores ``tool_call_count_matches`` True.")
     trace_evidence: str = Field(default=EVIDENCE_TRACE, description="Trace evidence to scan for tool calls.")
 
@@ -225,10 +227,7 @@ class ToolCallCountMetric(MetricBase):
         if trajectory is None:
             return 0
         return sum(
-            1
-            for step in trajectory.steps
-            for call in step.tool_calls or []
-            if _tool_name_matches(call.function_name, self.tool_name)
+            1 for step in trajectory.steps for call in step.tool_calls or [] if call.function_name == self.tool_name
         )
 
 
@@ -246,7 +245,9 @@ class ToolArgumentMatchesInputMetric(MetricBase):
     """
 
     type: Literal[MetricType.TOOL_ARGUMENT_MATCHES_INPUT] = MetricType.TOOL_ARGUMENT_MATCHES_INPUT
-    tool_name: str = Field(description="Tool whose calls are checked, without any harness or MCP server prefix.")
+    tool_name: str = Field(
+        description="Tool whose calls are checked, exactly as the harness records it (Hermes: ``mcp__<server>__<tool>``)."
+    )
     argument: str = Field(default="text", description="Tool-call argument that must carry the task input.")
     input_key: str = Field(default="instruction", description="Task input the argument must equal.")
     normalize: Literal["exact", "whitespace"] = Field(
@@ -271,10 +272,7 @@ class ToolArgumentMatchesInputMetric(MetricBase):
         if trajectory is None:
             return False
         calls = [
-            call
-            for step in trajectory.steps
-            for call in step.tool_calls or []
-            if _tool_name_matches(call.function_name, self.tool_name)
+            call for step in trajectory.steps for call in step.tool_calls or [] if call.function_name == self.tool_name
         ]
         if not calls:
             return False
@@ -287,11 +285,6 @@ class ToolArgumentMatchesInputMetric(MetricBase):
 
     def _normalize(self, text: str) -> str:
         return " ".join(text.split()) if self.normalize == "whitespace" else text
-
-
-def _tool_name_matches(function_name: str, tool_name: str) -> bool:
-    """Whether a trajectory tool name is ``tool_name``, allowing a harness/MCP-server prefix."""
-    return function_name == tool_name or function_name.endswith(("-" + tool_name, "_" + tool_name))
 
 
 async def _read_atif(candidate: CandidateOutput, trace_evidence: str, *, metric: str) -> Trajectory | None:

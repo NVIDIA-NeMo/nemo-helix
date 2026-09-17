@@ -114,11 +114,12 @@ eval:
   evaluators:
     exactly_once:
       _type: tool_call_count
-      tool_name: email_phishing_analyzer
+      # Exactly as Hermes records the MCP tool in the trajectory: mcp__<server>__<tool>.
+      tool_name: mcp__email_phishing_analyzer__email_phishing_analyzer
       expected_calls: 1
     verbatim_input:
       _type: tool_argument_matches_input
-      tool_name: email_phishing_analyzer
+      tool_name: mcp__email_phishing_analyzer__email_phishing_analyzer
       argument: text
     accuracy:
       _type: tunable_rag_evaluator

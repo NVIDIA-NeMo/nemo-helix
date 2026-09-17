@@ -207,13 +207,15 @@ def path_references(config: Mapping[str, Any]) -> Iterator[PathReference]:
 
 
 def _mcp_server_references(config: Mapping[str, Any]) -> Iterator[PathReference]:
-    """Bundle files a stdio MCP server is launched from: ``args`` entries that name a script.
+    """Bundle files a stdio MCP server is launched from: a ``url`` or ``args`` entry that names a script.
 
-    A server shipped in the bundle is spawned as ``url: python3, args: [path/in/bundle.py]``; the
-    optimizer makes that path absolute at run time, so preflight has to know the file exists.
-    Only entries that look like relative files are checked, since ``args`` also carries flags, URLs
-    and plain values. An extensionless script with no directory part (``analyzer``) is not
-    recognised here; the runtime still resolves it if it exists in the bundle.
+    A server shipped in the bundle is spawned as ``url: python3, args: [path/in/bundle.py]`` or
+    directly as ``url: path/in/bundle.py``; the optimizer makes either path absolute at run time
+    (``resolve_mcp_server_paths``), so preflight has to know the file exists. Only values that look
+    like relative files are checked, since ``url`` also names commands on ``PATH`` or absolute host
+    executables, and ``args`` carries flags, URLs and plain values. An extensionless script with no
+    directory part (``analyzer``) is not recognised here; the runtime still resolves it if it exists
+    in the bundle.
     """
     mcp = config.get("mcp")
     servers = mcp.get("servers") if isinstance(mcp, Mapping) else None
@@ -222,6 +224,9 @@ def _mcp_server_references(config: Mapping[str, Any]) -> Iterator[PathReference]
     for name, server in servers.items():
         if not isinstance(server, Mapping) or server.get("transport") != "stdio":
             continue
+        url = server.get("url")
+        if isinstance(url, str) and _looks_like_bundle_script(url):
+            yield from _optional(url, f"mcp.servers.{name}.url", must_exist=True)
         args = server.get("args")
         for index, arg in enumerate(args if isinstance(args, list) else []):
             if isinstance(arg, str) and _looks_like_bundle_script(arg):

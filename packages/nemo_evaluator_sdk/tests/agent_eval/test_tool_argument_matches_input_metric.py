@@ -22,7 +22,11 @@ def _atif(*calls: dict[str, Any]) -> dict[str, Any]:
     return {"schema_version": "ATIF-v1.7", "steps": steps}
 
 
-def _call(text: object, name: str = "mcp__email_phishing_analyzer__email_phishing_analyzer") -> dict[str, Any]:
+# The name Hermes records for the analyzer's MCP tool; the metric matches it exactly.
+_TOOL = "mcp__email_phishing_analyzer__email_phishing_analyzer"
+
+
+def _call(text: object, name: str = _TOOL) -> dict[str, Any]:
     return {"function_name": name, "arguments": {"text": text}}
 
 
@@ -40,7 +44,7 @@ async def _score(
     return bool(output.value)
 
 
-_METRIC = ToolArgumentMatchesInputMetric(tool_name="email_phishing_analyzer")
+_METRIC = ToolArgumentMatchesInputMetric(tool_name=_TOOL)
 
 
 async def test_verbatim_argument_matches() -> None:
@@ -50,7 +54,7 @@ async def test_verbatim_argument_matches() -> None:
 async def test_whitespace_differences_are_tolerated_by_default_but_not_under_exact() -> None:
     reflowed = " ".join(_EMAIL.split())
     assert await _score(_METRIC, _atif(_call(reflowed))) is True
-    strict = ToolArgumentMatchesInputMetric(tool_name="email_phishing_analyzer", normalize="exact")
+    strict = ToolArgumentMatchesInputMetric(tool_name=_TOOL, normalize="exact")
     assert await _score(strict, _atif(_call(reflowed))) is False
 
 
@@ -65,12 +69,15 @@ async def test_every_call_must_match_not_just_one() -> None:
 
 async def test_other_tools_are_ignored_and_no_call_fails() -> None:
     assert await _score(_METRIC, _atif(_call(_EMAIL, name="read_file"))) is False
+    # Exact match only: a shared suffix, or the bare name when the record is prefixed, is another tool.
+    assert await _score(_METRIC, _atif(_call(_EMAIL, name="backup_" + _TOOL))) is False
+    assert await _score(_METRIC, _atif(_call(_EMAIL, name="email_phishing_analyzer"))) is False
     assert await _score(_METRIC, _atif()) is False
     assert await _score(_METRIC, None) is False
 
 
 async def test_missing_or_non_string_argument_fails() -> None:
-    assert await _score(_METRIC, _atif({"function_name": "email_phishing_analyzer", "arguments": {}})) is False
+    assert await _score(_METRIC, _atif({"function_name": _TOOL, "arguments": {}})) is False
     assert await _score(_METRIC, _atif(_call({"nested": _EMAIL}))) is False
 
 
@@ -78,5 +85,5 @@ async def test_a_task_without_the_input_key_fails_rather_than_matching_nothing()
     assert await _score(_METRIC, _atif(_call(_EMAIL)), row={"task": {"id": "t"}, "inputs": {}}) is False
     # A top-level key is not a task input; only the nested ``inputs`` mapping is.
     assert await _score(_METRIC, _atif(_call(_EMAIL)), row={"instruction": _EMAIL}) is False
-    other = ToolArgumentMatchesInputMetric(tool_name="email_phishing_analyzer", input_key="email")
+    other = ToolArgumentMatchesInputMetric(tool_name=_TOOL, input_key="email")
     assert await _score(other, _atif(_call(_EMAIL)), row={"inputs": {"email": _EMAIL}}) is True

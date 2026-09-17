@@ -164,6 +164,30 @@ def test_checks_stdio_mcp_server_scripts_ship_in_the_bundle(tmp_path: Path) -> N
     assert preflight_bundle(tmp_path, "optimize.yml")["mcp"]["servers"]["analyzer"]["args"][0] == "mcps/analyzer.py"
 
 
+def test_checks_a_stdio_mcp_server_launched_directly_from_a_bundle_url(tmp_path: Path) -> None:
+    """``url`` may name the bundled script itself; the runtime resolves it, so preflight checks it too."""
+    config = full_config()
+    config["mcp"] = {
+        "servers": {
+            "bundled": {"transport": "stdio", "url": "mcps/server.py"},
+            # Commands on PATH and absolute host executables are not bundle files and are left alone.
+            "on_path": {"transport": "stdio", "url": "email-phishing-analyzer-mcp"},
+            "host": {"transport": "stdio", "url": "/opt/analyzer/bin/analyzer-mcp"},
+        }
+    }
+    make_bundle(tmp_path, config, files={"dataset.json": DATASET})
+
+    with pytest.raises(BundlePreflightError) as excinfo:
+        preflight_bundle(tmp_path, "optimize.yml")
+    message = str(excinfo.value)
+    assert "mcp.servers.bundled.url" in message
+    assert "on_path" not in message and "host" not in message
+
+    (tmp_path / "mcps").mkdir()
+    (tmp_path / "mcps" / "server.py").write_text("print(1)\n", encoding="utf-8")
+    assert preflight_bundle(tmp_path, "optimize.yml")["mcp"]["servers"]["bundled"]["url"] == "mcps/server.py"
+
+
 def test_ignores_a_dataset_staged_from_its_own_fileset(tmp_path: Path) -> None:
     config = full_config()
     config["eval"]["general"]["dataset"] = {"file_path": "default/evals#rows.json"}
