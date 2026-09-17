@@ -32,7 +32,7 @@ from nemo_platform_plugin.inference_middleware import (
 )
 from nemo_platform_plugin.refs import ENTITY_REF_PATTERN
 from nemo_platform_plugin.secrets.client import AsyncSecretsClient
-from nmp.common.entities.utils import ModelEntityId, parse_adapters_suffix, parse_model_entity_ref
+from nmp.common.entities.utils import ADAPTERS_INFIX, parse_adapters_suffix, parse_model_entity_ref
 from nmp.core.inference_gateway.api.backend_format import resolve_backend_format
 from nmp.core.inference_gateway.api.errors import (
     raise_model_entity_not_found,
@@ -1031,21 +1031,18 @@ async def virtual_model_proxy(
             parse_adapters_suffix(body_model) if isinstance(body_model, str) and "&adapters/" in body_model else None
         )
         if adapter_parts is not None:
-            # Graft the request's adapter segments onto the VM's base entity, via the
-            # shared ModelEntityId grammar. The body model may be bare (no workspace,
-            # which comes from the URL path), so its adapter parts are recovered with
-            # parse_adapters_suffix; the base is re-anchored on default_model_entity and
-            # re-formatted through the single composite constructor. Example: body
-            # ``myvm&adapters/a-ws/a-name`` + default ``base-ws/base`` →
+            # Graft the request's adapter segments onto the VM's base entity. The body
+            # model may be bare (no workspace, which comes from the URL path), so its
+            # adapter parts are recovered with parse_adapters_suffix. default_model_entity
+            # is the base id and is used verbatim as the prefix (as before) - we do NOT
+            # parse it: it is an unrestricted VirtualModel field that need not be
+            # workspace-qualified, and parsing it would add a new raise/500 path here.
+            # Example: body ``myvm&adapters/a-ws/a-name`` + default ``base-ws/base`` ->
             # ``base-ws/base&adapters/a-ws/a-name``.
             _, adapter_workspace, adapter_name = adapter_parts
-            default_base = ModelEntityId.parse(virtual_model.default_model_entity)
-            json_body["model"] = ModelEntityId(
-                workspace=default_base.workspace,
-                base_name=default_base.base_name,
-                adapter_workspace=adapter_workspace,
-                adapter_name=adapter_name,
-            ).to_composite()
+            json_body["model"] = (
+                f"{virtual_model.default_model_entity}{ADAPTERS_INFIX}{adapter_workspace}/{adapter_name}"
+            )
         else:
             json_body["model"] = virtual_model.default_model_entity
 

@@ -25,6 +25,7 @@ __all__ = [
     "parse_entity_ref",
     "parse_model_entity_ref",
     "ModelEntityId",
+    "ADAPTERS_INFIX",
     "parse_adapters_suffix",
 ]
 

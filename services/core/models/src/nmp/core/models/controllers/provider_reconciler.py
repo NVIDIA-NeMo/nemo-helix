@@ -29,7 +29,7 @@ from nemo_platform_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nemo_platform_plugin.virtual_models.types import CreateVirtualModelRequest, VirtualModel
 from nmp.common.datetime_utils import ensure_utc
 from nmp.common.entities.constants import NAME_PATTERN
-from nmp.common.entities.utils import ModelEntityId, parse_adapters_suffix, parse_entity_ref
+from nmp.common.entities.utils import ADAPTERS_INFIX, parse_adapters_suffix, parse_entity_ref
 from nmp.core.models.app import (
     ModelWeightsType,
     get_model_weights_type,
@@ -997,17 +997,13 @@ class ModelProviderReconciler:
                     )
                     continue
 
-                # Build the LoRA composite id via the shared ModelEntityId formatter
-                # (single home for the {base}&adapters/{adapter_ws}/{adapter_name} grammar,
-                # shared with IGW validation/routing). base_id is the workspace-qualified
-                # base model id; parse it and attach the recovered adapter segments.
-                base_ref = ModelEntityId.parse(base_id)
-                model_entity_id = ModelEntityId(
-                    workspace=base_ref.workspace,
-                    base_name=base_ref.base_name,
-                    adapter_workspace=adapter_ws,
-                    adapter_name=adapter_name,
-                ).to_composite()
+                # Build the LoRA composite id from the base id + recovered adapter
+                # segments using the shared ADAPTERS_INFIX (single home for the grammar).
+                # base_id is used verbatim as the prefix (as the prior f-string did) - we
+                # do NOT parse it, because _resolve_base_backend_model_id may return an
+                # unqualified id and parsing would raise here, aborting the whole mapping
+                # loop where the old code produced an id later dropped by validation.
+                model_entity_id = f"{base_id}{ADAPTERS_INFIX}{adapter_ws}/{adapter_name}"
                 served.append(ServedModelMapping(model_entity_id=model_entity_id, served_model_name=mid))
                 continue
 
