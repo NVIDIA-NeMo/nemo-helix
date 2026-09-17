@@ -502,17 +502,39 @@ mkdir -p my-env/wheels
 uv build --wheel --out-dir my-env/wheels "$RL/3rdparty/Gym-workspace/Gym"
 GYM_WHEEL=$(ls my-env/wheels/nemo_gym-"$GYM_VERSION"-*.whl)
 
-pip download --dest my-env/wheels \
-  --only-binary=:all: \
+# Resolve and download are separate steps: `--platform` requires `--no-deps`, and resolving
+# on the build host would evaluate environment markers for the wrong OS.
+cat > closure.in <<EOF
+nemo-gym[dev] @ file://$GYM_WHEEL
+ray[default]==$RAY_VERSION
+openai==$OPENAI_VERSION
+pip
+setuptools>=61,<81
+setuptools-scm
+hydra-core>=1.3,<1.4
+omegaconf>=2.2,<2.4
+-r resources_servers/my_env/requirements.txt
+EOF
+uv pip compile closure.in --output-file closure.txt --no-header --no-config \
+  --python-platform "$ARCH-unknown-linux-gnu" --python-version 3.13
+
+pip download --dest my-env/wheels --no-cache-dir --no-deps \
   --python-version 3.13 \
   --platform "manylinux_2_39_$ARCH" \
   --platform "manylinux_2_28_$ARCH" \
   --platform "manylinux_2_17_$ARCH" \
   --platform "manylinux2014_$ARCH" \
-  "nemo-gym[dev] @ file://$GYM_WHEEL" \
-  "ray[default]==$RAY_VERSION" "openai==$OPENAI_VERSION" \
-  pip "setuptools>=61,<81" setuptools-scm "hydra-core>=1.3,<1.4" "omegaconf>=2.2,<2.4" \
-  -r resources_servers/my_env/requirements.txt
+  -r closure.txt
+
+# omegaconf pins antlr4-python3-runtime, which publishes no wheel on PyPI. `wheels/` must hold
+# wheels only, so build whatever arrived as a source artifact. (`--only-binary=:all:` is not an
+# option here: it makes the resolve fail outright rather than fall back to the sdist.)
+for sdist in my-env/wheels/*.tar.gz; do
+  [ -e "$sdist" ] || break
+  uv run --no-project --python 3.13 --with pip python -m pip wheel --no-deps \
+    --wheel-dir my-env/wheels "$sdist" && rm "$sdist"
+done
+
 uv run --package nmp-rl pi-to-gym-conversion --validate-only ./my-env
 ```
 
