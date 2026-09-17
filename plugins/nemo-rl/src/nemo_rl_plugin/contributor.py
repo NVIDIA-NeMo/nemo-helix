@@ -48,7 +48,8 @@ The job JSON follows the RlJobInput schema:
 Optional blocks: output names the model entity written at the end of the run,
 and integrations enables Weights & Biases reporting.
 
-For SFT or LoRA fine-tuning, use the automodel or unsloth backend.
+For supervised fine-tuning, use the automodel or unsloth backend. GRPO here
+trains LoRA adapters too.
 
 Run 'nemo customization rl explain' for the full schema and defaults."""
 

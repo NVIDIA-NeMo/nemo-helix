@@ -57,7 +57,10 @@ class AutomodelContributor(BaseContributor):
     cli_help: ClassVar[str] = _CLI_HELP
     cli_summary: ClassVar[CustomizationCLISummary] = CustomizationCLISummary(
         trains="SFT and LoRA fine-tuning, and knowledge distillation.",
-        runs_on="a GPU execution profile, on the docker or kubernetes_job backend. Multi-node needs kubernetes_job.",
+        runs_on=(
+            "a GPU execution profile, on the docker or kubernetes_job backend. "
+            "Multi-node needs kubernetes_job or volcano_job."
+        ),
         job_json="model, dataset, training, schedule, batch, optimizer, parallelism.",
         use_when="you need SFT, LoRA, or knowledge distillation on one or more GPUs.",
         command="nemo customization automodel submit job.json",

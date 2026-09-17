@@ -9,7 +9,10 @@ from typing import ClassVar
 
 import typer
 from nemo_platform_plugin.cli import NemoCLI
-from nemo_platform_plugin.customization_contributor import CustomizationContributorDiscoveryError
+from nemo_platform_plugin.customization_contributor import (
+    CustomizationCLISummaryProvider,
+    CustomizationContributorDiscoveryError,
+)
 from nemo_platform_plugin.discovery import (
     CUSTOMIZATION_CONTRIBUTORS_GROUP,
     discover_customization_contributors,
@@ -68,10 +71,12 @@ class CustomizationCLI(NemoCLI):
         blocks = [_OVERVIEW, "Installed backends:"]
 
         for key in sorted(self._contributors.keys()):
-            # Read through getattr so that a contributor without a summary is
+            # Contributing a summary is optional, so a backend without one is
             # listed by name instead of breaking --help for the others.
-            get_summary = getattr(self._contributors[key], "get_cli_summary", None)
-            summary = get_summary() if get_summary is not None else None
+            contributor = self._contributors[key]
+            summary = (
+                contributor.get_cli_summary() if isinstance(contributor, CustomizationCLISummaryProvider) else None
+            )
             blocks.append(summary.render(key) if summary is not None else key)
 
         blocks.append(_NEXT_STEPS)

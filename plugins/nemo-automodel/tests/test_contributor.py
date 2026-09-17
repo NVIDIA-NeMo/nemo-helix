@@ -66,8 +66,18 @@ def test_cli_summary_states_what_it_trains_and_where_it_runs() -> None:
     summary = AutomodelContributor().get_cli_summary()
     assert summary is not None
     assert "SFT" in summary.trains and "LoRA" in summary.trains
-    assert "Multi-node needs kubernetes_job." in summary.runs_on
+    assert "Multi-node needs kubernetes_job or volcano_job." in summary.runs_on
     assert summary.command == "nemo customization automodel submit job.json"
+
+
+def test_summary_and_help_agree_on_multi_node_backends() -> None:
+    """The overview must not exclude a backend the detailed help accepts."""
+    contributor = AutomodelContributor()
+    summary = contributor.get_cli_summary()
+    assert summary is not None
+    for backend in ("kubernetes_job", "volcano_job"):
+        assert backend in summary.runs_on, backend
+        assert backend in contributor.cli_help, backend
 
 
 def test_cli_summary_fits_the_rendered_width() -> None:

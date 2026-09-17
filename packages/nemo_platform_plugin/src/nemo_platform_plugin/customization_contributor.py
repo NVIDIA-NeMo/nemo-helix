@@ -77,6 +77,28 @@ class CustomizationCLISummary:
 
 
 @runtime_checkable
+class CustomizationCLISummaryProvider(Protocol):
+    """Optional add-on to :class:`CustomizationContributor` for the CLI overview.
+
+    Kept separate from the required contract on purpose. Discovery validates a
+    loaded contributor against :class:`CustomizationContributor`, and a
+    runtime-checkable protocol checks every member it declares, so folding this
+    method into that contract would make a backend that predates it fail to load
+    over missing help text.
+    """
+
+    def get_cli_summary(self) -> CustomizationCLISummary | None:
+        """Short summary for the ``nemo customization --help`` overview.
+
+        The router collects one summary per discovered backend, in name order, so
+        that a user can choose a backend before reading any per-backend help.
+        Return ``None`` to be listed by name only. The detailed description of the
+        backend, including job JSON fields and constraints, belongs on the Typer
+        app returned by ``get_cli()``.
+        """
+
+
+@runtime_checkable
 class CustomizationContributor(Protocol):
     """One training backend mounted under ``/apis/customization``."""
 
@@ -92,16 +114,6 @@ class CustomizationContributor(Protocol):
         HTTP authorization is **not** declared here: it is derived from the
         ``@path_rule``-decorated routes returned by :meth:`get_routers`, which the
         customization hub aggregates into its own ``nemo.services`` route surface.
-        """
-
-    def get_cli_summary(self) -> CustomizationCLISummary | None:
-        """Short summary for the ``nemo customization --help`` overview.
-
-        The router collects one summary per discovered backend, in name order, so
-        that a user can choose a backend before reading any per-backend help.
-        Return ``None`` to be listed by name only. The detailed description of the
-        backend, including job JSON fields and constraints, belongs on the Typer
-        app returned by ``get_cli()``.
         """
 
     def get_sdk_resources(self) -> CustomizationContributorSDKResources | None:

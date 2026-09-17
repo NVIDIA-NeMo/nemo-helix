@@ -48,6 +48,8 @@ def test_backend_help_names_the_backend_to_use_for_sft(contributor: RlContributo
     help_text = contributor.cli_help
     assert "kubernetes_job backend only" in help_text
     assert "use the automodel or unsloth backend" in help_text
+    # GRPO trains LoRA adapters, so the redirect must be about SFT only.
+    assert "For SFT or LoRA fine-tuning" not in help_text
 
 
 def test_submit_help_explains_the_job_json(contributor: RlContributor) -> None:
