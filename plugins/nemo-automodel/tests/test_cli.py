@@ -105,6 +105,112 @@ def test_cli_submit_accepts_job_json_file(monkeypatch: pytest.MonkeyPatch) -> No
     assert submitted["spec"]["model"] == "default/qwen3-1.7b"
 
 
+def test_cli_submit_prints_studio_link_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """End-to-end: the wired renderer emits the Studio deep link on submit.
+
+    Proves the ``renderer_cls`` wiring through ``BaseContributor.get_cli`` reaches
+    the real Typer CLI for the automodel backend. The ``/status`` probe is mocked
+    to report Studio ready so the test makes no network call.
+    """
+
+    def fake_submit_remote(
+        _scheduler,
+        job_cls: type,
+        spec_data: dict,
+        base_url: str | None,
+        workspace: str,
+        profile: str | None = None,
+        options: dict | None = None,
+        metadata: dict | None = None,
+        http_client: httpx.Client | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> dict:
+        return {"id": "job-uuid", "name": "my-automodel-run", "status": "queued"}
+
+    monkeypatch.setattr(
+        "nemo_platform_plugin.commands.NemoJobScheduler.submit_remote",
+        fake_submit_remote,
+    )
+    monkeypatch.setattr(
+        "nemo_platform_plugin.discovery.discover_jobs",
+        lambda: {"customization.automodel.jobs": AutomodelJob},
+    )
+    # Report Studio ready without a real /status call.
+    monkeypatch.setattr(
+        "nmp.customization_common.cli.renderer.studio_is_available",
+        lambda base_url: True,
+    )
+
+    automodel_cli = AutomodelContributor().get_cli()
+    runner = CliRunner()
+    result = runner.invoke(
+        automodel_cli,
+        [
+            "submit",
+            str(FIXTURES / "minimal_sft_lora.json"),
+            "--workspace",
+            "acme-corp",
+            "--base-url",
+            "https://nmp.test",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    # Link + tracking hints go to stderr; stdout stays pure JSON.
+    assert "https://nmp.test/studio/workspaces/acme-corp/customizations/my-automodel-run" in result.stderr
+    assert "nemo jobs list --workspace acme-corp" in result.stderr
+    assert '"name": "my-automodel-run"' in result.stdout
+    assert "View in Studio" not in result.stdout
+
+
+def test_cli_submit_omits_studio_link_when_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When Studio is not a ready service, submit omits the link but keeps CLI hints."""
+
+    def fake_submit_remote(
+        _scheduler,
+        job_cls: type,
+        spec_data: dict,
+        base_url: str | None,
+        workspace: str,
+        profile: str | None = None,
+        options: dict | None = None,
+        metadata: dict | None = None,
+        http_client: httpx.Client | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> dict:
+        return {"id": "job-uuid", "name": "my-automodel-run", "status": "queued"}
+
+    monkeypatch.setattr(
+        "nemo_platform_plugin.commands.NemoJobScheduler.submit_remote",
+        fake_submit_remote,
+    )
+    monkeypatch.setattr(
+        "nemo_platform_plugin.discovery.discover_jobs",
+        lambda: {"customization.automodel.jobs": AutomodelJob},
+    )
+    monkeypatch.setattr(
+        "nmp.customization_common.cli.renderer.studio_is_available",
+        lambda base_url: False,
+    )
+
+    automodel_cli = AutomodelContributor().get_cli()
+    runner = CliRunner()
+    result = runner.invoke(
+        automodel_cli,
+        [
+            "submit",
+            str(FIXTURES / "minimal_sft_lora.json"),
+            "--workspace",
+            "acme-corp",
+            "--base-url",
+            "https://nmp.test",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "View in Studio" not in result.stderr
+    assert "nemo jobs list --workspace acme-corp" in result.stderr
+    assert '"name": "my-automodel-run"' in result.stdout
+
+
 def test_cli_help_lists_submit_and_explain_only() -> None:
     automodel_cli = AutomodelContributor().get_cli()
     runner = CliRunner()
