@@ -474,6 +474,15 @@ class ModelProviderReconciler:
                     ).data()
                 except Exception as e:
                     logger.error(f"Failed to update provider {provider_id} status: {e}")
+                # A provider that goes non-compliant serves nothing this cycle, so every
+                # entity it served last cycle must be unlinked — the same per-model pruning
+                # the success path does, just with an empty resolved set. Without this the
+                # cleared served_models mapping (above) prunes routing but leaves the
+                # entity's model_providers back-reference stale, and because the persisted
+                # served_models is now [], a later cycle has nothing left to diff against.
+                # ``provider`` still holds the pre-update served_models here (update_provider_status
+                # returns a fresh object into ctx.model_provider; the local is untouched).
+                self._unlink_dropped_model_entities(provider, provider_id, [])
                 return
             case DiscoverySuccess() as success:
                 pass
