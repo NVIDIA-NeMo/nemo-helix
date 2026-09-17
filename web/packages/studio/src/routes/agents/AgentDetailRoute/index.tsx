@@ -177,7 +177,11 @@ export const AgentDetailRoute: FC = () => {
                 {agent?.description && (
                   <>
                     <Dot className="size-2" aria-hidden />
-                    <Text kind="body/regular/sm" className="text-secondary">
+                    <Text
+                      kind="body/regular/sm"
+                      className="line-clamp-1 text-secondary"
+                      title={agent.description}
+                    >
                       {agent.description}
                     </Text>
                   </>

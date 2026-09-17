@@ -6,13 +6,16 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_AGENT_OVERVIEW_ENABLED', 'true');
 });
 
+import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
+import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import { getAgentDetailRoute } from '@studio/routes/utils';
 import { renderRoute, screen } from '@studio/tests/util/render';
 import { waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
 
 const agentName = 'react-agent';
 const workspace = workspace1.workspace;
@@ -89,5 +92,28 @@ describe('AgentDetailRoute', () => {
     // The llm api_key is masked, never shown raw
     expect(screen.queryByText('not-used')).not.toBeInTheDocument();
     expect(screen.getByText('••••••••')).toBeInTheDocument();
+  });
+
+  it('clamps a long header description to one line and exposes the full text as a tooltip', async () => {
+    const description = 'A long agent description that would otherwise bloat the header row.';
+    server.use(
+      http.get(
+        `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agents/:name`,
+        ({ params }) =>
+          HttpResponse.json({
+            name: params['name'],
+            workspace: params['workspace'],
+            description,
+            config: {},
+            config_format: 'nat-workflow-v1',
+          })
+      )
+    );
+
+    renderDetail();
+
+    const descriptionEl = await screen.findByText(description);
+    expect(descriptionEl).toHaveClass('line-clamp-1');
+    expect(descriptionEl).toHaveAttribute('title', description);
   });
 });
