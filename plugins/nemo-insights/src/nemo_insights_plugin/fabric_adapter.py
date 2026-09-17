@@ -126,9 +126,7 @@ def _datetime_setting(settings: dict[str, Any], key: str) -> datetime | None:
 def _bool_setting(settings: dict[str, Any], key: str, default: bool) -> bool:
     value = settings.get(key, default)
     if not isinstance(value, bool):
-        raise AnalystAdapterConfigError(
-            f"harness.settings.{key} must be a boolean, got {type(value).__name__}"
-        )
+        raise AnalystAdapterConfigError(f"harness.settings.{key} must be a boolean, got {type(value).__name__}")
     return value
 
 
