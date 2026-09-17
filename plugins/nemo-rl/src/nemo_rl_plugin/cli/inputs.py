@@ -19,6 +19,24 @@ from nemo_rl_plugin.schema import RlJobInput
 _JOB_JSON_HELP = "Path to NeMo-RL job JSON (RlJobInput schema)."
 
 
+_SUBMIT_HELP = """Submit a NeMo-RL training job to the platform.
+
+Pass the path to a job JSON file holding one RlJobInput object: the base
+model, the dataset, and how to align it. Set training.type to 'dpo' or 'grpo';
+GRPO also needs an environment fileset. Submit fails fast when the platform
+has no kubernetes_job backend.
+
+Submit validates the file first, so a bad field is reported here instead of
+after the job starts. The platform then creates the job and runs it on the
+execution profile it resolves for this backend.
+
+Submit prints the created job as JSON on stdout. Its 'name' field is the job
+id. Follow the run with 'nemo jobs watch <job id>' or check it once with
+'nemo jobs get-status <job id>'.
+
+Run 'nemo customization rl explain' to print the job JSON schema."""
+
+
 def load_job_json(path: Path) -> str:
     """Load and validate job JSON; return canonical JSON string for ``--spec``."""
     data = json.loads(path.read_text())
@@ -32,4 +50,5 @@ def apply_rl_job_cli_overrides(group: typer.Typer) -> None:
         group,
         load_job_json=load_job_json,
         job_json_help=_JOB_JSON_HELP,
+        submit_help=_SUBMIT_HELP,
     )

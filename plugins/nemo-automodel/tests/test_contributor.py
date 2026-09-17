@@ -60,3 +60,41 @@ def test_contributor_exposes_sdk_resources() -> None:
     assert sdk is not None
     assert sdk.sync_resource is AutomodelCustomization
     assert sdk.async_resource is AsyncAutomodelCustomization
+
+
+def test_cli_summary_states_what_it_trains_and_where_it_runs() -> None:
+    summary = AutomodelContributor().get_cli_summary()
+    assert summary is not None
+    assert "SFT" in summary.trains and "LoRA" in summary.trains
+    assert "Multi-node needs kubernetes_job." in summary.runs_on
+    assert summary.command == "nemo customization automodel submit job.json"
+
+
+def test_cli_summary_fits_the_rendered_width() -> None:
+    """The router prints the blurb through an 80-column Rich console."""
+    summary = AutomodelContributor().get_cli_summary()
+    assert summary is not None
+    rendered = summary.render("automodel")
+    assert [line for line in rendered.splitlines() if len(line) > 80] == []
+
+
+def test_backend_help_goes_deeper_than_the_top_level_blurb() -> None:
+    contributor = AutomodelContributor()
+    summary = contributor.get_cli_summary()
+    assert summary is not None
+    blurb = summary.render(contributor.name)
+    help_text = contributor.cli_help
+
+    assert len(help_text) > len(blurb)
+    # Payload and escape-hatch detail belongs on the backend, not in the overview.
+    for detail in ("AutomodelJobInput", "global_batch_size", "num_nodes", "explain"):
+        assert detail in help_text, detail
+        assert detail not in blurb, detail
+
+
+def test_submit_help_explains_the_job_json() -> None:
+    cli = AutomodelContributor().get_cli()
+    submit = next(cmd for cmd in cli.registered_commands if cmd.name == "submit")
+    assert submit.help is not None
+    assert "AutomodelJobInput" in submit.help
+    assert "nemo customization automodel explain" in submit.help

@@ -15,6 +15,19 @@ from nemo_platform_plugin.discovery import (
     discover_customization_contributors,
 )
 
+# Backend-neutral on purpose: the router knows nothing about automodel, unsloth or
+# rl. Everything specific to a backend arrives through its `get_cli_summary()`.
+_OVERVIEW = """Train a model on your own data.
+
+You pick a backend, write a job JSON, and submit it. The platform creates the
+job and runs the training on a GPU execution profile. Each backend trains a
+different way, and the schema of the job JSON depends on the backend you
+pick."""
+
+_NEXT_STEPS = """Run 'nemo customization <backend> --help' for the full description of a
+backend, or 'nemo customization <backend> explain' to print its job JSON
+schema."""
+
 
 class CustomizationCLIError(CustomizationContributorDiscoveryError):
     """Raised when the customization CLI cannot start."""
@@ -24,7 +37,7 @@ class CustomizationCLI(NemoCLI):
     """``nemo customization`` root command."""
 
     name: ClassVar[str] = "customization"
-    description: ClassVar[str] = "Customization training backends (Automodel, …)."
+    description: ClassVar[str] = "Train a model on your own data with an installed training backend."
 
     def __init__(self) -> None:
         self._contributors = discover_customization_contributors()
@@ -38,7 +51,7 @@ class CustomizationCLI(NemoCLI):
     def get_cli(self) -> typer.Typer:
         app = typer.Typer(
             name=self.name,
-            help=self.description,
+            help=self._compose_help(),
             no_args_is_help=True,
         )
 
@@ -49,3 +62,17 @@ class CustomizationCLI(NemoCLI):
                 app.add_typer(subgroup, name=key)
 
         return app
+
+    def _compose_help(self) -> str:
+        """Intro + one blurb per discovered backend, in name order."""
+        blocks = [_OVERVIEW, "Installed backends:"]
+
+        for key in sorted(self._contributors.keys()):
+            # Read through getattr: a backend that skips the blurb is listed by
+            # name rather than breaking `--help` for every other backend.
+            get_summary = getattr(self._contributors[key], "get_cli_summary", None)
+            summary = get_summary() if get_summary is not None else None
+            blocks.append(summary.render(key) if summary is not None else key)
+
+        blocks.append(_NEXT_STEPS)
+        return "\n\n".join(blocks)

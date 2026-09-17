@@ -642,6 +642,9 @@ class TestDiscoverCustomizationContributors:
             def get_cli(self) -> None:
                 return None
 
+            def get_cli_summary(self) -> None:
+                return None
+
             def get_sdk_resources(self):
                 return None
 
@@ -666,6 +669,9 @@ class TestDiscoverCustomizationContributors:
             def get_cli(self) -> None:
                 return None
 
+            def get_cli_summary(self) -> None:
+                return None
+
             def get_sdk_resources(self):
                 return None
 
@@ -685,6 +691,9 @@ class TestDiscoverCustomizationContributors:
                 return []
 
             def get_cli(self) -> None:
+                return None
+
+            def get_cli_summary(self) -> None:
                 return None
 
             def get_sdk_resources(self):
