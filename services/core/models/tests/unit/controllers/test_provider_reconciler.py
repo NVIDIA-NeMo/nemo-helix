@@ -3608,3 +3608,89 @@ async def test_dropped_lora_composite_id_is_not_unlinked(reconciler, mock_models
     # The composite id was skipped before any parse/unlink — no entity write, no parse.
     mock_parse.assert_not_called()
     mock_models_sdk.models_client.update_model.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unlink_skipped_when_provider_update_fails(reconciler, mock_models_sdk, entity_cache):
+    """If the served_models write fails, do NOT unlink — the persisted mapping is unchanged.
+
+    Unlinking after a failed provider update would leave the entity dropping its provider
+    link while the provider's persisted served_models still lists the model, i.e. the
+    inverse of the staleness this fix targets. A later successful cycle re-runs the unlink.
+    """
+    await seed_entity_cache(
+        mock_models_sdk,
+        entity_cache,
+        [
+            _existing_entity(
+                "test-ns",
+                "dropped",
+                model_providers=["test-ns/test-provider"],
+                backend_format="OPENAI_CHAT",
+                api_endpoint={"url": "https://api.com", "model_id": "dropped", "format": "openai"},
+            )
+        ],
+    )
+    mock_models_sdk.models_client.update_model = AsyncMock(return_value=_ModelResponse())
+    # The provider status write FAILS this cycle.
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(side_effect=RuntimeError("write failed"))
+
+    provider = MagicMock()
+    provider.workspace = "test-ns"
+    provider.name = "test-provider"
+    provider.model_deployment_id = None
+    provider.enabled_models = None
+    provider.status = ModelProviderStatus.READY
+    provider.served_models = [ServedModelMapping(model_entity_id="test-ns/dropped", served_model_name="dropped")]
+    ctx = ModelContext(
+        model_provider=provider,
+        model_deployment=None,
+        model_deployment_config=None,
+        model_entity=None,
+    )
+
+    # ``dropped`` is gone from discovery this cycle, but the provider write fails.
+    with patch.object(reconciler, "_discover_models", return_value=DiscoverySuccess(_discovery_models_from_ids([]))):
+        await reconcile_and_flush(reconciler, entity_cache, [ctx])
+
+    # Provider write failed → the entity link must be left intact for a later cycle.
+    mock_models_sdk.models_client.update_model.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_non_compliant_unlink_skipped_when_provider_update_fails(reconciler, mock_models_sdk, entity_cache):
+    """Same guard on the non-compliant path: a failed status write must not unlink."""
+    await seed_entity_cache(
+        mock_models_sdk,
+        entity_cache,
+        [
+            _existing_entity(
+                "test-ns",
+                "m1",
+                model_providers=["test-ns/test-provider"],
+                backend_format="OPENAI_CHAT",
+                api_endpoint={"url": "https://api.com", "model_id": "m1", "format": "openai"},
+            )
+        ],
+    )
+    mock_models_sdk.models_client.update_model = AsyncMock(return_value=_ModelResponse())
+    mock_models_sdk.models_client.update_provider_status = AsyncMock(side_effect=RuntimeError("write failed"))
+
+    provider = MagicMock()
+    provider.workspace = "test-ns"
+    provider.name = "test-provider"
+    provider.model_deployment_id = None
+    provider.enabled_models = None
+    provider.status = ModelProviderStatus.READY
+    provider.served_models = [ServedModelMapping(model_entity_id="test-ns/m1", served_model_name="m1")]
+    ctx = ModelContext(
+        model_provider=provider,
+        model_deployment=None,
+        model_deployment_config=None,
+        model_entity=None,
+    )
+
+    with patch.object(reconciler, "_discover_models", return_value=DiscoveryNonCompliant()):
+        await reconcile_and_flush(reconciler, entity_cache, [ctx])
+
+    mock_models_sdk.models_client.update_model.assert_not_awaited()
