@@ -72,6 +72,12 @@ export interface AssistantChatProps {
    */
   promptData?: PromptData;
   /**
+   * When false, the request asks the model not to reason, in both conventions:
+   * `reasoning_effort: 'none'` and `chat_template_kwargs: { enable_thinking: false }`.
+   * A model that reads neither keeps reasoning as usual.
+   */
+  reasoningEnabled?: boolean;
+  /**
    * Optional OpenAI-compatible tools for the request.
    */
   tools?: ChatCompletionTool[];

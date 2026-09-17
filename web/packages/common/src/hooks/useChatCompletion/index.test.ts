@@ -58,6 +58,42 @@ describe('createChatCompletion', () => {
     expect(result).toEqual(completion);
   });
 
+  it('forwards both reasoning-off parameters to the model', async () => {
+    mocks.create.mockReturnValue(Promise.resolve(completion));
+
+    await createChatCompletion({
+      baseURL: 'http://localhost/v1',
+      accessToken: 'test-token',
+      model: 'default/reasoning-model',
+      messages: [{ role: 'user', content: 'Answer briefly.' }],
+      reasoning_effort: 'none',
+      chat_template_kwargs: { enable_thinking: false },
+    });
+
+    expect(mocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reasoning_effort: 'none',
+        chat_template_kwargs: { enable_thinking: false },
+      }),
+      expect.anything()
+    );
+  });
+
+  it('omits both reasoning parameters when they are not requested', async () => {
+    mocks.create.mockReturnValue(Promise.resolve(completion));
+
+    await createChatCompletion({
+      baseURL: 'http://localhost/v1',
+      accessToken: 'test-token',
+      model: 'default/reasoning-model',
+      messages: [{ role: 'user', content: 'Answer briefly.' }],
+    });
+
+    const [body] = mocks.create.mock.calls[0] as [Record<string, unknown>];
+    expect(body).not.toHaveProperty('reasoning_effort');
+    expect(body).not.toHaveProperty('chat_template_kwargs');
+  });
+
   it('preserves an SSE stream for an ordinary streamed completion', async () => {
     const stream = {
       controller: new AbortController(),

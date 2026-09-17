@@ -195,6 +195,48 @@ describe('AssistantChat', () => {
     interactionTimeoutMs
   );
 
+  it(
+    'omits reasoning_effort unless reasoning is turned off',
+    async () => {
+      renderAssistantChat(<AssistantChat model="test-model" workspace="default" />);
+
+      await userEvent.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'Hello model');
+      await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
+
+      await waitFor(() =>
+        expect(mocks.createChatCompletion).toHaveBeenCalledWith(
+          expect.objectContaining({
+            reasoning_effort: undefined,
+            chat_template_kwargs: undefined,
+          })
+        )
+      );
+    },
+    interactionTimeoutMs
+  );
+
+  it(
+    'sends both reasoning-off conventions when reasoning is disabled',
+    async () => {
+      renderAssistantChat(
+        <AssistantChat model="test-model" workspace="default" reasoningEnabled={false} />
+      );
+
+      await userEvent.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'Hello model');
+      await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
+
+      await waitFor(() =>
+        expect(mocks.createChatCompletion).toHaveBeenCalledWith(
+          expect.objectContaining({
+            reasoning_effort: 'none',
+            chat_template_kwargs: { enable_thinking: false },
+          })
+        )
+      );
+    },
+    interactionTimeoutMs
+  );
+
   it('allows a caller to render trusted Markdown links in messages', async () => {
     mocks.createChatCompletion.mockResolvedValueOnce(
       createCompletion('[Trace source](#zoomer-node=summary-1)')

@@ -45,6 +45,7 @@ type UseAssistantChatRuntimeOptions = Pick<
   | 'onRunningChange'
   | 'onEmptyChange'
   | 'promptData'
+  | 'reasoningEnabled'
   | 'tools'
   | 'workspace'
   | 'enableImageAttachments'
@@ -55,6 +56,7 @@ export const useAssistantChatRuntime = ({
   workspace,
   baseURL,
   promptData,
+  reasoningEnabled = true,
   tools,
   disabled = false,
   initialMessages = [],
@@ -129,6 +131,11 @@ export const useAssistantChatRuntime = ({
           messages: getOpenAIMessages(conversationMessages, promptData?.system_prompt),
           max_tokens: promptData?.inference_params?.max_tokens,
           temperature: promptData?.inference_params?.temperature,
+          // Two conventions, and a model reads only its own: OpenAI-style
+          // completions gate on reasoning_effort, NIM-served models (Qwen,
+          // Nemotron) on the chat template's enable_thinking.
+          reasoning_effort: reasoningEnabled ? undefined : 'none',
+          chat_template_kwargs: reasoningEnabled ? undefined : { enable_thinking: false },
           stream: true,
           tools: tools?.length ? tools : undefined,
           signal: runController.signal,
@@ -249,6 +256,7 @@ export const useAssistantChatRuntime = ({
       promptData?.inference_params?.max_tokens,
       promptData?.inference_params?.temperature,
       promptData?.system_prompt,
+      reasoningEnabled,
       setThreadMessages,
       tools,
       updateAssistantMessage,

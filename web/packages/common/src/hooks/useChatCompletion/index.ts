@@ -11,7 +11,17 @@ import { ChatMissingModelError, CHAT_CORS_HEADERS } from '../../constants/chat';
 import { PLATFORM_BASE_URL } from '../../constants/environment';
 import type { ChatCompletionRequestReturn } from '../../types/chat';
 
-export type UseChatCompletionParams = ChatCompletionCreateParams & {
+// The pinned OpenAI SDK predates 'none', which OpenAI-style chat completions
+// accept to turn reasoning off.
+export type ReasoningEffortParam = ChatCompletionCreateParams['reasoning_effort'] | 'none';
+
+export type UseChatCompletionParams = Omit<ChatCompletionCreateParams, 'reasoning_effort'> & {
+  reasoning_effort?: ReasoningEffortParam;
+  /**
+   * Forwarded to the model's chat template. NIM-served models (Qwen, Nemotron)
+   * gate thinking on `enable_thinking` here rather than on `reasoning_effort`.
+   */
+  chat_template_kwargs?: Record<string, boolean>;
   workspace?: string;
   baseURL?: string;
   accessToken?: string;
@@ -52,6 +62,7 @@ export const createChatCompletion = async (
     stream,
     accessToken,
     signal,
+    reasoning_effort,
     ...moreOptions
   } = props;
   if (!model) {
@@ -78,6 +89,9 @@ export const createChatCompletion = async (
       messages,
       temperature: 1,
       stream,
+      ...(reasoning_effort
+        ? { reasoning_effort: reasoning_effort as ChatCompletionCreateParams['reasoning_effort'] }
+        : {}),
       ...moreOptions,
     },
     {
