@@ -158,13 +158,17 @@ def _load_entrypoint(spec: str) -> NooaEntrypoint:
     except ImportError as error:
         # The overwhelmingly common cause is that the agent's own project was
         # never installed into the image -- i.e. `nemo agents package` ran
-        # without --pyproject. Say so rather than surfacing a bare ImportError.
+        # without --pyproject. Say so, but hedge: if the module is already
+        # installed, the ImportError is coming from inside it or one of its
+        # dependencies, and the --pyproject hint does not apply.
         raise PlatformNooaAdapterConfigError(
             f"Could not import {module_name.strip()!r} for "
             f"harness.settings.{ENTRYPOINT_SETTING}={spec!r}: {error}. "
-            "The module providing it must be installed in the environment running this agent; "
-            "package the agent with `nemo agents package --pyproject pyproject.toml` so the "
-            "project is installed into the image."
+            "If the module is your own agent code, make sure it is installed in the "
+            "environment running this agent -- package it with "
+            "`nemo agents package --pyproject pyproject.toml` so the project is installed "
+            "into the image. If the module is already installed, the failure is likely an "
+            "unrelated import error inside it or one of its dependencies."
         ) from error
     try:
         entrypoint = getattr(module, attribute.strip())
