@@ -68,7 +68,7 @@ export const useAgentDetails = ({
   const queryClient = useQueryClient();
   const toast = useToast();
 
-  const { data: agent } = useAgentsGetAgent(workspace, agentName ?? '', {
+  const { data: agent, isLoading: isAgentLoading } = useAgentsGetAgent(workspace, agentName ?? '', {
     query: { enabled: !!agentName && !!workspace },
   });
 
@@ -238,6 +238,7 @@ export const useAgentDetails = ({
   return {
     isDeploymentsLoading,
     agent,
+    isAgentLoading,
     agentDeployments,
     agentEvals,
     isAgentEvalsPending,

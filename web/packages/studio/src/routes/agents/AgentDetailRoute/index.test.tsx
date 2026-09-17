@@ -4,6 +4,7 @@
 vi.hoisted(() => {
   vi.stubEnv('VITE_FF_INTAKE_ENABLED', 'true');
   vi.stubEnv('VITE_FF_AGENT_OVERVIEW_ENABLED', 'true');
+  vi.stubEnv('VITE_FF_AGENT_CONTAINER_DEPLOYMENTS_ENABLED', 'true');
 });
 
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
@@ -12,7 +13,7 @@ import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import { getAgentDetailRoute } from '@studio/routes/utils';
-import { renderRoute, screen } from '@studio/tests/util/render';
+import { renderRoute, screen, within } from '@studio/tests/util/render';
 import { waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -25,6 +26,34 @@ const renderDetail = () =>
     history: getAgentDetailRoute(workspace, agentName),
     routes: [{ path: ROUTES.workspace.agentDetail, element: <AgentDetailRoute /> }],
   });
+
+const BUILT_IMAGE = 'nemo-agents/default/react-agent:1.0';
+const agentsUrl = '*/apis/agents/v2/workspaces/:workspace/agents';
+const jobsUrl = '*/apis/agents/v2/workspaces/:workspace/jobs/package';
+
+/** A Fabric agent whose most recent packaging job already produced BUILT_IMAGE. */
+const mockPreviouslyPackagedAgent = () => {
+  server.use(
+    http.get(`${agentsUrl}/:name`, () =>
+      HttpResponse.json({
+        name: agentName,
+        workspace,
+        description: '',
+        created_at: '2026-04-20T10:00:00Z',
+        config: {},
+        config_format: 'nemo-agents-spec-v1',
+      })
+    ),
+    http.get(jobsUrl, () =>
+      HttpResponse.json({ data: [{ name: 'pkg-1', spec: { agent: agentName } }], total: 1 })
+    ),
+    http.get(`${jobsUrl}/:name/status`, () => HttpResponse.json({ status: 'completed' })),
+    http.get(`${jobsUrl}/:name/logs`, () => HttpResponse.json({ data: [], next_page: null })),
+    http.get(`${jobsUrl}/:name/results/package_result/download`, () =>
+      HttpResponse.json({ image: BUILT_IMAGE, agent: agentName, published: '' })
+    )
+  );
+};
 
 describe('AgentDetailRoute', () => {
   it('renders the agent as a full page with tabs and header actions', async () => {
@@ -72,6 +101,36 @@ describe('AgentDetailRoute', () => {
 
     expect(screen.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true');
     expect(await screen.findByRole('textbox', { name: /Task prompt/i })).toBeInTheDocument();
+  });
+
+  it("offers this agent's built image to a deployment when asked for it", async () => {
+    mockPreviouslyPackagedAgent();
+    renderDetail();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('tab', { name: 'Deployments' }));
+    // The tag lives in the packaging modal now; the trigger is what reports it is ready.
+    await screen.findByText('Image ready');
+    await user.click(screen.getByRole('button', { name: /Manage image/ }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /^Deploy$/ }));
+
+    expect(await screen.findByRole('textbox', { name: 'Container Image' })).toHaveValue(
+      BUILT_IMAGE
+    );
+  });
+
+  it('does not make an image built earlier the silent default for a new deployment', async () => {
+    mockPreviouslyPackagedAgent();
+    renderDetail();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('tab', { name: 'Deployments' }));
+    await screen.findByText('Image ready');
+    await user.click(screen.getAllByRole('button', { name: /^Deploy$/ })[0]);
+
+    await screen.findByRole('textbox', { name: /Deployment Name/ });
+    expect(screen.queryByRole('textbox', { name: 'Container Image' })).not.toBeInTheDocument();
   });
 
   it('shows the agent spec on the details tab and masks secrets', async () => {
