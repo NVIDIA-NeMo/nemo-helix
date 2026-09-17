@@ -74,6 +74,21 @@ class ModelSpec(BaseModel):
     tokenizer template is used.
     """
 
+    chat_template_controls_reasoning: Optional[bool] = None
+    """
+    Whether the served chat template gives a caller control over reasoning through
+    chat_template_kwargs, determined by rendering the template with a candidate kwarg
+    set two different ways and comparing the result.
+
+    Covers enable_thinking, thinking, and a template-interpolated reasoning_effort. A
+    False here does not mean reasoning cannot be disabled by some other means:
+    reasoning_effort sent as a request parameter and Anthropic's thinking config
+    belong to the serving API rather than the checkpoint, and prompt-level switches
+    such as Qwen3's /no_think are trained model behaviour that leaves no trace in the
+    template. None when undetermined (checkpoint not analyzed, or the template could
+    not be rendered), which is not the same as False.
+    """
+
     context_size: Optional[int] = None
     """Context window size"""
 
@@ -110,21 +125,6 @@ class ModelSpec(BaseModel):
 
     sliding_window_config: Optional[SlidingWindowConfig] = None
     """Sliding window attention configuration."""
-
-    supports_reasoning_toggle: Optional[bool] = None
-    """
-    Whether the served chat template honours a reasoning-off request sent through
-    chat_template_kwargs, determined by rendering the template with the kwarg on and
-    off and comparing the result.
-
-    Scope is the chat-template kwarg family only (enable_thinking, thinking). A False
-    here does not mean reasoning cannot be disabled by some other means: API-level
-    controls such as reasoning_effort or Anthropic's thinking config belong to the
-    serving API rather than the checkpoint, and prompt-level switches such as Qwen3's
-    /no_think are trained model behaviour that leaves no trace in the template. None
-    when undetermined (checkpoint not analyzed, or the template could not be
-    rendered), which is not the same as False.
-    """
 
     tool_call_config: Optional[ToolCallConfig] = None
     """Configuration for tool calling support in NIM deployments."""

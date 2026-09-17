@@ -209,7 +209,16 @@ def is_huggingface_model_directory(
     return has_weights
 
 
-REASONING_TOGGLE_KWARGS = ("enable_thinking", "thinking")
+# Kwarg name -> the pair of values probed against each other. A template that
+# branches on the kwarg renders these two differently. Booleans cover the
+# Qwen3/Nemotron and DeepSeek spellings; gpt-oss-style templates interpolate a
+# reasoning-effort string into the system prompt instead, so that one is probed
+# with two efforts rather than with on/off.
+REASONING_CONTROL_KWARGS: dict[str, tuple[object, object]] = {
+    "enable_thinking": (True, False),
+    "thinking": (True, False),
+    "reasoning_effort": ("high", "low"),
+}
 
 _PROBE_MESSAGES = [{"role": "user", "content": "hi"}]
 _PROBE_CONTEXT = {
@@ -274,24 +283,26 @@ def _render_chat_template(template: str, **kwargs: object) -> str | None:
         return None
 
 
-def detect_reasoning_toggle(chat_template: object) -> bool | None:
-    """Whether a caller can turn reasoning off through ``chat_template_kwargs``.
+def detect_reasoning_control(chat_template: object) -> bool | None:
+    """Whether the served chat template gives a caller control over reasoning.
 
-    Renders the served template with the kwarg on and off and compares the
-    output. A template that branches on the kwarg renders differently; one that
-    merely mentions it — or hardcodes it, as ``{%- set enable_thinking = true %}``
-    does — renders the same both ways and is correctly reported as no toggle.
+    Renders the template with each candidate kwarg set two different ways and
+    compares the output. A template that branches on the kwarg renders
+    differently; one that merely mentions it — or hardcodes it, as
+    ``{%- set enable_thinking = true %}`` does — renders the same both ways and
+    is correctly reported as no control.
 
     Returns None when the answer is undetermined rather than negative: the
     template could not be resolved or rendered. Absent a template entirely the
     answer is a definite False, since there is nothing to honour the kwarg.
 
-    Scope is deliberately this one family. Reasoning is also disabled by means
-    that leave nothing in the template to read:
+    Scope is the ``chat_template_kwargs`` family only. Reasoning is also
+    disabled by means that leave nothing in the template to read:
 
-    * ``reasoning_effort`` on the request, and Anthropic's ``thinking`` config,
-      are properties of the serving API rather than of the weights — switchyard
-      handles each separately in its OpenAI and Anthropic backends.
+    * ``reasoning_effort`` sent as a *request parameter*, and Anthropic's
+      ``thinking`` config, are properties of the serving API rather than of the
+      weights — switchyard handles each separately in its OpenAI and Anthropic
+      backends. Only the template-interpolated spelling is visible here.
     * Prompt-level switches such as Qwen3's ``/no_think`` are trained behaviour.
       The template passes the marker through untouched, so rendering cannot see
       it; only an inference probe could.
@@ -306,17 +317,17 @@ def detect_reasoning_toggle(chat_template: object) -> bool | None:
     if template is None:
         return None
 
-    candidates = [kwarg for kwarg in REASONING_TOGGLE_KWARGS if kwarg in template]
+    candidates = {kwarg: values for kwarg, values in REASONING_CONTROL_KWARGS.items() if kwarg in template}
     if not candidates:
         return False
 
     undetermined = False
-    for kwarg in candidates:
-        enabled = _render_chat_template(template, **{kwarg: True})
-        disabled = _render_chat_template(template, **{kwarg: False})
-        if enabled is None or disabled is None:
+    for kwarg, (one, other) in candidates.items():
+        rendered_one = _render_chat_template(template, **{kwarg: one})
+        rendered_other = _render_chat_template(template, **{kwarg: other})
+        if rendered_one is None or rendered_other is None:
             undetermined = True
             continue
-        if enabled != disabled:
+        if rendered_one != rendered_other:
             return True
     return None if undetermined else False

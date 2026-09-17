@@ -233,32 +233,32 @@ def _spec_with(**overrides: Any) -> ModelSpec:
 
 def test_merge_existing_spec_preserves_a_determined_reasoning_toggle() -> None:
     entity = _model_entity("qwen3")
-    entity.spec = PluginModelSpec.model_validate(_spec_with(supports_reasoning_toggle=True).model_dump())
-    fresh = _spec_with(supports_reasoning_toggle=None)
+    entity.spec = PluginModelSpec.model_validate(_spec_with(chat_template_controls_reasoning=True).model_dump())
+    fresh = _spec_with(chat_template_controls_reasoning=None)
 
     ModelSpecRunner._merge_existing_spec(entity, fresh)
 
-    assert fresh.supports_reasoning_toggle is True
+    assert fresh.chat_template_controls_reasoning is True
 
 
 def test_merge_existing_spec_preserves_a_determined_false() -> None:
     entity = _model_entity("qwen3")
-    entity.spec = PluginModelSpec.model_validate(_spec_with(supports_reasoning_toggle=False).model_dump())
-    fresh = _spec_with(supports_reasoning_toggle=None)
+    entity.spec = PluginModelSpec.model_validate(_spec_with(chat_template_controls_reasoning=False).model_dump())
+    fresh = _spec_with(chat_template_controls_reasoning=None)
 
     ModelSpecRunner._merge_existing_spec(entity, fresh)
 
-    assert fresh.supports_reasoning_toggle is False
+    assert fresh.chat_template_controls_reasoning is False
 
 
 def test_merge_existing_spec_does_not_override_a_fresh_analysis() -> None:
     entity = _model_entity("qwen3")
-    entity.spec = PluginModelSpec.model_validate(_spec_with(supports_reasoning_toggle=False).model_dump())
-    fresh = _spec_with(supports_reasoning_toggle=True)
+    entity.spec = PluginModelSpec.model_validate(_spec_with(chat_template_controls_reasoning=False).model_dump())
+    fresh = _spec_with(chat_template_controls_reasoning=True)
 
     ModelSpecRunner._merge_existing_spec(entity, fresh)
 
-    assert fresh.supports_reasoning_toggle is True
+    assert fresh.chat_template_controls_reasoning is True
 
 
 OVERRIDABLE_TEMPLATE = (
@@ -270,24 +270,24 @@ OVERRIDABLE_TEMPLATE = (
 def test_rederive_uses_a_fileset_supplied_template_over_the_tokenizer_answer() -> None:
     # Tokenizer said the checkpoint toggles; the fileset then overrode the served
     # template with one that ignores the kwarg.
-    spec = _spec_with(supports_reasoning_toggle=True, chat_template="hello {{ messages[0]['content'] }}")
+    spec = _spec_with(chat_template_controls_reasoning=True, chat_template="hello {{ messages[0]['content'] }}")
 
-    ModelSpecRunner._rederive_reasoning_toggle(spec)
+    ModelSpecRunner._rederive_reasoning_control(spec)
 
-    assert spec.supports_reasoning_toggle is False
+    assert spec.chat_template_controls_reasoning is False
 
 
 def test_rederive_promotes_a_toggling_override() -> None:
-    spec = _spec_with(supports_reasoning_toggle=False, chat_template=OVERRIDABLE_TEMPLATE)
+    spec = _spec_with(chat_template_controls_reasoning=False, chat_template=OVERRIDABLE_TEMPLATE)
 
-    ModelSpecRunner._rederive_reasoning_toggle(spec)
+    ModelSpecRunner._rederive_reasoning_control(spec)
 
-    assert spec.supports_reasoning_toggle is True
+    assert spec.chat_template_controls_reasoning is True
 
 
 def test_rederive_leaves_the_tokenizer_answer_when_no_override_arrived() -> None:
-    spec = _spec_with(supports_reasoning_toggle=True, chat_template=None)
+    spec = _spec_with(chat_template_controls_reasoning=True, chat_template=None)
 
-    ModelSpecRunner._rederive_reasoning_toggle(spec)
+    ModelSpecRunner._rederive_reasoning_control(spec)
 
-    assert spec.supports_reasoning_toggle is True
+    assert spec.chat_template_controls_reasoning is True
