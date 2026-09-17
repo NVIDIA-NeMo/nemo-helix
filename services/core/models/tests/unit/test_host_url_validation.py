@@ -49,6 +49,9 @@ class TestHostUrlValidationHelper:
             "ftp://inference-api.nvidia.com",  # wrong scheme
             "//inference-api.nvidia.com",  # scheme-relative
             "",  # empty
+            "https:inference-api.nvidia.com",  # scheme but no authority/hostname
+            "https://",  # scheme + delimiter but no host
+            "http:/v1/models",  # single-slash, hostless
         ],
     )
     def test_rejects_urls_without_http_scheme(self, value: str) -> None:

@@ -384,13 +384,19 @@ def _validate_host_url(v: str) -> str:
     so the user gets a clear, actionable 4xx naming the missing scheme instead of
     a late, confusing failure.
 
+    Both a scheme AND a hostname are required: ``"https:inference-api.nvidia.com"``
+    (or ``"https://"``) parses with scheme ``https`` but no authority, which the
+    downstream client turns into the same hostless-request 502. Requiring
+    ``parsed.hostname`` rejects those too.
+
     Deliberately NOT wired onto the response/domain ``ModelProvider`` schema: that
     model is rebuilt from persisted rows on every read (``_entity_to_schema``), so
     validating it there would turn any provider stored before this check (exactly
     the NMP-186 rows) into an unreadable/un-listable 500. Enforcing only on
     create/upsert protects new writes without breaking reads of legacy data.
     """
-    if urlparse(v).scheme not in ("http", "https"):
+    parsed = urlparse(v)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ValueError(f"Model provider host_url must include a scheme (http:// or https://); got '{v}'")
     return v
 
