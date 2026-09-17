@@ -103,6 +103,12 @@ class PlatformNooaRuntime:
         # invocation. The runtime is long-lived and serves many; a leftover
         # FABRIC_RELAY_CONFIG_PATH is the ambient-config hazard the bundled
         # adapters have a named guard against.
+        #
+        # `_applied_environment` mutates the process-global `os.environ`, so it
+        # is safe only because this runtime serves one invocation at a time: the
+        # descriptor declares `streaming: false` / `cancellation: false` and the
+        # lifecycle serves invokes serially. Two overlapping invokes would
+        # overwrite each other's Relay env; keep that invariant.
         with _applied_environment(telemetry.env):
             async with relay_plugin.plugin(_relay_plugin_config(telemetry)):
                 return await self._invoke_entrypoint(request, context)
