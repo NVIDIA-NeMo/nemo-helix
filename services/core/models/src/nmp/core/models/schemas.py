@@ -159,7 +159,7 @@ class ModelSpec(BaseModel):
     supports_reasoning_toggle: Optional[bool] = Field(
         None,
         description=(
-            "Whether a caller can turn reasoning off for this model through chat_template_kwargs, determined by rendering the served chat template with the kwarg on and off and comparing the result. None when undetermined (checkpoint not analyzed, or the template could not be rendered), which is not the same as False."
+            "Whether the served chat template honours a reasoning-off request sent through chat_template_kwargs, determined by rendering the template with the kwarg on and off and comparing the result. Scope is the chat-template kwarg family only (enable_thinking, thinking). A False here does not mean reasoning cannot be disabled by some other means: API-level controls such as reasoning_effort or Anthropic's thinking config belong to the serving API rather than the checkpoint, and prompt-level switches such as Qwen3's /no_think are trained model behaviour that leaves no trace in the template. None when undetermined (checkpoint not analyzed, or the template could not be rendered), which is not the same as False."
         ),
     )
     head_type: Literal["causal_lm", "embedding", "cross_encoder", "unknown"] = Field(

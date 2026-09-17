@@ -285,6 +285,19 @@ def detect_reasoning_toggle(chat_template: object) -> bool | None:
     Returns None when the answer is undetermined rather than negative: the
     template could not be resolved or rendered. Absent a template entirely the
     answer is a definite False, since there is nothing to honour the kwarg.
+
+    Scope is deliberately this one family. Reasoning is also disabled by means
+    that leave nothing in the template to read:
+
+    * ``reasoning_effort`` on the request, and Anthropic's ``thinking`` config,
+      are properties of the serving API rather than of the weights — switchyard
+      handles each separately in its OpenAI and Anthropic backends.
+    * Prompt-level switches such as Qwen3's ``/no_think`` are trained behaviour.
+      The template passes the marker through untouched, so rendering cannot see
+      it; only an inference probe could.
+
+    A False therefore means "this template will ignore the kwarg", not "reasoning
+    cannot be turned off".
     """
     if chat_template is None:
         return False
