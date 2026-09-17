@@ -15,10 +15,10 @@ export interface WizardProgress {
   metrics: StepStatus;
 }
 
-/** ``complete`` wins over ``active``: a satisfied step reads as done even while
- *  the user is still editing it. */
+/** Locked wins over satisfied, because `StepStatus` cannot express both and
+ *  only `upcoming` disables the controls. */
 const statusOf = (unlocked: boolean, satisfied: boolean): StepStatus =>
-  satisfied ? 'complete' : unlocked ? 'active' : 'upcoming';
+  !unlocked ? 'upcoming' : satisfied ? 'complete' : 'active';
 
 /**
  * Which steps are done and which are open for input.
