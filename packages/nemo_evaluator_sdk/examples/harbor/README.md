@@ -99,18 +99,19 @@ uv run python -m packages.nemo_evaluator_sdk.examples.harbor.run_harbor_example
 
 ## A NeMo Fabric harness inside Harbor
 
-`fabric_hello_world_dataset/` is the same hello-world task on a `python:3.12-slim` image, so
-[NeMo Fabric](https://github.com/NVIDIA/NeMo-Fabric) can install itself into the task container.
-`run_fabric_deepagents_example.py` runs it with the LangChain deepagents harness on a Nemotron model:
+`fabric_agent/fabric_hello_world_dataset/` is the same hello-world task on a `python:3.12-slim`
+image, so [NeMo Fabric](https://github.com/NVIDIA/NeMo-Fabric) can install itself into the task
+container. `fabric_agent/run_fabric_deepagents_example.py` runs it with the LangChain deepagents
+harness on a Nemotron model:
 
 ```bash
 export NVIDIA_API_KEY=...   # https://build.nvidia.com
-uv run python -m packages.nemo_evaluator_sdk.examples.harbor.run_fabric_deepagents_example
+uv run python -m packages.nemo_evaluator_sdk.examples.harbor.fabric_agent.run_fabric_deepagents_example
 ```
 
-The agent is `nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent`, a thin
-subclass of Fabric's own Harbor agent that resolves the model credential variable and endpoint from the
-`provider/model` slug. The key reaches the container through `agent_env_from_host`, so the job
+The agent is `nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent`, a subclass
+of `FabricAgent`, Fabric's custom Harbor agent, that resolves the model credential variable and
+endpoint from the `provider/model` slug. The key reaches the container through `agent_env_from_host`, so the job
 directory's `config.json` records `${NVIDIA_API_KEY}` rather than the value. See
 [Run a NeMo Fabric Agent inside Harbor](https://docs.nvidia.com/nemo-platform/documentation/evaluate-models/agent-eval/harbor-fabric-agent)
 for the platform job form.

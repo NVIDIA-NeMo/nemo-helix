@@ -14,10 +14,10 @@ Requires ``harbor`` installed, a running Docker daemon, and the model provider's
 (``NVIDIA_API_KEY`` from https://build.nvidia.com for the default model). Run it as a module from the
 repository root::
 
-    uv run python -m packages.nemo_evaluator_sdk.examples.harbor.run_fabric_deepagents_example
-    uv run python -m packages.nemo_evaluator_sdk.examples.harbor.run_fabric_deepagents_example \\
-        --model nvidia/nemotron-3.5-lightning-30b-a3b
-    uv run python -m packages.nemo_evaluator_sdk.examples.harbor.run_fabric_deepagents_example \\
+    uv run python -m packages.nemo_evaluator_sdk.examples.harbor.fabric_agent.run_fabric_deepagents_example
+    uv run python -m packages.nemo_evaluator_sdk.examples.harbor.fabric_agent.run_fabric_deepagents_example \\
+        --model nvidia/nemotron-3-super-120b-a12b
+    uv run python -m packages.nemo_evaluator_sdk.examples.harbor.fabric_agent.run_fabric_deepagents_example \\
         --model openai/gpt-5.4   # forwards OPENAI_API_KEY instead
 """
 
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 #: hello-world on a `python:3.12-slim` image: the Fabric agent installs itself into the task container.
 FABRIC_HELLO_WORLD_DATASET_DIR = Path(__file__).resolve().parent / "fabric_hello_world_dataset"
 NEMO_FABRIC_AGENT = "nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent"
-DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b"
+DEFAULT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
 
 
 def api_key_env_for(model: str, override: str | None) -> str:

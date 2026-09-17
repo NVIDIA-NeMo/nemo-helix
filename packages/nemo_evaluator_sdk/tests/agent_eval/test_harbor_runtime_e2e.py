@@ -26,7 +26,9 @@ from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrialStatus
 pytestmark = [pytest.mark.e2e, pytest.mark.slow, pytest.mark.skip_in_ci]
 
 _DATASET_DIR = Path(__file__).resolve().parents[2] / "examples" / "harbor" / "hello_world_dataset"
-_FABRIC_DATASET_DIR = Path(__file__).resolve().parents[2] / "examples" / "harbor" / "fabric_hello_world_dataset"
+_FABRIC_DATASET_DIR = (
+    Path(__file__).resolve().parents[2] / "examples" / "harbor" / "fabric_agent" / "fabric_hello_world_dataset"
+)
 _TASK_NAME = "harbor/hello-world"
 
 # Minimal BaseAgent for the resume probe. Satisfies the bundled hello-world verifier,
@@ -233,7 +235,7 @@ async def test_nemo_fabric_agent_runs_deepagents_on_nemotron_inside_harbor(tmp_p
             "fabric_package": "nemo-fabric[deepagents]==0.3.0b1",
             "fabric_workspace": "/app",
         },
-        agent_model_name=os.environ.get("NEMO_FABRIC_TEST_MODEL", "nvidia/nemotron-3-super-120b-a12b"),
+        agent_model_name=os.environ.get("NEMO_FABRIC_TEST_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b"),
         agent_env_from_host=["NVIDIA_API_KEY"],
         agent_setup_timeout_multiplier=8.0,
         agent_timeout_multiplier=5.0,
