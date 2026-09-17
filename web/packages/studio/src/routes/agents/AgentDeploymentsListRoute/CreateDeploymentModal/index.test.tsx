@@ -249,7 +249,7 @@ describe('CreateDeploymentModal', () => {
     await user.click(await screen.findByRole('option', { name: 'Docker' }));
     await user.click(within(dialog).getByRole('button', { name: 'Deploy' }));
 
-    await waitFor(() => expect(captured.body.deployment_mode).toBe('docker'));
-    expect(captured.body.image).toBeUndefined();
+    await waitFor(() => expect(captured.body?.deployment_mode).toBe('docker'));
+    expect(captured.body?.image).toBeUndefined();
   });
 });
