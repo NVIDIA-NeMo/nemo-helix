@@ -25,6 +25,7 @@ interface ModelChatProps extends Pick<
   | 'baseURL'
   | 'promptData'
   | 'tools'
+  | 'extraHeaders'
   | 'assistantName'
   | 'placeholder'
   | 'disabled'
