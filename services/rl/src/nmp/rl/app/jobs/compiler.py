@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 
 from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.deployment import DeploymentParams
+from nemo_platform_plugin.deployment import LORA_ENABLED_REQUIRED_MESSAGE, DeploymentParams
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nemo_platform_plugin.jobs.api_factory import (
     ContainerSpec,
@@ -252,11 +252,7 @@ async def _validate_deployment_config(
         # RlJobInput rejects this at submit, but the compiler is entered with an
         # RlJobOutput, which carries no such validator -- re-assert it here.
         if job_spec.trains_lora_adapter and not dc.lora_enabled:
-            raise PlatformJobCompilationError(
-                "deployment_config.lora_enabled must be true (or omitted) when training a LoRA adapter. "
-                "Setting lora_enabled=false would deploy the base model without LoRA support, "
-                "making the trained adapter unservable."
-            )
+            raise PlatformJobCompilationError(LORA_ENABLED_REQUIRED_MESSAGE)
         tcc = dc.tool_call_config
         if tcc and tcc.tool_call_plugin:
             await _require_tool_call_plugin_permission(workspace)
