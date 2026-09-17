@@ -21,10 +21,9 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar, Protocol
 
 from nemo_platform_plugin.job_context import JobContext
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 EXECUTE_AGENT_EXTENSION_ENTRY_POINT_GROUP = "nemo.agents.execute_extensions"
-NOOP_EXECUTE_AGENT_EXTENSION_KIND = "noop"
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,18 +71,3 @@ class ExecuteAgentExtension(Protocol):
 
     def after_invoke(self, context: ExecuteAgentAfterInvokeContext) -> None:
         """Run after a successful Fabric invocation."""
-
-
-class NoopExecuteAgentExtensionConfig(BaseModel):
-    """The noop extension takes no configuration at all."""
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class NoopExecuteAgentExtension:
-    """Default extension used when no plugin extension is configured."""
-
-    config_model: ClassVar[type[BaseModel]] = NoopExecuteAgentExtensionConfig
-
-    def after_invoke(self, context: ExecuteAgentAfterInvokeContext) -> None:
-        del context

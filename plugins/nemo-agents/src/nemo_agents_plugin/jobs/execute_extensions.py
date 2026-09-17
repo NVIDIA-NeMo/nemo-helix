@@ -12,16 +12,31 @@ installed extension kind and running it.
 from __future__ import annotations
 
 from importlib.metadata import entry_points
-from typing import Any
+from typing import Any, ClassVar
 
 from nemo_platform_plugin.agents.execute_extensions import (
     EXECUTE_AGENT_EXTENSION_ENTRY_POINT_GROUP,
-    NOOP_EXECUTE_AGENT_EXTENSION_KIND,
     ExecuteAgentAfterInvokeContext,
     ExecuteAgentExtension,
-    NoopExecuteAgentExtension,
 )
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+NOOP_EXECUTE_AGENT_EXTENSION_KIND = "noop"
+
+
+class NoopExecuteAgentExtensionConfig(BaseModel):
+    """The noop extension takes no configuration at all."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class NoopExecuteAgentExtension:
+    """Default extension used when no plugin extension is configured."""
+
+    config_model: ClassVar[type[BaseModel]] = NoopExecuteAgentExtensionConfig
+
+    def after_invoke(self, context: ExecuteAgentAfterInvokeContext) -> None:
+        del context
 
 
 def resolve_execute_agent_extension(kind: str) -> type[ExecuteAgentExtension]:
