@@ -1022,12 +1022,16 @@ def list_artifacts(evaluation_id: str, db: Db, prefix: str = "") -> ListEnvelope
 
 
 @router.get("/{evaluation_id}/artifacts/{path:path}")
-def get_artifact(evaluation_id: str, path: str, db: Db) -> StreamingResponse:
+def get_artifact(evaluation_id: str, path: str, database_factory: StreamDatabaseFactory) -> StreamingResponse:
     try:
         object_key = s3.evaluation_artifact_key(evaluation_id, path)
     except ValueError:
         raise _http_error(404, "not_found", "not found") from None
-    _ensure_evaluation_exists(db, evaluation_id)
+    # Short-lived checkout: a request-scoped Db dependency would hold the pooled
+    # connection for the entire stream, and enough concurrent slow downloads then
+    # exhaust the pool and stall unrelated requests.
+    with database_factory() as db:
+        _ensure_evaluation_exists(db, evaluation_id)
     filename = path.rsplit("/", 1)[-1]
     return StreamingResponse(
         s3.stream_object(object_key),
@@ -1037,8 +1041,9 @@ def get_artifact(evaluation_id: str, path: str, db: Db) -> StreamingResponse:
 
 
 @router.get("/{evaluation_id}/archive/download")
-def download_archive(evaluation_id: str, db: Db) -> StreamingResponse:
-    row = _load_archive_row(db, evaluation_id)
+def download_archive(evaluation_id: str, database_factory: StreamDatabaseFactory) -> StreamingResponse:
+    with database_factory() as db:
+        row = _load_archive_row(db, evaluation_id)
     if row.get("archive_status") != "ready" or not row.get("archive_object_key"):
         raise _http_error(404, "not_found", "archive not ready")
     return StreamingResponse(
@@ -1049,8 +1054,9 @@ def download_archive(evaluation_id: str, db: Db) -> StreamingResponse:
 
 
 @router.get("/{evaluation_id}/harbor-viewer/archive")
-def download_harbor_viewer_archive(evaluation_id: str, db: Db) -> StreamingResponse:
-    row = _load_observability_row(db, evaluation_id)
+def download_harbor_viewer_archive(evaluation_id: str, database_factory: StreamDatabaseFactory) -> StreamingResponse:
+    with database_factory() as db:
+        row = _load_observability_row(db, evaluation_id)
     if not harbor_viewer_archive_available_from_result(row.get("result")):
         raise _http_error(404, "not_found", "Harbor Viewer archive not ready")
     return StreamingResponse(
