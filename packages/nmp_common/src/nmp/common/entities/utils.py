@@ -54,7 +54,9 @@ def parse_adapters_suffix(name: str) -> tuple[str, str, str] | None:
         return None
     base, _, adapter_part = name.partition(ADAPTERS_INFIX)
     adapter_workspace, separator, adapter_name = adapter_part.partition("/")
-    if not base or not separator or not adapter_workspace or not adapter_name:
+    # The grammar has exactly one adapter-name segment, so a surplus ``/`` in the
+    # adapter tail (e.g. ``base&adapters/ws/name/extra``) is not a valid composite.
+    if not base or not separator or not adapter_workspace or not adapter_name or "/" in adapter_name:
         return None
     return base, adapter_workspace, adapter_name
 
@@ -339,6 +341,16 @@ class ModelEntityId:
     base_name: str
     adapter_workspace: str | None = None
     adapter_name: str | None = None
+
+    def __post_init__(self) -> None:
+        # The adapter fields are all-or-nothing: a partial pair would set is_lora False
+        # and silently drop the supplied field on to_composite(). Empty strings would
+        # serialize an invalid composite. Reject both so a constructed instance is always
+        # a well-formed plain-or-LoRA id.
+        if (self.adapter_workspace is None) != (self.adapter_name is None):
+            raise ValueError("adapter_workspace and adapter_name must be provided together")
+        if self.adapter_workspace == "" or self.adapter_name == "":
+            raise ValueError("adapter fields must not be empty")
 
     @property
     def is_lora(self) -> bool:

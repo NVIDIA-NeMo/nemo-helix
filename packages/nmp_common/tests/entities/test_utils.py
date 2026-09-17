@@ -261,3 +261,22 @@ def test_parse_adapters_suffix_plain_name_returns_none():
 def test_parse_adapters_suffix_malformed_returns_none(name: str):
     """A malformed ``&adapters/`` name is not a valid composite (None, not raise)."""
     assert parse_adapters_suffix(name) is None
+
+
+def test_parse_adapters_suffix_rejects_surplus_segment():
+    """A surplus '/' in the adapter tail is not a valid single-segment adapter name."""
+    assert parse_adapters_suffix("base&adapters/ws/name/extra") is None
+
+
+def test_model_entity_id_rejects_partial_adapter_state():
+    """Constructing with only one adapter field set is rejected (all-or-nothing)."""
+    with pytest.raises(ValueError, match="provided together"):
+        ModelEntityId(workspace="ws", base_name="base", adapter_workspace="a-ws")
+    with pytest.raises(ValueError, match="provided together"):
+        ModelEntityId(workspace="ws", base_name="base", adapter_name="a-name")
+
+
+def test_model_entity_id_rejects_empty_adapter_fields():
+    """Empty-string adapter fields are rejected."""
+    with pytest.raises(ValueError, match="must not be empty"):
+        ModelEntityId(workspace="ws", base_name="base", adapter_workspace="", adapter_name="")
