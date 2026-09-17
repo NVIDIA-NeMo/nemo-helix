@@ -15,7 +15,7 @@ import {
   PRIMARY_CANONICAL_FIELDS,
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
 import {
-  lastSelectorForRole,
+  lastExchange,
   useDatasetPreview,
 } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetPreview';
 import { CircleCheck, CircleHelp } from 'lucide-react';
@@ -44,8 +44,9 @@ export const DatasetPanel: FC = () => {
     dataset ?? null
   );
 
-  const assistantSelector = lastSelectorForRole(messageSelectors, 'assistant') ?? '';
-  const userSelector = lastSelectorForRole(messageSelectors, 'user') ?? '';
+  const exchange = lastExchange(messageSelectors);
+  const assistantSelector = exchange.assistant ?? '';
+  const userSelector = exchange.user ?? '';
 
   const formatLabel = (dataset?.split('.').pop() ?? '').toUpperCase() || 'File';
 
@@ -63,14 +64,18 @@ export const DatasetPanel: FC = () => {
     if (boundMessages !== nextMessages) setValue('fieldMapping.messages', nextMessages);
 
     const boundReference = fieldMapping?.reference ?? '';
+    const boundInput = fieldMapping?.input ?? '';
     if (messagesColumn) {
       if (boundReference !== assistantSelector)
         setValue('fieldMapping.reference', assistantSelector);
-    } else if (boundReference && !isSupportedMappingPath(boundReference)) {
-      // Left over from a messages dataset; a flat file cannot use it.
-      setValue('fieldMapping.reference', '');
+      if (boundInput !== userSelector) setValue('fieldMapping.input', userSelector);
+    } else {
+      // Left over from a messages dataset; a flat file cannot use array paths.
+      if (boundReference && !isSupportedMappingPath(boundReference))
+        setValue('fieldMapping.reference', '');
+      if (boundInput && !isSupportedMappingPath(boundInput)) setValue('fieldMapping.input', '');
     }
-  }, [row, messagesColumn, assistantSelector, fieldMapping, setValue]);
+  }, [row, messagesColumn, assistantSelector, userSelector, fieldMapping, setValue]);
 
   const bindableOptions = useMemo(
     () => keyOptions.filter((option) => isSupportedMappingPath(option.value)),

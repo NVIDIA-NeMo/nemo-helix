@@ -6,7 +6,7 @@ import {
   type DatasetBindings,
 } from '@studio/routes/evaluation/EvaluationNewRoute/types';
 import {
-  lastSelectorForRole,
+  lastExchange,
   useDatasetPreview,
 } from '@studio/routes/evaluation/EvaluationNewRoute/useDatasetPreview';
 import { useMemo } from 'react';
@@ -32,13 +32,14 @@ export function useDatasetBindings(): DatasetBindings {
 
   return useMemo(() => {
     if (messagesColumn) {
-      const user = lastSelectorForRole(messageSelectors, 'user');
-      const assistant = lastSelectorForRole(messageSelectors, 'assistant');
+      const { user, assistant } = lastExchange(messageSelectors);
       const asCanonical = (selector: string | null) =>
         selector ? `{{ ${selector.replace(messagesColumn, 'messages')} }}` : null;
       return {
         messagesColumn,
-        input: asCanonical(user) ?? '{{input}}',
+        // No `{{input}}` fallback: a messages dataset binds no canonical input
+        // column, so that expression would fail the job at render time.
+        input: asCanonical(user) ?? '',
         reference: asCanonical(assistant),
         context: null,
         inputPath: user,
