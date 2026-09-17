@@ -17,6 +17,7 @@ __all__ = [
     "AutomodelJobOutput",
     "BatchSpec",
     "DatasetSpec",
+    "DeploymentParams",
     "ExportSpec",
     "LoRAParams",
     "OptimizerSpec",
@@ -25,6 +26,7 @@ __all__ = [
     "ParallelismSpec",
     "RetrievalSpec",
     "ScheduleSpec",
+    "ToolCallParams",
     "TrainingSpec",
     "ValidationError",
 ]
@@ -219,6 +221,60 @@ class OutputResponse(AutomodelSchema):
     description: str | None = None
 
 
+class ToolCallParams(AutomodelSchema):
+    """Tool calling configuration for NIM deployments."""
+
+    tool_call_parser: str | None = Field(
+        default=None,
+        description=(
+            "Name of the tool call parser to use (e.g., 'openai', 'hermes', 'pythonic', 'llama3_json', 'mistral')."
+        ),
+    )
+    tool_call_plugin: str | None = Field(
+        default=None,
+        pattern=r"^[\w\-.]+/[\w\-.]+$",
+        description=(
+            "Reference to a fileset containing the custom tool call plugin Python file. "
+            "Expected format: '{workspace}/{fileset_name}'."
+        ),
+    )
+    auto_tool_choice: bool | None = Field(
+        default=None,
+        description="Whether to enable automatic tool choice.",
+    )
+
+
+class DeploymentParams(AutomodelSchema):
+    """Inline deployment parameters for auto-deploying a trained model.
+
+    Used in :class:`AutomodelJobInput.deployment_config` and passed through to
+    the model_entity task at compile time. When unset, no deployment is launched.
+    """
+
+    gpu: int = Field(default=1, gt=0, description="Number of GPUs required for the deployment.")
+    additional_envs: dict[str, str] | None = Field(
+        default=None,
+        description="Additional environment variables for the deployment.",
+    )
+    disk_size: str | None = Field(default=None, description="Disk size for the deployment.")
+    image_name: str | None = Field(
+        default=None,
+        description="Container image name from NGC. If not specified, defaults to multi-llm.",
+    )
+    image_tag: str | None = Field(default=None, description="Container image tag from NGC.")
+    lora_enabled: bool = Field(
+        default=True,
+        description=(
+            "When auto-deploying a full SFT training, setting this true allows subsequent "
+            "LoRA adapters to be deployed against it."
+        ),
+    )
+    tool_call_config: ToolCallParams | None = Field(
+        default=None,
+        description="Tool calling configuration override for the NIM deployment.",
+    )
+
+
 class AutomodelJobInput(AutomodelSchema):
     """POST body / CLI JSON."""
 
@@ -232,6 +288,15 @@ class AutomodelJobInput(AutomodelSchema):
     parallelism: ParallelismSpec = Field(default_factory=ParallelismSpec)
     output: OutputRequest | None = None
     integrations: IntegrationsSpec | None = None
+    deployment_config: str | DeploymentParams | None = Field(
+        default=None,
+        description=(
+            "Deployment configuration for auto-deploying the model after training. "
+            "Pass a string to reference an existing ModelDeploymentConfig by name "
+            "('my-config' or 'workspace/my-config'). An object provides inline NIM "
+            "deployment parameters. Omit to skip deployment."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -239,6 +304,32 @@ class AutomodelJobInput(AutomodelSchema):
         if isinstance(data, dict) and "output_model" in data:
             raise ValueError("spec.output_model was removed. Use spec.output instead.")
         return data
+
+    def trains_standalone_lora_adapter(self) -> bool:
+        """True when the job produces a LoRA adapter rather than a full-weight model.
+
+        ``merge=True`` folds the adapter back into the base weights, which yields a
+        standalone model; only the unmerged case needs a LoRA-enabled deployment.
+        """
+        lora = self.training.lora
+        return self.training.finetuning_type == "lora" and lora is not None and not lora.merge
+
+    @model_validator(mode="after")
+    def _reject_lora_without_lora_enabled(self) -> Self:
+        # A LoRA adapter cannot be served by a base deployment with lora_enabled=false --
+        # the deployed NIM would refuse to load it. Surface this at submit time rather
+        # than after training has already burned the GPU hours.
+        if (
+            self.trains_standalone_lora_adapter()
+            and isinstance(self.deployment_config, DeploymentParams)
+            and not self.deployment_config.lora_enabled
+        ):
+            raise ValueError(
+                "deployment_config.lora_enabled must be true (or omitted) when training a LoRA adapter. "
+                "Setting lora_enabled=false would deploy the base model without LoRA support, "
+                "making the trained adapter unservable."
+            )
+        return self
 
     def with_resolved_recipe(self, checkpoint_head_type: str) -> Self:
         """Return the canonical job input after resolving its recipe and defaults."""
@@ -292,6 +383,15 @@ class AutomodelJobOutput(AutomodelSchema):
     parallelism: ParallelismSpec
     output: OutputResponse
     integrations: IntegrationsSpec | None = None
+    deployment_config: str | DeploymentParams | None = Field(
+        default=None,
+        description=(
+            "Deployment configuration for auto-deploying the model after training. "
+            "Pass a string to reference an existing ModelDeploymentConfig by name "
+            "('my-config' or 'workspace/my-config'). An object provides inline NIM "
+            "deployment parameters. Omit to skip deployment."
+        ),
+    )
 
     def validate_for_training(self) -> None:
         """MoE / parallelism constraints (ported from legacy CustomizationJobOutput)."""

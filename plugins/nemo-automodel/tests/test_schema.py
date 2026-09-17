@@ -5,7 +5,7 @@ import json
 
 import pytest
 from nemo_automodel_plugin.cli.inputs import load_job_json
-from nemo_automodel_plugin.schema import AutomodelJobInput, ExportSpec
+from nemo_automodel_plugin.schema import AutomodelJobInput, DeploymentParams, ExportSpec
 
 
 def test_reject_output_model() -> None:
@@ -213,3 +213,94 @@ def test_cli_serialization_still_carries_explicit_fields(tmp_path) -> None:
 
     assert resolved.batch.micro_batch_size == 2
     assert resolved.batch.global_batch_size == 256
+
+
+def test_deployment_config_defaults_to_none() -> None:
+    spec = AutomodelJobInput.model_validate(
+        {
+            "model": "meta/llama",
+            "dataset": {"training": "default/train"},
+            "training": {"training_type": "sft", "finetuning_type": "lora"},
+        }
+    )
+    assert spec.deployment_config is None
+
+
+def test_deployment_config_accepts_string_ref_and_inline_params() -> None:
+    base = {
+        "model": "meta/llama",
+        "dataset": {"training": "default/train"},
+        "training": {"training_type": "sft", "finetuning_type": "lora"},
+    }
+    by_ref = AutomodelJobInput.model_validate({**base, "deployment_config": "shared/my-config"})
+    assert by_ref.deployment_config == "shared/my-config"
+
+    inline = AutomodelJobInput.model_validate({**base, "deployment_config": {"gpu": 2}})
+    assert isinstance(inline.deployment_config, DeploymentParams)
+    assert inline.deployment_config.gpu == 2
+    assert inline.deployment_config.lora_enabled is True
+
+
+def test_lora_adapter_rejects_lora_enabled_false() -> None:
+    with pytest.raises(ValueError, match="lora_enabled must be true"):
+        AutomodelJobInput.model_validate(
+            {
+                "model": "meta/llama",
+                "dataset": {"training": "default/train"},
+                "training": {"training_type": "sft", "finetuning_type": "lora"},
+                "deployment_config": {"lora_enabled": False},
+            }
+        )
+
+
+def test_merged_lora_allows_lora_enabled_false() -> None:
+    """merge=True produces a full-weight model, so a non-LoRA deployment is fine."""
+    spec = AutomodelJobInput.model_validate(
+        {
+            "model": "meta/llama",
+            "dataset": {"training": "default/train"},
+            "training": {"training_type": "sft", "finetuning_type": "lora", "lora": {"merge": True}},
+            "deployment_config": {"lora_enabled": False},
+        }
+    )
+    assert spec.trains_standalone_lora_adapter() is False
+
+
+def test_all_weights_allows_lora_enabled_false() -> None:
+    spec = AutomodelJobInput.model_validate(
+        {
+            "model": "meta/llama",
+            "dataset": {"training": "default/train"},
+            "training": {"training_type": "sft", "finetuning_type": "all_weights"},
+            "deployment_config": {"lora_enabled": False},
+        }
+    )
+    assert spec.trains_standalone_lora_adapter() is False
+
+
+@pytest.mark.parametrize("gpu", [0, -1])
+def test_deployment_config_rejects_non_positive_gpu(gpu: int) -> None:
+    """Caught at submit, not at compile time where the task-side schema would reject it."""
+    with pytest.raises(ValueError, match="greater than 0"):
+        AutomodelJobInput.model_validate(
+            {
+                "model": "meta/llama",
+                "dataset": {"training": "default/train"},
+                "training": {"training_type": "sft", "finetuning_type": "lora"},
+                "deployment_config": {"gpu": gpu},
+            }
+        )
+
+
+def test_deployment_config_accepts_a_positive_gpu_count() -> None:
+    spec = AutomodelJobInput.model_validate(
+        {
+            "model": "meta/llama",
+            "dataset": {"training": "default/train"},
+            "training": {"training_type": "sft", "finetuning_type": "lora"},
+            "deployment_config": {"gpu": 1},
+        }
+    )
+
+    assert isinstance(spec.deployment_config, DeploymentParams)
+    assert spec.deployment_config.gpu == 1
