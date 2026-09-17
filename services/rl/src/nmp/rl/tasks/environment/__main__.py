@@ -83,6 +83,43 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--nemo-rl-root",
+        type=Path,
+        default=None,
+        help=(
+            "NeMo-RL checkout, submodules included, at the commit NEMO_RL_REF pins in "
+            "docker-bake.hcl. The whole agent closure is derived from it: nemo-gym from the "
+            "Gym submodule, ray and openai from its uv.lock. Without it the package needs "
+            "sandbox egress to start."
+        ),
+    )
+    parser.add_argument(
+        "--gym-root",
+        type=Path,
+        default=None,
+        help=(
+            "NeMo-Gym checkout, if not using --nemo-rl-root. nemo-gym is not on an index, so "
+            "its dependencies are read by building it from source."
+        ),
+    )
+    parser.add_argument(
+        "--nemo-gym-version",
+        default=None,
+        help="Fail unless the Gym checkout builds this exact version. Only needed when the "
+        "checkout is not the one NEMO_RL_REF pins.",
+    )
+    parser.add_argument(
+        "--ray-version",
+        default=None,
+        help="Override the ray pin from --nemo-rl-root's uv.lock. Gym appends "
+        "'ray[default]==<this>' to every per-server venv install.",
+    )
+    parser.add_argument(
+        "--openai-version",
+        default=None,
+        help="Override the openai pin from --nemo-rl-root's uv.lock. Appended the same way.",
+    )
+    parser.add_argument(
         "--validate-only",
         type=Path,
         default=None,
@@ -145,6 +182,11 @@ def main(argv: list[str] | None = None) -> int:
         dataset_seed=args.dataset_seed,
         validation_fraction=args.validation_fraction,
         wheels_dir=args.wheels_dir.resolve() if args.wheels_dir else None,
+        nemo_rl_root=args.nemo_rl_root.resolve() if args.nemo_rl_root else None,
+        gym_root=args.gym_root.resolve() if args.gym_root else None,
+        nemo_gym_version=args.nemo_gym_version,
+        ray_version=args.ray_version,
+        openai_version=args.openai_version,
     )
     try:
         result = convert_prime_environment(spec)

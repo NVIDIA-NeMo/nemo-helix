@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,7 +29,7 @@ from nmp.rl.tasks.environment.package import (
     write_adapter_wheels_package,
     write_dataset_jsonl,
 )
-from nmp.rl.tasks.environment.validate import VENV_SEED_PACKAGES, validate_dataset_rows
+from nmp.rl.tasks.environment.validate import SANDBOX_VENV_DISTRIBUTIONS, validate_dataset_rows
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name, parse_wheel_filename
 from packaging.version import InvalidVersion, Version
@@ -49,6 +50,22 @@ TARGET_WHEEL_PLATFORMS = (
 TARGET_UV_PLATFORM = "x86_64-unknown-linux-gnu"
 TARGET_PYTHON_VERSION = "3.13"  # Gym venv Python in the training image
 _TARGET_PLATFORM_TAG_RE = re.compile(r"^(any|linux_x86_64|manylinux[0-9_.]*_x86_64)$")
+
+# Gym rebuilds each per-server venv from empty and installs the agent before the environment,
+# so an offline package has to carry the agent side too. Values mirror scripts/grpo-examples/
+# gym_to_env_package.py, which already does this for wheels-v1.
+SETUPTOOLS_PKG_RESOURCES_CEILING = "81"  # 81 dropped pkg_resources, which Gym's hydra 1.3 imports
+HYDRA_CORE_SPEC = ">=1.3,<1.4"
+OMEGACONF_SPEC = ">=2.2,<2.4"
+# Resolved for every package: pip is what `uv venv --seed` installs, setuptools/setuptools-scm are
+# Gym's build-system.requires for building the agent from the image's source tree.
+GYM_VENV_REQUIREMENTS = (
+    "pip",
+    f"setuptools>=61,<{SETUPTOOLS_PKG_RESOURCES_CEILING}",
+    "setuptools-scm",
+    f"hydra-core{HYDRA_CORE_SPEC}",
+    f"omegaconf{OMEGACONF_SPEC}",
+)
 
 # Snapshot of the hub env's HF dataset, mounted at SANDBOX_DATASET_PATH.
 HUB_ENV_DATASET_FILENAME = "hub_environment.parquet"
@@ -72,6 +89,15 @@ class ConvertEnvironmentSpec:
     verifiers_spec: str = DEFAULT_VERIFIERS_SPEC
     extra_wheels: tuple[str, ...] = ()
     wheels_dir: Path | None = None  # pre-vendored *.whl; required non-empty if set
+    # The agent side of the closure. Gym pins each venv to the versions the training image has
+    # installed, and nemo-gym is not on an index, so these cannot be inferred from the hub id.
+    # A NeMo-RL checkout at the commit docker-bake.hcl pins (NEMO_RL_REF), submodules included.
+    # Everything the agent closure needs is in there, so nothing has to be looked up by hand.
+    nemo_rl_root: Path | None = None
+    gym_root: Path | None = None  # defaults to nemo_rl_root's Gym submodule; built, not downloaded
+    nemo_gym_version: str | None = None  # fail unless gym_root builds exactly this
+    ray_version: str | None = None  # defaults to the nemo_rl_root lock pin
+    openai_version: str | None = None
 
 
 def _compile_pinned_requirements(
@@ -211,17 +237,120 @@ def assert_wheels_target_platform(wheels_dir: Path) -> None:
         )
 
 
-def _vendor_missing_seed_wheels(wheels_dir: Path, *, work_dir: Path) -> None:
-    """Add any ``uv venv --seed`` package a pre-vendored closure does not already carry."""
+GYM_SUBMODULE_PATH = "3rdparty/Gym-workspace/Gym"
+
+
+def _lock_pin(nemo_rl_root: Path, distribution: str) -> str | None:
+    """Read a distribution's pinned version out of NeMo-RL's ``uv.lock``.
+
+    Gym stamps ``ray``/``openai`` into every sub-venv from what the training image has
+    installed, and the image resolves those from this lock -- not from Gym's own, which pins
+    different versions.
+    """
+    lock = nemo_rl_root / "uv.lock"
+    if not lock.is_file():
+        raise ValueError(f"{nemo_rl_root} has no uv.lock; expected a NeMo-RL checkout")
+    packages = tomllib.loads(lock.read_text(encoding="utf-8")).get("package", [])
+    versions = {pkg["version"] for pkg in packages if pkg.get("name") == distribution and "version" in pkg}
+    if len(versions) != 1:
+        return None
+    return versions.pop()
+
+
+def _resolve_image_pins(spec: ConvertEnvironmentSpec) -> tuple[Path | None, str | None, str | None]:
+    """Fill gym_root/ray/openai from ``nemo_rl_root``, leaving explicit values untouched."""
+    gym_root, ray_version, openai_version = spec.gym_root, spec.ray_version, spec.openai_version
+    if spec.nemo_rl_root is None:
+        return gym_root, ray_version, openai_version
+
+    if gym_root is None:
+        candidate = spec.nemo_rl_root / GYM_SUBMODULE_PATH
+        if not (candidate / "pyproject.toml").is_file():
+            raise ValueError(
+                f"{candidate} is not a Gym checkout. Clone NeMo-RL with --recurse-submodules, "
+                "or pass --gym-root explicitly."
+            )
+        gym_root = candidate
+    ray_version = ray_version or _lock_pin(spec.nemo_rl_root, "ray")
+    openai_version = openai_version or _lock_pin(spec.nemo_rl_root, "openai")
+    return gym_root, ray_version, openai_version
+
+
+def _build_gym_fork_wheel(gym_root: Path, dest: Path, expect_version: str | None) -> Path:
+    """Build nemo-gym from ``gym_root`` so a fork is not replaced by the upstream release."""
+    dest.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["uv", "build", "--wheel", "--out-dir", str(dest), str(gym_root)], check=True)
+    built = sorted(dest.glob("nemo_gym-*.whl"))
+    if len(built) != 1:
+        raise RuntimeError(f"expected exactly one nemo_gym wheel, got {[p.name for p in built]}")
+    version = built[0].name.split("-")[1]
+    if expect_version is not None and version != expect_version:
+        raise RuntimeError(
+            f"--gym-root builds nemo-gym {version} but the image reports {expect_version}. "
+            "Gym pins each per-server venv to the image's version, so this wheel would be "
+            "ignored and uv would resolve from an index instead."
+        )
+    return built[0]
+
+
+def _agent_closure_requirements(spec: ConvertEnvironmentSpec, *, work_dir: Path) -> list[str]:
+    """Requirements for the agent venv Gym builds, on top of the environment's own."""
+    gym_root, ray_version, openai_version = _resolve_image_pins(spec)
+
+    requirements = list(GYM_VENV_REQUIREMENTS)
+    if gym_root is not None:
+        # The [dev] extra, not the bare wheel: the image's verifiers_agent installs
+        # `-e nemo-gym[dev] @ ../../`, so the closure has to cover that extra too.
+        wheel = _build_gym_fork_wheel(gym_root, work_dir / "gym", spec.nemo_gym_version)
+        requirements.append(f"nemo-gym[dev] @ file://{wheel}")
+    if ray_version:
+        requirements.append(f"ray[default]=={ray_version}")
+    if openai_version:
+        requirements.append(f"openai=={openai_version}")
+
+    incomplete = [
+        name
+        for name, supplied in (
+            ("--gym-root", gym_root is not None),
+            ("--ray-version", bool(ray_version)),
+            ("--openai-version", bool(openai_version)),
+        )
+        if not supplied
+    ]
+    if incomplete:
+        logger.warning(
+            "Building without %s. Gym pins each per-server venv to the versions the training "
+            "image runs, so without them the package needs sandbox egress to start. Pass "
+            "--nemo-rl-root pointing at a NeMo-RL checkout (with submodules) at the commit "
+            "NEMO_RL_REF pins, and all of them are derived from it.",
+            ", ".join(incomplete),
+        )
+    return requirements
+
+
+def _vendor_missing_agent_wheels(wheels_dir: Path, spec: ConvertEnvironmentSpec, *, work_dir: Path) -> None:
+    """Top a pre-vendored closure up to what Gym's per-server venv install needs.
+
+    Resolved from the same requirements as the download path rather than from bare
+    distribution names: unpinned, setuptools resolves past the pkg_resources ceiling and ray
+    and openai land on versions the training image does not run, which fails offline exactly
+    like the omission did. A closure that already carries all of them is left alone, so a
+    complete pre-vendored directory still needs no network.
+    """
     provided = {canonicalize_name(str(parse_wheel_filename(whl.name)[0])) for whl in wheels_dir.glob("*.whl")}
-    missing = [name for name in VENV_SEED_PACKAGES if canonicalize_name(name) not in provided]
+    missing = [name for name in SANDBOX_VENV_DISTRIBUTIONS if canonicalize_name(name) not in provided]
     if not missing:
         return
-    logger.info("--wheels-dir omits venv seed package(s); vendoring: %s", ", ".join(missing))
+    logger.info("--wheels-dir omits %s; resolving the agent closure to supply them", ", ".join(missing))
     # No extra index: these come from PyPI, and uv gives --extra-index-url priority for
     # every package it resolves.
-    pinned = _compile_pinned_requirements(work_dir / "seed", list(missing))
+    requirements = _agent_closure_requirements(spec, work_dir=work_dir)
+    pinned = _compile_pinned_requirements(work_dir / "agent", requirements)
     _run_pip_download(wheels_dir, requirements_file=pinned)
+    # omegaconf's antlr4-python3-runtime publishes no wheel, so the closure is incomplete
+    # until the source artifacts are built -- same as the download path.
+    _build_downloaded_sdists(wheels_dir)
+    _assert_complete_wheel_closure(wheels_dir, pinned)
 
 
 def download_hub_wheels(
@@ -240,15 +369,21 @@ def download_hub_wheels(
         wheels_dir.mkdir(parents=True, exist_ok=True)
         for whl in src_wheels:
             shutil.copy2(whl, wheels_dir / whl.name)
-        _vendor_missing_seed_wheels(wheels_dir, work_dir=work_dir)
+        _vendor_missing_agent_wheels(wheels_dir, spec, work_dir=work_dir)
         assert_wheels_target_platform(wheels_dir)
         return wheels_dir
 
     package_name = hub_id_to_package_name(spec.hub_id)
     hub_requirement = f"{package_name}=={spec.hub_version}" if spec.hub_version else package_name
-    # The seed packages resolve alongside the environment so the closure stays internally
-    # consistent; vendoring them afterwards could pin a version the rest of it contradicts.
-    packages = [spec.verifiers_spec, hub_requirement, *spec.extra_wheels, *VENV_SEED_PACKAGES]
+    # One resolve for the whole venv, not one per part. Resolving the environment alone is what
+    # produced a closure pinning openai 3.14.1 while Gym installs openai==2.6.1: complete on its
+    # own terms, unsatisfiable against the venv it has to build.
+    packages = [
+        spec.verifiers_spec,
+        hub_requirement,
+        *spec.extra_wheels,
+        *_agent_closure_requirements(spec, work_dir=work_dir),
+    ]
     pinned = _compile_pinned_requirements(work_dir, packages, extra_index_url=PRIME_HUB_SIMPLE_INDEX)
     _run_pip_download(wheels_dir, requirements_file=pinned, extra_index_url=PRIME_HUB_SIMPLE_INDEX)
     _build_downloaded_sdists(wheels_dir)
