@@ -28,6 +28,7 @@ from nemo_auditor.entities import (
     AuditTarget as AuditTargetEntity,
 )
 from nemo_auditor.jobs.audit import (
+    GARAK_PYTHON_ENVVAR,
     AuditInputSpec,
     AuditJob,
     AuditSpec,
@@ -36,6 +37,7 @@ from nemo_auditor.jobs.audit import (
     _collect_report_artifacts,
     _divide_and_write_confs,
     _garak_config_dict,
+    _resolve_garak_python,
     _rewrite_options_uris,
 )
 from nemo_platform import AsyncNeMoPlatform
@@ -384,6 +386,15 @@ class TestAuditJobRun:
         monkeypatch.setenv("NEMO_AUDITOR_GARAK_PYTHON", str(tmp_path / "does-not-exist"))
         with pytest.raises(FileNotFoundError, match="garak interpreter not found"):
             AuditJob().run(_make_spec_dict(), ctx=ctx)
+
+    def test_garak_interperter_resolution_env_override(self, monkeypatch) -> None:
+        monkeypatch.delenv(GARAK_PYTHON_ENVVAR, raising=False)
+        assert len(_resolve_garak_python()) > 0
+        env_path = "env_path"
+        monkeypatch.setenv(GARAK_PYTHON_ENVVAR, env_path)
+        garak_pythons = _resolve_garak_python()
+        assert len(garak_pythons) == 1
+        assert garak_pythons[0] == env_path
 
     def test_completed_run_collects_all_three_artifacts(
         self, tmp_path: Path, fake_garak_python: Path, fake_parse_plugin_spec
