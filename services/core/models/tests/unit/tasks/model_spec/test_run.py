@@ -259,3 +259,35 @@ def test_merge_existing_spec_does_not_override_a_fresh_analysis() -> None:
     ModelSpecRunner._merge_existing_spec(entity, fresh)
 
     assert fresh.supports_reasoning_toggle is True
+
+
+OVERRIDABLE_TEMPLATE = (
+    "{%- set enable_thinking = enable_thinking if enable_thinking is defined else true %}"
+    "{%- if enable_thinking %}<think>{%- endif %}"
+)
+
+
+def test_rederive_uses_a_fileset_supplied_template_over_the_tokenizer_answer() -> None:
+    # Tokenizer said the checkpoint toggles; the fileset then overrode the served
+    # template with one that ignores the kwarg.
+    spec = _spec_with(supports_reasoning_toggle=True, chat_template="hello {{ messages[0]['content'] }}")
+
+    ModelSpecRunner._rederive_reasoning_toggle(spec)
+
+    assert spec.supports_reasoning_toggle is False
+
+
+def test_rederive_promotes_a_toggling_override() -> None:
+    spec = _spec_with(supports_reasoning_toggle=False, chat_template=OVERRIDABLE_TEMPLATE)
+
+    ModelSpecRunner._rederive_reasoning_toggle(spec)
+
+    assert spec.supports_reasoning_toggle is True
+
+
+def test_rederive_leaves_the_tokenizer_answer_when_no_override_arrived() -> None:
+    spec = _spec_with(supports_reasoning_toggle=True, chat_template=None)
+
+    ModelSpecRunner._rederive_reasoning_toggle(spec)
+
+    assert spec.supports_reasoning_toggle is True

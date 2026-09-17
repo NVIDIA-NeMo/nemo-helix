@@ -158,9 +158,9 @@ class ModelSpec(BaseModel):
     is_chat: Optional[bool] = Field(None, description="Whether this is a chat model")
     supports_reasoning_toggle: Optional[bool] = Field(
         None,
-        description="Whether the model's chat template accepts an 'enable_thinking' kwarg, meaning a caller can "
-        "turn reasoning off per request via chat_template_kwargs. None when the checkpoint has not been analyzed, "
-        "which is not the same as False.",
+        description=(
+            "Whether a caller can turn reasoning off for this model through chat_template_kwargs, determined by rendering the served chat template with the kwarg on and off and comparing the result. None when undetermined (checkpoint not analyzed, or the template could not be rendered), which is not the same as False."
+        ),
     )
     head_type: Literal["causal_lm", "embedding", "cross_encoder", "unknown"] = Field(
         default="unknown",

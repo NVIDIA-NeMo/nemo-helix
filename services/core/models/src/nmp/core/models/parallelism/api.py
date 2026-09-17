@@ -181,13 +181,15 @@ def infer_model_cfg_from_hf(
         cfg = yaml_cfg
 
     is_chat = False
+    # None means undetermined — the tokenizer was unreachable. A tokenizer that
+    # loads and carries no chat template is a definite "no toggle", so the call
+    # stays outside the is_chat branch.
     supports_reasoning_toggle = None
     if os.path.exists(cfg.name_or_path):
         tokenizer = AutoTokenizer.from_pretrained(cfg.name_or_path, trust_remote_code=is_trusted)
         chat_template = getattr(tokenizer, "chat_template", None)
         is_chat = chat_template is not None
-        if is_chat:
-            supports_reasoning_toggle = detect_reasoning_toggle(chat_template)
+        supports_reasoning_toggle = detect_reasoning_toggle(chat_template)
 
     if getattr(cfg, "text_config", None):
         cfg = getattr(cfg, "text_config")

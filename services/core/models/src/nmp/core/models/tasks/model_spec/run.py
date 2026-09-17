@@ -46,6 +46,7 @@ from nmp.common.entities.utils import parse_entity_ref
 from nmp.common.model_utils import is_embedding_model
 from nmp.common.sdk_factory import get_platform_sdk
 from nmp.core.models.config import config as models_config
+from nmp.core.models.parallelism.utils import detect_reasoning_toggle
 from nmp.core.models.schemas import ModelSpec, ToolCallConfig
 from nmp.core.models.tasks.model_spec.schemas import ModelSpecTaskConfig, NMPJobContext
 from nmp.core.models.tasks.model_spec.utils import infer_model_head_type
@@ -148,6 +149,23 @@ class ModelSpecRunner:
                 auto_tool_choice=tc.auto_tool_choice,
             )
             logger.info("Merged tool_call_config from fileset metadata into model spec")
+
+    @staticmethod
+    def _rederive_reasoning_toggle(model_spec: ModelSpec) -> None:
+        """Re-derive the reasoning toggle against the template that will be served.
+
+        The checkpoint's tokenizer supplied the first answer, but the fileset or
+        the entity's previous spec may since have supplied a ``chat_template``
+        override, and that override is what backends render. Runs after both
+        merges so it always sees the final template; leaves the tokenizer-derived
+        answer alone when no override arrived.
+        """
+        if model_spec.chat_template is None:
+            return
+        model_spec.supports_reasoning_toggle = detect_reasoning_toggle(model_spec.chat_template)
+        logger.info(
+            f"Re-derived supports_reasoning_toggle={model_spec.supports_reasoning_toggle} from the served chat template"
+        )
 
     @staticmethod
     def _merge_existing_spec(me: ModelEntity, model_spec: ModelSpec) -> None:
@@ -313,6 +331,10 @@ class ModelSpecRunner:
         # Preserve user-set fields from the existing spec that the auto-generated
         # spec doesn't cover (e.g. tool_call_config set before the task ran).
         self._merge_existing_spec(me, model_spec)
+
+        # Last, so it sees the final chat_template whether that came from the
+        # fileset or from the entity's previous spec.
+        self._rederive_reasoning_toggle(model_spec)
 
         try:
             me: ModelEntity = self._models.update_model(

@@ -209,23 +209,101 @@ def is_huggingface_model_directory(
     return has_weights
 
 
-REASONING_TOGGLE_KWARG = "enable_thinking"
+REASONING_TOGGLE_KWARGS = ("enable_thinking", "thinking")
+
+_PROBE_MESSAGES = [{"role": "user", "content": "hi"}]
+_PROBE_CONTEXT = {
+    "messages": _PROBE_MESSAGES,
+    "add_generation_prompt": True,
+    "bos_token": "",
+    "eos_token": "",
+    "tools": None,
+}
 
 
-def detect_reasoning_toggle(chat_template: object) -> bool:
-    """Detect whether a chat template lets a caller turn reasoning off.
+def default_chat_template(chat_template: object) -> str | None:
+    """Resolve the template that inference will actually render.
 
-    Qwen3- and Nemotron-style templates branch on an ``enable_thinking`` variable
-    that callers set through ``chat_template_kwargs``. A template that never
-    mentions it ignores the kwarg, so such a request would silently keep reasoning.
-
-    Transformers exposes ``chat_template`` as a string, or as a list of
-    ``{"name": ..., "template": ...}`` entries when a model ships several.
+    Transformers exposes ``chat_template`` as a plain string, or as a collection
+    of named templates when a model ships more than one. Only the ``default``
+    entry serves ordinary requests; a model that puts its reasoning behaviour in
+    a separately-named template is switched by template *selection*, not by a
+    kwarg, so the others must not be consulted here.
     """
     if isinstance(chat_template, str):
-        return REASONING_TOGGLE_KWARG in chat_template
+        return chat_template
     if isinstance(chat_template, dict):
-        return any(detect_reasoning_toggle(value) for value in chat_template.values())
+        entry = chat_template.get("default")
+        return entry if isinstance(entry, str) else None
     if isinstance(chat_template, list):
-        return any(detect_reasoning_toggle(entry) for entry in chat_template)
-    return False
+        for entry in chat_template:
+            if isinstance(entry, dict) and entry.get("name") == "default":
+                template = entry.get("template")
+                return template if isinstance(template, str) else None
+    return None
+
+
+def _render_chat_template(template: str, **kwargs: object) -> str | None:
+    """Render a chat template, or return None if it cannot be rendered here.
+
+    jinja2 arrives with transformers, which is only installed in the task image,
+    so the import is deliberately lazy — an API-server import of this module must
+    not require it.
+    """
+    try:
+        from jinja2 import ChainableUndefined
+        from jinja2.sandbox import ImmutableSandboxedEnvironment
+    except ImportError:
+        logger.info("jinja2 unavailable; cannot determine chat-template reasoning support")
+        return None
+
+    def raise_exception(message: str) -> None:
+        raise RuntimeError(message)
+
+    env = ImmutableSandboxedEnvironment(
+        trim_blocks=True,
+        lstrip_blocks=True,
+        undefined=ChainableUndefined,
+    )
+    env.globals["raise_exception"] = raise_exception
+    env.globals["strftime_now"] = lambda fmt: ""
+    try:
+        return env.from_string(template).render(**_PROBE_CONTEXT, **kwargs)
+    except Exception as exc:
+        logger.info(f"Could not render chat template while probing reasoning support: {exc}")
+        return None
+
+
+def detect_reasoning_toggle(chat_template: object) -> bool | None:
+    """Whether a caller can turn reasoning off through ``chat_template_kwargs``.
+
+    Renders the served template with the kwarg on and off and compares the
+    output. A template that branches on the kwarg renders differently; one that
+    merely mentions it — or hardcodes it, as ``{%- set enable_thinking = true %}``
+    does — renders the same both ways and is correctly reported as no toggle.
+
+    Returns None when the answer is undetermined rather than negative: the
+    template could not be resolved or rendered. Absent a template entirely the
+    answer is a definite False, since there is nothing to honour the kwarg.
+    """
+    if chat_template is None:
+        return False
+
+    template = default_chat_template(chat_template)
+    if template is None:
+        return None
+
+    candidates = [kwarg for kwarg in REASONING_TOGGLE_KWARGS if kwarg in template]
+    if not candidates:
+        return False
+
+    undetermined = False
+    for kwarg in candidates:
+        enabled = _render_chat_template(template, **{kwarg: True})
+        disabled = _render_chat_template(template, **{kwarg: False})
+        if enabled is None or disabled is None:
+            undetermined = True
+            continue
+        if enabled != disabled:
+            return True
+    return None if undetermined else False
