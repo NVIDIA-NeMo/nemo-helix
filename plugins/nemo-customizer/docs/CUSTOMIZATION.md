@@ -12,21 +12,24 @@ Implement `CustomizationContributor`:
 - `name` — must match the entry-point key (e.g. `automodel`)
 - `get_routers()` — `RouterSpec` list with a **unique** prefix under `v2/workspaces/{workspace}/<backend>/`
 - `get_cli()` — optional `typer.Typer` mounted at `nemo customization <name>`
-- `get_cli_summary()` — optional `CustomizationCLISummary` folded into `nemo customization --help`; the router lists discovered backends in name order and never names one itself
+- `get_cli_summary()` — optional `CustomizationCLISummary` added to `nemo customization --help`; the router lists discovered backends in name order and never names one itself
 - `get_sdk_resources()` — optional sync/async resource classes for `client.customization.<name>`; the Customizer hub constructs them with a typed Customizer SDK context that contains the typed Customizer client, typed Jobs client, and active workspace (do not register a separate `nemo.sdk` entry point; the Customizer hub owns `nemo.sdk` → `customization` and composes backends)
 
 ## Help text
 
-`nemo customization --help` has to let someone pick a backend without reading any
-docs, so each backend owns two layers of help:
+A user should be able to choose a backend from `nemo customization --help` alone, so
+each backend provides two layers of help:
 
-- **Overview** — `get_cli_summary()` returns a `CustomizationCLISummary` with
-  `trains`, `runs_on`, `job_json`, `pick_when` and `command`. Keep each field to one
-  or two short sentences. The router prints it through an 80-column console, so lines
-  longer than that re-wrap and lose their indent.
-- **Detail** — the `help` on the `typer.Typer` from `get_cli()`, and the `submit`
-  command's own help. This is where the job JSON fields, runtime constraints and
-  "use another backend instead" advice belong.
+- **Overview** — `get_cli_summary()` returns a `CustomizationCLISummary` with the
+  fields `trains`, `runs_on`, `job_json`, `use_when` and `command`. Keep each field to
+  one or two short sentences. `render()` wraps them to fit the 80-column console the
+  router's help is printed through.
+- **Detail** — the `help` on the `typer.Typer` returned by `get_cli()`, and the help on
+  its `submit` command. This is where the job JSON fields, runtime constraints, and
+  pointers to a more suitable backend belong.
+
+Keep the two layers consistent with the other backends: the overview fields answer the
+same questions in the same order, and the detailed help follows the same section order.
 
 ## pyproject.toml
 

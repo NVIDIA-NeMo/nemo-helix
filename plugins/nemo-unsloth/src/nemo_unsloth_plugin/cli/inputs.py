@@ -24,13 +24,13 @@ _SUBMIT_HELP = """Submit an Unsloth training job to the platform.
 Pass the path to a job JSON file holding one UnslothJobInput object: the base
 model, the dataset, and how to train it.
 
-Submit validates the file first, so a bad field is reported here instead of
-after the job starts. The platform then creates the job and runs it on the
-execution profile it resolves for this backend.
+Submit validates the file before creating the job, so an invalid field is
+reported immediately. The platform then creates the job and runs it on the
+execution profile resolved for this backend.
 
-Submit prints the created job as JSON on stdout. Its 'name' field is the job
-id. Follow the run with 'nemo jobs watch <job id>' or check it once with
-'nemo jobs get-status <job id>'.
+Submit prints the created job as JSON on stdout. The 'name' field is the job
+id. Track the job with 'nemo jobs watch <job id>', or check its status once
+with 'nemo jobs get-status <job id>'.
 
 Run 'nemo customization unsloth explain' to print the job JSON schema."""
 

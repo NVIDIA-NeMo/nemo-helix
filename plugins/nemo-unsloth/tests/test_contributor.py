@@ -148,23 +148,23 @@ class TestCLIHelp:
         assert summary.command == "nemo customization unsloth submit job.json"
 
     def test_cli_summary_fits_the_rendered_width(self, unsloth: UnslothContributor) -> None:
-        """The router prints the blurb through an 80-column Rich console."""
+        """The router prints the summary through an 80-column Rich console."""
         summary = unsloth.get_cli_summary()
         assert summary is not None
         rendered = summary.render("unsloth")
         assert [line for line in rendered.splitlines() if len(line) > 80] == []
 
-    def test_backend_help_goes_deeper_than_the_top_level_blurb(self, unsloth: UnslothContributor) -> None:
+    def test_backend_help_goes_deeper_than_the_top_level_summary(self, unsloth: UnslothContributor) -> None:
         summary = unsloth.get_cli_summary()
         assert summary is not None
-        blurb = summary.render(unsloth.name)
+        summary_text = summary.render(unsloth.name)
         help_text = unsloth.cli_help
 
-        assert len(help_text) > len(blurb)
-        # Payload and escape-hatch detail belongs on the backend, not in the overview.
+        assert len(help_text) > len(summary_text)
+        # Job JSON fields and schema names belong on the backend, not in the overview.
         for detail in ("UnslothJobInput", "gradient_accumulation_steps", "save_method", "explain"):
             assert detail in help_text, detail
-            assert detail not in blurb, detail
+            assert detail not in summary_text, detail
 
     def test_submit_help_explains_the_job_json(self, unsloth: UnslothContributor) -> None:
         cli = unsloth.get_cli()

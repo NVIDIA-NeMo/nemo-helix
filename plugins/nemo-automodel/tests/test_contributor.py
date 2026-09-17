@@ -71,25 +71,25 @@ def test_cli_summary_states_what_it_trains_and_where_it_runs() -> None:
 
 
 def test_cli_summary_fits_the_rendered_width() -> None:
-    """The router prints the blurb through an 80-column Rich console."""
+    """The router prints the summary through an 80-column Rich console."""
     summary = AutomodelContributor().get_cli_summary()
     assert summary is not None
     rendered = summary.render("automodel")
     assert [line for line in rendered.splitlines() if len(line) > 80] == []
 
 
-def test_backend_help_goes_deeper_than_the_top_level_blurb() -> None:
+def test_backend_help_goes_deeper_than_the_top_level_summary() -> None:
     contributor = AutomodelContributor()
     summary = contributor.get_cli_summary()
     assert summary is not None
-    blurb = summary.render(contributor.name)
+    summary_text = summary.render(contributor.name)
     help_text = contributor.cli_help
 
-    assert len(help_text) > len(blurb)
-    # Payload and escape-hatch detail belongs on the backend, not in the overview.
+    assert len(help_text) > len(summary_text)
+    # Job JSON fields and schema names belong on the backend, not in the overview.
     for detail in ("AutomodelJobInput", "global_batch_size", "num_nodes", "explain"):
         assert detail in help_text, detail
-        assert detail not in blurb, detail
+        assert detail not in summary_text, detail
 
 
 def test_submit_help_explains_the_job_json() -> None:

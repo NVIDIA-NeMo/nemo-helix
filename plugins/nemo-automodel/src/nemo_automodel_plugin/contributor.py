@@ -26,7 +26,7 @@ _CLI_HELP = """Fine-tune a model with Automodel: SFT, LoRA, or knowledge distill
 
 The platform runs the job on a GPU execution profile. That profile's backend
 is docker or kubernetes_job, depending on how the platform was set up. Run
-'nemo jobs list-execution-profiles' to see what this platform offers.
+'nemo jobs list-execution-profiles' to see the profiles on this platform.
 
 Multi-node training (parallelism.num_nodes above 1) needs a kubernetes_job or
 volcano_job backend. On a single node, set the GPU count with
@@ -42,7 +42,7 @@ The job JSON follows the AutomodelJobInput schema:
   parallelism  nodes, GPUs per node, tensor and pipeline parallel sizes
 
 Optional blocks: output names the model entity written at the end of the run,
-and integrations turns on Weights & Biases reporting.
+and integrations enables Weights & Biases reporting.
 
 For DPO or GRPO, use the rl backend.
 
@@ -59,7 +59,7 @@ class AutomodelContributor(BaseContributor):
         trains="SFT and LoRA fine-tuning, and knowledge distillation.",
         runs_on="a GPU execution profile, on the docker or kubernetes_job backend. Multi-node needs kubernetes_job.",
         job_json="model, dataset, training, schedule, batch, optimizer, parallelism.",
-        pick_when="you want SFT, LoRA, or knowledge distillation, on one GPU or many.",
+        use_when="you need SFT, LoRA, or knowledge distillation on one or more GPUs.",
         command="nemo customization automodel submit job.json",
     )
     jobs_router_description: ClassVar[str] = "Automodel training jobs."

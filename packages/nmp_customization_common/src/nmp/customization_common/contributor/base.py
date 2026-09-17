@@ -34,7 +34,7 @@ class BaseContributor:
     job_cls: ClassVar[type[Any]]
     #: ``nemo customization <name>`` Typer help text.
     cli_help: ClassVar[str]
-    #: Short blurb the router folds into ``nemo customization --help``.
+    #: Short summary the router adds to ``nemo customization --help``.
     cli_summary: ClassVar[CustomizationCLISummary | None] = None
     #: Description for the jobs ``RouterSpec``.
     jobs_router_description: ClassVar[str]
@@ -107,7 +107,7 @@ class BaseContributor:
         return app
 
     def get_cli_summary(self) -> CustomizationCLISummary | None:
-        """Return the backend's overview blurb for ``nemo customization --help``."""
+        """Return the backend's summary for the ``nemo customization --help`` overview."""
         return type(self).cli_summary
 
     def get_sdk_resources(self) -> CustomizationContributorSDKResources | None:

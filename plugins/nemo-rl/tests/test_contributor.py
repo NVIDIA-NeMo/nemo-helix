@@ -23,28 +23,28 @@ def test_cli_summary_states_what_it_trains_and_where_it_runs(contributor: RlCont
 
 
 def test_cli_summary_fits_the_rendered_width(contributor: RlContributor) -> None:
-    """The router prints the blurb through an 80-column Rich console."""
+    """The router prints the summary through an 80-column Rich console."""
     summary = contributor.get_cli_summary()
     assert summary is not None
     rendered = summary.render("rl")
     assert [line for line in rendered.splitlines() if len(line) > 80] == []
 
 
-def test_backend_help_goes_deeper_than_the_top_level_blurb(contributor: RlContributor) -> None:
+def test_backend_help_goes_deeper_than_the_top_level_summary(contributor: RlContributor) -> None:
     summary = contributor.get_cli_summary()
     assert summary is not None
-    blurb = summary.render(contributor.name)
+    summary_text = summary.render(contributor.name)
     help_text = contributor.cli_help
 
-    assert len(help_text) > len(blurb)
-    # Payload and escape-hatch detail belongs on the backend, not in the overview.
+    assert len(help_text) > len(summary_text)
+    # Job JSON fields and schema names belong on the backend, not in the overview.
     for detail in ("RlJobInput", "training.type", "finetuning_type", "explain"):
         assert detail in help_text, detail
-        assert detail not in blurb, detail
+        assert detail not in summary_text, detail
 
 
 def test_backend_help_names_the_backend_to_use_for_sft(contributor: RlContributor) -> None:
-    """Someone who landed here wanting SFT needs to be sent somewhere, not just refused."""
+    """A user who wanted SFT should be pointed at a backend that supports it."""
     help_text = contributor.cli_help
     assert "kubernetes_job backend only" in help_text
     assert "use the automodel or unsloth backend" in help_text

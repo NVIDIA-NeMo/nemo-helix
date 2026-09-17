@@ -33,10 +33,10 @@ _CLI_HELP = """Fine-tune a model with Unsloth on one GPU: SFT with LoRA or full 
 
 The platform runs the job on a GPU execution profile. That profile's backend
 is docker or kubernetes_job, depending on how the platform was set up. Run
-'nemo jobs list-execution-profiles' to see what this platform offers.
+'nemo jobs list-execution-profiles' to see the profiles on this platform.
 
-One job trains on one GPU. hardware.gpus only picks which GPU to use; it does
-not split the model across several GPUs.
+One job trains on a single GPU. hardware.gpus selects which GPU to use; it
+does not split the model across several GPUs.
 
 The job JSON follows the UnslothJobInput schema:
   model      base model entity, max_seq_length, 4-bit or 8-bit loading
@@ -47,9 +47,9 @@ The job JSON follows the UnslothJobInput schema:
   optimizer  learning_rate, weight_decay, optimizer algorithm
   hardware   which GPU to use, and training precision
 
-Optional blocks: output names the result and picks save_method (lora,
+Optional blocks: output names the result and selects save_method (lora,
 merged_16bit, merged_4bit), deployment_config deploys the trained model, and
-integrations turns on Weights & Biases reporting.
+integrations enables Weights & Biases reporting.
 
 For tensor, pipeline, or multi-node parallelism, use the automodel backend.
 For DPO or GRPO, use the rl backend.
@@ -67,7 +67,7 @@ class UnslothContributor(BaseContributor):
         trains="SFT fine-tuning with LoRA or with full weights.",
         runs_on="a GPU execution profile, on the docker or kubernetes_job backend. One job uses one GPU.",
         job_json="model, dataset, training, schedule, batch, optimizer, hardware.",
-        pick_when="you asked for Unsloth, or want its 4-bit LoRA path on one GPU.",
+        use_when="you need Unsloth's 4-bit LoRA path on a single GPU.",
         command="nemo customization unsloth submit job.json",
     )
     jobs_router_description: ClassVar[str] = "Unsloth GPU fine-tuning jobs (container submit)."

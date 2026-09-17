@@ -48,7 +48,7 @@ def test_cli_mounts_contributor_subgroups(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 class _SummaryContributor(_FakeContributor):
-    """Stub that also contributes a top-level blurb."""
+    """Stub that also contributes a top-level summary."""
 
     name: ClassVar[str] = "stub"
 
@@ -57,7 +57,7 @@ class _SummaryContributor(_FakeContributor):
             trains="Widgets.",
             runs_on="a widget press.",
             job_json="widget, press.",
-            pick_when="you need a widget.",
+            use_when="you need a widget.",
             command="nemo customization stub submit JOB.json",
         )
 
@@ -99,6 +99,6 @@ def test_root_help_lists_contributor_without_a_summary(monkeypatch: pytest.Monke
 
 
 def test_root_help_stays_within_the_rendered_width(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Group help is printed through an 80-column Rich console; longer lines re-wrap."""
+    """Group help is printed through an 80-column Rich console, and longer lines re-wrap."""
     help_text = _root_help({"stub": _SummaryContributor()}, monkeypatch)
     assert [line for line in help_text.splitlines() if len(line) > 80] == []

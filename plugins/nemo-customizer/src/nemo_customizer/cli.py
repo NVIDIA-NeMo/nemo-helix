@@ -15,14 +15,14 @@ from nemo_platform_plugin.discovery import (
     discover_customization_contributors,
 )
 
-# Backend-neutral on purpose: the router knows nothing about automodel, unsloth or
-# rl. Everything specific to a backend arrives through its `get_cli_summary()`.
+# The router is deliberately backend-neutral: it never names automodel, unsloth or
+# rl. Backend-specific text comes from each contributor's get_cli_summary().
 _OVERVIEW = """Train a model on your own data.
 
-You pick a backend, write a job JSON, and submit it. The platform creates the
-job and runs the training on a GPU execution profile. Each backend trains a
-different way, and the schema of the job JSON depends on the backend you
-pick."""
+Choose a backend, write a job JSON for it, and submit the file. The platform
+creates the job and runs the training on a GPU execution profile. Each backend
+trains a different way, and the schema of the job JSON depends on the backend
+you choose."""
 
 _NEXT_STEPS = """Run 'nemo customization <backend> --help' for the full description of a
 backend, or 'nemo customization <backend> explain' to print its job JSON
@@ -64,12 +64,12 @@ class CustomizationCLI(NemoCLI):
         return app
 
     def _compose_help(self) -> str:
-        """Intro + one blurb per discovered backend, in name order."""
+        """Overview, one summary per discovered backend in name order, then next steps."""
         blocks = [_OVERVIEW, "Installed backends:"]
 
         for key in sorted(self._contributors.keys()):
-            # Read through getattr: a backend that skips the blurb is listed by
-            # name rather than breaking `--help` for every other backend.
+            # Read through getattr so that a contributor without a summary is
+            # listed by name instead of breaking --help for the others.
             get_summary = getattr(self._contributors[key], "get_cli_summary", None)
             summary = get_summary() if get_summary is not None else None
             blocks.append(summary.render(key) if summary is not None else key)
