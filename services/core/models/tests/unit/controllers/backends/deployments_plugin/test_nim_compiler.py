@@ -53,6 +53,59 @@ def test_compile_nim_server_env_sets_ft_model_for_model_specific_image() -> None
     env = compile_nim_server_env(_resolved(), DeploymentsPluginConfig(), weighted=True, tool_call_plugin_path=None)
     assert env["NIM_FT_MODEL"] == "/model-store"
     assert env["NIM_CUSTOM_MODEL"] == "/model-store"
+    assert env["NIM_MODEL_NAME"] == "/model-store"
+    assert env["NIM_SERVED_MODEL_NAME"] == "org/model"
+
+
+def test_compile_nim_server_env_non_legacy_name_is_served_fqdn() -> None:
+    resolved = _resolved()
+    resolved = ResolvedPluginDeployment(
+        deployment=resolved.deployment,
+        config=resolved.config,
+        model_entity=resolved.model_entity,
+        view=DeploymentConfigView(
+            model_namespace="org",
+            model_name="model",
+            override_config={"nimLegacy": False},
+            additional_envs={"NIM_ENGINE_MODEL_PATH": "alternates/hf"},
+        ),
+        weights_type=resolved.weights_type,
+        model_namespace=resolved.model_namespace,
+        model_name=resolved.model_name,
+        model_revision=resolved.model_revision,
+        files_hf_url=resolved.files_hf_url,
+        huggingface_model_puller=resolved.huggingface_model_puller,
+        runtime=resolved.runtime,
+    )
+    env = compile_nim_server_env(resolved, DeploymentsPluginConfig(), weighted=True, tool_call_plugin_path=None)
+    assert env["NIM_ENGINE_MODEL_NAME"] == "org/model"
+    assert env["NIM_ENGINE_MODEL_PATH"] == "/model-store/alternates/hf"
+    assert env["NIM_FT_MODEL"] == "/model-store/alternates/hf"
+    assert "NIM_MODEL_PATH" not in env
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (False, False),
+        (True, True),
+        ("false", False),
+        ("0", False),
+        ("off", False),
+        ("true", True),
+        ("1", True),
+        ("on", True),
+    ],
+)
+def test_nim_legacy_weight_env_parses_untyped_override(value: object, expected: bool) -> None:
+    view = DeploymentConfigView(override_config={"nimLegacy": value})
+    assert nim_compiler.nim_legacy_weight_env(view) is expected
+
+
+def test_nim_legacy_weight_env_rejects_invalid_override() -> None:
+    view = DeploymentConfigView(override_config={"nimLegacy": "sometimes"})
+    with pytest.raises(ValueError, match="nimLegacy must be a boolean-like value"):
+        nim_compiler.nim_legacy_weight_env(view)
 
 
 def test_compile_nim_server_env_additional_envs_override_ngc_api_key() -> None:
@@ -497,6 +550,42 @@ def test_apply_nim_override_config_ignored_on_docker() -> None:
         view,
         engine="nim",
         runtime=Runtime.DOCKER,
+    )
+    assert container.image == "nim:1.0"
+
+
+def test_apply_nim_override_config_strips_nim_legacy_directive() -> None:
+    # nimLegacy drives env compilation only. It is not a NIMService Spec field,
+    # so it must not survive into the applied spec fragments or the container.
+    from nemo_deployments_plugin.entities import DeploymentConfig
+
+    container = Container(name="server", image="nim:1.0")
+    server_config = DeploymentConfig(name="dep-server", workspace="default", containers=[container])
+    view = DeploymentConfigView(override_config={"nimLegacy": False, "labels": {"custom": "label"}})
+    apply_nim_override_config(
+        container,
+        server_config,
+        view,
+        engine="nim",
+        runtime=Runtime.KUBERNETES,
+    )
+    assert server_config.labels["custom"] == "label"
+    assert "nimLegacy" not in server_config.labels
+    assert [item.name for item in container.env] == []
+
+
+def test_apply_nim_override_config_accepts_nim_legacy_alone() -> None:
+    from nemo_deployments_plugin.entities import DeploymentConfig
+
+    container = Container(name="server", image="nim:1.0")
+    server_config = DeploymentConfig(name="dep-server", workspace="default", containers=[container])
+    view = DeploymentConfigView(override_config={"nimLegacy": False})
+    apply_nim_override_config(
+        container,
+        server_config,
+        view,
+        engine="nim",
+        runtime=Runtime.KUBERNETES,
     )
     assert container.image == "nim:1.0"
 

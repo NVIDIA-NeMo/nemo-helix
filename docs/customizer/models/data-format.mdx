@@ -34,6 +34,11 @@ Each line in your JSONL file must contain a JSON object with these required fiel
 - **`query`** (string): The query text to use as an anchor for similarity learning.
 - **`pos_doc`** (string): A document that should match positively with the query.
 - **`neg_doc`** (array of strings): One or more documents that should not match with the query.
+  Convert-only retrieval Stage 1 (`enable_mining: false`) emits an **empty** list.
+  Automodel `bi_encoder` / `cross_encoder` jobs then fail at collate time with
+  `neg_doc must contain at least 1 document to sample N negatives` (N defaults to
+  4). Mine hard negatives before submitting, or provide your own non-empty lists.
+  Do not lower `training.retrieval.train_n_passages` to hide an unmined fileset.
 
 #### Example Dataset Entry
 

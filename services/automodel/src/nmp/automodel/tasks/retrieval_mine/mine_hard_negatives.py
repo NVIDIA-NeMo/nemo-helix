@@ -5,9 +5,23 @@
 
 from __future__ import annotations
 
-from nemo_automodel._transformers.auto_model import NeMoAutoModelBiEncoder
-from nemo_automodel.components.config._arg_parser import parse_args_and_load_config
-from nemo_automodel.recipes.retrieval import mine_hard_negatives as automodel_mining
+import logging
+import sys
+
+from nmp.automodel.tasks.tqdm_logging import install_line_tqdm
+
+install_line_tqdm()
+
+from nemo_automodel._transformers.auto_model import NeMoAutoModelBiEncoder  # noqa: E402
+from nemo_automodel.components.config._arg_parser import parse_args_and_load_config  # noqa: E402
+from nemo_automodel.recipes.retrieval import mine_hard_negatives as automodel_mining  # noqa: E402
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    stream=sys.stderr,
+    force=True,
+)
 
 
 class MineHardNegativesRecipe(automodel_mining.MineHardNegativesRecipe):
@@ -35,9 +49,11 @@ class MineHardNegativesRecipe(automodel_mining.MineHardNegativesRecipe):
         self.model = self.model.to(self.dist_env.device)
         self.model.eval()
         self._configure_tokenizer()
+        automodel_mining.logger.info("Loading retrieval train split and corpus for mining")
         self._load_data()
         self._build_document_mappings()
         self._prepare_data()
+        automodel_mining.logger.info("Mining setup complete; embedding queries and passages")
 
 
 def main() -> None:
@@ -45,6 +61,7 @@ def main() -> None:
     recipe = MineHardNegativesRecipe(cfg)
     recipe.setup()
     recipe.run()
+    automodel_mining.logger.info("Hard-negative mining recipe finished")
 
 
 if __name__ == "__main__":

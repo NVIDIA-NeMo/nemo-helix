@@ -20,9 +20,11 @@ Automodel detects schema from the **first JSONL line** (`DatasetSchema` in `serv
 | **CHAT** (preferred when model has chat template) | `{"messages": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}` | (none) |
 | **SFT** | `{"prompt": "...", "completion": "..."}` | (none) |
 | **CUSTOM** | Any two columns, e.g. `{"input": "...", "output": "..."}` | `"prompt_template": "{input} {output}"` on `dataset` |
-| **EMBEDDING** | `{"query": "...", "pos_doc": "...", "neg_doc": ["...", "..."]}` | embedding training type when applicable |
+| **EMBEDDING** | `{"query": "...", "pos_doc": "...", "neg_doc": ["...", "..."]}` | `training.recipe: bi_encoder` or `cross_encoder`. `neg_doc` must be a **non-empty** list; convert-only retrieval Stage 1 emits `[]` and training crashes unless you mine first. |
 
 **Conversion preference:** CHAT if `AutoTokenizer(...).chat_template` or model `spec.is_chat` / `spec.chat_template` → else SFT. Use CUSTOM or EMBEDDING only when the user asks or the task requires it.
+
+Retrieval Stage 1 already emits Automodel EMBEDDING `training.jsonl`. Do not convert those rows to CHAT `messages`.
 
 For **CUSTOM**, placeholders in `prompt_template` must match column names exactly (two placeholders).
 
@@ -64,11 +66,12 @@ EMBEDDING and CUSTOM (automodel-only schemas) are not supported by unsloth today
 
 ## Post-training evaluation
 
-Eval rows must use the **same CHAT `messages` shape** as training. Do not flatten to `prompt`/`expected` for the evaluator.
+CHAT SFT eval rows must use the **same CHAT `messages` shape** as training. Do not flatten to `prompt`/`expected` for the evaluator.
 
 | Training JSONL | Eval dataset | Eval `prompt_template` | Metric reference |
 |----------------|--------------|------------------------|------------------|
 | `messages` (single- or multi-turn) | Same fileset split (`validation.jsonl`) | `messages[:-1]` — exclude final assistant label — see `post-training-eval.md` | `{{ item.messages[-1].content }}` |
+| EMBEDDING (`query` / `pos_doc` / `neg_doc`) | Frozen Stage 1 `eval_beir` fileset (`corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`) | N/A — `nemo evaluator retrieve-eval` | nDCG@k / Recall@k in `eval_results.json` |
 
 LoRA inference and eval use the **provider** gateway on the **base** entity (`/provider/<name>/-/v1`, `model: default--<adapter>`). Base model uses the model-entity path. Full SFT / merged checkpoints use the **output** model entity's model-entity URL — deploy first. See `post-training-eval.md` and the **Using the adapter** / **Using the fine-tuned model** sections in `reporting.md`.
 

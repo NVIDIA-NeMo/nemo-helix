@@ -162,6 +162,31 @@ def test_hf_corpus_passes_token_to_snapshot_download(tmp_path: Path, monkeypatch
     assert captured["token"] == "hf_secret_value"
 
 
+def test_hf_file_uri_includes_filename_in_allow_patterns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    fake_hub = types.ModuleType("huggingface_hub")
+    dest = tmp_path / "snapshot"
+    dest.mkdir()
+    (dest / "nv_pp_dd_sdg.json").write_text("[]\n", encoding="utf-8")
+
+    def snapshot_download(**kwargs: object) -> str:
+        captured.update(kwargs)
+        return str(dest)
+
+    setattr(fake_hub, "snapshot_download", snapshot_download)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hub)
+
+    staged = materialize_corpus(
+        "hf://org/dataset@abc123/nv_pp_dd_sdg.json",
+        dest=dest,
+        sdk=Mock(),
+        workspace="default",
+    )
+
+    assert captured["allow_patterns"] == ["nv_pp_dd_sdg.json", "nv_pp_dd_sdg.json/**"]
+    assert staged == dest / "nv_pp_dd_sdg.json"
+
+
 def test_hf_token_from_env_reads_step_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("HF_TOKEN", raising=False)
     assert hf_token_from_env() is None

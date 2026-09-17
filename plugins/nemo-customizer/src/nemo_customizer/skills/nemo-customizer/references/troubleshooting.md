@@ -293,6 +293,23 @@ Set `jobs.executors.docker.launcher_tool_path` in `~/.nemo/config.yaml` to the *
 
 See `plugins/nemo-unsloth/README.md` for the 4-step job flow (download → train → upload → model-entity).
 
+## Empty `neg_doc` on retrieval jobs
+
+Symptom: `bi_encoder` / `cross_encoder` dies in the first batch with
+`neg_doc must contain at least 1 document to sample N negatives`.
+
+Cause: Data Designer convert-only Stage 1 (`enable_mining: false`) writes
+`training.jsonl` with `neg_doc: []`. Dataset validation still accepts empty
+lists. The collator then samples `train_n_passages - 1` negatives (default 4).
+
+Fix: sample `training.jsonl` and require `neg_doc` to be a non-empty list on
+every checked row. A single empty list can be selected by the collator and fail
+the run. If any row is empty, run `nemo data-designer retrieval-prepare` with
+`enable_mining: true` (or `train_input_file` on the existing convert-only
+fileset so frozen `eval_beir` is not regenerated). Do not lower
+`train_n_passages` to hide an unmined fileset. Conductor:
+`nemo-retrieval-recipes` `references/sdg.md`.
+
 ## CLI quick reference
 
 Shared:

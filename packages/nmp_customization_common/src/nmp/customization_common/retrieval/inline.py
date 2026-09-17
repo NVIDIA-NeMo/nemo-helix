@@ -5,12 +5,16 @@
 
 import json
 import logging
+import shutil
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+ADDITIONAL_DIRNAME = "additional"
+_ROOT_NAMES = frozenset({"training.jsonl", "eval_beir", ADDITIONAL_DIRNAME})
 
 
 @dataclass
@@ -67,6 +71,28 @@ def wrapped_to_inline_jsonl(train_json: Path, output_jsonl: Path, corpus_parquet
             dropped_records,
         )
     return output_jsonl
+
+
+def move_aux_files_to_additional(output_dir: Path) -> None:
+    """Move everything except ``training.jsonl`` and ``eval_beir/`` under ``additional/``.
+
+    Mining and conversion write wrapped JSON, corpus parquet, and embedding caches
+    beside the files Automodel and retrieve-eval read. Those extras stay in the
+    artifacts result, nested so a fileset whose root is this directory is
+    immediately usable as ``dataset.training``.
+    """
+    extra = output_dir / ADDITIONAL_DIRNAME
+    extra.mkdir(parents=True, exist_ok=True)
+    for child in list(output_dir.iterdir()):
+        if child.name in _ROOT_NAMES:
+            continue
+        dest = extra / child.name
+        if dest.exists():
+            if dest.is_dir():
+                shutil.rmtree(dest)
+            else:
+                dest.unlink()
+        shutil.move(str(child), str(dest))
 
 
 def _inline_rows(record: dict[str, Any], resolver: _CorpusResolver) -> list[dict[str, Any]]:

@@ -280,6 +280,21 @@ def _discover_files_by_patterns(base_path: Path, patterns: list[str], dirs: list
     return sorted(files)  # Sorted for deterministic ordering
 
 
+def _prefer_jsonl(files: list[Path]) -> list[Path]:
+    """
+    Drop ``.json`` candidates when ``.jsonl`` files are present.
+
+    Retrieval Stage 1 publishes a wrapped ``train.json`` beside the inline
+    ``training.jsonl``; both match the discovery patterns, and merging them
+    would emit invalid JSONL.
+    """
+    jsonl_files = [f for f in files if f.suffix.lower() == ".jsonl"]
+    if jsonl_files and len(jsonl_files) < len(files):
+        skipped = [f.name for f in files if f.suffix.lower() != ".jsonl"]
+        logger.info(f"Ignoring non-JSONL dataset file(s) found alongside JSONL: {skipped}")
+    return jsonl_files or files
+
+
 def discover_dataset_files(dataset_path: Path) -> tuple[list[Path], list[Path]]:
     """
     Discover training and validation files using heuristics.
@@ -290,6 +305,9 @@ def discover_dataset_files(dataset_path: Path) -> tuple[list[Path], list[Path]]:
     3. Files matching val*/validation*/dev* patterns → validation
     4. Files in val/, validation/, or dev/ directories → validation
     5. If only one .jsonl file found → treat as training (will auto-split)
+
+    A ``.json`` candidate is ignored when JSONL files are present for the same
+    split, so a dataset may also carry wrapped JSON or BEIR artifacts.
 
     Args:
         dataset_path: Path to the dataset directory.
@@ -329,6 +347,9 @@ def discover_dataset_files(dataset_path: Path) -> tuple[list[Path], list[Path]]:
                 f"Treating all as training data: {[f.name for f in all_jsonl]}"
             )
             train_files = all_jsonl
+
+    train_files = _prefer_jsonl(train_files)
+    val_files = _prefer_jsonl(val_files)
 
     if not train_files:
         raise DatasetFormatError(
