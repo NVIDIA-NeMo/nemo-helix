@@ -111,7 +111,10 @@ logging.getLogger("nemo_evaluator_sdk.agent_eval.runtimes.gym").setLevel(logging
 - **One distinct row is one task.** Task identity is the row's content hash, so duplicate rows collapse into a single task and the runner warns. Repeating a row is *not* how you ask for repeated attempts — `num_repeats` is, since attempts are a run-level concern. Duplicates usually mean a data problem.
 - **Per-env deps are heterogeneous.** mcqa needs only `tiktoken`; other Gym envs pull `torch`/COMET/GPU or docker. The caller is responsible for a Gym runtime whose deps are installed.
 - **`--no-serve --input` bypasses Gym's data-prep** (prompt templating / dataset materialization). This example's `example.jsonl` rows are already complete, so it's faithful; an env whose rows need templating would need that step first.
-- Service-side execution (docker/k8s, Ray provisioning) is out of scope for this SDK path — that's the evaluator plugin's job.
+- This example covers the local subprocess path. Platform deployments can run the same target
+  colocated or provision a separate sandboxed Gym host; custom environment FileSets require the
+  sandboxed path. See the
+  [Evaluator Gym documentation](https://docs.nvidia.com/nemo-platform/documentation/evaluate-models/agent-eval/gym-runner).
 
 ## Next steps
 

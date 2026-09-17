@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from nemo_platform_plugin.auth.access_keys import endpoints
-from nemo_platform_plugin.auth.access_keys.types import AccessKeyCreateRequest
+from nemo_platform_plugin.auth.access_keys.types import AccessKeyCreateRequest, AccessKeyRotateRequest
 from nemo_platform_plugin.client.types import PreparedRequest
 
 
@@ -53,3 +53,18 @@ def test_unsuspend_access_key_endpoint_uses_jti_path_param() -> None:
     assert prepared.method == "POST"
     assert prepared.path_template == "/apis/auth/v2/access-keys/{jti}/unsuspend"
     assert prepared.path_params == {"jti": "ak_example"}
+
+
+def test_rotate_access_key_endpoint_uses_jti_path_param() -> None:
+    prepared = endpoints.rotate_access_key(jti="ak_example", body=AccessKeyRotateRequest())
+
+    assert prepared.method == "POST"
+    assert prepared.path_template == "/apis/auth/v2/access-keys/{jti}/rotate"
+    assert prepared.path_params == {"jti": "ak_example"}
+
+
+def test_rotate_access_key_endpoint_sends_grace_period_seconds() -> None:
+    prepared = endpoints.rotate_access_key(jti="ak_example", body=AccessKeyRotateRequest(grace_period_seconds=3600))
+
+    assert prepared.content_type == "application/json"
+    assert prepared.content == b'{"grace_period_seconds":3600}'

@@ -22,10 +22,13 @@ in-process call is the ``find_spec`` availability probe below, which is delibera
 a top-level name so that it imports nothing.
 """
 
+import asyncio
+import builtins
 import importlib.util
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -73,6 +76,21 @@ print(json.dumps({
 """
 
 
+def _is_harbor_module(name: str) -> bool:
+    return name == "harbor" or name.startswith("harbor.")
+
+
+def _block_harbor_import(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_import = builtins.__import__
+
+    def blocked_harbor_import(name, *args, **kwargs):
+        if _is_harbor_module(name):
+            raise ModuleNotFoundError("blocked Harbor import")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", blocked_harbor_import)
+
+
 def test_agent_eval_import_does_not_pull_the_execution_stack() -> None:
     """The optimizer imports only ``agent_eval``; it must not pay for backends and benchmarks.
 
@@ -97,12 +115,45 @@ def test_agent_eval_import_does_not_pull_the_execution_stack() -> None:
     # cached_property, so it was never on this path and asserting it would prove nothing.
     heavy = {"openai", "sacrebleu", "zstandard", "pyarrow", "numpy", "jinja2", "jsonschema"} & modules
     assert heavy == set(), f"heavy dependencies pulled into the agent_eval path: {sorted(heavy)}"
+    harbor_modules = sorted(name for name in modules if _is_harbor_module(name))
+    assert harbor_modules == [], f"the lazy Harbor result validator was imported eagerly: {harbor_modules}"
 
     # A canary, not a spec: measured at 300 modules once both barrels went lazy, down from 1416.
     # The bound is deliberately close — the assertions above enumerate known offenders, so only
     # this catches a re-drag through some other route. Raise it only for a dependency agent_eval
     # genuinely needs, and say which in the commit message.
     assert len(modules) < 380, f"agent_eval import surface grew to {len(modules)} modules"
+
+
+def test_harbor_adapter_invocation_without_extra_has_actionable_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import build_trials_from_job_dir
+
+    _block_harbor_import(monkeypatch)
+    with pytest.raises(ModuleNotFoundError, match=r"optional `harbor` extra on Python >=3\.12") as exc_info:
+        build_trials_from_job_dir(".", [])
+
+    assert "repository root" in str(exc_info.value)
+    assert "uv sync --frozen --package nemo-evaluator-sdk --extra harbor" in str(exc_info.value)
+
+
+def test_harbor_execution_without_extra_has_actionable_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, _build_native_job
+
+    _block_harbor_import(monkeypatch)
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs")
+    _job_dir, run_job = _build_native_job(config, tmp_path / "dataset", None)
+
+    async def invoke_run_job() -> None:
+        await run_job()
+
+    with pytest.raises(ModuleNotFoundError, match=r"optional `harbor` extra on Python >=3\.12") as exc_info:
+        asyncio.run(invoke_run_job())
+
+    assert "repository root" in str(exc_info.value)
+    assert "uv sync --frozen --package nemo-evaluator-sdk --extra harbor" in str(exc_info.value)
 
 
 @pytest.mark.parametrize(

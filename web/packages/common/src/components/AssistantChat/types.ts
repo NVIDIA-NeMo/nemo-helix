@@ -40,6 +40,7 @@ export interface AssistantChatThreadProps {
   emptyState?: {
     slotHeading?: string;
     slotSubheading?: string;
+    slotAction?: ReactNode;
   };
   contentClassName?: string;
   composerContainerClassName?: string;
@@ -131,6 +132,7 @@ export interface AssistantChatProps {
   emptyState?: {
     slotHeading?: string;
     slotSubheading?: string;
+    slotAction?: ReactNode;
   };
   /** Overrides used when rendering Markdown inside chat messages. */
   messageContentProps?: AssistantChatMessageContentProps;

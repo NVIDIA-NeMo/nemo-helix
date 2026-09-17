@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 
 from nmp.common.files.storage_config import (
+    GithubStorageConfig,
     HuggingfaceStorageConfig,
     LocalStorageConfig,
     NGCStorageConfig,
@@ -49,5 +50,9 @@ def storage_impl_factory(
             from nmp.core.files.app.backends.s3 import S3StorageImpl
 
             return S3StorageImpl(config, secrets)
+        case GithubStorageConfig():
+            from nmp.core.files.app.backends.github import GithubStorageImpl
+
+            return GithubStorageImpl(config, secrets)
         case _:
             raise TypeError(f"Unsupported storage config type: {type(config).__name__}")

@@ -123,8 +123,9 @@ result = job.get_result()
 - Use `await AgentEvaluator().run(tasks=..., target=...)` for local task-driven SDK runs
 that do not require running nemo-platform.
 - Use the Evaluator plugin's `uv run nemo evaluator agent-evaluate submit` job for durable runs with inline
-tasks or stored tasksets. The high-level `client.evaluator.submit` interface
-above remains dataset-driven only.
+tasks or stored tasksets. A locally validated `GymAgentTaskRunner` can also be submitted with
+`client.evaluator.submit(tasks=TasksetRef(...), target=runner)`; other runner targets use an
+agent-evaluate spec.
 
 </Note>
 

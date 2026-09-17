@@ -319,6 +319,25 @@ class AccessKeyConfig(BaseSettings):
             "Set to null to allow explicit no-expiration requests."
         ),
     )
+    rotation_grace_period_seconds: int = Field(
+        default=48 * 60 * 60,
+        ge=1,
+        description=(
+            "Default grace period in seconds for a rotated-out Scoped Access Key, used when "
+            "grace_period_seconds is omitted from POST /v2/access-keys/{jti}/rotate. The key "
+            "remains usable for this long after rotation before it is treated as revoked. "
+            "Gives callers a dual-active window to cut over to the newly issued key."
+        ),
+    )
+    max_rotation_grace_period_seconds: int | None = Field(
+        default=30 * 24 * 60 * 60,
+        ge=1,
+        description=(
+            "Maximum grace period accepted when a caller explicitly requests grace_period_seconds "
+            "on POST /v2/access-keys/{jti}/rotate. Set to null to allow any explicitly requested "
+            "grace period."
+        ),
+    )
 
     @staticmethod
     def _parse_nullable_expiry(value: Any) -> Any:

@@ -116,6 +116,22 @@ def mock_hf_api():
         yield mock_api
 
 
+def test_tracked_revision_is_the_ref_the_fileset_was_resolved_from(hf_config_resolved, hf_secrets_empty):
+    """A resolved fileset can be re-resolved against the ref it came from."""
+    impl = HuggingfaceStorageImpl(hf_config_resolved, hf_secrets_empty)
+
+    assert impl.tracked_revision == "main"
+    assert impl.config_at_tracked_revision().revision == "main"
+    assert impl.config_at_tracked_revision().repo_id == "test-org/test-repo"
+
+
+def test_a_fileset_created_from_a_sha_tracks_nothing(hf_secrets_empty):
+    """Nothing to re-resolve when the user pinned an immutable revision themselves."""
+    config = HuggingfaceStorageConfig(repo_id="test-org/test-repo", revision="a1b2c3d")
+
+    assert HuggingfaceStorageImpl(config, hf_secrets_empty).tracked_revision is None
+
+
 def test_get_download_url(hf_config, hf_secrets_empty):
     """Test download URL generation."""
     with patch("nmp.core.files.app.backends.huggingface.hf_hub_url") as mock_url:

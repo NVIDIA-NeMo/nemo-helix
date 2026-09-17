@@ -116,3 +116,33 @@ def build_agent_eval_spec(metric_bundle: Any) -> Any:
         max_concurrent_tasks=2,
         labels={"benchmark": "geography-smoke"},
     )
+
+
+def build_gym_agent_eval_spec() -> Any:
+    """Build a sandboxed Gym evaluation for a stored taskset and environment FileSet."""
+    from nemo_evaluator.api.schemas import TasksetRef
+    from nemo_evaluator.filesets import FilesetRef
+    from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, GymRunnerTarget
+
+    return AgentEvalInputSpec(
+        tasks=TasksetRef("default/my-gym-taskset"),
+        target=GymRunnerTarget(
+            environment=FilesetRef(root="default/my-gym-environment"),
+            agent="simple_agent",
+            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            resources_server="custom_greeting",
+            num_repeats=1,
+            concurrency=1,
+            hydra_params={
+                "policy_base_url": (
+                    "http://nemo-platform-api.default.svc.cluster.local:8080/"
+                    "apis/inference-gateway/v2/workspaces/default/model/my-model/-/v1"
+                ),
+                "policy_api_key": "not-used",
+                "policy_model_name": "my-model",
+            },
+        ),
+        max_concurrent_tasks=1,
+        fail_fast=True,
+        labels={"benchmark": "custom-gym-environment"},
+    )

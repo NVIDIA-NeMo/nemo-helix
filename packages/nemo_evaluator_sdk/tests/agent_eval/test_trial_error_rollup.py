@@ -95,23 +95,46 @@ def test_membership_ignores_trial_status() -> None:
 def test_duplicate_trial_ids_stay_two_entries() -> None:
     # Nothing enforces trial-id uniqueness (Gym derives ids from a rollout index in two separate
     # loops), so the rollup must append rather than collect into a set — collapsing them would
-    # understate the error count.
+    # understate the error count. trial_count is len(trials) for the same reason.
     summary = AgentEvalSummary.from_scores([], trials=[_trial("dup", error="E"), _trial("dup", error="E")])
 
     assert summary.error_trial_ids == {"E": ["dup", "dup"]}
     assert summary.error_count == 2
+    assert summary.trial_count == 2
 
 
 def test_trials_may_be_wider_than_the_scores() -> None:
     # A caller re-aggregating a subset can hand over more trials than scores. The rollup names them
-    # regardless: it reads trials, not scores, so the two need not line up.
+    # regardless: it reads trials, not scores, so the two need not line up. trial_count is
+    # len(trials), so the unmeasured t1 still contributes even though it has no score.
+    unmeasured = _trial("t1", task_id="task-b", error="RuntimeError")
     summary = AgentEvalSummary.from_scores(
         [_score("task-a", "t0", 1.0)],
-        trials=[_trial("t0"), _trial("t1", task_id="task-b", error="RuntimeError")],
+        trials=[_trial("t0"), unmeasured],
     )
 
     assert summary.error_trial_ids == {"RuntimeError": ["t1"]}
+    assert summary.trial_count == 2
+    assert summary.score_count == 1
     assert "task-b" not in summary.task_metric_values
+
+
+def test_trial_count_without_trials_is_distinct_score_pairs() -> None:
+    # Same trial_id on two tasks is two attempts. Two score rows for one pair are one attempt.
+    two_tasks = AgentEvalSummary.from_scores([_score("task-a", "shared", 1.0), _score("task-b", "shared", 0.0)])
+    two_metrics = AgentEvalSummary.from_scores([_score("task-a", "t0", 1.0), _score("task-a", "t0", 0.0)])
+
+    assert two_tasks.trial_count == 2
+    assert two_metrics.trial_count == 1
+
+
+def test_trial_count_with_trials_is_the_supplied_list_length() -> None:
+    summary = AgentEvalSummary.from_scores(
+        [_score("task-a", "shared", 1.0), _score("task-b", "shared", 0.0)],
+        trials=[_trial("shared"), _trial("shared", task_id="task-b")],
+    )
+
+    assert summary.trial_count == 2
 
 
 def test_error_count_must_agree_with_the_rollup() -> None:

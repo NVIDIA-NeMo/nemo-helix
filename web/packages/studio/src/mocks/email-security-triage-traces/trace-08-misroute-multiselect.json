@@ -1,0 +1,46 @@
+{
+  "schema_version": "ATIF-v1.5",
+  "session_id": "3f2a1c00-0008-4a00-8000-000000000008",
+  "trajectory_id": "3f2a1c00-0008-4a00-8000-000000000008",
+  "agent": {
+    "name": "email-security-triage",
+    "version": "0.7.0",
+    "model_name": "nvidia-nemotron-3-nano-30b-a3b"
+  },
+  "final_metrics": {
+    "total_prompt_tokens": 4210,
+    "total_completion_tokens": 196,
+    "total_cost_usd": 0.0007491,
+    "total_steps": 2
+  },
+  "extra": {
+    "task_id": "email-security-triage/misroute-multiselect-8",
+    "verifier_result": {
+      "rewards": {
+        "correctness": 1.0,
+        "format": 0.0,
+        "routing": 0.0
+      }
+    }
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-08-27T22:18:55Z",
+      "source": "user",
+      "message": "{\"user_message\": \"should I trust the first one?\", \"emails\": [{\"from\": \"accounts@microsft-billing.com\", \"subject\": \"Your Microsoft 365 payment failed\", \"body\": \"Update your card at https://microsft-billing.com/pay to avoid suspension.\"}, {\"from\": \"hr@company.com\", \"subject\": \"Open enrollment closes Friday\", \"body\": \"Reminder to complete open enrollment in Workday.\"}]}"
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-08-27T22:19:01Z",
+      "source": "agent",
+      "model_name": "default/nvidia-nemotron-3-nano-30b-a3b",
+      "message": "ANALYSIS\n\n[1]\nVERDICT: phishing\nATTACK_TYPE: credential\nIOCS: microsft-billing.com\nACTION: quarantine\nREASONING: Typosquatted Microsoft domain paired with a billing-failure lure.\n\n[2]\nVERDICT: benign\nATTACK_TYPE: benign\nIOCS: none\nACTION: deliver\nREASONING: Internal HR reminder pointing at an internal system.",
+      "metrics": {
+        "prompt_tokens": 4210,
+        "completion_tokens": 196,
+        "cost_usd": 0.0007491
+      }
+    }
+  ]
+}

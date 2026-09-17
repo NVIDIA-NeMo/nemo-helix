@@ -170,6 +170,31 @@ def test_serve_config_takes_cluster_facts_from_the_deployment_not_the_job() -> N
     assert payload["gym_global_config"]["config_paths"]
 
 
+def test_unset_runtime_image_uses_the_qualified_gym_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    qualified = "registry.example.com/nemo/nmp-gym-host:same-platform-tag"
+    monkeypatch.setattr(
+        "nemo_evaluator.jobs.gym_sandbox.get_qualified_image",
+        lambda name: qualified if name == "nmp-gym-host" else "",
+    )
+
+    plan = resolve_sandbox_plan(capable_config(sandbox_runtime_image=None), target())
+
+    assert plan is not None
+    assert plan.runtime_image == qualified
+
+
+def test_explicit_runtime_image_bypasses_qualification(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unexpected_qualification(name: str) -> str:
+        raise AssertionError(f"explicit runtime override unexpectedly qualified {name}")
+
+    monkeypatch.setattr("nemo_evaluator.jobs.gym_sandbox.get_qualified_image", unexpected_qualification)
+
+    plan = resolve_sandbox_plan(capable_config(sandbox_runtime_image="registry.example.com/custom/host:1"), target())
+
+    assert plan is not None
+    assert plan.runtime_image == "registry.example.com/custom/host:1"
+
+
 def test_sandbox_server_protocol_reaches_the_opensandbox_host_provider() -> None:
     plan = resolve_sandbox_plan(
         capable_config(),
@@ -246,11 +271,10 @@ def test_an_incapable_cluster_refuses_rather_than_running_colocated() -> None:
         resolve_sandbox_plan(config, target())
 
 
-@pytest.mark.parametrize("missing", ["sandbox_runtime_image", "sandbox_job_storage_pvc_claim"])
-def test_a_host_that_cannot_be_provisioned_fails_before_provisioning(missing: str) -> None:
-    config = capable_config(**{missing: None})
+def test_a_host_without_storage_cannot_be_provisioned() -> None:
+    config = capable_config(sandbox_job_storage_pvc_claim=None)
 
-    with pytest.raises(SandboxUnavailableError, match=missing):
+    with pytest.raises(SandboxUnavailableError, match="sandbox_job_storage_pvc_claim"):
         resolve_sandbox_plan(config, target())
 
 

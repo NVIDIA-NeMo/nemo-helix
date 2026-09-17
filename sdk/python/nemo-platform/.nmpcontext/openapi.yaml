@@ -336,6 +336,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/access-keys/{jti}/rotate:
+    post:
+      tags:
+      - Scoped Access Keys
+      summary: Rotate Access Key
+      operationId: rotate_access_key_apis_auth_v2_access_keys__jti__rotate_post
+      parameters:
+      - name: jti
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^ak_[0-9a-f]{32}$
+          description: Stable JWT ID of the Scoped Access Key for the lifecycle operation.
+          title: Jti
+        description: Stable JWT ID of the Scoped Access Key for the lifecycle operation.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/AccessKeyRotateRequest'
+              default: {}
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyRotateResponse'
+        '400':
+          description: Scoped Access Key rotation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyErrorResponse'
+        '404':
+          description: Scoped Access Keys are not enabled or the key was not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyErrorResponse'
+        '409':
+          description: Invalid or concurrent access-key state transition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyErrorResponse'
+        '501':
+          description: Not Implemented
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessKeyNotImplementedErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/auth/v2/access-keys/{jti}/suspend:
     post:
       tags:
@@ -2287,6 +2347,90 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PlatformJobLogPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/files/v2/workspaces/{workspace}/filesets/{name}/refresh:
+    post:
+      tags:
+      - Files
+      summary: Refresh Fileset Revision
+      description: 'Re-resolve a fileset''s tracked revision against its source.
+
+
+        A fileset created from a mutable ref is pinned to an immutable id so its
+
+        contents cannot shift under a deployment. This re-resolves that same ref and
+
+        repoints the fileset at whatever it names now. Everything else about the
+
+        storage config, including the repository and directory, is left alone.
+
+
+        A running deployment keeps serving the revision it staged. It moves to this
+        one
+
+        when the runner next stages the fileset, and records the revision it staged.'
+      operationId: refresh_fileset_apis_files_v2_workspaces__workspace__filesets__name__refresh_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FilesetOutput'
+        '400':
+          description: Storage configuration, secret, or source rejected the refresh
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '404':
+          description: Fileset not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '409':
+          description: Fileset does not track a mutable revision
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '502':
+          description: Storage backend unavailable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
         '422':
           description: Validation Error
           content:
@@ -8323,6 +8467,7 @@ components:
           - EXPIRED
           - REVOKED
           - SUSPENDED
+          - ROTATING
           title: Status
         issuer:
           type: string
@@ -8341,6 +8486,19 @@ components:
           title: Created At
         expires_at:
           title: Expires At
+          nullable: true
+          type: string
+          format: date-time
+        grace_period_expires_at:
+          title: Grace Period Expires At
+          description: Timestamp when the rotated-out key's grace period expires.
+          nullable: true
+          type: string
+          format: date-time
+        last_used_at:
+          title: Last Used At
+          description: Timestamp of the most recent successful authentication with
+            this Scoped Access Key.
           nullable: true
           type: string
           format: date-time
@@ -8432,6 +8590,7 @@ components:
           - EXPIRED
           - REVOKED
           - SUSPENDED
+          - ROTATING
           title: Status
         issuer:
           type: string
@@ -8450,6 +8609,19 @@ components:
           title: Created At
         expires_at:
           title: Expires At
+          nullable: true
+          type: string
+          format: date-time
+        grace_period_expires_at:
+          title: Grace Period Expires At
+          description: Timestamp when the rotated-out key's grace period expires.
+          nullable: true
+          type: string
+          format: date-time
+        last_used_at:
+          title: Last Used At
+          description: Timestamp of the most recent successful authentication with
+            this Scoped Access Key.
           nullable: true
           type: string
           format: date-time
@@ -8489,6 +8661,68 @@ components:
       - revoked
       title: AccessKeyRevokeResponse
       description: Response returned after a Scoped Access Key revoke request.
+    AccessKeyRotateRequest:
+      properties:
+        grace_period_seconds:
+          title: Grace Period Seconds
+          description: Grace period in seconds for the rotated-out key. Omit to use
+            auth.access_keys.rotation_grace_period_seconds. Subject to auth.access_keys.max_rotation_grace_period_seconds.
+          nullable: true
+          type: integer
+          minimum: 1.0
+      type: object
+      title: AccessKeyRotateRequest
+      description: Request body for rotating a Scoped Access Key.
+    AccessKeyRotateResponse:
+      properties:
+        new_key:
+          allOf:
+          - $ref: '#/components/schemas/AccessKeyCreateResponse'
+          description: Newly minted successor Scoped Access Key. Its raw token is
+            returned only once.
+        previous_jti:
+          type: string
+          title: Previous Jti
+          description: Stable JWT ID of the Scoped Access Key that was rotated out.
+        previous_status:
+          type: string
+          enum:
+          - ACTIVE
+          - EXPIRED
+          - REVOKED
+          - SUSPENDED
+          - ROTATING
+          title: Previous Status
+          description: Effective status of the rotated-out key immediately after this
+            request. Normally ROTATING, but may already read as REVOKED or EXPIRED
+            if reconciling this request's outcome was itself delayed past the grace
+            deadline or a concurrent revoke.
+        grace_period_seconds:
+          type: integer
+          title: Grace Period Seconds
+          description: Seconds the rotated-out key remains usable before it is treated
+            as revoked.
+        grace_period_expires_at:
+          title: Grace Period Expires At
+          description: Timestamp when the rotated-out key's grace period expires.
+          nullable: true
+          type: string
+          format: date-time
+      type: object
+      required:
+      - new_key
+      - previous_jti
+      - previous_status
+      - grace_period_seconds
+      title: AccessKeyRotateResponse
+      description: 'Response returned after rotating a Scoped Access Key.
+
+
+        The rotated-out key (``previous_jti``) remains usable for ``grace_period_seconds``
+
+        (the dual-active grace period) so callers can cut traffic over to ``new_key``
+
+        before the old key is treated as revoked.'
     AccessKeyStatusChangeResponse:
       properties:
         jti:
@@ -10068,7 +10302,12 @@ components:
             keys: image, command, args, resources, env, readinessProbe, livenessProbe,
             startupProbe, nodeSelector, tolerations, userID, groupID, labels, initContainers,
             sidecarContainers. Unsupported keys are rejected at compile time. Ignored
-            by non-NIM engines and docker runtime.'
+            by non-NIM engines and docker runtime. One key is a platform directive
+            rather than a Spec fragment and is honored on both runtimes: nimLegacy
+            (default true) emits the legacy NIM_MODEL_NAME / NIM_MODEL_PATH weight
+            env vars; set it false for images that retired those names and expect
+            NIM_ENGINE_MODEL_NAME / NIM_ENGINE_MODEL_PATH, since such images fail
+            config validation when a retired name is set.'
           additionalProperties: true
           type: object
       type: object
@@ -10269,6 +10508,7 @@ components:
           - $ref: '#/components/schemas/NGCStorageConfig'
           - $ref: '#/components/schemas/HuggingfaceStorageConfig'
           - $ref: '#/components/schemas/S3StorageConfig'
+          - $ref: '#/components/schemas/GithubStorageConfig'
           title: Storage
           description: The storage configuration for the fileset. If not provided,
             uses default storage.
@@ -12619,6 +12859,7 @@ components:
           - $ref: '#/components/schemas/NGCStorageConfig'
           - $ref: '#/components/schemas/HuggingfaceStorageConfig'
           - $ref: '#/components/schemas/S3StorageConfig'
+          - $ref: '#/components/schemas/GithubStorageConfig'
           title: Storage
         metadata:
           $ref: '#/components/schemas/FilesetMetadata'
@@ -13125,6 +13366,60 @@ components:
         with ``-`` for
 
         descending order.'
+    GithubStorageConfig:
+      properties:
+        read_chunk_size:
+          type: integer
+          title: Read Chunk Size
+          description: 'Chunk size in bytes for reading/streaming files. Larger chunks
+            reduce async overhead but increase memory per concurrent download. Default:
+            1MB.'
+          default: 1048576
+        type:
+          type: string
+          const: github
+          title: Type
+          default: github
+        owner:
+          type: string
+          title: Owner
+          description: GitHub repository owner (user or organization)
+        repo:
+          type: string
+          title: Repo
+          description: GitHub repository name
+        revision:
+          type: string
+          title: Revision
+          description: Branch, tag, or commit SHA. 'HEAD' resolves to the repository's
+            default branch.
+          default: HEAD
+        original_revision:
+          title: Original Revision
+          description: The original revision requested by the user before resolution
+            (e.g., 'main'). The 'revision' field contains the resolved commit SHA.
+          type: string
+        path:
+          type: string
+          title: Path
+          description: Optional directory within the repository. All paths are relative
+            to it.
+          default: ''
+        token_secret:
+          allOf:
+          - $ref: '#/components/schemas/SecretRef'
+          description: GitHub personal access token secret name, required for private
+            repositories
+        api_base_url:
+          type: string
+          title: Api Base Url
+          description: GitHub API base URL. Use for GitHub Enterprise instances.
+          default: https://api.github.com
+      type: object
+      required:
+      - owner
+      - repo
+      title: GithubStorageConfig
     GuardrailCheckRequest:
       properties:
         model:
@@ -17425,6 +17720,12 @@ components:
           - type: string
           description: The source of the job.
           title: Source
+        spec:
+          description: Filter on a path within the job's plugin-defined spec, e.g.
+            `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
       title: PlatformJobsListFilter
       type: object
     PlatformSecretAccessResponse:
@@ -19041,6 +19342,7 @@ components:
       - ngc
       - huggingface
       - s3
+      - github
       title: StorageConfigType
       type: string
     StringFilter:

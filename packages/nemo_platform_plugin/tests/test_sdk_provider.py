@@ -166,6 +166,31 @@ class TestDefaultSDKProvider:
 
         assert sdk.default_headers["X-NMP-Principal-On-Behalf-Of"] == "user@ex.com"
 
+    def test_get_platform_sdk_propagates_env_principal_on_behalf_of(self, monkeypatch):
+        monkeypatch.setenv("NMP_BASE_URL", "http://test:9090")
+        monkeypatch.setenv(
+            "NMP_PRINCIPAL",
+            json.dumps(
+                {
+                    "id": "service:evaluator",
+                    "email": "evaluator@service.test",
+                    "groups": ["system:serviceaccounts"],
+                    "on_behalf_of": "creator@ex.com",
+                    "on_behalf_of_email": "creator@ex.com",
+                    "on_behalf_of_groups": ["workspace-editors", "ml-team"],
+                }
+            ),
+        )
+
+        sdk = DefaultSDKProvider().get_platform_sdk()
+
+        assert sdk.default_headers["X-NMP-Principal-Id"] == "service:evaluator"
+        assert sdk.default_headers["X-NMP-Principal-Email"] == "evaluator@service.test"
+        assert sdk.default_headers["X-NMP-Principal-Groups"] == "system:serviceaccounts"
+        assert sdk.default_headers["X-NMP-Principal-On-Behalf-Of"] == "creator@ex.com"
+        assert sdk.default_headers["X-NMP-Principal-On-Behalf-Of-Email"] == "creator@ex.com"
+        assert sdk.default_headers["X-NMP-Principal-On-Behalf-Of-Groups"] == "workspace-editors,ml-team"
+
 
 # ---------------------------------------------------------------------------
 # get_async_task_sdk — the async sibling of get_task_sdk
@@ -246,8 +271,26 @@ class _CustomProvider:
     def get_task_sdk(self, service_name: str) -> NeMoPlatform:
         return NeMoPlatform(base_url="http://custom:1234")
 
-    def get_platform_sdk(self, **kwargs) -> NeMoPlatform:
+    def get_async_task_sdk(self, service_name: str) -> AsyncNeMoPlatform:
+        return AsyncNeMoPlatform(base_url="http://custom:1234")
+
+    def get_platform_sdk(
+        self,
+        *,
+        as_service: str | None = None,
+        internal: bool = False,
+        on_behalf_of: str | None = None,
+    ) -> NeMoPlatform:
         return NeMoPlatform(base_url="http://custom:1234")
+
+    def get_async_platform_sdk(
+        self,
+        *,
+        as_service: str | None = None,
+        internal: bool = False,
+        on_behalf_of: str | None = None,
+    ) -> AsyncNeMoPlatform:
+        return AsyncNeMoPlatform(base_url="http://custom:1234")
 
 
 class _FakeEntryPoint:

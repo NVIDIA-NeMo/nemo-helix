@@ -31,6 +31,7 @@ def test_principal_from_env_parses_json(clean_env, monkeypatch):
     )
 
     principal = principal_from_env()
+    assert principal is not None
     headers = principal.get_headers()
 
     assert headers["X-NMP-Principal-Id"] == "job-creator@example.com"
@@ -50,6 +51,7 @@ def test_principal_from_env_handles_id_only(clean_env, monkeypatch):
     )
 
     principal = principal_from_env()
+    assert principal is not None
     headers = principal.get_headers()
 
     assert headers["X-NMP-Principal-Id"] == "service-account"
@@ -76,6 +78,7 @@ def test_principal_from_env_does_not_modify_context(clean_env, monkeypatch):
     )
 
     principal = principal_from_env()
+    assert principal is not None
     headers = principal.get_headers()
     assert headers["X-NMP-Principal-Id"] == "test-user"
 
@@ -96,6 +99,7 @@ def test_principal_from_env_handles_empty_groups(clean_env, monkeypatch):
     )
 
     principal = principal_from_env()
+    assert principal is not None
     headers = principal.get_headers()
 
     assert headers["X-NMP-Principal-Id"] == "user"

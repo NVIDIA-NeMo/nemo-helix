@@ -566,7 +566,11 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
         # If auth is disabled, just proceed with the principal
         if not self.config.enabled:
             auth_client = AuthClient(
-                principal=principal, config=self.config, http_client=self._client, service_name=self.service_name
+                principal=principal,
+                config=self.config,
+                http_client=self._client,
+                service_name=self.service_name,
+                resolved_bearer_token=resolved,
             )
             return await self._call_next_with_auth_client(request, call_next, auth_client)
 
@@ -576,6 +580,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             config=self.config,
             http_client=self._get_client(request),
             service_name=self.service_name,
+            resolved_bearer_token=resolved,
         )
 
         # Extract scopes from token claims

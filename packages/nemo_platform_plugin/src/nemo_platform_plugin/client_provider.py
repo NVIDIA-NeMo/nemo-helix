@@ -448,3 +448,14 @@ def get_task_nemo_client(service_name: str, *, workspace: str | None = None) -> 
 def get_async_task_nemo_client(service_name: str, *, workspace: str | None = None) -> AsyncNemoClient:
     """Async counterpart of :func:`get_task_nemo_client`."""
     return _resolve_provider().get_async_task_nemo_client(service_name, workspace=workspace)
+
+
+def get_forwarding_headers(client: NemoClient | AsyncNemoClient) -> dict[str, str]:
+    """Return default headers that should be forwarded to nested platform calls.
+
+    This is the NemoClient equivalent of
+    :func:`nemo_platform_plugin.sdk_provider.get_forwarding_headers`. Guardrails
+    middleware uses it to propagate service-principal and tracing headers into
+    model calls made by cached LangChain clients.
+    """
+    return dict(client.default_headers)

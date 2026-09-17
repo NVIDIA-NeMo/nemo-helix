@@ -49,6 +49,7 @@ def test_metric_output_spec_convenience_constructors_and_json_schema() -> None:
 
     assert score.name == "reward"
     assert score.description == "Reward score"
+    assert score.required is True
     assert score.value_schema is ContinuousScore
     assert score.value_json_schema()["type"] == "number"
     assert label.value_schema is Label
@@ -125,7 +126,7 @@ def test_validate_metric_result_rejects_duplicate_output_names() -> None:
 def test_validate_metric_result_rejects_missing_or_undeclared_outputs() -> None:
     outputs = [MetricOutputSpec.continuous_score("reward"), MetricOutputSpec.continuous_score("format")]
 
-    with pytest.raises(ValueError, match="Missing declared metric outputs"):
+    with pytest.raises(ValueError, match="Missing required metric outputs"):
         validate_metric_result(MetricResult(outputs=[MetricOutput(name="reward", value=1.0)]), outputs)
 
     with pytest.raises(ValueError, match="Undeclared metric outputs"):
@@ -139,6 +140,27 @@ def test_validate_metric_result_rejects_missing_or_undeclared_outputs() -> None:
             ),
             outputs,
         )
+
+
+def test_validate_metric_result_allows_missing_optional_outputs() -> None:
+    outputs = [
+        MetricOutputSpec.continuous_score("reward"),
+        MetricOutputSpec.continuous_score("format", required=False),
+    ]
+
+    result = validate_metric_result(
+        MetricResult(outputs=[MetricOutput(name="reward", value=1.0)]),
+        outputs,
+    )
+
+    assert result.outputs == [MetricOutput(name="reward", value=1.0)]
+
+
+def test_validate_metric_result_rejects_none_for_continuous_score() -> None:
+    outputs = [MetricOutputSpec.continuous_score("reward")]
+
+    with pytest.raises(ValidationError):
+        validate_metric_result(MetricResult(outputs=[MetricOutput(name="reward", value=None)]), outputs)
 
 
 def test_validate_metric_result_rejects_value_that_does_not_match_schema() -> None:

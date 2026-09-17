@@ -5,10 +5,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from nmp.customization_common.contributor.transform import generated_output_name
-from nmp.customization_common.service.platform_client import check_dataset_access, fetch_model_entity
+from nmp.customization_common.service.platform_client import (
+    AsyncCustomizationPlatformClients,
+    check_dataset_access,
+    fetch_model_entity,
+)
 
 from nemo_automodel_plugin.schema import (
     AutomodelJobInput,
@@ -16,17 +20,13 @@ from nemo_automodel_plugin.schema import (
     OutputResponse,
 )
 
-if TYPE_CHECKING:
-    from nemo_platform import AsyncNeMoPlatform
-
 
 def _infer_output_type(input_spec: AutomodelJobInput, checkpoint_head_type: str) -> Literal["model", "adapter"]:
     recipe = input_spec.training.recipe
     is_bi_encoder = recipe == "bi_encoder" or (recipe == "auto" and checkpoint_head_type == "embedding")
     if is_bi_encoder:
         return "model"
-    lora = input_spec.training.lora
-    if input_spec.training.finetuning_type == "lora" and lora is not None and not lora.merge:
+    if input_spec.trains_standalone_lora_adapter():
         return "adapter"
     return "model"
 
@@ -34,13 +34,13 @@ def _infer_output_type(input_spec: AutomodelJobInput, checkpoint_head_type: str)
 async def transform_input_to_output(
     input_spec: AutomodelJobInput,
     workspace: str,
-    sdk: AsyncNeMoPlatform,
+    platform: AsyncCustomizationPlatformClients,
 ) -> AutomodelJobOutput:
     """Enrich submitter input into canonical AutomodelJobOutput."""
-    model_entity = await fetch_model_entity(input_spec.model, workspace, sdk)
-    await check_dataset_access(sdk, input_spec.dataset.training, workspace)
+    model_entity = await fetch_model_entity(input_spec.model, workspace, platform)
+    await check_dataset_access(platform, input_spec.dataset.training, workspace)
     if input_spec.dataset.validation:
-        await check_dataset_access(sdk, input_spec.dataset.validation, workspace)
+        await check_dataset_access(platform, input_spec.dataset.validation, workspace)
 
     checkpoint_head_type = "unknown"
     if model_entity.spec:
@@ -77,4 +77,5 @@ async def transform_input_to_output(
         parallelism=input_spec.parallelism,
         output=output,
         integrations=input_spec.integrations,
+        deployment_config=input_spec.deployment_config,
     )

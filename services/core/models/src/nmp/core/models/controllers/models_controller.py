@@ -2,18 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
+import json
 import threading
 from logging import getLogger
 from typing import Optional
 
-from nemo_platform import DefaultAsyncHttpxClient  # type: ignore[deprecated]
-from nemo_platform.types.inference import ModelDeploymentStatus
-from nemo_platform.types.inference.model_deployment import ModelDeployment
-from nemo_platform.types.inference.model_deployment_config import ModelDeploymentConfig
+import httpx
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.errors import NotFoundError
 from nemo_platform_plugin.models.client import AsyncModelsClient
-from nemo_platform_plugin.models.types import ModelEntity
+from nemo_platform_plugin.models.types import ModelDeployment, ModelDeploymentConfig, ModelDeploymentStatus, ModelEntity
 from nmp.common.controller import Controller, HeartbeatMixin
 from nmp.common.entities.utils import parse_entity_ref
 from nmp.common.sdk_factory import get_async_platform_sdk
@@ -28,12 +26,15 @@ from nmp.core.models.controllers.provider_reconciler import ModelProviderReconci
 
 logger = getLogger(__name__)
 
+_CONTROLLER_HTTP_TIMEOUT = httpx.Timeout(timeout=60, connect=5.0)
+_CONTROLLER_HTTP_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20)
+
 NON_TERMINAL_STATES: list[ModelDeploymentStatus] = [
-    "CREATED",
-    "PENDING",
-    "READY",
-    "DELETING",
-    "DELETED",  # Poll DELETED deployments to clean them up after grace period
+    ModelDeploymentStatus.CREATED,
+    ModelDeploymentStatus.PENDING,
+    ModelDeploymentStatus.READY,
+    ModelDeploymentStatus.DELETING,
+    ModelDeploymentStatus.DELETED,  # Poll DELETED deployments to clean them up after grace period
 ]
 
 
@@ -64,8 +65,13 @@ class ModelsController(HeartbeatMixin, Controller):
         self._models_sdk = get_async_platform_sdk(
             as_service="models",
             internal=True,
-            http_client=DefaultAsyncHttpxClient(),
+            http_client=httpx.AsyncClient(
+                timeout=_CONTROLLER_HTTP_TIMEOUT,
+                limits=_CONTROLLER_HTTP_LIMITS,
+                follow_redirects=True,
+            ),
         )
+        self._models_client = client_from_platform(self._models_sdk, AsyncModelsClient)
         self._service_backends = backend_registry.list_backends()
 
         # Shared by both reconcilers; re-read at the start of each phase that
@@ -126,7 +132,7 @@ class ModelsController(HeartbeatMixin, Controller):
         return self._backend_registry.get_backend()
 
     async def _retrieve_deployment_config(
-        self, config_ref: str, config_version: str, deployment_workspace: str
+        self, config_ref: str, config_version: int | str, deployment_workspace: str
     ) -> ModelDeploymentConfig:
         """Retrieve the ModelDeploymentConfig from the API.
 
@@ -143,11 +149,13 @@ class ModelsController(HeartbeatMixin, Controller):
             workspace, name = ref.workspace, ref.name
 
             logger.debug(f"Fetching ModelDeploymentConfig {workspace}/{name}@{config_version}")
-            config = await self._models_sdk.inference.deployment_configs.versions.retrieve(
-                name=str(config_version),  # version number
-                workspace=workspace,  # workspace
-                config=name,  # config name
-            )
+            config = (
+                await self._models_client.get_deployment_config_version(
+                    name=str(config_version),
+                    workspace=workspace,
+                    config=name,
+                )
+            ).data()
             return config
         except Exception as e:
             logger.error(f"Failed to fetch ModelDeploymentConfig {config_ref}@{config_version}: {e}")
@@ -238,9 +246,8 @@ class ModelsController(HeartbeatMixin, Controller):
             if revision or not self._entity_cache.loaded:
                 # A revision resolves server-side and does not correspond to an
                 # cache key, so it has to be fetched directly.
-                models = client_from_platform(self._models_sdk, AsyncModelsClient)
                 model_entity = (
-                    await models.get_model(
+                    await self._models_client.get_model(
                         name=full_model_name,
                         workspace=workspace,
                     )
@@ -289,16 +296,18 @@ class ModelsController(HeartbeatMixin, Controller):
             try:
                 logger.debug(f"Querying ModelDeployments with status: {status} across all workspaces")
                 # SDK returns AsyncPaginator - iterate through all pages
-                resp = self._models_sdk.inference.deployments.list(
+                resp = await self._models_client.list_deployments(
                     workspace="-",  # Cross-workspace query
-                    filter={"status": status},
-                    all_versions=True,
-                    page_size=1000,
+                    query_params={
+                        "filter": json.dumps({"status": status.value}),
+                        "all_versions": True,
+                        "page_size": 1000,
+                    },
                 )
                 logger.debug(f"Got paginator response for status {status}, iterating...")
 
                 # Collect all deployments from paginator
-                deployments = [deployment async for deployment in resp]
+                deployments = [deployment async for deployment in resp.items()]
                 logger.debug(f"Iteration complete for status {status}, got {len(deployments)} deployment(s)")
 
                 if deployments:
@@ -328,10 +337,12 @@ class ModelsController(HeartbeatMixin, Controller):
                             try:
                                 _prov_ref = parse_entity_ref(deployment.model_provider_id)
                                 provider_workspace, provider_name = _prov_ref.workspace, _prov_ref.name
-                                provider = await self._models_sdk.inference.providers.retrieve(
-                                    name=provider_name,
-                                    workspace=provider_workspace,
-                                )
+                                provider = (
+                                    await self._models_client.get_provider(
+                                        name=provider_name,
+                                        workspace=provider_workspace,
+                                    )
+                                ).data()
                             except Exception as e:
                                 logger.warning(
                                     f"Failed to fetch provider for deployment {deployment.workspace}/{deployment.name}: {e}"
@@ -369,11 +380,11 @@ class ModelsController(HeartbeatMixin, Controller):
         provider_contexts: list[ModelContext] = []
 
         try:
-            providers = self._models_sdk.inference.providers.list(
+            providers = await self._models_client.list_providers(
                 workspace="-",  # Cross-workspace query
             )
 
-            async for provider in providers:
+            async for provider in providers.items():
                 deployment = None
                 config = None
                 entity = None
@@ -383,10 +394,12 @@ class ModelsController(HeartbeatMixin, Controller):
                     try:
                         _depl_ref = parse_entity_ref(provider.model_deployment_id)
                         deployment_workspace, deployment_name = _depl_ref.workspace, _depl_ref.name
-                        deployment = await self._models_sdk.inference.deployments.retrieve(
-                            deployment_name,
-                            workspace=deployment_workspace,
-                        )
+                        deployment = (
+                            await self._models_client.get_deployment(
+                                name=deployment_name,
+                                workspace=deployment_workspace,
+                            )
+                        ).data()
 
                         # Fetch config if deployment has config reference
                         if deployment and deployment.config and deployment.config_version:
@@ -429,13 +442,15 @@ class ModelsController(HeartbeatMixin, Controller):
         since GC only needs the deployment itself and its timestamps.
         """
         try:
-            resp = self._models_sdk.inference.deployments.list(
+            resp = await self._models_client.list_deployments(
                 workspace="-",
-                filter={"status": "ERROR"},
-                all_versions=True,
-                page_size=1000,
+                query_params={
+                    "filter": json.dumps({"status": ModelDeploymentStatus.ERROR.value}),
+                    "all_versions": True,
+                    "page_size": 1000,
+                },
             )
-            return [deployment async for deployment in resp]
+            return [deployment async for deployment in resp.items()]
         except Exception:
             logger.warning("Error querying ERROR deployments for GC", exc_info=True)
             return []
@@ -472,7 +487,9 @@ class ModelsController(HeartbeatMixin, Controller):
                 await self._deployment_reconciler.reconcile_deployments(deployment_contexts)
 
             known_deployment_ids = {
-                f"{ctx.model_deployment.workspace}/{ctx.model_deployment.name}" for ctx in deployment_contexts
+                f"{ctx.model_deployment.workspace}/{ctx.model_deployment.name}"
+                for ctx in deployment_contexts
+                if ctx.model_deployment is not None
             }
             await self._deployment_reconciler.reconcile_orphans(known_deployment_ids)
             self.emit_heartbeat()

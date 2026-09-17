@@ -9,6 +9,24 @@ runner. LAB ships **raw** tasks (`tasks/**/task.json` + `documents/`); this exam
 — it downloads the pinned source and *generates* the Harbor suite itself, then runs and scores it with
 one `AgentEvaluator` call.
 
+## Prerequisites, seams & caveats
+
+- **Not zero-dependency**: Python ≥ 3.12, Docker, and a NeMo Platform source checkout
+  (see [SETUP.md](../../../../SETUP.md) for toolchain prerequisites). The SDK is not
+  published as a standalone PyPI package. From the repository root, install Harbor with
+  `uv sync --frozen --package nemo-evaluator-sdk --extra harbor`. Harbor native runtime is early-access.
+- **Reproducing LAB's official reference-agent number** additionally requires wiring **LAB's reference
+  agent** (as an `--agent-import-path` adapter) and
+  LAB's **exact** `rubric_criterion` judge prompt into `lab_verify.py`. Out of the box this generates a
+  *runnable, faithful-in-shape* suite; treat scores as comparable-in-method until you drop those in.
+- **Agent-output seam**: `prepare_lab_suite.py --run-dir` sets where the verifier reads the agent's
+  deliverables (default `/logs/agent/artifacts/lab-run`, LAB's reference-agent location). Point it at
+  wherever your chosen Harbor agent writes.
+- **`scores.json` schema**: `LabCriteriaMetric` reads `n_criteria`, `n_passed`, `all_pass`,
+  `judge_error_count`, `criteria_results[].verdict` — exactly what `lab_verify.py` writes.
+- **Scale**: the SDK runs tasks with async concurrency locally (or a single-container platform job).
+  For the full 1,749-task sweep, prefer the governed platform job over a local run.
+
 ## Files
 
 - [`prepare_lab_suite.py`](prepare_lab_suite.py) — self-contained: downloads + SHA-verifies the pinned
@@ -68,22 +86,6 @@ lab_criteria.n_passed / n_criteria
 lab_criteria.judge_error_count:  mean=0.0    # treat > 0 as an infra failure, not a model miss
 view.legal_quality:              mean=0.60   # MEAN(reward, criteria_pass_rate)
 ```
-
-## Prerequisites, seams & caveats
-
-- **Not zero-dependency**: Python ≥ 3.12, Docker, and `harbor` installed separately
-  (`uv pip install "harbor>=0.16.1"`). Harbor native runtime is early-access.
-- **Reproducing LAB's official reference-agent number** additionally requires wiring **LAB's reference
-  agent** (as an `--agent-import-path` adapter) and
-  LAB's **exact** `rubric_criterion` judge prompt into `lab_verify.py`. Out of the box this generates a
-  *runnable, faithful-in-shape* suite; treat scores as comparable-in-method until you drop those in.
-- **Agent-output seam**: `prepare_lab_suite.py --run-dir` sets where the verifier reads the agent's
-  deliverables (default `/logs/agent/artifacts/lab-run`, LAB's reference-agent location). Point it at
-  wherever your chosen Harbor agent writes.
-- **`scores.json` schema**: `LabCriteriaMetric` reads `n_criteria`, `n_passed`, `all_pass`,
-  `judge_error_count`, `criteria_results[].verdict` — exactly what `lab_verify.py` writes.
-- **Scale**: the SDK runs tasks with async concurrency locally (or a single-container platform job).
-  For the full 1,749-task sweep, prefer the governed platform job over a local run.
 
 For the **task-driven, bring-your-own-agent** counterpart (native `AgentEvalTask`s + Fabric + a rubric
 *metric* instead of an in-container verifier), see [`../legal_agent_bench_fabric`](../legal_agent_bench_fabric).

@@ -15,7 +15,7 @@ resolves the execution profile.
 
 from __future__ import annotations
 
-from typing import ClassVar, cast
+from typing import ClassVar
 
 from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
@@ -23,24 +23,37 @@ from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
 from nemo_rl_plugin.schema import RlJobInput
 from nemo_rl_plugin.transform import transform_input_to_output
 from nmp.customization_common.contributor.jobs import BaseSubmitJob, require_distributed_runtime
+from nmp.customization_common.service.platform_client import (
+    AsyncCustomizationPlatformClients,
+    async_customization_platform_clients_from_platform,
+)
 from nmp.rl.compile import platform_job_config_compiler
 from nmp.rl.schemas import RlJobOutput
 from pydantic import BaseModel
 
 
-class RlJob(BaseSubmitJob):
+class RlJob(BaseSubmitJob[RlJobInput, RlJobOutput]):
     """NeMo-RL DPO and GRPO training job under the customization router (submit-only)."""
 
     name: ClassVar[str] = "rl.jobs"
     description: ClassVar[str] = "NeMo-RL DPO and GRPO training jobs on the platform Kubernetes GPU cluster (Ray)."
     job_collection_path: ClassVar[str | None] = "/rl/jobs"
-    input_spec_schema: ClassVar[type[BaseModel] | None] = RlJobInput
-    spec_schema: ClassVar[type[BaseModel] | None] = RlJobOutput
+    input_spec_schema: ClassVar[type[RlJobInput] | None] = RlJobInput
+    spec_schema: ClassVar[type[RlJobOutput] | None] = RlJobOutput
     runtime_label: ClassVar[str] = "NeMo-RL"
 
     @classmethod
-    async def _transform(cls, job_input: BaseModel, workspace: str, async_sdk: AsyncNeMoPlatform) -> RlJobOutput:
-        return await transform_input_to_output(cast(RlJobInput, job_input), workspace, async_sdk)
+    def _job_input_schema(cls) -> type[RlJobInput]:
+        return RlJobInput
+
+    @classmethod
+    async def _transform(
+        cls,
+        job_input: RlJobInput,
+        workspace: str,
+        platform: AsyncCustomizationPlatformClients,
+    ) -> RlJobOutput:
+        return await transform_input_to_output(job_input, workspace, platform)
 
     @classmethod
     async def compile(
@@ -49,7 +62,7 @@ class RlJob(BaseSubmitJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: object,
+        async_sdk: AsyncNeMoPlatform,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
@@ -62,6 +75,7 @@ class RlJob(BaseSubmitJob):
         (single-node ``gpu`` vs multi-node ``gpu_distributed``).
         """
         del entity_client, options
+        platform = async_customization_platform_clients_from_platform(async_sdk)
         require_distributed_runtime(cls.runtime_label)
         canonical = spec if isinstance(spec, RlJobOutput) else RlJobOutput.model_validate(spec.model_dump())
         try:
@@ -75,7 +89,7 @@ class RlJob(BaseSubmitJob):
         return await platform_job_config_compiler(
             workspace=workspace,
             spec=canonical,
-            sdk=cast(AsyncNeMoPlatform, async_sdk),
+            platform=platform,
             job_name=job_name,
             profile=execution_profile,
         )

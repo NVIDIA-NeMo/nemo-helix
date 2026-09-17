@@ -15,7 +15,7 @@ Covers:
 - DI: ``ctx`` annotation gets a :class:`FunctionContext` with the
   workspace from the path and the request id from the
   ``X-Request-ID`` header.
-- DI: ``async_sdk`` annotation gets the request-scoped platform
+- DI: ``sdk`` and ``async_sdk`` annotations get the request-scoped platform
   handle (overridden via ``app.dependency_overrides``).
 
 The tests mount the auto-derived router under
@@ -28,12 +28,13 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Literal
 
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from nemo_platform_plugin.dependencies import get_sdk_client
+from nemo_platform_plugin.dependencies import get_sdk_client, get_sync_sdk_client
 from nemo_platform_plugin.function import NemoFunction
 from nemo_platform_plugin.function_context import FunctionContext
 from nemo_platform_plugin.functions.frames import Done, FrameModel, Heartbeat
@@ -56,6 +57,11 @@ class GreetSpec(BaseModel):
 
 class GreetResponse(BaseModel):
     message: str
+
+
+@dataclass(frozen=True)
+class _MarkerSdk:
+    marker: str
 
 
 class _NonStreamingGreet(NemoFunction[GreetSpec]):
@@ -114,10 +120,30 @@ class _SdkGreet(NemoFunction[GreetSpec]):
     name: ClassVar[str] = "sdk-greet"
     spec_schema: ClassVar[type[BaseModel]] = GreetSpec
 
-    async def run(self, spec: GreetSpec, *, async_sdk: object) -> dict:
+    async def run(self, spec: GreetSpec, *, async_sdk: _MarkerSdk) -> dict:
         # Echo a marker attribute so the test can assert the override
         # actually flowed through.
-        return {"name": spec.name, "sdk_marker": getattr(async_sdk, "marker", None)}
+        return {"name": spec.name, "sdk_marker": async_sdk.marker}
+
+
+class _SyncSdkGreet(NemoFunction[GreetSpec]):
+    name: ClassVar[str] = "sync-sdk-greet"
+    spec_schema: ClassVar[type[BaseModel]] = GreetSpec
+
+    async def run(self, spec: GreetSpec, *, sdk: _MarkerSdk) -> dict:
+        return {"name": spec.name, "sdk_marker": sdk.marker}
+
+
+class _BothSdkGreet(NemoFunction[GreetSpec]):
+    name: ClassVar[str] = "both-sdk-greet"
+    spec_schema: ClassVar[type[BaseModel]] = GreetSpec
+
+    async def run(self, spec: GreetSpec, *, sdk: _MarkerSdk, async_sdk: _MarkerSdk) -> dict:
+        return {
+            "name": spec.name,
+            "sdk_marker": sdk.marker,
+            "async_sdk_marker": async_sdk.marker,
+        }
 
 
 class _LocalityGreet(NemoFunction[GreetSpec]):
@@ -358,11 +384,8 @@ class TestSignatureDi:
         assert body["request_id"] is None
 
     def test_async_sdk_resolved_from_dependency_override(self) -> None:
-        class FakeSdk:
-            marker = "fake-sdk"
-
         app = _build_app(_SdkGreet)
-        app.dependency_overrides[get_sdk_client] = lambda: FakeSdk()
+        app.dependency_overrides[get_sdk_client] = lambda: _MarkerSdk("fake-sdk")
         client = TestClient(app)
         resp = client.post(
             "/apis/example/v2/workspaces/default/sdk-greet",
@@ -382,6 +405,33 @@ class TestSignatureDi:
             json={"name": "world"},
         )
         assert resp.status_code == 500
+
+    def test_sync_sdk_resolved_from_dependency_override(self) -> None:
+        app = _build_app(_SyncSdkGreet)
+        app.dependency_overrides[get_sync_sdk_client] = lambda: _MarkerSdk("fake-sync-sdk")
+        client = TestClient(app)
+        resp = client.post(
+            "/apis/example/v2/workspaces/default/sync-sdk-greet",
+            json={"name": "world"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"name": "world", "sdk_marker": "fake-sync-sdk"}
+
+    def test_sync_and_async_sdks_resolved_independently(self) -> None:
+        app = _build_app(_BothSdkGreet)
+        app.dependency_overrides[get_sync_sdk_client] = lambda: _MarkerSdk("fake-sync-sdk")
+        app.dependency_overrides[get_sdk_client] = lambda: _MarkerSdk("fake-async-sdk")
+        client = TestClient(app)
+        resp = client.post(
+            "/apis/example/v2/workspaces/default/both-sdk-greet",
+            json={"name": "world"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "name": "world",
+            "sdk_marker": "fake-sync-sdk",
+            "async_sdk_marker": "fake-async-sdk",
+        }
 
 
 # ---------------------------------------------------------------------------

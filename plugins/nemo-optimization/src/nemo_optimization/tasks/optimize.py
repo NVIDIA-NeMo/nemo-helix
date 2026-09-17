@@ -10,8 +10,10 @@ import signal
 import sys
 from types import FrameType
 
+from nemo_platform_plugin.errors import LocalRunError
 from nemo_platform_plugin.sdk_provider import get_task_sdk
-from nemo_platform_plugin.tasks.dispatcher import run_task
+from nemo_platform_plugin.tasks.dispatcher import build_ctx_from_env, exit_code_for, read_step_config
+from nemo_platform_plugin.tasks.logging_setup import configure_task_logging
 
 from nemo_optimization.jobs.optimize import OptimizeJob
 
@@ -24,13 +26,23 @@ def _shutdown_handler(signum: int, frame: FrameType | None) -> None:
 
 
 def main() -> int:
+    configure_task_logging()
     signal.signal(signal.SIGTERM, _shutdown_handler)
     try:
         sdk = get_task_sdk("agents")
+        ctx = build_ctx_from_env(sdk)
+        config = read_step_config()
+        job = OptimizeJob()
     except Exception:
-        logger.exception("Failed to build task SDK for agents")
+        logger.exception("Failed to prepare task for agents")
         return 2
-    return run_task(OptimizeJob, sdk=sdk)
+    try:
+        return exit_code_for(job.run(config, ctx=ctx, sdk=sdk))
+    except LocalRunError:
+        raise
+    except Exception:
+        logger.exception("OptimizeJob.run raised")
+        return 1
 
 
 if __name__ == "__main__":

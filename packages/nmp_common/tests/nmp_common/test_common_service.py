@@ -27,20 +27,6 @@ from nmp.common.service import get_nemo_client as facade_get_nemo_client
 from nmp.common.service.dependencies import get_nemo_client
 
 
-def _route_paths(app: FastAPI) -> set[str]:
-    """Collect all route paths, compatible with FastAPI 0.138+ _IncludedRouter."""
-    paths: set[str] = set()
-    queue = list(app.routes)
-    while queue:
-        route = queue.pop()
-        if hasattr(route, "path"):
-            paths.add(route.path)
-        fn = getattr(route, "effective_candidates", None)
-        if callable(fn):
-            queue.extend(fn())  # type: ignore[arg-type]
-    return paths
-
-
 class MockService(Service):
     """Mock implementation of Service for testing."""
 
@@ -55,6 +41,24 @@ class MockService(Service):
             return {"message": "test"}
 
         return [RouterConfig(router, tag="Test", description="Test endpoints")]
+
+
+class NestedRouterService(Service):
+    """Service with an included router nested under its configured router."""
+
+    def __init__(self):
+        super().__init__(name="nested-router", module_name="nmp.test")
+
+    def get_routers(self) -> List[RouterConfig]:
+        child_router = APIRouter()
+
+        @child_router.get("/child")
+        async def child_endpoint():
+            return {"message": "nested"}
+
+        parent_router = APIRouter()
+        parent_router.include_router(child_router, prefix="/nested")
+        return [RouterConfig(parent_router, tag="Nested", description="Nested endpoints")]
 
 
 class TestRouterConfig:
@@ -138,8 +142,42 @@ class TestServiceBase:
         service = MockService()
         app = service.app
 
-        route_paths = _route_paths(app)
-        assert "/test" in route_paths
+        with TestClient(app) as client:
+            response = client.get("/test")
+
+        assert response.status_code == 200
+        assert response.json() == {"message": "test"}
+
+    def test_service_tags_untagged_nested_router_routes_in_openapi(self):
+        service = NestedRouterService()
+
+        openapi = service.app.openapi()
+
+        assert openapi["paths"]["/nested/child"]["get"]["tags"] == ["Nested"]
+
+    def test_service_openapi_schema_is_generated_lazily(self, monkeypatch: pytest.MonkeyPatch):
+        import nmp.common.service.base as service_base
+
+        calls = 0
+
+        def fake_get_openapi(**_kwargs: object) -> dict[str, object]:
+            nonlocal calls
+            calls += 1
+            return {"components": {"schemas": {}}, "paths": {}}
+
+        monkeypatch.setattr(service_base, "get_openapi", fake_get_openapi)
+
+        service = MockService()
+        app = service.app
+
+        assert calls == 0
+        assert app.openapi_schema is None
+
+        first_schema = app.openapi()
+        second_schema = app.openapi()
+
+        assert calls == 1
+        assert first_schema is second_schema
 
 
 class TestServiceAsync:

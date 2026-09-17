@@ -32,6 +32,7 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_agents_plugin.runner.backend import DeploymentInfo
 from nemo_agents_plugin.runner.controller import AgentDeploymentController
+from nemo_agents_plugin.spec_revision import SpecRevision
 from nemo_platform_plugin.auth import AuthContext
 from nemo_platform_plugin.entities.client import AsyncEntitiesClient
 from nemo_platform_plugin.entity_client import NemoEntityConflictError
@@ -295,7 +296,7 @@ async def test_activity_from_current_runtime_wins_restart_reconciliation() -> No
 
     assert result is None
     assert current_generation.status is SessionStatus.ACTIVE
-    ctrl.entities.update.assert_not_called()
+    cast(Any, ctrl.entities.update).assert_not_called()
     cleanup.assert_not_called()
 
 
@@ -317,7 +318,7 @@ async def test_activity_between_runtime_start_and_controller_observation_stays_a
     assert first_activity_at < controller_observed_at
     assert result is None
     assert current_generation.status is SessionStatus.ACTIVE
-    ctrl.entities.update.assert_not_called()
+    cast(Any, ctrl.entities.update).assert_not_called()
     cleanup.assert_not_called()
 
 
@@ -574,6 +575,52 @@ async def test_start_deployment_writes_runtime_fields_to_entity() -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_deployment_records_the_spec_revision_the_backend_staged() -> None:
+    ctrl, backend = _make_controller()
+    backend.allocate_port = MagicMock(return_value=0)
+    backend.create_deployment = AsyncMock(
+        return_value=DeploymentInfo(
+            name="dep-1",
+            status="starting",
+            staged_spec=SpecRevision(revision="2" * 40, tracked_revision="main"),
+        )
+    )
+    dep = AgentDeployment(
+        name="dep-1",
+        workspace="default",
+        agent="calc",
+        status="pending",
+        spec_revision="1" * 40,
+        spec_tracked_revision="main",
+    )
+
+    await ctrl._start_deployment(dep)
+
+    assert dep.spec_revision == "2" * 40
+    assert dep.spec_tracked_revision == "main"
+
+
+@pytest.mark.asyncio
+async def test_start_deployment_keeps_the_spec_revision_when_nothing_was_staged() -> None:
+    ctrl, backend = _make_controller()
+    backend.allocate_port = MagicMock(return_value=0)
+    backend.create_deployment = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="starting"))
+    dep = AgentDeployment(
+        name="dep-1",
+        workspace="default",
+        agent="calc",
+        status="pending",
+        spec_revision="1" * 40,
+        spec_tracked_revision="main",
+    )
+
+    await ctrl._start_deployment(dep)
+
+    assert dep.spec_revision == "1" * 40
+    assert dep.spec_tracked_revision == "main"
+
+
+@pytest.mark.asyncio
 async def test_start_deployment_forwards_image_entrypoint_mode() -> None:
     ctrl, backend = _make_controller()
     backend.allocate_port = MagicMock(return_value=0)
@@ -723,7 +770,7 @@ async def test_expire_session_leaves_session_before_deadline_active(expires_at: 
 
     assert result is None
     assert session.status is SessionStatus.ACTIVE
-    ctrl.entities.update.assert_not_called()
+    cast(Any, ctrl.entities.update).assert_not_called()
     cleanup.assert_not_called()
 
 

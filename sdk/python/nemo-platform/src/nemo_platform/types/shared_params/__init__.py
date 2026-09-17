@@ -27,10 +27,8 @@ from .fileset_metadata import FilesetMetadata as FilesetMetadata
 from .inference_params import InferenceParams as InferenceParams
 from .tool_call_config import ToolCallConfig as ToolCallConfig
 from .api_endpoint_data import APIEndpointData as APIEndpointData
-from .file_storage_type import FileStorageType as FileStorageType
 from .linear_layer_spec import LinearLayerSpec as LinearLayerSpec
 from .generic_sort_field import GenericSortField as GenericSortField
-from .platform_job_status import PlatformJobStatus as PlatformJobStatus
 from .sliding_window_config import SlidingWindowConfig as SlidingWindowConfig
 from .model_metadata_content import ModelMetadataContent as ModelMetadataContent
 from .dataset_metadata_content import DatasetMetadataContent as DatasetMetadataContent

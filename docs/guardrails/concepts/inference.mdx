@@ -10,7 +10,7 @@ description: ""
 
 NeMo Guardrails applies safety checks to inference requests through VirtualModels. When your application sends a request to a VirtualModel with guardrails middleware, the plugin runs input and output rails around the model call automatically. You use the standard IGW OpenAI-compatible endpoint — no separate guardrails endpoint is needed.
 
-Platform-managed agents are the canonical consumer: pointing an agent's `llms` block at a guarded VirtualModel entity is how you secure the agent's model path. See [Secure Agents](/documentation/agents/secure-agents) for the agent-side wiring. The rest of this page applies to any client calling a guarded VirtualModel, agent or not.
+Platform-managed agents are the canonical consumer: pointing an agent's `llms` block at a guarded VirtualModel entity is how you secure the agent's model path. See [Add Guardrails to an Agent](/documentation/agents/add-guardrails) for the agent-side wiring. The rest of this page applies to any client calling a guarded VirtualModel, agent or not.
 
 ## Prerequisites
 

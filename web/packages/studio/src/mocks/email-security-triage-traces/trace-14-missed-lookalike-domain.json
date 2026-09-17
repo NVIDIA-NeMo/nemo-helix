@@ -1,0 +1,46 @@
+{
+  "schema_version": "ATIF-v1.5",
+  "session_id": "3f2a1c00-0014-4a00-8000-000000000014",
+  "trajectory_id": "3f2a1c00-0014-4a00-8000-000000000014",
+  "agent": {
+    "name": "email-security-triage",
+    "version": "0.7.0",
+    "model_name": "nvidia-nemotron-3-nano-30b-a3b"
+  },
+  "final_metrics": {
+    "total_prompt_tokens": 3690,
+    "total_completion_tokens": 68,
+    "total_cost_usd": 0.0005943,
+    "total_steps": 2
+  },
+  "extra": {
+    "task_id": "email-security-triage/missed-lookalike-14",
+    "verifier_result": {
+      "rewards": {
+        "correctness": 0.0,
+        "format": 1.0,
+        "routing": 1.0
+      }
+    }
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-08-21T22:18:55Z",
+      "source": "user",
+      "message": "{\"user_message\": \"can I trust this vendor mail?\", \"emails\": [{\"from\": \"orders@nothbound-supply.com\", \"subject\": \"Updated banking details for future payments\", \"body\": \"Hi,\\n\\nOur bank has changed. Please update our remittance details using the form at https://nothbound-supply.com/remittance before your next payment run.\\n\\nThanks,\\nNorthbound Supply Accounts\"}]}"
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-08-21T22:19:01Z",
+      "source": "agent",
+      "model_name": "default/nvidia-nemotron-3-nano-30b-a3b",
+      "message": "benign\nA known supplier notifying a banking change, with the form hosted on their own site and no urgency language.",
+      "metrics": {
+        "prompt_tokens": 3690,
+        "completion_tokens": 68,
+        "cost_usd": 0.0005943
+      }
+    }
+  ]
+}

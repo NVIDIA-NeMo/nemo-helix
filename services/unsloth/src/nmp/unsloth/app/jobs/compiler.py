@@ -234,6 +234,7 @@ async def platform_job_config_compiler(
 
     cpu_resources = _get_cpu_resources()
     base_env = _get_base_environment()
+    task_profile = profile or config.default_training_execution_profile
 
     validation_dataset_path = _resolve_validation_dataset_path(job_spec, workspace=workspace)
     download_config = _build_file_download_config(job_spec, me, workspace=workspace)
@@ -249,6 +250,7 @@ async def platform_job_config_compiler(
             name="model-and-dataset-download",
             executor=CPUExecutionProviderSpec(
                 provider="cpu",
+                profile=task_profile,
                 container=ContainerSpec(
                     image=get_tasks_image(),
                     entrypoint=UNSLOTH_PYTHON_ENTRYPOINT,
@@ -263,12 +265,13 @@ async def platform_job_config_compiler(
             job_spec,
             base_env,
             validation_dataset_path=validation_dataset_path,
-            profile=profile,
+            profile=task_profile,
         ),
         PlatformJobStep(
             name="model-upload",
             executor=CPUExecutionProviderSpec(
                 provider="cpu",
+                profile=task_profile,
                 container=ContainerSpec(
                     image=get_tasks_image(),
                     entrypoint=UNSLOTH_PYTHON_ENTRYPOINT,
@@ -283,6 +286,7 @@ async def platform_job_config_compiler(
             name="model-entity-creation",
             executor=CPUExecutionProviderSpec(
                 provider="cpu",
+                profile=task_profile,
                 container=ContainerSpec(
                     image=get_tasks_image(),
                     entrypoint=UNSLOTH_PYTHON_ENTRYPOINT,

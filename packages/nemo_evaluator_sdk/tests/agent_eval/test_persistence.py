@@ -12,8 +12,15 @@ from pathlib import Path
 import pytest
 from nemo_evaluator_sdk.agent_eval.persistence import persist_run, read_trials
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary, TrialMetricValue
-from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput, TrialError
+from nemo_evaluator_sdk.agent_eval.trials import (
+    AgentEvalTrial,
+    AgentEvalTrialStatus,
+    AgentOutput,
+    TrialError,
+    TrialMeasurements,
+)
 from nemo_evaluator_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
+from pydantic import ValidationError
 
 
 def _write_trial(run_dir: Path, trial: AgentEvalTrial) -> None:
@@ -31,7 +38,7 @@ def _trial_with_workspace(ref: str) -> AgentEvalTrial:
     )
 
 
-def test_read_trials_hydrates_trial_and_keeps_valid_evidence_ref(tmp_path: Path) -> None:
+def test_read_trials_loads_trial_and_keeps_valid_evidence_ref(tmp_path: Path) -> None:
     # A stored bundle whose workspace evidence ref still resolves as-is (re-scoring reads the deliverables).
     workspace = tmp_path / "evidence" / "fabric" / "run" / "000000-taskA" / "workspace"
     (workspace / "output").mkdir(parents=True)
@@ -82,6 +89,28 @@ def test_persist_run_writes_bundle_relative_refs_that_survive_a_move(tmp_path: P
     (trial,) = read_trials(moved)
     resolved = Path(trial.evidence.require("workspace").ref)  # type: ignore[arg-type]
     assert resolved.is_dir() and resolved == moved / "evidence" / "fabric" / "r" / "000000-taskA" / "workspace"
+
+
+def test_persist_run_revalidates_model_copy_corrupted_measurements_before_writing(tmp_path: Path) -> None:
+    trial = _trial_with_workspace("workspace").model_copy(
+        update={"measurements": TrialMeasurements(prompt_tokens=8, completion_tokens=2)}
+    )
+    result = AgentEvalResult(
+        run_id="r",
+        tasks=[],
+        trials=[trial],
+        scores=[],
+        summary=AgentEvalSummary.from_scores([], tasks=[]),
+    )
+    corrupted_measurements = trial.measurements.model_copy(update={"prompt_tokens": -1})
+    corrupted_trial = trial.model_copy(update={"measurements": corrupted_measurements})
+    corrupted_result = result.model_copy(update={"trials": [corrupted_trial]})
+    bundle = tmp_path / "bundle"
+
+    with pytest.raises(ValidationError):
+        persist_run(corrupted_result, bundle, write_html_dashboard=False)
+
+    assert not bundle.exists()
 
 
 def test_persist_run_writes_per_task_values_to_summary(tmp_path: Path) -> None:
@@ -262,3 +291,82 @@ def test_trials_jsonl_round_trips_a_typed_error(tmp_path: Path) -> None:
     [reloaded] = read_trials(tmp_path)
 
     assert reloaded.error == trial.error
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_measurements"),
+    [
+        pytest.param(
+            {
+                "measurements": {
+                    "prompt_tokens": 8,
+                    "completion_tokens": 2,
+                    "runtime_sec": 0,
+                    "cost_usd": 0,
+                },
+                "metadata": {"provenance": "kept"},
+            },
+            TrialMeasurements(prompt_tokens=8, completion_tokens=2, runtime_sec=0, cost_usd=0),
+            id="typed",
+        ),
+        pytest.param(
+            {"metadata": {"prompt_tokens": 8, "completion_tokens": 2, "duration_ms": 1500}},
+            TrialMeasurements(),
+            id="metadata-only",
+        ),
+        pytest.param(
+            {
+                "measurements": {"prompt_tokens": 8, "completion_tokens": 2},
+                "metadata": {"prompt_tokens": 999, "completion_tokens": 999, "duration_ms": 1500},
+            },
+            TrialMeasurements(prompt_tokens=8, completion_tokens=2),
+            id="conflicting-metadata",
+        ),
+    ],
+)
+def test_trials_jsonl_preserves_typed_measurements_and_opaque_metadata(
+    tmp_path: Path,
+    payload: dict[str, object],
+    expected_measurements: TrialMeasurements,
+) -> None:
+    row = {"id": "task-a:trial", "task_id": "task-a", "status": "partial", **payload}
+    (tmp_path / "trials.jsonl").write_text(
+        json.dumps(row) + "\n",
+        encoding="utf-8",
+    )
+
+    [loaded] = read_trials(tmp_path)
+    assert loaded.measurements == expected_measurements
+    assert loaded.metadata == payload.get("metadata", {})
+
+    round_trip_dir = tmp_path / "round-trip"
+    persist_run(
+        AgentEvalResult(run_id="run", tasks=[], trials=[loaded], scores=[], summary=AgentEvalSummary()),
+        round_trip_dir,
+        write_html_dashboard=False,
+    )
+    [reloaded] = read_trials(round_trip_dir)
+    assert reloaded == loaded
+
+
+@pytest.mark.parametrize("measurements", [None, {"prompt_tokens": -1}])
+def test_trials_jsonl_rejects_invalid_typed_measurements_without_metadata_fallback(
+    tmp_path: Path,
+    measurements: object,
+) -> None:
+    (tmp_path / "trials.jsonl").write_text(
+        json.dumps(
+            {
+                "id": "task-a:invalid",
+                "task_id": "task-a",
+                "status": "partial",
+                "measurements": measurements,
+                "metadata": {"prompt_tokens": 8, "duration_ms": 1500},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError):
+        read_trials(tmp_path)

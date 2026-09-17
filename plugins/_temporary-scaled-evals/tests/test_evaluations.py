@@ -1700,11 +1700,25 @@ def test_list_artifacts_404_when_evaluation_unknown(monkeypatch) -> None:  # noq
 
 
 def test_get_artifact_streams_content(monkeypatch) -> None:  # noqa: ANN001
-    _override_conn(_conn_with_fetchone({"id": "ev_test123"}))
-    monkeypatch.setattr(
-        "scaled_evals.api.routers.evaluations.s3.stream_object",
-        lambda key: iter([b"artifact content"]),
-    )
+    conn = _conn_with_fetchone({"id": "ev_test123"})
+    _override_conn(conn)
+    checkout_active = False
+
+    @contextmanager
+    def stream_db() -> Iterator[Database]:
+        nonlocal checkout_active
+        checkout_active = True
+        try:
+            yield Database(conn)
+        finally:
+            checkout_active = False
+
+    def stream_object(_key: str) -> Iterator[bytes]:
+        assert not checkout_active, "artifact download retained its database checkout"
+        yield b"artifact content"
+
+    v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.stream_object", stream_object)
 
     response = client.get(
         "/v1/evaluations/ev_test123/artifacts/trial/result.json",

@@ -15,7 +15,9 @@ from datetime import datetime
 from typing import NotRequired, Self, TypedDict
 
 from nemo_platform_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN, NAME_PATTERN_DESCRIPTION
+from nemo_platform_plugin.schema import Page
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_serializer, model_validator
+from typing_extensions import Required
 
 # ---------------------------------------------------------------------------
 # Response types
@@ -39,12 +41,20 @@ class PlatformSecretAccessResponse(BaseModel):
     workspace: str = Field(description="The workspace ID the secret belongs to")
     value: str = Field(description="The payload of the secret")
 
+    @property
+    def data(self) -> str:
+        return self.value
+
 
 class PlatformSecretAdminRotationResponse(BaseModel):
-    """Response DTO for the admin key-rotation routine."""
+    """Response schema for admin secret rotation routine."""
 
     rotated_secrets: int
     success: bool
+
+
+class PlatformSecretResponsesPage(Page[PlatformSecretResponse]):
+    """Compatibility page model for the legacy SDK secrets resource."""
 
 
 # ---------------------------------------------------------------------------
@@ -108,3 +118,22 @@ class PlatformSecretUpdateRequest(BaseModel):
 class ListSecretsQueryParams(TypedDict, total=False):
     page: NotRequired[int]
     page_size: NotRequired[int]
+
+
+class SecretCreateParams(TypedDict, total=False):
+    workspace: str
+    name: Required[str]
+    value: Required[str]
+    description: str
+
+
+class SecretListParams(TypedDict, total=False):
+    workspace: str
+    page: int
+    page_size: int
+
+
+class SecretUpdateParams(TypedDict, total=False):
+    workspace: str
+    description: str
+    value: str

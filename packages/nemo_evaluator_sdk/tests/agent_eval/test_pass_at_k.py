@@ -24,17 +24,18 @@ from nemo_evaluator_sdk.values.protocol import MetricOutputSpec
 
 
 class _ScoreMetric:
-    """Minimal metric declaring a single continuous-score output (pass@k-eligible)."""
+    """Minimal metric declaring continuous-score outputs (pass@k-eligible)."""
 
-    def __init__(self, metric_type: str) -> None:
+    def __init__(self, metric_type: str, *output_names: str) -> None:
         self._type = metric_type
+        self._output_names = output_names or ("reward",)
 
     @property
     def type(self) -> str:
         return self._type
 
     def output_spec(self) -> list[MetricOutputSpec]:
-        return [MetricOutputSpec.continuous_score("reward")]
+        return [MetricOutputSpec.continuous_score(name, required=name == "reward") for name in self._output_names]
 
     async def compute_scores(self, input: MetricInput) -> MetricResult:  # pragma: no cover - not exercised
         raise NotImplementedError
@@ -59,6 +60,10 @@ def _task(task_id: str, *metrics: Metric) -> AgentEvalTask:
 
 
 def _score(task_id: str, trial_id: str, metric_type: str, name: str, value: object) -> AgentEvalTaskScore:
+    return _score_outputs(task_id, trial_id, metric_type, {name: value})
+
+
+def _score_outputs(task_id: str, trial_id: str, metric_type: str, outputs: dict[str, object]) -> AgentEvalTaskScore:
     return AgentEvalTaskScore(
         id=f"{task_id}:{trial_id}:{metric_type}",
         run_id="run",
@@ -66,7 +71,7 @@ def _score(task_id: str, trial_id: str, metric_type: str, name: str, value: obje
         trial_id=trial_id,
         metric_type=metric_type,
         status=AgentEvalScoreStatus.COMPLETED,
-        outputs=[MetricOutput(name=name, value=value)],
+        outputs=[MetricOutput(name=name, value=value) for name, value in outputs.items()],
     )
 
 
@@ -205,10 +210,83 @@ def test_a_metric_that_raised_leaves_the_trial_unmeasured_rather_than_failed() -
 
     assert metric_values(summary.task_metric_values["t1"]["reward.reward"]) == [1.0]
     assert by_name["reward.reward.pass@1"].mean == pytest.approx(0.75)  # mean(1.0, 0.5), not mean(0.5, 0.5)
-    # t1 drops out of pass@2 for having fewer than k trials. That is the estimator working as defined,
-    # not missing data, so it is not counted as nan.
+    # t1 had two applicable attempts but only one measured value, so pass@2 stays visibly
+    # unestimable instead of silently dropping the task.
     assert by_name["reward.reward.pass@2"].count == 1
-    assert by_name["reward.reward.pass@2"].nan_count == 0
+    assert by_name["reward.reward.pass@2"].nan_count == 1
+
+
+def test_sparse_optional_output_emits_pass_rows_through_applicable_attempts() -> None:
+    tasks = [_task("A", _ScoreMetric("harbor_reward", "format_ok", "reward"))]
+    scores = [
+        _score_outputs("A", "a1", "harbor_reward", {"reward": 1.0, "format_ok": 1.0}),
+        _score_outputs("A", "a2", "harbor_reward", {"reward": 0.0}),
+    ]
+
+    summary = AgentEvalSummary.from_scores(scores, tasks=tasks)
+    format_pass_1 = summary.score("harbor_reward.format_ok.pass@1")
+    format_pass_2 = summary.score("harbor_reward.format_ok.pass@2")
+
+    assert (format_pass_1.count, format_pass_1.nan_count, format_pass_1.mean) == (1, 0, 1.0)
+    assert (format_pass_2.count, format_pass_2.nan_count, format_pass_2.mean) == (0, 1, None)
+    # Exact fully qualified names prove alphabetical output order never selects the primary.
+    assert summary.score("harbor_reward.reward.pass@1").mean == pytest.approx(0.5)
+
+
+def test_all_omitted_optional_output_retains_each_applicable_pass_row() -> None:
+    tasks = [_task("A", _ScoreMetric("harbor_reward", "reward", "format_ok"))]
+    scores = [
+        _score_outputs("A", "a1", "harbor_reward", {"reward": 1.0}),
+        _score_outputs("A", "a2", "harbor_reward", {"reward": 0.0}),
+    ]
+
+    summary = AgentEvalSummary.from_scores(scores, tasks=tasks)
+
+    for k in (1, 2):
+        score = summary.score(f"harbor_reward.format_ok.pass@{k}")
+        assert (score.count, score.nan_count, score.mean) == (0, 1, None)
+
+
+def test_failed_metric_stays_out_of_n_while_failed_trial_is_a_non_pass() -> None:
+    tasks = [
+        _task("trial-failed", _ScoreMetric("harbor_reward", "reward", "format_ok")),
+        _task("metric-failed", _ScoreMetric("harbor_reward", "reward", "format_ok")),
+    ]
+    scores = [
+        _score_outputs("trial-failed", "a1", "harbor_reward", {"reward": 1.0, "format_ok": 1.0}),
+        _failed_score("trial-failed", "a2", "harbor_reward", details={TRIAL_STATUS_DETAIL: "failed"}),
+        _score_outputs("metric-failed", "b1", "harbor_reward", {"reward": 1.0, "format_ok": 1.0}),
+        _failed_score("metric-failed", "b2", "harbor_reward", details={"exception_type": "TimeoutError"}),
+    ]
+
+    summary = AgentEvalSummary.from_scores(scores, tasks=tasks)
+
+    assert summary.score("harbor_reward.format_ok.pass@1").mean == pytest.approx(0.75)
+    pass_2 = summary.score("harbor_reward.format_ok.pass@2")
+    assert (pass_2.count, pass_2.nan_count, pass_2.mean) == (1, 1, 1.0)
+
+
+def test_pass_at_two_counts_each_declaring_task_even_when_one_has_n_one() -> None:
+    tasks = [
+        _task("A", _ScoreMetric("harbor_reward", "reward", "format_ok")),
+        _task("B", _ScoreMetric("harbor_reward", "reward", "format_ok")),
+        _task("C", _ScoreMetric("harbor_reward", "reward")),
+    ]
+    scores = [
+        _score_outputs("A", "a1", "harbor_reward", {"reward": 1.0, "format_ok": 1.0}),
+        _score_outputs("A", "a2", "harbor_reward", {"reward": 0.0, "format_ok": 0.0}),
+        _score_outputs("B", "b1", "harbor_reward", {"reward": 1.0, "format_ok": 1.0}),
+        _score_outputs("B", "b2", "harbor_reward", {"reward": 0.0}),
+        _score_outputs("C", "c1", "harbor_reward", {"reward": 1.0}),
+        _score_outputs("C", "c2", "harbor_reward", {"reward": 0.0}),
+    ]
+
+    summary = AgentEvalSummary.from_scores(scores, tasks=tasks)
+    pass_2 = summary.score("harbor_reward.format_ok.pass@2")
+
+    assert (pass_2.count, pass_2.nan_count, pass_2.mean) == (1, 1, 1.0)
+    coverage = summary.metric_coverage["harbor_reward"]["format_ok"]
+    assert coverage.total == 4  # task C does not declare format_ok and creates no opportunity
 
 
 def test_a_task_with_no_usable_value_is_reported_as_nan_count_uniformly_across_k() -> None:

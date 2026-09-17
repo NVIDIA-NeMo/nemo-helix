@@ -25,7 +25,7 @@ from evaluation.registry import Subject
 from evaluation.tau2run import load_tasks, policy_version, read_policy, resolve_paths, run_tau2
 from nemo_insights_plugin.analyst.observability import AnalystEvaluationContext
 from nemo_insights_plugin.analyst.run import run_analyst
-from nemo_insights_plugin.client import make_client
+from nemo_insights_plugin.platform_client import make_client
 from nemo_platform import AsyncNeMoPlatform
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

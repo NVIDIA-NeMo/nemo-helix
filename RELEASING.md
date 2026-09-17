@@ -37,7 +37,7 @@ input description in that workflow.
 | Type | IDs |
 | --- | --- |
 | Wheels | `nemo-platform`, `nemo-platform-plugin` |
-| Containers | `nmp-api`, `nmp-cpu-tasks`, `nmp-gym-tasks`, `nmp-customizer-tasks`, `nmp-automodel-training`, `nmp-unsloth-training`, `nmp-rl-training`, `auditor-tasks`, `safe-synthesizer-tasks` |
+| Containers | `nmp-api`, `nmp-cpu-tasks`, `nmp-gym-tasks`, `nmp-gym-host`, `nmp-customizer-tasks`, `nmp-automodel-training`, `nmp-unsloth-training`, `nmp-rl-training`, `auditor-tasks`, `safe-synthesizer-tasks` |
 | Helm chart | `nemo-platform` |
 
 For every selected wheel, the workflow checks that its package configuration

@@ -9,9 +9,9 @@ serialized response.
 """
 
 import json
+from http import HTTPStatus
 from typing import Any
 
-import nemo_platform
 import pytest
 from nemo_guardrails_plugin.constants import GUARDRAILS_DATA_MESSAGE_ROLE
 from nmp.core.inference_gateway.testing.harness import IGWPluginHarness
@@ -19,6 +19,8 @@ from nmp.testing.mock_chat_completions import ChatCompletion, chat_completion
 
 from .utils import (
     GUARDRAILS_PLUGIN_NAME,
+    GuardrailsTestDataNames,
+    expect_harness_http_error,
     make_guardrail_config,
     make_guardrails_test_data_names,
     make_middleware_call,
@@ -140,7 +142,7 @@ class TestRequestLogging:
         *,
         log_options: dict[str, bool] | None = None,
         return_choice: bool = False,
-    ) -> tuple[dict[str, Any], Any]:
+    ) -> tuple[dict[str, Any], GuardrailsTestDataNames]:
         test_data_names = make_guardrails_test_data_names(workspace=harness.workspace)
 
         harness.mock_chat_completions(
@@ -287,14 +289,14 @@ class TestRequestLogging:
                 default_model_entity=test_data_names.main_model_entity_ref,
                 request_middleware=[make_middleware_call(guardrail_config)],
             )
-            with pytest.raises(nemo_platform.APIStatusError) as exc_info:
-                harness.chat_completions(
+            expect_harness_http_error(
+                lambda: harness.chat_completions(
                     workspace=harness.workspace,
                     body={
                         "model": test_data_names.request_virtual_model_name,
                         "messages": [{"role": "user", "content": self.USER_INPUT}],
                         "guardrails": {"options": {"log": {"unknown": True}}},
                     },
-                )
-
-        assert exc_info.value.status_code == 422
+                ),
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+            )

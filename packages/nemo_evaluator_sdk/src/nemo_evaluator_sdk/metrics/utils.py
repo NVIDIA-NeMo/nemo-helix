@@ -3,11 +3,29 @@
 
 """Shared helpers for runtime metrics."""
 
+import math
 import re
 import string
+from typing import Any
 
 from nemo_evaluator_sdk.enums import MetricType
 from nemo_evaluator_sdk.metrics.protocol import Metric
+
+
+def as_finite_float(value: Any) -> float | None:
+    """The value as a float when it is a real measurement, otherwise ``None``.
+
+    ``bool`` is an int subclass; never treat True/False as a measurement. NaN, the infinities,
+    and integers too large to represent are rejected too: none can be serialised onto the wire,
+    so recording one would fail the publish of an otherwise good trial.
+    """
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    try:
+        number = float(value)
+    except OverflowError:
+        return None
+    return number if math.isfinite(number) else None
 
 
 def normalize_text(s: str) -> str:

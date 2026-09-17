@@ -152,6 +152,19 @@ def test_descriptor_declares_the_ethos_setting() -> None:
     assert "agent_spec" not in settings_schema["properties"]
 
 
+def test_descriptor_declares_relay_telemetry_support() -> None:
+    """Without this, Fabric rejects the relay config agents auto-wires for every job.
+
+    The Analyst then cannot run at all, rather than merely running untraced --
+    the export is configured by the agents layer, which asks the descriptor
+    first.
+    """
+    telemetry = json.loads(DESCRIPTOR.read_text(encoding="utf-8"))["telemetry"]
+
+    assert "relay" in telemetry["providers"]
+    assert "atif" in telemetry["providers"]["relay"]["outputs"]
+
+
 def test_fabric_plans_a_config_carrying_an_ethos(tmp_path: Path) -> None:
     """Planning is where a setting the descriptor omits actually blows up."""
     _require_installed_descriptor()

@@ -26,7 +26,7 @@ import re
 from typing import Any
 
 from nemo_experimentalist_plugin.eval_author import traces
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.client import AsyncNemoClient
 
 # Every column Intake names in its "Unknown filter field" message, which is a superset of
 # what it can actually filter. Probing the superset is the point.
@@ -115,7 +115,7 @@ def uses_sentinel(field: str) -> bool:
 
 async def run(
     kind: str,
-    client: AsyncNeMoPlatform,
+    client: AsyncNemoClient,
     workspace: str,
     filter: dict[str, Any],
     *,
@@ -139,7 +139,7 @@ async def run(
     return "WORKS"
 
 
-async def probe_fields(client: AsyncNeMoPlatform, workspace: str, kind: str, fields: tuple[str, ...]) -> None:
+async def probe_fields(client: AsyncNemoClient, workspace: str, kind: str, fields: tuple[str, ...]) -> None:
     print(f"\n{'=' * 66}\n{kind.upper()} FILTER FIELDS\n{'=' * 66}")
     works: list[str] = []
     broken: list[str] = []
@@ -170,7 +170,7 @@ async def probe_fields(client: AsyncNeMoPlatform, workspace: str, kind: str, fie
         print("  Do not document them. Confirm they are still broken before removing this note.")
 
 
-async def probe_operators(client: AsyncNeMoPlatform, workspace: str) -> None:
+async def probe_operators(client: AsyncNemoClient, workspace: str) -> None:
     print(f"\n{'=' * 66}\nOPERATORS (which operators Intake accepts per field)\n{'=' * 66}")
     for kind, label, filter in OPERATOR_CASES:
         # The $in cases pass values nothing holds, so they must come back empty. The date
@@ -178,7 +178,7 @@ async def probe_operators(client: AsyncNeMoPlatform, workspace: str) -> None:
         print(f"  {kind:<6} {label:<22} {await run(kind, client, workspace, filter, expect_no_rows='$in' in label)}")
 
 
-async def probe_group_by(client: AsyncNeMoPlatform, workspace: str) -> None:
+async def probe_group_by(client: AsyncNemoClient, workspace: str) -> None:
     print(f"\n{'=' * 66}\nGROUP BY\n{'=' * 66}")
     for field in ("trace_id", "session_id", "agent_name", "kind"):
         try:
@@ -194,7 +194,7 @@ async def main() -> None:
     parser.add_argument("--workspace", default="default", help="Any workspace. It need not hold spans.")
     args = parser.parse_args()
 
-    async with AsyncNeMoPlatform(base_url=args.base_url) as client:
+    async with AsyncNemoClient(base_url=args.base_url) as client:
         await probe_fields(client, args.workspace, "span", SPAN_FIELDS)
         await probe_fields(client, args.workspace, "trace", TRACE_FIELDS)
         await probe_operators(client, args.workspace)

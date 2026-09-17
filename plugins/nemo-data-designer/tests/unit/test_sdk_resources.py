@@ -39,12 +39,15 @@ from nemo_data_designer_plugin.sdk.errors import (
     DataDesignerConfigValidationError,
     DataDesignerPreviewError,
 )
+from nemo_data_designer_plugin.sdk.job_resources import AsyncDataDesignerJobResource, DataDesignerJobResource
 from nemo_data_designer_plugin.sdk.resources import (
     AsyncDataDesignerResource,
     DataDesignerResource,
     _decode_preview_frame,
 )
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_platform_plugin.data_designer.client import AsyncDataDesignerClient, DataDesignerClient
+from nemo_platform_plugin.data_designer.types import DataDesignerJobResponse
 from nemo_platform_plugin.functions.frames import Done, Error, Heartbeat
 from pydantic import BaseModel
 
@@ -67,6 +70,20 @@ def resource(platform: NeMoPlatform) -> DataDesignerResource:
 @pytest.fixture
 def async_resource(async_platform: AsyncNeMoPlatform) -> AsyncDataDesignerResource:
     return AsyncDataDesignerResource(async_platform)
+
+
+def test_job_resource_accepts_legacy_platform_constructor(platform: NeMoPlatform) -> None:
+    job = DataDesignerJobResource(job_name="dd-job", platform=platform, workspace="default")
+
+    assert job.name == "dd-job"
+    assert isinstance(job._client, DataDesignerClient)
+
+
+def test_async_job_resource_accepts_legacy_platform_constructor(async_platform: AsyncNeMoPlatform) -> None:
+    job = AsyncDataDesignerJobResource(job_name="dd-job", platform=async_platform, workspace="default")
+
+    assert job.name == "dd-job"
+    assert isinstance(job._client, AsyncDataDesignerClient)
 
 
 @pytest.fixture
@@ -260,14 +277,15 @@ async def test_http_error_translates_5xx_to_generic_client_error(
 def test_create_posts_to_named_create_job(
     resource: DataDesignerResource, config_builder: dd.DataDesignerConfigBuilder
 ) -> None:
-    mock_resp = MagicMock()
-    mock_resp.json.return_value = {"name": "dd-job-1"}
-    mock_client = MagicMock()
-    mock_client.post.return_value = mock_resp
-    with patch.object(resource, "_client", return_value=mock_client):
+    mock_response = MagicMock()
+    mock_response.data.return_value = DataDesignerJobResponse(name="dd-job-1")
+    mock_create_job = MagicMock(return_value=mock_response)
+    with patch.object(resource._data_designer_client, "create_job", mock_create_job):
         job = resource.create(config_builder, num_records=10, workspace="ws")
-    url = mock_client.post.call_args.args[0]
-    assert url.endswith("/jobs/create")
+    kwargs = mock_create_job.call_args.kwargs
+    assert kwargs["workspace"] == "ws"
+    assert kwargs["job_collection"] == "create"
+    assert kwargs["body"].spec["num_records"] == 10
     assert job._job_name == "dd-job-1"
     assert job._job_collection == "create"
 
@@ -276,13 +294,14 @@ def test_create_posts_to_named_create_job(
 async def test_async_create_posts_to_named_create_job(
     async_resource: AsyncDataDesignerResource, config_builder: dd.DataDesignerConfigBuilder
 ) -> None:
-    mock_resp = MagicMock()
-    mock_resp.json.return_value = {"name": "dd-job-2"}
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(return_value=mock_resp)
-    with patch.object(async_resource, "_client", return_value=mock_client):
+    mock_response = MagicMock()
+    mock_response.data.return_value = DataDesignerJobResponse(name="dd-job-2")
+    mock_create_job = AsyncMock(return_value=mock_response)
+    with patch.object(async_resource._data_designer_client, "create_job", mock_create_job):
         job = await async_resource.create(config_builder, num_records=10, workspace="ws")
-    url = mock_client.post.call_args.args[0]
-    assert url.endswith("/jobs/create")
+    kwargs = mock_create_job.call_args.kwargs
+    assert kwargs["workspace"] == "ws"
+    assert kwargs["job_collection"] == "create"
+    assert kwargs["body"].spec["num_records"] == 10
     assert job._job_name == "dd-job-2"
     assert job._job_collection == "create"

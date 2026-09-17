@@ -133,3 +133,9 @@ export const getErrorMessage = (error: AxiosError | Error, fallbackMessage?: str
   // "config has no usable model" into "Unknown error" at the guardrail-run call site.
   return error.message || fallbackMessage || '';
 };
+
+export const swallowConflict = <T>(promise: Promise<T>): Promise<T | undefined> =>
+  promise.catch((e: unknown) => {
+    if (e instanceof AxiosError && e.response?.status === 409) return undefined;
+    throw e;
+  });

@@ -3,9 +3,9 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
+import { useInsightsGetInsight } from '@nemo/sdk/generated/insights/insights-insights';
 import { useGetExperiment } from '@nemo/sdk/generated/platform/experiments';
 import { Button, Card, Flex, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
-import { useOptimizerGetInsight } from '@studio/api/optimizer';
 import {
   isTrendChoiceCurrent,
   resolveTrendVisible,
@@ -31,7 +31,7 @@ export const ExperimentDetailRoute: FC = () => {
   const { experimentName } = useRequiredPathParams([ROUTE_PARAMS.experimentName]);
   const { data: group, error } = useGetExperiment(workspace, experimentName);
   // The insight is a group-level concept, reached via the group's insight_id.
-  const { data: insight } = useOptimizerGetInsight(workspace, group?.insight_id ?? '', {
+  const { data: insight } = useInsightsGetInsight(workspace, group?.insight_id ?? '', {
     query: { enabled: OPTIMIZER_ENABLED && Boolean(group?.insight_id) },
   });
   const [editOpen, setEditOpen] = useState(false);

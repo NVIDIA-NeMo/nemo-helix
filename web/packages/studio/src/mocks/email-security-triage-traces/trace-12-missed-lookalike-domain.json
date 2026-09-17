@@ -1,0 +1,46 @@
+{
+  "schema_version": "ATIF-v1.5",
+  "session_id": "3f2a1c00-0012-4a00-8000-000000000012",
+  "trajectory_id": "3f2a1c00-0012-4a00-8000-000000000012",
+  "agent": {
+    "name": "email-security-triage",
+    "version": "0.7.0",
+    "model_name": "nvidia-nemotron-3-nano-30b-a3b"
+  },
+  "final_metrics": {
+    "total_prompt_tokens": 3690,
+    "total_completion_tokens": 68,
+    "total_cost_usd": 0.0005943,
+    "total_steps": 2
+  },
+  "extra": {
+    "task_id": "email-security-triage/missed-lookalike-12",
+    "verifier_result": {
+      "rewards": {
+        "correctness": 0.0,
+        "format": 1.0,
+        "routing": 1.0
+      }
+    }
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-08-23T22:18:55Z",
+      "source": "user",
+      "message": "{\"user_message\": \"should I trust this?\", \"emails\": [{\"from\": \"billing@acme-invoicing.co\", \"subject\": \"Overdue invoice INV-7741\", \"body\": \"Hi Sam,\\n\\nInvoice INV-7741 for $8,400 is 14 days overdue. Settle it through our portal: https://portal.acme-invoicing.co/pay\\n\\nRegards,\\nAccounts Receivable\"}]}"
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-08-23T22:19:01Z",
+      "source": "agent",
+      "model_name": "default/nvidia-nemotron-3-nano-30b-a3b",
+      "message": "benign\nThe invoice references a specific number and amount, the tone is routine, and the payment portal is on the sender's own domain.",
+      "metrics": {
+        "prompt_tokens": 3690,
+        "completion_tokens": 68,
+        "cost_usd": 0.0005943
+      }
+    }
+  ]
+}

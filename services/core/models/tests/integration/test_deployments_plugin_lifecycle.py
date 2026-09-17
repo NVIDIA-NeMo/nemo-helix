@@ -10,11 +10,19 @@ import uuid
 import pytest
 from docker.errors import NotFound
 from nemo_deployments_plugin.backends.labels import container_name
-from nemo_platform import NotFoundError
+from nemo_platform_plugin.client.errors import NotFoundError
 from nmp.core.models.controllers.backends.deployments_plugin.naming import entity_names
 from tenacity import retry, stop_after_delay, wait_fixed
 
 import docker
+
+from .conftest import (
+    create_deployment,
+    create_deployment_config,
+    delete_deployment,
+    get_deployment,
+    get_provider,
+)
 
 try:
     docker.from_env().ping()
@@ -36,7 +44,7 @@ def test_deployments_plugin_docker_lifecycle(controller_with_deployments_plugin,
     Tests: create → PENDING → READY → delete → cleanup
     Also verifies ModelProvider creation and deletion.
     """
-    controller, _, sdk, mock_nim_image, ctx, reconcile = controller_with_deployments_plugin
+    controller, _, models_client, mock_nim_image, ctx, reconcile = controller_with_deployments_plugin
     test_uuid = uuid.uuid4().hex[:8]
     config_name = f"test-plugin-lifecycle-{test_uuid}"
     deployment_name = f"test-plugin-lifecycle-{test_uuid}"
@@ -47,7 +55,8 @@ def test_deployments_plugin_docker_lifecycle(controller_with_deployments_plugin,
     ctx.register_container(server_container_name)
 
     image_name, image_tag = mock_nim_image.rsplit(":", 1)
-    sdk.inference.deployment_configs.create(
+    create_deployment_config(
+        models_client,
         name=config_name,
         workspace=workspace,
         engine="nim",
@@ -58,7 +67,8 @@ def test_deployments_plugin_docker_lifecycle(controller_with_deployments_plugin,
             "image_tag": image_tag,
         },
     )
-    sdk.inference.deployments.create(
+    create_deployment(
+        models_client,
         name=deployment_name,
         workspace=workspace,
         config=config_name,
@@ -83,7 +93,7 @@ def test_deployments_plugin_docker_lifecycle(controller_with_deployments_plugin,
     @retry(stop=stop_after_delay(45), wait=wait_fixed(0.2), reraise=True)
     def wait_for_deployment_ready():
         reconcile(controller)
-        dep = sdk.inference.deployments.retrieve(deployment_name, workspace=workspace)
+        dep = get_deployment(models_client, name=deployment_name, workspace=workspace)
         assert dep.status == "READY", f"Deployment not READY: {dep.status} ({dep.status_message})"
         return dep
 
@@ -92,14 +102,14 @@ def test_deployments_plugin_docker_lifecycle(controller_with_deployments_plugin,
     provider_id = deployment.model_provider_id
     assert provider_id is not None, "ModelProvider should be created when deployment becomes READY"
     provider_workspace, provider_name = provider_id.split("/")
-    provider = sdk.inference.providers.retrieve(provider_name, workspace=provider_workspace)
+    provider = get_provider(models_client, name=provider_name, workspace=provider_workspace)
     assert provider.host_url is not None
     assert provider.status == "READY"
 
     reconcile(controller)
-    sdk.inference.providers.retrieve(provider_name, workspace=provider_workspace)
+    get_provider(models_client, name=provider_name, workspace=provider_workspace)
 
-    sdk.inference.deployments.delete(deployment_name, workspace=workspace)
+    delete_deployment(models_client, name=deployment_name, workspace=workspace)
     reconcile(controller)
 
     @retry(stop=stop_after_delay(30), wait=wait_fixed(0.2), reraise=True)
@@ -113,7 +123,7 @@ def test_deployments_plugin_docker_lifecycle(controller_with_deployments_plugin,
         except NotFound:
             pass
         try:
-            sdk.inference.providers.retrieve(provider_name, workspace=provider_workspace)
+            get_provider(models_client, name=provider_name, workspace=provider_workspace)
         except NotFoundError:
             return
         raise AssertionError("ModelProvider still exists after deployment delete")
@@ -121,4 +131,4 @@ def test_deployments_plugin_docker_lifecycle(controller_with_deployments_plugin,
     wait_for_delete_complete()
 
     with pytest.raises(NotFoundError):
-        sdk.inference.providers.retrieve(provider_name, workspace=provider_workspace)
+        get_provider(models_client, name=provider_name, workspace=provider_workspace)

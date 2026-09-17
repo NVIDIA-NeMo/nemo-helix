@@ -36,7 +36,9 @@
     "update-warning-count": "pnpm tsx ../common/scripts/update-max-warnings.ts",
     "screenshots": "tsx screenshots/capture.ts",
     "feature-flags": "tsx scripts/feature-flag-matrix.ts",
-    "fetch-styles": "tsx scripts/fetch-styles.ts"
+    "fetch-styles": "tsx scripts/fetch-styles.ts",
+    "traces:bump": "tsx scripts/bump-trace-timestamps.ts",
+    "traces:convert": "tsx scripts/convert-trace-formats.ts"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.12.28",

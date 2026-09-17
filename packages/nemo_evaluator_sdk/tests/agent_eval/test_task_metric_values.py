@@ -15,7 +15,6 @@ from nemo_evaluator_sdk.agent_eval.results import (
     AgentEvalSummary,
     TrialMetricValue,
     TrialMetricValueType,
-    _task_metric_values,
     metric_values,
     numeric_metric_values,
 )
@@ -27,7 +26,7 @@ from nemo_evaluator_sdk.agent_eval.scores import (
     AgentEvalTaskScore,
 )
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask, SemanticReducer, SemanticView, ViewSignal
-from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricResult
+from nemo_evaluator_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricResult
 from nemo_evaluator_sdk.values.protocol import MetricOutputSpec
 from pydantic import RootModel, ValidationError
 
@@ -41,16 +40,16 @@ class _TokenCount(RootModel[int]):
 
 
 class _Metric:
-    def __init__(self, metric_type: str, output: MetricOutputSpec) -> None:
+    def __init__(self, metric_type: str, *outputs: MetricOutputSpec) -> None:
         self._type = metric_type
-        self._output = output
+        self._outputs = outputs
 
     @property
     def type(self) -> str:
         return self._type
 
     def output_spec(self) -> list[MetricOutputSpec]:
-        return [self._output]
+        return list(self._outputs)
 
     async def compute_scores(self, input: MetricInput) -> MetricResult:  # pragma: no cover
         raise NotImplementedError
@@ -90,6 +89,23 @@ def _score(
     *,
     status: AgentEvalScoreStatus = AgentEvalScoreStatus.COMPLETED,
 ) -> AgentEvalTaskScore:
+    return _score_outputs(
+        task_id,
+        trial_id,
+        metric_type,
+        {output_name: value},
+        status=status,
+    )
+
+
+def _score_outputs(
+    task_id: str,
+    trial_id: str,
+    metric_type: str,
+    outputs: dict[str, object],
+    *,
+    status: AgentEvalScoreStatus = AgentEvalScoreStatus.COMPLETED,
+) -> AgentEvalTaskScore:
     return AgentEvalTaskScore(
         id=f"run:{task_id}:{trial_id}:{metric_type}",
         run_id="run",
@@ -97,7 +113,30 @@ def _score(
         trial_id=trial_id,
         metric_type=metric_type,
         status=status,
-        outputs=[MetricOutput(name=output_name, value=value)],
+        outputs=[MetricOutput(name=name, value=value) for name, value in outputs.items()],
+    )
+
+
+def _harbor_task(task_id: str, *, format_ok: bool = True, with_view: bool = False) -> AgentEvalTask:
+    outputs = [MetricOutputSpec.continuous_score("reward")]
+    if format_ok:
+        outputs.append(MetricOutputSpec.continuous_score("format_ok", required=False))
+    views = (
+        {
+            "format_quality": SemanticView(
+                reducer=SemanticReducer.SINGLE,
+                signals=[ViewSignal(metric="harbor_reward", output="format_ok")],
+            )
+        }
+        if with_view
+        else {}
+    )
+    return AgentEvalTask(
+        id=task_id,
+        intent="test",
+        inputs={},
+        metrics=[_Metric("harbor_reward", *outputs)],
+        views=views,
     )
 
 
@@ -177,9 +216,102 @@ def test_task_metric_values_scans_scores_once() -> None:
         ]
     )
 
-    assert _pairs(_task_metric_values(scores, tasks)) == {
+    assert _pairs(AgentEvalSummary.from_scores(scores, tasks=tasks).task_metric_values) == {
         "task-a": {"reward.score": [("trial-0", 1.0), ("trial-1", 0.0)]}
     }
+
+
+def test_sparse_optional_output_is_consistent_across_summary_consumers() -> None:
+    task = _harbor_task("A", with_view=True)
+    scores = [
+        _score_outputs("A", "a1", "harbor_reward", {"reward": 1.0, "format_ok": 1.0}),
+        _score_outputs("A", "a2", "harbor_reward", {"reward": 0.0}),
+    ]
+
+    summary = AgentEvalSummary.from_scores(scores, tasks=[task])
+    raw = summary.score("harbor_reward.format_ok")
+    coverage = summary.metric_coverage["harbor_reward"]["format_ok"]
+    view = summary.score("view.format_quality")
+
+    assert (raw.count, raw.nan_count, raw.mean) == (1, 1, 1.0)
+    assert raw.sample_std_dev is None and raw.sample_variance is None
+    assert (coverage.total, coverage.scored, coverage.missing, coverage.failed) == (2, 1, 1, 0)
+    assert raw.count is not None
+    assert raw.count + raw.nan_count == 2
+    assert coverage.scored + coverage.missing + coverage.failed == coverage.total
+    assert _pairs(summary.task_metric_values)["A"]["harbor_reward.format_ok"] == [("a1", 1.0)]
+    assert (view.count, view.nan_count, view.mean) == (1, 1, 1.0)
+
+
+def test_all_omitted_optional_output_retains_unmeasured_summary_rows() -> None:
+    task = _harbor_task("A", with_view=True)
+    scores = [
+        _score_outputs("A", "a1", "harbor_reward", {"reward": 1.0}),
+        _score_outputs("A", "a2", "harbor_reward", {"reward": 0.0}),
+    ]
+
+    summary = AgentEvalSummary.from_scores(scores, tasks=[task])
+    raw = summary.score("harbor_reward.format_ok")
+    coverage = summary.metric_coverage["harbor_reward"]["format_ok"]
+    view = summary.score("view.format_quality")
+
+    assert (raw.count, raw.nan_count, raw.mean) == (0, 2, None)
+    assert (coverage.total, coverage.scored, coverage.missing, coverage.failed) == (2, 0, 2, 0)
+    assert _pairs(summary.task_metric_values)["A"]["harbor_reward.format_ok"] == []
+    assert (view.count, view.nan_count, view.mean) == (0, 2, None)
+    assert summary.score("harbor_reward.format_ok.pass@1").nan_count == 1
+    assert summary.score("harbor_reward.format_ok.pass@2").nan_count == 1
+
+
+def test_failed_trial_and_failed_metric_have_distinct_observations() -> None:
+    task = _harbor_task("A", with_view=True)
+    trial_failure = AgentEvalSummary.from_scores(
+        [
+            _score_outputs("A", "a1", "harbor_reward", {"reward": 1.0, "format_ok": 1.0}),
+            _failed_score("A", "a2", trial_failed=True, metric_type="harbor_reward"),
+        ],
+        tasks=[task],
+    )
+    metric_failure = AgentEvalSummary.from_scores(
+        [
+            _score_outputs("A", "a1", "harbor_reward", {"reward": 1.0, "format_ok": 1.0}),
+            _failed_score("A", "a2", trial_failed=False, metric_type="harbor_reward"),
+        ],
+        tasks=[task],
+    )
+
+    for summary in (trial_failure, metric_failure):
+        raw = summary.score("harbor_reward.format_ok")
+        coverage = summary.metric_coverage["harbor_reward"]["format_ok"]
+        assert (raw.count, raw.nan_count, raw.mean) == (1, 1, 1.0)
+        assert (coverage.total, coverage.scored, coverage.missing, coverage.failed) == (2, 1, 0, 1)
+        assert summary.score("view.format_quality").nan_count == 1
+    assert _pairs(trial_failure.task_metric_values)["A"]["harbor_reward.format_ok"] == [
+        ("a1", 1.0),
+        ("a2", None),
+    ]
+    assert _pairs(metric_failure.task_metric_values)["A"]["harbor_reward.format_ok"] == [("a1", 1.0)]
+    assert trial_failure.score("harbor_reward.format_ok.pass@1").mean == pytest.approx(0.5)
+    assert metric_failure.score("harbor_reward.format_ok.pass@1").mean == pytest.approx(1.0)
+
+
+def test_output_applicability_is_task_local_for_every_summary_consumer() -> None:
+    tasks = [_harbor_task("A", with_view=True), _harbor_task("B", format_ok=False)]
+    scores = [
+        _score_outputs("A", "a1", "harbor_reward", {"reward": 1.0, "format_ok": 1.0}),
+        _score_outputs("A", "a2", "harbor_reward", {"reward": 0.0}),
+        _score_outputs("B", "b1", "harbor_reward", {"reward": 1.0}),
+        _score_outputs("B", "b2", "harbor_reward", {"reward": 0.0}),
+    ]
+
+    summary = AgentEvalSummary.from_scores(scores, tasks=tasks)
+    raw = summary.score("harbor_reward.format_ok")
+    coverage = summary.metric_coverage["harbor_reward"]["format_ok"]
+
+    assert (raw.count, raw.nan_count, raw.mean) == (1, 1, 1.0)
+    assert (coverage.total, coverage.scored, coverage.missing, coverage.failed) == (2, 1, 1, 0)
+    assert "harbor_reward.format_ok" not in summary.task_metric_values["B"]
+    assert summary.score("view.format_quality").nan_count == 1
 
 
 def test_failed_trials_are_recorded_but_metric_failures_are_unmeasured() -> None:
@@ -245,10 +377,9 @@ def test_outputs_declared_under_an_unretained_schema_stay_out_even_when_numeric(
     }
 
 
-def test_one_tasks_schema_exclusion_does_not_suppress_another_tasks_output() -> None:
-    # The spec filter is per task: tasks in one run need not declare the same output under the same
-    # schema. Task-a declaring usage.prompt_tokens as a free model must not strip it from task-b,
-    # which never declared it and whose only evidence is the numeric value it actually emitted.
+def test_task_specs_do_not_rediscover_undeclared_outputs() -> None:
+    # With task specs, declared output pairs are the complete applicability contract. Task-a's
+    # unretained model output and task-b's undeclared output must both stay out of task values.
     tasks = [
         _task("task-a", _Metric("usage", MetricOutputSpec.model("prompt_tokens", _TokenCount))),
         _task("task-b", _Metric("reward", MetricOutputSpec.continuous_score("score"))),
@@ -264,10 +395,7 @@ def test_one_tasks_schema_exclusion_does_not_suppress_another_tasks_output() -> 
     # task-a declared it under an unretained schema, so it is not a key there at all -- not even an
     # empty one -- and the numeric value it emitted cannot add it back.
     assert records["task-a"] == {}
-    # task-b never declared it, so its emitted numeric value is the only evidence and it is kept.
-    assert sorted(records["task-b"]) == ["reward.score", "usage.prompt_tokens"]
-    assert _pairs(records)["task-b"]["usage.prompt_tokens"] == [("trial-0", 250)]
-    assert isinstance(records["task-b"]["usage.prompt_tokens"][0].value, int)  # not widened to float
+    assert records["task-b"].keys() == {"reward.score"}
 
 
 def test_nan_metric_values_survive_json_as_a_string() -> None:
@@ -383,10 +511,7 @@ def test_values_align_across_keys_by_trial_id_not_position() -> None:
     ]
 
 
-def test_an_undeclared_label_is_discovered_from_the_value_alone() -> None:
-    # Load-bearing: the declared branch prepopulates keys from task specs *before* the discovery
-    # loop, so a test using a *declared* label would still pass if that loop's gate were left as
-    # _semantic_value (which drops strings). Only an undeclared label exercises it.
+def test_undeclared_outputs_are_discovered_only_without_task_specs() -> None:
     tasks = [_task("task-a", _Metric("reward", MetricOutputSpec.continuous_score("score")))]
     scores = [
         _score("task-a", "trial-0", "reward", "score", 1.0),
@@ -394,21 +519,18 @@ def test_an_undeclared_label_is_discovered_from_the_value_alone() -> None:
     ]
 
     assert _pairs(AgentEvalSummary.from_scores(scores, tasks=tasks).task_metric_values) == {
-        "task-a": {"reward.score": [("trial-0", 1.0)], "verdict.grade": [("trial-0", "excellent")]}
+        "task-a": {"reward.score": [("trial-0", 1.0)]}
     }
-
-    # Same again with no specs at all, where the filter cannot apply.
     assert _pairs(AgentEvalSummary.from_scores(scores).task_metric_values) == {
         "task-a": {"reward.score": [("trial-0", 1.0)], "verdict.grade": [("trial-0", "excellent")]}
     }
 
 
 def test_a_label_under_a_scorelike_key_does_not_break_pass_at_k() -> None:
-    # _scorelike_outputs unions across all tasks while the spec filter is per task, and
-    # validate_metric_result coerces-and-discards -- so a label can reach a key pass@k reads. It must
-    # land in nan_count as an unmeasured task, not raise on `"good" >= 1.0`.
+    # A hand-built score can carry a label under a task-declared score output. It must land in
+    # nan_count as an unmeasured task, not raise on `"good" >= 1.0`.
     reward = _Metric("reward", MetricOutputSpec.continuous_score("score"))
-    tasks = [_task("scored", reward), _task("labelled")]  # 'labelled' declares no metric at all
+    tasks = [_task("scored", reward), _task("labelled", reward)]
     scores = [
         _score("scored", "trial-0", "reward", "score", 1.0),
         _score("labelled", "trial-0", "reward", "score", "good"),  # a label under a scorelike key
@@ -446,6 +568,134 @@ def test_a_view_over_a_label_output_reduces_to_nothing_rather_than_raising() -> 
 
     assert view.count == 0 and view.nan_count == 1  # reduced to nothing, no exception
     assert _pairs(summary.task_metric_values) == {"task-a": {"verdict.grade": [("trial-0", "excellent")]}}
+
+
+@pytest.mark.parametrize("nonfinite", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "-inf"])
+@pytest.mark.parametrize(
+    "reducer",
+    [SemanticReducer.MEAN, SemanticReducer.WEIGHTED_MEAN, SemanticReducer.ALL, SemanticReducer.ANY],
+)
+@pytest.mark.parametrize("reverse_signals", [False, True], ids=["finite-first", "nonfinite-first"])
+def test_a_view_rejects_any_nonfinite_signal_before_reduction(
+    nonfinite: float,
+    reducer: SemanticReducer,
+    *,
+    reverse_signals: bool,
+) -> None:
+    metrics: list[Metric] = [
+        _Metric("finite", MetricOutputSpec.continuous_score("score")),
+        _Metric("nonfinite", MetricOutputSpec.continuous_score("score")),
+    ]
+    signals = [
+        ViewSignal(metric="finite", output="score"),
+        ViewSignal(metric="nonfinite", output="score"),
+    ]
+    task = AgentEvalTask(
+        id="task-a",
+        intent="test",
+        inputs={},
+        metrics=metrics,
+        views={
+            "quality": SemanticView(
+                reducer=reducer,
+                signals=list(reversed(signals)) if reverse_signals else signals,
+            )
+        },
+    )
+    scores = [
+        _score("task-a", "trial-0", "finite", "score", 1.0),
+        _score("task-a", "trial-0", "nonfinite", "score", nonfinite),
+    ]
+
+    view = AgentEvalSummary.from_scores(scores, tasks=[task]).score("view.quality")
+
+    assert (view.count, view.nan_count, view.mean) == (0, 1, None)
+
+
+@pytest.mark.parametrize("nonfinite", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "-inf"])
+def test_a_single_signal_view_rejects_nonfinite_values(nonfinite: float) -> None:
+    metric = _Metric("reward", MetricOutputSpec.continuous_score("score"))
+    task = AgentEvalTask(
+        id="task-a",
+        intent="test",
+        inputs={},
+        metrics=[metric],
+        views={
+            "quality": SemanticView(
+                reducer=SemanticReducer.SINGLE,
+                signals=[ViewSignal(metric="reward", output="score")],
+            )
+        },
+    )
+
+    view = AgentEvalSummary.from_scores(
+        [_score("task-a", "trial-0", "reward", "score", nonfinite)], tasks=[task]
+    ).score("view.quality")
+
+    assert (view.count, view.nan_count, view.mean) == (0, 1, None)
+
+
+def test_a_one_signal_view_preserves_duplicate_score_attempts() -> None:
+    metric = _Metric("reward", MetricOutputSpec.continuous_score("score"))
+    task = AgentEvalTask(
+        id="task-a",
+        intent="test",
+        inputs={},
+        metrics=[metric],
+        views={
+            "quality": SemanticView(
+                reducer=SemanticReducer.SINGLE,
+                signals=[ViewSignal(metric="reward", output="score")],
+            )
+        },
+    )
+    scores = [
+        _score("task-a", "duplicate", "reward", "score", 1.0),
+        _score("task-a", "duplicate", "reward", "score", 0.0),
+    ]
+
+    summary = AgentEvalSummary.from_scores(scores, tasks=[task])
+    view = summary.score("view.quality")
+
+    assert (view.count, view.nan_count, view.mean) == (2, 0, 0.5)
+    assert summary.score("reward.score").count == 2
+    assert summary.metric_coverage["reward"]["score"].total == 2
+    assert _pairs(summary.task_metric_values)["task-a"]["reward.score"] == [
+        ("duplicate", 1.0),
+        ("duplicate", 0.0),
+    ]
+
+
+def test_repeated_view_attempts_pair_signals_by_occurrence_and_retain_absent_signal_opportunities() -> None:
+    metrics: list[Metric] = [
+        _Metric("a", MetricOutputSpec.continuous_score("score")),
+        _Metric("b", MetricOutputSpec.continuous_score("score")),
+        _Metric("other", MetricOutputSpec.continuous_score("score")),
+    ]
+    task = AgentEvalTask(
+        id="task-a",
+        intent="test",
+        inputs={},
+        metrics=metrics,
+        views={
+            "quality": SemanticView(
+                reducer=SemanticReducer.MEAN,
+                signals=[ViewSignal(metric="a", output="score"), ViewSignal(metric="b", output="score")],
+            )
+        },
+    )
+    scores = [
+        _score("task-a", "repeated", "a", "score", 1.0),
+        _score("task-a", "repeated", "b", "score", 1.0),
+        _score("task-a", "repeated", "a", "score", 0.0),
+        _score("task-a", "other-only", "other", "score", 1.0),
+    ]
+
+    view = AgentEvalSummary.from_scores(scores, tasks=[task]).score("view.quality")
+
+    # repeated occurrence 0 pairs a=1 with b=1; occurrence 1 has no b. The other-only trial creates
+    # one more unmeasured opportunity even though neither view signal has a score for it.
+    assert (view.count, view.nan_count, view.mean) == (1, 2, 1.0)
 
 
 def test_dead_trials_are_nameable_from_the_summary_alone() -> None:
@@ -500,8 +750,8 @@ def test_metric_values_projects_to_a_bare_value_list() -> None:
     assert metric_values([]) == []
 
 
-def test_pass_at_k_aggregates_are_unchanged_by_carrying_trial_ids() -> None:
-    """Golden table captured from the pre-change implementation, before records carried trial ids.
+def test_pass_at_k_aggregates_keep_every_declaring_task_visible_at_each_k() -> None:
+    """Golden table for failures, missing measurements, and tasks with no attempts.
 
     Every branch pass@k distinguishes is present: a task that always passes, one whose trials
     include a dead one (None counts toward ``n``), one whose metric raised on a trial (dropped
@@ -536,11 +786,11 @@ def test_pass_at_k_aggregates_are_unchanged_by_carrying_trial_ids() -> None:
 
     assert actual == {
         "complete.passed.pass@1": (pytest.approx(0.7777777777777777), 3, 2),
-        "complete.passed.pass@2": (pytest.approx(0.8333333333333333), 2, 2),
-        "complete.passed.pass@3": (pytest.approx(1.0), 2, 2),
+        "complete.passed.pass@2": (pytest.approx(0.8333333333333333), 2, 3),
+        "complete.passed.pass@3": (pytest.approx(1.0), 2, 3),
         "reward.score.pass@1": (pytest.approx(0.7777777777777777), 3, 2),
-        "reward.score.pass@2": (pytest.approx(0.8333333333333333), 2, 2),
-        "reward.score.pass@3": (pytest.approx(1.0), 2, 2),
+        "reward.score.pass@2": (pytest.approx(0.8333333333333333), 2, 3),
+        "reward.score.pass@3": (pytest.approx(1.0), 2, 3),
     }
 
 

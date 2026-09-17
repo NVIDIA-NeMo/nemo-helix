@@ -10,6 +10,7 @@ from nemo_platform_plugin.auth.access_keys.types import (
     AccessKeyCreateResponse,
     AccessKeyListResponse,
     AccessKeyRevokeResponse,
+    AccessKeyRotateResponse,
     AccessKeyStatusChangeResponse,
 )
 
@@ -34,3 +35,5 @@ class AccessKeyIssuer(Protocol):
     def suspend(self, jti: str) -> AccessKeyStatusChangeResponse: ...
 
     def unsuspend(self, jti: str) -> AccessKeyStatusChangeResponse: ...
+
+    def rotate(self, jti: str, *, grace_period_seconds: int | None = None) -> AccessKeyRotateResponse: ...

@@ -33,9 +33,6 @@ HYDRA_SUBDIR = "gym_hydra"
 _CAPTURE_SUBDIR = "model_calls"
 #: `gym env start`'s combined output, under the run's work dir. Named here because a *collection*
 #: failure often has to point at it: the eval logs show the symptom, this shows the cause.
-_SECRET_KEY_MARKERS = ("api_key", "apikey", "token", "secret", "password", "passwd", "credential")
-#: Stand-in written in place of a redacted override value.
-_REDACTED = "<redacted>"
 
 
 #: Dict keys Hydra reads back unchanged. Its ``dictKey`` rule accepts no quoting, so a key is
@@ -128,44 +125,6 @@ def _flatten_overrides(overrides: Mapping[str, Any], _prefix: str = "") -> list[
         else:
             arguments.append(f"++{path}={hydra_scalar(value)}")
     return arguments
-
-
-def redact_hydra_params(overrides: Mapping[str, Any], _prefix: str = "") -> dict[str, Any]:
-    """Redact credential-looking values from overrides before they are recorded as provenance.
-
-    ``hydra_params`` is a free-form escape hatch forwarded to Gym, so nothing stops a caller passing
-    ``{"model": {"api_key": "sk-..."}}``. ``RunnerInfo.config`` is persisted into the run bundle, so a
-    value that looks like a credential must not be written there.
-
-    The *key* is always kept — knowing that a run overrode ``model.api_key`` is useful provenance;
-    knowing the value is a leak. Matching is on the full dotted path, so a marker anywhere in it
-    redacts, and nesting cannot hide a credential behind an innocuous leaf name.
-
-    Lists are walked too, since a mapping inside one — ``{"models": [{"api_key": "sk-..."}]}`` —
-    reaches Gym just as a nested mapping does. The index contributes no path segment: what marks a
-    value as a credential is the key it sits under, not where in a list it happens to fall.
-    """
-    redacted: dict[str, Any] = {}
-    for key, value in overrides.items():
-        path = f"{_prefix}{key}"
-        if isinstance(value, Mapping):
-            redacted[key] = redact_hydra_params(value, f"{path}.")
-        elif any(marker in path.casefold() for marker in _SECRET_KEY_MARKERS):
-            redacted[key] = _REDACTED
-        elif isinstance(value, (list, tuple)):
-            redacted[key] = [_redact_list_item(item, path) for item in value]
-        else:
-            redacted[key] = value
-    return redacted
-
-
-def _redact_list_item(item: Any, path: str) -> Any:
-    """Redact inside one element of a list-valued override. See :func:`redact_hydra_params`."""
-    if isinstance(item, Mapping):
-        return redact_hydra_params(item, f"{path}.")
-    if isinstance(item, (list, tuple)):
-        return [_redact_list_item(nested, path) for nested in item]
-    return item
 
 
 def selection_args(config: GymRuntimeConfig, work_dir: Path) -> list[str]:

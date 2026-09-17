@@ -1,9 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Trial artifacts, the runtime/serde interfaces that produce them, and the
-runtime-agnostic helpers for shaping trials from artifacts (status mapping +
-the standard evidence-key builder)."""
+"""Typed trial artifacts and runtime/serde interfaces."""
 
 from __future__ import annotations
 
@@ -11,9 +9,10 @@ from collections.abc import Sequence
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any, Protocol, runtime_checkable
+from typing import Annotated, Any, Protocol, Self, runtime_checkable
 
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
+from nemo_evaluator_sdk.metrics.protocol import Metric
 from nemo_evaluator_sdk.values.agents import Agent
 from nemo_evaluator_sdk.values.evidence import (
     EVIDENCE_FINAL_STATE,
@@ -132,10 +131,50 @@ class TrialError(BaseModel):
         return value
 
 
-class AgentEvalTrial(BaseModel):
-    """Durable trial artifact for one task: output, evidence, status, error, and metadata."""
+NonNegativeTokenCount = Annotated[int, Field(strict=True, ge=0)]
+FiniteNonNegativeFloat = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 
-    model_config = ConfigDict(extra="forbid")
+
+class TrialMeasurements(BaseModel):
+    """Validated usage, runtime, and cost measurements for one trial."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, revalidate_instances="always")
+
+    prompt_tokens: NonNegativeTokenCount | None = None
+    completion_tokens: NonNegativeTokenCount | None = None
+    total_tokens: NonNegativeTokenCount | None = None
+    cache_creation_tokens: NonNegativeTokenCount | None = None
+    cache_read_tokens: NonNegativeTokenCount | None = None
+    runtime_sec: FiniteNonNegativeFloat | None = None
+    cost_usd: FiniteNonNegativeFloat | None = None
+
+    @field_validator("runtime_sec", "cost_usd", mode="before")
+    @classmethod
+    def _require_real_number(cls, value: Any) -> Any:
+        if value is None:
+            return value
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ValueError("measurement must be a real number, not a Boolean or string")
+        return value
+
+    @model_validator(mode="after")
+    def _require_canonical_total(self) -> Self:
+        if self.prompt_tokens is None or self.completion_tokens is None:
+            if self.total_tokens is not None:
+                raise ValueError("total_tokens requires prompt_tokens and completion_tokens")
+            return self
+        expected = self.prompt_tokens + self.completion_tokens
+        if self.total_tokens is None:
+            object.__setattr__(self, "total_tokens", expected)
+        elif self.total_tokens != expected:
+            raise ValueError("total_tokens must equal prompt_tokens + completion_tokens")
+        return self
+
+
+class AgentEvalTrial(BaseModel):
+    """Durable trial artifact: output, evidence, status, error, measurements, and metadata."""
+
+    model_config = ConfigDict(extra="forbid", validate_assignment=True, revalidate_instances="always")
 
     id: str = Field(description="Stable identifier for this trial.")
     task_id: str = Field(description="Identifier of the AgentEvalTask this trial was produced for.")
@@ -154,6 +193,10 @@ class AgentEvalTrial(BaseModel):
             "What went wrong producing this trial, when the producer reported a failure. Populated "
             "by a runner runtime. Drives AgentEvalSummary.error_trial_ids."
         ),
+    )
+    measurements: TrialMeasurements = Field(
+        default_factory=TrialMeasurements,
+        description="Validated token usage, agent runtime, and cost measurements for the trial.",
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
@@ -252,6 +295,46 @@ class RunAggregationsProvider(Protocol):
     """
 
     def run_aggregate_scores(self) -> Sequence[AggregateScore]: ...
+
+
+@runtime_checkable
+class TrialAwareMetricsProvider(Protocol):
+    """Optional companion to :class:`AgentTaskRunner`: a runner whose metric outputs
+    are not fully known until trials exist finalizes them here.
+
+    The evaluator calls this once per task after trial generation and before
+    scoring, with only that task's trials. Return the task's full metric list; the
+    evaluator rebuilds the task with these metrics and nothing else, re-validates it
+    (duplicate metric types, views that reference undeclared outputs), and re-groups
+    trials from the final trial list before scoring.
+
+    Do not mutate ``task`` or ``trials``. The evaluator rejects trial ``task_id``
+    reassignment after this hook; other mutation remains a convention for in-process
+    runner code, matching the standing ``run_tasks`` contract.
+
+    Harbor is the in-tree example. The placeholder ``harbor_reward`` metric cannot
+    declare verifier extras until trials exist, because those keys live in
+    ``trial.metadata["reward_details"]``. ``scoring_metrics`` unions the primary
+    reward with keys observed on the task's trials and replaces only the
+    ``harbor_reward`` metric. Two attempts of task A::
+
+        a1: {"reward": 1.0, "format_ok": 1.0}
+        a2: {"reward": 0.0}
+
+    become one spec: required ``reward`` plus optional ``format_ok``. Per-task
+    scoping is structural: the hook never sees another task's trials.
+
+    Runners whose metrics are known before execution simply don't implement this
+    protocol.
+    """
+
+    def scoring_metrics(
+        self,
+        task: AgentEvalTask,
+        trials: Sequence[AgentEvalTrial],
+    ) -> Sequence[Metric]:
+        """Return the metrics to score ``task`` with, given its ``trials``."""
+        ...
 
 
 @runtime_checkable

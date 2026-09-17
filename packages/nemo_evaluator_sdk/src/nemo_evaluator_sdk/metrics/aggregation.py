@@ -17,6 +17,7 @@ from nemo_evaluator_sdk.metrics.protocol import (
     MetricOutput,
     MetricOutputSpec,
     MetricResult,
+    validate_metric_result,
 )
 from nemo_evaluator_sdk.values.results import (
     AggregatedMetricResult,
@@ -50,10 +51,12 @@ class MetricWithScores(Protocol):
     def scores(self) -> Sequence[Score]: ...
 
 
-def _coerce_aggregate_output(output: MetricOutput, output_spec: MetricOutputSpec) -> MetricScore | None:
-    """Convert one declared aggregateable metric output into MetricScore form."""
-    if not is_aggregateable_output_spec(output_spec):
-        return None
+def _coerce_aggregate_output(output: MetricOutput, output_spec: MetricOutputSpec) -> MetricScore:
+    """Convert one declared metric output into MetricScore form.
+
+    ``output_spec`` must be aggregateable; callers select those with
+    :func:`is_aggregateable_output_spec` before they get here.
+    """
     if (
         issubclass(output_spec.value_schema, BooleanValue)
         and isinstance(output.value, float)
@@ -65,6 +68,13 @@ def _coerce_aggregate_output(output: MetricOutput, output_spec: MetricOutputSpec
     if isinstance(value, bool):
         value = 1.0 if value else 0.0
     return MetricScore(name=output.name, value=value)
+
+
+def _score_or_nan(output: MetricOutput | None, output_spec: MetricOutputSpec) -> MetricScore:
+    """The spec's score for this row, or NaN when an optional output was not emitted."""
+    if output is None:
+        return MetricScore(name=output_spec.name, value=float("nan"))
+    return _coerce_aggregate_output(output, output_spec)
 
 
 def _attach_rubric_stats(
@@ -98,26 +108,6 @@ def _attach_rubric_stats(
     )
 
 
-def _aggregateable_scores(
-    result: MetricResult,
-    output_specs: list[MetricOutputSpec],
-    rubric_definitions: Mapping[str, Sequence[RubricScoreStat]] | None = None,
-) -> list[MetricScore]:
-    """Extract score-like outputs from a metric result using declared output specs."""
-    specs_by_name = {output_spec.name: output_spec for output_spec in output_specs}
-    output_by_name = {output.name: output for output in result.outputs}
-    scores: list[MetricScore] = []
-    for output in result.outputs:
-        output_spec = specs_by_name.get(output.name)
-        if output_spec is None:
-            continue
-        score = _coerce_aggregate_output(output, output_spec)
-        if score is not None:
-            score = _attach_rubric_stats(score, output_by_name, rubric_definitions or {})
-            scores.append(score)
-    return scores
-
-
 def add_corpus_scores(
     aggregated_result: AggregatedMetricResult,
     corpus_result: MetricResult,
@@ -132,8 +122,19 @@ def add_corpus_scores(
     Returns:
         ``None``. The ``aggregated_result`` object is updated in place.
     """
-    for score in _aggregateable_scores(corpus_result, output_specs):
+    validated_result = validate_metric_result(corpus_result, output_specs)
+    outputs_by_name = {output.name: output for output in validated_result.outputs}
+    aggregateable_specs = [output_spec for output_spec in output_specs if is_aggregateable_output_spec(output_spec)]
+    for output_spec in aggregateable_specs:
+        score = _score_or_nan(outputs_by_name.get(output_spec.name), output_spec)
         value = score.value
+        if isinstance(value, float) and math.isnan(value):
+            # Every statistic is undefined, so all of them stay at their model default of None;
+            # `count=0` asserts that nothing was evaluated, which is not the same as unknown.
+            aggregated_result.scores.append(
+                AggregateRangeScore(name=score.name, count=0, nan_count=1, histogram=Histogram(bins=[]))
+            )
+            continue
         # Corpus-level metrics contribute one already-aggregated value, so
         # expose them through the same aggregate schema with count=1.
         corpus_score = AggregateRangeScore(
@@ -276,34 +277,50 @@ def aggregate_metrics(
     rubric_distribution: dict[str, dict[str, dict]] = defaultdict(lambda: defaultdict(OrderedDict))
     has_rubric: dict[str, bool] = {}
 
+    aggregateable_specs = [output_spec for output_spec in output_specs if is_aggregateable_output_spec(output_spec)]
+    if not items:
+        return AggregatedMetricResult(scores=[])
+
+    for output_spec in aggregateable_specs:
+        score_name = output_spec.name
+        aggregated_results[score_name] = MetricScore(
+            name=score_name,
+            value=0.0,
+            stats=ScoreStats(
+                count=0,
+                sum=0,
+                sum_squared=0,
+                min=None,
+                max=None,
+                mean=0,
+                variance=None,
+                stddev=None,
+                nan_count=0,
+            ),
+        )
+        rubric_definition = (rubric_definitions or {}).get(score_name)
+        has_rubric[score_name] = bool(rubric_definition)
+        if rubric_definition:
+            for rubric_stat in rubric_definition:
+                rubric_distribution[score_name][rubric_stat.label] = {
+                    "label": rubric_stat.label,
+                    "value": rubric_stat.value,
+                    "count": 0,
+                }
+
     for item in items:
-        for score in _aggregateable_scores(item, output_specs, rubric_definitions):
-            if score.name not in aggregated_results:
-                # Keep one running accumulator per score name; distribution
-                # details are materialized in a second pass once all values exist.
-                aggregated_results[score.name] = MetricScore(
-                    name=score.name,
-                    value=0.0,
-                    stats=ScoreStats(
-                        count=0,
-                        sum=0,
-                        sum_squared=0,
-                        min=None,
-                        max=None,
-                        mean=0,
-                        variance=None,
-                        stddev=None,
-                        nan_count=0,
-                    ),
-                )
-                has_rubric[score.name] = bool(score.stats and score.stats.rubric_distribution)
-                if score.stats and score.stats.rubric_distribution:
-                    for rubric_stat in score.stats.rubric_distribution:
-                        rubric_distribution[score.name][rubric_stat.label] = {
-                            "label": rubric_stat.label,
-                            "value": rubric_stat.value,
-                            "count": 0,
-                        }
+        output_by_name = {output.name: output for output in item.outputs}
+        missing = [
+            output_spec.name
+            for output_spec in aggregateable_specs
+            if output_spec.required and output_spec.name not in output_by_name
+        ]
+        if missing:
+            raise ValueError(f"Missing required metric outputs: {missing}")
+        for output_spec in aggregateable_specs:
+            score = _score_or_nan(output_by_name.get(output_spec.name), output_spec)
+            if has_rubric.get(score.name):
+                score = _attach_rubric_stats(score, output_by_name, rubric_definitions or {})
 
             if score.stats and score.stats.rubric_distribution:
                 for rubric_stat in score.stats.rubric_distribution:
@@ -393,7 +410,7 @@ def aggregate_metrics(
                 for r in rubric_distribution[score_name].values()
             ]
             mode_category = None
-            if rubric_dist:
+            if any(r.count for r in rubric_dist):
                 # Break ties deterministically so aggregate output is stable.
                 max_count = max(r.count for r in rubric_dist)
                 tied = sorted(r.label for r in rubric_dist if r.count == max_count)

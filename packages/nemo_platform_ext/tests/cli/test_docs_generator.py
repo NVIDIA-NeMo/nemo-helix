@@ -30,6 +30,8 @@ def _load_docs_generator():
 _docs_generator = _load_docs_generator()
 generate_docs = _docs_generator.generate_docs
 generate_index_snippet = _docs_generator.generate_index_snippet
+write_docs_files = _docs_generator.write_docs_files
+with_trailing_newline = _docs_generator._with_trailing_newline
 enable_plugin_cli_docs = _docs_generator._enable_plugin_cli_docs
 documented_plugin_clis = _docs_generator._DOCUMENTED_PLUGIN_CLIS
 plugin_docs_discovery_env = _docs_generator._PLUGIN_DOCS_DISCOVERY_ENV
@@ -48,19 +50,19 @@ def test_cli_docs_use_supported_plugins_regardless_of_environment(monkeypatch):
     )
 
     for name in plugin_docs_discovery_env:
-        monkeypatch.setenv(name, "iron-swarm")
+        monkeypatch.setenv(name, "agent-hardener")
 
     enable_plugin_cli_docs()
 
     assert all(os.environ[name] == value for name, value in plugin_docs_discovery_env.items())
     assert os.environ["NEMO_PLUGIN_ALLOWLIST"] == "*"
     assert os.environ["NEMO_PLUGIN_CLI_ALLOWLIST"] == ",".join(documented_plugin_clis)
-    assert "iron-swarm" not in documented_plugin_clis
+    assert "agent-hardener" not in documented_plugin_clis
 
 
 def test_cli_docs_main_includes_supported_plugin_commands(tmp_path):
     env = os.environ.copy()
-    env.update({name: "iron-swarm" for name in plugin_docs_discovery_env})
+    env.update({name: "agent-hardener" for name in plugin_docs_discovery_env})
     repo_root = Path(_docs_generator.__file__).resolve().parents[3]
 
     result = subprocess.run(
@@ -77,12 +79,12 @@ def test_cli_docs_main_includes_supported_plugin_commands(tmp_path):
     )
     for plugin_name in documented_plugin_clis:
         assert f"`{plugin_name}`" in functional_plugins_row
-    assert "`iron-swarm`" not in functional_plugins_row
+    assert "`agent-hardener`" not in functional_plugins_row
 
 
 def test_cli_docs_main_documents_supported_plugin_subcommands(tmp_path):
     env = os.environ.copy()
-    env.update({name: "iron-swarm" for name in plugin_docs_discovery_env})
+    env.update({name: "agent-hardener" for name in plugin_docs_discovery_env})
     repo_root = Path(_docs_generator.__file__).resolve().parents[3]
 
     result = subprocess.run(
@@ -99,7 +101,7 @@ def test_cli_docs_main_documents_supported_plugin_subcommands(tmp_path):
         assert re.search(rf"^#### nemo {re.escape(plugin_name)} \S", result.stdout, re.MULTILINE), (
             f"expected at least one documented subcommand for `nemo {plugin_name}`"
         )
-    assert "iron-swarm" not in result.stdout
+    assert "agent-hardener" not in result.stdout
 
 
 def test_index_snippet_skips_hidden_lazy_commands_without_loading():
@@ -143,3 +145,25 @@ def test_index_snippet_skips_hidden_lazy_commands_without_loading():
     assert "hidden-command" not in snippet
     assert "Hidden command." not in snippet
     assert "* `--help, -h`: Show this message and exit." in reference
+
+
+def test_write_docs_files_matches_individual_generators(tmp_path):
+    docs_app = typer.Typer()
+
+    @docs_app.callback()
+    def main() -> None:
+        """Test CLI."""
+
+    @docs_app.command(rich_help_panel="Setup")
+    def visible() -> None:
+        """Visible command."""
+
+    reference_path = tmp_path / "docs/cli/reference.mdx"
+    summary_path = tmp_path / "docs/fern/snippets/_snippets/cli-summary.mdx"
+
+    write_docs_files(docs_app, reference_path, summary_path, name="nemo")
+
+    assert reference_path.read_text(encoding="utf-8") == generate_docs(docs_app, name="nemo")
+    assert summary_path.read_text(encoding="utf-8") == with_trailing_newline(
+        generate_index_snippet(docs_app, name="nemo")
+    )

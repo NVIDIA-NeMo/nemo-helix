@@ -19,7 +19,7 @@ from typing import (
 
 from nemo_platform_plugin.config import nmp_user_data_dir
 from nemo_platform_plugin.schema import SecretRef
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 
 class StorageConfigType(StrEnum):
@@ -27,6 +27,7 @@ class StorageConfigType(StrEnum):
     NGC = "ngc"
     HUGGINGFACE = "huggingface"
     S3 = "s3"
+    GITHUB = "github"
     # AZURE_BLOB = "azure_blob"
     # GCS = "gcs"
     # HTTP = "http"
@@ -34,6 +35,38 @@ class StorageConfigType(StrEnum):
 
 # Default chunk size for reading/streaming files (1MB)
 DEFAULT_READ_CHUNK_SIZE = 1 * 1024 * 1024
+
+
+def _tracked_revision(revision: str, original_revision: str | None) -> str | None:
+    """Return the ref *revision* was resolved from, when that ref can still move.
+
+    Resolution records the original revision even when the user pinned an
+    immutable id themselves, and a ref equal to what it resolved to cannot name
+    anything else.
+    """
+    return original_revision if original_revision and original_revision != revision else None
+
+
+def _reject_blank(field: str, value: str) -> str:
+    """Refuse a value that would drop out of a URL built from it.
+
+    An empty segment is skipped when the path is joined, so a blank revision turns
+    ``/commits/{revision}`` into the list-commits endpoint rather than failing.
+    """
+    if not value.strip():
+        raise ValueError(f"{field} must not be blank")
+    return value
+
+
+def _reject_relative_segments(field: str, value: str) -> str:
+    """Refuse values that would re-point a URL built from them at another resource.
+
+    ``..`` is resolved away by the URL layer before the request is sent, so a
+    dot segment escapes the repository the rest of the config names.
+    """
+    if any(segment in (".", "..") for segment in value.split("/")):
+        raise ValueError(f"{field} must not contain '.' or '..' path segments, got {value!r}")
+    return value
 
 
 class BaseStorageConfig(BaseModel):
@@ -47,6 +80,20 @@ class BaseStorageConfig(BaseModel):
     def get_secret_references(self) -> dict[str, SecretRef]:
         """Get the secret references for the storage config."""
         return {}
+
+    @property
+    def pinned_revision(self) -> str:
+        """The immutable id this storage is pinned to, empty when it pins nothing."""
+        return ""
+
+    @property
+    def tracked_revision(self) -> str | None:
+        """The mutable ref :attr:`pinned_revision` was resolved from, if it can still move.
+
+        None when the fileset was created from an already-immutable id, which has
+        nothing to move to.
+        """
+        return None
 
     @property
     def owns_storage_data(self) -> bool:
@@ -141,6 +188,82 @@ class HuggingfaceStorageConfig(BaseStorageConfig):
         default="https://huggingface.co",
         description="Huggingface Hub endpoint URL. Use for self-hosted instances.",
     )
+
+    @property
+    def pinned_revision(self) -> str:
+        return self.revision
+
+    @property
+    def tracked_revision(self) -> str | None:
+        return _tracked_revision(self.revision, self.original_revision)
+
+    def get_secret_references(self) -> dict[str, SecretRef]:
+        return {"token": self.token_secret} if self.token_secret else {}
+
+
+class GithubStorageConfig(BaseStorageConfig):
+    type: Literal[StorageConfigType.GITHUB] = StorageConfigType.GITHUB
+    owner: str = Field(description="GitHub repository owner (user or organization)")
+    repo: str = Field(description="GitHub repository name")
+    revision: str = Field(
+        default="HEAD",
+        description="Branch, tag, or commit SHA. 'HEAD' resolves to the repository's default branch.",
+    )
+    original_revision: str | None = Field(
+        default=None,
+        description="The original revision requested by the user before resolution (e.g., 'main'). "
+        "The 'revision' field contains the resolved commit SHA.",
+    )
+    path: str = Field(
+        default="",
+        description="Optional directory within the repository. All paths are relative to it.",
+    )
+
+    token_secret: SecretRef | None = Field(
+        default=None,
+        description="GitHub personal access token secret name, required for private repositories",
+    )
+
+    api_base_url: str = Field(
+        default="https://api.github.com",
+        description="GitHub API base URL. Use for GitHub Enterprise instances.",
+    )
+
+    @field_validator("path")
+    @classmethod
+    def strip_path_slashes(cls, v: str) -> str:
+        return _reject_relative_segments("path", v.strip("/"))
+
+    @field_validator("owner", "repo")
+    @classmethod
+    def reject_multi_segment_names(cls, v: str, info: ValidationInfo) -> str:
+        field = info.field_name or "value"
+        if "/" in v:
+            raise ValueError(f"{field} must name a single path segment, got {v!r}")
+        return _reject_relative_segments(field, _reject_blank(field, v))
+
+    @field_validator("revision")
+    @classmethod
+    def reject_relative_revision(cls, v: str) -> str:
+        return _reject_relative_segments("revision", _reject_blank("revision", v))
+
+    @field_validator("api_base_url")
+    @classmethod
+    def require_https(cls, v: str) -> str:
+        # Every request to this host carries the token, and the external-host
+        # allowlist matches on scheme, so an allowlisted http:// host would send it
+        # in cleartext.
+        if not v.lower().startswith("https://"):
+            raise ValueError(f"api_base_url must use https, got {v!r}")
+        return v
+
+    @property
+    def pinned_revision(self) -> str:
+        return self.revision
+
+    @property
+    def tracked_revision(self) -> str | None:
+        return _tracked_revision(self.revision, self.original_revision)
 
     def get_secret_references(self) -> dict[str, SecretRef]:
         return {"token": self.token_secret} if self.token_secret else {}
@@ -252,6 +375,6 @@ class S3StorageConfig(BaseStorageConfig):
         return self.model_copy(deep=True, update={"prefix": new_prefix})
 
 
-StorageConfig = LocalStorageConfig | NGCStorageConfig | HuggingfaceStorageConfig | S3StorageConfig
+StorageConfig = LocalStorageConfig | NGCStorageConfig | HuggingfaceStorageConfig | S3StorageConfig | GithubStorageConfig
 
 StorageConfigField = Annotated[StorageConfig, Field(discriminator="type")]

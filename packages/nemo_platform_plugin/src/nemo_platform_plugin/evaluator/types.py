@@ -11,12 +11,29 @@ direct ``NeMoPlatform._client`` usage.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, Literal, NotRequired, TypeAlias, TypedDict
+from typing import Annotated, Any, Literal, NotRequired, Self, TypeAlias, TypedDict
 
+from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
+from nemo_platform_plugin.jobs.types import validate_output_location
 from nemo_platform_plugin.schema import Page
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, field_validator, model_validator
 
 FlatQueryParams: TypeAlias = dict[str, str | int | bool | None]
+
+_ENTITY_NAME_SEGMENT = r"[a-z](?:[a-z0-9@.+_]|-[a-z0-9@.+_]){1,62}"
+_QUALIFIED_MODEL_REF_PATTERN = rf"^{_ENTITY_NAME_SEGMENT}/{_ENTITY_NAME_SEGMENT}$"
+_SECRET_REF_PATTERN = r"^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)?$"
+
+Truncation: TypeAlias = Literal["end", "start"]
+RetrieveEvalModelFormat: TypeAlias = Literal["nim", "openai", "llama_stack"]
+_RetrieveEvalModelRefRoot: TypeAlias = Annotated[
+    str,
+    Field(
+        pattern=_QUALIFIED_MODEL_REF_PATTERN,
+        description="Reference to a model (format: workspace/name).",
+        examples=["workspace/model_name"],
+    ),
+]
 
 # ---------------------------------------------------------------------------
 # Response types
@@ -32,6 +49,12 @@ class EvaluatorHealth(BaseModel):
     status: str | None = None
     service: str | None = None
     jobs: list[str] = Field(default_factory=list)
+
+
+class HelloResponse(BaseModel):
+    """Evaluator plugin hello response."""
+
+    message: str
 
 
 class EvaluateJob(BaseModel):
@@ -61,6 +84,166 @@ class AgentEvalJob(BaseModel):
 
 
 EvaluatorJobResponse: TypeAlias = EvaluateJob
+
+
+class RetrieveEvalFilesetRef(RootModel[str]):
+    """Reference to a persisted platform fileset, optionally with a file fragment."""
+
+    root: str = Field(description="Reference to a Fileset (format: workspace/fileset-name).")
+
+
+class RetrieveEvalModelRef(RootModel[_RetrieveEvalModelRefRoot]):
+    """Reference to a model resolved by the evaluator backend."""
+
+
+class RetrieveEvalSecretRef(RootModel[str]):
+    """Reference to a platform secret or local environment variable."""
+
+    root: str = Field(
+        description="Reference to a platform secret or local environment variable. "
+        "Format: 'secret_name' (uses request workspace) or 'workspace/secret_name' (explicit workspace).",
+        pattern=_SECRET_REF_PATTERN,
+        examples=[
+            "my-secret",
+            "my-workspace/my-secret",
+            "NVIDIA_API_KEY",
+        ],
+    )
+
+
+class RetrieveEvalModel(BaseModel):
+    """Inline model definition accepted by retrieve-eval specs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(description="URL of the model.")
+    name: str = Field(description="Name of the model.")
+    host_url: str | None = Field(
+        default=None,
+        description="Direct NIM endpoint URL populated when a model reference is resolved.",
+    )
+    api_key_secret: RetrieveEvalSecretRef | None = Field(
+        default=None,
+        description="API key secret reference for the model.",
+    )
+    format: RetrieveEvalModelFormat = Field(
+        default="openai",
+        description="Inference API format used by the model.",
+    )
+
+
+class RetrieveEvalRetrievalInputSpec(BaseModel):
+    """Submitter-facing retrieval target before platform model refs are resolved."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    embeddings: RetrieveEvalModel | RetrieveEvalModelRef
+    reranker: RetrieveEvalModel | RetrieveEvalModelRef | None = None
+    first_stage_k: int = Field(default=100, ge=1, description="Dense-search cutoff before reranking.")
+    truncate_long_documents: Truncation | None = Field(
+        default="end",
+        description="How to cap passages at 65535 characters: keep the start ('end'), the tail ('start'), or error (null).",
+        json_schema_extra={"nullable": True},
+    )
+    batch_size: int = Field(default=32, ge=1, description="Embedding HTTP batch size.")
+    embedding_dimensions: int | None = Field(
+        default=None,
+        gt=0,
+        description="Expected embedding width. Omit to accept the model's native width.",
+    )
+
+
+RetrieveEvalSubmitTarget: TypeAlias = RetrieveEvalRetrievalInputSpec | RetrieveEvalModel | RetrieveEvalModelRef
+
+
+class RetrieveEvalInputSpec(BaseModel):
+    """Submitter-facing BEIR retrieval evaluation spec."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dataset: RetrieveEvalFilesetRef = Field(description="Fileset containing a BEIR test split.")
+    target: RetrieveEvalSubmitTarget = Field(
+        description="Retrieval pipeline, embedding NIM, or platform model reference."
+    )
+    baseline: RetrieveEvalSubmitTarget | None = Field(
+        default=None,
+        description="Optional baseline retrieval pipeline used for relative nDCG and recall at 10.",
+    )
+    k: list[int] = Field(default_factory=lambda: [1, 5, 10, 100], min_length=1)
+
+    @model_validator(mode="after")
+    def validate_k(self) -> Self:
+        """Require unique positive cutoffs."""
+        if any(cutoff < 1 for cutoff in self.k):
+            raise ValueError("retrieval cutoffs must be positive")
+        if len(set(self.k)) != len(self.k):
+            raise ValueError("retrieval cutoffs must be unique")
+        self.k.sort()
+        return self
+
+
+class RetrieveEvalRetrievalSpec(BaseModel):
+    """Canonical retrieval target returned after model refs are resolved."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    embeddings: RetrieveEvalModel = Field(description="Embedding NIM used to encode queries and passages.")
+    reranker: RetrieveEvalModel | None = Field(
+        default=None, description="Optional ranking NIM applied after dense search."
+    )
+    first_stage_k: int = Field(default=100, ge=1, description="Dense-search cutoff before reranking.")
+    truncate_long_documents: Truncation | None = Field(
+        default="end",
+        description="How to cap passages at 65535 characters: keep the start ('end'), the tail ('start'), or error (null).",
+        json_schema_extra={"nullable": True},
+    )
+    batch_size: int = Field(default=32, ge=1, description="Embedding HTTP batch size.")
+    embedding_dimensions: int | None = Field(
+        default=None,
+        gt=0,
+        description="Expected embedding width. Omit to accept the model's native width.",
+    )
+
+
+class RetrieveEvalSpec(BaseModel):
+    """Canonical BEIR retrieval evaluation spec."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dataset: RetrieveEvalFilesetRef
+    target: RetrieveEvalRetrievalSpec
+    baseline: RetrieveEvalRetrievalSpec | None = None
+    k: list[int] = Field(default_factory=lambda: [1, 5, 10, 100], min_length=1)
+
+    @model_validator(mode="after")
+    def validate_k(self) -> Self:
+        """Require unique positive cutoffs in canonical task payloads."""
+        if any(cutoff < 1 for cutoff in self.k):
+            raise ValueError("retrieval cutoffs must be positive")
+        if len(set(self.k)) != len(self.k):
+            raise ValueError("retrieval cutoffs must be unique")
+        self.k.sort()
+        return self
+
+
+class RetrieveEvalJob(BaseModel):
+    """Response from a retrieve-eval job route."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str | None = None
+    name: str
+    description: str | None = None
+    project: str | None = None
+    workspace: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    spec: RetrieveEvalSpec
+    status: PlatformJobStatus | None = None
+    status_details: dict[str, JsonValue] | None = None
+    error_details: dict[str, JsonValue] | None = None
+    ownership: dict[str, JsonValue] | None = None
+    custom_fields: dict[str, JsonValue] | None = None
 
 
 class _WorkspaceResource(BaseModel):
@@ -146,6 +329,24 @@ class SubmitAgentEvalJobRequest(BaseModel):
     spec: dict[str, Any]
 
 
+class SubmitRetrieveEvalJobRequest(BaseModel):
+    """Request body for POST /retrieve-eval/jobs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    description: str | None = None
+    project: str | None = None
+    spec: RetrieveEvalInputSpec
+    profile: str | None = None
+    options: dict[str, JsonValue] | None = None
+    ownership: dict[str, JsonValue] | None = None
+    custom_fields: dict[str, JsonValue] | None = None
+    output_location: str | None = None
+
+    _validate_output_location = field_validator("output_location")(validate_output_location)
+
+
 class MetricMetadata(BaseModel):
     """User-facing metadata captured with a bundled metric."""
 
@@ -169,7 +370,7 @@ class MetricSecretRef(RootModel[str]):
     root: str = Field(
         description="Reference to a platform secret or local environment variable. "
         "Format: 'secret_name' (uses request workspace) or 'workspace/secret_name' (explicit workspace).",
-        pattern=r"^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)?$",
+        pattern=_SECRET_REF_PATTERN,
         examples=[
             "my-secret",
             "my-workspace/my-secret",
@@ -291,6 +492,12 @@ class ListTasksetsQueryParams(TypedDict, total=False):
     page_size: NotRequired[int]
     sort: NotRequired[str]
     filter: NotRequired[str]
+
+
+class EvaluatorJobLogsQueryParams(TypedDict, total=False):
+    limit: NotRequired[int]
+    page_cursor: NotRequired[str]
+    tail: NotRequired[int]
 
 
 class ListRevisionsQueryParams(TypedDict, total=False):

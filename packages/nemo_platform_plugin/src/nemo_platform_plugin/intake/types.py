@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Typed wire shapes for the Intake APIs used by evaluator."""
+"""Typed wire shapes for the Intake APIs used by evaluator and Experimentalist."""
 
 from __future__ import annotations
 
@@ -9,16 +9,21 @@ from datetime import datetime
 from typing import Any, Literal, NotRequired, Required, TypedDict
 
 from nemo_platform_plugin.schema import Page
-from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, model_validator
 
 EvaluatorResultDataType = Literal["NUMERIC", "BOOLEAN", "CATEGORICAL", "TEXT"]
 TraceMode = Literal["summary", "preview", "detailed"]
 TraceStatus = Literal["OK", "ERROR", "UNSET"] | str
+SpanMode = Literal["summary", "preview", "detailed"]
+SpanKind = Literal["AGENT", "CHAIN", "EVALUATOR", "LLM", "TOOL"] | str
+SpanStatus = Literal["success", "error", "cancelled", "unknown", "OK", "ERROR", "UNSET"] | str
 
 
 class EvaluationContextParam(TypedDict, total=False):
     evaluation_name: str
     test_case_name: str
+    evaluation_id: str
+    test_case_id: str
 
 
 class AtifAgentParam(TypedDict, total=False):
@@ -137,6 +142,7 @@ class EvaluatorResult(BaseModel):
 class EvaluatorAggregate(BaseModel):
     """Aggregate stats hydrated onto evaluation responses."""
 
+    sum: float | None = None
     mean: float | None = None
     min: float | None = None
     max: float | None = None
@@ -145,6 +151,33 @@ class EvaluatorAggregate(BaseModel):
     p95: float | None = None
     p99: float | None = None
     count: int = 0
+
+
+class EvaluationCreateRequest(BaseModel):
+    """Create/full-update body for an Evaluation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    experiment_ids: list[str] = Field(default_factory=list)
+    experiment_group_id: str | None = None
+    dataset_name: str
+    dataset_version: str | None = None
+    source_link: str | None = None
+    metadata: dict[str, str] = Field(default_factory=dict)
+    description: str | None = None
+    parent_evaluation_id: str | None = None
+    status: str | None = None
+    root_cause: str | None = None
+
+    @model_validator(mode="after")
+    def _resolve_group_membership(self) -> EvaluationCreateRequest:
+        if not self.experiment_ids and self.experiment_group_id:
+            self.experiment_ids = [self.experiment_group_id]
+        if not self.experiment_ids:
+            raise ValueError("Evaluation requires at least one experiment id.")
+        self.experiment_ids = list(dict.fromkeys(self.experiment_ids))
+        return self
 
 
 class EvaluationPatchRequest(BaseModel):
@@ -191,6 +224,50 @@ class EvaluationResponse(BaseModel):
     tokens: EvaluatorAggregate | None = None
 
 
+class ExperimentCreateRequest(BaseModel):
+    """Create body for an Experiment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str | None = None
+    insight_id: str | None = None
+    summary: str | None = None
+    metadata: dict[str, str] | None = None
+    default_sort: str = "-created_at"
+    pareto: dict[str, Any] | None = None
+    column_layout: dict[str, Any] | None = None
+    is_favorite: bool = False
+    show_evaluations_over_time: bool = False
+
+
+class ExperimentUpdateRequest(ExperimentCreateRequest):
+    """Full-update body for an Experiment."""
+
+    baseline_evaluation_name: str | None = None
+
+
+class ExperimentResponse(BaseModel):
+    """Experiment as served by the Intake API."""
+
+    id: str
+    name: str
+    workspace: str
+    description: str | None = None
+    insight_id: str | None = None
+    summary: str | None = None
+    metadata: dict[str, str] | None = None
+    default_sort: str
+    pareto: dict[str, Any] | None = None
+    column_layout: dict[str, Any] | None = None
+    is_favorite: bool = False
+    show_evaluations_over_time: bool = False
+    baseline_evaluation_name: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    evaluation_count: int = 0
+
+
 class Trace(BaseModel):
     """Trace summary returned by Intake trace listing."""
 
@@ -221,8 +298,90 @@ class Trace(BaseModel):
     error_count: int | None = Field(default=None, ge=0)
 
 
+class SpanEvaluationContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evaluation_name: str | None = None
+    test_case_name: str | None = None
+    evaluation_id: str | None = None
+    test_case_id: str | None = None
+
+
+class Span(BaseModel):
+    """Span row returned by the Intake spans API."""
+
+    model_config = ConfigDict(extra="allow")
+
+    span_id: str
+    session_id: str
+    workspace: str
+    project: str | None = None
+    evaluation_context: SpanEvaluationContext | None = None
+    parent_span_id: str | None = None
+    kind: SpanKind
+    name: str | None = None
+    source: str
+    trace_id: str | None = None
+    started_at: datetime
+    ended_at: datetime | None = None
+    status: SpanStatus
+    error_type: str | None = None
+    error_message: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    prompt_id: str | None = None
+    agent_id: str | None = None
+    agent_name: str | None = None
+    tool_name: str | None = None
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    cached_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    usage_details: dict[str, int] = Field(default_factory=dict)
+    cost_total_usd: float | None = None
+    cost_input_usd: float | None = None
+    cost_output_usd: float | None = None
+    cost_details: dict[str, float] = Field(default_factory=dict)
+    input: str | None = None
+    output: str | None = None
+    raw_attributes: str | None = None
+    ingested_at: datetime
+
+
+class SpanGroup(BaseModel):
+    """Grouped span row returned by Intake."""
+
+    group: dict[str, str]
+    span_count: int = Field(ge=0)
+    started_at: datetime
+
+
+class SpanGroupsPage(Page[SpanGroup]):
+    grouped_by: list[str] = Field(default_factory=list)
+
+
+class Annotation(BaseModel):
+    """Flattened read shape for Intake post-hoc annotations."""
+
+    model_config = ConfigDict(extra="allow")
+
+    annotation_id: str
+    workspace: str
+    span_id: str | None = None
+    session_id: str
+    kind: str
+    name: str | None = None
+    value: str | float | None = None
+    value_type: str | None = None
+    text: str | None = None
+    metadata: dict[str, JsonValue] | None = None
+    created_by: str | None = None
+    created_at: datetime
+    ingested_at: datetime
+
+
 class TraceFilterParam(TypedDict, total=False):
-    id: str
+    id: str | dict[str, list[str]]
     session_id: str
     status: str
     started_at: dict[str, str]
@@ -241,6 +400,64 @@ class ListTracesQueryParams(TypedDict, total=False):
     filter: TraceFilterParam
 
 
+class RetrieveTraceQueryParams(TypedDict, total=False):
+    mode: TraceMode
+
+
+class SpanFilterParam(TypedDict, total=False):
+    session_id: str
+    trace_id: str
+    parent_span_id: str
+    project: str
+    evaluation_name: str
+    test_case_name: str
+    evaluation_id: str
+    test_case_id: str
+    source: str
+    kind: str
+    status: str
+    model: str
+    tool_name: str
+    provider: str
+    agent_id: str
+    agent_name: str
+    started_at: dict[str, str]
+
+
+class ListSpansQueryParams(TypedDict, total=False):
+    page: int
+    page_size: int
+    sort: str
+    mode: SpanMode
+    filter: SpanFilterParam | dict[str, JsonValue]
+
+
+class ListSpanGroupsQueryParams(TypedDict, total=False):
+    by: Required[str]
+    page: int
+    page_size: int
+    sort: str
+    filter: SpanFilterParam | dict[str, JsonValue]
+
+
+class AnnotationFilterParam(TypedDict, total=False):
+    span_id: str
+    session_id: str
+    kind: str
+    name: str
+    value_text: str
+    value_numeric: dict[str, float]
+    created_by: str
+    created_at: dict[str, str]
+
+
+class ListAnnotationsQueryParams(TypedDict, total=False):
+    page: int
+    page_size: int
+    sort: str
+    filter: AnnotationFilterParam | dict[str, JsonValue]
+
+
 class ListEvaluatorResultsQueryParams(TypedDict, total=False):
     page: int
     page_size: int
@@ -249,4 +466,7 @@ class ListEvaluatorResultsQueryParams(TypedDict, total=False):
 
 
 TracePage = Page[Trace]
+SpanPage = Page[Span]
+SpanGroupPage = Page[SpanGroup]
 EvaluatorResultPage = Page[EvaluatorResult]
+AnnotationPage = Page[Annotation]

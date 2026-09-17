@@ -1,0 +1,127 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Troubleshooting"
+description: ""
+---
+<a id="agents-governance-troubleshooting"></a>
+
+<Warning>
+
+Agent Governance is released with _early access_ availability and is subject to limited support and potential API changes in future releases.
+
+</Warning>
+
+Start with `nemo agent-hardener doctor`. It is read-only and checks the five host
+prerequisites: the agent-hardener virtual environment, the garak virtual
+environment, the inference credential, the Docker daemon and the OpenShell
+gateway.
+
+## Setup
+
+**`openshell status` reports "connection refused" or "no compute driver" on macOS.**
+The gateway is running but has no driver. Point OpenShell at Docker:
+
+```bash
+DOCKER_SOCK=$(docker context inspect --format '{{.Endpoints.docker.Host}}')
+brew services stop openshell
+launchctl setenv OPENSHELL_DRIVERS docker
+launchctl setenv DOCKER_HOST "$DOCKER_SOCK"
+brew services restart openshell
+openshell status
+```
+
+Then re-run `nemo agent-hardener setup` to re-register the `auto-defender` gateway.
+
+**The OpenShell CLI is present but a war-game says the gateway is missing.**
+Installing OpenShell as a standalone CLI tool gives you the command without the
+gateway service. Use the native installer instead.
+
+## Runs
+
+**A run fails immediately with `smart-benign validation requires an explicit benign suite`.**
+`nemo agent-hardener run` consumes a benign suite and never generates one. Create it
+first:
+
+```bash
+nemo agent-hardener synth-benign --manifest-id <name>
+```
+
+The suite is cached on the manifest and reused by later runs.
+
+**A run reports success but the agent's tools were never exercised.**
+The sandbox drops outbound traffic that the manifest does not allow-list. When a
+tool call is dropped, the model usually answers from its own knowledge, so the
+run looks clean. Add the hosts and re-create the manifest:
+
+```bash
+nemo agent-hardener init --agent <name> --egress <host>
+```
+
+A bare host opens port 443 only. Write `host:80` for plain HTTP. Hosts cannot be
+discovered automatically for an agent whose tool code lives in an installed
+package.
+
+**A run does not reflect a change made to the agent.**
+Runs target a frozen manifest, so editing the agent does not change an existing
+one. Pick up the change deliberately:
+
+```bash
+nemo agent-hardener refresh --manifest-id <name>
+```
+
+**A run fails in seconds with `model_unavailable`.**
+Every model group you set explicitly — `--attack-model`, `--analysis-model` and
+`--safety-model`, together with their `--*-base-url` and `--*-key-secret` — is
+probed against its endpoint before the sandbox is built, so a wrong model name or
+key fails immediately rather than minutes in. The error lists the models the
+credentials can actually reach; pick one of those. Built-in defaults are not
+probed.
+
+**The guardrails defender runs but proposes no change.**
+An unreachable safety model does not raise: it hangs the defender until its
+timeout, which reads as "ran, proposed nothing". Preflight catches this whenever
+`--safety-model` is set explicitly, so check that first if you left it at its
+default.
+
+## The Victim Sandbox
+
+**`Missing required secrets: <NAME>`.**
+The agent config references `${<NAME>}` and nothing supplies it. Required secrets
+are derived from the agent's stored config, so this means the variable was unset
+when the agent was registered. Export it and re-run `nemo agents create`, or
+supply it with `--env-file`.
+
+**The victim never becomes healthy, and its log shows a pydantic `union_tag_invalid` for a `_type`.**
+The agent references a component the scaffolded victim cannot resolve. The victim
+installs a minimal dependency set, not the platform's full plugin list. Platform
+telemetry is stripped automatically; anything else means the agent needs a real
+project, so pass `--project-dir` to `init` and let the project's own
+dependencies supply it.
+
+**The victim is healthy but every request returns 422 with `Invalid model`.**
+The workflow's `model_name` is not a model entity the platform knows. Entity names
+are lowercase letters, digits and hyphens, so a provider id containing a slash is
+rejected. Check `nemo models list`, then re-register the agent with that exact
+name. The value is resolved when the agent is registered, so it must be correct
+at `nemo agents create` time.
+
+## Studio
+
+**Agent Hardener is missing from the Studio side nav.**
+The UI ships with the plugin, so a missing entry means Studio did not load its
+bundle. Confirm the plugin is registered and the bundle is served:
+
+```bash
+curl -s $NMP_BASE_URL/apis/plugins
+curl -sI $NMP_BASE_URL/plugin-ui/agent-hardener/index.js
+```
+
+The first should list `agent-hardener` with a `bundleUrl`. Then hard-reload the
+browser.
+
+**Applied guardrails have no effect on the running agent.**
+Applying updates the stored agent config without redeploying. Redeploy the agent
+for the guardrails to take effect.
+

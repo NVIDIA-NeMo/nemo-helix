@@ -1,10 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getErrorMessage } from '@nemo/common/src/api/common/utils';
-import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
+import type { InsightListItem } from '@nemo/sdk/generated/insights/schema';
 import { Button, Flex, Skeleton, Stack, Text } from '@nvidia/foundations-react-core';
-import type { InsightListItem } from '@studio/api/optimizer';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { OpenInsightRow } from '@studio/routes/agents/AgentDetailRoute/overview/OpenInsightRow';
 import type { FC } from 'react';
@@ -14,7 +12,7 @@ interface OpenInsightsPanelProps {
   /** Open insights for the agent overall, which can exceed the rendered slice. */
   readonly totalCount: number;
   readonly isPending?: boolean;
-  readonly error?: unknown;
+  readonly hasError?: boolean;
   readonly onOpenInsight: (insight: InsightListItem) => void;
   readonly awaitingTelemetry?: boolean;
   /** Omit to hide the "View all" action. */
@@ -31,19 +29,19 @@ export const OpenInsightsPanel: FC<OpenInsightsPanelProps> = ({
   insights,
   totalCount,
   isPending,
-  error,
+  hasError,
   awaitingTelemetry,
   onOpenInsight,
   onViewAll,
 }) => {
-  const isEmpty = !isPending && !error && insights.length === 0;
+  const isEmpty = !isPending && !hasError && insights.length === 0;
 
   return (
     <DetailPanel
       title="Open insights"
       flush
       slotAction={
-        error || isPending ? null : (
+        hasError || isPending ? null : (
           <Flex gap="3" align="center">
             <Text kind="body/regular/sm" className="text-secondary">
               {`${totalCount} total`}
@@ -57,15 +55,12 @@ export const OpenInsightsPanel: FC<OpenInsightsPanelProps> = ({
         )
       }
     >
-      {error ? (
-        <div className="p-4">
-          <ErrorPanel
-            title="Insights are unavailable"
-            errorMessage={getErrorMessage(
-              error instanceof Error ? error : new Error('Failed to fetch insights')
-            )}
-          />
-        </div>
+      {hasError ? (
+        <Flex justify="center" align="center" padding="density-xl" className="min-h-60">
+          <Text kind="body/regular/md" className="max-w-72 text-center text-secondary">
+            Insights couldn&apos;t be loaded right now.
+          </Text>
+        </Flex>
       ) : isPending ? (
         <Stack gap="3" className="p-4">
           <Skeleton className="h-5 w-2/3" />

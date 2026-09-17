@@ -11,6 +11,7 @@ import {
 } from '@studio/hooks/useCustomizationDatasetValidation';
 import { mockUseParams } from '@studio/tests/util/mockUseParams';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import { FORM_DEFAULTS, type CustomizationFormFields } from '@studio/util/forms/customization';
 import userEvent from '@testing-library/user-event';
 
 const mutateAutomodel = vi.fn();
@@ -63,8 +64,9 @@ const emptyValidation: CustomizationDatasetValidationResult = {
 
 describe('NewCustomizationForm', () => {
   beforeEach(() => {
-    mutateAutomodel.mockReset();
-    mutateUnsloth.mockReset();
+    mutateAutomodel.mockReset().mockResolvedValue(undefined);
+    mutateUnsloth.mockReset().mockResolvedValue(undefined);
+    mutateRl.mockReset().mockResolvedValue(undefined);
     mockUseParams({ [ROUTE_PARAMS.workspace]: 'default' });
     vi.mocked(useCustomizationDatasetValidation).mockReturnValue(emptyValidation);
     mockListModels.mockReset();
@@ -98,6 +100,62 @@ describe('NewCustomizationForm', () => {
     expect(screen.queryByText('GPUs per Node')).not.toBeInTheDocument();
   });
 
+  /**
+   * The backend documents these as mutually exclusive (`load_in_4bit` xor `load_in_8bit`),
+   * so the two switches must not both be on. Both off is valid — that is the 16-bit path.
+   */
+  it('turns off the other quantisation switch when one is enabled', async () => {
+    const user = userEvent.setup();
+    renderRoute(<NewCustomizationForm workspace="default" />);
+
+    await user.click(await screen.findByRole('radio', { name: /Unsloth/i }));
+    // Two sections carry an "Advanced" accordion; the model fields are in the first.
+    await user.click((await screen.findAllByText('Advanced'))[0]);
+
+    const fourBit = await screen.findByRole('switch', { name: /Load in 4-bit/i });
+    const eightBit = await screen.findByRole('switch', { name: /Load in 8-bit/i });
+
+    // 4-bit is the spec default, so 8-bit starts off.
+    expect(fourBit).toBeChecked();
+    expect(eightBit).not.toBeChecked();
+
+    await user.click(eightBit);
+    expect(eightBit).toBeChecked();
+    expect(fourBit).not.toBeChecked();
+
+    await user.click(fourBit);
+    expect(fourBit).toBeChecked();
+    expect(eightBit).not.toBeChecked();
+  });
+
+  /** Both off is the 16-bit path, so turning one off must not switch the other on. */
+  it('leaves the other switch alone when one is turned off', async () => {
+    const user = userEvent.setup();
+    renderRoute(<NewCustomizationForm workspace="default" />);
+
+    await user.click(await screen.findByRole('radio', { name: /Unsloth/i }));
+    // Two sections carry an "Advanced" accordion; the model fields are in the first.
+    await user.click((await screen.findAllByText('Advanced'))[0]);
+
+    const fourBit = await screen.findByRole('switch', { name: /Load in 4-bit/i });
+    const eightBit = await screen.findByRole('switch', { name: /Load in 8-bit/i });
+
+    await user.click(fourBit);
+
+    expect(fourBit).not.toBeChecked();
+    expect(eightBit).not.toBeChecked();
+
+    // Each switch clears the other through its own handler, so the 8-bit side needs the
+    // same check: turning it on takes 4-bit off, and turning it back off leaves it off.
+    await user.click(eightBit);
+    expect(eightBit).toBeChecked();
+    expect(fourBit).not.toBeChecked();
+
+    await user.click(eightBit);
+    expect(eightBit).not.toBeChecked();
+    expect(fourBit).not.toBeChecked();
+  });
+
   it('shows the validation banner and does not submit when required fields are missing', async () => {
     const user = userEvent.setup();
     renderRoute(<NewCustomizationForm workspace="default" />);
@@ -121,6 +179,41 @@ describe('NewCustomizationForm', () => {
     const banner = await screen.findByText(/Please fix the following errors/i);
     expect(banner.textContent).not.toMatch(/automodel/i);
     await waitFor(() => expect(mutateAutomodel).not.toHaveBeenCalled());
+  });
+
+  /**
+   * The dataset picker writes the validation reference and no field renders it, so the
+   * only thing proving it survives to the API is the request itself.
+   */
+  it('submits the validation dataset the picker resolved', async () => {
+    vi.mocked(useCustomizationDatasetValidation).mockReturnValue({
+      ...emptyValidation,
+      hasTraining: true,
+      hasValidation: true,
+    });
+
+    const initialValues: CustomizationFormFields = {
+      ...FORM_DEFAULTS,
+      backend: 'automodel',
+      outputName: 'my-output',
+      automodel: {
+        ...FORM_DEFAULTS.automodel,
+        model: 'default/qwen3-0-6b',
+        dataset: { ...FORM_DEFAULTS.automodel.dataset, training: 'default/commonsense_qa' },
+      },
+    };
+
+    const user = userEvent.setup();
+    renderRoute(<NewCustomizationForm workspace="default" initialValues={initialValues} />);
+
+    await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+
+    await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
+    const [[call]] = mutateAutomodel.mock.calls;
+    expect(call.data.spec.dataset).toMatchObject({
+      training: 'default/commonsense_qa',
+      validation: 'default/commonsense_qa',
+    });
   });
 
   it('asks the API for fine-tunable models instead of filtering the page client-side', async () => {

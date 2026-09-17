@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any
 
 import pytest
@@ -223,6 +224,17 @@ def _download_job_result(sdk: NeMoPlatform, workspace: str, job_name: str, resul
     return response.text
 
 
+def _wait_for_spans(sdk: NeMoPlatform, *, workspace: str, agent_name: str, timeout: float = 120.0) -> list[Any]:
+    """Poll Intake: Relay posts as the run ends and ingest is asynchronous."""
+    deadline = time.monotonic() + timeout
+    while True:
+        page = sdk.intake.spans.list(workspace=workspace, filter={"agent_name": agent_name}, page_size=50)
+        spans = list(page.data or [])
+        if spans or time.monotonic() >= deadline:
+            return spans
+        time.sleep(2.0)
+
+
 def _created_insight_id(report: str) -> str:
     """Pull the stored insight id out of the report's change log.
 
@@ -284,6 +296,12 @@ def test_analysis_run_persists_insights_and_saves_its_report(sdk: NeMoPlatform, 
     # The extension persisted the change-set as a real Insight. The report's
     # change log is what says which one: it is written from what the Insights
     # API returned, so its id only exists if the write landed.
+    # Relay carries the Analyst's own trajectory to Intake. Nothing in this
+    # test configures telemetry: the agents plugin wires the export, Fabric
+    # resolves it, and the adapter activates it.
+    spans = _wait_for_spans(sdk, workspace=workspace, agent_name="insights-analyst")
+    assert spans, "the Analyst ran but its trajectory never reached Intake"
+
     insight_id = _created_insight_id(report)
     filed = sdk.insights.insights.get(workspace=workspace, insight_id=insight_id)
     assert filed.title == INSIGHT_TITLE

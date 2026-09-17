@@ -90,3 +90,91 @@ def test_update_pyproject_copies_build_hook_before_configuring_path(tmp_path: Pa
     assert wheel_hook["path"] == "hatch_build.py"
     assert sdist_hook["path"] == "hatch_build.py"
     assert list(wheel_hook["source-packages"]) == list(sdist_hook["source-packages"])
+
+
+def test_clean_api_index_removes_missing_type_imports_and_resource_links(tmp_path: Path) -> None:
+    sdk_info = _sdk_info(tmp_path)
+    types_dir = sdk_info.sdk_dir / "src" / sdk_info.module_name / "types"
+    types_dir.mkdir(parents=True)
+    (types_dir / "__init__.py").write_text(
+        """
+from __future__ import annotations
+
+from .shared import (
+    AuthContext as AuthContext,
+    ExistingType as ExistingType,
+)
+""".lstrip(),
+        encoding="utf-8",
+    )
+    existing_resource_api = sdk_info.sdk_dir / "src" / sdk_info.module_name / "resources" / "files" / "api.md"
+    existing_resource_api.parent.mkdir(parents=True)
+    existing_resource_api.write_text("# Files\n", encoding="utf-8")
+    (sdk_info.sdk_dir / "api.md").write_text(
+        """
+# Shared Types
+
+```python
+from nemo_platform.types import (
+    AuthContext,
+    DeletedType,
+    ExistingType,
+)
+```
+
+# [Files](src/nemo_platform/resources/files/api.md)
+
+# [Auth](src/nemo_platform/resources/auth/api.md)
+
+# [Unrelated](src/nemo_platform/resources/unrelated/api.md)
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert post_generation_update.clean_api_index(sdk_info)
+
+    api_index = (sdk_info.sdk_dir / "api.md").read_text(encoding="utf-8")
+    assert "AuthContext" in api_index
+    assert "ExistingType" in api_index
+    assert "DeletedType" not in api_index
+    assert "src/nemo_platform/resources/files/api.md" in api_index
+    assert "src/nemo_platform/resources/auth/api.md" not in api_index
+    assert "src/nemo_platform/resources/unrelated/api.md" in api_index
+
+
+def test_ensure_source_owned_type_aliases_writes_compatibility_modules(tmp_path: Path) -> None:
+    sdk_info = _sdk_info(tmp_path)
+    types_dir = sdk_info.sdk_dir / "src" / sdk_info.module_name / "types"
+    shared_dir = types_dir / "shared"
+    shared_dir.mkdir(parents=True)
+    (types_dir / "__init__.py").write_text("from __future__ import annotations\n", encoding="utf-8")
+    (shared_dir / "__init__.py").write_text("from __future__ import annotations\n", encoding="utf-8")
+
+    assert post_generation_update.ensure_source_owned_type_aliases(sdk_info)
+
+    types_init = (types_dir / "__init__.py").read_text(encoding="utf-8")
+    shared_init = (shared_dir / "__init__.py").read_text(encoding="utf-8")
+    assert "from .shared import PlatformJobStatusResponse as PlatformJobStatusResponse" in types_init
+    assert (
+        "from .platform_job_status_response import PlatformJobStatusResponse as PlatformJobStatusResponse"
+        in shared_init
+    )
+    assert "PlatformJobStatusResponse as PlatformJobStatusResponse" in (
+        shared_dir / "platform_job_status_response.py"
+    ).read_text(encoding="utf-8")
+    assert "PlatformJobStepResponse as PlatformJobStep" in (types_dir / "jobs" / "__init__.py").read_text(
+        encoding="utf-8"
+    )
+    assert "PlatformSecretResponse as PlatformSecretResponse" in (
+        types_dir / "secrets" / "platform_secret_response.py"
+    ).read_text(encoding="utf-8")
+    assert "SecretCreateParams as SecretCreateParams" in (types_dir / "secrets" / "secret_create_params.py").read_text(
+        encoding="utf-8"
+    )
+    assert "SecretsResource as SecretsResource" in (
+        sdk_info.sdk_dir / "src" / sdk_info.module_name / "resources" / "secrets" / "__init__.py"
+    ).read_text(encoding="utf-8")
+    assert "SecretsResource as SecretsResource" in (
+        sdk_info.sdk_dir / "src" / sdk_info.module_name / "resources" / "secrets" / "secrets.py"
+    ).read_text(encoding="utf-8")
+    assert not post_generation_update.ensure_source_owned_type_aliases(sdk_info)

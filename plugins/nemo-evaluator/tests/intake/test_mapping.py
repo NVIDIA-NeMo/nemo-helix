@@ -200,7 +200,7 @@ def test_trial_to_atif_ingest_omits_invocation_window_without_ended_at() -> None
     body = trial_to_atif_ingest(
         _trial(), run_id="run-1", evaluation_name="exp-1", agent_name="a", started_at=STARTED_AT
     )
-    assert "extra" not in body["steps"][0]
+    assert "extra" not in next(iter(body["steps"]))
 
 
 # --- score_to_evaluator_results: data_type coercions ------------------------
@@ -267,6 +267,35 @@ def test_comment_taken_from_first_diagnostic() -> None:
     )
     row = _rows(score)[0]
     assert row["comment"] == "first"
+
+
+def test_comment_prefers_each_outputs_matching_diagnostic_over_general_fallback() -> None:
+    score = _score(
+        outputs=[
+            MetricOutput(name="reward", value=1.0),
+            MetricOutput(name="format_ok", value=1.0),
+        ],
+        diagnostics=[
+            AgentEvalDiagnostic(
+                severity=AgentEvalDiagnosticSeverity.WARNING,
+                message="format detail",
+                details={"output": "format_ok"},
+            ),
+            AgentEvalDiagnostic(severity=AgentEvalDiagnosticSeverity.INFO, message="general detail"),
+            AgentEvalDiagnostic(
+                severity=AgentEvalDiagnosticSeverity.WARNING,
+                message="reward detail",
+                details={"output": "reward"},
+            ),
+        ],
+    )
+
+    rows = _rows(score)
+
+    assert [(row["name"], row["comment"]) for row in rows] == [
+        ("accuracy.reward", "reward detail"),
+        ("accuracy.format_ok", "format detail"),
+    ]
 
 
 def test_comment_absent_without_diagnostics() -> None:
@@ -386,7 +415,7 @@ def test_supplied_steps_replace_the_synthetic_single_step() -> None:
         evaluation_name="eval-1",
         agent_name="codex",
         started_at=STARTED_AT,
-        steps=real_steps,  # type: ignore[arg-type]
+        steps=real_steps,  # ty: ignore[invalid-argument-type]
     )
 
     assert body["steps"] == real_steps

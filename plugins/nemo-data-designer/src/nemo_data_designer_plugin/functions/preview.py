@@ -16,7 +16,7 @@ from anyio.lowlevel import current_token
 from data_designer.config.utils.io_helpers import serialize_data
 from data_designer.errors import DataDesignerError
 from data_designer.interface.data_designer import DataDesigner
-from data_designer_nemo.context import create_data_designer_context
+from data_designer_nemo.context import create_execution_context, create_validation_context
 from data_designer_nemo.errors import NDDInternalError, NDDInvalidConfigError, raise_if_errors
 from data_designer_nemo.fileset_file_seed_reader import workspace_cvar
 from data_designer_nemo.runnable import resolve_runnable_config
@@ -31,7 +31,7 @@ from nemo_data_designer_plugin.functions._types import (
     PreviewSpec,
     ProcessorOutputFrame,
 )
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.function import NemoFunction
 from nemo_platform_plugin.function_context import FunctionContext
 from nemo_platform_plugin.functions.frames import Done, Error
@@ -52,14 +52,20 @@ class PreviewFunction(NemoFunction[PreviewSpec]):
         spec: PreviewSpec,
         *,
         ctx: FunctionContext,
+        sdk: NeMoPlatform,
         async_sdk: AsyncNeMoPlatform,
     ) -> AsyncIterator[BaseModel]:
         # Fail fast on request shape (``num_records``) before doing any config-validation work.
         num_records = _validate_and_get_num_records(spec.num_records)
 
-        dd_ctx = create_data_designer_context(async_sdk, ctx.workspace)
-        errors, _, model_providers = await resolve_runnable_config(dd_ctx, spec.config)
+        validation_ctx = create_validation_context(async_sdk, ctx.workspace)
+        errors, _, model_providers = await resolve_runnable_config(validation_ctx, spec.config)
         raise_if_errors(errors)
+        execution_ctx = create_execution_context(
+            sdk,
+            ctx.workspace,
+            validated_roots=validation_ctx.validated_filesystem_roots,
+        )
 
         workspace_cvar.set(ctx.workspace)
 
@@ -79,7 +85,7 @@ class PreviewFunction(NemoFunction[PreviewSpec]):
             data_designer = create_data_designer(
                 artifact_path=artifact_storage_tmpdir,
                 model_providers=model_providers,
-                dd_ctx=dd_ctx,
+                dd_ctx=execution_ctx,
             )
 
             try:
@@ -139,10 +145,9 @@ def _make_preview_dataset(
 ) -> None:
     """
     Synchronous function that runs on a worker thread under
-    :func:`anyio.to_thread.run_sync`. SDK calls bridge back to the API
-    process's event loop via :func:`anyio.from_thread.run` inside the
-    helpers. Sends frames back to the async context via the
-    ``send_frame`` callback.
+    :func:`anyio.to_thread.run_sync`. The Data Designer engine and its
+    filesystem readers use sync APIs here; ``send_frame`` is the only bridge
+    back to the async request context.
     """
     with forward_data_designer_logs(send_frame):
         preview_results = data_designer.preview(config_builder, num_records=num_records)

@@ -14,7 +14,6 @@ const {
   resolveSource,
   selectSourcePullRequest,
   sendForwardMergeAlert,
-  slackUserGroupMention,
 } = require("../forward-merge-alert.cjs");
 
 function git(workspace, ...args) {
@@ -170,24 +169,28 @@ test("shows only ten conflict files and links the remainder", () => {
   assert.match(message, /\+2 more/);
 });
 
-test("tags the configured Slack user group", () => {
-  const message = buildSlackMessage(
-    messageFixture({ userGroupId: "S0123456789" }),
-  );
-
-  assert.match(
-    message,
-    /^<!subteam\^S0123456789> :warning: \*Forward merge needs attention\*/,
-  );
+test("includes the configured recovery guide for every failure kind", () => {
+  for (const kind of ["conflicts", "clean", "unavailable"]) {
+    const message = buildSlackMessage(
+      messageFixture({
+        conflicts: { kind, files: ["uv.lock"] },
+        recoveryDocsUrl: " https://docs.example.com/forward-merge/ ",
+      }),
+    );
+    assert.match(
+      message,
+      /<https:\/\/docs\.example\.com\/forward-merge\/\|Follow these steps to fix the forward merge>/,
+    );
+    assert.match(message, /View failure details/);
+  }
 });
 
-test("omits a missing or invalid Slack user group", () => {
-  assert.equal(slackUserGroupMention(), "");
-  assert.equal(slackUserGroupMention("not-a-slack-group"), "");
-  assert.match(
-    buildSlackMessage(messageFixture()),
-    /^:warning: \*Forward merge needs attention\*/,
-  );
+test("omits the recovery guide when its secret is missing or blank", () => {
+  for (const recoveryDocsUrl of [undefined, "", "   "]) {
+    const message = buildSlackMessage(messageFixture({ recoveryDocsUrl }));
+    assert.doesNotMatch(message, /Follow these steps to fix the forward merge/);
+    assert.match(message, /Manual recovery is required/);
+  }
 });
 
 test("escapes untrusted Slack labels", () => {
@@ -251,6 +254,8 @@ test("falls back to the basic alert when PR metadata fails", async () => {
       RUN_URL: "https://github.com/NVIDIA-NeMo/nemo-platform/actions/runs/1234",
       SLACK_ALERTS_WEBHOOK: "https://hooks.slack.test/example",
       SLACK_ALERT_USERGROUP_ID: "S0123456789",
+      FORWARD_MERGE_RECOVERY_DOCS_URL:
+        "https://docs.example.com/forward-merge/",
     },
     fetchImpl: async (url, options) => {
       requests.push({ url, options });
@@ -263,9 +268,15 @@ test("falls back to the basic alert when PR metadata fails", async () => {
   assert.equal(requests[0].options.redirect, "error");
   assert.match(
     JSON.parse(requests[0].options.body).text,
-    /^<!subteam\^S0123456789>/,
+    /^:warning: \*Forward merge needs attention\*/,
   );
+  assert.doesNotMatch(result.text, /<!subteam\^/);
   assert.match(result.text, /Source: unavailable/);
+  assert.ok(
+    JSON.parse(requests[0].options.body).text.includes(
+      "<https://docs.example.com/forward-merge/|Follow these steps to fix the forward merge>",
+    ),
+  );
   assert.match(result.text, /Conflict metadata unavailable/);
   assert.match(warnings[0], /Unable to read forward-merge PR/);
 

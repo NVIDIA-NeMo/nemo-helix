@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import email.utils
+import inspect
 import json
 import logging
 import os
@@ -285,6 +286,10 @@ def _should_retry(
     else:
         # A response only arrives once the body has gone out on the wire.
         body_is_spent = True
+        if response.status_code == 409 and (request.client_options or {}).get("exist_ok"):
+            # The caller declared the conflict an expected outcome that send()
+            # resolves by fetching the existing entity; retrying it is wasted work.
+            return None
         decision = response.headers.get("x-should-retry") if policy.respect_retry_decision_headers else None
         if policy.respect_retry_decision_headers and response.status_code < 400:
             return None
@@ -386,6 +391,7 @@ class BaseNemoClient(Generic[HttpClientT]):
     """
 
     _http: HttpClientT
+    _owns_http: bool
 
     def __init__(
         self,
@@ -486,6 +492,15 @@ class BaseNemoClient(Generic[HttpClientT]):
             headers.update(request.extra_headers)
         return headers or None
 
+    def _needs_auth_header(self, headers: Mapping[str, str] | None) -> bool:
+        """Whether this attempt must carry a freshly resolved bearer token.
+
+        Explicit ``Authorization`` values (per-call ``headers=`` or client defaults)
+        stay authoritative; otherwise the token provider is consulted on every
+        HTTP attempt so retries and later pages never replay an expired token.
+        """
+        return self._auth is not None and not _has_header(headers, _AUTHORIZATION_HEADER)
+
     def _is_binary(self, request: PreparedRequest) -> bool:
         return request.response_type is BinaryContent
 
@@ -512,6 +527,14 @@ class BaseNemoClient(Generic[HttpClientT]):
             client.with_options(timeout=300).update_fileset(...)
         """
         clone = copy.copy(self)
+        clone._owns_http = False
+        # Cached plugin resources were built against the original transport and
+        # must be rebuilt against the clone's options.
+        cached = self.__dict__.get("_cached_resources")
+        if cached:
+            for name in cached:
+                clone.__dict__.pop(name, None)
+            clone.__dict__["_cached_resources"] = set(cached)
         if headers:
             clone._default_headers = {**self._default_headers, **headers}
         if retry is not None:
@@ -523,6 +546,13 @@ class BaseNemoClient(Generic[HttpClientT]):
     def with_headers(self, headers: Mapping[str, str]) -> Self:
         """Shorthand for ``with_options(headers=...)``."""
         return self.with_options(headers=headers)
+
+    def with_workspace(self, workspace: str) -> Self:
+        """Return a copy of this client with *workspace* as the default workspace."""
+        clone = copy.copy(self)
+        clone._owns_http = False
+        clone._workspace = workspace
+        return clone
 
     def with_retry(self, retry: RetryPolicy) -> Self:
         """Shorthand for ``with_options(retry=...)``."""
@@ -576,6 +606,24 @@ class BaseNemoClient(Generic[HttpClientT]):
         return self._resource_client(JobsClient, AsyncJobsClient)
 
     @property
+    def auth(self) -> NemoClient | AsyncNemoClient:
+        from nemo_platform_plugin.auth.client import AsyncAuthenticationClient, AuthenticationClient
+
+        return self._resource_client(AuthenticationClient, AsyncAuthenticationClient)
+
+    @property
+    def access_keys(self) -> NemoClient | AsyncNemoClient:
+        from nemo_platform_plugin.auth.access_keys.client import AccessKeysClient, AsyncAccessKeysClient
+
+        return self._resource_client(AccessKeysClient, AsyncAccessKeysClient)
+
+    @property
+    def iam(self) -> NemoClient | AsyncNemoClient:
+        from nemo_platform_plugin.iam.client import AsyncIAMClient, IAMClient
+
+        return self._resource_client(IAMClient, AsyncIAMClient)
+
+    @property
     def agents(self) -> NemoClient | AsyncNemoClient:
         from nemo_platform_plugin.agents.client import AgentsClient, AsyncAgentsClient
 
@@ -618,14 +666,39 @@ class BaseNemoClient(Generic[HttpClientT]):
         return self._resource_client(DataDesignerClient, AsyncDataDesignerClient)
 
     @property
-    def iron_swarm(self) -> NemoClient | AsyncNemoClient:
-        from nemo_platform_plugin.iron_swarm.client import AsyncIronSwarmClient, IronSwarmClient
+    def agent_hardener(self) -> NemoClient | AsyncNemoClient:
+        from nemo_platform_plugin.agent_hardener.client import AgentHardenerClient, AsyncAgentHardenerClient
 
-        return self._resource_client(IronSwarmClient, AsyncIronSwarmClient)
+        return self._resource_client(AgentHardenerClient, AsyncAgentHardenerClient)
 
     @property
     def inference(self: NemoClient | AsyncNemoClient) -> _InferenceNamespace:
         return _InferenceNamespace(self)
+
+    def __getattr__(self, name: str) -> Any:
+        """Resolve ``nemo.sdk`` plugin resource namespaces as client attributes.
+
+        Only reached when normal attribute lookup fails. Plugin resources are
+        built with the sync or async factory matching this client and cached on
+        the instance, so ``client.example`` resolves the same object each time.
+        """
+        if name.startswith("_"):
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute {name!r}")
+
+        from nemo_platform_plugin.discovery import discover_sdk
+
+        resources = discover_sdk().get(name)
+        if resources is None:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute {name!r}")
+
+        factory = resources.async_resource if isinstance(self, AsyncNemoClient) else resources.sync_resource
+        if factory is None:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute {name!r}")
+
+        instance = factory(self)
+        self.__dict__[name] = instance
+        self.__dict__.setdefault("_cached_resources", set()).add(name)
+        return instance
 
     def _resolve_query_params(self, request: PreparedRequest) -> dict[str, str | int | bool] | None:
         """Filter out None values and JSON-serialize dicts/lists in query params."""
@@ -657,6 +730,7 @@ class NemoClient(BaseNemoClient[httpx.Client]):
         timeout: float | httpx.Timeout | None = None,
         retry: RetryPolicy | None = None,
         http_client: httpx.Client | None = None,
+        owns_http_client: bool | None = None,
         url_resolver: Callable[[str], str | httpx.URL] | None = None,
     ) -> None:
         """Create a client.
@@ -682,6 +756,7 @@ class NemoClient(BaseNemoClient[httpx.Client]):
             timeout=timeout,
             url_resolver=url_resolver,
         )
+        self._owns_http = http_client is None if owns_http_client is None else owns_http_client
         self._http = http_client or httpx.Client(
             headers=dict(default_headers) if default_headers else None,
             timeout=timeout if timeout is not None else DEFAULT_TIMEOUT,
@@ -699,8 +774,20 @@ class NemoClient(BaseNemoClient[httpx.Client]):
             timeout=client._timeout,
             retry=client._retry,
             http_client=client._http,
+            owns_http_client=False,
             url_resolver=client._url_resolver,
         )
+
+    def close(self) -> None:
+        """Close the underlying sync HTTP transport."""
+        if self._owns_http:
+            self._http.close()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self.close()
 
     @overload
     def send(
@@ -783,14 +870,8 @@ class NemoClient(BaseNemoClient[httpx.Client]):
         if headers:
             request = request.with_headers(headers)
 
-        # Inject auth header if a TokenProvider is configured.
-        # NOTE: If a 401 occurs despite this, a future enhancement could
-        # call provider.force_refresh() and retry once. The proactive
-        # refresh margin (60s) makes this unlikely in practice.
-        if self._auth:
-            token = self._auth.get_access_token()
-            request = request.with_headers({"Authorization": f"Bearer {token}"})
-
+        # The bearer token is resolved per HTTP attempt (see _authorized_headers),
+        # not once per logical request, so retries and later pages use a live token.
         url = self._resolve_path(request)
         req_headers = self._request_headers(request)
         params = self._resolve_query_params(request)
@@ -824,6 +905,15 @@ class NemoClient(BaseNemoClient[httpx.Client]):
             body = _parse_response_body(request.response_type, raw)
         return NemoResponse(http_response=raw, body=body, request=request)
 
+    def _authorized_headers(self, headers: dict[str, str] | None) -> dict[str, str] | None:
+        """Return *headers* with a bearer token resolved for this attempt when the provider owns auth."""
+        if self._auth is None or not self._needs_auth_header(headers):
+            return headers
+        token = self._auth.get_access_token()
+        if inspect.isawaitable(token):
+            raise TypeError("Async token provider used on a synchronous client; use AsyncNemoClient.")
+        return {**(headers or {}), _AUTHORIZATION_HEADER: f"Bearer {token}"}
+
     def _request_with_retry(
         self,
         request: PreparedRequest,
@@ -836,7 +926,11 @@ class NemoClient(BaseNemoClient[httpx.Client]):
         last_response: httpx.Response | None = None
         for attempt in range(retry.max_retries + 1 if retry else 1):
             try:
-                kwargs: dict = {"content": request.content, "headers": headers, "params": params}
+                kwargs: dict = {
+                    "content": request.content,
+                    "headers": self._authorized_headers(headers),
+                    "params": params,
+                }
                 if self._timeout is not None:
                     kwargs["timeout"] = self._timeout
                 raw = self._http.request(request.method, url, **kwargs)
@@ -870,7 +964,11 @@ class NemoClient(BaseNemoClient[httpx.Client]):
         for attempt in range(retry.max_retries + 1 if retry else 1):
             yielded = False
             try:
-                kwargs: dict = {"content": request.content, "headers": headers, "params": params}
+                kwargs: dict = {
+                    "content": request.content,
+                    "headers": self._authorized_headers(headers),
+                    "params": params,
+                }
                 if self._timeout is not None:
                     kwargs["timeout"] = self._timeout
                 with self._http.stream(request.method, url, **kwargs) as raw:
@@ -922,6 +1020,7 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
         timeout: float | httpx.Timeout | None = None,
         retry: RetryPolicy | None = None,
         http_client: httpx.AsyncClient | None = None,
+        owns_http_client: bool | None = None,
         url_resolver: Callable[[str], str | httpx.URL] | None = None,
     ) -> None:
         """Create a client. See :meth:`NemoClient.__init__` for *timeout*."""
@@ -940,6 +1039,7 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
             timeout=timeout,
             url_resolver=url_resolver,
         )
+        self._owns_http = http_client is None if owns_http_client is None else owns_http_client
         self._http = http_client or httpx.AsyncClient(
             headers=dict(default_headers) if default_headers else None,
             timeout=timeout if timeout is not None else DEFAULT_TIMEOUT,
@@ -957,8 +1057,24 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
             timeout=client._timeout,
             retry=client._retry,
             http_client=client._http,
+            owns_http_client=False,
             url_resolver=client._url_resolver,
         )
+
+    async def close(self) -> None:
+        """Close the underlying async HTTP transport."""
+        if self._owns_http:
+            await self._http.aclose()
+
+    async def aclose(self) -> None:
+        """Alias for compatibility with httpx-style async resources."""
+        await self.close()
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        await self.close()
 
     def with_http_client(self, http_client: httpx.AsyncClient) -> Self:
         """Return a copy of this client using a different async transport."""
@@ -970,6 +1086,7 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
             timeout=self._timeout,
             retry=self._retry,
             http_client=http_client,
+            owns_http_client=False,
             url_resolver=self._url_resolver,
         )
         return type(self).from_client(transport_owner)
@@ -1040,9 +1157,6 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
         if headers:
             request = request.with_headers(headers)
 
-        if self._auth:
-            request = request.with_headers({"Authorization": f"Bearer {await resolve_token_async(self._auth)}"})
-
         url = self._resolve_path(request)
         req_headers = self._request_headers(request)
         params = self._resolve_query_params(request)
@@ -1076,6 +1190,13 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
             body = _parse_response_body(request.response_type, raw)
         return NemoResponse(http_response=raw, body=body, request=request)
 
+    async def _authorized_headers(self, headers: dict[str, str] | None) -> dict[str, str] | None:
+        """Return *headers* with a bearer token resolved for this attempt when the provider owns auth."""
+        if self._auth is None or not self._needs_auth_header(headers):
+            return headers
+        token = await resolve_token_async(self._auth)
+        return {**(headers or {}), _AUTHORIZATION_HEADER: f"Bearer {token}"}
+
     async def _request_with_retry(
         self,
         request: PreparedRequest,
@@ -1088,7 +1209,11 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
         last_response: httpx.Response | None = None
         for attempt in range(retry.max_retries + 1 if retry else 1):
             try:
-                kwargs: dict = {"content": request.content, "headers": headers, "params": params}
+                kwargs: dict = {
+                    "content": request.content,
+                    "headers": await self._authorized_headers(headers),
+                    "params": params,
+                }
                 if self._timeout is not None:
                     kwargs["timeout"] = self._timeout
                 raw = await self._http.request(request.method, url, **kwargs)
@@ -1122,7 +1247,11 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
         for attempt in range(retry.max_retries + 1 if retry else 1):
             yielded = False
             try:
-                kwargs: dict = {"content": request.content, "headers": headers, "params": params}
+                kwargs: dict = {
+                    "content": request.content,
+                    "headers": await self._authorized_headers(headers),
+                    "params": params,
+                }
                 if self._timeout is not None:
                     kwargs["timeout"] = self._timeout
                 async with self._http.stream(request.method, url, **kwargs) as raw:

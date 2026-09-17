@@ -2865,6 +2865,11 @@ components:
           - $ref: '#/components/schemas/TrialError'
           description: What went wrong producing this trial, when the producer reported
             a failure. Populated by a runner runtime. Drives AgentEvalSummary.error_trial_ids.
+        measurements:
+          allOf:
+          - $ref: '#/components/schemas/TrialMeasurements'
+          description: Validated token usage, agent runtime, and cost measurements
+            for the trial.
         metadata:
           additionalProperties: true
           type: object
@@ -2877,8 +2882,8 @@ components:
       - task_id
       - status
       title: AgentEvalTrial
-      description: 'Durable trial artifact for one task: output, evidence, status,
-        error, and metadata.'
+      description: 'Durable trial artifact: output, evidence, status, error, measurements,
+        and metadata.'
     AgentEvalTrialStatus:
       type: string
       enum:
@@ -2997,6 +3002,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/PlatformJobStatus'
           description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
         updated_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -3382,6 +3392,10 @@ components:
           additionalProperties: true
           type: object
           title: Value Json Schema
+        required:
+          type: boolean
+          title: Required
+          default: true
       additionalProperties: false
       type: object
       required:
@@ -3649,6 +3663,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/PlatformJobStatus'
           description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
         updated_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -4278,11 +4297,11 @@ components:
       - resources_server
       title: GymRunnerTarget
       description: "Generate trials by driving a NeMo Gym environment through the\
-        \ SDK's :class:`GymAgentTaskRunner`.\n\nGym runs locally in the job container\
-        \ (the ``gym`` CLI must be installed in the same environment\nas this SDK).\
-        \ The environment dataset is recovered from the tasks at run time \u2014 the\
-        \ runner stamps\n``gym_dataset_path`` onto each task via ``discover_gym_tasks``,\
-        \ mirroring the Harbor pattern."
+        \ SDK's :class:`GymAgentTaskRunner`.\n\nThe deployment chooses colocated execution\
+        \ in the Gym task container or a separate sandboxed\nGym host. An environment\
+        \ FileSet requires the sandboxed path. The environment dataset is\nrecovered\
+        \ from the tasks at run time \u2014 ``discover_gym_tasks`` records the source\
+        \ row data needed\nto materialize the selected tasks for rollout collection."
     HTTPValidationError:
       properties:
         detail:
@@ -4315,6 +4334,27 @@ components:
           title: Agent Model Name
           description: Optional model slug passed to the Harbor agent.
           type: string
+        agent_kwargs:
+          additionalProperties:
+            $ref: '#/components/schemas/JsonValue'
+          type: object
+          title: Agent Kwargs
+          description: "Keyword arguments forwarded to the Harbor agent's constructor,\
+            \ the equivalent of Harbor's `--ak key=value`. Not for secrets: Harbor\
+            \ persists these unredacted across the job dir. Credential-shaped plaintext\
+            \ is rejected, but that check is a heuristic \u2014 use `env_secrets`\
+            \ regardless."
+        env_secrets:
+          additionalProperties:
+            $ref: '#/components/schemas/SecretRef'
+          type: object
+          title: Env Secrets
+          description: 'Environment variables for the Harbor agent, sourced from the
+            secrets service, as {ENV_NAME: secret-ref}. The reference travels in the
+            spec; the service resolves it into the job''s environment at compile time,
+            and Harbor receives a `${ENV_NAME}` template it expands when the agent
+            is created, so no credential is stored on the spec, the run bundle, or
+            the job dir''s `config.json`.'
         n_attempts:
           type: integer
           minimum: 1.0
@@ -4856,6 +4896,22 @@ components:
           type: string
           title: Name
           description: Name of the model.
+        served_model_name:
+          title: Served Model Name
+          description: Provider model identifier preserved when resolving a ModelRef.
+          nullable: true
+          type: string
+        inference:
+          title: Inference
+          description: Capability-specific invocation metadata. Ranking is the only
+            variant today.
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/RankingInference'
+          discriminator:
+            propertyName: type
+            mapping:
+              ranking: '#/components/schemas/RankingInference'
         api_key_secret:
           allOf:
           - $ref: '#/components/schemas/SecretRef'
@@ -5356,6 +5412,42 @@ components:
       type: object
       title: PublicationSpec
       description: Where a completed agent-evaluation run publishes its results.
+    RankingInference:
+      properties:
+        type:
+          type: string
+          const: ranking
+          title: Type
+          default: ranking
+        contract:
+          title: Contract
+          description: Explicit reranking request and response contract selected during
+            preflight.
+          nullable: true
+          type: string
+          enum:
+          - nim-ranking-v1
+          - hosted-rerank-v1
+          - hosted-ranking-v1
+          - hosted-retrieval-reranking-v1
+        path:
+          title: Path
+          description: Explicit reranking route relative to the model's resolved /v1
+            inference-gateway URL.
+          nullable: true
+          type: string
+      additionalProperties: false
+      type: object
+      required:
+      - type
+      title: RankingInference
+      description: 'Reranking invocation contract and route.
+
+
+        Additional inference variants, such as embeddings, join InferenceConfig as
+        new
+
+        type members rather than adding more fields to Model.'
     ReasoningParams:
       properties:
         end_token:
@@ -5445,6 +5537,13 @@ components:
           title: Batch Size
           description: Embedding HTTP batch size.
           default: 32
+        embedding_in_flight:
+          type: integer
+          minimum: 1.0
+          title: Embedding In Flight
+          description: Concurrent embedding POSTs to one NIM so the GPU is not idle
+            between batches.
+          default: 2
         embedding_dimensions:
           title: Embedding Dimensions
           description: Expected embedding width. Omit to accept the model's native
@@ -5492,6 +5591,13 @@ components:
           title: Batch Size
           description: Embedding HTTP batch size.
           default: 32
+        embedding_in_flight:
+          type: integer
+          minimum: 1.0
+          title: Embedding In Flight
+          description: Concurrent embedding POSTs to one NIM so the GPU is not idle
+            between batches.
+          default: 2
         embedding_dimensions:
           title: Embedding Dimensions
           description: Expected embedding width. Omit to accept the model's native
@@ -5654,6 +5760,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/PlatformJobStatus'
           description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
         updated_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -6499,6 +6610,40 @@ components:
         the trial reports
 
         a new one.'
+    TrialMeasurements:
+      properties:
+        prompt_tokens:
+          title: Prompt Tokens
+          type: integer
+          minimum: 0.0
+        completion_tokens:
+          title: Completion Tokens
+          type: integer
+          minimum: 0.0
+        total_tokens:
+          title: Total Tokens
+          type: integer
+          minimum: 0.0
+        cache_creation_tokens:
+          title: Cache Creation Tokens
+          type: integer
+          minimum: 0.0
+        cache_read_tokens:
+          title: Cache Read Tokens
+          type: integer
+          minimum: 0.0
+        runtime_sec:
+          title: Runtime Sec
+          type: number
+          minimum: 0.0
+        cost_usd:
+          title: Cost Usd
+          type: number
+          minimum: 0.0
+      additionalProperties: false
+      type: object
+      title: TrialMeasurements
+      description: Validated usage, runtime, and cost measurements for one trial.
     ValidationError:
       properties:
         loc:

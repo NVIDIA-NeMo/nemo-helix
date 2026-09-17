@@ -47,6 +47,7 @@ def _patch_files_client(monkeypatch: pytest.MonkeyPatch) -> None:
         return AsyncFilesClient(base_url=base_url, workspace=sdk.workspace)
 
     monkeypatch.setattr(input_module, "FilesetFileSystem", FakeFilesetFileSystem)
+    monkeypatch.setattr(input_module, "AsyncFilesetFileSystem", FakeFilesetFileSystem)
     monkeypatch.setattr(input_module, "client_from_platform", client_from_platform)
 
 

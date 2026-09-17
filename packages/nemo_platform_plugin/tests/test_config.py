@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import ClassVar
 
 import pytest
@@ -294,3 +295,18 @@ def test_validate_docker_available_returns_false_on_connection_failures() -> Non
             assert validate_docker_available() is False
         client.close.assert_called()
     reset_capability_cache()
+
+
+def test_default_client_config_fast_model_falls_back_to_env_default_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nemo_platform_plugin.client.config.config import Config
+    from nemo_platform_plugin.client.config.models import ConfigFile
+
+    monkeypatch.setenv("NEMO_DEFAULT_MODEL", "default/quality")
+    monkeypatch.delenv("NEMO_FAST_MODEL", raising=False)
+
+    context = Config.create(tmp_path / "config.yaml", ConfigFile()).resolve()
+
+    assert context.default_model == "default/quality"
+    assert context.fast_model == "default/quality"

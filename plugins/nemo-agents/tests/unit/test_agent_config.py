@@ -129,7 +129,8 @@ class TestAgentConfig:
         assert config.environment.provider == "local"
         assert config.environment.workspace == "./workspace"
         assert config.environment.artifacts == "./artifacts"
-        assert config.telemetry.enabled is False
+        # Tri-state: unset, so the backend may wire an export for the context.
+        assert config.telemetry.enabled is None
 
     def test_shared_capability_sections_validate(self) -> None:
         payload = _example_yaml_config()

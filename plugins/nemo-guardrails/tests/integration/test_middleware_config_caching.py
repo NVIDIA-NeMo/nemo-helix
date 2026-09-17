@@ -9,20 +9,22 @@ middleware cache and the Guardrails plugin's in-memory LLMRails cache.
 
 from collections.abc import Callable
 from http import HTTPStatus
-from typing import Any, cast
+from typing import Any
 
-import nemo_platform
 import pytest
 from nemo_guardrails_plugin.constants import GUARDRAILS_PLUGIN_CONFIG_TYPE
-from nemo_platform.types.inference.middleware_call_param import MiddlewareCallParam
 from nmp.core.inference_gateway.testing.harness import IGWLoopbackHarness, IGWPluginHarness
 from nmp.testing.mock_chat_completions import ChatCompletion, chat_completion
 
 from .utils import (
     GUARDRAILS_PLUGIN_NAME,
+    EntityGuardrailsMiddlewareCall,
     GuardrailsTestDataNames,
-    detach_guardrail_config,
+    create_guardrail_config,
+    delete_guardrail_config_if_present,
+    expect_harness_http_error,
     make_guardrails_test_data_names,
+    update_guardrail_config,
 )
 
 pytestmark = [pytest.mark.integration]
@@ -96,7 +98,7 @@ class TestMiddlewareConfigCaching:
         return "Paris is the capital of France."
 
     @staticmethod
-    def _middleware_call(workspace: str, config_name: str) -> MiddlewareCallParam:
+    def _middleware_call(workspace: str, config_name: str) -> EntityGuardrailsMiddlewareCall:
         return {
             "name": GUARDRAILS_PLUGIN_NAME,
             "config_type": GUARDRAILS_PLUGIN_CONFIG_TYPE,
@@ -123,11 +125,7 @@ class TestMiddlewareConfigCaching:
     def _delete_config_if_present(harness: IGWPluginHarness, config_name: str) -> None:
         # The service refuses to delete a config a VirtualModel still applies; harness
         # cleanup removes those routes, but it runs after this teardown.
-        detach_guardrail_config(harness, config_name)
-        try:
-            harness.sdk.guardrail.configs.delete(name=config_name, workspace=harness.workspace)
-        except nemo_platform.NotFoundError:
-            pass
+        delete_guardrail_config_if_present(harness, config_name)
 
     @staticmethod
     def _refresh_caches(harness: IGWPluginHarness) -> None:
@@ -142,18 +140,19 @@ class TestMiddlewareConfigCaching:
         *,
         model: str,
     ) -> None:
-        with pytest.raises(nemo_platform.APIStatusError) as exc_info:
-            harness.chat_completions(
+        error = expect_harness_http_error(
+            lambda: harness.chat_completions(
                 workspace=harness.workspace,
                 body={
                     "model": model,
                     "messages": [{"role": "user", "content": cls.USER_INPUT}],
                 },
-            )
+            ),
+            HTTPStatus.SERVICE_UNAVAILABLE,
+        )
 
-        assert exc_info.value.status_code == HTTPStatus.SERVICE_UNAVAILABLE
-        assert isinstance(exc_info.value.body, dict)
-        body = cast(dict[str, Any], exc_info.value.body)
+        body = error.body
+        assert isinstance(body, dict)
         detail = body.get("detail")
         assert isinstance(detail, str)
         assert "Middleware configuration unavailable" in detail
@@ -182,8 +181,8 @@ class TestMiddlewareConfigCaching:
             served_models={test_data_names.main_model_served_name: test_data_names.main_model_served_name},
         )
 
-        harness.sdk.guardrail.configs.create(
-            workspace=harness.workspace,
+        create_guardrail_config(
+            harness,
             name=test_data_names.guardrail_config_name,
             description="Entity-backed self-check config for middleware cache tests",
             data=self._config_data(version=config_version, main_base_url=harness.nim_base_url),
@@ -267,9 +266,9 @@ class TestMiddlewareConfigCaching:
                 )
 
                 # Update the config referenced by the VirtualModel
-                harness.sdk.guardrail.configs.update(
+                update_guardrail_config(
+                    harness,
                     name=test_data_names.guardrail_config_name,
-                    workspace=harness.workspace,
                     data=self._config_data(version="v2", main_base_url=harness.nim_base_url),
                 )
 
@@ -346,8 +345,8 @@ class TestMiddlewareConfigCaching:
                 )
 
                 # Recreate the config referenced by the VirtualModel.
-                harness.sdk.guardrail.configs.create(
-                    workspace=harness.workspace,
+                create_guardrail_config(
+                    harness,
                     name=test_data_names.guardrail_config_name,
                     description="Recreated self-check config for middleware cache tests",
                     data=self._config_data(version="v2", main_base_url=harness.nim_base_url),

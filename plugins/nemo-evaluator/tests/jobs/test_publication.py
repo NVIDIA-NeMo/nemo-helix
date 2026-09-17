@@ -16,7 +16,7 @@ from typing import Any
 import httpx
 import pytest
 from nemo_evaluator.api.schemas import MetricInline
-from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob
+from nemo_evaluator.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
@@ -30,7 +30,7 @@ from nemo_evaluator.jobs.agent_spec import (
     Target,
     target_agent_identity,
 )
-from nemo_evaluator.jobs.evaluate import EvaluateInputSpec, EvaluateJob, EvaluateSpec
+from nemo_evaluator.jobs.evaluate import AsyncEvaluateJob, EvaluateInputSpec, EvaluateSpec
 from nemo_evaluator.jobs.publication import (
     EVAL_DURATION_KEY,
     PUBLISH_DURATION_KEY,
@@ -173,6 +173,7 @@ class _FakeClient(AsyncIntakeClient):
         ingest_delay_sec: float = 0.0,
     ) -> None:
         self._workspace = "default"
+        self._http = httpx.AsyncClient()
         self.atif_calls: list[dict[str, Any]] = []
         self.eval_result_calls: list[dict[str, Any]] = []
         self.trace_calls: _SessionIds = []
@@ -595,11 +596,11 @@ def _job_spec(*, required: bool = True) -> AgentEvalSpec:
 
 
 def test_job_does_not_publish_without_a_publication_spec(tmp_path: Path, mocker: MockerFixture) -> None:
-    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
+    mocker.patch.object(AsyncAgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
     client = _FakeClient()
 
     spec = AgentEvalSpec(tasks=[AgentEvalTaskSpec(id="task-1", intent="Answer.")], target=FabricRunnerTarget(config={}))
-    result = AgentEvalJob().run(spec.model_dump(), ctx=_job_context(tmp_path), async_sdk=client)
+    result = AsyncAgentEvalJob().run(spec.model_dump(), ctx=_job_context(tmp_path), async_client=client)
 
     assert "publication" not in result
     assert client.atif_calls == []
@@ -607,11 +608,11 @@ def test_job_does_not_publish_without_a_publication_spec(tmp_path: Path, mocker:
 
 def test_job_publishes_through_the_real_sync_bridge(tmp_path: Path, mocker: MockerFixture) -> None:
     evaluator = _FakeEvaluator()
-    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=evaluator)
+    mocker.patch.object(AsyncAgentEvalJob, "_build_evaluator", return_value=evaluator)
     client = _FakeClient()
     ctx = _job_context(tmp_path)
 
-    result = AgentEvalJob().run(_job_spec().model_dump(), ctx=ctx, async_sdk=client)
+    result = AsyncAgentEvalJob().run(_job_spec().model_dump(), ctx=ctx, async_client=client)
 
     # The evaluator drove a loop to completion first; publication then ran on a different one,
     # reusing the same injected SDK. That crossing is what raises "Event loop is closed" when the
@@ -637,25 +638,25 @@ def test_job_publishes_through_the_real_sync_bridge(tmp_path: Path, mocker: Mock
 def test_job_keeps_the_bundle_when_required_publication_fails(tmp_path: Path, mocker: MockerFixture) -> None:
     # Publication is the only step that can fail the job, so it runs last: the bundle and summary
     # artifacts must survive for a later re-publish.
-    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
+    mocker.patch.object(AsyncAgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
     client = _FakeClient(missing_evaluation=True)
     ctx = _job_context(tmp_path)
 
     with pytest.raises(PublicationFailedError):
-        AgentEvalJob().run(_job_spec().model_dump(), ctx=ctx, async_sdk=client)
+        AsyncAgentEvalJob().run(_job_spec().model_dump(), ctx=ctx, async_client=client)
 
     assert (ctx.storage.persistent / "agent-eval" / "trials.jsonl").exists()
     assert (ctx.storage.persistent / "results" / "agent-eval-results").exists()
 
 
 def test_job_completes_when_optional_publication_fails(tmp_path: Path, mocker: MockerFixture) -> None:
-    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
+    mocker.patch.object(AsyncAgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
     client = _FakeClient(missing_evaluation=True)
 
-    result = AgentEvalJob().run(
+    result = AsyncAgentEvalJob().run(
         _job_spec(required=False).model_dump(),
         ctx=_job_context(tmp_path),
-        async_sdk=client,
+        async_client=client,
     )
 
     assert result["status"] == PlatformJobStatus.COMPLETED
@@ -667,12 +668,12 @@ def test_job_publication_requires_a_run_start_time(tmp_path: Path, mocker: Mocke
     # Without `started_at` the trajectory would fall back to Intake's per-request ingest clock, and
     # re-publishing would duplicate spans instead of replacing them. Refuse rather than write rows
     # that can never be collapsed.
-    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator(started_at=None))
+    mocker.patch.object(AsyncAgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator(started_at=None))
 
-    result = AgentEvalJob().run(
+    result = AsyncAgentEvalJob().run(
         _job_spec(required=False).model_dump(),
         ctx=_job_context(tmp_path),
-        async_sdk=_FakeClient(),
+        async_client=_FakeClient(),
     )
 
     assert result["publication"]["status"] == PlatformJobStatus.ERROR
@@ -726,7 +727,7 @@ def test_evaluate_job_does_not_publish_without_a_publication_spec(tmp_path: Path
     client = _FakeClient()
 
     spec = EvaluateSpec(metrics=[_INLINE_METRIC], dataset=[{"question": "2+2?"}])
-    result = EvaluateJob().run(spec.model_dump(), ctx=_job_context(tmp_path, job_id="job-1"), async_sdk=client)
+    result = AsyncEvaluateJob().run(spec.model_dump(), ctx=_job_context(tmp_path, job_id="job-1"), async_client=client)
 
     assert "publication" not in result
     assert client.atif_calls == []
@@ -740,7 +741,7 @@ def test_evaluate_job_persists_the_run_identity_it_published_under(tmp_path: Pat
     client = _FakeClient()
     ctx = _job_context(tmp_path, job_id="job-1")
 
-    EvaluateJob().run(_evaluate_spec().model_dump(), ctx=ctx, async_sdk=client)
+    AsyncEvaluateJob().run(_evaluate_spec().model_dump(), ctx=ctx, async_client=client)
 
     # Registered as its own artifact, like the sibling score files — a re-publish should not have to
     # unpack the artifacts directory to recover the identity it must reuse.
@@ -759,10 +760,10 @@ def test_evaluate_job_publishes_rows_through_the_real_sync_bridge(tmp_path: Path
     mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=evaluator)
     client = _FakeClient()
 
-    result = EvaluateJob().run(
+    result = AsyncEvaluateJob().run(
         _evaluate_spec().model_dump(),
         ctx=_job_context(tmp_path, job_id="job-1"),
-        async_sdk=client,
+        async_client=client,
     )
 
     # The evaluator drove a loop to completion first; publication then ran on a different one,
@@ -789,10 +790,10 @@ def test_evaluate_job_uses_the_configured_test_case_id_column(tmp_path: Path, mo
     mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=_FakeRowEvaluator())
     client = _FakeClient()
 
-    EvaluateJob().run(
+    AsyncEvaluateJob().run(
         _evaluate_spec(test_case_id_field="qid").model_dump(),
         ctx=_job_context(tmp_path, job_id="job-1"),
-        async_sdk=client,
+        async_client=client,
     )
 
     assert client.atif_calls[0]["session_id"] == "job-1:q-1"
@@ -800,15 +801,15 @@ def test_evaluate_job_uses_the_configured_test_case_id_column(tmp_path: Path, mo
 
 
 def test_evaluate_job_without_a_job_id_cannot_publish(tmp_path: Path, mocker: MockerFixture) -> None:
-    # A row result carries no run id of its own, so a platformless local run has nothing stable to
-    # key sessions on.
+    # A row result carries no run id of its own, so without a job id there is nothing stable to key
+    # sessions on.
     mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=_FakeRowEvaluator())
     client = _FakeClient()
 
-    result = EvaluateJob().run(
+    result = AsyncEvaluateJob().run(
         _evaluate_spec(required=False).model_dump(),
         ctx=_job_context(tmp_path, job_id=None),
-        async_sdk=client,
+        async_client=client,
     )
 
     assert result["publication"]["status"] == PlatformJobStatus.ERROR
@@ -820,10 +821,10 @@ def test_evaluate_job_reports_a_bad_test_case_id_column(tmp_path: Path, mocker: 
     mocker.patch("nemo_evaluator.jobs.evaluate.Evaluator", return_value=_FakeRowEvaluator())
     client = _FakeClient()
 
-    result = EvaluateJob().run(
+    result = AsyncEvaluateJob().run(
         _evaluate_spec(required=False, test_case_id_field="missing").model_dump(),
         ctx=_job_context(tmp_path, job_id="job-1"),
-        async_sdk=client,
+        async_client=client,
     )
 
     assert result["publication"]["status"] == PlatformJobStatus.ERROR

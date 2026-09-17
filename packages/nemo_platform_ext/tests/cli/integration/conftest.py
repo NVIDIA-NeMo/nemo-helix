@@ -12,6 +12,7 @@ a live server or external database.
 
 import os
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Generator
 
@@ -23,6 +24,7 @@ from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.workspaces.client import WorkspacesClient
 from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
+from nmp.core.auth.service import AuthService
 from nmp.core.files.service import FilesService
 from nmp.testing import ClientContext, create_test_client
 from starlette.testclient import TestClient
@@ -31,10 +33,22 @@ from typer.testing import CliRunner
 DEFAULT_WORKSPACE = "default"
 
 
+@pytest.fixture
+def assert_exit_code() -> Callable[[Result, int], None]:
+    """Assert a CLI result's exit code, printing its output on failure."""
+
+    def _assert(result: Result, expected_code: int) -> None:
+        assert result.exit_code == expected_code, (
+            f"Expected exit code {expected_code}, got {result.exit_code}. stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+    return _assert
+
+
 @pytest.fixture(scope="module")
 def client_context() -> Generator[ClientContext, None, None]:
-    """ClientContext with FilesService and ASGI-backed SDK clients."""
-    with create_test_client(FilesService, client_type=ClientContext) as context:
+    """ClientContext with the Auth and Files services and ASGI-backed SDK clients."""
+    with create_test_client(AuthService, FilesService, client_type=ClientContext) as context:
         yield context
 
 

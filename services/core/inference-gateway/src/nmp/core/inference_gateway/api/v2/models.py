@@ -6,6 +6,8 @@ from typing import Annotated
 
 from aiohttp import ClientSession
 from fastapi import APIRouter, Depends, Request, Response, status
+from nemo_platform_plugin.client.client import AsyncNemoClient
+from nmp.common.service.dependencies import get_nemo_client
 from nmp.core.inference_gateway.api.authz import (
     MODEL_EXEC_PERMISSION,
     enforce_delegated_workspace_access,
@@ -29,6 +31,7 @@ from nmp.core.inference_gateway.api.proxy import (
     PROXY_OPENAPI_EXTRA,
     virtual_model_proxy,
 )
+from nmp.core.inference_gateway.api.v2.openai import resolve_vm_for_model
 from nmp.core.inference_gateway.api.validation import validate_entity_name, validate_model_entity_name
 from nmp.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 
@@ -80,6 +83,7 @@ async def model_entity_proxy(
     name: str,
     trailing_uri: str,
     http_client: Annotated[ClientSession, Depends(global_http_client)],
+    nemo_client: Annotated[AsyncNemoClient, Depends(get_nemo_client)],
     model_cache: Annotated[ModelCache, Depends(global_model_cache)],
     virtual_model_cache: Annotated[VirtualModelCache, Depends(global_virtual_model_cache)],
     registry: Annotated[MiddlewareRegistry, Depends(global_middleware_registry)],
@@ -112,9 +116,9 @@ async def model_entity_proxy(
     validate_model_entity_name(name, field_name="name")
     logger.info(f"Model entity proxy request: {workspace}/{name}/-/{trailing_uri}")
 
-    virtual_model = virtual_model_cache.get(workspace, name)
+    virtual_model = resolve_vm_for_model(virtual_model_cache, workspace, name)
 
-    if virtual_model is None:
+    if virtual_model is None or virtual_model.name is None:
         raise_virtual_model_not_found(workspace, name)
 
     # Parse body before handing off — bodyless requests (e.g. GET) get an
@@ -124,14 +128,25 @@ async def model_entity_proxy(
     except Exception:
         json_body = {}
 
+    # For a LoRA composite URL name (``base&adapters/{ws}/{adapter}``), the routing intent
+    # is the URL ``name``, not the body model — seed it into ``body["model"]`` so the
+    # ``default_model_entity`` splice in virtual_model_proxy can preserve the adapter suffix
+    # when routing through the base model's VM. For a plain (non-composite) name, leave the
+    # body untouched: a custom VM with no ``default_model_entity`` relies on the client's
+    # qualified body model for entity resolution, and overwriting it with a bare URL name
+    # would regress that path to a 422 (bare name, no default workspace).
+    if "&adapters/" in name:
+        json_body["model"] = name
+
     return await virtual_model_proxy(
         request=request,
         workspace=workspace,
-        vm_name=name,
+        vm_name=virtual_model.name,
         virtual_model=virtual_model,
         trailing_uri=trailing_uri,
         json_body=json_body,
         http_client=http_client,
         model_cache=model_cache,
         registry=registry,
+        request_nemo_client=nemo_client,
     )

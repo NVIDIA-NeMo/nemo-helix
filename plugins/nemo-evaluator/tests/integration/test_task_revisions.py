@@ -31,10 +31,12 @@ from nemo_evaluator.api.schemas import (
     EvaluatorTaskDefinition,
     HarborTaskDefinition,
     TaskInput,
+    TaskInputs,
+    TaskRef,
     TasksetInput,
 )
-from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.sdk import NeMoPlatform
 from nemo_platform_plugin.workspaces.client import WorkspacesClient
 from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
 
@@ -55,7 +57,11 @@ def _unique(prefix: str) -> str:
 
 def _task_input(intent: str = "Answer the question.", *, tags: list[str] | None = None) -> TaskInput:
     return TaskInput(
-        spec=EvaluatorTaskDefinition(kind="evaluator", intent=intent, inputs={"instruction": "What is 2+2?"}),
+        spec=EvaluatorTaskDefinition(
+            kind="evaluator",
+            intent=intent,
+            inputs=TaskInputs(instruction="What is 2+2?"),
+        ),
         tags=tags or [],
     )
 
@@ -218,7 +224,7 @@ def test_taskset_membership_is_pinned_and_stays_pinned(subprocess_platform: str)
         client.evaluator.tasks.create(task_name, task=_task_input("Original."), workspace=WORKSPACE)
 
         created = client.evaluator.tasksets.create(
-            set_name, taskset=TasksetInput(tasks=[task_name]), workspace=WORKSPACE
+            set_name, taskset=TasksetInput(tasks=[TaskRef(task_name)]), workspace=WORKSPACE
         )
         member = created.tasks[0].root
         assert "#" in member, "membership must be stored digest-pinned"
@@ -250,13 +256,13 @@ def test_republishing_a_taskset_after_a_member_moves_cuts_a_revision(subprocess_
     try:
         client.evaluator.tasks.create(task_name, task=_task_input("v1."), workspace=WORKSPACE)
         created = client.evaluator.tasksets.create(
-            set_name, taskset=TasksetInput(tasks=[task_name]), workspace=WORKSPACE
+            set_name, taskset=TasksetInput(tasks=[TaskRef(task_name)]), workspace=WORKSPACE
         )
         assert created.revision == 1
 
         client.evaluator.tasks.replace(task_name, task=_task_input("v2."), workspace=WORKSPACE)
         republished = client.evaluator.tasksets.replace(
-            set_name, taskset=TasksetInput(tasks=[task_name]), workspace=WORKSPACE
+            set_name, taskset=TasksetInput(tasks=[TaskRef(task_name)]), workspace=WORKSPACE
         )
 
         assert republished.revision == 2, "the grouping names different content, so it is a new revision"

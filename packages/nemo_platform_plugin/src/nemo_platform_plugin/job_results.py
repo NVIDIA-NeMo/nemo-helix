@@ -10,7 +10,7 @@ sync library protocols, so ``ctx.results.save(...)`` is sync.
 Concrete impls living in this codebase:
 
 - :class:`LocalJobResults` — copies the artefact under a local directory
-  rooted at ``<persistent>/results/``. Used for laptop ``run_local`` and
+  rooted at ``<persistent>/results/``. Used by programmatic callers and
   any context where no NeMo Platform Files / Jobs SDK is configured.
 - :class:`PlatformJobResults` — thin adapter over
   :class:`nemo_platform_plugin.jobs.result_manager.ResultManager` that registers
@@ -29,8 +29,6 @@ import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.jobs.client import JobsClient
@@ -158,8 +156,8 @@ class PlatformJobResults(JobResults):
     Args:
         job_name: Platform job name this sink publishes results for.
         workspace: Workspace the job lives in.
-        sdk: :class:`NeMoPlatform` handle used for both file uploads and
-            the jobs-results registration.
+        client: Typed root client used for both file uploads and the jobs-results
+            registration.
         attempt_id: Optional override for the job attempt id; when
             omitted, looked up lazily via the typed Jobs client.
     """
@@ -169,13 +167,13 @@ class PlatformJobResults(JobResults):
         *,
         job_name: str,
         workspace: str,
-        sdk: NeMoPlatform,
+        client: NemoClient,
         attempt_id: str | None = None,
     ) -> None:
         self._configure_manager(
             job_name=job_name,
             workspace=workspace,
-            client=client_from_platform(sdk, NemoClient),
+            client=client,
             attempt_id=attempt_id,
         )
 

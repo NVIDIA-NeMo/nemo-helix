@@ -32,11 +32,32 @@ def _install_mock_transport(handler) -> AbstractContextManager[Any]:
     transport = httpx.MockTransport(handler)
     real_client = httpx.Client
 
-    def _factory(*args, **kwargs):
-        kwargs["transport"] = transport
-        return real_client(*args, **kwargs)
+    class _Client(real_client):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
 
-    return patch("nemo_agents_plugin.cli.httpx.Client", _factory)
+    return patch("nemo_agents_plugin.cli.httpx.Client", _Client)
+
+
+def _page(
+    data: list[dict[str, Any]],
+    *,
+    page: int = 1,
+    total_pages: int = 1,
+    total_results: int | None = None,
+) -> dict[str, Any]:
+    total = len(data) if total_results is None else total_results
+    return {
+        "data": data,
+        "pagination": {
+            "page": page,
+            "page_size": len(data),
+            "current_page_size": len(data),
+            "total_pages": total_pages,
+            "total_results": total,
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +198,68 @@ def test_deploy_no_wait_returns_immediately_with_pending_json() -> None:
     assert gets == []
 
 
+def test_deployments_wait_agent_resolves_latest_active_deployment_across_pages() -> None:
+    """``deployments wait --agent`` fetches all pages and selects newest active deployment."""
+    requests: list[httpx.Request] = []
+    pages = [
+        [
+            {
+                "name": "calc-new",
+                "agent": "calc",
+                "status": "pending",
+                "created_at": "2026-05-18T12:00:00",
+            },
+        ],
+        [
+            {
+                "name": "calc-old",
+                "agent": "calc",
+                "status": "pending",
+                "created_at": "2026-05-17T12:00:00",
+            },
+        ],
+    ]
+    total_results = sum(len(page) for page in pages)
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        requests.append(req)
+        if req.method == "GET" and req.url.path.endswith("/deployments"):
+            page_number = int(req.url.params.get("page", "1"))
+            return httpx.Response(
+                200,
+                json=_page(
+                    pages[page_number - 1],
+                    page=page_number,
+                    total_pages=len(pages),
+                    total_results=total_results,
+                ),
+            )
+        if req.method == "GET" and req.url.path.endswith("/deployments/calc-new"):
+            return httpx.Response(
+                200,
+                json={
+                    "name": "calc-new",
+                    "agent": "calc",
+                    "status": "running",
+                    "created_at": "2026-05-18T12:00:00",
+                },
+            )
+        return httpx.Response(404)
+
+    app = AgentsCLI().get_cli()
+    with _install_mock_transport(handler), patch("nemo_agents_plugin.cli.time.sleep"):
+        result = CliRunner().invoke(
+            app,
+            ["deployments", "wait", "--agent", "calc", "--base-url", "http://test", "--timeout", "10"],
+        )
+
+    assert result.exit_code == 0, result.stdout + (result.stderr or "")
+    list_requests = [request for request in requests if request.url.path.endswith("/deployments")]
+    assert len(list_requests) == 2
+    assert list_requests[1].url.params["page"] == "2"
+    assert requests[-1].url.path.endswith("/deployments/calc-new")
+
+
 # ---------------------------------------------------------------------------
 # logs subcommand — path derivation
 # ---------------------------------------------------------------------------
@@ -306,8 +389,8 @@ def test_logs_resolves_most_recent_deployment_for_agent() -> None:
             # Return them in NON-creation order to confirm the CLI sorts.
             return httpx.Response(
                 200,
-                json={
-                    "data": [
+                json=_page(
+                    [
                         {
                             "name": "calc-2",
                             "agent": "calc",
@@ -327,7 +410,7 @@ def test_logs_resolves_most_recent_deployment_for_agent() -> None:
                             "created_at": "2026-05-18T13:00:00",
                         },
                     ]
-                },
+                ),
             )
         return httpx.Response(404)
 
@@ -337,6 +420,56 @@ def test_logs_resolves_most_recent_deployment_for_agent() -> None:
 
     assert result.exit_code == 0, result.stderr or result.stdout
     assert "calc-2 ok" in result.stdout
+
+
+def test_logs_agent_resolution_fetches_all_deployment_pages() -> None:
+    """``logs --agent`` considers matching deployments beyond the first page."""
+    log_file = _make_log_for(_DEFAULT_WORKSPACE, "calc-2")
+    log_file.write_text("calc-2 from page 2\n")
+    requests: list[httpx.Request] = []
+    pages = [
+        [
+            {
+                "name": "other-1",
+                "agent": "other",
+                "status": "running",
+                "created_at": "2026-05-18T13:00:00",
+            },
+        ],
+        [
+            {
+                "name": "calc-2",
+                "agent": "calc",
+                "status": "running",
+                "created_at": "2026-05-18T12:00:00",
+            },
+        ],
+    ]
+    total_results = sum(len(page) for page in pages)
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        requests.append(req)
+        if req.method == "GET" and req.url.path.endswith("/deployments"):
+            page_number = int(req.url.params.get("page", "1"))
+            return httpx.Response(
+                200,
+                json=_page(
+                    pages[page_number - 1],
+                    page=page_number,
+                    total_pages=len(pages),
+                    total_results=total_results,
+                ),
+            )
+        return httpx.Response(404)
+
+    app = AgentsCLI().get_cli()
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(app, ["logs", "--agent", "calc", "--base-url", "http://test"])
+
+    assert result.exit_code == 0, result.stderr or result.stdout
+    assert "calc-2 from page 2" in result.stdout
+    assert len(requests) == 2
+    assert requests[1].url.params["page"] == "2"
 
 
 def test_logs_requires_name_or_agent() -> None:

@@ -179,3 +179,56 @@ async def test_async_list_traces_returns_paginated_items_and_serializes_filter()
 
     assert len(traces) == 1
     assert traces[0].root_span_id == "span-1"
+
+
+@pytest.mark.asyncio
+async def test_async_list_spans_accepts_deprecated_evaluation_context_aliases() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/apis/intake/v2/workspaces/default/spans"
+        assert json.loads(request.url.params["filter"]) == {"evaluation_name": "eval-1"}
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "data": [
+                    {
+                        "span_id": "span-1",
+                        "session_id": "session-1",
+                        "workspace": "default",
+                        "evaluation_context": {
+                            "evaluation_name": "eval-1",
+                            "test_case_name": "case-1",
+                            "evaluation_id": "eval-1",
+                            "test_case_id": "case-1",
+                        },
+                        "kind": "CHAIN",
+                        "source": "otel",
+                        "trace_id": "trace-1",
+                        "started_at": "2026-01-02T03:04:05Z",
+                        "status": "success",
+                        "ingested_at": "2026-01-02T03:04:06Z",
+                    }
+                ],
+                "pagination": {
+                    "page": 1,
+                    "page_size": 10,
+                    "current_page_size": 1,
+                    "total_pages": 1,
+                    "total_results": 1,
+                },
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        client = AsyncIntakeClient(base_url=BASE, workspace="default", http_client=http_client)
+
+        spans = [
+            span
+            async for span in (await client.list_spans(query_params={"filter": {"evaluation_name": "eval-1"}})).items()
+        ]
+
+    assert len(spans) == 1
+    assert spans[0].evaluation_context is not None
+    assert spans[0].evaluation_context.evaluation_name == "eval-1"
+    assert spans[0].evaluation_context.evaluation_id == "eval-1"

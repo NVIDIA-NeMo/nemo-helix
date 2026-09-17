@@ -1,0 +1,39 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "v0.5.1 - 2026-09-10"
+description: ""
+---
+NeMo Platform v0.5.1 is a patch release for the 0.5 release line. It focuses
+on Kubernetes deployment correctness for Fabric-backed agents.
+
+## What's fixed
+
+- Kubernetes agent deployments now stage read-only agent roots into writable
+  runtime directories before starting Fabric. This fixes deployments that
+  reached a healthy state and then failed on first invocation when Fabric tried
+  to write beside a ConfigMap-mounted agent root.
+- Staged Kubernetes agent roots are isolated per runtime lifecycle and are
+  cleaned up when startup fails or when the runtime stops.
+- Agent deployment creation now rejects a container deployment with no
+  resolvable image before persisting the deployment record.
+- Agent deployment creation now rejects a requested deployment mode when the
+  configured executor cannot honor that mode, including mismatches hidden by
+  default executor fallback.
+
+## Upgrade from v0.5.0
+
+Update to v0.5.1 before relying on Kubernetes-hosted Fabric agent deployments.
+After updating the checkout or package, restart local services or redeploy the
+affected Kubernetes agent deployments so the deployment preflight checks and
+writable-root staging take effect.
+
+## Compatibility
+
+v0.5.1 has the same compatibility target as v0.5.0.
+
+## Links
+
+- Repository: [https://github.com/NVIDIA-NeMo/nemo-platform](https://github.com/NVIDIA-NeMo/nemo-platform)
+- Issues: [https://github.com/NVIDIA-NeMo/nemo-platform/issues](https://github.com/NVIDIA-NeMo/nemo-platform/issues)

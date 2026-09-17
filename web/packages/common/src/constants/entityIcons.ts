@@ -21,6 +21,7 @@ import {
   Radar,
   Rocket,
   ShieldCheck,
+  SlidersHorizontal,
   UserPen,
   UsersRound,
   Waypoints,
@@ -51,6 +52,8 @@ export const ENTITY_ICONS = {
   agents: Bot,
   // Monitor runs are agent telemetry, so they share the span glyph.
   agentMonitorRuns: Logs,
+  // Every run that tunes an agent — parameter sweeps, insight loops.
+  agentOptimizations: SlidersHorizontal,
 
   // Models
   baseModels: Boxes,

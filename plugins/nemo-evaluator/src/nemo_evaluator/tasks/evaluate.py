@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import sys
 
-from nemo_evaluator.jobs.evaluate import EvaluateJob
-from nemo_evaluator.tasks.runner import run_task_main
+from nemo_evaluator.jobs.evaluate import AsyncEvaluateJob
+from nemo_evaluator.tasks.runner import run_async_task_main
 
 
 def main() -> int:
     """Build the task SDK and dispatch to the evaluator plugin job."""
-    return run_task_main(EvaluateJob, service_name="evaluator")
+    return run_async_task_main(AsyncEvaluateJob, service_name="evaluator")
 
 
 if __name__ == "__main__":

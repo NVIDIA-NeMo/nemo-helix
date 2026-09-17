@@ -271,6 +271,77 @@ def test_scoped_access_key_created_by_auth_service_authenticates_platform_reques
             client.delete(f"{WORKSPACES_PATH}/{workspace}", headers=SERVICE_HEADERS)
 
 
+def test_rotated_access_key_keeps_working_during_grace_period_and_new_key_authenticates(tmp_path: Path) -> None:
+    private_key_file = tmp_path / "rotate-access-key-private.pem"
+    _write_private_key(private_key_file)
+    shared_config, service_config = _auth_configs(str(private_key_file))
+    user = f"rotate-user-{uuid.uuid4().hex[:8]}@example.com"
+    user_headers = {
+        "X-NMP-Principal-Id": user,
+        "X-NMP-Principal-Email": user,
+    }
+
+    with create_test_client(
+        client_type=TestClient,
+        auth_enabled=True,
+        service_configs={AuthConfig: shared_config, AuthServiceConfig: service_config},
+    ) as client:
+        created = client.post(
+            ACCESS_KEYS_PATH,
+            json={"name": "rotate-smoke"},
+            headers=user_headers,
+        )
+        assert created.status_code == 200, created.text
+        old_key = created.json()["token"]
+        old_jti = created.json()["jti"]
+
+        rotated = client.post(f"{ACCESS_KEYS_PATH}/{old_jti}/rotate", headers=user_headers)
+        assert rotated.status_code == 200, rotated.text
+        rotated_body = rotated.json()
+        assert rotated_body["previous_jti"] == old_jti
+        assert rotated_body["previous_status"] == "ROTATING"
+        new_key = rotated_body["new_key"]["token"]
+        new_jti = rotated_body["new_key"]["jti"]
+        assert new_jti != old_jti
+
+        jwks = {"keys": [public_jwk_from_private_key_pem(shared_config)]}
+
+        async def validate_with_local_jwks(config: AuthConfig, token: str) -> TokenClaims | None:
+            return await validate_access_key_token(config, token, jwks_override=jwks)
+
+        def authenticate_with_access_key(token: str) -> Response:
+            with patch("nmp.common.auth.access_keys.validate_access_key_token", validate_with_local_jwks):
+                return client.get(
+                    "/apis/auth/authenticate",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+
+        # Dual-active grace period: both the rotated-out key and its successor
+        # authenticate until the old key is finalized (revoked or grace expires).
+        old_key_response = authenticate_with_access_key(old_key)
+        new_key_response = authenticate_with_access_key(new_key)
+        assert old_key_response.status_code == 200, old_key_response.text
+        assert new_key_response.status_code == 200, new_key_response.text
+
+        listing = {key["jti"]: key for key in client.get(ACCESS_KEYS_PATH, headers=user_headers).json()["data"]}
+        assert listing[old_jti]["status"] == "ROTATING"
+        assert listing[new_jti]["status"] == "ACTIVE"
+
+        # Cannot rotate an already-rotating key; must finalize (revoke) first.
+        second_rotate = client.post(f"{ACCESS_KEYS_PATH}/{old_jti}/rotate", headers=user_headers)
+        assert second_rotate.status_code == 409, second_rotate.text
+
+        finalize = client.delete(f"{ACCESS_KEYS_PATH}/{old_jti}", headers=user_headers)
+        assert finalize.status_code == 200, finalize.text
+
+        finalized_old_key_response = _wait_for_authorization_response(
+            lambda: authenticate_with_access_key(old_key),
+            expected_status_code=401,
+        )
+        assert finalized_old_key_response.status_code == 401, finalized_old_key_response.text
+        assert authenticate_with_access_key(new_key).status_code == 200
+
+
 def test_platform_admin_creates_service_bound_key_with_independent_identity(tmp_path: Path) -> None:
     private_key_file = tmp_path / "service-access-key-private.pem"
     _write_private_key(private_key_file)

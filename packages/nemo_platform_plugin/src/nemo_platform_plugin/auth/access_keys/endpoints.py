@@ -11,6 +11,8 @@ from nemo_platform_plugin.auth.access_keys.types import (
     AccessKeyListQueryParams,
     AccessKeyListResponse,
     AccessKeyRevokeResponse,
+    AccessKeyRotateRequest,
+    AccessKeyRotateResponse,
     AccessKeyStatusChangeResponse,
 )
 from nemo_platform_plugin.client.endpoint import delete, get, post
@@ -39,3 +41,8 @@ def suspend_access_key(*, jti: str) -> AccessKeyStatusChangeResponse: ...
 @post("/apis/auth/v2/access-keys/{jti}/unsuspend")
 @abstractmethod
 def unsuspend_access_key(*, jti: str) -> AccessKeyStatusChangeResponse: ...
+
+
+@post("/apis/auth/v2/access-keys/{jti}/rotate")
+@abstractmethod
+def rotate_access_key(*, jti: str, body: AccessKeyRotateRequest) -> AccessKeyRotateResponse: ...

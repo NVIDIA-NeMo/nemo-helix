@@ -10,10 +10,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from nemo_evaluator_sdk.agent_eval.evaluator import (
     AgentEvaluator,
+    _live_response_usage_measurements,
     _metric_row,
     _new_run_id,
     _task_row,
     _trial_from_sample,
+    _trial_sample,
+    _warn_invalid_live_usage_counts,
 )
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalSummary
 from nemo_evaluator_sdk.agent_eval.scores import (
@@ -34,10 +37,12 @@ from nemo_evaluator_sdk.agent_eval.trials import (
     AgentOutput,
     RunnerInfo,
     TrialError,
+    TrialMeasurements,
 )
 from nemo_evaluator_sdk.agent_inference import AgentInferenceContext, AgentInvocationResult, AgentInvocationStatus
 from nemo_evaluator_sdk.enums import AgentFormat, ModelFormat
 from nemo_evaluator_sdk.metrics.protocol import (
+    Metric,
     MetricDiagnostic,
     MetricInput,
     MetricOutput,
@@ -53,6 +58,7 @@ from nemo_evaluator_sdk.values import (
     RunConfigOnlineModel,
 )
 from nemo_evaluator_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
+from pydantic import ValidationError
 
 
 def test_trial_from_sample_falls_back_to_reasoning_content() -> None:
@@ -123,6 +129,261 @@ def test_trial_from_sample_preserves_typed_trace_and_canonical_metadata() -> Non
     assert trial.metadata["generated"] is True
 
 
+@pytest.mark.parametrize(
+    ("target", "usage", "expected"),
+    [
+        pytest.param(
+            Model(name="chat-model", url="https://example/v1/chat/completions"),
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 2,
+                "total_tokens": 999,
+                "prompt_tokens_details": {"cached_tokens": 3},
+            },
+            TrialMeasurements(prompt_tokens=10, completion_tokens=2, cache_read_tokens=3),
+            id="openai-chat",
+        ),
+        pytest.param(
+            Model(name="responses-model", url="https://example/v1/responses"),
+            {
+                "input_tokens": 8,
+                "output_tokens": 4,
+                "input_tokens_details": {"cached_tokens": 2},
+            },
+            TrialMeasurements(prompt_tokens=8, completion_tokens=4, cache_read_tokens=2),
+            id="openai-responses",
+        ),
+        pytest.param(
+            GenericAgent(
+                name="anthropic-agent",
+                url="https://example/agent",
+                format=AgentFormat.GENERIC,
+                body={"input": "{{ instruction }}"},
+                response_path="$.answer",
+            ),
+            {
+                "input_tokens": 5,
+                "output_tokens": 2,
+                "cache_creation_input_tokens": 1,
+                "cache_read_input_tokens": 4,
+            },
+            TrialMeasurements(
+                prompt_tokens=10,
+                completion_tokens=2,
+                cache_creation_tokens=1,
+                cache_read_tokens=4,
+            ),
+            id="anthropic-agent",
+        ),
+    ],
+)
+def test_trial_from_sample_normalizes_live_usage(
+    target: Model | Agent,
+    usage: dict[str, Any],
+    expected: TrialMeasurements,
+) -> None:
+    task = AgentEvalTask(id="task-1", intent="Answer.", inputs={"instruction": "Q?"})
+
+    trial = _trial_from_sample(
+        task,
+        target,
+        {"output_text": "answer", "response": {"usage": usage}},
+    )
+
+    assert trial.measurements == expected
+    assert trial.measurements.total_tokens == expected.total_tokens
+    assert trial.measurements.runtime_sec is None
+    assert trial.measurements.cost_usd is None
+
+
+def test_trial_from_sample_omits_ambiguous_prompt_cache_usage(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    task = AgentEvalTask(id="task-1", intent="Answer.", inputs={"instruction": "Q?"})
+    target = Model(name="target", url="https://example/v1/responses")
+
+    trial = _trial_from_sample(
+        task,
+        target,
+        {
+            "output_text": "answer",
+            "response": {
+                "usage": {
+                    "input_tokens": 8,
+                    "output_tokens": 4,
+                    "input_tokens_details": {"cached_tokens": 2},
+                    "cache_read_input_tokens": 2,
+                }
+            },
+        },
+    )
+
+    assert trial.measurements == TrialMeasurements(completion_tokens=4)
+    assert "both inclusive cache details and separate cache fields" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("usage", "expected"),
+    [
+        pytest.param(
+            {
+                "input_tokens": 5,
+                "output_tokens": 2,
+                "input_tokens_details": {"cached_tokens": None},
+                "cache_read_input_tokens": 4,
+            },
+            TrialMeasurements(prompt_tokens=9, completion_tokens=2, cache_read_tokens=4),
+            id="null-inclusive-placeholder",
+        ),
+        pytest.param(
+            {
+                "input_tokens": 5,
+                "output_tokens": 2,
+                "input_tokens_details": {"cached_tokens": 4},
+                "cache_read_input_tokens": None,
+            },
+            TrialMeasurements(prompt_tokens=5, completion_tokens=2, cache_read_tokens=4),
+            id="null-separate-placeholder",
+        ),
+    ],
+)
+def test_live_response_usage_ignores_null_cache_format_placeholders(
+    usage: dict[str, Any],
+    expected: TrialMeasurements,
+) -> None:
+    assert _live_response_usage_measurements({"usage": usage}, trial_id="trial-1") == expected
+
+
+def test_trial_from_sample_warns_and_preserves_independent_valid_usage(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    task = AgentEvalTask(id="task-1", intent="Answer.", inputs={"instruction": "Q?"})
+    target = Model(name="target", url="https://example/v1/chat/completions")
+
+    trial = _trial_from_sample(
+        task,
+        target,
+        {
+            "output_text": "answer",
+            "response": {
+                "usage": {
+                    "prompt_tokens": 8,
+                    "completion_tokens": "bad",
+                    "prompt_tokens_details": {"cached_tokens": -1},
+                }
+            },
+        },
+    )
+
+    assert trial.measurements == TrialMeasurements(prompt_tokens=8)
+    assert "completion_tokens='bad'" in caplog.text
+    assert "prompt_tokens_details.cached_tokens=-1" in caplog.text
+
+
+def test_live_response_usage_measurements_empty_when_usage_is_absent() -> None:
+    assert _live_response_usage_measurements(None, trial_id="trial-1") == TrialMeasurements()
+    assert _live_response_usage_measurements("not-a-mapping", trial_id="trial-1") == TrialMeasurements()
+    assert _live_response_usage_measurements({}, trial_id="trial-1") == TrialMeasurements()
+    assert _live_response_usage_measurements({"usage": None}, trial_id="trial-1") == TrialMeasurements()
+
+
+def test_live_response_usage_measurements_omits_non_object_usage(caplog: pytest.LogCaptureFixture) -> None:
+    assert _live_response_usage_measurements({"usage": "tokens"}, trial_id="trial-1") == TrialMeasurements()
+    assert "usage='tokens'" in caplog.text
+
+
+def test_live_response_usage_measurements_prefers_chat_aliases() -> None:
+    measurements = _live_response_usage_measurements(
+        {
+            "usage": {
+                "prompt_tokens": 10,
+                "input_tokens": 1,
+                "completion_tokens": 2,
+                "output_tokens": 9,
+                "total_tokens": 999,
+            }
+        },
+        trial_id="trial-1",
+    )
+
+    assert measurements == TrialMeasurements(prompt_tokens=10, completion_tokens=2)
+
+
+def test_live_response_usage_measurements_records_zero_usage() -> None:
+    measurements = _live_response_usage_measurements(
+        {"usage": {"prompt_tokens": 0, "completion_tokens": 0}},
+        trial_id="trial-1",
+    )
+
+    assert measurements.prompt_tokens == 0
+    assert measurements.completion_tokens == 0
+    assert measurements.total_tokens == 0
+
+
+def test_invalid_separate_cache_poisons_prompt_only(caplog: pytest.LogCaptureFixture) -> None:
+    measurements = _live_response_usage_measurements(
+        {"usage": {"input_tokens": 5, "output_tokens": 2, "cache_read_input_tokens": "bad"}},
+        trial_id="trial-1",
+    )
+
+    assert measurements == TrialMeasurements(completion_tokens=2)
+    assert "cache_read_input_tokens='bad'" in caplog.text
+
+
+def test_separate_cache_without_prompt_does_not_invent_a_prompt_total() -> None:
+    measurements = _live_response_usage_measurements(
+        {"usage": {"output_tokens": 2, "cache_read_input_tokens": 4}},
+        trial_id="trial-1",
+    )
+
+    assert measurements == TrialMeasurements(completion_tokens=2, cache_read_tokens=4)
+
+
+def test_inclusive_cache_falls_back_from_chat_details_to_responses_details(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    measurements = _live_response_usage_measurements(
+        {
+            "usage": {
+                "input_tokens": 8,
+                "output_tokens": 1,
+                "prompt_tokens_details": "not-an-object",
+                "input_tokens_details": {"cached_tokens": 3},
+            }
+        },
+        trial_id="trial-1",
+    )
+
+    assert measurements == TrialMeasurements(prompt_tokens=8, completion_tokens=1, cache_read_tokens=3)
+    assert "prompt_tokens_details='not-an-object'" in caplog.text
+
+
+def test_warn_invalid_live_usage_counts_skips_missing_and_null_values(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    usage = {"prompt_tokens": 8, "completion_tokens": None}
+
+    _warn_invalid_live_usage_counts("trial-1", usage)
+
+    assert caplog.text == ""
+    assert usage == {"prompt_tokens": 8, "completion_tokens": None}
+
+
+def test_warn_invalid_live_usage_counts_logs_malformed_fields(caplog: pytest.LogCaptureFixture) -> None:
+    _warn_invalid_live_usage_counts(
+        "trial-1",
+        {
+            "prompt_tokens": True,
+            "prompt_tokens_details": [1],
+            "input_tokens_details": {"cached_tokens": -1},
+        },
+    )
+
+    assert "prompt_tokens=True" in caplog.text
+    assert "prompt_tokens_details=[1]" in caplog.text
+    assert "input_tokens_details.cached_tokens=-1" in caplog.text
+
+
 def test_generated_run_ids_are_unique_within_the_same_second() -> None:
     with patch("nemo_evaluator_sdk.agent_eval.evaluator.datetime") as mock_datetime:
         mock_datetime.now.return_value.strftime.return_value = "20260628120000"
@@ -152,6 +413,53 @@ def test_metric_row_exposes_reference_but_task_row_hides_it() -> None:
     assert "reference" not in task_row
 
 
+def test_metric_row_keeps_measurements_separate_from_trial_metadata() -> None:
+    task = AgentEvalTask(id="task-1", intent="Fix it.", inputs={})
+    trial = AgentEvalTrial(
+        id="trial-1",
+        task_id=task.id,
+        status=AgentEvalTrialStatus.PARTIAL,
+        output=None,
+        measurements=TrialMeasurements(prompt_tokens=8, completion_tokens=2, runtime_sec=1.5),
+        metadata={"prompt_tokens": 999, "provenance": "kept"},
+    )
+
+    assert _trial_sample(trial) == {}
+    row = _metric_row(task, trial)
+    assert row["trial"]["measurements"] == trial.measurements.model_dump(mode="json")
+    assert row["trial"]["metadata"] == {"prompt_tokens": 999, "provenance": "kept"}
+    assert trial.metadata == {"prompt_tokens": 999, "provenance": "kept"}
+
+
+def test_metric_row_measurements_dump_does_not_alias_durable_trial_state() -> None:
+    trial = AgentEvalTrial(
+        id="trial-1",
+        task_id="task-1",
+        status=AgentEvalTrialStatus.PARTIAL,
+        measurements=TrialMeasurements(prompt_tokens=8, completion_tokens=2),
+    )
+    original = trial.measurements.model_copy()
+
+    row = _metric_row(AgentEvalTask(id="task-1", intent="Fix it.", inputs={}), trial)
+    row["trial"]["measurements"]["prompt_tokens"] = -1
+
+    assert trial.measurements == original
+
+
+def test_metric_row_metadata_does_not_alias_durable_trial_state() -> None:
+    trial = AgentEvalTrial(
+        id="trial-1",
+        task_id="task-1",
+        status=AgentEvalTrialStatus.PARTIAL,
+        metadata={"provenance": "kept"},
+    )
+
+    row = _metric_row(AgentEvalTask(id="task-1", intent="Fix it.", inputs={}), trial)
+    row["trial"]["metadata"]["provenance"] = "changed"
+
+    assert trial.metadata == {"provenance": "kept"}
+
+
 class _ConstantMetric:
     @property
     def type(self) -> str:
@@ -162,6 +470,15 @@ class _ConstantMetric:
 
     async def compute_scores(self, input: MetricInput) -> MetricResult:
         return MetricResult(outputs=[MetricOutput(name="score", value=0.75)])
+
+
+class _MeasurementCaptureMetric(_ConstantMetric):
+    def __init__(self) -> None:
+        self.input: MetricInput | None = None
+
+    async def compute_scores(self, input: MetricInput) -> MetricResult:
+        self.input = input
+        return await super().compute_scores(input)
 
 
 class _EvidenceMetric:
@@ -285,6 +602,176 @@ class _TaskRunner:
         ]
 
 
+class _FinalizingTaskRunner(_TaskRunner):
+    def __init__(self, replacement: Any, events: list[str]) -> None:
+        super().__init__()
+        self.replacement = replacement
+        self.events = events
+
+    async def run_tasks(
+        self,
+        tasks: Sequence[AgentEvalTask],
+        config: AgentEvalRunConfig | None = None,
+    ) -> list[AgentEvalTrial]:
+        self.events.append("run_tasks")
+        return await super().run_tasks(tasks, config)
+
+    def scoring_metrics(
+        self,
+        task: AgentEvalTask,
+        trials: Sequence[AgentEvalTrial],
+    ) -> Sequence[Metric]:
+        self.events.append(f"finalize:{len(trials)}")
+        return [self.replacement]
+
+
+class _OrderingMetric(_ConstantMetric):
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+
+    @property
+    def type(self) -> str:
+        return "finalized_metric"
+
+    def output_spec(self) -> list[MetricOutputSpec]:
+        return [MetricOutputSpec.continuous_score("finalized_score")]
+
+    async def compute_scores(self, input: MetricInput) -> MetricResult:
+        self.events.append("score")
+        return MetricResult(outputs=[MetricOutput(name="finalized_score", value=0.75)])
+
+
+class _MutableMetadataBox:
+    """Arbitrary mutable metadata leaf with identity-only equality."""
+
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+
+@pytest.mark.asyncio
+async def test_target_can_finalize_scoring_tasks_after_trials_and_before_scoring() -> None:
+    events: list[str] = []
+    metric = _OrderingMetric(events)
+    box = _MutableMetadataBox("original")
+    task = _task().model_copy(update={"metadata": {"box": box}})
+
+    result = await AgentEvaluator().run(tasks=[task], target=_FinalizingTaskRunner(metric, events))
+
+    assert events == ["run_tasks", "finalize:1", "score"]
+    assert result.tasks[0].metrics == [metric]
+    assert result.tasks[0].metadata["box"] is box
+    assert "finalized_metric.finalized_score" in result.summary.scores.scores_by_name
+    assert "constant_metric.score" not in result.summary.scores.scores_by_name
+
+
+@pytest.mark.asyncio
+async def test_non_provider_target_keeps_original_scoring_tasks() -> None:
+    task = _task()
+
+    result = await AgentEvaluator().run(tasks=[task], target=_TaskRunner())
+
+    assert result.tasks == [task]
+
+
+class _DuplicatingTaskRunner(_TaskRunner):
+    def scoring_metrics(
+        self,
+        task: AgentEvalTask,
+        trials: Sequence[AgentEvalTrial],
+    ) -> Sequence[Metric]:
+        return [_ConstantMetric(), _ConstantMetric()]
+
+
+@pytest.mark.asyncio
+async def test_finalized_tasks_are_revalidated_for_duplicate_metric_types() -> None:
+    with pytest.raises(ValueError, match="duplicate task metric types"):
+        await AgentEvaluator().run(tasks=[_task()], target=_DuplicatingTaskRunner())
+
+
+@pytest.mark.asyncio
+async def test_finalized_tasks_are_revalidated_for_view_references() -> None:
+    events: list[str] = []
+    task = _task().model_copy(
+        update={
+            "views": {
+                "quality": SemanticView(
+                    reducer=SemanticReducer.MEAN,
+                    signals=[ViewSignal(metric="constant_metric", output="score")],
+                )
+            }
+        }
+    )
+
+    # The replacement metric's type is "finalized_metric", so the view's signal no longer resolves.
+    with pytest.raises(ValueError, match="references unknown"):
+        await AgentEvaluator().run(tasks=[task], target=_FinalizingTaskRunner(_OrderingMetric(events), events))
+
+
+class _TrialMovingTaskRunner(_TaskRunner):
+    """Breaks the no-mutation convention by reassigning a trial to another task."""
+
+    def scoring_metrics(
+        self,
+        task: AgentEvalTask,
+        trials: Sequence[AgentEvalTrial],
+    ) -> Sequence[Metric]:
+        if task.id == "a":
+            trials[0].task_id = "b"
+        return list(task.metrics)
+
+
+class _TrialSwappingTaskRunner(_TaskRunner):
+    """Breaks the no-mutation convention while preserving one trial per task."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.trials_by_original_task: dict[str, AgentEvalTrial] = {}
+
+    async def run_tasks(
+        self,
+        tasks: Sequence[AgentEvalTask],
+        config: AgentEvalRunConfig | None = None,
+    ) -> list[AgentEvalTrial]:
+        trials = await super().run_tasks(tasks, config)
+        self.trials_by_original_task = {trial.task_id: trial for trial in trials}
+        return trials
+
+    def scoring_metrics(
+        self,
+        task: AgentEvalTask,
+        trials: Sequence[AgentEvalTrial],
+    ) -> Sequence[Metric]:
+        if task.id == "a":
+            trial_a = self.trials_by_original_task["a"]
+            trial_b = self.trials_by_original_task["b"]
+            trial_a.task_id, trial_b.task_id = trial_b.task_id, trial_a.task_id
+        return list(task.metrics)
+
+
+@pytest.mark.asyncio
+async def test_scoring_rejects_moved_trial_assignment() -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"must not mutate trials \(trial 'a:runtime' task_id 'a' -> 'b'\)",
+    ):
+        await AgentEvaluator().run(
+            tasks=[_task(task_id="a"), _task(task_id="b")],
+            target=_TrialMovingTaskRunner(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_scoring_rejects_balanced_trial_assignment_swap() -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"must not mutate trials \(trial 'a:runtime' task_id 'a' -> 'b'; trial 'b:runtime' task_id 'b' -> 'a'\)",
+    ):
+        await AgentEvaluator().run(
+            tasks=[_task(task_id="a"), _task(task_id="b")],
+            target=_TrialSwappingTaskRunner(),
+        )
+
+
 def test_run_rejects_trials_and_target_together() -> None:
     model = Model(url="https://model.test/v1/chat/completions", name="target", format=ModelFormat.OPEN_AI)
 
@@ -377,6 +864,126 @@ async def test_scores_partial_trials() -> None:
     assert result.summary.score("constant_metric.score").mean == 0.75
 
 
+@pytest.mark.parametrize(
+    ("measurements", "output", "expected_candidate_metadata"),
+    [
+        pytest.param(
+            TrialMeasurements(prompt_tokens=8, completion_tokens=2, runtime_sec=1.5),
+            AgentOutput(output_text="answer", response={"answer": 42}, metadata={"shared": "output"}),
+            {"provenance": "kept", "shared": "output"},
+            id="populated-output",
+        ),
+        pytest.param(
+            TrialMeasurements(),
+            None,
+            {},
+            id="empty-outputless",
+        ),
+        pytest.param(
+            TrialMeasurements(prompt_tokens=0, completion_tokens=0, runtime_sec=0.0, cost_usd=0.0),
+            AgentOutput(output_text="zero", metadata={"shared": "output"}),
+            {"provenance": "kept", "shared": "output"},
+            id="zero-output",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_metric_input_uses_only_canonical_trial_measurements(
+    measurements: TrialMeasurements,
+    output: AgentOutput | None,
+    expected_candidate_metadata: dict[str, Any],
+) -> None:
+    metric = _MeasurementCaptureMetric()
+    task = AgentEvalTask(id="task-1", intent="Answer.", inputs={}, metrics=[metric])
+    evidence = (
+        CandidateEvidence(descriptors={"trace": EvidenceDescriptor(kind="trace", format="json", data={})})
+        if output is not None
+        else None
+    )
+    trial = AgentEvalTrial(
+        id="trial-1",
+        task_id=task.id,
+        status=AgentEvalTrialStatus.PARTIAL,
+        output=output,
+        evidence=evidence,
+        measurements=measurements,
+        metadata={"provenance": "kept", "shared": "trial"},
+    )
+    original_trial = trial.model_copy(deep=True)
+
+    result = await AgentEvaluator().run(tasks=[task], trials=[trial])
+
+    assert result.scores[0].status == AgentEvalScoreStatus.COMPLETED
+    assert metric.input is not None
+    assert metric.input.row.data["trial"]["measurements"] == trial.measurements.model_dump(mode="json")
+    assert metric.input.row.data["trial"]["metadata"] == trial.metadata
+    assert metric.input.candidate.metadata == expected_candidate_metadata
+    assert metric.input.candidate.output_text == (output.output_text if output is not None else None)
+    assert metric.input.candidate.response == (output.response if output is not None else None)
+    assert metric.input.candidate.evidence == evidence
+    assert trial == original_trial
+
+
+@pytest.mark.asyncio
+async def test_measurement_named_metadata_remains_opaque_in_metric_input() -> None:
+    metric = _MeasurementCaptureMetric()
+    task = AgentEvalTask(id="task-1", intent="Answer.", inputs={}, metrics=[metric])
+    trial = AgentEvalTrial(
+        id="trial-1",
+        task_id=task.id,
+        status=AgentEvalTrialStatus.PARTIAL,
+        output=AgentOutput(output_text="answer"),
+        measurements=TrialMeasurements(prompt_tokens=8),
+        metadata={"prompt_tokens": 999},
+    )
+
+    await AgentEvaluator().run(tasks=[task], trials=[trial])
+
+    assert metric.input is not None
+    assert metric.input.candidate.metadata["prompt_tokens"] == 999
+    assert metric.input.row.data["trial"]["metadata"]["prompt_tokens"] == 999
+    assert metric.input.row.data["trial"]["measurements"]["prompt_tokens"] == 8
+
+
+@pytest.mark.asyncio
+async def test_run_revalidates_model_copy_corrupted_measurements_before_scoring() -> None:
+    metric = _MeasurementCaptureMetric()
+    task = AgentEvalTask(id="task-1", intent="Answer.", inputs={}, metrics=[metric])
+    trial = AgentEvalTrial(
+        id="trial-1",
+        task_id=task.id,
+        status=AgentEvalTrialStatus.PARTIAL,
+        measurements=TrialMeasurements(prompt_tokens=8, completion_tokens=2),
+    )
+    corrupted_measurements = trial.measurements.model_copy(update={"prompt_tokens": -1})
+    corrupted_trial = trial.model_copy(update={"measurements": corrupted_measurements})
+
+    with pytest.raises(ValidationError):
+        await AgentEvaluator().run(tasks=[task], trials=[corrupted_trial])
+
+    assert metric.input is None
+
+
+@pytest.mark.asyncio
+async def test_run_uses_revalidated_model_copy_measurements_when_scoring() -> None:
+    metric = _MeasurementCaptureMetric()
+    task = AgentEvalTask(id="task-1", intent="Answer.", inputs={}, metrics=[metric])
+    trial = AgentEvalTrial(
+        id="trial-1",
+        task_id=task.id,
+        status=AgentEvalTrialStatus.PARTIAL,
+    ).model_copy(update={"measurements": {"prompt_tokens": 8, "completion_tokens": 2}})
+
+    result = await AgentEvaluator().run(tasks=[task], trials=[trial])
+
+    assert result.scores[0].status == AgentEvalScoreStatus.COMPLETED
+    assert metric.input is not None
+    assert metric.input.row.data["trial"]["measurements"] == TrialMeasurements(
+        prompt_tokens=8, completion_tokens=2
+    ).model_dump(mode="json")
+    assert result.trials[0].measurements == TrialMeasurements(prompt_tokens=8, completion_tokens=2)
+
+
 @pytest.mark.asyncio
 async def test_target_runtime_produces_trials_before_scoring() -> None:
     runtime = _TaskRunner()
@@ -402,7 +1009,14 @@ async def test_live_model_generation_with_mocked_inference() -> None:
         del model, max_retries, kwargs
         assert request["messages"][0]["content"] == "What is the answer?"
         assert "prompt" not in request
-        return {"choices": [{"message": {"role": "assistant", "content": "Generated model answer"}}]}
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "Generated model answer"}}],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 2,
+                "prompt_tokens_details": {"cached_tokens": 3},
+            },
+        }
 
     model = Model(url="https://model.test/v1/chat/completions", name="target-model", format=ModelFormat.OPEN_AI)
     result = await AgentEvaluator(inference_fn=fake_model_inference).run(
@@ -414,6 +1028,11 @@ async def test_live_model_generation_with_mocked_inference() -> None:
     assert result.trials[0].metadata["model_id"] == "target-model"
     assert result.trials[0].output is not None
     assert result.trials[0].output.output_text == "Generated model answer"
+    assert result.trials[0].measurements == TrialMeasurements(
+        prompt_tokens=10,
+        completion_tokens=2,
+        cache_read_tokens=3,
+    )
     assert result.summary.score("constant_metric.score").mean == 0.75
 
 
@@ -551,6 +1170,12 @@ async def test_live_agent_generation_preserves_trace_evidence_for_metrics() -> N
         return {
             "choices": [{"message": {"role": "assistant", "content": "Generated agent answer"}}],
             "trajectory": [{"tool": "search", "line": 3}],
+            "usage": {
+                "input_tokens": 5,
+                "output_tokens": 2,
+                "cache_creation_input_tokens": 1,
+                "cache_read_input_tokens": 4,
+            },
         }
 
     agent = GenericAgent(
@@ -570,6 +1195,12 @@ async def test_live_agent_generation_preserves_trace_evidence_for_metrics() -> N
     assert result.trials[0].evidence.require("trace").kind == "trace"
     assert result.trials[0].output is not None
     assert result.trials[0].output.output_text == "Generated agent answer"
+    assert result.trials[0].measurements == TrialMeasurements(
+        prompt_tokens=10,
+        completion_tokens=2,
+        cache_creation_tokens=1,
+        cache_read_tokens=4,
+    )
     assert metric.inputs[0].candidate.evidence == result.trials[0].evidence
 
 
@@ -824,7 +1455,7 @@ def test_agent_evaluator_rejects_direct_inference_and_factory() -> None:
     with pytest.raises(ValueError, match="inference_fn.*agent_inference_fn_factory"):
         # Deliberately bypass the overload contract to verify the runtime guard for
         # dynamically typed callers.
-        AgentEvaluator(**invalid_kwargs)  # ty: ignore[no-matching-overload]
+        AgentEvaluator(**invalid_kwargs)
 
 
 @pytest.mark.asyncio
@@ -926,6 +1557,7 @@ def test_metric_row_error_is_none_for_a_trial_that_did_not_fail() -> None:
     row = _metric_row(AgentEvalTask(id="task-1", intent="Fix it.", inputs={}), _candidate_trial())
 
     assert row["trial"]["error"] is None
+    assert row["trial"]["measurements"] == TrialMeasurements().model_dump(mode="json")
 
 
 class _PreflightCountingMetric(_ConstantMetric):

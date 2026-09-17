@@ -42,12 +42,15 @@ from nmp.core.jobs.app.schemas import (
     PlatformJobSpec,
 )
 from nmp.core.jobs.entities import (
+    STEP_SPEC_NAME_CONFIG_KEY,
     PlatformJob,
     PlatformJobAttempt,
     PlatformJobResult,
     PlatformJobStep,
     PlatformJobTask,
+    get_step_spec_name,
 )
+from nmp.core.jobs.telemetry import build_job_run_telemetry, emit_job_run_event
 from opentelemetry import metrics, trace
 
 logger = logging.getLogger(__name__)
@@ -88,7 +91,25 @@ operations_counter = create_counter(
 
 _DELETE_PAGE_SIZE = 1000
 _JOB_MUTATION_LOCKS: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = weakref.WeakValueDictionary()
+_JOB_RUN_TELEMETRY_TERMINAL_STATUSES = frozenset(
+    {
+        PlatformJobStatus.COMPLETED,
+        PlatformJobStatus.ERROR,
+        PlatformJobStatus.CANCELLED,
+        PlatformJobStatus.PAUSED,
+    }
+)
 EntityT = TypeVar("EntityT")
+
+
+def _should_emit_job_run_telemetry(
+    previous_status: PlatformJobStatus,
+    new_status: PlatformJobStatus,
+) -> bool:
+    return (
+        previous_status not in _JOB_RUN_TELEMETRY_TERMINAL_STATUSES
+        and new_status in _JOB_RUN_TELEMETRY_TERMINAL_STATUSES
+    )
 
 
 def _get_job_mutation_lock(job_name: str, workspace: str) -> asyncio.Lock:
@@ -615,7 +636,7 @@ class JobDispatcher:
         # With parent-scoped uniqueness, step names are unique per attempt (parent)
         # Store original spec name in config for reference
         step_config = dict(first_step.config) if first_step.config else {}
-        step_config["_step_spec_name"] = first_step.name
+        step_config[STEP_SPEC_NAME_CONFIG_KEY] = first_step.name
         await self.store.create(
             PlatformJobStep(
                 name=first_step.name,  # Simple name, unique per attempt via parent-scoped uniqueness
@@ -1006,10 +1027,11 @@ class JobDispatcher:
             raise JobStatusUpdateSkippedError(f"Attempt does not exist: {saved_step.attempt_id}")
 
         # Determine new attempt status
+        previous_attempt_status = attempt.status
         new_attempt_status = attempt.status
 
         # Get the original step spec name from config (step entity names have suffixes for uniqueness)
-        step_spec_name = saved_step.config.get("_step_spec_name", saved_step.name)
+        step_spec_name = get_step_spec_name(saved_step.config, saved_step.name) or saved_step.name
 
         if (
             saved_step.status == PlatformJobStatus.PENDING
@@ -1043,7 +1065,7 @@ class JobDispatcher:
             if next_step:
                 # With parent-scoped uniqueness, use simple step name (unique per attempt)
                 next_step_config = dict(next_step.config) if next_step.config else {}
-                next_step_config["_step_spec_name"] = next_step.name
+                next_step_config[STEP_SPEC_NAME_CONFIG_KEY] = next_step.name
                 try:
                     await self.store.create(
                         PlatformJobStep(
@@ -1102,6 +1124,23 @@ class JobDispatcher:
                 if attempt.status == PlatformJobStatus.ERROR:
                     attempt.error_details = saved_step.error_details
                 attempt = await self.store.update(attempt)
+                if _should_emit_job_run_telemetry(previous_attempt_status, attempt.status):
+                    try:
+                        job = await self.store.get_by_id(PlatformJob, attempt.job)
+                        status_details = dict(attempt.status_details or {})
+                        status_details.update(saved_step.status_details or {})
+                        telemetry_event = build_job_run_telemetry(
+                            source=job.source,
+                            status=attempt.status.value,
+                            status_details=status_details,
+                            custom_fields=job.custom_fields,
+                            created_at=attempt.created_at,
+                            updated_at=attempt.updated_at,
+                        )
+                        if telemetry_event is not None:
+                            emit_job_run_event(telemetry_event)
+                    except Exception:
+                        logger.debug("Failed to queue job_run telemetry", exc_info=True)
                 logger.info(
                     "Updated job attempt status",
                     extra={

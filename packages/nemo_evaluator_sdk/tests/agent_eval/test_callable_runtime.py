@@ -7,7 +7,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.callable_runtime import (
     TrialDraft,
 )
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
-from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrialStatus, AgentOutput
+from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrialStatus, AgentOutput, TrialMeasurements
 
 
 def _task(task_id: str) -> AgentEvalTask:
@@ -18,7 +18,11 @@ def _task(task_id: str) -> AgentEvalTask:
 async def test_callable_runtime_wraps_str_output_and_trialdraft_in_order() -> None:
     async def agent_fn(task: AgentEvalTask) -> TrialDraft | str:
         if task.id == "t2":
-            return TrialDraft(output=AgentOutput(output_text="drafted"), metadata={"k": "v"})
+            return TrialDraft(
+                output=AgentOutput(output_text="drafted"),
+                metadata={"k": "v"},
+                measurements=TrialMeasurements(prompt_tokens=4, completion_tokens=1),
+            )
         return f"answer-{task.id}"
 
     runtime = CallableAgentTaskRunner(agent_fn, parallelism=2)
@@ -30,6 +34,8 @@ async def test_callable_runtime_wraps_str_output_and_trialdraft_in_order() -> No
     assert trials[0].output is not None and trials[0].output.output_text == "answer-t1"
     assert trials[1].output is not None and trials[1].output.output_text == "drafted"
     assert trials[1].metadata == {"k": "v"}
+    assert trials[1].measurements.total_tokens == 5
+    assert trials[0].measurements == TrialMeasurements()
 
 
 @pytest.mark.asyncio

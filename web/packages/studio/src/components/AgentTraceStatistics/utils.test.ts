@@ -16,10 +16,11 @@ const at = (
 });
 
 describe('bucketParamForRange', () => {
-  it('asks Intake for hourly buckets on the day range, daily otherwise', () => {
+  it('asks Intake for hourly buckets on the day range, daily on week/month, weekly on max', () => {
     expect(bucketParamForRange('day')).toBe('hour');
     expect(bucketParamForRange('week')).toBe('day');
     expect(bucketParamForRange('month')).toBe('day');
+    expect(bucketParamForRange('max')).toBe('week');
   });
 });
 

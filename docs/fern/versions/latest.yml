@@ -42,8 +42,15 @@ navigation:
         contents:
           - page: Deploy Agents
             path: ../../agents/deploy-agents.mdx
+          - page: Add Guardrails
+            path: ../../agents/add-guardrails.mdx
+            slug: add-guardrails
+          - page: Execute Agents as Jobs
+            path: ../../agents/execute-agent-jobs.mdx
           - page: Observe Agents
             path: ../../agents/observability.mdx
+          - page: Scan Trace Data
+            path: ../../agents/scan-trace-data.mdx
           - section: Optimize Agents
             contents:
               - page: ETHOS.md
@@ -53,8 +60,6 @@ navigation:
                 path: ../../agents/optimization.mdx
               - page: Insight-Driven Optimization
                 path: ../../agents/insight-driven-optimization.mdx
-          - page: Secure Agents
-            path: ../../agents/security.mdx
           - page: Plugins and Skills
             path: ../../agents/plugins.mdx
       - section: Evaluate Agents & Models
@@ -77,9 +82,18 @@ navigation:
               - page: Evaluate a Harbor Task Suite
                 slug: harbor-runner
                 path: ../../evaluator/agent-eval/harbor-runner.mdx
+              - page: Run a NeMo Fabric Agent inside Harbor
+                slug: harbor-fabric-agent
+                path: ../../evaluator/agent-eval/harbor-fabric-agent.mdx
               - page: Evaluate a NeMo Gym Environment
                 slug: gym-runner
                 path: ../../evaluator/agent-eval/gym-runner.mdx
+              - page: Run a Custom NeMo Gym Environment
+                slug: gym-custom-environment
+                path: ../../evaluator/agent-eval/gym-custom-environment.mdx
+              - page: Configure Sandboxed Gym for Evaluator
+                slug: gym-sandbox-configuration
+                path: ../../evaluator/agent-eval/gym-sandbox-configuration.mdx
               - page: Evaluate with a NeMo Fabric Harness
                 slug: fabric-runner
                 path: ../../evaluator/agent-eval/fabric-runner.mdx
@@ -364,6 +378,8 @@ navigation:
         contents:
           - page: Agents
             path: ../../studio/agents.mdx
+          - page: Anonymizer
+            path: ../../studio/anonymizer.mdx
           - page: Custom Models
             slug: customization
             path: ../../studio/customization.mdx
@@ -375,8 +391,6 @@ navigation:
             path: ../../studio/insights.mdx
           - page: Model Evaluations
             path: ../../studio/model-evaluations.mdx
-          - page: Monitor
-            path: ../../studio/monitor.mdx
           - page: Plugin UIs
             slug: plugins
             path: ../../studio/plugins.mdx
@@ -508,6 +522,12 @@ navigation:
             contents:
               - page: Current Release
                 path: ../../about/release-notes/current-release.mdx
+              - page: v0.5.1
+                slug: release-0-5-1
+                path: ../../about/release-notes/release-0-5-1.mdx
+              - page: v0.5.0
+                slug: release-0-5-0
+                path: ../../about/release-notes/release-0-5-0.mdx
               - page: v0.4.0
                 slug: release-0-4-0
                 path: ../../about/release-notes/release-0-4-0.mdx

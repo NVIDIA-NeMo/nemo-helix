@@ -13,6 +13,8 @@ programmatic follow-up, and the bundle (especially `report.html`) to inspect or 
 ## The result object
 
 ```python
+from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
+
 result = await AgentEvaluator().run(tasks=..., target=...)
 ```
 
@@ -31,15 +33,18 @@ result = await AgentEvaluator().run(tasks=..., target=...)
 
 - **`summary.scores.scores`** — the aggregates. Each is named `<metric.type>.<output>` (and
   `view.<name>` for a [view](/documentation/evaluate-models/agent-eval/score-by-component)), with
-  `mean`, `min`, `max`, and `std_dev`. This is what the guides print:
+  `mean`, `min`, `max`, and `std_dev`, `count`, and `nan_count`. `count` is the number
+  of finite measured values; `nan_count` is the number of applicable opportunities that were
+  unmeasured or failed. This is what the guides print:
 
   ```python
   for aggregate in result.summary.scores.scores:
       print(f"{aggregate.name}: {aggregate.mean}")
   ```
 
-- **`summary.metric_coverage`** — per metric output, how many trials were `total` / `scored` / failed /
-  missing, so you can tell a low mean from low coverage.
+- **`summary.metric_coverage`** — per metric output, how many applicable trials were `total`,
+  `scored`, `missing`, or `failed`, so you can tell a low mean from low coverage. For each output,
+  `scored + missing + failed == total`.
 - **`summary.task_metric_values`** — per task, the individual trial values behind those means, keyed
   `<metric.type>.<output>`. Each record carries the `trial_id` that produced it and its metric `value`, so
   you can answer "which tasks were flaky, and on which trial?" without regrouping `result.scores`
@@ -51,10 +56,11 @@ result = await AgentEvaluator().run(tasks=..., target=...)
       print(task_id, [(a.trial_id, a.value) for a in by_output.get("reward.score", [])])
   ```
 
-  A `value` of `None` is a trial that died before scoring — a trial that did not pass. A trial
-  whose *metric* failed is absent entirely, because that leaves it unmeasured rather than
-  unsuccessful. Look up by `trial_id` rather than by position: the two rules above mean lists for
-  different outputs of one task need not be the same length.
+  A `value` of `None` is a trial that died before scoring — a trial that did not pass. A trial whose
+  *metric* failed is absent entirely, because that leaves it unmeasured rather than unsuccessful. An
+  omitted optional output is also absent; it is not stored as `None`. Look up by `trial_id` rather
+  than by position: these rules mean lists for different outputs of one task need not be the same
+  length.
 
   Values keep the type the metric produced them in — a count stays an `int`, a flag stays a `bool`,
   and a judge's verdict stays a `str`. Each record's `value_type` says which it is (`number`,
@@ -66,7 +72,7 @@ result = await AgentEvaluator().run(tasks=..., target=...)
   from nemo_evaluator_sdk.agent_eval.results import numeric_metric_values
 
   records = result.summary.task_metric_values["task-47"]["reward.score"]
-  scores = numeric_metric_values(records)   # [1.0, None, 0.0]
+  scores = numeric_metric_values(records)  # [1.0, None, 0.0]
   ```
 
 - **`summary.task_outcomes(metric_name=None)`** — the same data as models rather than nested dicts,
@@ -75,6 +81,8 @@ result = await AgentEvaluator().run(tasks=..., target=...)
   wants:
 
   ```python
+  from nemo_evaluator_sdk.agent_eval.results import numeric_metric_values
+
   for per_task in result.summary.task_outcomes("reward.score"):
       for outcome in per_task.outcomes:
           values = numeric_metric_values(outcome.trials)
@@ -87,6 +95,38 @@ result = await AgentEvaluator().run(tasks=..., target=...)
     `trials` list, because there the coverage really is missing.
   - Unfiltered, every task is returned.
 - **`summary.task_count`**, **`summary.trial_count`**, **`summary.score_count`**.
+
+### Sparse output example
+
+Suppose task A has two trials. Its Harbor verifier emits:
+
+```text
+a1: reward=1.0, format_ok=1.0
+a2: reward=0.0, format_ok omitted
+```
+
+`reward` is measured twice. `format_ok` is applicable twice but measured once:
+
+| Consumer | Expected result |
+|---|---|
+| `harbor_reward.reward` aggregate | `mean=0.5`, `count=2`, `nan_count=0` |
+| `harbor_reward.format_ok` aggregate | `mean=1.0`, `count=1`, `nan_count=1`, `sample_std_dev=None`, `sample_variance=None` |
+| `format_ok` coverage | `total=2`, `scored=1`, `missing=1`, `failed=0` |
+| `task_metric_values` for `format_ok` | one record: `(a1, 1.0)` |
+| View requiring `format_ok` | only a1 contributes; `count=1`, `nan_count=1`, `mean=1.0` |
+| `harbor_reward.format_ok.pass@1` | `count=1`, `nan_count=0`, `mean=1.0`; measured `n=1` |
+| `harbor_reward.format_ok.pass@2` | `count=0`, `nan_count=1`, `mean=None`; measured `n=1` cannot estimate `k=2` |
+
+These invariants expose the effective denominator:
+
+- For an ordinary aggregate, `count + nan_count` equals the applicable opportunities.
+- If all optional values are omitted, the aggregate, coverage, task-value, view, and pass@k rows
+  remain present and unestimable instead of disappearing.
+- Pass@k is calculated separately for every score-like output. Measured `n` includes failed trials as
+  non-passes. A failed metric or an omitted optional output is left out of `n` (unmeasured, not
+  unsuccessful).
+- If task A declares `format_ok` and task B does not, `format_ok`'s `count`, `nan_count`, and
+  coverage are only over A's trials. B is omitted from that denominator, not counted as missing.
 
 ### Per-metric scores
 
@@ -107,7 +147,7 @@ Call `result.persist()` and it writes these files (the same data, on disk):
 | File | Contents |
 |---|---|
 | `run.json` | the run manifest — run id and a map of the artifact files |
-| `summary.json` | the aggregated summary (means / min / max / std-dev and coverage) |
+| `summary.json` | the aggregated summary (means / min / max / std-dev, effective counts, and coverage) |
 | `scores.jsonl` | one row per (task, trial, metric) |
 | `trials.jsonl` | one row per trial — output, evidence, status |
 | `tasks.jsonl` | the tasks that were evaluated |
@@ -117,10 +157,15 @@ Call `result.persist()` and it writes these files (the same data, on disk):
 `persist()` returns a `BundleLocation` telling you where the bundle landed:
 
 ```python
+from pathlib import Path
+
+from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
 
 result = await AgentEvaluator().run(
-    tasks=..., target=..., config=AgentEvalRunConfig(work_dir="./agent-eval-run"),
+    tasks=tasks,
+    target=target,
+    config=AgentEvalRunConfig(work_dir=Path("./agent-eval-run")),
 )
 location = result.persist()
 # -> ./agent-eval-run/report.html, summary.json, scores.jsonl, trials.jsonl, ...
@@ -129,6 +174,9 @@ print(location.output_dir, location.dashboard_path)
 
 `report.html` is the fastest way to eyeball a run or hand it to someone else; the `.jsonl` files are
 convenient for loading scores and trials into your own tooling.
+
+An omitted optional output remains absent in `scores.jsonl` and after loading the bundle. Persistence
+does not replace it with JSON `null`, a NaN label, or `0.0`.
 
 <Note>
 
@@ -147,6 +195,33 @@ A run with no `work_dir` and no explicit target raises rather than inventing a d
 JSON/JSONL artifacts and skips the HTML. The `.json` and `.jsonl` files are always written.
 
 </Note>
+
+## Results from platform jobs
+
+An `agent-evaluate` platform job persists the same JSON and JSONL data without `report.html`. It
+publishes two named job results:
+
+- `agent-eval-results` — the complete bundle, including tasks, trials, scores, metadata, and summary.
+- `summary` — `summary.json` by itself for lightweight retrieval.
+
+Wait for the platform job to reach a terminal state before reading either result:
+
+```python
+job.wait_until_done()
+stored = client.evaluator.agent_eval_results.retrieve("<result-name>")
+client.files.download(remote_path=stored.bundle_ref, local_path="agent-eval-run")
+```
+
+You can also download the bundle through the Jobs CLI:
+
+```bash
+nemo jobs results download agent-eval-results \
+  --job <job-name> \
+  --output-file agent-eval-results.tar.gz
+```
+
+The queryable `agent_eval_results` record stores aggregates, coverage, target identity, and the
+bundle reference. Individual trials remain in `trials.jsonl` inside the bundle.
 
 ## Related
 

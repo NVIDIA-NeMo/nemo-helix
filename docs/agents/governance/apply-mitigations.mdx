@@ -1,0 +1,155 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Review and Apply Mitigations"
+description: ""
+---
+<a id="agents-governance-apply-mitigations"></a>
+
+<Warning>
+
+Agent Governance is released with _early access_ availability and is subject to limited support and potential API changes in future releases.
+
+</Warning>
+
+A finished war-game produces proposed defenses. This page covers choosing which
+to keep, scoring that selection, and writing it back to the agent.
+
+Nothing reaches the agent until you apply it.
+
+## What a Run Proposes
+
+Each proposed defense is tagged by the surface it changes:
+
+| Tag | Written by | Effect |
+|-----|-----------|--------|
+| Guardrail | Guardrails defender | Pre-tool verifier middleware in the agent's workflow |
+| Policy | OpenShell policy defender | A sandbox policy covering network egress, filesystem access, process identity, seccomp and Landlock |
+
+Defenses are grouped by the tool they guard. Each one shows the attack that
+motivated it and the exact configuration diff.
+
+## Score a Selection Before Applying
+
+A sanity check freezes a chosen subset, replays the recorded attacks against it,
+and runs the benign suite. Use it to compare selections without touching the
+agent.
+
+```bash
+nemo agent-hardener sanity-check --manifest-id react-agent \
+  --mitigations mitigations.json \
+  --replay-hitlog <fileset-ref> \
+  --keep custom_guardrail_1
+```
+
+| Option | Effect |
+|--------|--------|
+| `--mitigations <path>` | The run's proposed defenses |
+| `--replay-hitlog <fileset-ref>` | The recorded attacks to replay |
+| `--keep <id>` | Keep this defense. Repeatable |
+| `--exclude <id>` | Drop this defense. Repeatable |
+| `--env-file <path>` | Dotenv supplying the agent's secrets |
+
+The result reports how many attacks the selection blocks and how many benign
+requests still pass. Re-run it with a different `--keep` set to compare.
+
+## Apply to the Agent
+
+<Note>
+
+Applying is available in Studio and through the REST API. The CLI stops at
+`sanity-check`.
+
+</Note>
+
+<Tabs>
+
+<Tab title="Studio">
+
+Open the finished run and select the **Harden** panel.
+
+1. Toggle the defenses you want. Each row expands to show the attack it
+   counters and the configuration diff.
+1. Select **Sanity check** to replay the attacks against just that selection
+   and see what it blocks and which ordinary requests it breaks.
+1. Select **Apply to Agent** to record the hardened guardrails onto the
+   agent config.
+
+</Tab>
+<Tab title="REST API">
+
+Applying takes two calls. First compose the subset you chose, which returns the
+workflow and policy for exactly those defenses:
+
+```bash
+curl -X POST \
+  $NMP_BASE_URL/apis/agent-hardener/v2/workspaces/default/runs/<run-name>/compose-defense \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mitigations": { ... },
+    "selected_defense_ids": ["custom_guardrail_1", "openshell_policy"]
+  }'
+```
+
+`mitigations` is the run's mitigations artifact. `selected_defense_ids` takes
+guardrail ids and `openshell_policy`. The response carries `guardrails_toml` and
+`policy_yaml`, and an unselected surface comes back at its baseline.
+
+Then write the composed guardrails onto the agent:
+
+```bash
+curl -X POST \
+  $NMP_BASE_URL/apis/agent-hardener/v2/workspaces/default/runs/<run-name>/apply-mitigation \
+  -H "Content-Type: application/json" \
+  -d '{"guardrails_toml": "<the guardrails_toml from compose-defense>"}'
+```
+
+`guardrails_toml` is required; the call returns `422` without it. Only the
+guardrails are written — `policy_yaml` is composed for review and sanity-check
+but is not applied to the agent. Runs from a bring-your-own manifest
+(`--project-dir`) are refused, because there is no registered agent to write to.
+
+The response reports `applied`, the `agent` whose config changed, and a
+`detail` note.
+
+</Tab>
+
+</Tabs>
+
+Applying records the hardened guardrails on the agent config and refreshes the
+manifest, so the next run measures the change you just made.
+
+<Warning>
+
+Applying does not yet activate the guardrails on a running agent. The guardrails
+are stored on the agent entity, but the deployment path does not read them back,
+so redeploying does not put them in force. Use `sanity-check` to confirm a
+defense works, and apply the guardrails to your agent's own configuration until
+this is wired up.
+
+</Warning>
+
+<Note>
+
+Applying writes another service's entity: it updates the target agent's config.
+The `agent-hardener.runs.apply` permission is therefore an agent-write grant in
+practice. Assign it accordingly.
+
+</Note>
+
+## Compare Two Runs
+
+Because runs target a frozen manifest, two reports for the same manifest are
+directly comparable. Run the cycle again after applying and compare the attack
+block rate and the benign pass rate against the earlier run:
+
+```bash
+nemo agent-hardener run --manifest-id react-agent
+nemo agent-hardener status --limit 5
+```
+
+## Related Topics
+
+- [Agent Hardener CLI Reference](/documentation/agents/governance/cli-reference): every command and flag.
+- [Guardrail Models](/documentation/guardrail-models): manage the guardrail configurations the defender writes against.

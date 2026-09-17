@@ -106,13 +106,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     rm -rf /opt/venv/lib/python*/site-packages/vllm \
     /opt/venv/lib/python*/site-packages/vllm-*.dist-info && \
     uv pip uninstall -y mlflow || true && \
+    rm -rf /opt/venv/lib/python*/site-packages/mlflow-3.11.1.dist-info && \
     uv pip install \
     --reinstall-package mlflow-skinny \
     --reinstall-package sqlparse \
     --reinstall-package wandb \
     "aiohttp>=3.13.3,<4" \
     "black>=26.3.1,<27" \
-    "GitPython>=3.1.58,<4" \
+    "GitPython>=3.1.62,<4" \
     "jaraco-context>=6.1.0,<7" \
     "jupyter-server>=2.20.0,<3" \
     "jupyterlab>=4.6.1,<5" \
@@ -130,6 +131,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "mlflow-skinny>=3.15.0,<3.16.0" \
     "sqlparse>=0.6.0,<0.7" \
     "grpcio>=1.81.1,<2" \
+    "thrift>=0.24.0" \
     "wandb>=0.29.0"
 
 ARG NMP_COLLECT_SOURCES=0

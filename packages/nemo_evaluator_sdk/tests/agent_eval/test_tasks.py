@@ -63,6 +63,41 @@ def test_task_serializes_metric_instances_as_descriptors() -> None:
     ]
 
 
+def test_task_serializes_optional_metric_outputs_only_with_required_false() -> None:
+    class _OptionalMetric(_Metric):
+        def output_spec(self) -> list[MetricOutputSpec]:
+            return [MetricOutputSpec.continuous_score("score", required=False)]
+
+    task = AgentEvalTask(
+        id="task-1",
+        intent="answer the prompt",
+        inputs={"instruction": "Question?"},
+        metrics=[_OptionalMetric()],
+    )
+
+    assert task.model_dump(mode="json")["metrics"] == [
+        {
+            "type": "example_metric",
+            "outputs": [{"name": "score", "description": None, "value_schema": "ContinuousScore", "required": False}],
+        }
+    ]
+
+
+def test_task_required_metric_descriptor_bytes_remain_stable() -> None:
+    task = AgentEvalTask(
+        id="task-1",
+        intent="answer the prompt",
+        inputs={"instruction": "Question?"},
+        metrics=[_Metric()],
+    )
+
+    assert task.model_dump_json() == (
+        '{"id":"task-1","intent":"answer the prompt","inputs":{"instruction":"Question?"},'
+        '"reference":{},"metrics":[{"type":"example_metric","outputs":[{"name":"score",'
+        '"description":null,"value_schema":"ContinuousScore"}]}],"views":{},"metadata":{}}'
+    )
+
+
 def test_task_rejects_duplicate_metric_types() -> None:
     with pytest.raises(ValueError, match="duplicate task metric types"):
         AgentEvalTask(

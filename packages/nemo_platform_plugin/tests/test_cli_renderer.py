@@ -20,6 +20,7 @@ from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from typing import Any, ClassVar
 
+import pytest
 import typer
 from nemo_platform_plugin.cli import NemoCLI
 from nemo_platform_plugin.cli_renderer import CLIRenderer, RendererContext
@@ -145,6 +146,14 @@ def _build_job_app(*job_classes: type[NemoJob], cli: NemoCLI | None = None) -> t
     return app
 
 
+def _patch_submit_remote(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_submit_remote(self, job_cls: type[NemoJob], spec: dict, **kwargs: object) -> dict:
+        del self, job_cls, kwargs
+        return {"message": f"Hello, {spec.get('name', 'world')}!"}
+
+    monkeypatch.setattr("nemo_platform_plugin.scheduler.NemoJobScheduler.submit_remote", fake_submit_remote)
+
+
 # ---------------------------------------------------------------------------
 # Streaming function: get_function_renderer for `run`
 # ---------------------------------------------------------------------------
@@ -216,25 +225,28 @@ class TestStreamingFunctionRunRenderer:
 
 
 # ---------------------------------------------------------------------------
-# Job: get_job_renderer for `run`
+# Job: get_job_renderer for `submit`
 # ---------------------------------------------------------------------------
 
 
-class TestJobRunRenderer:
-    def test_no_renderer_falls_through_to_default(self) -> None:
+class TestJobSubmitRenderer:
+    def test_no_renderer_falls_through_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_submit_remote(monkeypatch)
         app = _build_job_app(_GreetJob, cli=_NoOpCLI())
-        result = runner.invoke(app, ["greet", "run", "--config", '{"name": "World"}'])
+        result = runner.invoke(app, ["greet", "submit", "--spec", '{"name": "World"}'])
         assert result.exit_code == 0
         assert json.loads(result.output) == {"message": "Hello, World!"}
 
-    def test_renderer_lifecycle_for_synchronous_run(self) -> None:
+    def test_renderer_lifecycle_for_synchronous_submit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_submit_remote(monkeypatch)
+
         class _CLI(_NoOpCLI):
             def get_job_renderer(self, job_cls, *, verb):
                 return _RecordingRenderer
 
         app = _build_job_app(_GreetJob, cli=_CLI())
         _RecordingRenderer.events = []
-        result = runner.invoke(app, ["greet", "run", "--config", '{"name": "Renderer"}'])
+        result = runner.invoke(app, ["greet", "submit", "--spec", '{"name": "Renderer"}'])
         assert result.exit_code == 0, result.output
 
         events = _RecordingRenderer.events
@@ -244,8 +256,12 @@ class TestJobRunRenderer:
         # The frame is the dict the job returned.
         _, frame = events[1]
         assert frame == {"message": "Hello, Renderer!"}
+        start_meta = events[0][1]
+        assert start_meta == {"verb": "submit", "is_local": False}
 
-    def test_output_format_json_bypasses_job_renderer(self) -> None:
+    def test_output_format_json_bypasses_job_renderer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_submit_remote(monkeypatch)
+
         class _CLI(_NoOpCLI):
             def get_job_renderer(self, job_cls, *, verb):
                 return _RecordingRenderer
@@ -253,7 +269,7 @@ class TestJobRunRenderer:
         app = _build_job_app(_GreetJob, cli=_CLI())
         ctx_obj = _typer_context_with_overrides(output_format="json")
         _RecordingRenderer.events = []
-        result = runner.invoke(app, ["greet", "run", "--config", '{"name": "X"}'], obj=ctx_obj)
+        result = runner.invoke(app, ["greet", "submit", "--spec", '{"name": "X"}'], obj=ctx_obj)
         assert result.exit_code == 0
         assert _RecordingRenderer.events == []
         # Default echo fired:

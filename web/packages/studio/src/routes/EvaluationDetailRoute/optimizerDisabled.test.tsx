@@ -1,8 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getInsightsGetInsightQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
+import { getGetEvaluationQueryKey } from '@nemo/sdk/generated/platform/evaluations';
+import {
+  getGetExperimentQueryKey,
+  getListEvaluationSessionsQueryKey,
+} from '@nemo/sdk/generated/platform/experiments';
 import type { EvaluationResponse, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { ROUTES } from '@studio/constants/routes';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { EvaluationDetailRoute } from '@studio/routes/EvaluationDetailRoute';
 import { renderRoute, screen } from '@studio/tests/util/render';
@@ -38,13 +45,13 @@ describe('EvaluationDetailRoute with Optimizer disabled', () => {
   it('renders the evaluation description without requesting or linking to the insight', async () => {
     const insightRequest = vi.fn();
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/evaluations/:name', () =>
+      http.get(mockApiUrl(getGetEvaluationQueryKey, ':workspace', ':name'), () =>
         HttpResponse.json(evaluation)
       ),
-      http.get('*/apis/intake/v2/workspaces/:workspace/experiments/:name', () =>
+      http.get(mockApiUrl(getGetExperimentQueryKey, ':workspace', ':name'), () =>
         HttpResponse.json(group)
       ),
-      http.get('*/apis/intake/v2/workspaces/:workspace/evaluations/:name/sessions', () =>
+      http.get(mockApiUrl(getListEvaluationSessionsQueryKey, ':workspace', ':name'), () =>
         HttpResponse.json({
           data: [],
           pagination: {
@@ -56,7 +63,7 @@ describe('EvaluationDetailRoute with Optimizer disabled', () => {
           },
         })
       ),
-      http.get('*/apis/insights/v2/workspaces/:workspace/insights/:insightId', () => {
+      http.get(mockApiUrl(getInsightsGetInsightQueryKey, ':workspace', ':insightId'), () => {
         insightRequest();
         return HttpResponse.json({});
       })

@@ -9,11 +9,7 @@ import svgr from 'vite-plugin-svgr';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const config: StorybookConfig = {
-  stories: [
-    '../../studio/src/**/*.stories.@(ts|tsx)',
-    '../../common/src/**/*.stories.@(ts|tsx)',
-    '../../sandbox/**/*.stories.@(ts|tsx)',
-  ],
+  stories: ['../../studio/src/**/*.stories.@(ts|tsx)', '../../common/src/**/*.stories.@(ts|tsx)'],
   staticDirs: ['../public'],
   addons: ['@storybook/addon-a11y'],
   framework: {

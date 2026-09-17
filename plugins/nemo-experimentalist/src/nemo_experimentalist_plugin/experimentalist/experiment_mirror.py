@@ -21,7 +21,13 @@ import re
 from typing import Any
 
 from nemo_experimentalist_plugin.entities import Candidate, ExperimentRun
-from nemo_platform import AsyncNeMoPlatform, ConflictError, NotFoundError, omit
+from nemo_platform_plugin.client.errors import ConflictError, NotFoundError
+from nemo_platform_plugin.intake.client import AsyncIntakeClient
+from nemo_platform_plugin.intake.types import (
+    EvaluationCreateRequest,
+    ExperimentCreateRequest,
+    ExperimentUpdateRequest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +115,7 @@ class ExperimentMirror:
     """Best-effort, one-way projection to native Experiments. Callers wrap each method
     so failures don't propagate (spec F)."""
 
-    def __init__(self, client: AsyncNeMoPlatform, workspace: str) -> None:
+    def __init__(self, client: AsyncIntakeClient, workspace: str) -> None:
         self._client = client
         self._workspace = workspace
         self._group_ids: dict[str, str] = {}  # run_id -> ExperimentGroup id
@@ -123,35 +129,53 @@ class ExperimentMirror:
 
     async def ensure_group(self, run: ExperimentRun) -> None:
         gname = group_name(run.id)
+        body = self._group_create_request(run, gname)
         try:
-            grp = await self._client.experiments.create(
-                workspace=self._workspace,
-                name=gname,
-                insight_id=run.insight or omit,
-                summary=run.summary or "",
-                metadata=group_metadata(run),
-            )
+            grp = (await self._client.create_experiment(workspace=self._workspace, body=body)).data()
         except ConflictError:
-            grp = await self._client.experiments.retrieve(gname, workspace=self._workspace)
+            grp = (await self._client.get_experiment(name=gname, workspace=self._workspace)).data()
         self._group_ids[run.id] = grp.id
 
     async def update_group(self, run: ExperimentRun) -> None:
         gname = group_name(run.id)
-        # experiments.update is a full-replace PUT: omitted fields reset to None
-        # server-side, so re-supply the whole body (we have the run).
-        await self._client.experiments.update(
-            gname,
+        await self._client.update_experiment(
+            name=gname,
             workspace=self._workspace,
-            body_name=gname,
+            body=self._group_update_request(run, gname),
+        )
+
+    def _group_create_request(self, run: ExperimentRun, gname: str) -> ExperimentCreateRequest:
+        if run.insight:
+            return ExperimentCreateRequest(
+                name=gname,
+                insight_id=run.insight,
+                summary=run.summary or "",
+                metadata=group_metadata(run),
+            )
+        return ExperimentCreateRequest(
+            name=gname,
             summary=run.summary or "",
-            insight_id=run.insight or omit,
+            metadata=group_metadata(run),
+        )
+
+    def _group_update_request(self, run: ExperimentRun, gname: str) -> ExperimentUpdateRequest:
+        if run.insight:
+            return ExperimentUpdateRequest(
+                name=gname,
+                insight_id=run.insight,
+                summary=run.summary or "",
+                metadata=group_metadata(run),
+            )
+        return ExperimentUpdateRequest(
+            name=gname,
+            summary=run.summary or "",
             metadata=group_metadata(run),
         )
 
     async def _group_id_for(self, run_id: str) -> str:
         gid = self._group_ids.get(run_id)
         if gid is None:  # resume path: group exists, look it up by deterministic name
-            grp = await self._client.experiments.retrieve(group_name(run_id), workspace=self._workspace)
+            grp = (await self._client.get_experiment(name=group_name(run_id), workspace=self._workspace)).data()
             gid = self._group_ids[run_id] = grp.id
         return gid
 
@@ -206,42 +230,47 @@ class ExperimentMirror:
     ) -> None:
         name = experiment_name(gname, candidate.label, split)
         link = source_link or self._source_link(gname, candidate, agent_source)
-        parent = await self._parent_experiment_id(candidate, gname)
-        parent_id = parent if parent is not None else omit
-        st = status or experiment_status(candidate)
-        md = experiment_metadata(candidate, split)  # identity only — no reward/trials (§4.3)
+        parent_id = await self._parent_experiment_id(candidate, gname)
+        body = self._evaluation_request(
+            name=name,
+            split=split,
+            group_id=group_id,
+            link=link,
+            candidate=candidate,
+            parent_id=parent_id,
+            status=status or experiment_status(candidate),
+        )
         try:
-            exp = await self._client.evaluations.create(
-                name=name,
-                dataset_name=self._dataset_name(split),
-                dataset_version="v1",
-                workspace=self._workspace,
-                experiment_ids=[group_id],
-                source_link=link,
-                description=candidate.description,
-                parent_evaluation_id=parent_id,
-                root_cause="",  # OQ-RC: left empty for now
-                status=st,
-                metadata=md,
-            )
+            exp = (await self._client.create_evaluation(workspace=self._workspace, body=body)).data()
         except ConflictError:
-            exp = await self._client.evaluations.update(
-                name,
-                workspace=self._workspace,
-                dataset_name=self._dataset_name(split),
-                dataset_version="v1",
-                body_name=name,
-                experiment_ids=[group_id],
-                source_link=link,
-                description=candidate.description,
-                parent_evaluation_id=parent_id,
-                root_cause="",  # OQ-RC: left empty for now
-                status=st,
-                metadata=md,
-            )
+            exp = (await self._client.update_evaluation(name=name, workspace=self._workspace, body=body)).data()
         if candidate.id:
             self._experiment_ids[(candidate.id, split)] = exp.id
             self._labels[candidate.id] = candidate.label
+
+    def _evaluation_request(
+        self,
+        *,
+        name: str,
+        split: str,
+        group_id: str,
+        link: str,
+        candidate: Candidate,
+        parent_id: str | None,
+        status: str,
+    ) -> EvaluationCreateRequest:
+        return EvaluationCreateRequest(
+            name=name,
+            dataset_name=self._dataset_name(split),
+            dataset_version="v1",
+            experiment_ids=[group_id],
+            source_link=link,
+            description=candidate.description,
+            root_cause="",
+            status=status,
+            metadata=experiment_metadata(candidate, split),
+            parent_evaluation_id=parent_id,
+        )
 
     def _dataset_name(self, split: str) -> str:
         return split  # OQ-8: derive a real dataset name/version later
@@ -254,13 +283,14 @@ class ExperimentMirror:
     async def _existing_source_link(self, gname: str, label: str, split: str) -> str | None:
         """The source_link already stored for this candidate/split, or None.
 
-        ``finalize`` re-upserts the winner via a full-replace update without the run's
+        ``finalize`` re-upserts the winner via update without the run's
         ``agent_source``; reusing the link written during the run keeps a round-0 seed's real
-        ``{repo}@{ref}`` from being clobbered with a pseudo link when no PR was opened."""
+        ``{repo}@{ref}`` from being clobbered with a pseudo link when no PR was opened.
+        """
         try:
-            exp = await self._client.evaluations.retrieve(
-                experiment_name(gname, label, split), workspace=self._workspace
-            )
+            exp = (
+                await self._client.get_evaluation(name=experiment_name(gname, label, split), workspace=self._workspace)
+            ).data()
         except NotFoundError:
             return None
         return exp.source_link
@@ -287,9 +317,11 @@ class ExperimentMirror:
             )
             return None
         try:  # resume / ancestor created earlier this run
-            exp = await self._client.evaluations.retrieve(
-                experiment_name(gname, ancestor_label, "train"), workspace=self._workspace
-            )
+            exp = (
+                await self._client.get_evaluation(
+                    name=experiment_name(gname, ancestor_label, "train"), workspace=self._workspace
+                )
+            ).data()
         except NotFoundError:
             logger.debug(
                 "Ancestor experiment %r not found for candidate %r; lineage link omitted",
@@ -305,19 +337,17 @@ class ExperimentMirror:
     async def finalize(self, *, run_id: str, summary: str, winner: Candidate | None, pr_url: str | None = None) -> None:
         gname = group_name(run_id)
         gid = await self._group_id_for(run_id)
-        # experiments.update is a full-replace PUT: omitted fields reset to None
-        # server-side. finalize has no `run`, so read-preserve-write the current
-        # insight_id/metadata before writing the summary (stays within the mirror; no
-        # data flows back into the loop).
-        grp = await self._client.experiments.retrieve(gname, workspace=self._workspace)
-        await self._client.experiments.update(
-            gname,
-            workspace=self._workspace,
-            body_name=gname,
-            summary=summary,
-            insight_id=grp.insight_id if grp.insight_id is not None else omit,
-            metadata=grp.metadata if grp.metadata is not None else omit,
-        )
+        grp = (await self._client.get_experiment(name=gname, workspace=self._workspace)).data()
+        if grp.insight_id is not None:
+            body = ExperimentUpdateRequest(
+                name=gname,
+                summary=summary,
+                insight_id=grp.insight_id,
+                metadata=grp.metadata,
+            )
+        else:
+            body = ExperimentUpdateRequest(name=gname, summary=summary, metadata=grp.metadata)
+        await self._client.update_experiment(name=gname, workspace=self._workspace, body=body)
         if winner is None:
             return
         # The winner's Experiment is always status="winner"; whether a PR was opened is

@@ -10,7 +10,7 @@ from nemo_platform_plugin.auth.access_keys.types import AccessKeyEntityType
 from nmp.common.auth.access_keys import SERVICE_ACCOUNT_PRINCIPAL_PREFIX
 from nmp.common.auth.models import Principal
 from nmp.common.entities import EntityBase
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 
 class RoleBindingEntity(EntityBase):
@@ -54,9 +54,19 @@ class AccessKeyEntity(EntityBase):
     entity_type: AccessKeyEntityType = "USER"
     issuer: str
     audiences: list[str]
+    scope: list[str] = Field(default_factory=list)
     issued_at: datetime
     expires_at: datetime | None = None
-    status: Literal["ACTIVE", "REVOKED", "SUSPENDED"] = "ACTIVE"
+    last_used_at: datetime | None = None
+    status: Literal["ACTIVE", "REVOKED", "SUSPENDED", "ROTATING"] = "ACTIVE"
+    # Set when status == "ROTATING": the instant after which this rotated-out key is
+    # treated as revoked. Unused for every other status.
+    grace_period_expires_at: datetime | None = None
+    # Set when status == "ROTATING": the jti of the successor key minted for this
+    # rotation. Lets an ambiguous begin_rotation outcome be attributed to the request
+    # that actually committed it, rather than to a differently-raced concurrent
+    # request that happened to also see this key as ROTATING.
+    rotation_successor_jti: str | None = None
 
     @model_validator(mode="before")
     @classmethod

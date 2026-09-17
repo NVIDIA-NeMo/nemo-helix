@@ -3,14 +3,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "Evaluate a Harbor Task Suite"
-description: "Run an existing Harbor task dataset through NeMo Evaluator's Harbor runner — Harbor executes each task in a Docker sandbox and its verifier emits a reward, which the SDK scores and reports like any other agent-eval run."
+description: "Run an existing Harbor task dataset through NeMo Evaluator's Harbor runner — Harbor executes each task in a Docker sandbox and its verifier emits named rewards, which the SDK scores and reports like any other agent-eval run."
 ---
 
 [Harbor](https://www.harborframework.com) is a container-based harness for agentic tasks: it runs each
-task in a Docker sandbox, lets an agent work in it, then runs a **verifier** that emits a **reward**
+task in a Docker sandbox, lets an agent work in it, then runs a **verifier** that emits named
+**rewards**
 (see Harbor's [Core Concepts](https://www.harborframework.com/docs/core-concepts) for its task, trial,
 and job model). If you already have Harbor task datasets, the **Harbor runner** runs them and scores
-the verifier reward through agent-eval — the same
+the verifier rewards through agent-eval — the same
 [`AgentEvaluator`](/documentation/evaluate-models/agent-eval) and the same result and bundle as the
 [quickstart](/documentation/evaluate-models/agent-eval/quickstart). Only the runner changes.
 
@@ -18,18 +19,61 @@ the verifier reward through agent-eval — the same
 
 Unlike the quickstart, this runner is **not** zero-dependency — it shells out to Harbor and Docker:
 
-- **Python ≥ 3.12**
-- **Docker and docker daemon** installed and running
-- **Harbor**, installed separately: `uv pip install "harbor>=0.16.1"`. Harbor is intentionally **not**
-  a dependency of `nemo-platform[nemo-evaluator-sdk]`, so the rest of the SDK stays lightweight.
-
-The runner raises a clear error pointing at this install step if `harbor` is missing.
-
-Evaluator plugin submissions (`nemo evaluator agent-evaluate submit`) support the Harbor runner only
-through the host `subprocess` executor. Standalone SDK runs using `run_harbor_eval()` or
-`HarborAgentTaskRunner` invoke Harbor directly and do not use a Jobs execution profile.
+- **Python `>=3.12,<3.14`** — Harbor is imported lazily, so the base SDK remains usable on Python
+  3.11 without it; Harbor execution and existing-result adaptation require 3.12 or newer. The upper
+  bound is `nemo-platform`'s own; a source checkout resolves up to 3.14.
+- **A Docker-compatible container runtime** — Harbor invokes the `docker` executable on `PATH`
+  (`docker info` must succeed) and uses `docker compose`.
+- **Harbor** `>=0.20,<0.21` — see [Install Harbor](#install-harbor).
 
 </Warning>
+
+## Install Harbor
+
+`nemo-evaluator-sdk` is not published as a standalone package, so how you add Harbor depends on how
+you installed NeMo Platform.
+
+<Tabs>
+
+<Tab title="Installed package">
+
+Harbor ships with the `nemo-platform` `all` extra — `services`, `plugins`, and
+`nemo-experimentalist-plugin` include it as well:
+
+```bash
+uv pip install "nemo-platform[all]"
+```
+
+To add Harbor to an environment you already have, install it against the same constraint the SDK
+declares:
+
+```bash
+uv pip install "harbor>=0.20,<0.21"
+```
+
+Use `pip install` in place of `uv pip install` if you prefer; both work here.
+
+</Tab>
+
+<Tab title="Source checkout">
+
+`uv sync --package` resolves `nemo-evaluator-sdk` as a member of the repository's uv workspace, so
+it requires the workspace root `pyproject.toml` and does not work outside a checkout. Run it from
+the repository root (see the
+[setup guide](https://github.com/NVIDIA-NeMo/nemo-platform/blob/main/SETUP.md) for toolchain
+prerequisites):
+
+```bash
+uv sync --frozen --package nemo-evaluator-sdk --extra harbor
+```
+
+</Tab>
+
+</Tabs>
+
+`uv sync` has no `pip` equivalent — it resolves `nemo-evaluator-sdk` as a workspace member, which is
+why the source-checkout path needs the repository. The runner raises an error naming both of these
+install paths if `harbor` is missing.
 
 ## The dataset
 
@@ -48,6 +92,19 @@ my-suite/
 `id` and its human-readable `intent`, and `instruction.md` becomes `inputs["instruction"]` — the
 instruction the agent is prompted with. See
 [Harbor's task documentation](https://www.harborframework.com/docs/tasks) for the full task format.
+
+Those two files are the discovery contract, not a complete task — Harbor also needs an environment
+and a verifier to run the task and emit rewards. To author a new task, scaffold it with Harbor's own
+CLI rather than writing the files by hand:
+
+```bash
+harbor init my-org/my-task --task
+```
+
+This writes a populated `task.toml` alongside `instruction.md`, environment, verifier, and solution
+stubs, then prints the files to fill in. Add `--steps N` for a multi-step task, or use `-d` to
+initialize a dataset. See [Harbor's documentation](https://www.harborframework.com/docs/tasks) for
+the full task format and the rest of its CLI.
 
 <Note>
 
@@ -85,7 +142,8 @@ async def main() -> None:
             # OUTPUT: where Harbor writes its <job_name>/ results tree (not the dataset).
             jobs_dir=Path("./harbor-jobs"),
             agent_name="oracle",  # a built-in Harbor agent — see "Choosing an agent"
-        )
+            reward_key="reward",  # selects the required primary reward
+        ),
     )
 
     # Same AgentEvaluator as every agent-eval run; only the target changes.
@@ -99,13 +157,13 @@ asyncio.run(main())
 
 The three pieces map onto the model: `discover_harbor_tasks` turns the suite into tasks,
 `HarborAgentTaskRunner` runs the Harbor job and returns one trial per Harbor trial, and `AgentEvaluator`
-scores each trial's reward with `HarborRewardMetric`.
+scores each trial's named rewards with `HarborRewardMetric`.
 
 <Note>
 
 **`dataset_path` is input; `jobs_dir` is output.** The dataset is your read-only task suite. `jobs_dir`
 is a directory the runner writes into — Harbor's per-trial results land under `jobs_dir/<job_name>/`,
-and that directory doubles as a re-run cache (see [below](#attempts-concurrency-and-caching)).
+and that directory doubles as a re-run cache (see [below](#caching)).
 
 </Note>
 
@@ -118,6 +176,14 @@ harbor_reward.reward: 1.0
 
 Swap `agent_name` (or `agent_import_path`) for your own agent to get a real score.
 
+<Note>
+
+Evaluator plugin submissions (`nemo evaluator agent-evaluate submit`) support the Harbor runner only
+through the host `subprocess` executor. Standalone SDK runs using `run_harbor_eval()` or
+`HarborAgentTaskRunner` invoke Harbor directly and do not use a Jobs execution profile.
+
+</Note>
+
 ## Choosing an agent
 
 `HarborRuntimeConfig` decides what runs inside each sandbox (see
@@ -128,23 +194,244 @@ Swap `agent_name` (or `agent_import_path`) for your own agent to get a real scor
 - **`agent_import_path`** — your own Harbor agent, e.g. `"my_agent_module:MyAgent"`. Set `agent_dir`
   as well when it's a loose file rather than an installed package. Overrides `agent_name`.
 - **`agent_model_name`** — the model slug handed to the agent.
+- **`agent_kwargs`** — keyword arguments forwarded to the agent's constructor, the equivalent of
+  Harbor's `--ak key=value` flags. Values must be JSON (strings, numbers, booleans, lists, mappings).
+  Do not put secrets here. Harbor copies its config into the job directory's `config.json` and
+  `lock.json` and into every trial's `config.json`, `lock.json`, `result.json` and agent run spec, and
+  needs the real value to construct the agent, so there is no later point at which the value can be
+  taken back. Name credentials in `agent_env_from_host` instead;
+  a `${NAME}` template is fine here, since it carries no value.
+
+  A credential-shaped value fails validation before the run starts — a credential-looking key
+  (`api_key`, `token`, `secret`, `authorization`, ...) holding plaintext, or any value carrying a
+  recognised issued-token shape (`nvapi-`, `sk-`, `hf_`, a PEM block, ...). Treat that as a backstop,
+  not a guarantee: a secret under a key of your own naming, in a format the check does not know, will
+  pass straight through. The rule is still that secrets do not belong in `agent_kwargs`.
+- **`agent_env_from_host`** — host environment variables to forward to the agent. Each becomes a
+  `${NAME}` template on Harbor's `AgentConfig.env`: Harbor resolves it from the host environment when
+  it creates the agent and persists only the template, so the value never reaches `config.json`.
+  Provenance records the names, never the values.
+
+The agent fields map one-to-one onto Harbor's `AgentConfig`, which Harbor's agent factory unpacks
+into the agent's constructor:
+
+```text
+HarborRunnerTarget / HarborRuntimeConfig
+        │
+        ├─ agent_import_path   → Harbor AgentConfig.import_path
+        ├─ agent_model_name    → Harbor AgentConfig.model_name
+        ├─ agent_kwargs        → Harbor AgentConfig.kwargs
+        └─ agent_env_from_host → Harbor AgentConfig.env   ({NAME: "${NAME}"}, resolved by Harbor)
+                                       │
+                                       ▼
+                     Harbor AgentFactory constructs
+                     FabricAgent(model_name=..., extra_env=..., **kwargs)
+```
+
+For example, NeMo Fabric's
+[`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.3.0/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
+is one of Harbor's [existing agents](https://www.harborframework.com/docs/agents#existing-agents);
+its constructor requires `fabric_adapter_id` and accepts `fabric_package` and `fabric_telemetry`. For a
+complete, runnable version with a Nemotron model, see
+[Run a NeMo Fabric Agent inside Harbor](/documentation/evaluate-models/agent-eval/harbor-fabric-agent).
+
+```python
+config = HarborRuntimeConfig(
+    jobs_dir=Path("./harbor-jobs"),
+    agent_import_path="nemo_fabric.integrations.harbor:FabricAgent",
+    agent_kwargs={
+        "fabric_adapter_id": "nvidia.fabric.codex",
+        "fabric_package": "nemo-fabric[codex]==0.3.0",
+        "fabric_telemetry": "relay",
+    },
+)
+```
+
+The same fields appear on the platform job's `HarborRunnerTarget`, the `target` of an
+`AgentEvalInputSpec` submitted with `nemo evaluator agent-evaluate submit`. Instead of
+`agent_env_from_host`, the platform target takes `env_secrets`, a mapping of environment variable name
+to NeMo Platform secret reference. The service resolves each reference into the job's environment at
+compile time and the job hands Harbor a `${NAME}` template, so the credential appears on neither the
+spec, the run bundle, nor `config.json`:
+
+```json
+{
+  "target": {
+    "kind": "harbor",
+    "agent_import_path": "nemo_fabric.integrations.harbor:FabricAgent",
+    "agent_kwargs": {
+      "fabric_adapter_id": "nvidia.fabric.codex",
+      "fabric_package": "nemo-fabric[codex]==0.3.0"
+    },
+    "env_secrets": {
+      "OPENAI_API_KEY": "my-workspace/openai-key"
+    }
+  }
+}
+```
 
 ## How scoring works
 
 1. Harbor runs each task in its sandbox and writes a `<task>__<hash>/result.json` per trial, including
-   the reward from the task's [verifier](https://www.harborframework.com/docs/tasks).
-2. The runner reads that reward onto each trial's metadata, and `HarborRewardMetric` scores it — the
-   `reward` value, or `0.0` for a trial whose verifier emitted none.
-3. `result.summary` aggregates the reward across tasks (`harbor_reward.reward`), `result.trials` holds
-   each trial's status and evidence, and — if you call `result.persist()` — the run **bundle**
-   (including `report.html`) is written like any other agent-eval run.
+   the reward mapping from the task's [verifier](https://www.harborframework.com/docs/tasks).
+2. `reward_key` identifies the primary reward by name. If not specified, it defaults to `reward`.
+   Mapping order and alphabetical order never select the primary.
+3. The primary output is required. On a scoreable trial, a finite numeric value is emitted unchanged;
+   a missing or unusable primary emits `0.0` and a diagnostic instead of skipping the trial.
+4. Other keys from that task's Harbor-valid results become optional secondaries:
+   - Finite numbers are emitted.
+   - Missing or Boolean values are omitted with a diagnostic; usable siblings are kept.
+   - A `null`, nonnumeric string, or object in the reward mapping fails Harbor's `TrialResult`
+     check, so the whole attempt is skipped and sibling rewards are not scored. Harbor writes
+     `NaN` and infinity as `null`, which hits this gate.
+   - A secondary reward key discovered for one task does not apply to another task.
+5. `result.summary` aggregates each named output, `result.trials` holds each trial's status and
+   evidence, and `result.persist()` writes the standard run bundle.
 
-## Attempts, concurrency, and caching
+### What counts as a numeric reward
 
-- **`n_attempts`** — trials Harbor runs per task; **`n_concurrent_trials`** — how many run at once.
-- The job directory doubles as a **cache**. Pin a stable `job_name` and a completed job whose results
-  already cover every requested task is re-scored instead of re-run. The default timestamped `job_name`
-  always runs fresh; set `force_rerun=True` to delete an existing job dir first.
+Harbor's [task format](https://www.harborframework.com/docs/tasks) defines each `reward.json` value
+as a float or integer (`reward.txt` is a single number, stored under the key `reward`). Harbor reads
+and validates that file before writing `result.json`:
+
+- Finite numbers are retained. Numeric strings such as `"1.25"` are coerced to numbers.
+- A nonnumeric string, `null`, or an object fails validation of the whole reward mapping.
+- A JSON Boolean is coerced to `1.0` or `0.0`.
+- `NaN` and infinity pass Harbor's numeric validation, but serialize as `null` in `result.json`.
+
+The SDK first validates the whole `result.json` with Harbor's `TrialResult`. A `null`, nonnumeric
+string, or object in the reward mapping invalidates the attempt; its sibling rewards are not scored
+or cached. For a Harbor-valid result, the SDK parses each reward per key. It emits finite numbers,
+including numeric strings normalized by Harbor, and omits Boolean or non-finite values with a
+diagnostic while retaining usable siblings.
+
+Emit finite JSON numbers from the verifier. Use `1` and `0` when a reward represents pass/fail; do
+not rely on Harbor's coercion of strings or Booleans.
+
+### Sparse secondary and errored reward examples
+
+#### Missing secondary reward
+
+For two attempts on task A:
+
+```text
+a1: reward=1.0, format_ok=1.0
+a2: reward=0.0, format_ok omitted
+```
+
+**Resulting aggregates and coverage**
+
+| Result field | Expected value |
+|---|---|
+| `harbor_reward.reward` | `mean=0.5`, `count=2`, `nan_count=0` |
+| `harbor_reward.format_ok` | `mean=1.0`, `count=1`, `nan_count=1` |
+| `format_ok` coverage | `total=2`, `scored=1`, `missing=1`, `failed=0` |
+| `harbor_reward.format_ok.pass@1` | `mean=1.0`, `count=1`, `nan_count=0`; computed from one measured attempt |
+| `harbor_reward.format_ok.pass@2` | unestimable: `count=0`, `nan_count=1`, `mean=None` |
+
+Omission means unmeasured, not failure:
+
+- It does not create a null, NaN, or zero per-trial metric output.
+- Coverage records the missing measurement.
+- Derived aggregates can therefore be unestimable (`mean=None`).
+
+See [Reading Results](/documentation/evaluate-models/agent-eval/reading-results) for denominator,
+failed-trial, semantic-view, and persistence behavior.
+
+#### Errored attempt with a valid primary reward
+
+For two attempts on task A:
+
+```text
+a1: reward=1.0, no error
+a2: reward=0.8, error=RuntimeError
+```
+
+**Resulting statuses and aggregate**
+
+| Result field | Expected value |
+|---|---|
+| SDK trial `a1` | `COMPLETED` |
+| SDK trial `a2` | `PARTIAL`; remains scoreable |
+| `harbor_reward.reward` | `mean=0.9`, `count=2`, `nan_count=0` |
+| `error_trial_ids` | `{"RuntimeError": ["a2"]}` |
+
+The error changes `a2`'s status and error rollup; it does not discard or replace its finite reward.
+
+## Attempts and concurrency
+
+- **`n_attempts`** — desired attempts per task. On resume, Harbor runs only the missing attempts.
+- **`n_concurrent_trials`** — maximum trials Harbor runs concurrently.
+
+## Retries
+
+- **`max_retries`** — maximum extra attempts per trial during the current Harbor run; defaults to `0`.
+- **Error policy** — Harbor retries only allowed errors. Its
+  [default non-retryable errors](https://github.com/harbor-framework/harbor/blob/v0.20.0/src/harbor/models/job/config.py#L288-L301)
+  include `AgentTimeoutError`.
+- **Repeated SDK calls** — `max_retries` never reopens cached errored trials. Cache behavior is
+  described below.
+
+## Caching
+
+Caching activates only when `HarborRuntimeConfig.job_name` is pinned. Without it, every call creates a
+fresh timestamped job directory.
+
+A cache hit requires both:
+
+- A usable matching stamp for the requested inputs.
+- At least `n_attempts` Harbor-valid results for every requested task.
+
+On a repeated SDK call:
+
+- **Cache hit** — skips Harbor and Docker, then re-scores existing results. Harbor-valid errored results
+  count as completed, become `PARTIAL`, and are not rerun.
+- **Incomplete matching cache** — preserves valid results, including errored results, then runs only
+  attempts with missing or invalid results.
+- **Stale or unusable cache** — deletes the job directory and reruns every requested attempt. This
+  includes changed inputs, a missing or malformed stamp, and an unresolved requested task directory.
+- **`force_rerun=True`** — deletes the entire pinned job directory, then reruns every requested attempt.
+- **Selective cached-error rerun** — unsupported. The SDK cannot rerun cached attempts by error type.
+- **Concurrent processes** — must not share a pinned `job_name`; neither the SDK nor Harbor locks the
+  job directory.
+
+### Cache identity
+
+The SDK stores the cache stamp in `jobs_dir/<job_name>/.nemo-eval-harbor-cache.json`:
+
+- **`version`** — stamp schema; must match exactly.
+- **`options`** — SHA-256 of result-affecting `HarborRuntimeConfig` fields, including `agent_kwargs`;
+  must match exactly.
+- **`agent`** — digest of `agent_dir` contents, or `"<none>"` when unset; must match exactly.
+- **`tasks`** — every requested task digest must match; extra cached tasks are ignored. Cached A, B, C
+  can serve A, but cached A cannot serve A and B.
+- **Scoring and scheduling settings** — `reward_key`, selected metrics, `quiet`, and
+  `n_concurrent_trials` do not invalidate Harbor execution results.
+- **`agent_env_from_host`** — participates by name: adding or removing a forwarded variable invalidates,
+  but the value it resolves to at run time is never fingerprinted, so rotating a credential keeps the
+  cache valid.
+- **Installed agents** — when `agent_dir` is unset, the stamp covers the agent selection or import path,
+  not the installed package contents. Change the import path, use `agent_dir`, or force a rerun after
+  changing installed agent code.
+
+### Force a complete rerun
+
+```python
+import asyncio
+from pathlib import Path
+
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, run_harbor_eval
+
+config = HarborRuntimeConfig(
+    jobs_dir=Path("./harbor-jobs"),
+    job_name="my-suite",
+    agent_name="oracle",
+    force_rerun=True,
+)
+result = asyncio.run(run_harbor_eval(config, dataset_path=Path("path/to/my-suite")))
+```
+
+- **Keep the previous job** — use a new `job_name`, or omit it to create a fresh timestamped directory.
 
 ## Shortcut: `run_harbor_eval`
 
@@ -152,11 +439,16 @@ When a run is exactly "one Harbor suite, scored by its reward," `run_harbor_eval
 steps above — discover, run, score — into a single call:
 
 ```python
+import asyncio
+from pathlib import Path
+
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, run_harbor_eval
 
-result = await run_harbor_eval(
-    HarborRuntimeConfig(jobs_dir="./harbor-jobs", agent_name="oracle"),
-    dataset_path="path/to/my-suite",
+result = asyncio.run(
+    run_harbor_eval(
+        HarborRuntimeConfig(jobs_dir=Path("./harbor-jobs"), agent_name="oracle"),
+        dataset_path=Path("path/to/my-suite"),
+    )
 )
 ```
 
@@ -169,4 +461,6 @@ targets.
 <Cards>
   <Card title="Agent Evaluation (concepts)" href="/documentation/evaluate-models/agent-eval" />
   <Card title="Agent Evaluation Quickstart" href="/documentation/evaluate-models/agent-eval/quickstart" />
+  <Card title="Reading Results" href="/documentation/evaluate-models/agent-eval/reading-results" />
+  <Card title="Run a NeMo Fabric Agent inside Harbor" href="/documentation/evaluate-models/agent-eval/harbor-fabric-agent" />
 </Cards>

@@ -3,11 +3,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: eval-author-trace-environment
+version: 1.1.0
 description: >-
-  Turn one MLflow, Intake, OpenTelemetry, or existing ATIF trace into a private,
-  text-only candidate for a reproducible Harbor task environment. Use when a
-  coding agent should derive an evaluation environment from recorded behavior
-  and retain a candidate or no_candidate summary by task.
+  Use MLflow, Intake, OpenTelemetry, or ATIF trace evidence to derive a private,
+  reproducible Harbor environment candidate.
 triggers:
   - create an evaluation environment from a trace
   - turn ATIF into a Harbor task environment
@@ -18,115 +17,81 @@ not-for:
   - eval-author-task-create (use to close an actionable audit coverage gap)
   - eval-author-inspect-trace (use to explain an Intake trace without creating an environment)
 compatibility: >-
-  Python 3.11 or later for the standalone helper. MLflow normalization uses the
-  sibling mlflow-to-atif skill. Intake reads require the nemo CLI. Candidate
-  verification requires an existing Harbor installation and Docker. No model,
-  provider, or agent-framework configuration is required.
+  Python 3.11+, jsonschema 4.23+, referencing 0.28.4+; mlflow-to-atif for MLflow; nemo CLI for Intake; Harbor and
+  Docker for proof. Use Harbor's Python environment. NOP/Oracle need no model;
+  native-agent checks use the agent's configured provider.
+metadata:
+  author: Andrew Suter-Morris <asutermorris@nvidia.com>
+  tags: [evaluation, harbor, traces]
 maturity: alpha
 license: Apache-2.0
 user-invocable: true
-allowed-tools: [Bash, Read, Write, Grep, Glob]
+allowed-tools: Bash Read Write Grep Glob
 ---
 
 # Eval Author: trace to environment
 
-Read `eval-author` for the shared evidence standard and boundaries. This flow
-uses the current coding agent to turn one recorded interaction into one small,
-reproducible Harbor task. It does not require a particular coding agent, model,
-or framework.
+## Purpose
 
-```text
-bounded source → canonical ATIF → private text scrub → candidate decision
-                                                     ├─ no_candidate → summary
-                                                     └─ candidate → Harbor task → summary
-```
+Read `eval-author` for the shared evidence standard and boundaries. Turn one
+recorded interaction into a reproducible Harbor task with privacy scrubbing,
+machine-checked proof, and gated publication.
 
-The ATIF file is the only handoff into candidate analysis. Keep exact source
-exports restricted. Do not put trace payloads, credentials, or generated task
-workspaces in Git.
+## Instructions
+
+Follow steps 1-7 in order, one task workspace per trace. Commands are in
+`## Available Scripts`; an end-to-end run is in `## Examples`. Trace payloads,
+credentials, and task workspaces never go into Git.
 
 ## Artifact contract
 
-Use one workspace per task:
+Use one workspace per task. Paths below are generated workspace artifacts, not
+bundled skill files; `extra.*` names elsewhere are ATIF fields, not file paths.
 
 ```text
 .eval-author/trace-environments/
   .gitignore
   <task-id>/
     private/source.atif.json
+    private/canonical.atif.json
+    private/privacy-audit.json
+    private/{tool-call-inventory,tool-call-plan,tool-access,tool-call-generation}.json
+    private/publications/<digest>/
+    private/publication-review.json
     private/ground-truth/
     safe/trace.atif.json
     safe/privacy.json
     candidate.json
     task/
+      environment/tool-call-fixtures/
+    reproducibility.json
     validation.json
     summary.json
     summary.md
 ```
 
-`scripts/trace_environment.py init` writes the parent `.gitignore` so every
-task directory is ignored, makes directories owner-only, and refuses to replace
-an existing task workspace. The helper prints content-free JSON summaries.
+Source, evidence, ground truth, and Harbor jobs stay ignored; only the
+whitelist-only `export` command publishes. `init` writes the parent
+`.gitignore`, makes directories owner-only, refuses to replace an existing
+workspace, and prints content-free JSON summaries.
 
 ## Step 1: create the private task workspace
 
-Choose a stable lowercase kebab-case task ID. Derive it from a caller-supplied
-case name or trace ID; do not put a person's name, email address, account number,
-or other private value in it.
-
-```bash
-python <skill_dir>/scripts/trace_environment.py init \
-  --task-id <task-id>
-```
-
-Keep every source export and intermediate conversion under the returned task
-directory. Use `umask 077` before redirecting provider output there.
+Choose a stable lowercase kebab-case task ID from a caller-supplied case name
+or trace ID; never put a person's name, email, account number, or other private
+value in it. Run `init --task-id <task-id>`, then keep every source export and
+intermediate conversion under the returned task directory, using `umask 077`
+before redirecting provider output there.
 
 ## Step 2: normalize exactly one source to ATIF
 
-Do not merge unrelated traces. Preserve the source's trace and span identifiers
-in `extra`, order steps by recorded time, and record every missing or lossy field
-under `extra.normalization.uncertainties` or `extra.normalization.losses`.
-Never invent an instruction, tool result, file, or final answer.
-
-### Existing ATIF
-
-Use the trajectory as the canonical input. Do not relabel its ATIF version.
-
-### MLflow
-
-Read and follow `mlflow-to-atif`. Put its owner-private output under the task
-workspace and use the emitted `.atif.json` file as the canonical input.
-
-### Intake
-
-Resolve the CLI exactly as `eval-author-inspect-trace` specifies. Read one exact
-trace and every detailed span into owner-private JSON files:
-
-```bash
-umask 077
-nemo intake traces get --output-format=json --workspace="WORKSPACE" --mode=detailed "TRACE_ID" > <task-dir>/private/intake-trace.json
-nemo intake spans list --output-format=json --workspace="WORKSPACE" --filter.trace-id="TRACE_ID" --mode=detailed --sort=started_at --all-pages > <task-dir>/private/intake-spans.json
-```
-
-Require every returned span's `trace_id` to match the selected trace. The coding
-agent converts those records to ATIF: root input becomes the user instruction;
-model or assistant output becomes agent steps; each tool span becomes a paired
-tool call and observation; errors and unmapped attributes remain cited in
-`extra.intake`. If there is no complete human instruction, record no_candidate.
-
-### OpenTelemetry
-
-Prefer an existing Intake trace produced from the telemetry and use the Intake
-path above. For a bounded JSON OTLP export, the coding agent may map the root and
-descendant spans directly using the same rules. Preserve trace IDs, span IDs,
-parent IDs, timestamps, status, and semantic attributes under `extra.otel`.
-Do not parse protobuf bytes, contact a collector, or ingest remote data in this
-flow. If the export cannot establish parentage or a human instruction, record
-no_candidate instead of guessing.
-
-Before continuing, verify the canonical file has one ATIF v1.0-v1.7 object, one-based
-sequential step IDs, at least one user step, and resolvable tool-call references.
+Read and follow `references/sources.md`. One task per trace; never merge
+unrelated traces, and never invent an instruction, tool result, file, or final
+answer. Existing ATIF is used as-is; MLflow goes through `mlflow-to-atif`;
+Intake reads one exact trace plus every detailed span; bounded JSON OTLP
+exports map spans directly. Record every missing or lossy field under
+`extra.normalization.uncertainties` or `extra.normalization.losses`. If no
+complete human instruction exists, record no_candidate instead of guessing.
 
 ## Step 3: make a text-only safe copy
 
@@ -137,16 +102,41 @@ python <skill_dir>/scripts/trace_environment.py prepare \
   --source-kind <atif|mlflow|intake|otel>
 ```
 
-The helper retains an exact owner-private original, writes a scrubbed safe copy,
-replaces image parts with omission markers, and records only redaction counts.
-It recognizes common secret fields, bearer tokens, private keys, email addresses,
-phone numbers, social-security numbers, IP addresses, and user home paths.
+The helper retains an exact owner-private original, writes the bounded canonical
+ATIF and a scrubbed safe copy, replaces image parts with omission markers, and
+records only redaction counts in the safe report. It recognizes common secret
+fields, bearer tokens, private keys, and personal data classes (emails, phones,
+SSNs, IP addresses, cluster-local hostnames, home paths). It also writes
+`private/privacy-audit.json`: a complete string-field and character denominator,
+URL hosts, and candidate name, organization, and street-address findings —
+contextual leads, not automatic claims. Review every text field in
+`safe/trace.atif.json`, every audit finding and host, then record who performed
+this trace review with `review-privacy`. Generated task files do not exist yet;
+review the complete publication separately after finalization.
 
-This deliberately small scanner cannot recognize names, organizations, street
-addresses, proprietary code, or every credential format. Review every text field
-in `safe/trace.atif.json` and the generalized task files before passing
-`--privacy-reviewed`. Never copy a redacted value into a verifier. An image-only
-user instruction is a blocking reason and must remain no_candidate.
+Use the audit's field and character denominator to plan bounded reads; a
+truncated display does not establish missing trace evidence. If review cannot
+finish, retain that limitation without issuing a complete review attestation.
+
+Never copy a redacted value into a verifier. An image-only user instruction
+blocks candidacy. The scanner cannot establish that proprietary code is safe;
+the contextual reviewer owns that judgment.
+
+### Resolve tool-call access
+
+For traces with tool calls, read `../../docs/trace-derived-fixtures.md`, then
+run `inventory-tool-calls`, `plan-tool-call-access`, and
+`resolve-tool-call-access --decisions <decisions.json> --reviewer-kind <agent|human>`.
+After privacy review, when at least one decision is mock, run
+`generate-mock-tool-calls`.
+
+Select `real`, `mock`, or `none` for every scoped tool; candidate finalization
+requires complete decisions. Never substitute silently. The fixture reference
+defines reviewed schema overrides for traces that record calls without schemas.
+Copy generated fixtures into the task image and merge `integration.toml` into
+`task.toml`; finalization checks the wiring. Preserve the user's harness and model;
+check registration and prove discovery/calls as the fixture reference specifies. The MCP adapter performs
+exact-match replay. Fixtures are agent-visible and cannot hold verifier truth.
 
 ## Step 4: inventory ground truth and software requirements
 
@@ -159,69 +149,48 @@ agent's observed answer:
 - explicit human or evaluator feedback that establishes correctness.
 
 An agent answer is not ground truth merely because the trace succeeded. Record
-ground truth as `available`, `partial`, `absent`, or `unknown`. Retain available
-artifacts under `private/ground-truth/`, make them owner-only, record their
-SHA-256 digests, and cite the ATIF steps that establish their relationship to
-the task. Do not copy private ground-truth values into the generated task;
-generalize only what the verifier needs.
+it as `available`, `partial`, `absent`, or `unknown`; retain artifacts under
+`private/ground-truth/` (owner-only, SHA-256 digests, `atif_step` or `external`
+provenance) and its use as `comparison_only`, `verification`, or `none`. Never
+copy private ground-truth values into the generated task; generalize only what
+the verifier needs. `references/candidate-record.md` defines the provenance and
+reason-code contracts.
 
-Also inventory software needed to reproduce the work or verify the outcome.
-Include libraries and CLIs, desktop applications such as CAD tools, services,
-hardware, and proprietary or commercially licensed software. For each item,
-record whether it is actually required, its version when known, license class,
-local availability, redistributability, evidence steps, and a short note.
+Also inventory software needed to reproduce the work or verify the outcome:
+libraries, CLIs, desktop applications such as CAD tools, services, hardware,
+and proprietary or commercially licensed software. For each item record whether
+it is actually required, its version when known, license class, local
+availability, redistributability, evidence steps, and a short note, with the
+same explicit ATIF-or-external provenance object. Inventory the complete build,
+runtime, solution, and verifier dependency closure, pinning images, packages,
+repositories, and tools where reproducibility depends on them. The grading path
+must not download dependencies or contact a live service. A dependency needed
+only by the verifier still belongs in the inventory; common misses include
+fonts, compiler headers, package indexes, and language registries.
 
 Do not silently replace required software with a different application or mock
 when the requested behavior depends on the real product. Required unavailable
-software prevents candidacy. Unknown availability keeps the environment
-unproven until resolved. Proprietary or non-redistributable software is usable
-only when a legitimate, reproducible runtime path exists; never copy licensed
+software prevents candidacy; unknown availability keeps the environment
+`unproven` until resolved. Proprietary or non-redistributable software is
+usable only with a legitimate, reproducible runtime path; never copy licensed
 binaries into the task.
 
 ## Step 5: decide candidate or no_candidate
 
 Read only `safe/trace.atif.json`. Later user corrections outrank earlier turns.
-Every decision must cite real ATIF `step_id` values. Write `candidate.json` with
-this shape:
+Every decision must cite real ATIF `step_id` values. Read
+[references/candidate-record.md](references/candidate-record.md) for the
+`candidate.json` shape before writing the decision.
+Run its read-only `check-candidate` command before construction; it checks
+metadata, not execution, privacy review or readiness.
 
-```json
-{
-  "schema": "nemo.eval_author.trace_environment_candidate.v1",
-  "status": "candidate",
-  "instruction": "Observable task instruction without private values",
-  "requirements": ["Objectively testable requirement"],
-  "verification_mode": "execution",
-  "evidence_steps": [1, 2],
-  "uncertainties": [],
-  "reason_codes": [],
-  "ground_truth": {
-    "availability": "available",
-    "artifacts": [
-      {
-        "kind": "expected_output",
-        "path": "private/ground-truth/expected.json",
-        "sha256": "sha256:<64-hex-digest>",
-        "evidence_steps": [2],
-        "notes": "Expected output attached to the recorded task."
-      }
-    ],
-    "absence_reason": null
-  },
-  "software_requirements": [
-    {
-      "name": "ExampleCAD",
-      "category": "desktop_application",
-      "required": true,
-      "version": "2026",
-      "license": "proprietary",
-      "availability": "unknown",
-      "redistributable": false,
-      "evidence_steps": [1, 2],
-      "notes": "The requested edit and verifier depend on native CAD behavior."
-    }
-  ]
-}
-```
+Most traces do not record the agent's starting workspace. When the capability,
+instruction, and expected outcome are fully evidenced but the world state is
+not, you may still build a task as a coherent synthetic world around the
+recorded facts. Declare `"state_basis": "reconstructed"` in the candidate and
+follow the reconstruction rules in `references/candidate-record.md`; the
+default `"recorded"` basis claims the environment reproduces recorded state.
+Never present a reconstruction as a replay of the trace.
 
 Use `candidate` only when the request and expected outcome are complete,
 reproducible without private or live external state, and objectively testable.
@@ -229,118 +198,190 @@ This basic flow supports execution verification only. Do not add a model judge
 or convert a subjective, visual, or prose-quality outcome into a brittle string
 check.
 
-For no candidate, set `status` to `no_candidate`, `instruction` and
-`verification_mode` to `null`, keep `requirements` empty, and include one or more
-stable `reason_codes`. Keep the `ground_truth` and `software_requirements`
-inventories in the record even when they are empty or explain the blocker.
-Typical reasons are `missing_instruction`,
-`missing_outcome`, `requires_private_state`, `requires_live_external_state`,
-`non_text_evidence_required`, `subjective_verification`, and
-`insufficient_trace_evidence`. Use `required_software_unavailable` or
-`proprietary_runtime_unavailable` when the software inventory blocks a
-reproducible task. Ground truth may be absent without blocking a task, but its
-absence must be explicit.
+For no candidate, use the reference's null and empty fields and stable
+`reason_codes`; retain the `ground_truth` and `software_requirements`
+inventories even when empty. Ground truth may be absent without blocking a task,
+but its absence must be explicit. Use
+`required_software_unavailable` or `proprietary_runtime_unavailable` when the
+software inventory blocks reproducibility.
+
+For batch failures, use the reference's specific source or construction
+`reason_codes` instead of `insufficient_trace_evidence`, and record the failed
+command or contract check through Step 7's `finalize --did-not-work`.
 
 ## Step 6: author and prove a candidate environment
 
 Skip this step for no_candidate. Under `<task-dir>/task/`, create the smallest
 Harbor task that reproduces the initial state and objectively verifies the
-generalized outcome:
+generalized outcome. Read and follow `references/task-contract.md` for the
+required layout, the separate no-network verifier contract, and the
+reviewer-facing README sections, and `references/environment-integrity.md` for
+agent-network, contamination, portability, repeat-run, and negative-control
+requirements. Never copy private trace payloads into the task; include only the
+minimal files needed to reproduce the starting state. Human-supplied or
+reviewed `Relevant experience` is necessary for readiness; never invent it.
 
-- `task.toml` with realistic timeouts and resources;
-- `instruction.md` matching `candidate.json` without leaking tool names or test logic;
-- `environment/` containing prerequisites but never the solution;
-- `tests/test.sh` that grades only the observable outcome;
-- `solution/solve.sh` with the reference solution; and
-- `README.md` containing reviewer-facing development context, not a copy of the
-  agent instruction.
+`tests/test.sh` must emit one `check-id\tPASS|FAIL` row per scored check to
+`/logs/verifier/results`; read and follow `references/check-grammar.md`.
 
-The task README is not passed to the agent. Give it a level-one task title and
-these substantive level-two sections:
+Work in an authoring loop, not one pass. `validate-task` lints the tree with
+remediation hints; fix every issue it reports. Then `probe` runs one
+diagnostic NOP and Oracle pair in the real container; design checks so probe
+NOP fails every scored check and probe Oracle passes all of them. Probes are
+diagnostic-only, capped per task revision, and never accepted as proof — see
+`references/environment-integrity.md`.
 
-- `Difficulty explanation`: why the task is difficult for agents and humans;
-- `Environment and software requirements`: runtimes, services, hardware,
-  versions, licensing, and availability constraints;
-- `Ground-truth provenance`: what establishes correctness and where that
-  evidence came from, without exposing private values;
-- `Solution explanation`: the high-level reference approach without duplicating
-  `solution/solve.sh`;
-- `Verification explanation`: the observable outcomes and how the verifier
-  distinguishes success from failure; and
-- `Relevant experience`: human-supplied experience relevant to authoring or
-  reviewing the task.
-
-Keep each section concise and evidence-backed. Do not repeat `instruction.md`,
-reveal verifier internals to the agent, or invent author experience. If a human
-cannot supply and review `Relevant experience`, keep the environment `unproven`
-rather than claiming it is ready.
-
-Do not copy private trace payloads into the task. Include only the minimal files
-needed to reproduce the starting state. Pin external source to an exact public
-commit when it is truly required; otherwise prefer a small local fixture.
-
-Run both deterministic arms:
+Execute the repeat-run protocol in `references/environment-integrity.md`.
+For example, record the first NOP job's inputs and then run it:
 
 ```bash
-harbor run -p <task-dir>/task -a nop
-harbor run -p <task-dir>/task -a oracle
+python <skill_dir>/scripts/trace_environment.py record-run-inputs \
+  --task-dir <task-dir> --arm nop --job-dir private/jobs/nop-1
+harbor run -p <task-dir>/task -a nop \
+  --jobs-dir <task-dir>/private/jobs --job-name nop-1
 ```
 
-NOP must finish without an exception and receive reward `0`; Oracle must finish
-without an exception and receive reward `1`. Do not weaken the verifier to make
-Oracle pass. Write their exact evidence to `validation.json`:
+Repeat with `nop-2`, `oracle-1`, and `oracle-2`, selecting the matching arm
+and agent. Follow the integrity reference to declare and run the negative
+control. Retain every exact Harbor job and use the reference's
+`record-validation` command; proof requires the per-check rows from
+`references/check-grammar.md` in every job. Never hand-write rewards, job IDs,
+exceptions, or checksums.
 
-```json
-{
-  "schema": "nemo.eval_author.trace_environment_validation.v1",
-  "nop": {"reward": 0, "exception": null, "job_dir": "private/jobs/nop"},
-  "oracle": {"reward": 1, "exception": null, "job_dir": "private/jobs/oracle"}
-}
-```
+Failed proof remains technical evidence, and a fixable defect starts the
+bounded repair loop: `record-repair` with a reason code, then a fresh manifest
+and proof set (at most three repairs). Do not weaken the verifier to make
+Oracle pass.
 
-Retain each exact Harbor job directory at the relative path recorded above.
-These evidence directories must stay inside the ignored task workspace.
-
-If Harbor or Docker is missing, the environment is `unproven`; do not describe
-it as ready. If either arm fails, record `failed` and retain the useful failure
-summary in the task workspace.
+If Harbor or Docker is missing, technical status is `not_run` and the environment
+is `unproven`; do not describe it as ready. The integrity reference defines the
+conditions for technical status `passed` and the limits of that claim; passing
+proof does not establish human review.
 
 ## Step 7: finalize and verify the summary
 
-Record concise facts about the conversion and construction. Do not include raw
-payloads or redacted values in these flags.
+Record concise facts about the conversion and construction with `finalize`
+(`--status candidate --human-reviewed --worked-well ... --did-not-work ...`, or
+`--status no_candidate --reason ...`), then verify digests and required
+artifacts with `check`. Do not include raw payloads or redacted values in these
+flags.
 
-For a ready candidate:
+Derived environment status:
+failed technical proof becomes `failed`; passed proof with the required separate
+no-network verification, `--human-reviewed`, and no required software whose
+availability is `unknown` becomes `ready`; every other
+candidate is `unproven`. A shared verifier is a contract error rather than an
+unproven candidate. The human-review flag means a human supplied or reviewed
+Relevant experience and the generalized task. It is distinct from the earlier
+contextual privacy review by an agent or human.
 
-```bash
-python <skill_dir>/scripts/trace_environment.py finalize \
-  --task-dir <task-dir> \
-  --status candidate \
-  --environment-status ready \
-  --privacy-reviewed \
-  --worked-well "<evidence-backed success>" \
-  --did-not-work "<evidence-backed limitation>"
+## Batch and publication
+
+For a multi-task run, write a checked-in manifest with stable task IDs and
+source paths. This makes the denominator explicit and reruns idempotent:
+
+```json
+{
+  "schema": "nemo.eval_author.trace_environment_batch.v1",
+  "members": [
+    {"task_id": "stable-id", "atif": "private-source.atif.json", "source_kind": "atif"}
+  ]
+}
 ```
 
-For no_candidate:
+Keep a real manifest's source paths private if they reveal internal layout.
+`batch-prepare` prepares missing members and resumes existing ones;
+`batch-status` reports every member. `denominator` must equal the selected
+source set — never report only candidates or successes. A malformed workspace
+stays in the report as `invalid` without hiding other rows.
+
+Before any export, including `no_candidate`, read and follow
+`references/publication-review.md`. Prepare the complete private publication
+preview, review every exported file and path, and attest its exact digest before
+exporting. Trace privacy review and `--human-reviewed` do not replace this gate.
+Any change to the public product requires a new publication review; a successful
+`check` alone is not publication approval.
+
+Report the task ID, `candidate` or `no_candidate`, state basis, ground-truth
+availability and artifact count, required software and licensing constraints,
+environment status, technical status, check evidence mode, repair count,
+review status, verifier isolation, privacy review status, NOP and Oracle
+rewards when run, and paths to `summary.md` and the generated task. A
+`valid: true` check proves the recorded files are internally consistent;
+Harbor is the authority for whether the task actually runs.
+
+## Examples
+
+One end-to-end candidate flow (see `## Available Scripts` for every argument):
 
 ```bash
-python <skill_dir>/scripts/trace_environment.py finalize \
-  --task-dir <task-dir> \
-  --status no_candidate \
-  --reason "<why no reproducible environment can be built>"
+S=<skill_dir>/scripts/trace_environment.py
+python $S init --task-id my-task
+python $S prepare --task-dir <dir> --atif <trace.atif.json> --source-kind atif
+python $S review-privacy --task-dir <dir> --reviewer-kind agent --note "Reviewed every safe ATIF field."
+# decide candidate.json (check-candidate), then author <dir>/task/
+python $S validate-task --task-dir <dir>
+python $S probe --task-dir <dir>
+python $S record-reproducibility --task-dir <dir>
+python $S record-run-inputs --task-dir <dir> --arm nop --job-dir private/jobs/nop-1
+harbor run -p <dir>/task -a nop --jobs-dir <dir>/private/jobs --job-name nop-1
+# ... nop-2, oracle-1, oracle-2, negative-1 with record-run-inputs before each ...
+python $S record-validation --task-dir <dir> --nop-job-dir private/jobs/nop-1 \
+  --nop-job-dir private/jobs/nop-2 --oracle-job-dir private/jobs/oracle-1 \
+  --oracle-job-dir private/jobs/oracle-2 --negative-job-dir private/jobs/negative-1 \
+  --harbor-version "$(harbor --version)"
+python $S finalize --task-dir <dir> --status candidate --human-reviewed
+python $S check --task-dir <dir>
 ```
 
-Then verify digests and required artifacts:
+## Available Scripts
 
-```bash
-python <skill_dir>/scripts/trace_environment.py check \
-  --task-dir <task-dir>
-```
+Invoke the helper as `python <skill_dir>/scripts/trace_environment.py
+<command>`; there is no `run_script()` wrapper. Every command prints one JSON
+object and exits nonzero on contract errors.
 
-Report the task ID, `candidate` or `no_candidate`, ground-truth availability and
-artifact count, required software and licensing constraints, environment
-status, privacy review status, NOP and Oracle rewards when run, and paths to
-`summary.md` and the generated task. A `valid: true` check proves the recorded
-files are internally consistent; Harbor is the authority for whether the task
-actually runs.
+| Command | Purpose | Key arguments |
+|---|---|---|
+| `init` | Create the private, gitignored task workspace | `--task-id` |
+| `prepare` | Validate, bound, and scrub one canonical ATIF | `--task-dir --atif --source-kind` |
+| `review-privacy` | Record the contextual safe-ATIF review | `--reviewer-kind --note` |
+| `inventory-tool-calls` / `plan-tool-call-access` / `resolve-tool-call-access` / `generate-mock-tool-calls` | Trace-derived tool-call fixtures | `--task-dir [--decisions --reviewer-kind]` |
+| `check-candidate` | Read-only candidate metadata check before construction | `--task-dir` |
+| `validate-task` | Lint the authored task tree with remediation hints | `--task-dir` |
+| `probe` | Diagnostic NOP/Oracle run or adoption; never proof | `--task-dir --arm --results-from` |
+| `record-reproducibility` | Hash the task tree and integrity scan | `--task-dir` |
+| `record-run-inputs` | Bind one future Harbor job to arm and task digest | `--task-dir --arm --job-dir` |
+| `record-validation` | Derive proof from retained Harbor jobs | `--task-dir --*-job-dir --harbor-version [--allow-aggregate-only]` |
+| `record-repair` | Archive superseded proof and record one bounded repair | `--task-dir --reason-code --note` |
+| `finalize` | Write the candidate decision and summary | `--task-dir --status [--human-reviewed]` |
+| `check` | Verify digests, artifacts, proof, and repair ledger | `--task-dir` |
+| `batch-prepare` / `batch-status` | Prepare and report a checked-in manifest | `--manifest [--root]` |
+| `prepare-publication` / `review-publication` / `export` | Digest-bound publication gate and whitelist export | `--task-dir` |
+| `check-runtime` | Read-only Harbor capability preflight | `[--task-dir]` |
+
+## Prerequisites
+
+Python 3.11+ with jsonschema 4.23+ and referencing 0.28.4+ for the helper; the
+sibling `mlflow-to-atif` skill for MLflow sources; the `nemo` CLI for Intake
+sources; an existing Harbor installation plus Docker for probes and proof.
+
+## Limitations
+
+- Text-only evidence; image-only instructions block candidacy.
+- Execution verification with binary rewards only: no model judge, rubric, or graded scoring.
+- One bounded trace per task; no merging, deduplication, or corpus triage.
+- Cannot prove unrecorded side effects, subjective outcomes, unavailable software, or private and live external state.
+- Probes and proof run on the local Harbor+Docker runtime; no remote, cluster, or GPU execution route.
+- Reconstructed-state tasks generalize the recorded capability; they never recover unrecorded state.
+
+## Troubleshooting
+
+- On a contract failure, preserve the artifacts and record the exact failed
+  command with `finalize --did-not-work`; never bypass privacy, isolation, or
+  proof gates.
+- `validate-task` exits 1: fix each listed issue; hints name the contract. Rerun after every edit.
+- `probe` reports `not_run`: Harbor is missing; probing is optional, proof is not.
+- `record-validation` fails with `missing_check_evidence`: apply
+  `references/check-grammar.md` and rerun the jobs (`--allow-aggregate-only` only for historical proof).
+- `record-validation` fails on NOP PASS rows: the untouched environment passes a scored check; tighten it and repair.
+- `check` reports stale or missing proof after a repair: re-record `record-reproducibility` and re-prove.

@@ -1,28 +1,27 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Reusable agent-eval metrics and the typed view over trial measurements.
+"""Reusable metrics for scoring agent-evaluation trials.
 
-Two complementary pieces, both keyed off ``AgentEvalTrial``:
+The metrics are keyed off ``AgentEvalTrial``:
 
 * Metrics (scorers) — ``AgentPhaseSuccessMetric`` reads the agent-phase outcome
   stamped on trial metadata; ``EvidencePresenceMetric`` is a genuine
   *metric-over-evidence* that scores by inspecting ``candidate.evidence`` (a
   filesystem evidence handle) rather than trusting a verifier's stamped reward.
-* ``TrialMeasurements`` — the single documented place that names the loose
-  metadata keys gating/reporting read, applying the fallbacks (``duration_ms`` →
-  ``runtime_sec``, ``passed`` → ``reward``).
+
+``TrialMeasurements`` is re-exported from this module for import compatibility;
+its durable model is owned by :mod:`nemo_evaluator_sdk.agent_eval.trials`.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import math
 from collections.abc import Mapping
 from typing import Any, ClassVar, Literal
 
-from nemo_evaluator_sdk.agent_eval.trials import EVIDENCE_FINAL_STATE
+from nemo_evaluator_sdk.agent_eval.trials import TrialMeasurements  # noqa: F401 - compatibility re-export
 from nemo_evaluator_sdk.enums import MetricType
 from nemo_evaluator_sdk.metrics.protocol import (
     CandidateOutput,
@@ -33,6 +32,7 @@ from nemo_evaluator_sdk.metrics.protocol import (
 )
 from nemo_evaluator_sdk.values.atif import Trajectory
 from nemo_evaluator_sdk.values.evidence import (
+    EVIDENCE_FINAL_STATE,
     EVIDENCE_FORMAT_ATIF,
     EVIDENCE_FORMAT_OTLP,
     EVIDENCE_TRACE,
@@ -41,18 +41,9 @@ from nemo_evaluator_sdk.values.evidence import (
 from nemo_evaluator_sdk.values.metrics import MetricBase
 from nemo_evaluator_sdk.values.otlp import span_text_strings
 from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import Field, ValidationError
 
 logger = logging.getLogger(__name__)
-
-# Token-measurement keys carried on trial metadata (and in result.json["metrics"]).
-TOKEN_KEYS: tuple[str, ...] = (
-    "prompt_tokens",
-    "completion_tokens",
-    "total_tokens",
-    "cache_creation_tokens",
-    "cache_read_tokens",
-)
 
 
 class AgentPhaseSuccessMetric(MetricBase):
@@ -193,6 +184,123 @@ class SkillUsedMetric(MetricBase):
         return False
 
 
+class ToolCallCountMetric(MetricBase):
+    """Count how often the agent called one tool, and whether that matches an expected count.
+
+    * ``tool_call_count`` — the number of trajectory tool calls whose ``function_name`` equals
+      ``tool_name`` exactly. Give the name as the harness records it: Hermes exposes an MCP tool as
+      ``mcp__<server>__<tool>``, so a bare ``<tool>`` would not match its calls.
+    * ``tool_call_count_matches`` — ``True`` when that count equals ``expected_calls``.
+
+    Reads the ATIF view of the trace. Without a readable trajectory the count is ``0``, so an agent
+    that never produced a trace scores exactly like one that never called the tool: the match is
+    ``False`` unless ``expected_calls`` is itself ``0``.
+    """
+
+    type: Literal[MetricType.TOOL_CALL_COUNT] = MetricType.TOOL_CALL_COUNT
+    tool_name: str = Field(
+        description="Tool to count, exactly as the harness records it (Hermes: ``mcp__<server>__<tool>``)."
+    )
+    expected_calls: int = Field(default=1, ge=0, description="Call count that scores ``tool_call_count_matches`` True.")
+    trace_evidence: str = Field(default=EVIDENCE_TRACE, description="Trace evidence to scan for tool calls.")
+
+    OUTPUT_COUNT: ClassVar[str] = "tool_call_count"
+    OUTPUT_MATCHES: ClassVar[str] = "tool_call_count_matches"
+
+    def output_spec(self) -> list[MetricOutputSpec]:
+        return [
+            MetricOutputSpec.discrete_score(self.OUTPUT_COUNT),
+            MetricOutputSpec.boolean(self.OUTPUT_MATCHES),
+        ]
+
+    async def compute_scores(self, input: MetricInput) -> MetricResult:
+        count = await self._count_calls(input.candidate)
+        return MetricResult(
+            outputs=[
+                MetricOutput(name=self.OUTPUT_COUNT, value=count),
+                MetricOutput(name=self.OUTPUT_MATCHES, value=count == self.expected_calls),
+            ]
+        )
+
+    async def _count_calls(self, candidate: CandidateOutput) -> int:
+        trajectory = await _read_atif(candidate, self.trace_evidence, metric=type(self).__name__)
+        if trajectory is None:
+            return 0
+        return sum(
+            1 for step in trajectory.steps for call in step.tool_calls or [] if call.function_name == self.tool_name
+        )
+
+
+class ToolArgumentMatchesInputMetric(MetricBase):
+    """Emit ``tool_argument_matches_input``: the agent passed a task input to a tool unchanged.
+
+    Scores the agent's tool call, not the tool: for every trajectory call to ``tool_name`` (matched
+    like :class:`ToolCallCountMetric`), the ``argument`` value must equal the task input under
+    ``input_key`` after ``normalize``. ``True`` only when the tool was called at least once and every
+    call matched; ``False`` when it was never called, the argument is missing or not a string, the
+    task has no such input, or no readable ATIF trajectory exists.
+
+    Reads the task input from the metric row's ``inputs`` (agent-eval passes ``task.inputs`` through
+    verbatim there), so it works against any server, real or mock, in either execution mode.
+    """
+
+    type: Literal[MetricType.TOOL_ARGUMENT_MATCHES_INPUT] = MetricType.TOOL_ARGUMENT_MATCHES_INPUT
+    tool_name: str = Field(
+        description="Tool whose calls are checked, exactly as the harness records it (Hermes: ``mcp__<server>__<tool>``)."
+    )
+    argument: str = Field(default="text", description="Tool-call argument that must carry the task input.")
+    input_key: str = Field(default="instruction", description="Task input the argument must equal.")
+    normalize: Literal["exact", "whitespace"] = Field(
+        default="whitespace",
+        description="``whitespace`` collapses runs of whitespace and trims before comparing; ``exact`` does not.",
+    )
+    trace_evidence: str = Field(default=EVIDENCE_TRACE, description="Trace evidence to scan for tool calls.")
+
+    OUTPUT_MATCHES: ClassVar[str] = "tool_argument_matches_input"
+
+    def output_spec(self) -> list[MetricOutputSpec]:
+        return [MetricOutputSpec.boolean(self.OUTPUT_MATCHES)]
+
+    async def compute_scores(self, input: MetricInput) -> MetricResult:
+        inputs = input.row.data.get("inputs")
+        expected = inputs.get(self.input_key) if isinstance(inputs, Mapping) else None
+        matches = isinstance(expected, str) and await self._every_call_matches(input.candidate, expected)
+        return MetricResult(outputs=[MetricOutput(name=self.OUTPUT_MATCHES, value=matches)])
+
+    async def _every_call_matches(self, candidate: CandidateOutput, expected: str) -> bool:
+        trajectory = await _read_atif(candidate, self.trace_evidence, metric=type(self).__name__)
+        if trajectory is None:
+            return False
+        calls = [
+            call for step in trajectory.steps for call in step.tool_calls or [] if call.function_name == self.tool_name
+        ]
+        if not calls:
+            return False
+        wanted = self._normalize(expected)
+        for call in calls:
+            value = call.arguments.get(self.argument) if isinstance(call.arguments, Mapping) else None
+            if not isinstance(value, str) or self._normalize(value) != wanted:
+                return False
+        return True
+
+    def _normalize(self, text: str) -> str:
+        return " ".join(text.split()) if self.normalize == "whitespace" else text
+
+
+async def _read_atif(candidate: CandidateOutput, trace_evidence: str, *, metric: str) -> Trajectory | None:
+    """The ATIF trajectory behind ``trace_evidence``, or None when absent or unreadable (logged)."""
+    evidence = candidate.evidence
+    if evidence is None or evidence.get(trace_evidence) is None:
+        return None
+    try:
+        return await (await evidence.trace(trace_evidence, format=EVIDENCE_FORMAT_ATIF)).trace()
+    except KeyError:
+        return None
+    except (ValueError, ValidationError, OSError) as exc:
+        logger.warning("%s could not read ATIF trace %r (%s)", metric, trace_evidence, exc)
+        return None
+
+
 async def _otlp_used(evidence: CandidateEvidence, name: str, locations: list[str]) -> bool:
     """Whether the OTLP view of a trace references any staged skill location."""
     resource_spans = await (await evidence.trace(name, format=EVIDENCE_FORMAT_OTLP)).resource_spans()
@@ -208,62 +316,6 @@ async def _atif_used(evidence: CandidateEvidence, name: str, locations: list[str
 def _otlp_references(resource_spans: list[ResourceSpans], needle: str) -> bool:
     """Whether any string attribute on the trace's spans or events contains ``needle``."""
     return any(needle in blob for blob in span_text_strings(resource_spans))
-
-
-class TrialMeasurements(BaseModel):
-    """Numeric measurements projected from trial metadata.
-
-    Reporting/gating consume it via :meth:`from_metadata`; producers keep writing
-    the same keys onto ``AgentEvalTrial.metadata``.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    prompt_tokens: int | None = None
-    completion_tokens: int | None = None
-    total_tokens: int | None = None
-    cache_creation_tokens: int | None = None
-    cache_read_tokens: int | None = None
-    runtime_sec: float | None = None
-    cost_usd: float | None = Field(default=None, allow_inf_nan=False)
-    reward: float | None = None
-    passed: bool | None = None
-
-    @field_validator("cost_usd", mode="before")
-    @classmethod
-    def _reject_boolean_cost(cls, value: Any) -> Any:
-        """Refuse a ``bool`` cost, which coercion would otherwise hide.
-
-        ``bool`` is an ``int`` subclass, so ``True`` would validate as a cost of 1.0. Every other
-        unusable value is already refused: ``allow_inf_nan=False`` covers NaN and the infinities
-        however they were spelled, and float coercion covers an int too large to represent.
-        """
-        if isinstance(value, bool):
-            raise ValueError("cost_usd must be a number, not a bool")
-        return value
-
-    @classmethod
-    def from_metadata(cls, metadata: Mapping[str, Any] | None) -> TrialMeasurements:
-        """Project loose trial metadata onto the typed contract.
-
-        Applies the historical fallbacks so callers don't re-implement them:
-        ``runtime_sec`` falls back to ``duration_ms / 1000``; ``reward`` falls
-        back to ``1.0``/``0.0`` derived from ``passed`` when no explicit reward
-        is recorded.
-        """
-        metadata = metadata or {}
-
-        tokens = {key: _as_int(metadata.get(key)) for key in TOKEN_KEYS}
-        passed = metadata.get("passed")
-        passed = bool(passed) if isinstance(passed, bool) else None
-
-        return cls(
-            **tokens,
-            runtime_sec=_runtime_sec(metadata),
-            cost_usd=_as_float(metadata.get("cost_usd")),
-            reward=_reward(metadata, passed),
-            passed=passed,
-        )
 
 
 def _trajectory_references(trajectory: Trajectory, needle: str) -> bool:
@@ -284,45 +336,3 @@ def _trajectory_references(trajectory: Trajectory, needle: str) -> bool:
                 if result.content is not None and needle in json.dumps(result.content, default=str):
                     return True
     return False
-
-
-def _as_int(value: Any) -> int | None:
-    # bool is an int subclass; never treat True/False as a token count.
-    if isinstance(value, bool):
-        return None
-    return value if isinstance(value, int) else None
-
-
-def _as_float(value: Any) -> float | None:
-    # bool is an int subclass; never treat True/False as a measurement. NaN, the infinities, and
-    # integers too large to represent are rejected too: none can be serialised onto the wire, so
-    # recording one would fail the publish of an otherwise good trial.
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return None
-    try:
-        number = float(value)
-    except OverflowError:
-        return None
-    return number if math.isfinite(number) else None
-
-
-def _runtime_sec(metadata: Mapping[str, Any]) -> float | None:
-    runtime_sec = metadata.get("runtime_sec")
-    if isinstance(runtime_sec, int | float) and not isinstance(runtime_sec, bool):
-        return float(runtime_sec)
-    duration_ms = metadata.get("duration_ms")
-    if isinstance(duration_ms, int | float) and not isinstance(duration_ms, bool):
-        return float(duration_ms) / 1000.0
-    return None
-
-
-def _reward(metadata: Mapping[str, Any], passed: bool | None) -> float | None:
-    reward = metadata.get("reward")
-    if reward is not None:
-        try:
-            return float(reward)
-        except (TypeError, ValueError):
-            return None
-    if passed is not None:
-        return 1.0 if passed else 0.0
-    return None

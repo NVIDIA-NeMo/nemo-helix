@@ -9,33 +9,25 @@ imports, running a whole Harbor local dataset is two lines — build a
 runs Harbor's ``JobConfig`` and scores the results; the caller never imports
 ``harbor`` or assembles a job.
 
-Two modes, both over the bundled ``hello_world_dataset`` scored with the
-deterministic **oracle** agent, so no LLM/API key is needed:
-
-* ``--mode native`` — print the SDK summary.
-* ``--mode optimizer`` — collapse the result into NeMo Optimizer's legacy
-  ``{reward, reward_details, exceptions}`` payload.
-
-Running either mode requires ``harbor`` installed and a working Docker daemon.
+It runs the bundled ``hello_world_dataset`` with Harbor's deterministic **oracle**
+agent, so no LLM/API key is needed. Requires ``harbor`` installed and a working
+Docker daemon.
 
 Run it as a module from the repository root::
 
-    uv run python -m packages.nemo_evaluator_sdk.examples.harbor.run_harbor_example --mode native
-    uv run python -m packages.nemo_evaluator_sdk.examples.harbor.run_harbor_example --mode native --n-attempts 2
-    uv run python -m packages.nemo_evaluator_sdk.examples.harbor.run_harbor_example --mode optimizer
+    uv run python -m packages.nemo_evaluator_sdk.examples.harbor.run_harbor_example
+    uv run python -m packages.nemo_evaluator_sdk.examples.harbor.run_harbor_example --n-attempts 2
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 from pathlib import Path
 
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
     HarborRuntimeConfig,
-    reward_payload_from_result,
     run_harbor_eval,
 )
 
@@ -46,7 +38,7 @@ logger = logging.getLogger(__name__)
 HELLO_WORLD_DATASET_DIR = Path(__file__).resolve().parent / "hello_world_dataset"
 
 
-async def _main(mode: str, jobs_dir: Path, *, n_attempts: int, job_name: str | None) -> None:
+async def _main(jobs_dir: Path, *, n_attempts: int, job_name: str | None) -> None:
     # The entire caller-side plumbing: a config and one call.
     # n_attempts>1 runs the same verifier criteria per attempt so summary can emit pass@k.
     config = HarborRuntimeConfig(
@@ -59,14 +51,9 @@ async def _main(mode: str, jobs_dir: Path, *, n_attempts: int, job_name: str | N
     )
     result = await run_harbor_eval(config, HELLO_WORLD_DATASET_DIR)
 
-    if mode == "optimizer":
-        print("Legacy optimizer reward payload:")
-        print(json.dumps(reward_payload_from_result(result), indent=2, sort_keys=True))
-        return
-
     print(f"run_id: {result.run_id}  tasks: {result.summary.task_count}  trials: {result.summary.trial_count}")
     for aggregate in result.summary.scores.scores:
-        print(f"  {aggregate.name}: mean={aggregate.mean}")
+        print(f"  {aggregate.name}: {aggregate.headline_value}")
     for score in result.scores:
         reward = score.outputs[0].value if score.outputs else None
         print(f"  {score.task_id}: reward={reward} status={score.status.value}")
@@ -79,11 +66,10 @@ if __name__ == "__main__":
     if __package__ in {None, ""}:
         raise SystemExit(
             "Run this example as a module from the repository root:\n"
-            "  uv run python -m packages.nemo_evaluator_sdk.examples.harbor.run_harbor_example --mode native"
+            "  uv run python -m packages.nemo_evaluator_sdk.examples.harbor.run_harbor_example"
         )
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=["native", "optimizer"], default="native")
     parser.add_argument(
         "--jobs-dir",
         type=Path,
@@ -102,4 +88,4 @@ if __name__ == "__main__":
         help="Pin a stable Harbor job name to reuse the job-dir cache across debug runs.",
     )
     args = parser.parse_args()
-    asyncio.run(_main(args.mode, args.jobs_dir, n_attempts=args.n_attempts, job_name=args.job_name))
+    asyncio.run(_main(args.jobs_dir, n_attempts=args.n_attempts, job_name=args.job_name))

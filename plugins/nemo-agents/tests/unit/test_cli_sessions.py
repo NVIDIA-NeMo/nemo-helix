@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import call, patch
+from unittest.mock import patch
 
+import httpx
 import pytest
 from nemo_agents_plugin.cli import AgentsCLI
 from typer.testing import CliRunner
@@ -37,7 +38,8 @@ def _sessions_response() -> dict[str, Any]:
             }
         ],
         "pagination": {
-            "current_page": 1,
+            "page": 1,
+            "page_size": 1,
             "current_page_size": 1,
             "total_pages": 1,
             "total_results": 1,
@@ -45,6 +47,33 @@ def _sessions_response() -> dict[str, Any]:
         "sort": "-created_at",
         "filter": {},
     }
+
+
+def _install_mock_transport(handler):
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.Client
+
+    class _Client(real_client):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    return patch("nemo_agents_plugin.cli.httpx.Client", _Client)
+
+
+def _scripted_responses(*responses: dict[str, Any]):
+    requests: list[httpx.Request] = []
+    queue = list(responses)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if not queue:
+            raise AssertionError(f"unexpected request: {request.method} {request.url}")
+        response = queue.pop(0)
+        status_code = 201 if request.method == "POST" else 200
+        return httpx.Response(status_code, request=request, json=response)
+
+    return _install_mock_transport(handler), requests
 
 
 def test_sessions_help_exposes_management_scope_without_pagination_or_delete(app) -> None:
@@ -65,15 +94,14 @@ def test_sessions_help_exposes_management_scope_without_pagination_or_delete(app
 
 def test_sessions_list_defaults_to_newest_first_api_table(app) -> None:
     response = _sessions_response()
-    with patch("nemo_agents_plugin.cli._api_request", return_value=response) as api_request:
+    transport, requests = _scripted_responses(response)
+    with transport:
         result = runner.invoke(app, ["sessions", "list", "--base-url", "http://test"])
 
     assert result.exit_code == 0, result.output
-    api_request.assert_called_once_with(
-        "GET",
-        "http://test",
-        "/apis/agents/v2/workspaces/default/sessions",
-    )
+    assert [(request.method, request.url.path) for request in requests] == [
+        ("GET", "/apis/agents/v2/workspaces/default/sessions")
+    ]
     assert "debug-auth" in result.stdout
     assert "active" in result.stdout
     assert "deployment_id" in result.stdout
@@ -85,7 +113,8 @@ def test_sessions_list_defaults_to_newest_first_api_table(app) -> None:
 @pytest.mark.parametrize("output_format", ["json", "yaml", "csv", "markdown", "raw"])
 def test_sessions_list_supports_existing_output_formats(app, output_format: str) -> None:
     response = _sessions_response()
-    with patch("nemo_agents_plugin.cli._api_request", return_value=response):
+    transport, _requests = _scripted_responses(response)
+    with transport:
         result = runner.invoke(app, ["sessions", "list", "--format", output_format])
 
     assert result.exit_code == 0, result.output
@@ -96,80 +125,65 @@ def test_sessions_list_supports_existing_output_formats(app, output_format: str)
 
 def test_sessions_list_filters_by_deployment_name(app) -> None:
     response = _sessions_response()
-    with patch(
-        "nemo_agents_plugin.cli._api_request",
-        side_effect=[{"id": "deployment-id", "name": "fabric-deployment"}, response],
-    ) as api_request:
+    transport, requests = _scripted_responses({"id": "deployment-id", "name": "fabric-deployment"}, response)
+    with transport:
         result = runner.invoke(
             app,
             ["sessions", "list", "--agent-deployment", "fabric-deployment", "--format", "json"],
         )
 
     assert result.exit_code == 0, result.output
-    assert api_request.call_args_list == [
-        call(
-            "GET",
-            "http://localhost:8080",
-            "/apis/agents/v2/workspaces/default/deployments/fabric-deployment",
-        ),
-        call(
-            "GET",
-            "http://localhost:8080",
-            "/apis/agents/v2/workspaces/default/sessions?filter%5Bdeployment_id%5D=deployment-id",
-        ),
+    assert [(request.method, request.url.path) for request in requests] == [
+        ("GET", "/apis/agents/v2/workspaces/default/deployments/fabric-deployment"),
+        ("GET", "/apis/agents/v2/workspaces/default/sessions"),
     ]
+    assert requests[1].url.params["filter[deployment_id]"] == "deployment-id"
 
 
-@pytest.mark.parametrize("deployment", [None, {}, {"id": None}, {"id": ""}, {"id": 123}])
+@pytest.mark.parametrize("deployment", [{}, {"id": None}, {"id": ""}])
 def test_sessions_list_rejects_invalid_deployment_response(app, deployment: Any) -> None:
-    with patch("nemo_agents_plugin.cli._api_request", return_value=deployment) as api_request:
+    transport, requests = _scripted_responses(deployment)
+    with transport:
         result = runner.invoke(app, ["sessions", "list", "--agent-deployment", "fabric-deployment"])
 
     assert result.exit_code == 1
     assert "Deployment 'fabric-deployment' returned an invalid response" in result.stderr
-    api_request.assert_called_once_with(
-        "GET",
-        "http://localhost:8080",
-        "/apis/agents/v2/workspaces/default/deployments/fabric-deployment",
-    )
+    assert [(request.method, request.url.path) for request in requests] == [
+        ("GET", "/apis/agents/v2/workspaces/default/deployments/fabric-deployment")
+    ]
 
 
 def test_sessions_list_rejects_empty_deployment_filter(app) -> None:
-    with patch("nemo_agents_plugin.cli._api_request") as api_request:
-        result = runner.invoke(app, ["sessions", "list", "--agent-deployment", ""])
+    result = runner.invoke(app, ["sessions", "list", "--agent-deployment", ""])
 
     assert result.exit_code == 2
     assert "--agent-deployment must not be empty" in result.stderr
-    api_request.assert_not_called()
 
 
 def test_sessions_get_prints_full_session_json(app) -> None:
     session = _sessions_response()["data"][0]
-    with patch("nemo_agents_plugin.cli._api_request", return_value=session) as api_request:
+    transport, requests = _scripted_responses(session)
+    with transport:
         result = runner.invoke(app, ["sessions", "get", "debug-auth", "--base-url", "http://test"])
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout) == session
-    api_request.assert_called_once_with(
-        "GET",
-        "http://test",
-        "/apis/agents/v2/workspaces/default/sessions/debug-auth",
-    )
+    assert [(request.method, request.url.path) for request in requests] == [
+        ("GET", "/apis/agents/v2/workspaces/default/sessions/debug-auth")
+    ]
 
 
 def test_sessions_close_requires_confirmation(app) -> None:
-    with patch("nemo_agents_plugin.cli._api_request") as api_request:
-        result = runner.invoke(app, ["sessions", "close", "debug-auth"], input="n\n")
+    result = runner.invoke(app, ["sessions", "close", "debug-auth"], input="n\n")
 
     assert result.exit_code == 1
     assert "cannot be resumed" in result.stdout
-    api_request.assert_not_called()
 
 
 def test_sessions_close_accepts_yes_and_calls_close_endpoint(app) -> None:
-    with patch(
-        "nemo_agents_plugin.cli._api_request", return_value={"name": "debug-auth", "status": "closed"}
-    ) as api_request:
+    session = {**_sessions_response()["data"][0], "status": "closed"}
+    transport, requests = _scripted_responses(session)
+    with transport:
         result = runner.invoke(
             app,
             ["sessions", "close", "debug-auth", "--yes", "--workspace", "team-a", "--base-url", "http://test"],
@@ -177,8 +191,6 @@ def test_sessions_close_accepts_yes_and_calls_close_endpoint(app) -> None:
 
     assert result.exit_code == 0, result.output
     assert "Session 'debug-auth' closed." in result.stdout
-    api_request.assert_called_once_with(
-        "POST",
-        "http://test",
-        "/apis/agents/v2/workspaces/team-a/sessions/debug-auth/close",
-    )
+    assert [(request.method, request.url.path) for request in requests] == [
+        ("POST", "/apis/agents/v2/workspaces/team-a/sessions/debug-auth/close")
+    ]

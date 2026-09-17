@@ -24,11 +24,7 @@ export const CustomizationJobListRoute: FC = () => {
   );
 
   useBreadcrumbs({
-    items: [
-      {
-        slotLabel: 'Custom Models',
-      },
-    ],
+    items: [{ slotLabel: 'Custom Models' }],
   });
 
   return (
@@ -49,6 +45,7 @@ export const CustomizationJobListRoute: FC = () => {
           }}
         />
       </Stack>
+
       <ModelPanel
         open={!!selectedModel}
         model={selectedModel ?? undefined}
@@ -71,9 +68,7 @@ export const CustomizationJobListRoute: FC = () => {
                   className="flex-1"
                   kind="secondary"
                   size="small"
-                  onClick={() => {
-                    navigate(getIntakeTracesRoute(workspace));
-                  }}
+                  onClick={() => navigate(getIntakeTracesRoute(workspace))}
                 >
                   View Intake Traces
                 </Button>
@@ -82,11 +77,7 @@ export const CustomizationJobListRoute: FC = () => {
                 className="flex-1"
                 kind="secondary"
                 size="small"
-                onClick={() => {
-                  // EvaluationModelSelect treats `URN::adapter` as a single
-                  // form-field value, so when an adapter is selected we append
-                  navigate(getEvaluationResultsRoute(workspace));
-                }}
+                onClick={() => navigate(getEvaluationResultsRoute(workspace))}
               >
                 Evaluate this Model
               </Button>

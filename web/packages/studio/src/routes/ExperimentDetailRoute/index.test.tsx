@@ -1,8 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getInsightsGetInsightQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
+import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
+import { getGetExperimentQueryKey } from '@nemo/sdk/generated/platform/experiments';
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { ROUTES } from '@studio/constants/routes';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { ExperimentDetailRoute } from '@studio/routes/ExperimentDetailRoute';
 import { renderRoute, screen } from '@studio/tests/util/render';
@@ -30,10 +34,10 @@ const group = {
 const mockGroup = (overrides?: Partial<ExperimentResponse>) => {
   const insightRequest = vi.fn();
   server.use(
-    http.get('*/apis/intake/v2/workspaces/:workspace/experiments/:name', () =>
+    http.get(mockApiUrl(getGetExperimentQueryKey, ':workspace', ':name'), () =>
       HttpResponse.json({ ...group, ...overrides })
     ),
-    http.get('*/apis/intake/v2/workspaces/:workspace/evaluations', () =>
+    http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), () =>
       HttpResponse.json({
         data: [],
         pagination: {
@@ -45,7 +49,7 @@ const mockGroup = (overrides?: Partial<ExperimentResponse>) => {
         },
       })
     ),
-    http.get('*/apis/insights/v2/workspaces/:workspace/insights/:insightId', () => {
+    http.get(mockApiUrl(getInsightsGetInsightQueryKey, ':workspace', ':insightId'), () => {
       insightRequest();
       return HttpResponse.json({});
     })

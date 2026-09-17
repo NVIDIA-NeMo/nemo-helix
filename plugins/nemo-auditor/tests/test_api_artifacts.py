@@ -202,13 +202,19 @@ class TestDownloadAuditArtifacts:
 
         with (
             patch.object(artifacts_module, "client_from_platform", return_value=mock_jobs),
-            patch.object(artifacts_module, "async_result_manager_factory", return_value=mock_rm),
+            patch.object(artifacts_module, "async_result_manager_factory", return_value=mock_rm) as factory,
         ):
             client.get("/apis/auditor/v2/workspaces/prod/jobs/audit/my-job/results/artifacts/download")
 
         first_call = mock_jobs.get_job_result.await_args_list[0]
         assert first_call.kwargs["workspace"] == "prod"
         assert first_call.kwargs["job"] == "my-job"
+        factory.assert_called_once_with(
+            job_name="my-job",
+            workspace="prod",
+            files_client=mock_jobs,
+            jobs_client=mock_jobs,
+        )
 
 
 class TestArtifactsRouteWiring:

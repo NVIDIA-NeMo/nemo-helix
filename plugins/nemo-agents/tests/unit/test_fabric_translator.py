@@ -13,6 +13,8 @@ import pytest
 from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
 from nemo_agents_plugin.fabric.gateway_credentials import PLATFORM_IGW_API_KEY_ENV, PLATFORM_IGW_API_KEY_PLACEHOLDER
 from nemo_agents_plugin.fabric.translator import FabricTranslationError, translate_agent_config
+from nemo_agents_plugin.telemetry.intake_export import configure_intake_atif_export
+from nemo_fabric.models import RelayHttpStorageConfig
 
 
 def _example_yaml_config() -> dict[str, Any]:
@@ -592,3 +594,38 @@ class TestTranslateAgentConfig:
         assert endpoint.resource_attributes == {"deployment.environment": "test"}
         assert endpoint.service_name == "example-agent"
         assert opentelemetry.endpoints[1].service_name == "shared-agent-service"
+
+
+def test_auto_wired_intake_telemetry_translates_to_a_relay_http_storage() -> None:
+    """The wired dict has to be a shape Fabric accepts, not merely a plausible one.
+
+    The unit tests around ``configure_intake_atif_export`` assert its output
+    structurally; this puts that output through the real translator so a field
+    Relay does not recognise fails here rather than inside a running job.
+    """
+    payload = _example_yaml_config()
+    # The shared fixture opts out; this is about a config that does not.
+    payload.pop("telemetry")
+    configure_intake_atif_export(
+        payload,
+        workspace="team-a",
+        base_url="http://nemo-platform-api:8080",
+        header_env={"X-NMP-Principal-Id": "NMP_AGENT_TELEMETRY_HEADER_X_NMP_PRINCIPAL_ID"},
+    )
+
+    fabric_config = translate_agent_config(AgentConfig.model_validate(payload))
+
+    relay = fabric_config.relay
+    assert relay is not None
+    observability = relay.observability
+    assert observability is not None
+    atif = observability.atif
+    assert atif is not None
+    storage = atif.storage[0]
+    assert isinstance(storage, RelayHttpStorageConfig)
+    assert storage.endpoint == "http://nemo-platform-api:8080/apis/intake/v2/workspaces/team-a/ingest/atif"
+    assert storage.header_env == {"X-NMP-Principal-Id": "NMP_AGENT_TELEMETRY_HEADER_X_NMP_PRINCIPAL_ID"}
+    assert not storage.headers, "credentials must reach Relay through the environment, not the config"
+    # Relay identifies the trajectory by these; both come from the agent config.
+    assert atif.agent_name == payload["name"]
+    assert atif.model_name

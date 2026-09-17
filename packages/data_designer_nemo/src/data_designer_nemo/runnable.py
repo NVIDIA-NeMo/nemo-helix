@@ -21,13 +21,13 @@ run engine-level checks of its own.
 from __future__ import annotations
 
 import data_designer.config as dd
-from data_designer_nemo.context import DataDesignerContext
+from data_designer_nemo.context import DataDesignerValidationContext
 from data_designer_nemo.errors import NDDError, NDDInternalError, NDDInvalidConfigError
 from data_designer_nemo.model_configs import get_model_configs
 
 
 async def resolve_runnable_config(
-    dd_ctx: DataDesignerContext,
+    dd_ctx: DataDesignerValidationContext,
     config: dd.DataDesignerConfig,
 ) -> tuple[list[NDDError], list[dd.ModelConfig], list[dd.ModelProvider]]:
     """Run the producer pass against ``config`` and return ``(errors, model_configs, model_providers)``.

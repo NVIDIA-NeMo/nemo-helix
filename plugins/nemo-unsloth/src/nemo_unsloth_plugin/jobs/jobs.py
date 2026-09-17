@@ -14,7 +14,7 @@ because the compiler call convention and profile resolution are backend-specific
 from __future__ import annotations
 
 import asyncio
-from typing import ClassVar, cast
+from typing import ClassVar
 
 from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
@@ -22,25 +22,35 @@ from nemo_platform_plugin.jobs.docker import validate_gpu_available_for_docker
 from nemo_unsloth_plugin.schema import UnslothJobInput
 from nemo_unsloth_plugin.transform import transform_input_to_output
 from nmp.customization_common.contributor.jobs import BaseSubmitJob, require_container_runtime
+from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
 from nmp.unsloth.compile import platform_job_config_compiler
 from nmp.unsloth.config import config as unsloth_config
 from nmp.unsloth.schemas import UnslothJobOutput
 from pydantic import BaseModel
 
 
-class UnslothJob(BaseSubmitJob):
+class UnslothJob(BaseSubmitJob[UnslothJobInput, UnslothJobOutput]):
     """GPU Unsloth fine-tuning job under the customization router (submit-only)."""
 
     name: ClassVar[str] = "unsloth.jobs"
     description: ClassVar[str] = "Unsloth SFT (LoRA / full / merged) training jobs on the platform GPU cluster."
     job_collection_path: ClassVar[str | None] = "/unsloth/jobs"
-    input_spec_schema: ClassVar[type[BaseModel] | None] = UnslothJobInput
-    spec_schema: ClassVar[type[BaseModel] | None] = UnslothJobOutput
+    input_spec_schema: ClassVar[type[UnslothJobInput] | None] = UnslothJobInput
+    spec_schema: ClassVar[type[UnslothJobOutput] | None] = UnslothJobOutput
     runtime_label: ClassVar[str] = "Unsloth"
 
     @classmethod
-    async def _transform(cls, job_input: BaseModel, workspace: str, async_sdk: AsyncNeMoPlatform) -> UnslothJobOutput:
-        return await transform_input_to_output(cast(UnslothJobInput, job_input), workspace, async_sdk)
+    def _job_input_schema(cls) -> type[UnslothJobInput]:
+        return UnslothJobInput
+
+    @classmethod
+    async def _transform(
+        cls,
+        job_input: UnslothJobInput,
+        workspace: str,
+        platform: AsyncCustomizationPlatformClients,
+    ) -> UnslothJobOutput:
+        return await transform_input_to_output(job_input, workspace, platform)
 
     @classmethod
     async def compile(
@@ -49,7 +59,7 @@ class UnslothJob(BaseSubmitJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: object,
+        async_sdk: AsyncNeMoPlatform,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
@@ -69,7 +79,7 @@ class UnslothJob(BaseSubmitJob):
         platform_spec = await platform_job_config_compiler(
             workspace=workspace,
             spec=canonical,
-            sdk=cast(AsyncNeMoPlatform, async_sdk),
+            sdk=async_sdk,
             job_name=job_name,
             profile=execution_profile,
         )

@@ -17,7 +17,7 @@ from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import 
 )
 from nemo_experimentalist_plugin.experimentalist.reporting import RunReporter
 from nemo_insights_plugin.entities import Insight
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.client import AsyncNemoClient
 from nemo_platform_plugin.nooa_model_client import (
     ConfiguredModelClients,
     ConfiguredModelRefs,
@@ -36,7 +36,7 @@ class _EvalAuthorAgent(Protocol):
         train_dataset: Dataset,
         validation_dataset: Dataset,
         *,
-        client: AsyncNeMoPlatform,
+        client: AsyncNemoClient,
     ) -> EvalAuthorResult: ...
 
 

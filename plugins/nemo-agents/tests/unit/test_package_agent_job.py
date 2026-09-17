@@ -191,7 +191,9 @@ class TestRun:
     def test_builds_from_staged_ethos_fileset(self, tmp_path: Path) -> None:
         captured: dict[str, Any] = {}
 
-        async def _stage(*, workspace: str, agent_name: str, agent_config: dict, base_dir: Path, sdk: Any) -> None:
+        async def _stage(
+            *, workspace: str, agent_name: str, agent_config: dict, base_dir: Path, files_client: Any
+        ) -> None:
             captured["workspace"] = workspace
             captured["agent_name"] = agent_name
             (base_dir / "skills").mkdir()

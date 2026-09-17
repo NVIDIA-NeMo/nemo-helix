@@ -13,6 +13,8 @@ from nemo_platform_plugin.auth.access_keys.issuer import (
     AccessKeyOperationNotImplementedError,
 )
 from nemo_platform_plugin.auth.access_keys.types import AccessKeyReversibleStatus
+from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_platform_plugin.workspaces.client import AsyncWorkspacesClient
 from nmp.common.auth import AuthClient, get_auth_client
 from nmp.common.auth.access_keys import (
     ACCESS_KEY_JTI_PATTERN,
@@ -20,6 +22,7 @@ from nmp.common.auth.access_keys import (
 )
 from nmp.common.config import get_auth_config
 from nmp.common.entities import EntityConflictError
+from nmp.common.service.dependencies import get_nemo_client
 from nmp.core.auth.app.access_keys import (
     AccessKeyNotFoundError,
     AccessKeyRegistry,
@@ -89,6 +92,15 @@ _ACCESS_KEY_SUSPENSION_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     409: _ACCESS_KEY_STATE_CONFLICT_ERROR_RESPONSE,
     501: _ACCESS_KEY_NOT_IMPLEMENTED_ERROR_RESPONSE,
 }
+_ACCESS_KEY_ROTATE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    400: {
+        "description": "Scoped Access Key rotation error",
+        "model": schemas.AccessKeyErrorResponse,
+    },
+    404: _ACCESS_KEY_DISABLED_OR_NOT_FOUND_ERROR_RESPONSE,
+    409: _ACCESS_KEY_STATE_CONFLICT_ERROR_RESPONSE,
+    501: _ACCESS_KEY_NOT_IMPLEMENTED_ERROR_RESPONSE,
+}
 
 
 async def _is_platform_admin(auth_client: AuthClient) -> bool:
@@ -105,15 +117,33 @@ async def _is_platform_admin(auth_client: AuthClient) -> bool:
     return auth_client.auth_enabled and await auth_client.has_role("system", "PlatformAdmin")
 
 
+def get_workspaces_client(
+    nemo_client: AsyncNemoClient = Depends(get_nemo_client),
+) -> AsyncWorkspacesClient:
+    return AsyncWorkspacesClient.from_client(nemo_client)
+
+
+def _caller_access_key_scope(auth_client: AuthClient) -> list[str] | None:
+    """The caller's own Scoped Access Key scope restriction, if any."""
+    resolved = auth_client.resolved_bearer_token
+    if resolved is None or resolved.token_kind != "access_key":
+        return None
+    services = sorted({scope.split(":", 1)[0] for scope in resolved.scopes if ":" in scope})
+    return services or None
+
+
 def get_access_key_issuer(
     auth_client: AuthClient = Depends(get_auth_client),
     registry: AccessKeyRegistry = Depends(get_access_key_registry),
+    workspaces_client: AsyncWorkspacesClient = Depends(get_workspaces_client),
 ) -> PersistentAccessKeyIssuer:
     return PersistentAccessKeyIssuer(
         get_auth_config(),
         auth_client.principal.effective_principal,
         registry,
+        workspaces_client,
         admin_override=lambda: _is_platform_admin(auth_client),
+        caller_scope=_caller_access_key_scope(auth_client),
     )
 
 
@@ -242,3 +272,29 @@ async def unsuspend_access_key(
     issuer: PersistentAccessKeyIssuer = Depends(get_access_key_issuer),
 ) -> schemas.AccessKeyStatusChangeResponse | JSONResponse:
     return await _change_suspension_status(jti, issuer.unsuspend_async)
+
+
+@router.post(
+    "/v2/access-keys/{jti}/rotate",
+    response_model=schemas.AccessKeyRotateResponse,
+    responses=_ACCESS_KEY_ROTATE_ERROR_RESPONSES,
+)
+async def rotate_access_key(
+    jti: _AccessKeyJTI,
+    request: schemas.AccessKeyRotateRequest = schemas.AccessKeyRotateRequest(),
+    issuer: PersistentAccessKeyIssuer = Depends(get_access_key_issuer),
+) -> schemas.AccessKeyRotateResponse | JSONResponse:
+    try:
+        return await issuer.rotate_async(jti, grace_period_seconds=request.grace_period_seconds)
+    except AccessKeyFeatureDisabledError:
+        return _disabled_response()
+    except AccessKeyOperationNotImplementedError as exc:
+        raise _not_implemented(exc) from exc
+    except AccessKeyValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except AccessKeyNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except AccessKeyStateConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except EntityConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Concurrent update conflict; retry.") from exc

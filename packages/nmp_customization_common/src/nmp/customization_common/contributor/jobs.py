@@ -11,14 +11,21 @@ call convention, schema validation, profile resolution) and stays per-backend.
 
 from __future__ import annotations
 
-from typing import ClassVar, cast
+from typing import ClassVar, Generic, TypeVar
 
 from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.capabilities import probe_docker
 from nemo_platform_plugin.config import NemoPlatformConfig, Runtime
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nmp.customization_common.service.platform_client import (
+    AsyncCustomizationPlatformClients,
+    async_customization_platform_clients_from_platform,
+)
 from pydantic import BaseModel
+
+JobInputT = TypeVar("JobInputT", bound=BaseModel)
+JobOutputT = TypeVar("JobOutputT", bound=BaseModel)
 
 
 def require_container_runtime(backend_label: str, *, num_nodes: int = 1) -> None:
@@ -86,7 +93,7 @@ def require_distributed_runtime(backend_label: str) -> None:
         )
 
 
-class BaseSubmitJob(NemoJob):
+class BaseSubmitJob(NemoJob, Generic[JobInputT, JobOutputT]):
     """Shared submit-only job scaffold.
 
     Subclasses set the ``NemoJob`` ClassVars (``name``, ``description``,
@@ -99,7 +106,17 @@ class BaseSubmitJob(NemoJob):
     runtime_label: ClassVar[str] = "Training"
 
     @classmethod
-    async def _transform(cls, job_input: BaseModel, workspace: str, async_sdk: AsyncNeMoPlatform) -> BaseModel:
+    def _job_input_schema(cls) -> type[JobInputT]:
+        """Return the concrete submitter-facing schema for this backend."""
+        raise PlatformJobCompilationError(f"{cls.__name__} is missing an input_spec_schema.")
+
+    @classmethod
+    async def _transform(
+        cls,
+        job_input: JobInputT,
+        workspace: str,
+        platform: AsyncCustomizationPlatformClients,
+    ) -> JobOutputT:
         """Validate platform refs and return the canonical output spec. Per backend."""
         raise NotImplementedError
 
@@ -109,13 +126,12 @@ class BaseSubmitJob(NemoJob):
         input_spec: BaseModel,
         workspace: str,
         entity_client: object,
-        async_sdk: object,
+        async_sdk: AsyncNeMoPlatform,
         is_local: bool,
-    ) -> BaseModel:
+    ) -> JobOutputT:
         """Validate platform refs, resolve naming, return the canonical spec."""
         del entity_client, is_local
-        schema = cls.input_spec_schema
-        if schema is None:
-            raise PlatformJobCompilationError(f"{cls.__name__} is missing an input_spec_schema.")
+        schema = cls._job_input_schema()
         job_input = input_spec if isinstance(input_spec, schema) else schema.model_validate(input_spec.model_dump())
-        return await cls._transform(job_input, workspace, cast(AsyncNeMoPlatform, async_sdk))
+        platform = async_customization_platform_clients_from_platform(async_sdk)
+        return await cls._transform(job_input, workspace, platform)

@@ -5,11 +5,11 @@
 
 import logging
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from nemo_platform import AsyncNeMoPlatform
-from nemo_platform._exceptions import ConflictError, NotFoundError
 from nmp.core.models.config import ControllerConfig
 from nmp.core.models.controllers.backends.backends import DeploymentStatusUpdate
 from nmp.core.models.controllers.backends.registry import BackendRegistry
@@ -18,14 +18,47 @@ from nmp.core.models.controllers.deployment_reconciler import ModelDeploymentRec
 from nmp.core.models.controllers.entity_cache import ModelEntityCache
 from nmp.core.models.schemas import ModelDeployment
 
-from .conftest import AsyncPaginator, _ModelResponse, make_async_models_client, make_entity, seed_entity_cache
-
-_AsyncPaginator = AsyncPaginator
+from .conftest import (
+    _ModelResponse,
+    _status_error,
+    make_async_models_client,
+    make_entity,
+    seed_entity_cache,
+)
 
 
 def _entity(workspace, name, model_providers):
     """Model Entity stand-in addressable by the cache."""
     return make_entity(workspace, name, model_providers=model_providers)
+
+
+def _enum_value(value: Enum | str) -> str:
+    return value.value if isinstance(value, Enum) else value
+
+
+def _deployment_status_call(update_status: AsyncMock, index: int = -1) -> dict[str, str | None]:
+    call = update_status.call_args_list[index]
+    body = call.kwargs["body"]
+    query_params = call.kwargs["query_params"]
+    return {
+        "name": call.kwargs["name"],
+        "workspace": call.kwargs["workspace"],
+        "version": query_params.get("version"),
+        "status": _enum_value(body.status),
+        "status_message": body.status_message,
+        "model_provider_id": body.model_provider_id,
+    }
+
+
+def _request_body_call(method: AsyncMock, index: int = -1) -> dict[str, object]:
+    call = method.call_args_list[index]
+    values: dict[str, object] = {}
+    if "workspace" in call.kwargs:
+        values["workspace"] = call.kwargs["workspace"]
+    if "name" in call.kwargs:
+        values["name"] = call.kwargs["name"]
+    values.update(call.kwargs["body"].model_dump(exclude_unset=True, mode="json"))
+    return values
 
 
 @pytest.fixture
@@ -40,9 +73,15 @@ def mock_models_sdk():
 def _patch_entity_cache_client_from_platform(mock_models_sdk):
     """Route ``client_from_platform(sdk, AsyncModelsClient)`` in the entity cache
     back to the mock typed client on ``mock_models_sdk.models_client``."""
-    with patch(
-        "nmp.core.models.controllers.entity_cache.client_from_platform",
-        side_effect=lambda sdk, cls: sdk.models_client,
+    with (
+        patch(
+            "nmp.core.models.controllers.entity_cache.client_from_platform",
+            side_effect=lambda sdk, cls: sdk.models_client,
+        ),
+        patch(
+            "nmp.core.models.controllers.deployment_reconciler.client_from_platform",
+            side_effect=lambda sdk, cls: sdk.models_client,
+        ),
     ):
         yield
 
@@ -127,7 +166,7 @@ async def test_handle_created_deployment_success(reconciler, mock_backend_regist
     mock_backend_registry.get_backend.return_value = mock_backend
 
     # Mock SDK update_status method
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Call the handler with the backend function
     await reconciler._reconcile_individual_deployment(deployment, mock_backend.create_model_deployment, "create")
@@ -135,15 +174,14 @@ async def test_handle_created_deployment_success(reconciler, mock_backend_regist
     # Verify backend was called
     mock_backend.create_model_deployment.assert_called_once_with(deployment)
 
-    # Verify SDK update was called
-    reconciler._models_sdk.inference.deployments.update_status.assert_called_once_with(
-        name="test-deployment",
-        workspace="default",
-        status="PENDING",
-        version="v1",
-        status_message="Deployment created",
-        model_provider_id=None,  # No provider created for PENDING status
-    )
+    assert _deployment_status_call(reconciler._models_client.update_deployment_status) == {
+        "name": "test-deployment",
+        "workspace": "default",
+        "status": "PENDING",
+        "version": "v1",
+        "status_message": "Deployment created",
+        "model_provider_id": None,
+    }
 
 
 @pytest.mark.asyncio
@@ -157,7 +195,7 @@ async def test_handle_created_deployment_backend_failure(reconciler, mock_backen
     mock_backend_registry.get_backend.return_value = mock_backend
 
     # Mock SDK update_status method
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Call the handler - should not raise exception
     await reconciler._reconcile_individual_deployment(deployment, mock_backend.create_model_deployment, "create")
@@ -166,8 +204,8 @@ async def test_handle_created_deployment_backend_failure(reconciler, mock_backen
     mock_backend.create_model_deployment.assert_called_once_with(deployment)
 
     # Verify SDK update was called with ERROR status
-    reconciler._models_sdk.inference.deployments.update_status.assert_called_once()
-    call_kwargs = reconciler._models_sdk.inference.deployments.update_status.call_args.kwargs
+    reconciler._models_client.update_deployment_status.assert_called_once()
+    call_kwargs = _deployment_status_call(reconciler._models_client.update_deployment_status)
     assert call_kwargs["name"] == "test-deployment"
     assert call_kwargs["workspace"] == "default"
     assert call_kwargs["version"] == "v1"
@@ -180,7 +218,7 @@ async def test_reconcile_individual_deployment_monitor_ready_no_message_logs_deb
     """Routine monitor + READY with no status message should log at DEBUG, not INFO."""
     deployment = make_deployment(status="READY")
     status_update = DeploymentStatusUpdate(status="READY", status_message="", host_url=None)
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     with caplog.at_level(logging.DEBUG, logger="nmp.core.models.controllers.deployment_reconciler"):
         await reconciler._reconcile_individual_deployment(
@@ -202,7 +240,7 @@ async def test_reconcile_individual_deployment_monitor_ready_with_message_logs_i
     """Monitor + READY with a status message stays at INFO."""
     deployment = make_deployment(status="READY")
     status_update = DeploymentStatusUpdate(status="READY", status_message="NIM loading", host_url=None)
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     with caplog.at_level(logging.INFO, logger="nmp.core.models.controllers.deployment_reconciler"):
         await reconciler._reconcile_individual_deployment(
@@ -233,15 +271,13 @@ async def test_reconcile_individual_deployment_conflict_is_noop(reconciler, mock
     mock_backend_registry.get_backend.return_value = mock_backend
 
     # Main status update conflicts (deployment was marked DELETING server-side)
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock(
-        side_effect=ConflictError("Conflict", response=MagicMock(), body=None)
-    )
+    reconciler._models_client.update_deployment_status = AsyncMock(side_effect=_status_error(409, "Conflict"))
 
     # Should not raise and should not attempt ERROR update
     await reconciler._reconcile_individual_deployment(deployment, mock_backend.create_model_deployment, "create")
 
-    reconciler._models_sdk.inference.deployments.update_status.assert_called_once()
-    call_kwargs = reconciler._models_sdk.inference.deployments.update_status.call_args.kwargs
+    reconciler._models_client.update_deployment_status.assert_called_once()
+    call_kwargs = _deployment_status_call(reconciler._models_client.update_deployment_status)
     assert call_kwargs["status"] == "PENDING"
 
 
@@ -257,15 +293,13 @@ async def test_reconcile_individual_deployment_error_fallback_conflict_is_noop(
     mock_backend.create_model_deployment = AsyncMock(side_effect=Exception("Backend error"))
     mock_backend_registry.get_backend.return_value = mock_backend
 
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock(
-        side_effect=ConflictError("Conflict", response=MagicMock(), body=None)
-    )
+    reconciler._models_client.update_deployment_status = AsyncMock(side_effect=_status_error(409, "Conflict"))
 
     # Should not raise if fallback ERROR update hits 409 conflict
     await reconciler._reconcile_individual_deployment(deployment, mock_backend.create_model_deployment, "create")
 
-    reconciler._models_sdk.inference.deployments.update_status.assert_called_once()
-    call_kwargs = reconciler._models_sdk.inference.deployments.update_status.call_args.kwargs
+    reconciler._models_client.update_deployment_status.assert_called_once()
+    call_kwargs = _deployment_status_call(reconciler._models_client.update_deployment_status)
     assert call_kwargs["status"] == "ERROR"
 
 
@@ -281,11 +315,11 @@ async def test_reconcile_created_backend_error_persisted(reconciler, mock_backen
         )
     )
     mock_backend_registry.get_backend.return_value = mock_backend
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     await reconciler._reconcile_individual_deployment(deployment, mock_backend.create_model_deployment, "create")
 
-    call_kwargs = reconciler._models_sdk.inference.deployments.update_status.call_args.kwargs
+    call_kwargs = _deployment_status_call(reconciler._models_client.update_deployment_status)
     assert call_kwargs["status"] == "ERROR"
     assert call_kwargs["status_message"] == "Backend create failed for some reason"
 
@@ -325,7 +359,7 @@ async def test_reconcile_deployments_with_created_status(reconciler, mock_backen
     mock_backend_registry.get_backend.return_value = mock_backend
 
     # Mock SDK
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployments (now passing contexts with pre-fetched data)
     await reconciler.reconcile_deployments([created_context, pending_context])
@@ -339,7 +373,7 @@ async def test_reconcile_deployments_with_created_status(reconciler, mock_backen
     mock_backend.get_model_deployment_status.assert_called_once_with(pending_context)
 
     # Verify SDK update was called twice (once for each deployment)
-    assert reconciler._models_sdk.inference.deployments.update_status.call_count == 2
+    assert reconciler._models_client.update_deployment_status.call_count == 2
 
 
 # ============================================================================
@@ -351,10 +385,8 @@ async def test_reconcile_deployments_with_created_status(reconciler, mock_backen
 async def test_ensure_model_provider_creates_when_not_exists(reconciler, make_deployment):
     """Test that ensure_model_provider creates provider when it doesn't exist."""
     # Mock provider doesn't exist (retrieve raises NotFoundError)
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(
-        side_effect=NotFoundError("Not found", response=MagicMock(), body=None)
-    )
-    reconciler._models_sdk.inference.providers.create = AsyncMock()
+    reconciler._models_client.get_provider = AsyncMock(side_effect=_status_error(404, "Not found"))
+    reconciler._models_client.create_provider = AsyncMock()
 
     deployment = make_deployment(workspace="test-ns", project="test-project")
 
@@ -365,21 +397,20 @@ async def test_ensure_model_provider_creates_when_not_exists(reconciler, make_de
     assert model_provider_id == "test-ns/test-deployment"
 
     # Verify retrieve was called to check existence
-    reconciler._models_sdk.inference.providers.retrieve.assert_called_once_with(
+    reconciler._models_client.get_provider.assert_called_once_with(
         name="test-deployment",
         workspace="test-ns",
     )
 
-    # Verify create was called with correct parameters including model_deployment_id and status
-    reconciler._models_sdk.inference.providers.create.assert_called_once_with(
-        workspace="test-ns",
-        name="test-deployment",
-        host_url="http://test-ns/test-deployment",
-        description="Auto-created provider for deployment test-deployment",
-        project="test-project",
-        model_deployment_id="test-ns/test-deployment",
-        status="READY",
-    )
+    assert _request_body_call(reconciler._models_client.create_provider) == {
+        "workspace": "test-ns",
+        "name": "test-deployment",
+        "host_url": "http://test-ns/test-deployment",
+        "description": "Auto-created provider for deployment test-deployment",
+        "project": "test-project",
+        "model_deployment_id": "test-ns/test-deployment",
+        "status": "READY",
+    }
 
 
 @pytest.mark.asyncio
@@ -393,8 +424,8 @@ async def test_ensure_model_provider_handles_name_collision(mock_uuid, reconcile
 
     # Mock provider exists (retrieve succeeds on first call - collision)
     mock_provider = MagicMock()
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(return_value=mock_provider)
-    reconciler._models_sdk.inference.providers.create = AsyncMock()
+    reconciler._models_client.get_provider = AsyncMock(return_value=_ModelResponse(mock_provider))
+    reconciler._models_client.create_provider = AsyncMock()
 
     deployment = make_deployment(workspace="test-ns", project="test-project")
 
@@ -405,18 +436,17 @@ async def test_ensure_model_provider_handles_name_collision(mock_uuid, reconcile
     assert model_provider_id == "test-ns/test-deployment_abcdef12"
 
     # Verify retrieve was called to check existence
-    reconciler._models_sdk.inference.providers.retrieve.assert_called_once()
+    reconciler._models_client.get_provider.assert_called_once()
 
-    # Verify create was called with UUID-suffixed name and status
-    reconciler._models_sdk.inference.providers.create.assert_called_once_with(
-        workspace="test-ns",
-        name="test-deployment_abcdef12",
-        host_url="http://test-ns/test-deployment",
-        description="Auto-created provider for deployment test-deployment",
-        project="test-project",
-        model_deployment_id="test-ns/test-deployment",
-        status="READY",
-    )
+    assert _request_body_call(reconciler._models_client.create_provider) == {
+        "workspace": "test-ns",
+        "name": "test-deployment_abcdef12",
+        "host_url": "http://test-ns/test-deployment",
+        "description": "Auto-created provider for deployment test-deployment",
+        "project": "test-project",
+        "model_deployment_id": "test-ns/test-deployment",
+        "status": "READY",
+    }
 
 
 @pytest.mark.asyncio
@@ -427,9 +457,9 @@ async def test_ensure_model_provider_reuses_existing_when_already_set(reconciler
     mock_provider.host_url = "http://test-ns/test-deployment"
     mock_provider.description = "Existing provider"
     mock_provider.enabled_models = None
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(return_value=mock_provider)
-    reconciler._models_sdk.inference.providers.create = AsyncMock()
-    reconciler._models_sdk.inference.providers.update = AsyncMock()
+    reconciler._models_client.get_provider = AsyncMock(return_value=_ModelResponse(mock_provider))
+    reconciler._models_client.create_provider = AsyncMock()
+    reconciler._models_client.upsert_provider = AsyncMock()
 
     deployment = make_deployment(
         workspace="test-ns", project="test-project", model_provider_id="test-ns/existing-provider"
@@ -442,16 +472,16 @@ async def test_ensure_model_provider_reuses_existing_when_already_set(reconciler
     assert model_provider_id == "test-ns/existing-provider"
 
     # Verify retrieve was called to check the existing provider exists
-    reconciler._models_sdk.inference.providers.retrieve.assert_called_once_with(
+    reconciler._models_client.get_provider.assert_called_once_with(
         name="existing-provider",
         workspace="test-ns",
     )
 
     # Verify create was NOT called since we're reusing existing provider
-    reconciler._models_sdk.inference.providers.create.assert_not_called()
+    reconciler._models_client.create_provider.assert_not_called()
 
     # Verify update was NOT called since host_url matches
-    reconciler._models_sdk.inference.providers.update.assert_not_called()
+    reconciler._models_client.upsert_provider.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -462,9 +492,9 @@ async def test_ensure_model_provider_updates_when_host_url_changes(reconciler, m
     mock_provider.host_url = "http://old-host/test-deployment"
     mock_provider.description = "Existing provider"
     mock_provider.enabled_models = ["model1", "model2"]
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(return_value=mock_provider)
-    reconciler._models_sdk.inference.providers.create = AsyncMock()
-    reconciler._models_sdk.inference.providers.update = AsyncMock()
+    reconciler._models_client.get_provider = AsyncMock(return_value=_ModelResponse(mock_provider))
+    reconciler._models_client.create_provider = AsyncMock()
+    reconciler._models_client.upsert_provider = AsyncMock()
 
     deployment = make_deployment(
         workspace="test-ns", project="test-project", model_provider_id="test-ns/existing-provider"
@@ -477,33 +507,30 @@ async def test_ensure_model_provider_updates_when_host_url_changes(reconciler, m
     assert model_provider_id == "test-ns/existing-provider"
 
     # Verify retrieve was called to check the existing provider
-    reconciler._models_sdk.inference.providers.retrieve.assert_called_once_with(
+    reconciler._models_client.get_provider.assert_called_once_with(
         name="existing-provider",
         workspace="test-ns",
     )
 
-    # Verify update was called with new host_url, existing metadata, and status
-    reconciler._models_sdk.inference.providers.update.assert_called_once_with(
-        name="existing-provider",
-        workspace="test-ns",
-        host_url=new_host_url,
-        description="Existing provider",
-        enabled_models=["model1", "model2"],
-        status="READY",
-    )
+    assert _request_body_call(reconciler._models_client.upsert_provider) == {
+        "name": "existing-provider",
+        "workspace": "test-ns",
+        "host_url": new_host_url,
+        "description": "Existing provider",
+        "enabled_models": ["model1", "model2"],
+        "status": "READY",
+    }
 
     # Verify create was NOT called since we're updating existing provider
-    reconciler._models_sdk.inference.providers.create.assert_not_called()
+    reconciler._models_client.create_provider.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_ensure_model_provider_creates_new_when_existing_not_found(reconciler, make_deployment):
     """Test that ensure_model_provider creates new provider when existing provider_id points to non-existent provider."""
     # First retrieve (checking existing provider) fails, second retrieve (checking name collision) fails too
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(
-        side_effect=NotFoundError("Not found", response=MagicMock(), body=None)
-    )
-    reconciler._models_sdk.inference.providers.create = AsyncMock()
+    reconciler._models_client.get_provider = AsyncMock(side_effect=_status_error(404, "Not found"))
+    reconciler._models_client.create_provider = AsyncMock()
 
     deployment = make_deployment(
         workspace="test-ns", project="test-project", model_provider_id="test-ns/missing-provider"
@@ -516,25 +543,24 @@ async def test_ensure_model_provider_creates_new_when_existing_not_found(reconci
     assert model_provider_id == "test-ns/test-deployment"
 
     # Verify retrieve was called twice (once for existing, once for name collision check)
-    assert reconciler._models_sdk.inference.providers.retrieve.call_count == 2
+    assert reconciler._models_client.get_provider.call_count == 2
 
-    # Verify create was called to create new provider with status
-    reconciler._models_sdk.inference.providers.create.assert_called_once_with(
-        workspace="test-ns",
-        name="test-deployment",
-        host_url="http://test-ns/test-deployment",
-        description="Auto-created provider for deployment test-deployment",
-        project="test-project",
-        model_deployment_id="test-ns/test-deployment",
-        status="READY",
-    )
+    assert _request_body_call(reconciler._models_client.create_provider) == {
+        "workspace": "test-ns",
+        "name": "test-deployment",
+        "host_url": "http://test-ns/test-deployment",
+        "description": "Auto-created provider for deployment test-deployment",
+        "project": "test-project",
+        "model_deployment_id": "test-ns/test-deployment",
+        "status": "READY",
+    }
 
 
 @pytest.mark.asyncio
 async def test_delete_model_provider_deletes_when_exists(reconciler, make_deployment):
     """Test that delete_model_provider deletes provider when it exists."""
     # Mock provider exists and delete succeeds
-    reconciler._models_sdk.inference.providers.delete = AsyncMock()
+    reconciler._models_client.delete_provider = AsyncMock()
 
     # Mock the cleanup method to track if it's called
     reconciler._cleanup_model_entities_for_provider = AsyncMock()
@@ -549,7 +575,7 @@ async def test_delete_model_provider_deletes_when_exists(reconciler, make_deploy
     )
 
     # Verify delete was called with correct parameters
-    reconciler._models_sdk.inference.providers.delete.assert_called_once_with(
+    reconciler._models_client.delete_provider.assert_called_once_with(
         name="test-deployment",
         workspace="test-ns",
     )
@@ -559,9 +585,7 @@ async def test_delete_model_provider_deletes_when_exists(reconciler, make_deploy
 async def test_delete_model_provider_handles_not_found(reconciler, make_deployment):
     """Test that delete_model_provider handles NotFoundError gracefully."""
     # Mock provider doesn't exist (delete raises NotFoundError)
-    reconciler._models_sdk.inference.providers.delete = AsyncMock(
-        side_effect=NotFoundError("Not found", response=MagicMock(), body=None)
-    )
+    reconciler._models_client.delete_provider = AsyncMock(side_effect=_status_error(404, "Not found"))
 
     # Mock the cleanup method to track if it's called
     reconciler._cleanup_model_entities_for_provider = AsyncMock()
@@ -577,13 +601,13 @@ async def test_delete_model_provider_handles_not_found(reconciler, make_deployme
     )
 
     # Verify delete was called
-    reconciler._models_sdk.inference.providers.delete.assert_called_once()
+    reconciler._models_client.delete_provider.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_delete_model_provider_skips_when_no_provider_id(reconciler, make_deployment):
     """Test that delete_model_provider skips deletion when model_provider_id is not set."""
-    reconciler._models_sdk.inference.providers.delete = AsyncMock()
+    reconciler._models_client.delete_provider = AsyncMock()
 
     # Mock the cleanup method to track if it's called
     reconciler._cleanup_model_entities_for_provider = AsyncMock()
@@ -596,13 +620,13 @@ async def test_delete_model_provider_skips_when_no_provider_id(reconciler, make_
     reconciler._cleanup_model_entities_for_provider.assert_not_called()
 
     # Verify delete was NOT called
-    reconciler._models_sdk.inference.providers.delete.assert_not_called()
+    reconciler._models_client.delete_provider.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_delete_model_provider_handles_uuid_suffix(reconciler, make_deployment):
     """Test that delete_model_provider correctly parses provider ID with UUID suffix."""
-    reconciler._models_sdk.inference.providers.delete = AsyncMock()
+    reconciler._models_client.delete_provider = AsyncMock()
 
     # Mock the cleanup method to track if it's called
     reconciler._cleanup_model_entities_for_provider = AsyncMock()
@@ -617,7 +641,7 @@ async def test_delete_model_provider_handles_uuid_suffix(reconciler, make_deploy
     )
 
     # Verify delete was called with UUID-suffixed name
-    reconciler._models_sdk.inference.providers.delete.assert_called_once_with(
+    reconciler._models_client.delete_provider.assert_called_once_with(
         name="test-deployment_abcdef12",
         workspace="test-ns",
     )
@@ -627,10 +651,8 @@ async def test_delete_model_provider_handles_uuid_suffix(reconciler, make_deploy
 async def test_reconcile_model_provider_creates_for_ready_status(reconciler, make_deployment):
     """Test that reconcile_model_provider creates provider when status is READY."""
     # Mock provider doesn't exist
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(
-        side_effect=NotFoundError("Not found", response=MagicMock(), body=None)
-    )
-    reconciler._models_sdk.inference.providers.create = AsyncMock()
+    reconciler._models_client.get_provider = AsyncMock(side_effect=_status_error(404, "Not found"))
+    reconciler._models_client.create_provider = AsyncMock()
 
     deployment = make_deployment(workspace="test-ns", project="test-project")
 
@@ -643,14 +665,14 @@ async def test_reconcile_model_provider_creates_for_ready_status(reconciler, mak
     assert model_provider_id == "test-ns/test-deployment"
 
     # Verify create was called
-    reconciler._models_sdk.inference.providers.create.assert_called_once()
+    reconciler._models_client.create_provider.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_reconcile_model_provider_deletes_for_deleted_status(reconciler, make_deployment):
     """Test that reconcile_model_provider deletes provider when status is DELETED or DELETING."""
     # Mock provider exists
-    reconciler._models_sdk.inference.providers.delete = AsyncMock()
+    reconciler._models_client.delete_provider = AsyncMock()
 
     deployment = make_deployment(workspace="test-ns", model_provider_id="test-ns/test-deployment")
 
@@ -661,14 +683,14 @@ async def test_reconcile_model_provider_deletes_for_deleted_status(reconciler, m
     assert model_provider_id is None
 
     # Verify delete was called
-    reconciler._models_sdk.inference.providers.delete.assert_called_once()
+    reconciler._models_client.delete_provider.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_reconcile_model_provider_deletes_for_deleting_status(reconciler, make_deployment):
     """Test that reconcile_model_provider deletes provider when status is DELETING."""
     # Mock provider exists
-    reconciler._models_sdk.inference.providers.delete = AsyncMock()
+    reconciler._models_client.delete_provider = AsyncMock()
 
     deployment = make_deployment(workspace="test-ns", model_provider_id="test-ns/test-deployment")
 
@@ -679,15 +701,15 @@ async def test_reconcile_model_provider_deletes_for_deleting_status(reconciler, 
     assert model_provider_id is None
 
     # Verify delete was called
-    reconciler._models_sdk.inference.providers.delete.assert_called_once()
+    reconciler._models_client.delete_provider.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_reconcile_model_provider_does_nothing_for_other_statuses(reconciler, make_deployment):
     """Test that reconcile_model_provider does nothing for statuses other than READY/DELETED/DELETING."""
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock()
-    reconciler._models_sdk.inference.providers.create = AsyncMock()
-    reconciler._models_sdk.inference.providers.delete = AsyncMock()
+    reconciler._models_client.get_provider = AsyncMock()
+    reconciler._models_client.create_provider = AsyncMock()
+    reconciler._models_client.delete_provider = AsyncMock()
 
     deployment = make_deployment(workspace="test-ns")
 
@@ -707,19 +729,17 @@ async def test_reconcile_model_provider_does_nothing_for_other_statuses(reconcil
     assert result is None
 
     # Verify no provider operations were called
-    reconciler._models_sdk.inference.providers.retrieve.assert_not_called()
-    reconciler._models_sdk.inference.providers.create.assert_not_called()
-    reconciler._models_sdk.inference.providers.delete.assert_not_called()
+    reconciler._models_client.get_provider.assert_not_called()
+    reconciler._models_client.create_provider.assert_not_called()
+    reconciler._models_client.delete_provider.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_reconcile_model_provider_handles_errors_gracefully(reconciler, make_deployment):
     """Test that reconcile_model_provider handles errors without failing deployment update."""
     # Mock provider creation fails with unexpected error
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(
-        side_effect=NotFoundError("Not found", response=MagicMock(), body=None)
-    )
-    reconciler._models_sdk.inference.providers.create = AsyncMock(side_effect=Exception("API Error"))
+    reconciler._models_client.get_provider = AsyncMock(side_effect=_status_error(404, "Not found"))
+    reconciler._models_client.create_provider = AsyncMock(side_effect=Exception("API Error"))
 
     deployment = make_deployment(workspace="test-ns", project="test-project")
 
@@ -733,7 +753,7 @@ async def test_reconcile_model_provider_handles_errors_gracefully(reconciler, ma
     assert result is None
 
     # Verify create was attempted
-    reconciler._models_sdk.inference.providers.create.assert_called_once()
+    reconciler._models_client.create_provider.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -767,12 +787,10 @@ async def test_full_deployment_lifecycle_with_provider_management(reconciler, mo
     mock_backend.delete_model_deployment = AsyncMock(return_value=deleted_status)
 
     # Mock provider operations
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(
-        side_effect=NotFoundError("Not found", response=MagicMock(), body=None)
-    )
-    reconciler._models_sdk.inference.providers.create = AsyncMock()
-    reconciler._models_sdk.inference.providers.delete = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
+    reconciler._models_client.get_provider = AsyncMock(side_effect=_status_error(404, "Not found"))
+    reconciler._models_client.create_provider = AsyncMock()
+    reconciler._models_client.delete_provider = AsyncMock()
 
     deployment = make_deployment(workspace="test-ns", status="CREATED", project="test-project")
 
@@ -780,7 +798,7 @@ async def test_full_deployment_lifecycle_with_provider_management(reconciler, mo
     await reconciler._reconcile_individual_deployment(deployment, mock_backend.create_model_deployment, "create")
 
     # Provider should NOT be created for PENDING status
-    reconciler._models_sdk.inference.providers.create.assert_not_called()
+    reconciler._models_client.create_provider.assert_not_called()
 
     # Step 2: Deployment becomes READY
     deployment.status = "PENDING"
@@ -788,20 +806,19 @@ async def test_full_deployment_lifecycle_with_provider_management(reconciler, mo
         deployment, mock_backend.get_model_deployment_status, "check status"
     )
 
-    # Provider SHOULD be created for READY status with backend-provided host_url and status
-    reconciler._models_sdk.inference.providers.create.assert_called_once_with(
-        workspace="test-ns",
-        name="test-deployment",
-        host_url="http://test-ns/test-deployment",  # From backend's status update
-        description="Auto-created provider for deployment test-deployment",
-        project="test-project",
-        model_deployment_id="test-ns/test-deployment",  # New field linking to deployment
-        status="READY",
-    )
+    assert _request_body_call(reconciler._models_client.create_provider) == {
+        "workspace": "test-ns",
+        "name": "test-deployment",
+        "host_url": "http://test-ns/test-deployment",
+        "description": "Auto-created provider for deployment test-deployment",
+        "project": "test-project",
+        "model_deployment_id": "test-ns/test-deployment",
+        "status": "READY",
+    }
 
     # Verify the status update for READY included model_provider_id
-    ready_call = reconciler._models_sdk.inference.deployments.update_status.call_args_list[1]
-    assert ready_call.kwargs["model_provider_id"] == "test-ns/test-deployment"
+    ready_call = _deployment_status_call(reconciler._models_client.update_deployment_status, 1)
+    assert ready_call["model_provider_id"] == "test-ns/test-deployment"
 
     # Step 3: Delete deployment (READY -> DELETED)
     # The deployment should now have the model_provider_id set from when it was READY
@@ -812,13 +829,13 @@ async def test_full_deployment_lifecycle_with_provider_management(reconciler, mo
     )
 
     # Provider SHOULD be deleted for DELETED status
-    reconciler._models_sdk.inference.providers.delete.assert_called_once_with(
+    reconciler._models_client.delete_provider.assert_called_once_with(
         name="test-deployment",
         workspace="test-ns",
     )
 
     # Verify all deployment status updates were called
-    assert reconciler._models_sdk.inference.deployments.update_status.call_count == 3
+    assert reconciler._models_client.update_deployment_status.call_count == 3
 
 
 # ============================================================================
@@ -839,13 +856,13 @@ async def test_handle_deleted_deployment_cleanup_after_grace_period(reconciler, 
     )
 
     # Mock the SDK versions.delete method
-    reconciler._models_sdk.inference.deployments.versions.delete = AsyncMock()
+    reconciler._models_client.delete_deployment_version = AsyncMock()
 
     # Call handle_deleted_deployment
     await reconciler._handle_deleted_deployment(deployment)
 
     # Verify hard delete was called for the specific version
-    reconciler._models_sdk.inference.deployments.versions.delete.assert_called_once_with(
+    reconciler._models_client.delete_deployment_version.assert_called_once_with(
         name="1",
         workspace="test-workspace",
         deployment="test-deployment",
@@ -865,13 +882,13 @@ async def test_handle_deleted_deployment_no_cleanup_within_grace_period(reconcil
     )
 
     # Mock the SDK versions.delete method
-    reconciler._models_sdk.inference.deployments.versions.delete = AsyncMock()
+    reconciler._models_client.delete_deployment_version = AsyncMock()
 
     # Call handle_deleted_deployment
     await reconciler._handle_deleted_deployment(deployment)
 
     # Verify hard delete was NOT called
-    reconciler._models_sdk.inference.deployments.versions.delete.assert_not_called()
+    reconciler._models_client.delete_deployment_version.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -890,13 +907,13 @@ async def test_handle_deleted_deployment_with_naive_datetime(reconciler, make_de
     )
 
     # Mock the SDK versions.delete method
-    reconciler._models_sdk.inference.deployments.versions.delete = AsyncMock()
+    reconciler._models_client.delete_deployment_version = AsyncMock()
 
     # Call handle_deleted_deployment - should NOT raise TypeError
     await reconciler._handle_deleted_deployment(deployment)
 
     # Verify hard delete was called for the specific version (deployment is past grace period)
-    reconciler._models_sdk.inference.deployments.versions.delete.assert_called_once_with(
+    reconciler._models_client.delete_deployment_version.assert_called_once_with(
         name="1",
         workspace="test-workspace",
         deployment="test-deployment",
@@ -925,13 +942,13 @@ async def test_reconcile_deployments_calls_handle_deleted(reconciler, make_deplo
     )
 
     # Mock the SDK versions.delete method
-    reconciler._models_sdk.inference.deployments.versions.delete = AsyncMock()
+    reconciler._models_client.delete_deployment_version = AsyncMock()
 
     # Call reconcile_deployments with a list containing the DELETED deployment context
     await reconciler.reconcile_deployments([deleted_context])
 
     # Verify hard delete was called for the specific version (since it's past grace period)
-    reconciler._models_sdk.inference.deployments.versions.delete.assert_called_once_with(
+    reconciler._models_client.delete_deployment_version.assert_called_once_with(
         name="1",
         workspace="test-workspace",
         deployment="deleted-deployment",
@@ -953,7 +970,7 @@ async def test_cleanup_model_entities_removes_provider_from_entities(reconciler)
         MagicMock(model_entity_id="test-ns/model-2"),
     ]
 
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(return_value=mock_provider)
+    reconciler._models_client.get_provider = AsyncMock(return_value=_ModelResponse(mock_provider))
     await seed_entity_cache(
         reconciler._models_sdk,
         reconciler._entity_cache,
@@ -968,7 +985,7 @@ async def test_cleanup_model_entities_removes_provider_from_entities(reconciler)
     await reconciler._entity_cache.flush()
 
     # Verify provider was retrieved
-    reconciler._models_sdk.inference.providers.retrieve.assert_called_once_with(
+    reconciler._models_client.get_provider.assert_called_once_with(
         name="provider-1",
         workspace="test-ns",
     )
@@ -988,14 +1005,14 @@ async def test_cleanup_model_entities_no_served_models(reconciler):
     mock_provider = MagicMock()
     mock_provider.served_models = []
 
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(return_value=mock_provider)
+    reconciler._models_client.get_provider = AsyncMock(return_value=_ModelResponse(mock_provider))
 
     # Call cleanup
     await reconciler._cleanup_model_entities_for_provider("test-ns", "provider-1", "test-ns/provider-1")
     await reconciler._entity_cache.flush()
 
     # Verify provider was retrieved
-    reconciler._models_sdk.inference.providers.retrieve.assert_called_once()
+    reconciler._models_client.get_provider.assert_called_once()
 
     # Verify no model entity operations were performed
     reconciler._models_sdk.models_client.update_model.assert_not_awaited()
@@ -1004,9 +1021,7 @@ async def test_cleanup_model_entities_no_served_models(reconciler):
 @pytest.mark.asyncio
 async def test_cleanup_model_entities_provider_not_found(reconciler):
     """Test that cleanup handles NotFoundError gracefully when provider doesn't exist."""
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(
-        side_effect=NotFoundError("Provider not found", response=MagicMock(), body=None)
-    )
+    reconciler._models_client.get_provider = AsyncMock(side_effect=_status_error(404, "Provider not found"))
 
     # Call cleanup - should not raise
     await reconciler._cleanup_model_entities_for_provider("test-ns", "provider-1", "test-ns/provider-1")
@@ -1025,7 +1040,7 @@ async def test_cleanup_model_entities_provider_not_in_list(reconciler):
         MagicMock(model_entity_id="test-ns/model-1"),
     ]
 
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(return_value=mock_provider)
+    reconciler._models_client.get_provider = AsyncMock(return_value=_ModelResponse(mock_provider))
     await seed_entity_cache(
         reconciler._models_sdk,
         reconciler._entity_cache,
@@ -1050,7 +1065,7 @@ async def test_cleanup_model_entities_skips_missing_entity_and_continues(reconci
         MagicMock(model_entity_id="test-ns/model-2"),
     ]
 
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(return_value=mock_provider)
+    reconciler._models_client.get_provider = AsyncMock(return_value=_ModelResponse(mock_provider))
     # Only model-2 exists.
     await seed_entity_cache(
         reconciler._models_sdk,
@@ -1082,7 +1097,7 @@ async def test_cleanup_model_entities_handles_model_update_failure(reconciler):
         MagicMock(model_entity_id="test-ns/model-2"),
     ]
 
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(return_value=mock_provider)
+    reconciler._models_client.get_provider = AsyncMock(return_value=_ModelResponse(mock_provider))
     await seed_entity_cache(
         reconciler._models_sdk,
         reconciler._entity_cache,
@@ -1113,7 +1128,7 @@ async def test_cleanup_model_entities_with_null_model_providers(reconciler):
         MagicMock(model_entity_id="test-ns/model-1"),
     ]
 
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(return_value=mock_provider)
+    reconciler._models_client.get_provider = AsyncMock(return_value=_ModelResponse(mock_provider))
     await seed_entity_cache(
         reconciler._models_sdk,
         reconciler._entity_cache,
@@ -1161,7 +1176,7 @@ async def test_lost_status_triggers_drift_recovery(reconciler, mock_backend_regi
     mock_backend_registry.get_backend.return_value = mock_backend
 
     # Mock SDK
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
     await reconciler.reconcile_deployments([ctx])
@@ -1170,8 +1185,8 @@ async def test_lost_status_triggers_drift_recovery(reconciler, mock_backend_regi
     mock_backend.create_model_deployment.assert_called_once_with(ctx)
 
     # Verify status was updated to PENDING with recovery message
-    reconciler._models_sdk.inference.deployments.update_status.assert_called_once()
-    call_kwargs = reconciler._models_sdk.inference.deployments.update_status.call_args.kwargs
+    reconciler._models_client.update_deployment_status.assert_called_once()
+    call_kwargs = _deployment_status_call(reconciler._models_client.update_deployment_status)
     assert call_kwargs["status"] == "PENDING"
     assert "Recovering deployment" in call_kwargs["status_message"]
     assert "attempt 1/" in call_kwargs["status_message"]
@@ -1205,11 +1220,9 @@ async def test_successful_status_clears_drift_state(reconciler, mock_backend_reg
     mock_backend_registry.get_backend.return_value = mock_backend
 
     # Mock SDK
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(
-        side_effect=NotFoundError("Not found", response=MagicMock(), body=None)
-    )
-    reconciler._models_sdk.inference.providers.create = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
+    reconciler._models_client.get_provider = AsyncMock(side_effect=_status_error(404, "Not found"))
+    reconciler._models_client.create_provider = AsyncMock()
 
     # Process deployment
     await reconciler.reconcile_deployments([ctx])
@@ -1250,7 +1263,7 @@ async def test_pending_status_preserves_drift_state(reconciler, mock_backend_reg
     mock_backend_registry.get_backend.return_value = mock_backend
 
     # Mock SDK
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
     await reconciler.reconcile_deployments([ctx])
@@ -1295,7 +1308,7 @@ async def test_drift_recovery_max_retries_exceeded(reconciler, mock_backend_regi
     mock_backend_registry.get_backend.return_value = mock_backend
 
     # Mock SDK
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
     await reconciler.reconcile_deployments([ctx])
@@ -1304,8 +1317,8 @@ async def test_drift_recovery_max_retries_exceeded(reconciler, mock_backend_regi
     mock_backend.create_model_deployment.assert_not_called()
 
     # Verify status was updated to ERROR
-    reconciler._models_sdk.inference.deployments.update_status.assert_called_once()
-    call_kwargs = reconciler._models_sdk.inference.deployments.update_status.call_args.kwargs
+    reconciler._models_client.update_deployment_status.assert_called_once()
+    call_kwargs = _deployment_status_call(reconciler._models_client.update_deployment_status)
     assert call_kwargs["status"] == "ERROR"
     assert "failed after 3 attempts" in call_kwargs["status_message"]
 
@@ -1350,7 +1363,7 @@ async def test_drift_recovery_respects_backoff(reconciler, mock_backend_registry
     mock_backend_registry.get_backend.return_value = mock_backend
 
     # Mock SDK
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
     await reconciler.reconcile_deployments([ctx])
@@ -1359,7 +1372,7 @@ async def test_drift_recovery_respects_backoff(reconciler, mock_backend_registry
     mock_backend.create_model_deployment.assert_not_called()
 
     # Verify status was NOT updated (skipped this cycle)
-    reconciler._models_sdk.inference.deployments.update_status.assert_not_called()
+    reconciler._models_client.update_deployment_status.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1407,7 +1420,7 @@ async def test_drift_recovery_proceeds_after_backoff(reconciler, mock_backend_re
     mock_backend_registry.get_backend.return_value = mock_backend
 
     # Mock SDK
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
     await reconciler.reconcile_deployments([ctx])
@@ -1450,7 +1463,7 @@ async def test_drift_recovery_ready_deployment(reconciler, mock_backend_registry
     mock_backend_registry.get_backend.return_value = mock_backend
 
     # Mock SDK
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
     await reconciler.reconcile_deployments([ctx])
@@ -1459,7 +1472,7 @@ async def test_drift_recovery_ready_deployment(reconciler, mock_backend_registry
     mock_backend.create_model_deployment.assert_called_once()
 
     # Verify status message indicates recovery
-    call_kwargs = reconciler._models_sdk.inference.deployments.update_status.call_args.kwargs
+    call_kwargs = _deployment_status_call(reconciler._models_client.update_deployment_status)
     assert "Recovering deployment" in call_kwargs["status_message"]
 
 
@@ -1486,14 +1499,14 @@ async def test_unknown_status_triggers_handler_and_updates_status(reconciler, mo
     mock_backend_registry.get_backend.return_value = mock_backend
 
     # Mock SDK
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
     await reconciler.reconcile_deployments([ctx])
 
     # Verify status was updated to UNKNOWN with attempt info
-    reconciler._models_sdk.inference.deployments.update_status.assert_called_once()
-    call_kwargs = reconciler._models_sdk.inference.deployments.update_status.call_args.kwargs
+    reconciler._models_client.update_deployment_status.assert_called_once()
+    call_kwargs = _deployment_status_call(reconciler._models_client.update_deployment_status)
     assert call_kwargs["status"] == "UNKNOWN"
     assert "attempt 1/" in call_kwargs["status_message"]
     assert "Unable to determine deployment status" in call_kwargs["status_message"]
@@ -1534,14 +1547,14 @@ async def test_unknown_status_max_retries_sets_error(reconciler, mock_backend_re
     mock_backend_registry.get_backend.return_value = mock_backend
 
     # Mock SDK
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
     await reconciler.reconcile_deployments([ctx])
 
     # Verify status was set to ERROR
-    reconciler._models_sdk.inference.deployments.update_status.assert_called_once()
-    call_kwargs = reconciler._models_sdk.inference.deployments.update_status.call_args.kwargs
+    reconciler._models_client.update_deployment_status.assert_called_once()
+    call_kwargs = _deployment_status_call(reconciler._models_client.update_deployment_status)
     assert call_kwargs["status"] == "ERROR"
     assert "Unable to communicate with backend after 3 attempts" in call_kwargs["status_message"]
 
@@ -1581,13 +1594,13 @@ async def test_unknown_status_respects_backoff(reconciler, mock_backend_registry
     mock_backend_registry.get_backend.return_value = mock_backend
 
     # Mock SDK
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
     await reconciler.reconcile_deployments([ctx])
 
     # Verify status was NOT updated (in backoff period)
-    reconciler._models_sdk.inference.deployments.update_status.assert_not_called()
+    reconciler._models_client.update_deployment_status.assert_not_called()
 
     # Verify attempts was NOT incremented
     assert reconciler._drift_recovery_cache.get_attempts("default/test-deployment") == 1
@@ -1621,11 +1634,9 @@ async def test_unknown_status_clears_on_recovery(reconciler, mock_backend_regist
     mock_backend_registry.get_backend.return_value = mock_backend
 
     # Mock SDK
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
-    reconciler._models_sdk.inference.providers.retrieve = AsyncMock(
-        side_effect=NotFoundError("Not found", response=MagicMock(), body=None)
-    )
-    reconciler._models_sdk.inference.providers.create = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
+    reconciler._models_client.get_provider = AsyncMock(side_effect=_status_error(404, "Not found"))
+    reconciler._models_client.create_provider = AsyncMock()
 
     # Process deployment
     await reconciler.reconcile_deployments([ctx])
@@ -1634,7 +1645,7 @@ async def test_unknown_status_clears_on_recovery(reconciler, mock_backend_regist
     assert "default/test-deployment" not in reconciler._drift_recovery_cache._states
 
     # Verify status was updated to READY
-    call_kwargs = reconciler._models_sdk.inference.deployments.update_status.call_args.kwargs
+    call_kwargs = _deployment_status_call(reconciler._models_client.update_deployment_status)
     assert call_kwargs["status"] == "READY"
 
 
@@ -1741,7 +1752,7 @@ def gc_reconciler(mock_models_sdk, mock_backend_registry):
         return_value=DeploymentStatusUpdate(status="DELETED", status_message="")
     )
     mock_backend_registry.get_backend.return_value = mock_backend
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
     reconciler._delete_model_provider = AsyncMock()
     return reconciler
 
@@ -1784,8 +1795,8 @@ async def test_gc_triggers_after_ttl(gc_reconciler, mock_backend_registry):
     mock_backend = mock_backend_registry.get_backend()
     mock_backend.delete_model_deployment.assert_called_once_with("default", "err-deploy")
 
-    gc_reconciler._models_sdk.inference.deployments.update_status.assert_called_once()
-    call_kw = gc_reconciler._models_sdk.inference.deployments.update_status.call_args.kwargs
+    gc_reconciler._models_client.update_deployment_status.assert_called_once()
+    call_kw = _deployment_status_call(gc_reconciler._models_client.update_deployment_status)
     assert call_kw["status"] == "DELETING"
     assert call_kw["name"] == "err-deploy"
     assert call_kw["workspace"] == "default"
@@ -1813,7 +1824,7 @@ async def test_gc_skips_deployment_with_no_updated_at(gc_reconciler, mock_backen
 
     mock_backend = mock_backend_registry.get_backend()
     mock_backend.delete_model_deployment.assert_not_called()
-    gc_reconciler._models_sdk.inference.deployments.update_status.assert_not_called()
+    gc_reconciler._models_client.update_deployment_status.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1826,8 +1837,8 @@ async def test_gc_backend_delete_failure_still_transitions(gc_reconciler, mock_b
 
     await gc_reconciler.gc_error_deployments([dep])
 
-    gc_reconciler._models_sdk.inference.deployments.update_status.assert_called_once()
-    call_kw = gc_reconciler._models_sdk.inference.deployments.update_status.call_args.kwargs
+    gc_reconciler._models_client.update_deployment_status.assert_called_once()
+    call_kw = _deployment_status_call(gc_reconciler._models_client.update_deployment_status)
     assert call_kw["status"] == "DELETING"
 
 
@@ -1837,9 +1848,7 @@ async def test_gc_status_update_failure_does_not_block_others(gc_reconciler, moc
     dep1 = _make_error_deployment(name="dep-1")
     dep2 = _make_error_deployment(name="dep-2")
 
-    gc_reconciler._models_sdk.inference.deployments.update_status = AsyncMock(
-        side_effect=[Exception("version conflict"), None]
-    )
+    gc_reconciler._models_client.update_deployment_status = AsyncMock(side_effect=[Exception("version conflict"), None])
 
     await gc_reconciler.gc_error_deployments([dep1, dep2])
 
@@ -1863,7 +1872,7 @@ async def test_gc_mixed_ttl_only_expired_cleaned(gc_reconciler, mock_backend_reg
 
     mock_backend = mock_backend_registry.get_backend()
     mock_backend.delete_model_deployment.assert_called_once_with("default", "old-deploy")
-    gc_reconciler._models_sdk.inference.deployments.update_status.assert_called_once()
+    gc_reconciler._models_client.update_deployment_status.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -1887,8 +1896,8 @@ async def test_gc_provider_cleanup_failure_is_non_fatal(gc_reconciler, mock_back
     mock_backend = mock_backend_registry.get_backend()
     mock_backend.delete_model_deployment.assert_called_once()
 
-    gc_reconciler._models_sdk.inference.deployments.update_status.assert_called_once()
-    call_kw = gc_reconciler._models_sdk.inference.deployments.update_status.call_args.kwargs
+    gc_reconciler._models_client.update_deployment_status.assert_called_once()
+    call_kw = _deployment_status_call(gc_reconciler._models_client.update_deployment_status)
     assert call_kw["status"] == "DELETING"
     assert "Provider cleanup failed" in call_kw["status_message"]
 
@@ -1900,7 +1909,7 @@ async def test_gc_empty_list_no_ops(gc_reconciler, mock_backend_registry):
 
     mock_backend = mock_backend_registry.get_backend()
     mock_backend.delete_model_deployment.assert_not_called()
-    gc_reconciler._models_sdk.inference.deployments.update_status.assert_not_called()
+    gc_reconciler._models_client.update_deployment_status.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1921,7 +1930,7 @@ async def test_gc_custom_ttl_respected(mock_models_sdk, mock_backend_registry):
         return_value=DeploymentStatusUpdate(status="DELETED", status_message="")
     )
     mock_backend_registry.get_backend.return_value = mock_backend
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
     reconciler._delete_model_provider = AsyncMock()
 
     within_default_but_past_custom = _make_error_deployment(
@@ -1940,7 +1949,7 @@ async def test_gc_status_message_includes_original_error(gc_reconciler, mock_bac
 
     await gc_reconciler.gc_error_deployments([dep])
 
-    call_kw = gc_reconciler._models_sdk.inference.deployments.update_status.call_args.kwargs
+    call_kw = _deployment_status_call(gc_reconciler._models_client.update_deployment_status)
     assert "garbage collected" in call_kw["status_message"]
     assert "NIM health check timed out after 7200s" in call_kw["status_message"]
     assert "Original error:" in call_kw["status_message"]
@@ -1953,7 +1962,7 @@ async def test_gc_status_message_without_original_error(gc_reconciler, mock_back
 
     await gc_reconciler.gc_error_deployments([dep])
 
-    call_kw = gc_reconciler._models_sdk.inference.deployments.update_status.call_args.kwargs
+    call_kw = _deployment_status_call(gc_reconciler._models_client.update_deployment_status)
     assert "garbage collected" in call_kw["status_message"]
     assert "Original error:" not in call_kw["status_message"]
 
@@ -1962,9 +1971,7 @@ async def test_gc_status_message_without_original_error(gc_reconciler, mock_back
 async def test_gc_not_found_on_status_update_handled(gc_reconciler, mock_backend_registry):
     """NotFoundError on status update (deployment deleted between query and GC) is handled."""
     dep = _make_error_deployment()
-    gc_reconciler._models_sdk.inference.deployments.update_status = AsyncMock(
-        side_effect=NotFoundError("Not found", response=MagicMock(), body=None)
-    )
+    gc_reconciler._models_client.update_deployment_status = AsyncMock(side_effect=_status_error(404, "Not found"))
 
     # Should not raise
     await gc_reconciler.gc_error_deployments([dep])
@@ -2010,7 +2017,7 @@ async def test_gc_ttl_boundary_parametrized(mock_models_sdk, mock_backend_regist
         return_value=DeploymentStatusUpdate(status="DELETED", status_message="")
     )
     mock_backend_registry.get_backend.return_value = mock_backend
-    reconciler._models_sdk.inference.deployments.update_status = AsyncMock()
+    reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
     reconciler._delete_model_provider = AsyncMock()
 
     dep = _make_error_deployment(
@@ -2023,7 +2030,7 @@ async def test_gc_ttl_boundary_parametrized(mock_models_sdk, mock_backend_regist
 
     if should_gc:
         mock_backend.delete_model_deployment.assert_called_once()
-        reconciler._models_sdk.inference.deployments.update_status.assert_called_once()
+        reconciler._models_client.update_deployment_status.assert_called_once()
     else:
         mock_backend.delete_model_deployment.assert_not_called()
-        reconciler._models_sdk.inference.deployments.update_status.assert_not_called()
+        reconciler._models_client.update_deployment_status.assert_not_called()

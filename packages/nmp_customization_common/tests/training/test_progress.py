@@ -63,17 +63,17 @@ class _JobCtx:
 class _Reporter(JobsServiceProgressReporter):
     """Reporter with the SDK and job context stubbed out.
 
-    Bypasses ``__init__`` rather than mocking the SDK factory: what is under test
-    is the status_details logic, and the real constructor calls ``get_task_sdk``,
-    which wants credentials. Every attribute ``update_task`` touches is set here.
+    Bypasses ``__init__`` rather than mocking the client factory: what is under
+    test is the status_details logic, and the real constructor wants task
+    credentials. Every attribute ``update_task`` touches is set here.
 
-    The SDK client itself is patched (see the ``jobs`` fixture) rather than
-    ``fetch_current_metrics``, so the real fetch runs.
+    The Jobs client itself is injected rather than ``fetch_current_metrics``, so
+    the real fetch runs.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, jobs: "_Jobs") -> None:
         self._job_ctx = _JobCtx()  # type: ignore[assignment] - duck-typed stand-in
-        self._sdk = type("S", (), {"close": lambda self: None})()  # type: ignore[assignment]
+        self._jobs = jobs.client()  # type: ignore[assignment] - duck-typed stand-in
         self._is_main_rank = True
         self._enabled = True
         self._max_steps = 0
@@ -121,13 +121,9 @@ class _Jobs:
 
 
 @pytest.fixture
-def jobs(monkeypatch: pytest.MonkeyPatch) -> _Jobs:
-    """Patch the SDK client seam so update_task and the fetch both run for real."""
+def jobs() -> _Jobs:
+    """Return a Jobs service harness so update_task and fetch both run for real."""
     harness = _Jobs()
-    monkeypatch.setattr(
-        "nmp.customization_common.training.progress.client_from_platform",
-        lambda _sdk, _cls: harness.client(),
-    )
     return harness
 
 
@@ -135,7 +131,7 @@ def _reporter(jobs: _Jobs, stored: dict[str, Any] | None = None) -> _Reporter:
     """A reporter over the harness, with the server pre-seeded if given."""
     if stored is not None:
         jobs.stored = stored
-    return _Reporter()
+    return _Reporter(jobs)
 
 
 def _details(jobs: _Jobs, index: int = -1) -> dict[str, Any]:
@@ -289,7 +285,7 @@ def test_a_malformed_blob_seeds_nothing_instead_of_raising(jobs: _Jobs, stored: 
     """
     jobs.stored = stored
 
-    assert _Reporter().fetch_current_metrics() == {}
+    assert _reporter(jobs).fetch_current_metrics() == {}
 
 
 # --------------------------------------------------------------------------- #
@@ -401,54 +397,105 @@ def test_progress_updates_use_a_short_timeout(monkeypatch: pytest.MonkeyPatch) -
     Asserted against the SDK the reporter actually built, not against the
     constant, so that wiring the constant to nothing would fail here.
     """
-    built: dict[str, Any] = {}
+    timeouts: list[httpx.Timeout] = []
+    optioned_clients: list[_JobsClient] = []
 
-    class _Sdk:
+    class _JobsClient:
         def __init__(self, optioned: bool = False) -> None:
             self.optioned = optioned
 
-        def with_options(self, **kwargs: Any) -> "_Sdk":
-            built.update(kwargs)
-            return _Sdk(optioned=True)
-
-        def close(self) -> None: ...
+        def with_options(self, *, timeout: httpx.Timeout) -> "_JobsClient":
+            timeouts.append(timeout)
+            client = _JobsClient(optioned=True)
+            optioned_clients.append(client)
+            return client
 
     monkeypatch.setattr(
-        "nmp.customization_common.training.progress.get_task_sdk",
-        lambda service_name: _Sdk(),
+        "nmp.customization_common.training.progress.get_task_nemo_client",
+        lambda service_name: object(),
     )
-    reporter = JobsServiceProgressReporter(_JobCtx(), service_name="customizer")  # ty: ignore[invalid-argument-type] # duck-typed stub
+    monkeypatch.setattr(
+        "nmp.customization_common.training.progress.JobsClient.from_client",
+        lambda client: _JobsClient(),
+    )
+    JobsServiceProgressReporter(_JobCtx(), service_name="customizer")  # ty: ignore[invalid-argument-type] # duck-typed stub
 
-    timeout = built["timeout"]
     # A 12 MB blob -- far past anything a real run produces -- costs 46ms plus
     # 0.31ms/KB, so about 4s on the wire. 15s leaves room and still bounds the stall.
-    assert timeout.read <= 15, "long enough for a 12 MB blob, short enough to give the step back"
-    assert timeout.write <= 15
-    assert timeout.connect <= 5
-    assert reporter._sdk.optioned, "kept the un-optioned SDK, so the timeout never applies"
+    assert timeouts == [httpx.Timeout(10.0, connect=5.0)]
+    assert len(optioned_clients) == 1
+    assert optioned_clients[0].optioned, "kept the un-optioned Jobs client, so the timeout never applies"
 
 
-def test_the_sdk_is_not_rebuilt_with_a_custom_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`get_task_sdk` skips its workload-identity branch when handed a client.
+def test_the_task_client_is_not_rebuilt_with_a_custom_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`get_task_nemo_client` skips workload identity when handed a client.
 
     Setting the timeout by passing our own `http_client` would therefore change
     how a task authenticates, silently and only in the deployment that uses
     workload identity -- which is the one hardest to test. `with_options` leaves
     that path alone.
     """
-    seen: dict[str, Any] = {}
+    seen: dict[str, object | None] = {}
 
-    class _Sdk:
-        def with_options(self, **kwargs: Any) -> "_Sdk":
+    class _JobsClient:
+        def with_options(self, *, timeout: httpx.Timeout) -> "_JobsClient":
             return self
 
-        def close(self) -> None: ...
-
-    def _factory(service_name: str, http_client: Any = None) -> _Sdk:
+    def _factory(service_name: str, *, http_client: object | None = None, workspace: str | None = None) -> object:
         seen["http_client"] = http_client
-        return _Sdk()
+        seen["workspace"] = workspace
+        return object()
 
-    monkeypatch.setattr("nmp.customization_common.training.progress.get_task_sdk", _factory)
+    monkeypatch.setattr("nmp.customization_common.training.progress.get_task_nemo_client", _factory)
+    monkeypatch.setattr(
+        "nmp.customization_common.training.progress.JobsClient.from_client",
+        lambda client: _JobsClient(),
+    )
     JobsServiceProgressReporter(_JobCtx(), service_name="customizer")  # ty: ignore[invalid-argument-type] # duck-typed stub
 
     assert seen["http_client"] is None, "no client passed, so the auth path is untouched"
+
+
+def test_close_closes_the_owning_task_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Derived service clients share transport, so the root task client owns close."""
+
+    class _TaskClient:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    class _JobsClient:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def with_options(self, *, timeout: httpx.Timeout) -> "_JobsClient":
+            return self
+
+        def close(self) -> None:
+            self.closed = True
+
+    task_client = _TaskClient()
+    jobs_client = _JobsClient()
+    seen_clients: list[_TaskClient] = []
+
+    def _from_client(client: _TaskClient) -> _JobsClient:
+        seen_clients.append(client)
+        return jobs_client
+
+    monkeypatch.setattr(
+        "nmp.customization_common.training.progress.get_task_nemo_client",
+        lambda service_name: task_client,
+    )
+    monkeypatch.setattr(
+        "nmp.customization_common.training.progress.JobsClient.from_client",
+        _from_client,
+    )
+
+    reporter = JobsServiceProgressReporter(_JobCtx(), service_name="customizer")  # ty: ignore[invalid-argument-type] # duck-typed stub
+    reporter.close()
+
+    assert seen_clients == [task_client]
+    assert task_client.closed
+    assert not jobs_client.closed

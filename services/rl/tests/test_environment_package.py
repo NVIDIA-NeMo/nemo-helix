@@ -224,6 +224,7 @@ def test_convert_with_wheels_dir_writes_layout(tmp_path: Path) -> None:
     assert list((result.environment_root / "wheels").glob("*.whl"))
     assert result.dataset_dir.is_dir()
     assert result.training_jsonl.is_file()
+    assert not (result.dataset_dir / ".huggingface").exists()
 
 
 def test_convert_rejects_empty_wheels_dir(tmp_path: Path) -> None:
@@ -241,6 +242,100 @@ def test_convert_rejects_empty_wheels_dir(tmp_path: Path) -> None:
                 dataset_size=0,
             )
         )
+
+
+def test_convert_vendors_hub_dataset_and_configures_its_sandbox_path(tmp_path: Path, monkeypatch) -> None:
+    """Conversion isolates both environment and pre-imported Hugging Face cache settings."""
+    import os
+    import sys
+    from types import ModuleType
+
+    from nmp.rl.tasks.environment import convert as convert_mod
+    from nmp.rl.tasks.environment.convert import ConvertEnvironmentSpec, convert_prime_environment
+
+    wheels = tmp_path / "prebuilt"
+    wheels.mkdir()
+    (wheels / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+
+    developer_hf = tmp_path / "developer-hf"
+    developer_hf.mkdir()
+    (developer_hf / "should-not-copy").write_text("developer-cache", encoding="utf-8")
+    monkeypatch.setenv("HF_HOME", str(developer_hf))
+    monkeypatch.setenv("HF_HUB_CACHE", str(developer_hf / "hub"))
+    monkeypatch.setenv("HF_DATASETS_CACHE", str(developer_hf / "datasets"))
+
+    # Model libraries read cache variables at import time. Simulate both having
+    # already been imported before the converter establishes its isolated cache.
+    hub_constants = ModuleType("huggingface_hub.constants")
+    setattr(hub_constants, "HF_HOME", str(developer_hf))
+    setattr(hub_constants, "HF_HUB_CACHE", str(developer_hf / "hub"))
+    datasets_config = ModuleType("datasets.config")
+    setattr(datasets_config, "HF_DATASETS_CACHE", developer_hf / "datasets")
+    monkeypatch.setitem(sys.modules, "huggingface_hub.constants", hub_constants)
+    monkeypatch.setitem(sys.modules, "datasets.config", datasets_config)
+
+    class FakeDataset:
+        column_names = ["prompt", "answer"]
+
+        def __len__(self) -> int:
+            return 1
+
+        def __getitem__(self, key: str):
+            if key == "prompt":
+                return [[{"role": "user", "content": "draw an ascii tree"}]]
+            return [""]
+
+        def to_parquet(self, path: str) -> None:
+            Path(path).write_bytes(b"PARQUET")
+
+    class FakeEnv:
+        dataset = FakeDataset()
+
+        def get_dataset(self, n: int = -1, seed: int | None = None):
+            return self.dataset
+
+    captured: dict[str, str] = {}
+
+    def _fake_load(*_a, **_k):
+        isolated = Path(os.environ["HF_HOME"])
+        captured["hf_home"] = str(isolated)
+        assert os.environ["HF_HUB_CACHE"] == str(isolated / "hub")
+        assert os.environ["HF_DATASETS_CACHE"] == str(isolated / "datasets")
+        assert getattr(hub_constants, "HF_HOME") == str(isolated)
+        assert getattr(hub_constants, "HF_HUB_CACHE") == str(isolated / "hub")
+        assert getattr(datasets_config, "HF_DATASETS_CACHE") == isolated / "datasets"
+        (isolated / "hub").mkdir(parents=True)
+        (isolated / "hub" / "datasets--primeintellect--ascii-tree").write_text("cached", encoding="utf-8")
+        return FakeEnv()
+
+    monkeypatch.setattr(convert_mod, "_install_hub_package_from_wheels", lambda *a, **k: None)
+    monkeypatch.setattr(convert_mod, "_load_verifiers_environment", _fake_load)
+
+    result = convert_prime_environment(
+        ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            out_dir=tmp_path / "env",
+            dataset_dir=tmp_path / "dataset",
+            wheels_dir=wheels,
+            dataset_size=1,
+        )
+    )
+    assert (result.dataset_dir / "hub_environment.parquet").read_bytes() == b"PARQUET"
+    agent = yaml.safe_load((result.environment_root / "configs" / "verifiers_agent.yaml").read_text())
+    vf_env_args = agent["verifiers_agent"]["responses_api_agents"]["verifiers_agent"]["vf_env_args"]
+    assert vf_env_args["dataset_path"] == "/job/dataset/hub_environment.parquet"
+    assert next((result.environment_root / "wheels").glob("ascii_tree-*.whl")).read_bytes() == b"PK\x03\x04"
+
+    snap = result.dataset_dir / ".huggingface" / "hub" / "datasets--primeintellect--ascii-tree"
+    assert snap.read_text(encoding="utf-8") == "cached"
+    assert not (result.dataset_dir / ".huggingface" / "should-not-copy").exists()
+    assert captured["hf_home"] != str(developer_hf)
+    assert os.environ["HF_HOME"] == str(developer_hf)
+    assert os.environ["HF_HUB_CACHE"] == str(developer_hf / "hub")
+    assert os.environ["HF_DATASETS_CACHE"] == str(developer_hf / "datasets")
+    assert getattr(hub_constants, "HF_HOME") == str(developer_hf)
+    assert getattr(hub_constants, "HF_HUB_CACHE") == str(developer_hf / "hub")
+    assert getattr(datasets_config, "HF_DATASETS_CACHE") == developer_hf / "datasets"
 
 
 def test_split_train_validation_never_overlaps() -> None:
@@ -337,6 +432,7 @@ def test_download_hub_wheels_resolves_before_downloading(tmp_path: Path, monkeyp
             dest = Path(cmd[cmd.index("--dest") + 1])
             dest.mkdir(parents=True, exist_ok=True)
             (dest / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+            (dest / "xxhash-4.0.0-cp313-cp313-manylinux_2_17_x86_64.whl").write_bytes(b"PK\x03\x04")
         return None
 
     monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
@@ -359,6 +455,92 @@ def test_download_hub_wheels_resolves_before_downloading(tmp_path: Path, monkeyp
         "ascii-tree==0.1.5",
         "xxhash==4.0.0",
     ]
+
+
+def test_download_hub_wheels_builds_sdists_and_requires_complete_closure(tmp_path: Path, monkeypatch) -> None:
+    """Source-only releases must become target-Python wheels; dropping them breaks offline Gym."""
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    commands: list[list[str]] = []
+    monkeypatch.setattr(convert_mod.sys, "executable", "/host/python3.12")
+
+    def _fake_run(cmd, **kwargs):
+        commands.append(cmd)
+        if "compile" in cmd:
+            Path(cmd[cmd.index("--output-file") + 1]).write_text(
+                "ascii-tree==0.1.5\nverifiers @ git+https://example.test/verifiers.git@v0.1.14\n",
+                encoding="utf-8",
+            )
+        elif "download" in cmd:
+            dest = Path(cmd[cmd.index("--dest") + 1])
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+            (dest / "verifiers-0.1.14.zip").write_bytes(b"source")
+        elif "wheel" in cmd:
+            dest = Path(cmd[cmd.index("--wheel-dir") + 1])
+            (dest / "verifiers-0.1.14-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+        return None
+
+    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+
+    wheels = convert_mod.download_hub_wheels(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            out_dir=tmp_path / "env",
+        ),
+        work_dir=tmp_path / "work",
+    )
+
+    wheel_cmd = next(cmd for cmd in commands if "wheel" in cmd)
+    assert wheel_cmd[:9] == [
+        "uv",
+        "run",
+        "--no-project",
+        "--python",
+        convert_mod.TARGET_PYTHON_VERSION,
+        "--with",
+        "pip",
+        "python",
+        "-m",
+    ]
+    assert "/host/python3.12" not in wheel_cmd
+    assert "--no-deps" in wheel_cmd
+    assert not (wheels / "verifiers-0.1.14.zip").exists()
+    assert (wheels / "verifiers-0.1.14-py3-none-any.whl").is_file()
+
+
+def test_complete_wheel_closure_rejects_missing_distribution(tmp_path: Path) -> None:
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    (wheels / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text("ascii-tree==0.1.5\nverifiers==0.1.14\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="no wheel was produced for: verifiers"):
+        convert_mod._assert_complete_wheel_closure(wheels, requirements)
+
+
+def test_install_hub_package_does_not_build_sdist_deps(tmp_path: Path, monkeypatch) -> None:
+    """Hub install must not rebuild verifiers from a zip sitting next to the wheel."""
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    whl = wheels / "ascii_tree-0.1.5-py3-none-any.whl"
+    whl.write_bytes(b"PK\x03\x04")
+    (wheels / "verifiers-0.1.14.zip").write_bytes(b"not-a-wheel")
+    captured: list[list[str]] = []
+
+    def _fake_run(cmd, **kwargs):
+        captured.append(cmd)
+
+    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    convert_mod._install_hub_package_from_wheels(wheels, "ascii_tree")
+    assert captured and "--no-deps" in captured[0]
+    assert "--find-links" not in " ".join(captured[0])
+    assert str(whl) in captured[0]
 
 
 def test_download_hub_wheels_requirements_in_lists_env_and_verifiers(tmp_path: Path, monkeypatch) -> None:
@@ -384,14 +566,20 @@ def test_download_hub_wheels_requirements_in_lists_env_and_verifiers(tmp_path: P
             hub_id="primeintellect/ascii-tree",
             out_dir=tmp_path / "env",
             extra_wheels=("some-extra",),
+            ray_version="2.56.1",
+            openai_version="2.6.1",
         ),
         work_dir=tmp_path / "work",
     )
 
+    # One resolve covering the environment and the venv Gym builds around it.
     assert seen["in"].splitlines() == [
         convert_mod.DEFAULT_VERIFIERS_SPEC,
         "ascii_tree",
         "some-extra",
+        *convert_mod.GYM_VENV_REQUIREMENTS,
+        "ray[default]==2.56.1",
+        "openai==2.6.1",
     ]
 
 
@@ -436,6 +624,357 @@ def test_validate_package_layout_warns_on_duplicate_wheels(tmp_path: Path, caplo
         )
 
     assert "2 versions of xxhash" in caplog.text
+
+
+def _fake_nemo_rl_checkout(root: Path, *, ray: str = "2.56.1", openai: str = "2.6.1") -> Path:
+    """Minimal stand-in for a NeMo-RL checkout with submodules."""
+    gym = root / "3rdparty/Gym-workspace/Gym"
+    gym.mkdir(parents=True)
+    (gym / "pyproject.toml").write_text('[project]\nname = "nemo-gym"\n', encoding="utf-8")
+    (root / "uv.lock").write_text(
+        f'[[package]]\nname = "ray"\nversion = "{ray}"\n\n'
+        f'[[package]]\nname = "openai"\nversion = "{openai}"\n\n'
+        '[[package]]\nname = "nemo-gym"\nsource = {{ editable = "." }}\n'.replace("{{", "{").replace("}}", "}"),
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_nemo_rl_root_derives_gym_root_and_image_pins(tmp_path: Path) -> None:
+    """The checkout the image is built from carries all three; nothing is looked up by hand."""
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    rl = _fake_nemo_rl_checkout(tmp_path / "RL")
+    gym_root, ray_version, openai_version = convert_mod._resolve_image_pins(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree", out_dir=tmp_path / "env", nemo_rl_root=rl
+        )
+    )
+    assert gym_root == rl / "3rdparty/Gym-workspace/Gym"
+    assert (ray_version, openai_version) == ("2.56.1", "2.6.1")
+
+
+def test_explicit_versions_win_over_the_lock(tmp_path: Path) -> None:
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    rl = _fake_nemo_rl_checkout(tmp_path / "RL")
+    _, ray_version, openai_version = convert_mod._resolve_image_pins(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            out_dir=tmp_path / "env",
+            nemo_rl_root=rl,
+            ray_version="9.9.9",
+        )
+    )
+    assert (ray_version, openai_version) == ("9.9.9", "2.6.1")
+
+
+def test_nemo_rl_root_without_submodules_is_rejected(tmp_path: Path) -> None:
+    """A checkout cloned without --recurse-submodules has an empty Gym directory."""
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    rl = tmp_path / "RL"
+    rl.mkdir()
+    (rl / "uv.lock").write_text("", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="recurse-submodules"):
+        convert_mod._resolve_image_pins(
+            convert_mod.ConvertEnvironmentSpec(
+                hub_id="primeintellect/ascii-tree", out_dir=tmp_path / "env", nemo_rl_root=rl
+            )
+        )
+
+
+def test_nemo_rl_root_must_be_a_checkout(tmp_path: Path) -> None:
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    rl = tmp_path / "RL"
+    (rl / "3rdparty/Gym-workspace/Gym").mkdir(parents=True)
+    (rl / "3rdparty/Gym-workspace/Gym/pyproject.toml").write_text("", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="no uv.lock"):
+        convert_mod._resolve_image_pins(
+            convert_mod.ConvertEnvironmentSpec(
+                hub_id="primeintellect/ascii-tree", out_dir=tmp_path / "env", nemo_rl_root=rl
+            )
+        )
+
+
+def test_gym_root_puts_fork_wheel_and_pins_in_the_closure(tmp_path: Path, monkeypatch) -> None:
+    """nemo-gym is not on an index, so its deps only reach the closure via --gym-root."""
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    seen: dict[str, str] = {}
+
+    def _fake_run(cmd, **kwargs):
+        if cmd[:3] == ["uv", "build", "--wheel"]:
+            out = Path(cmd[cmd.index("--out-dir") + 1])
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "nemo_gym-0.5.0rc0-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+        elif "compile" in cmd:
+            seen["in"] = Path(cmd[3]).read_text(encoding="utf-8")
+            Path(cmd[cmd.index("--output-file") + 1]).write_text("", encoding="utf-8")
+        else:
+            dest = Path(cmd[cmd.index("--dest") + 1])
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+        return None
+
+    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+
+    convert_mod.download_hub_wheels(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            out_dir=tmp_path / "env",
+            gym_root=tmp_path / "Gym",
+            nemo_gym_version="0.5.0rc0",
+            ray_version="2.56.1",
+            openai_version="2.6.1",
+        ),
+        work_dir=tmp_path / "work",
+    )
+
+    lines = seen["in"].splitlines()
+    assert any(ln.startswith("nemo-gym[dev] @ file://") and ln.endswith(".whl") for ln in lines)
+    assert "ray[default]==2.56.1" in lines
+    assert "openai==2.6.1" in lines
+
+
+def test_gym_root_version_mismatch_is_rejected(tmp_path: Path, monkeypatch) -> None:
+    """A checkout off the image's commit silently yields a wheel Gym would ignore."""
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    def _fake_run(cmd, **kwargs):
+        out = Path(cmd[cmd.index("--out-dir") + 1])
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "nemo_gym-0.4.0-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+        return None
+
+    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+
+    with pytest.raises(RuntimeError, match="builds nemo-gym 0.4.0 but the image reports 0.5.0rc0"):
+        convert_mod._agent_closure_requirements(
+            convert_mod.ConvertEnvironmentSpec(
+                hub_id="primeintellect/ascii-tree",
+                out_dir=tmp_path / "env",
+                gym_root=tmp_path / "Gym",
+                nemo_gym_version="0.5.0rc0",
+            ),
+            work_dir=tmp_path / "work",
+        )
+
+
+def test_missing_image_pins_warns_that_package_needs_egress(tmp_path: Path, caplog) -> None:
+    import logging
+
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    with caplog.at_level(logging.WARNING):
+        reqs = convert_mod._agent_closure_requirements(
+            convert_mod.ConvertEnvironmentSpec(hub_id="primeintellect/ascii-tree", out_dir=tmp_path / "env"),
+            work_dir=tmp_path / "work",
+        )
+
+    assert list(convert_mod.GYM_VENV_REQUIREMENTS) == reqs
+    assert "--gym-root" in caplog.text
+    assert "egress" in caplog.text
+
+
+# A wheelhouse that satisfies the whole offline venv contract, not just the seed step.
+_COMPLETE_VENV_WHEELS = (
+    "pip-25.2-py3-none-any.whl",
+    "setuptools-80.10.2-py3-none-any.whl",
+    "setuptools_scm-10.2.3-py3-none-any.whl",
+    "ray-2.56.1-py3-none-any.whl",
+    "openai-2.6.1-py3-none-any.whl",
+)
+
+
+def test_download_hub_wheels_vendors_venv_seed_packages(tmp_path: Path, monkeypatch) -> None:
+    """`uv venv --seed` resolves pip before any requirement, so the closure must carry it."""
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    compiled: list[list[str]] = []
+
+    def fake_compile(work_dir, packages, *, extra_index_url=None):
+        compiled.append(list(packages))
+        pinned = Path(work_dir) / "requirements.txt"
+        pinned.parent.mkdir(parents=True, exist_ok=True)
+        pinned.write_text("ascii-tree==0.1.5\nverifiers==0.1.14\npip==25.2\n", encoding="utf-8")
+        return pinned
+
+    def fake_download(wheels_dir, *, requirements_file, extra_index_url=None):
+        wheels_dir.mkdir(parents=True, exist_ok=True)
+        for name in (
+            "ascii_tree-0.1.5-py3-none-any.whl",
+            "verifiers-0.1.14-py3-none-any.whl",
+            "pip-25.2-py3-none-any.whl",
+        ):
+            (wheels_dir / name).write_bytes(b"PK\x03\x04")
+
+    monkeypatch.setattr(convert_mod, "_compile_pinned_requirements", fake_compile)
+    monkeypatch.setattr(convert_mod, "_run_pip_download", fake_download)
+    monkeypatch.setattr(convert_mod, "_build_downloaded_sdists", lambda wheels_dir: None)
+
+    wheels = convert_mod.download_hub_wheels(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            hub_version="0.1.5",
+            out_dir=tmp_path / "env",
+        ),
+        work_dir=tmp_path / "work",
+    )
+
+    assert "pip" in compiled[0]
+    assert (wheels / "pip-25.2-py3-none-any.whl").is_file()
+
+
+def test_wheels_dir_gets_seed_packages_vendored(tmp_path: Path, monkeypatch) -> None:
+    """--wheels-dir is resolved for the environment, so pip has to be added for it."""
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    src = tmp_path / "prebuilt"
+    src.mkdir()
+    (src / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+
+    requested: list[list[str]] = []
+
+    def fake_compile(work_dir, packages, *, extra_index_url=None):
+        requested.append(list(packages))
+        pinned = Path(work_dir) / "requirements.txt"
+        pinned.parent.mkdir(parents=True, exist_ok=True)
+        pinned.write_text("pip==25.2\n", encoding="utf-8")
+        return pinned
+
+    def fake_download(dest, *, requirements_file, extra_index_url=None):
+        (dest / "pip-25.2-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+
+    monkeypatch.setattr(convert_mod, "_compile_pinned_requirements", fake_compile)
+    monkeypatch.setattr(convert_mod, "_run_pip_download", fake_download)
+
+    wheels = convert_mod.download_hub_wheels(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            out_dir=tmp_path / "env",
+            wheels_dir=src,
+        ),
+        work_dir=tmp_path / "work",
+    )
+
+    # The pinned agent closure, not bare names: unpinned, setuptools resolves past the
+    # pkg_resources ceiling and ray/openai miss the image's versions.
+    assert requested == [list(convert_mod.GYM_VENV_REQUIREMENTS)]
+    assert (wheels / "pip-25.2-py3-none-any.whl").is_file()
+    assert (wheels / "ascii_tree-0.1.5-py3-none-any.whl").is_file()
+
+
+def test_wheels_dir_top_up_carries_the_image_pins(tmp_path: Path, monkeypatch) -> None:
+    """A pre-vendored closure must be completed with the image's versions, not latest."""
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    src = tmp_path / "prebuilt"
+    src.mkdir()
+    (src / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+
+    requested: list[list[str]] = []
+
+    def fake_compile(work_dir, packages, *, extra_index_url=None):
+        requested.append(list(packages))
+        pinned = Path(work_dir) / "requirements.txt"
+        pinned.parent.mkdir(parents=True, exist_ok=True)
+        pinned.write_text("", encoding="utf-8")
+        return pinned
+
+    monkeypatch.setattr(convert_mod, "_compile_pinned_requirements", fake_compile)
+    monkeypatch.setattr(convert_mod, "_run_pip_download", lambda *a, **k: None)
+    monkeypatch.setattr(convert_mod, "_build_downloaded_sdists", lambda wheels_dir: None)
+    monkeypatch.setattr(convert_mod, "_assert_complete_wheel_closure", lambda *a, **k: None)
+
+    convert_mod.download_hub_wheels(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            out_dir=tmp_path / "env",
+            wheels_dir=src,
+            ray_version="2.56.1",
+            openai_version="2.6.1",
+        ),
+        work_dir=tmp_path / "work",
+    )
+
+    roots = requested[0]
+    assert "ray[default]==2.56.1" in roots
+    assert "openai==2.6.1" in roots
+    # The ceiling matters: setuptools 81 dropped pkg_resources, which Gym's hydra imports.
+    assert "setuptools>=61,<81" in roots
+
+
+def test_wheels_dir_already_carrying_seed_packages_is_untouched(tmp_path: Path, monkeypatch) -> None:
+    from nmp.rl.tasks.environment import convert as convert_mod
+
+    src = tmp_path / "prebuilt"
+    src.mkdir()
+    (src / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+    for name in _COMPLETE_VENV_WHEELS:
+        (src / name).write_bytes(b"PK\x03\x04")
+
+    def boom(*args, **kwargs):
+        raise AssertionError("must not reach the network when the closure is already complete")
+
+    monkeypatch.setattr(convert_mod, "_compile_pinned_requirements", boom)
+    monkeypatch.setattr(convert_mod, "_run_pip_download", boom)
+
+    wheels = convert_mod.download_hub_wheels(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            out_dir=tmp_path / "env",
+            wheels_dir=src,
+        ),
+        work_dir=tmp_path / "work",
+    )
+    assert sorted(p.name for p in wheels.glob("*.whl")) == sorted(
+        ["ascii_tree-0.1.5-py3-none-any.whl", *_COMPLETE_VENV_WHEELS]
+    )
+
+
+def test_validate_package_layout_warns_on_missing_seed_packages(tmp_path: Path, caplog) -> None:
+    """A closure without pip cannot build a venv on a deny-default sandbox."""
+    import logging
+
+    from nmp.rl.tasks.environment.package import write_adapter_wheels_package
+
+    src = tmp_path / "prebuilt"
+    src.mkdir()
+    (src / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+
+    with caplog.at_level(logging.WARNING):
+        write_adapter_wheels_package(
+            out_dir=tmp_path / "env",
+            hub_id="primeintellect/ascii-tree",
+            wheels_src=src,
+        )
+
+    assert "does not vendor pip" in caplog.text
+
+
+def test_validate_package_layout_quiet_when_seed_packages_present(tmp_path: Path, caplog) -> None:
+    import logging
+
+    from nmp.rl.tasks.environment.package import write_adapter_wheels_package
+
+    src = tmp_path / "prebuilt"
+    src.mkdir()
+    (src / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+    for name in _COMPLETE_VENV_WHEELS:
+        (src / name).write_bytes(b"PK\x03\x04")
+
+    with caplog.at_level(logging.WARNING):
+        write_adapter_wheels_package(
+            out_dir=tmp_path / "env",
+            hub_id="primeintellect/ascii-tree",
+            wheels_src=src,
+        )
+
+    assert "does not vendor" not in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -586,10 +1125,12 @@ def test_download_targets_the_training_image_not_the_host(tmp_path: Path, monkey
         "cffi-2.1.1-cp313-cp313-macosx_11_0_arm64.whl",
         "charset_normalizer-3.5.0-cp313-cp313-macosx_10_13_universal2.whl",
         "foo-1.0-cp313-cp313-win_amd64.whl",
+        "host_built-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+        "future-1.0-cp314-cp314-manylinux_2_17_x86_64.whl",
     ],
 )
 def test_assert_wheels_target_platform_rejects_foreign_wheels(tmp_path: Path, filename: str) -> None:
-    """Catch it here, not as an opaque resolver failure minutes into a cluster job."""
+    """Catch foreign platforms and Python ABIs before the cluster install."""
     from nmp.rl.tasks.environment.convert import assert_wheels_target_platform
 
     wheels = tmp_path / "wheels"

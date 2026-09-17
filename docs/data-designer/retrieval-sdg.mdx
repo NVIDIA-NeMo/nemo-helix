@@ -27,9 +27,9 @@ NeMo Platform exposes Nemotron embed/rerank Stage 0 (`sdg`) and Stage 1
 nemo data-designer retrieval-generate --workspace default --spec '{
   "corpus": "default/my-docs",
   "provider": "default/nvidia-build",
-  "artifact_extraction_model": "nvidia/nemotron-3-nano-30b-a3b",
-  "qa_generation_model": "nvidia/nemotron-3-nano-30b-a3b",
-  "quality_judge_model": "nvidia/nemotron-3-nano-30b-a3b",
+  "artifact_extraction_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+  "qa_generation_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+  "quality_judge_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
   "embed_model": "nvidia/nemotron-3-embed-1b"
 }'
 ```
@@ -44,7 +44,7 @@ Equivalent helper:
 nemo data-designer retrieval generate \
   --corpus default/my-docs \
   --provider default/nvidia-build \
-  --chat-model nvidia/nemotron-3-nano-30b-a3b \
+  --chat-model nvidia/nemotron-3.5-lightning-30b-a3b \
   --embed-model nvidia/nemotron-3-embed-1b
 ```
 
@@ -53,27 +53,41 @@ Output fileset includes Q&A JSONL and `generation_result.json`.
 Preview without a full job:
 
 ```bash
-nemo data-designer retrieval-preview --spec '{"generate":{"corpus":"default/my-docs","provider":"default/nvidia-build","artifact_extraction_model":"nvidia/nemotron-3-nano-30b-a3b","qa_generation_model":"nvidia/nemotron-3-nano-30b-a3b","quality_judge_model":"nvidia/nemotron-3-nano-30b-a3b","embed_model":"nvidia/nemotron-3-embed-1b"},"num_records":1}'
+nemo data-designer retrieval-preview --spec '{"generate":{"corpus":"default/my-docs","provider":"default/nvidia-build","artifact_extraction_model":"nvidia/nemotron-3.5-lightning-30b-a3b","qa_generation_model":"nvidia/nemotron-3.5-lightning-30b-a3b","quality_judge_model":"nvidia/nemotron-3.5-lightning-30b-a3b","embed_model":"nvidia/nemotron-3-embed-1b"},"num_records":1}'
 ```
 
 ## Prepare (Stage 1)
 
 Conversion (CPU) produces `eval_beir/` and training JSON. GPU mining is off by
 default. Skip SDG by pointing `sdg_input` at a fileset containing an existing
-`generation_result.json`, or at
-`hf://nvidia/Retrieval-Synthetic-NVDocs-v1@<revision>`.
+`generation_result.json`. For a differently named dump, put the filename in
+the reference or set `generation_file`. Directories default to
+`generation_result.json`; the job does not guess among JSON files.
 
 ```bash
 nemo data-designer retrieval-prepare --spec '{
   "sdg_input": "default/stage0-out"
 }'
+
+nemo data-designer retrieval-prepare --spec '{
+  "sdg_input": "hf://nvidia/Retrieval-Synthetic-NVDocs-v1@<revision>/nv_pp_dd_sdg.json",
+  "enable_mining": false
+}'
+
+nemo data-designer retrieval-prepare --spec '{
+  "sdg_input": "default/retrieval-synthetic-nvdocs-v1",
+  "generation_file": "nv_pp_dd_sdg.json",
+  "enable_mining": false
+}'
 ```
 
-Enable mining (GPU, ~40GB) with `"enable_mining": true`. The `model` field identifies
-a platform model entity whose fileset is downloaded by `nmp-customizer-tasks` into
-the shared job storage. `nmp-automodel-training` then loads the encoder and tokenizer
-from that local directory with Hugging Face networking disabled. Conversion-only
-prepare stays on `nmp-cpu-tasks`.
+Enable mining (GPU, ~40GB) with `"enable_mining": true`. `model` is a platform
+entity with an attached encoder fileset.
+
+Mining embeds every training query and the corpus, so it dominates Stage 1 wall
+time. The `mining.query_embedding_batch_size` and
+`mining.document_embedding_batch_size` defaults of 16 leave a 48 GB GPU mostly
+idle; raise them to 64–128 for a large split.
 
 All retrieval steps use the same container-backed execution profile so they share job
 storage across generation, conversion, model staging, and mining. Configure it with
@@ -87,17 +101,51 @@ nemo data-designer retrieval-run --spec '{
   "generate": {
     "corpus": "default/my-docs",
     "provider": "default/nvidia-build",
-    "artifact_extraction_model": "nvidia/nemotron-3-nano-30b-a3b",
-    "qa_generation_model": "nvidia/nemotron-3-nano-30b-a3b",
-    "quality_judge_model": "nvidia/nemotron-3-nano-30b-a3b",
+    "artifact_extraction_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "qa_generation_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "quality_judge_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
     "embed_model": "nvidia/nemotron-3-embed-1b"
   },
-  "prepare": {}
+  "prepare": {
+    "enable_mining": true,
+    "model": "default/nemotron-3-embed-1b"
+  }
 }'
 ```
 
 This is jobs-service multi-step execution (CPU then optional GPU), not Data Designer
 in-config workflow chaining.
+
+## Use the Stage 1 output
+
+Stage 1 saves one `artifacts` fileset containing `training.jsonl`, `eval_beir/`
+(`corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`), and the wrapped `train.json`
+that hard-negative mining consumes.
+
+Pass that fileset to both downstream consumers without repackaging it:
+
+- Automodel `dataset.training` — dataset discovery selects `training.jsonl` and
+  ignores the non-JSONL `train.json` beside it.
+- `nemo evaluator retrieve-eval` `dataset` — the BEIR loader accepts either the
+  BEIR directory or a fileset root containing `eval_beir`.
+
+Convert-only prepare (`enable_mining: false`) writes `neg_doc: []` on every
+training row. Encoder fine-tuning still samples `train_n_passages - 1` negatives
+(default 4) and fails with `neg_doc must contain at least 1 document to sample N
+negatives`. Before `nemo customization automodel submit`, download
+`training.jsonl` and require a non-empty `neg_doc` list on every checked row.
+A single empty list can be selected by the collator and fail the run. If any row
+is empty, re-run `retrieval-prepare` with `"enable_mining": true` and a
+fileset-backed encoder `model`. To mine an existing convert-only fileset without
+regenerating frozen `eval_beir`, set `train_input_file` to that fileset instead
+of `sdg_input`.
+
+```bash
+nemo files list <artifacts-fileset> --workspace default
+```
+
+Freeze the fileset once base-versus-tuned comparison starts, so both runs score
+against the same `eval_beir` split.
 
 ## SDK
 
@@ -111,9 +159,9 @@ client.data_designer.retrieval_generate(
     RetrievalGenerateJobConfig(
         corpus="default/my-docs",
         provider="default/nvidia-build",
-        artifact_extraction_model="nvidia/nemotron-3-nano-30b-a3b",
-        qa_generation_model="nvidia/nemotron-3-nano-30b-a3b",
-        quality_judge_model="nvidia/nemotron-3-nano-30b-a3b",
+        artifact_extraction_model="nvidia/nemotron-3.5-lightning-30b-a3b",
+        qa_generation_model="nvidia/nemotron-3.5-lightning-30b-a3b",
+        quality_judge_model="nvidia/nemotron-3.5-lightning-30b-a3b",
         embed_model="nvidia/nemotron-3-embed-1b",
     )
 )
@@ -121,6 +169,8 @@ client.data_designer.retrieval_generate(
 
 ## Next Steps
 
+- Conduct the rest of the recipe with the `nemo-retrieval-recipes` skill (Automodel
+  `bi_encoder` / `cross_encoder`, then `nemo evaluator retrieve-eval` on frozen `eval_beir`).
 - See the [Data Designer CLI](/documentation/design-synthetic-data/cli) for configuration and command details.
-- Use the Stage 1 `training.jsonl` artifact as input to an embedding or
-  reranking customization job.
+- Stage 1 emits `training.jsonl` plus `eval_beir/` (`corpus.jsonl`, `queries.jsonl`, `qrels/test.tsv`).
+  Tiny corpora can leave the train split empty — generate with enough files (50+) before mining.

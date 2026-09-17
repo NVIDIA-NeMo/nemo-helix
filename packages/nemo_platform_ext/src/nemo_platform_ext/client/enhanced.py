@@ -17,12 +17,16 @@ from nemo_platform import (
     DefaultAsyncHttpxClient,
     DefaultHttpxClient,
     NotGiven,
+    Omit,
     __version__,
     not_given,
 )
 from nemo_platform._base_client import AsyncAPIClient, SyncAPIClient
+from nemo_platform._compat import cached_property
 from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_platform_plugin.client.tls import client_verify_from_env
+from nemo_platform_plugin.jobs.client import AsyncJobsClient, JobsClient
+from nemo_platform_plugin.secrets.compat import AsyncSecretsResource, SecretsResource
 
 
 def _should_bootstrap_config(
@@ -74,7 +78,7 @@ class NeMoPlatform(SyncAPIClient):
         access_token: str | None = None,
         timeout: float | Timeout | None | NotGiven = not_given,
         max_retries: int = DEFAULT_MAX_RETRIES,
-        default_headers: Mapping[str, str] | None = None,
+        default_headers: Mapping[str, str | Omit] | None = None,
         default_query: Mapping[str, object] | None = None,
         # Configure a custom httpx client.
         # We provide a `DefaultHttpxClient` class that you can pass to retain the default values we use for `limits`, `timeout` & `follow_redirects`.
@@ -220,6 +224,16 @@ class NeMoPlatform(SyncAPIClient):
         self.__dict__[name] = instance
         return instance
 
+    @cached_property
+    def jobs(self) -> JobsClient:
+        from nemo_platform_plugin.client.adapter import client_from_platform
+
+        return client_from_platform(self, JobsClient)
+
+    @cached_property
+    def secrets(self) -> SecretsResource:
+        return SecretsResource(self)
+
     def copy(
         self,
         *,
@@ -232,8 +246,8 @@ class NeMoPlatform(SyncAPIClient):
         timeout: float | Timeout | None | NotGiven = not_given,
         http_client: httpx.Client | None = None,
         max_retries: int | NotGiven = not_given,
-        default_headers: Mapping[str, str] | None = None,
-        set_default_headers: Mapping[str, str] | None = None,
+        default_headers: Mapping[str, str | Omit] | None = None,
+        set_default_headers: Mapping[str, str | Omit] | None = None,
         default_query: Mapping[str, object] | None = None,
         set_default_query: Mapping[str, object] | None = None,
         _extra_kwargs: Mapping[str, Any] = {},
@@ -296,7 +310,7 @@ class AsyncNeMoPlatform(AsyncAPIClient):
         access_token: str | None = None,
         timeout: float | Timeout | None | NotGiven = not_given,
         max_retries: int = DEFAULT_MAX_RETRIES,
-        default_headers: Mapping[str, str] | None = None,
+        default_headers: Mapping[str, str | Omit] | None = None,
         default_query: Mapping[str, object] | None = None,
         # Configure a custom httpx client.
         # We provide a `DefaultAsyncHttpxClient` class that you can pass to retain the default values we use for `limits`, `timeout` & `follow_redirects`.
@@ -464,6 +478,16 @@ class AsyncNeMoPlatform(AsyncAPIClient):
         self.__dict__[name] = instance
         return instance
 
+    @cached_property
+    def jobs(self) -> AsyncJobsClient:
+        from nemo_platform_plugin.client.adapter import client_from_platform
+
+        return client_from_platform(self, AsyncJobsClient)
+
+    @cached_property
+    def secrets(self) -> AsyncSecretsResource:
+        return AsyncSecretsResource(self)
+
     def copy(
         self,
         *,
@@ -476,8 +500,8 @@ class AsyncNeMoPlatform(AsyncAPIClient):
         timeout: float | Timeout | None | NotGiven = not_given,
         http_client: httpx.AsyncClient | None = None,
         max_retries: int | NotGiven = not_given,
-        default_headers: Mapping[str, str] | None = None,
-        set_default_headers: Mapping[str, str] | None = None,
+        default_headers: Mapping[str, str | Omit] | None = None,
+        set_default_headers: Mapping[str, str | Omit] | None = None,
         default_query: Mapping[str, object] | None = None,
         set_default_query: Mapping[str, object] | None = None,
         _extra_kwargs: Mapping[str, Any] = {},

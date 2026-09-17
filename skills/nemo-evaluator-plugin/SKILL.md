@@ -33,9 +33,12 @@ Establish these inputs before building an evaluation:
 1. Clarify whether the input is [dataset-driven rows](references/evaluation-shapes.md#dataset-driven-evaluation),
    [task-driven agent work](references/evaluation-shapes.md#task-driven-evaluation), or a
    [BEIR retrieval corpus](references/evaluation-shapes.md#retrieval-driven-evaluation).
+   If the user wants the full embed/rerank fine-tune recipe, hand off to `nemo-retrieval-recipes`
+   and use this skill only for retrieve-eval submit/debug.
 2. Choose the simplest metric that measures the requested behavior. Prefer deterministic metrics when possible.
 3. Build a tiny smoke case with one expected pass and one expected failure.
-4. Validate metric behavior with the standalone SDK and inspect row-level output plus aggregates.
+4. Validate metric behavior with the standalone SDK. Inspect row-level output, aggregate `count` and
+   `nan_count`, and coverage before interpreting a mean.
 5. Fix field mappings, prompts, parsers, or task definitions before scaling.
 6. Submit the platform job only after the input and scoring shape works.
 
@@ -113,6 +116,7 @@ under a different skills root.
 | `assets/specs/exact_match_metric.json` | Two-row offline smoke spec; submit as-is |
 | `assets/specs/llm_as_judge.json` | Online generation + judge; local-first (`NVIDIA_API_KEY`) |
 | `assets/specs/fabric_agent_eval.json` | Task-driven Fabric runner spec |
+| `assets/specs/gym_agent_eval.json` | Task-driven sandboxed Gym FileSet spec |
 | `assets/examples/plugin_sdk_examples.py` | Copyable SDK snippets for each plugin surface |
 
 ## Available Scripts
@@ -162,8 +166,9 @@ Submission accepts inline tasks or a stored `TasksetRef`. Stored tasksets are
 resolved in the target workspace.
 
 Read [Agent Evaluation](references/agent-evaluation.md) for inline tasks,
-`TasksetRef`, concurrency, fail-fast behavior, result artifacts, and runner
-configuration.
+`TasksetRef`, concurrency, fail-fast behavior, sparse-output denominators,
+result artifacts, and runner configuration, including Gym FileSet and
+sandbox requirements.
 
 ### Prepare Fabric in a repository checkout
 

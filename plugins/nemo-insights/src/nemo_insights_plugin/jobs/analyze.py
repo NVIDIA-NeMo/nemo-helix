@@ -12,6 +12,7 @@ from typing import ClassVar
 
 from nemo_insights_plugin.analyst.run import run_analyst
 from nemo_insights_plugin.entities import AnalysisConfigStatus
+from nemo_insights_plugin.types import ANALYSIS_JOB_NAME, AnalyzeSpec
 from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
@@ -29,7 +30,7 @@ from nemo_platform_plugin.jobs.constants import (
 from nemo_platform_plugin.jobs.image import get_qualified_image
 from nemo_platform_plugin.nooa_model_client import ConfiguredModelRefs
 from nemo_platform_plugin.sdk_provider import get_async_task_sdk
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -37,43 +38,10 @@ REPORT_RESULT_NAME = "analysis-report"
 REPORT_FILE_NAME = "analysis-report.txt"
 
 
-class AnalyzeSpec(BaseModel):
-    """Canonical input for one insights analyst run."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    agent: str = Field(description="Agent under test.")
-    ethos: str | None = Field(
-        default=None,
-        description="Optional Ethos Markdown for the agent under test.",
-    )
-    base_url: str | None = Field(
-        default=None,
-        description="Optional platform base URL. Unset uses the active platform context.",
-    )
-    insights_output: str | None = Field(
-        default=None,
-        description=(
-            "Optional local YAML path mirroring the Insights the platform stored. "
-            "Container-local unless it points at mounted storage."
-        ),
-    )
-    since: datetime | None = Field(
-        default=None,
-        description="Optional lower bound for incremental trace/span analysis.",
-    )
-    update_analysis_config: bool = Field(
-        default=True,
-        description="Update the matching AnalysisRunStatus with run metadata.",
-    )
-    default_model: str = Field(description="Workspace-qualified default Model Entity ID selected during setup.")
-    fast_model: str = Field(description="Workspace-qualified fast Model Entity ID selected during setup.")
-
-
 class AnalyzeJob(NemoJob):
     """Run the insights analyst once for a single agent."""
 
-    name: ClassVar[str] = "analyze-job"
+    name: ClassVar[str] = ANALYSIS_JOB_NAME
     description: ClassVar[str] = "Run the insights analyst once for a single agent."
     container: ClassVar[str] = "cpu-tasks"
     spec_schema: ClassVar[type[BaseModel] | None] = AnalyzeSpec

@@ -22,12 +22,12 @@ import os
 import uuid
 
 import pytest
-from nemo_evaluator.api.schemas import EvaluatorTaskDefinition, MetricInline, TaskInput
+from nemo_evaluator.api.schemas import EvaluatorTaskDefinition, MetricInline, TaskInput, TaskInputs
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
-from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.sdk import NeMoPlatform
 from nemo_platform_plugin.workspaces.client import WorkspacesClient
 from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
 
@@ -60,7 +60,10 @@ def _inline_metric(marker: str) -> MetricInline:
 def _task_input(metric: MetricInline) -> TaskInput:
     return TaskInput(
         spec=EvaluatorTaskDefinition(
-            kind="evaluator", intent="Answer the question.", inputs={"instruction": "What is 2+2?"}, metrics=[metric]
+            kind="evaluator",
+            intent="Answer the question.",
+            inputs=TaskInputs(instruction="What is 2+2?"),
+            metrics=[metric],
         )
     )
 

@@ -18,6 +18,7 @@ import tomlkit
 import typer
 from nemo_platform_sdk_tools.sdk.core.common import WRAPPER_DISTRIBUTION_NAME, SdkInfo, get_sdk_info
 from nemo_platform_sdk_tools.sdk.post_generation_exist_ok import inject_exist_ok
+from nemo_platform_sdk_tools.sdk.source_owned_resources import SOURCE_OWNED_RESOURCE_EXCLUSIONS
 from tomlkit.items import AoT, Table
 
 app = typer.Typer(
@@ -47,6 +48,128 @@ SDK_BUILD_SOURCE_PACKAGES: tuple[dict[str, str | list[str]], ...] = (
         ],
     },
 )
+SOURCE_OWNED_RESOURCE_NAMES = frozenset(resource.resource_name for resource in SOURCE_OWNED_RESOURCE_EXCLUSIONS)
+SOURCE_OWNED_JOB_STATUS_TYPE_EXPORTS: tuple[tuple[str, str], ...] = (
+    ("platform_job_status_response", "PlatformJobStatusResponse"),
+    ("platform_job_step_status_response", "PlatformJobStepStatusResponse"),
+    ("platform_job_task_status_response", "PlatformJobTaskStatusResponse"),
+)
+SOURCE_OWNED_SECRET_TYPE_EXPORTS: tuple[tuple[str, str], ...] = (
+    ("platform_secret_access_response", "PlatformSecretAccessResponse"),
+    ("platform_secret_admin_rotation_response", "PlatformSecretAdminRotationResponse"),
+    ("platform_secret_create_request", "PlatformSecretCreateRequest"),
+    ("platform_secret_response", "PlatformSecretResponse"),
+    ("platform_secret_responses_page", "PlatformSecretResponsesPage"),
+    ("platform_secret_update_request", "PlatformSecretUpdateRequest"),
+    ("secret_create_params", "SecretCreateParams"),
+    ("secret_list_params", "SecretListParams"),
+    ("secret_update_params", "SecretUpdateParams"),
+)
+SOURCE_OWNED_JOBS_TYPES_INIT = """\
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+from __future__ import annotations
+
+from nemo_platform_plugin.jobs.spec import (
+    PlatformJobSpec as PlatformJobSpec,
+    PlatformJobStepSpec as PlatformJobStepSpec,
+)
+from nemo_platform_plugin.jobs.types import (
+    JobLogsQueryParams as JobLogsQueryParams,
+    ListJobsQueryParams as ListJobsQueryParams,
+    PlatformJobResponse as PlatformJobResponse,
+    ListStepsQueryParams as ListStepsQueryParams,
+    PlatformJobSortField as PlatformJobSortField,
+    PlatformJobTaskUpdate as PlatformJobTaskUpdate,
+    JobStatusDetailsUpdate as JobStatusDetailsUpdate,
+    PlatformJobLogSortField as PlatformJobLogSortField,
+    PlatformJobStepResponse as PlatformJobStepResponse,
+    PlatformJobTaskResponse as PlatformJobTaskResponse,
+    CreatePlatformJobRequest as CreatePlatformJobRequest,
+    PlatformJobListSortField as PlatformJobListSortField,
+    ListJobResultsQueryParams as ListJobResultsQueryParams,
+    PlatformJobStepWithContext as PlatformJobStepWithContext,
+    PlatformJobAttemptSortField as PlatformJobAttemptSortField,
+    PlatformJobListTaskResponse as PlatformJobListTaskResponse,
+    PlatformJobStatusUpdateRequest as PlatformJobStatusUpdateRequest,
+    PlatformJobStatusDetailsUpdateRequest as PlatformJobStatusDetailsUpdateRequest,
+)
+from nemo_platform_plugin.jobs.schemas import (
+    PlatformJobLog as PlatformJobLog,
+    FileStorageType as FileStorageType,
+    PlatformJobStatus as PlatformJobStatus,
+    PlatformJobLogPage as PlatformJobLogPage,
+    PlatformJobResultResponse as PlatformJobResultResponse,
+    PlatformJobStatusResponse as PlatformJobStatusResponse,
+    PlatformJobListResultResponse as PlatformJobListResultResponse,
+    PlatformJobStepStatusResponse as PlatformJobStepStatusResponse,
+    PlatformJobTaskStatusResponse as PlatformJobTaskStatusResponse,
+    PlatformJobResultCreateRequest as PlatformJobResultCreateRequest,
+)
+
+PlatformJobStep = PlatformJobStepResponse
+"""
+SOURCE_OWNED_SECRETS_TYPES_INIT = """\
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+from __future__ import annotations
+
+from nemo_platform_plugin.secrets.types import (
+    SecretListParams as SecretListParams,
+    SecretCreateParams as SecretCreateParams,
+    SecretUpdateParams as SecretUpdateParams,
+    ListSecretsQueryParams as ListSecretsQueryParams,
+    PlatformSecretResponse as PlatformSecretResponse,
+    PlatformSecretCreateRequest as PlatformSecretCreateRequest,
+    PlatformSecretResponsesPage as PlatformSecretResponsesPage,
+    PlatformSecretUpdateRequest as PlatformSecretUpdateRequest,
+    PlatformSecretAccessResponse as PlatformSecretAccessResponse,
+    PlatformSecretAdminRotationResponse as PlatformSecretAdminRotationResponse,
+)
+"""
+SOURCE_OWNED_SECRETS_RESOURCE_INIT = """\
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+from __future__ import annotations
+
+from nemo_platform_plugin.secrets.compat import (
+    SecretsResource as SecretsResource,
+    AsyncSecretsResource as AsyncSecretsResource,
+    SecretsAdminResource as SecretsAdminResource,
+    AsyncSecretsAdminResource as AsyncSecretsAdminResource,
+)
+
+AdminResource = SecretsAdminResource
+AsyncAdminResource = AsyncSecretsAdminResource
+"""
+SOURCE_OWNED_SECRETS_ADMIN_RESOURCE = """\
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+from __future__ import annotations
+
+from nemo_platform_plugin.secrets.compat import (
+    SecretsAdminResource as SecretsAdminResource,
+    AsyncSecretsAdminResource as AsyncSecretsAdminResource,
+)
+
+AdminResource = SecretsAdminResource
+AsyncAdminResource = AsyncSecretsAdminResource
+"""
+SOURCE_OWNED_SECRETS_RESOURCE = """\
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+from __future__ import annotations
+
+from nemo_platform_plugin.secrets.compat import (
+    SecretsResource as SecretsResource,
+    AsyncSecretsResource as AsyncSecretsResource,
+)
+"""
 
 
 def _build_hook_source(sdk_info: SdkInfo) -> Path:
@@ -241,6 +364,183 @@ def apply_string_replacements(sdk_dir: Path, replacements: List[Tuple[str, str]]
                 continue
 
     typer.echo(f"  - Processed {processed_files} files with {total_replacements} total replacements")
+
+
+def _sdk_type_exports(sdk_info: SdkInfo) -> set[str]:
+    types_init = sdk_info.sdk_dir / "src" / sdk_info.module_name / "types" / "__init__.py"
+    if not types_init.exists():
+        return set()
+
+    exports: set[str] = set()
+    for line in types_init.read_text(encoding="utf-8").splitlines():
+        match = re.fullmatch(r"\s*([A-Za-z_]\w*)\s+as\s+\1,\s*", line)
+        if match:
+            exports.add(match.group(1))
+    return exports
+
+
+def _api_index_resource_name(sdk_info: SdkInfo, link_target: str) -> str | None:
+    match = re.fullmatch(rf"src/{sdk_info.module_name}/resources/([^/]+)/api\.md", link_target)
+    if match:
+        return match.group(1)
+    return None
+
+
+def clean_api_index(sdk_info: SdkInfo) -> bool:
+    """Remove generated API index entries for artifacts absent after post-processing."""
+    api_index = sdk_info.sdk_dir / "api.md"
+    if not api_index.exists():
+        typer.echo(f"api.md not found at {api_index}. Skipping cleanup.")
+        return False
+
+    type_exports = _sdk_type_exports(sdk_info)
+    content = api_index.read_text(encoding="utf-8")
+    lines = content.splitlines()
+    cleaned_lines: list[str] = []
+    in_type_import_block = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(f"from {sdk_info.module_name}.types import ("):
+            in_type_import_block = True
+            cleaned_lines.append(line)
+            continue
+        if in_type_import_block and stripped == ")":
+            in_type_import_block = False
+            cleaned_lines.append(line)
+            continue
+        if in_type_import_block:
+            type_name = stripped.removesuffix(",")
+            if type_name and type_name not in type_exports:
+                continue
+
+        link_match = re.fullmatch(r"# \[[^\]]+\]\(([^)]+)\)", stripped)
+        resource_name = _api_index_resource_name(sdk_info, link_match.group(1)) if link_match else None
+        if (
+            resource_name in SOURCE_OWNED_RESOURCE_NAMES
+            and link_match
+            and not (sdk_info.sdk_dir / link_match.group(1)).exists()
+        ):
+            continue
+
+        cleaned_lines.append(line)
+
+    cleaned_content = "\n".join(cleaned_lines)
+    if content.endswith("\n"):
+        cleaned_content += "\n"
+
+    if cleaned_content == content:
+        typer.echo(f"  - No changes needed for {api_index}")
+        return False
+
+    api_index.write_text(cleaned_content, encoding="utf-8")
+    typer.echo(f"  - Updated {api_index}")
+    return True
+
+
+def _source_owned_type_module_content(source_module: str, type_name: str) -> str:
+    return f"""\
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+from __future__ import annotations
+
+from {source_module} import (
+    {type_name} as {type_name},
+)
+"""
+
+
+def _append_missing_lines(path: Path, lines: tuple[str, ...]) -> bool:
+    content = path.read_text(encoding="utf-8") if path.exists() else ""
+    existing_lines = set(content.splitlines())
+    missing_lines = [line for line in lines if line not in existing_lines]
+    if not missing_lines:
+        return False
+
+    if content and not content.endswith("\n"):
+        content += "\n"
+    if content and not content.endswith("\n\n"):
+        content += "\n"
+    content += "\n".join(missing_lines)
+    content += "\n"
+    path.write_text(content, encoding="utf-8")
+    return True
+
+
+def ensure_source_owned_type_aliases(sdk_info: SdkInfo) -> bool:
+    """Expose source-owned compatibility objects through legacy SDK import paths."""
+    types_dir = sdk_info.sdk_dir / "src" / sdk_info.module_name / "types"
+    resources_dir = sdk_info.sdk_dir / "src" / sdk_info.module_name / "resources"
+    shared_dir = types_dir / "shared"
+    jobs_dir = types_dir / "jobs"
+    secrets_types_dir = types_dir / "secrets"
+    secrets_resources_dir = resources_dir / "secrets"
+    changed = False
+
+    shared_dir.mkdir(parents=True, exist_ok=True)
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    secrets_types_dir.mkdir(parents=True, exist_ok=True)
+    secrets_resources_dir.mkdir(parents=True, exist_ok=True)
+
+    for module_name, type_name in SOURCE_OWNED_JOB_STATUS_TYPE_EXPORTS:
+        module_path = shared_dir / f"{module_name}.py"
+        module_content = _source_owned_type_module_content("nemo_platform_plugin.jobs.schemas", type_name)
+        if not module_path.exists() or module_path.read_text(encoding="utf-8") != module_content:
+            module_path.write_text(module_content, encoding="utf-8")
+            changed = True
+
+    for module_name, type_name in SOURCE_OWNED_SECRET_TYPE_EXPORTS:
+        module_path = secrets_types_dir / f"{module_name}.py"
+        module_content = _source_owned_type_module_content("nemo_platform_plugin.secrets.types", type_name)
+        if not module_path.exists() or module_path.read_text(encoding="utf-8") != module_content:
+            module_path.write_text(module_content, encoding="utf-8")
+            changed = True
+
+    jobs_init = jobs_dir / "__init__.py"
+    if not jobs_init.exists() or jobs_init.read_text(encoding="utf-8") != SOURCE_OWNED_JOBS_TYPES_INIT:
+        jobs_init.write_text(SOURCE_OWNED_JOBS_TYPES_INIT, encoding="utf-8")
+        changed = True
+
+    secrets_types_init = secrets_types_dir / "__init__.py"
+    if (
+        not secrets_types_init.exists()
+        or secrets_types_init.read_text(encoding="utf-8") != SOURCE_OWNED_SECRETS_TYPES_INIT
+    ):
+        secrets_types_init.write_text(SOURCE_OWNED_SECRETS_TYPES_INIT, encoding="utf-8")
+        changed = True
+
+    secrets_resources_init = secrets_resources_dir / "__init__.py"
+    if (
+        not secrets_resources_init.exists()
+        or secrets_resources_init.read_text(encoding="utf-8") != SOURCE_OWNED_SECRETS_RESOURCE_INIT
+    ):
+        secrets_resources_init.write_text(SOURCE_OWNED_SECRETS_RESOURCE_INIT, encoding="utf-8")
+        changed = True
+
+    secrets_admin = secrets_resources_dir / "admin.py"
+    if not secrets_admin.exists() or secrets_admin.read_text(encoding="utf-8") != SOURCE_OWNED_SECRETS_ADMIN_RESOURCE:
+        secrets_admin.write_text(SOURCE_OWNED_SECRETS_ADMIN_RESOURCE, encoding="utf-8")
+        changed = True
+
+    secrets_resource = secrets_resources_dir / "secrets.py"
+    if not secrets_resource.exists() or secrets_resource.read_text(encoding="utf-8") != SOURCE_OWNED_SECRETS_RESOURCE:
+        secrets_resource.write_text(SOURCE_OWNED_SECRETS_RESOURCE, encoding="utf-8")
+        changed = True
+
+    shared_init = shared_dir / "__init__.py"
+    shared_imports = tuple(
+        f"from .{module_name} import {type_name} as {type_name}"
+        for module_name, type_name in SOURCE_OWNED_JOB_STATUS_TYPE_EXPORTS
+    )
+    changed = _append_missing_lines(shared_init, shared_imports) or changed
+
+    types_init = types_dir / "__init__.py"
+    top_level_imports = tuple(
+        f"from .shared import {type_name} as {type_name}" for _, type_name in SOURCE_OWNED_JOB_STATUS_TYPE_EXPORTS
+    )
+    changed = _append_missing_lines(types_init, top_level_imports) or changed
+    return changed
 
 
 def update_pyproject_toml(sdk_info: SdkInfo) -> bool:
@@ -569,6 +869,29 @@ def replace_strings() -> None:
 
 
 @app.command()
+def cleanup_api_index() -> None:
+    """Remove API index entries for generated SDK artifacts removed by post-processing."""
+    sdk_info = get_sdk_info()
+
+    typer.echo("Cleaning API index...")
+    clean_api_index(sdk_info)
+    typer.echo("API index cleanup completed!")
+
+
+@app.command()
+def ensure_source_owned_aliases() -> None:
+    """Create source-owned compatibility type aliases in the generated SDK tree."""
+    sdk_info = get_sdk_info()
+
+    typer.echo("Ensuring source-owned type aliases...")
+    if ensure_source_owned_type_aliases(sdk_info):
+        typer.echo("  - Updated source-owned type aliases")
+    else:
+        typer.echo("  - Source-owned type aliases already present")
+    typer.echo("Source-owned type alias update completed!")
+
+
+@app.command()
 def copy_license() -> None:
     """Copy LICENSE file from overrides to SDK directory."""
     sdk_info = get_sdk_info()
@@ -747,7 +1070,11 @@ def update_all() -> None:
     typer.echo()
     copy_source_overrides()
     typer.echo()
+    ensure_source_owned_aliases()
+    typer.echo()
     replace_strings()
+    typer.echo()
+    cleanup_api_index()
     typer.echo()
     update_license_headers()
     typer.echo()

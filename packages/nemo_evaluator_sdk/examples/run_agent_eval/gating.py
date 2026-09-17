@@ -10,7 +10,7 @@ of the persisted run bundle. Note ``pass_rate`` here is a per-task pass/fail cou
 against a reward threshold — deliberately different from
 :class:`~nemo_evaluator_sdk.agent_eval.results.AgentEvalSummary`'s mean-per-output.
 Token/runtime are read via
-:class:`~nemo_evaluator_sdk.agent_eval.metrics.TrialMeasurements`.
+:class:`~nemo_evaluator_sdk.agent_eval.trials.TrialMeasurements`.
 """
 
 from __future__ import annotations
@@ -20,9 +20,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from nemo_evaluator_sdk.agent_eval.metrics import TrialMeasurements
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
 from nemo_evaluator_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
+from nemo_evaluator_sdk.agent_eval.trials import TrialMeasurements
 from pydantic import BaseModel
 
 # Metric outputs, in priority order, that represent a task's pass/reward signal.
@@ -102,15 +102,15 @@ def summarize_run(
 ) -> dict[str, Any]:
     """Aggregate pass-rate, token, and runtime for one run.
 
-    Token/runtime are read via :class:`TrialMeasurements`; the reward used for
-    pass-rate prefers a scored metric output (``reward_outputs``) and falls back
-    to the trial's recorded reward.
+    Token/runtime are read via :class:`TrialMeasurements`; pass-rate uses only
+    completed canonical score outputs. Tasks without one are reported as unscored.
     """
     trials_by_task = {trial.task_id: trial for trial in result.trials}
     reward_by_task = _rewards_by_task(result.scores, reward_outputs)
     task_ids = sorted({task.id for task in result.tasks} | set(trials_by_task))
 
     passed = 0
+    unscored_task_ids: list[str] = []
     token_sum = 0
     token_count = 0
     token_unavailable: list[str] = []
@@ -120,12 +120,12 @@ def summarize_run(
 
     for task_id in task_ids:
         trial = trials_by_task.get(task_id)
-        measurements = TrialMeasurements.from_metadata(trial.metadata if trial is not None else {})
+        measurements = trial.measurements if trial is not None else TrialMeasurements()
 
         reward_value = reward_by_task.get(task_id)
         if reward_value is None:
-            reward_value = measurements.reward if measurements.reward is not None else 0.0
-        if reward_value >= 1.0:
+            unscored_task_ids.append(task_id)
+        elif reward_value >= 1.0:
             passed += 1
 
         if measurements.total_tokens is not None:
@@ -147,6 +147,7 @@ def summarize_run(
         "total_tasks": total,
         "passed_tasks": passed,
         "pass_rate": (passed / total) if total else 0.0,
+        "unscored_task_ids": sorted(unscored_task_ids),
         "task_names": task_ids,
         "total_tokens_sum": token_sum if token_count else None,
         "avg_total_tokens": (token_sum / token_count) if token_count else None,

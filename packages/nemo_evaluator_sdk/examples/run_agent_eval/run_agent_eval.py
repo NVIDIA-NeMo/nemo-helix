@@ -29,7 +29,6 @@ if __package__ in {None, ""}:
         "  python -m packages.nemo_evaluator_sdk.examples.run_agent_eval.run_agent_eval --task all"
     )
 
-from nemo_evaluator_sdk.agent_eval.metrics import TrialMeasurements
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
 from nemo_evaluator_sdk.metrics.protocol import Metric
 
@@ -156,8 +155,8 @@ def _print_result(result: AgentEvalResult) -> None:
     for metric_type, true_count, total in _boolean_true_rates(result):
         print(f"  {metric_type}: {true_count}/{total} true")
     for score in result.summary.scores.scores:
-        if score.mean is not None:
-            print(f"  {score.name}: mean={score.mean:.3f}")
+        if score.headline_value is not None:
+            print(f"  {score.name}: {score.headline_value:.3f}")
     _print_measurements(result)
     if result.work_dir is not None:
         print(f"work_dir: {result.work_dir}")
@@ -166,7 +165,7 @@ def _print_result(result: AgentEvalResult) -> None:
 
 def _print_measurements(result: AgentEvalResult) -> None:
     """Print token/runtime totals (the same measurements nat_runner records)."""
-    measurements = [TrialMeasurements.from_metadata(trial.metadata) for trial in result.trials]
+    measurements = [trial.measurements for trial in result.trials]
     total_tokens = [m.total_tokens for m in measurements if m.total_tokens is not None]
     runtimes = [m.runtime_sec for m in measurements if m.runtime_sec is not None]
     if total_tokens:

@@ -32,11 +32,25 @@ def _install_mock_transport(handler) -> AbstractContextManager[Any]:
     transport = httpx.MockTransport(handler)
     real_client = httpx.Client
 
-    def _factory(*args, **kwargs):
-        kwargs["transport"] = transport
-        return real_client(*args, **kwargs)
+    class _Client(real_client):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
 
-    return patch("nemo_agents_plugin.cli.httpx.Client", _factory)
+    return patch("nemo_agents_plugin.cli.httpx.Client", _Client)
+
+
+def _empty_page() -> dict[str, Any]:
+    return {
+        "data": [],
+        "pagination": {
+            "page": 1,
+            "page_size": 0,
+            "current_page_size": 0,
+            "total_pages": 1,
+            "total_results": 0,
+        },
+    }
 
 
 def _capturing(captured: list[httpx.Request], *, json_body: Any = None):
@@ -44,7 +58,7 @@ def _capturing(captured: list[httpx.Request], *, json_body: Any = None):
 
     def handler(req: httpx.Request) -> httpx.Response:
         captured.append(req)
-        return httpx.Response(200, json=json_body if json_body is not None else {"data": []})
+        return httpx.Response(200, request=req, json=json_body if json_body is not None else _empty_page())
 
     return handler
 

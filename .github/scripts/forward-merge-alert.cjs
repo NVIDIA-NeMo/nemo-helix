@@ -14,14 +14,6 @@ function escapeSlackText(value) {
     .replaceAll("\n", "\\n");
 }
 
-function slackUserGroupMention(value) {
-  const userGroupId = String(value || "").trim();
-  if (!/^S[A-Z0-9]{8,}$/.test(userGroupId)) {
-    return "";
-  }
-  return `<!subteam^${userGroupId}>`;
-}
-
 function selectSourcePullRequest({
   pulls,
   forwardPullNumber,
@@ -175,11 +167,10 @@ function buildSlackMessage({
   source,
   conflicts,
   runUrl,
-  userGroupId,
+  recoveryDocsUrl,
 }) {
-  const mention = slackUserGroupMention(userGroupId);
   const lines = [
-    `${mention ? `${mention} ` : ""}:warning: *Forward merge needs attention*`,
+    ":warning: *Forward merge needs attention*",
     `Repository: ${escapeSlackText(repository)}`,
     `PR: <${pullUrl}|${escapeSlackText(pullTitle)}>`,
     sourceLine(source),
@@ -203,11 +194,13 @@ function buildSlackMessage({
     lines.push("", "Conflict metadata unavailable; see the failure details.");
   }
 
-  lines.push(
-    "",
-    "The bot will not retry. Manual recovery is required.",
-    `<${commentUrl}|View failure details>`,
-  );
+  lines.push("", "The bot will not retry. Manual recovery is required.");
+  if (recoveryDocsUrl?.trim()) {
+    lines.push(
+      `:point_right: *<${escapeSlackText(recoveryDocsUrl.trim())}|Follow these steps to fix the forward merge>*`,
+    );
+  }
+  lines.push(`<${commentUrl}|View failure details>`);
   return lines.join("\n");
 }
 
@@ -311,7 +304,7 @@ async function sendForwardMergeAlert({
     source,
     conflicts,
     runUrl: env.RUN_URL,
-    userGroupId: env.SLACK_ALERT_USERGROUP_ID,
+    recoveryDocsUrl: env.FORWARD_MERGE_RECOVERY_DOCS_URL,
   });
   await postSlack({
     fetchImpl,
@@ -332,5 +325,4 @@ module.exports = {
   resolveSource,
   selectSourcePullRequest,
   sendForwardMergeAlert,
-  slackUserGroupMention,
 };

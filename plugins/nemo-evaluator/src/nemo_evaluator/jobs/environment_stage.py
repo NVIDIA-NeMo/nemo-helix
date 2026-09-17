@@ -8,7 +8,6 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-import fsspec.asyn
 from filesets import FilesetFileSystem, FilesetPathError, parse_fileset_ref
 from nemo_evaluator.filesets import FilesetRef
 from nemo_platform_plugin.client.client import NemoClient
@@ -42,11 +41,11 @@ def _remove_path(path: Path) -> None:
         shutil.rmtree(path)
 
 
-def _download_fileset_contents(*, sdk: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
+def _download_fileset_contents(*, client: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
     """Download a FileSet root's contents directly into ``destination``."""
-    files_client = FilesClient.from_client(sdk)
+    files_client = FilesClient.from_client(client)
     fs = FilesetFileSystem(client=files_client)
-    fsspec.asyn.sync(fs.loop, fs._get, f"{workspace}/{fileset}/", str(destination), True)
+    fs.get(f"{workspace}/{fileset}/", str(destination), recursive=True)
 
 
 class EnvironmentStageJob(NemoJob):
@@ -57,7 +56,13 @@ class EnvironmentStageJob(NemoJob):
     container = "nmp-cpu-tasks"
     spec_schema = EnvironmentStageSpec
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient) -> dict:
+    def run(
+        self,
+        config: dict,
+        *,
+        ctx: JobContext,
+        client: NemoClient,
+    ) -> dict:
         """Download the FileSet into ``persistent/environment``, replacing any previous tree."""
         spec = EnvironmentStageSpec.model_validate(config)
         try:
@@ -79,7 +84,7 @@ class EnvironmentStageJob(NemoJob):
 
         try:
             _download_fileset_contents(
-                sdk=sdk,
+                client=client,
                 destination=staging,
                 fileset=fileset,
                 workspace=workspace,

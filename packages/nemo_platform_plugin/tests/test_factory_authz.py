@@ -23,10 +23,10 @@ from nemo_platform_plugin.jobs.api_factory import (
     FileResultSerializer,
     JobRouteOption,
     PlatformJobResultRoute,
-    PlatformJobSpec,
     job_route_factory,
 )
 from nemo_platform_plugin.jobs.routes import _rebase_job_collection_routes
+from nemo_platform_plugin.jobs.spec import PlatformJobSpec
 from nemo_platform_plugin.service import NemoService, RouterSpec
 from pydantic import BaseModel
 

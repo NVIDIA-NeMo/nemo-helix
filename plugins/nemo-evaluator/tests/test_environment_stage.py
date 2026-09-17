@@ -35,8 +35,8 @@ def test_stages_environment_at_fixed_persistent_path(tmp_path: Path, mocker: Moc
     ctx = _context(tmp_path)
     task_client = _task_client(mocker)
 
-    def download_contents(*, sdk: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
-        assert sdk is task_client
+    def download_contents(*, client: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
+        assert client is task_client
         assert workspace == "shared"
         assert fileset == "custom-gym"
         Path(destination, "nemo-environment.yaml").write_text("format: wheels-v1\n")
@@ -49,11 +49,11 @@ def test_stages_environment_at_fixed_persistent_path(tmp_path: Path, mocker: Moc
     result = EnvironmentStageJob().run(
         {"environment": "shared/custom-gym"},
         ctx=ctx,
-        sdk=task_client,
+        client=task_client,
     )
 
     download_fileset_contents.assert_called_once_with(
-        sdk=task_client,
+        client=task_client,
         fileset="custom-gym",
         workspace="shared",
         destination=ctx.storage.persistent / ".environment-staging",
@@ -70,8 +70,8 @@ def test_staged_fileset_preserves_wheels_tree(tmp_path: Path, mocker: MockerFixt
     wheel_name = "xmltodict-1.0.4-py3-none-any.whl"
     config_rel = Path("resources_servers") / "structeval" / "configs" / "structeval_nonrenderable.yaml"
 
-    def download_contents(*, sdk: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
-        assert sdk is task_client
+    def download_contents(*, client: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
+        assert client is task_client
         assert workspace == "dev"
         assert fileset == "structeval-wheels"
         root = destination
@@ -88,7 +88,7 @@ def test_staged_fileset_preserves_wheels_tree(tmp_path: Path, mocker: MockerFixt
         side_effect=download_contents,
     )
 
-    EnvironmentStageJob().run({"environment": "dev/structeval-wheels"}, ctx=ctx, sdk=task_client)
+    EnvironmentStageJob().run({"environment": "dev/structeval-wheels"}, ctx=ctx, client=task_client)
 
     environment = ctx.storage.persistent / "environment"
     assert (environment / "nemo-environment.yaml").is_file()
@@ -106,8 +106,8 @@ def test_failed_download_removes_partial_staging_without_replacing_environment(
     (environment / "existing.txt").write_text("complete")
     task_client = _task_client(mocker)
 
-    def fail_download(*, sdk: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
-        assert sdk is task_client
+    def fail_download(*, client: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
+        assert client is task_client
         assert workspace == "dev"
         assert fileset == "custom-gym"
         Path(destination, "partial.txt").write_text("partial")
@@ -122,9 +122,34 @@ def test_failed_download_removes_partial_staging_without_replacing_environment(
         EnvironmentStageJob().run(
             {"environment": "custom-gym"},
             ctx=ctx,
-            sdk=task_client,
+            client=task_client,
         )
 
     assert (environment / "existing.txt").read_text() == "complete"
     assert not (ctx.storage.persistent / ".environment-staging").exists()
     assert (ctx.storage.persistent / "workspace").is_dir()
+
+
+def test_run_passes_the_declared_typed_client(tmp_path: Path, mocker: MockerFixture) -> None:
+    """The sync job entrypoint uses the typed client declared by the job."""
+    received: dict[str, object] = {}
+
+    def download_contents(*, client: object, workspace: str, fileset: str, destination: Path) -> None:
+        received["client"] = client
+        Path(destination, "nemo-environment.yaml").write_text("format: wheels-v1\n")
+
+    mocker.patch(
+        "nemo_evaluator.jobs.environment_stage._download_fileset_contents",
+        side_effect=download_contents,
+    )
+    client = _task_client(mocker)
+    ctx = _context(tmp_path)
+
+    result = EnvironmentStageJob().run(
+        {"environment": "shared/custom-gym"},
+        ctx=ctx,
+        client=client,
+    )
+
+    assert result["status"] == "completed"
+    assert received["client"] is client

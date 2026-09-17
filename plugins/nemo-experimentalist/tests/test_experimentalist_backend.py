@@ -19,7 +19,7 @@ from typing import Any, cast
 
 import httpx
 import pytest
-from doubles import make_candidate
+from doubles import fake_client, make_candidate
 from nemo_experimentalist_plugin.entities import Candidate
 from nemo_experimentalist_plugin.experimentalist import experimentalist_backend as beim
 from nemo_experimentalist_plugin.experimentalist.components.repository import AgentCloneError, AgentSource
@@ -28,29 +28,26 @@ from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import 
     LocalExperimentalistBackend,
 )
 from nemo_insights_plugin.entities import Insight
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_platform_plugin.client.errors import NotFoundError
 
 
 def _local_backend(tmp_path: Path) -> LocalExperimentalistBackend:
-    return LocalExperimentalistBackend(path=tmp_path / "backend")
-
-
-def _as_platform_client(value: object) -> AsyncNeMoPlatform:
-    return cast(AsyncNeMoPlatform, value)
+    return LocalExperimentalistBackend(client=fake_client(), path=tmp_path / "backend")
 
 
 # ---------------------------------------------------------------------------
-# get_insight — local file (offline) vs platform id fetch
+# get_insight — local file fixture vs platform id fetch
 # ---------------------------------------------------------------------------
 
 
-class _StubInsightResource:
+class _StubInsightsClient:
     def __init__(self, insight: Insight | None, error: Exception | None = None) -> None:
         self._insight = insight
         self._error = error
         self.calls: list[dict[str, str]] = []
 
-    async def get(self, *, workspace: str, insight_id: str) -> Insight:
+    async def get_insight(self, *, workspace: str, insight_id: str) -> Insight:
         self.calls.append({"workspace": workspace, "insight_id": insight_id})
         if self._error is not None:
             raise self._error
@@ -58,58 +55,34 @@ class _StubInsightResource:
         return self._insight
 
 
-class _StubInsights:
-    def __init__(self, insight: Insight) -> None:
-        self.insights = _StubInsightResource(insight)
-
-
-class _StubClient:
-    def __init__(self, insight: Insight) -> None:
-        self.insights = _StubInsights(insight)
-
-
-class _ErrorStubClient:
-    def __init__(self, error: Exception) -> None:
-        self.insights = type("_StubInsights", (), {"insights": _StubInsightResource(None, error=error)})()
-
-
 async def test_get_insight_reads_local_file(tmp_path: Path) -> None:
     insight_file = tmp_path / "insight.json"
     insight_file.write_text(
         json.dumps({"id": "insight-local", "workspace": "w", "title": "t", "description": "d", "agent": "a"})
     )
-    backend = LocalExperimentalistBackend(path=tmp_path / "backend")
+    backend = LocalExperimentalistBackend(client=fake_client(), path=tmp_path / "backend")
 
     insight = await backend.get_insight(workspace="w", insight_id=str(insight_file))
 
     assert insight.id == "insight-local"
 
 
-async def test_get_insight_fetches_platform_id_via_client(tmp_path: Path) -> None:
+async def test_get_insight_fetches_platform_id_via_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     platform_insight = Insight(workspace="ws", title="platform", description="d", agent="a")
-    client = _StubClient(platform_insight)
-    backend = LocalExperimentalistBackend(client=_as_platform_client(client), path=tmp_path / "backend")
+    insights_client = _StubInsightsClient(platform_insight)
+    monkeypatch.setattr(beim.AsyncInsightsClient, "from_client", lambda _client: insights_client)
+    backend = LocalExperimentalistBackend(client=fake_client(), path=tmp_path / "backend")
 
     insight = await backend.get_insight(workspace="ws", insight_id="insight-remote-123")
 
     assert insight is platform_insight
-    assert client.insights.insights.calls == [{"workspace": "ws", "insight_id": "insight-remote-123"}]
+    assert insights_client.calls == [{"workspace": "ws", "insight_id": "insight-remote-123"}]
 
 
-async def test_get_insight_platform_id_without_client_raises(tmp_path: Path) -> None:
-    backend = LocalExperimentalistBackend(path=tmp_path / "backend")
-    with pytest.raises(ValueError, match="no platform client is available"):
-        await backend.get_insight(workspace="w", insight_id="insight-remote-123")
-
-
-async def test_get_insight_platform_404_raises_value_error(tmp_path: Path) -> None:
-    request = httpx.Request("GET", "http://platform.test/insights/missing")
-    response = httpx.Response(404, request=request)
-    error = httpx.HTTPStatusError("not found", request=request, response=response)
-    backend = LocalExperimentalistBackend(
-        client=_as_platform_client(_ErrorStubClient(error)),
-        path=tmp_path / "backend",
-    )
+async def test_get_insight_platform_404_raises_value_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    error = NotFoundError(httpx.Response(404, request=httpx.Request("GET", "http://platform.test/insights/missing")))
+    monkeypatch.setattr(beim.AsyncInsightsClient, "from_client", lambda _client: _StubInsightsClient(None, error))
+    backend = LocalExperimentalistBackend(client=fake_client(), path=tmp_path / "backend")
 
     with pytest.raises(ValueError, match="Insight not found on the platform"):
         await backend.get_insight(workspace="w", insight_id="missing")
@@ -245,7 +218,7 @@ def _cand(label: str = "agent-2", run_id: str = "run-1") -> Candidate:
 
 
 def _git_backend(tmp_path: Path, storage: CandidateStorageConfig | None = None) -> LocalExperimentalistBackend:
-    backend = LocalExperimentalistBackend(path=tmp_path / "backend", storage=storage)
+    backend = LocalExperimentalistBackend(client=fake_client(), path=tmp_path / "backend", storage=storage)
     backend._agent_source = AgentSource(repo_url="ssh://git@h/g/r.git", ref="main", agent_path="pkg/agent")
     backend._agent_checkout = tmp_path / "clone"
     return backend
@@ -397,28 +370,50 @@ def _atif_ref(tmp_path, session_id="sess-1"):
     return ResourceRef(uri=f"file://{path}", description="", metadata={"trace_format": "atif"})
 
 
-class _RecordingResource:
-    def __init__(self, result: object = None) -> None:
-        self.calls: list[dict] = []
-        self._result = result
+class _Response:
+    def __init__(self, body: object) -> None:
+        self._body = body
 
-    async def create(self, **kwargs):
-        self.calls.append(kwargs)
-        return self._result
+    def data(self) -> object:
+        return self._body
 
 
 class _RecordingIntakeClient:
-    """Exposes only the ingest chains the trace uploads reach through."""
+    """Exposes only the async typed Intake methods the trace uploads reach through."""
 
     def __init__(self) -> None:
-        self.traces = _RecordingResource(SimpleNamespace(errors=[]))
-        self.atif = _RecordingResource()
-        self.intake = SimpleNamespace(
-            ingest=SimpleNamespace(
-                otlp=SimpleNamespace(v1=SimpleNamespace(traces=self.traces)),
-                atif=self.atif,
-            )
-        )
+        self.traces = SimpleNamespace(calls=[])
+        self.atif = SimpleNamespace(calls=[])
+        self.evaluator_results: list[dict[str, object]] = []
+        self._otlp_result = SimpleNamespace(errors=[])
+
+    async def create_otlp_traces(self, *, content: bytes, workspace: str) -> _Response:
+        self.traces.calls.append({"workspace": workspace, "body": content})
+        return _Response(self._otlp_result)
+
+    async def create_atif(self, *, workspace: str, body: object) -> _Response:
+        self.atif.calls.append({"workspace": workspace, "body": body})
+        return _Response(None)
+
+    async def create_evaluator_result(self, *, workspace: str, body: object) -> _Response:
+        self.evaluator_results.append({"workspace": workspace, "body": body})
+        return _Response(object())
+
+
+def test_backend_stores_intake_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _RecordingIntakeClient()
+    factory_calls: list[AsyncNemoClient] = []
+
+    def from_client(platform_client: AsyncNemoClient) -> beim.AsyncIntakeClient:
+        factory_calls.append(platform_client)
+        return cast(beim.AsyncIntakeClient, client)
+
+    monkeypatch.setattr(beim.AsyncIntakeClient, "from_client", from_client)
+    platform_client = fake_client()
+    backend = LocalExperimentalistBackend(client=platform_client, path=tmp_path / "backend")
+
+    assert backend.intake_client is client
+    assert factory_calls == [platform_client]
 
 
 def _otlp_ref(tmp_path):
@@ -470,7 +465,7 @@ async def test_upload_trace_otlp_raises_when_intake_rejects_spans(tmp_path):
     from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import _upload_trace_otlp
 
     client = _RecordingIntakeClient()
-    client.traces._result = SimpleNamespace(errors=["span 00a1: bad trace_id"])
+    client._otlp_result = SimpleNamespace(errors=["span 00a1: bad trace_id"])
 
     with pytest.raises(RuntimeError, match="bad trace_id"):
         await _upload_trace_otlp(
@@ -483,13 +478,16 @@ async def test_upload_trace_otlp_raises_when_intake_rejects_spans(tmp_path):
         )
 
 
-async def test_persist_trial_leaves_the_local_trace_ref_when_ingest_is_rejected(tmp_path):
+async def test_persist_trial_leaves_the_local_trace_ref_when_ingest_is_rejected(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
     """A partial ingest must not repoint the trial at a trace that never fully landed."""
     from nemo_experimentalist_plugin.entities import TrialResult
 
     client = _RecordingIntakeClient()
-    client.traces._result = SimpleNamespace(errors=["span 00a1: bad trace_id"])
-    backend = LocalExperimentalistBackend(client=cast(Any, client), path=tmp_path / "backend")
+    client._otlp_result = SimpleNamespace(errors=["span 00a1: bad trace_id"])
+    monkeypatch.setattr(beim.AsyncIntakeClient, "from_client", lambda _client: client)
+    backend = LocalExperimentalistBackend(client=fake_client(), path=tmp_path / "backend")
     ref = _otlp_ref(tmp_path)
     trial = TrialResult(id="trial-9", task_id="case-z", status="completed", trace=ref)
 
@@ -517,20 +515,21 @@ class _ReingestClient(_RecordingIntakeClient):
     def __init__(self, rows: list[dict]) -> None:
         super().__init__()
         self.list_calls: list[dict] = []
-        self.intake.spans = SimpleNamespace(list=self._list)
         self._rows = rows
 
-    def _list(self, **kwargs):
+    async def list_spans(self, **kwargs):
         self.list_calls.append(kwargs)
 
         async def _iter():
             for row in self._rows:
                 yield _SpanRow(row)
 
-        return _iter()
+        return SimpleNamespace(items=_iter)
 
 
-async def test_persist_trial_reingests_intake_traces_with_evaluation_attributes(tmp_path, monkeypatch):
+async def test_persist_trial_reingests_intake_traces_with_evaluation_attributes(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
     from nemo_experimentalist_plugin.entities import ResourceRef, TrialResult
 
     row = {
@@ -540,7 +539,8 @@ async def test_persist_trial_reingests_intake_traces_with_evaluation_attributes(
         "started_at": "2026-08-14T00:00:00Z",
     }
     client = _ReingestClient([row])
-    backend = LocalExperimentalistBackend(client=cast(Any, client), path=tmp_path / "backend")
+    monkeypatch.setattr(beim.AsyncIntakeClient, "from_client", lambda _client: client)
+    backend = LocalExperimentalistBackend(client=fake_client(), path=tmp_path / "backend")
     # The trace already exists in Intake but carries no evaluation context, which is the
     # condition that triggers the re-ingest.
     monkeypatch.setattr(
@@ -558,7 +558,7 @@ async def test_persist_trial_reingests_intake_traces_with_evaluation_attributes(
     await backend._persist_trial(trial, workspace="ws-1", evaluation_name="exp-1", agent_attrs={})
 
     assert client.list_calls[0]["workspace"] == "ws-1"
-    assert client.list_calls[0]["filter"] == {"trace_id": "abc123"}
+    assert client.list_calls[0]["query_params"]["filter"] == {"trace_id": "abc123"}
     assert len(client.traces.calls) == 1
     body = client.traces.calls[0]["body"]
     assert client.traces.calls[0]["workspace"] == "ws-1"
@@ -581,11 +581,12 @@ async def test_upload_trace_atif_sends_evaluation_context_and_agent_identity(tmp
     assert len(client.atif.calls) == 1
     call = client.atif.calls[0]
     assert call["workspace"] == "ws-1"
-    assert call["evaluation_context"] == {
+    body = call["body"].root
+    assert body["evaluation_context"] == {
         "evaluation_name": "exp-1",
         "test_case_name": "case-a",
     }
-    assert call["agent"]["model_name"] == "gpt-5-mini"
+    assert body["agent"]["model_name"] == "gpt-5-mini"
 
 
 async def test_upload_trace_atif_sends_a_trajectory_not_bytes(tmp_path):
@@ -595,7 +596,7 @@ async def test_upload_trace_atif_sends_a_trajectory_not_bytes(tmp_path):
     await _upload_trace_atif(cast(Any, client), "ws-1", _atif_ref(tmp_path), evaluation_name="exp-1", task_id="case-a")
 
     assert client.traces.calls == []
-    assert client.atif.calls[0]["schema_version"].startswith("ATIF-")
+    assert client.atif.calls[0]["body"].root["schema_version"].startswith("ATIF-")
 
 
 @pytest.mark.parametrize("bad_id", ["../run", "a/b", "..", ".", "nested/../../run"])

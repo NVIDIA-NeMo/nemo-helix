@@ -22,7 +22,7 @@ import tempfile
 
 import data_designer.config as dd
 from data_designer.config.errors import InvalidConfigError
-from data_designer_nemo.context import create_data_designer_context
+from data_designer_nemo.context import create_execution_context, create_validation_context
 from data_designer_nemo.errors import NDDInternalError, NDDInvalidConfigError
 from data_designer_nemo.runnable import resolve_runnable_config
 from data_designer_nemo.sdk_translation import sync_to_async_sdk
@@ -65,15 +65,14 @@ async def validate_config(
 
     Mirrors the work ``CreateJob.to_spec`` and ``PreviewFunction.run`` do at
     submit/preview time — via the shared :func:`resolve_runnable_config` —
-    and additionally runs an engine-level compile check that the runtime
-    callers defer to library-execution time. Never short-circuits: every
-    sub-check that *can* be run is run, so a single pass surfaces every
-    problem.
+    and additionally runs an engine-level compile check when a sync SDK is
+    available. Never short-circuits: every sub-check that *can* be run is run,
+    so a single pass surfaces every problem.
 
     Args:
         config_builder: The Data Designer config to validate.
-        sdk: Sync NeMoPlatform SDK. Used as a fallback to derive ``async_sdk``
-            when one is not supplied.
+        sdk: Sync NeMoPlatform SDK. Used for engine-level compile validation
+            and as a fallback to derive ``async_sdk`` when one is not supplied.
         async_sdk: Async NeMoPlatform SDK. If omitted but ``sdk`` is supplied,
             an async wrapper is built via ``sync_to_async_sdk``.
         workspace: Workspace used to resolve provider references and seed
@@ -95,10 +94,10 @@ async def validate_config(
 
     config = config_builder.build()
 
-    dd_ctx = create_data_designer_context(async_sdk, workspace)
+    validation_ctx = create_validation_context(async_sdk, workspace)
 
     # First run the same resolution that the job and function execute.
-    runnable_errors, _model_configs, model_providers = await resolve_runnable_config(dd_ctx, config)
+    runnable_errors, _model_configs, model_providers = await resolve_runnable_config(validation_ctx, config)
     errors: list[ValidationError] = [_to_validation_error(e) for e in runnable_errors]
 
     # Next additionally run engine-level compile via upstream ``DataDesigner.validate``,
@@ -111,13 +110,18 @@ async def validate_config(
     # 'df'``) when the config is already known to be malformed. Skip the
     # engine check in that case so the user-facing diagnostics stay focused
     # on the actionable problems we've already found.
-    if not errors:
+    if not errors and sdk is not None:
+        execution_ctx = create_execution_context(
+            sdk,
+            workspace,
+            validated_roots=validation_ctx.validated_filesystem_roots,
+        )
         try:
             with tempfile.TemporaryDirectory() as artifact_path:
                 data_designer = create_data_designer(
                     artifact_path=artifact_path,
                     model_providers=model_providers,
-                    dd_ctx=dd_ctx,
+                    dd_ctx=execution_ctx,
                 )
                 # Engine validate is sync; run it on a worker thread so the
                 # event loop stays unblocked.

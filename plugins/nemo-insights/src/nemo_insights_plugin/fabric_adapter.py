@@ -5,9 +5,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from nemo_fabric_adapter_contract import models as contract
@@ -16,8 +20,11 @@ from nemo_insights_plugin.analyst.run import run_analyst_change_set
 from nemo_platform_plugin.nooa_model_client import ConfiguredModelRefs
 from nemo_platform_plugin.sdk_provider import get_async_task_sdk
 from nemo_platform_plugin.tasks.logging_setup import configure_task_logging
+from nemo_relay import plugin as relay_plugin
 
 logger = logging.getLogger(__name__)
+
+ANALYST_RELAY_SCOPE = "insights-analyst"
 
 
 class AnalystAdapterConfigError(ValueError):
@@ -41,9 +48,8 @@ class InsightsAnalystRuntime:
         request: contract.AgentRunRequest,
         context: contract.RuntimeContext,
     ) -> contract.AgentRunResult:
-        del context
         try:
-            result = await self._run_analysis(request)
+            result = await self._run_with_telemetry(request, context)
         except Exception as error:
             # Log the full exception so it reaches this process's stderr, which
             # is where the job reads a failed run's diagnostics from.
@@ -66,7 +72,32 @@ class InsightsAnalystRuntime:
             },
         )
 
-    async def _run_analysis(self, request: contract.AgentRunRequest):
+    async def _run_with_telemetry(
+        self,
+        request: contract.AgentRunRequest,
+        context: contract.RuntimeContext,
+    ):
+        """Run the analysis, instrumented by Relay when Fabric asked for it.
+
+        Fabric resolves the whole export -- endpoint, credentials, agent name --
+        into a config file and points at it through ``telemetry.env``. Nothing
+        about the destination is decided here; the adapter's job is to activate
+        the config and let Relay carry the trajectory.
+        """
+        telemetry = context.telemetry
+        if telemetry is None or not telemetry.relay_enabled:
+            return await self._run_analysis(request)
+
+        # Relay reads credentials for the export from the environment Fabric
+        # names, so apply it before the exporter is built -- and only for this
+        # invocation. The runtime is long-lived and serves many; a leftover
+        # FABRIC_RELAY_CONFIG_PATH is the ambient-config hazard the bundled
+        # adapters have a named guard against.
+        with _applied_environment(telemetry.env):
+            async with relay_plugin.plugin(_relay_plugin_config(telemetry)):
+                return await self._run_analysis(request, relay_scope_name=ANALYST_RELAY_SCOPE)
+
+    async def _run_analysis(self, request: contract.AgentRunRequest, *, relay_scope_name: str | None = None):
         target_agent = _string_setting(self._settings, "agent") or _string_setting(self._settings, "target_agent")
         if target_agent is None:
             raise AnalystAdapterConfigError("harness.settings.agent is required for the Insights analyst adapter")
@@ -102,12 +133,47 @@ class InsightsAnalystRuntime:
                 since=since,
                 evaluation_id=evaluation_id,
                 enable_observability=enable_observability,
+                relay_scope_name=relay_scope_name,
                 model_refs=model_refs,
             )
         return result
 
     async def stop(self) -> None:
         self.__init__()
+
+
+@contextmanager
+def _applied_environment(env: dict[str, str]) -> Iterator[None]:
+    """Apply *env* for the duration of one invocation, then put it back."""
+    previous = {name: os.environ.get(name) for name in env}
+    os.environ.update(env)
+    try:
+        yield
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def _relay_plugin_config(telemetry: contract.RuntimeTelemetryContext) -> dict[str, Any]:
+    """Read the Relay plugin config Fabric resolved for this invocation.
+
+    ``nemo_fabric_adapters.common.load_relay_plugin_config`` does the same from
+    a raw invocation payload, which a lifecycle adapter never sees -- it is
+    handed the typed context instead, and ``config_path`` points at the same
+    file. The helper additionally rebases ATOF file-sink directories, which
+    matters only for configs this path does not produce: the agents plugin
+    wires ATIF over HTTP.
+    """
+    if not telemetry.config_path:
+        raise AnalystAdapterConfigError("Relay is enabled but Fabric supplied no config path")
+    wrapper = json.loads(Path(telemetry.config_path).read_text(encoding="utf-8"))
+    config = (wrapper.get("relay") or {}).get("config") or {}
+    if not config.get("components"):
+        raise AnalystAdapterConfigError(f"Relay config at {telemetry.config_path} declares no components")
+    return config
 
 
 def _string_setting(settings: dict[str, Any], key: str) -> str | None:

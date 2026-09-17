@@ -3,12 +3,12 @@
 
 from __future__ import annotations
 
-from typing import ClassVar, cast
+from typing import ClassVar
 
-from data_designer_nemo.context import create_data_designer_context
+from data_designer_nemo.context import create_validation_context
 from nemo_data_designer_plugin.jobs.retrieval_common import retrieval_step, work_dir
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig, RetrievalGenerateStepConfig
-from nemo_data_designer_plugin.retrieval.corpus import materialize_corpus
+from nemo_data_designer_plugin.retrieval.corpus import hf_token_from_env, materialize_corpus
 from nemo_data_designer_plugin.retrieval.providers import build_retrieval_model_configs, resolve_retrieval_providers
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.job import NemoJob
@@ -32,12 +32,15 @@ class RetrievalGenerateJob(NemoJob):
         input_spec: BaseModel,
         workspace: str,
         entity_client: object,
-        async_sdk: object,
+        async_sdk: AsyncNeMoPlatform,
         is_local: bool,
     ) -> BaseModel:
-        async_sdk = cast(AsyncNeMoPlatform, async_sdk)
-        job_config = cast(RetrievalGenerateJobConfig, input_spec)
-        dd_ctx = create_data_designer_context(async_sdk, workspace)
+        job_config = (
+            input_spec
+            if isinstance(input_spec, RetrievalGenerateJobConfig)
+            else RetrievalGenerateJobConfig.model_validate(input_spec.model_dump())
+        )
+        dd_ctx = create_validation_context(async_sdk, workspace)
         model_configs = build_retrieval_model_configs(
             provider=job_config.provider,
             chat_provider=job_config.chat_provider,
@@ -62,23 +65,29 @@ class RetrievalGenerateJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: object,
+        async_sdk: AsyncNeMoPlatform,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
+        canonical_spec = (
+            spec
+            if isinstance(spec, RetrievalGenerateStepConfig)
+            else RetrievalGenerateStepConfig.model_validate(spec.model_dump())
+        )
         return PlatformJobSpec(
             steps=[
                 await retrieval_step(
                     "retrieval-generate",
                     "nemo_data_designer_plugin.jobs.retrieval_generate",
-                    spec,
+                    canonical_spec,
                     profile=profile,
                     async_sdk=async_sdk,
+                    hf_token_secret=canonical_spec.job_config.hf_token_secret,
                 )
             ]
         )
 
-    def run(self, config: dict, ctx: JobContext, sdk: NeMoPlatform) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoPlatform) -> dict:
         from nemo_data_designer_plugin.retrieval.generation import build_generation_run_config, execute_generation
 
         step = RetrievalGenerateStepConfig.model_validate(config)
@@ -90,6 +99,7 @@ class RetrievalGenerateJob(NemoJob):
             dest=ctx.storage.ephemeral / "corpus",
             sdk=sdk,
             workspace=ctx.workspace,
+            hf_token=hf_token_from_env(),
         )
         run_config = build_generation_run_config(
             corpus_dir=corpus_dir,
@@ -125,8 +135,8 @@ class RetrievalGenerateJob(NemoJob):
         return {
             "exit_code": 0,
             "workspace": ctx.workspace,
-            "dataset_name": getattr(result, "dataset_name", job.dataset_name or job.corpus_id),
-            "num_records": getattr(result, "num_records", None),
+            "dataset_name": result.dataset_name,
+            "num_records": result.num_records,
             "results": {"artifacts": artifacts.model_dump()},
         }
 

@@ -50,9 +50,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from pkgutil import resolve_name
-from types import SimpleNamespace
-from typing import Any, ClassVar, Literal, Optional, cast
-from urllib.parse import urlencode
+from typing import Any, ClassVar, Literal, Optional, TypeVar, cast
 
 import click
 import httpx
@@ -95,10 +93,34 @@ from nemo_platform_ext.cli.core.api import is_tty
 from nemo_platform_ext.cli.core.formatters import Column, format_output
 from nemo_platform_ext.cli.core.help_formatter import NmpGroup
 from nemo_platform_ext.ui.prompts import is_interactive
+from nemo_platform_plugin.agents.client import AgentsClient
+from nemo_platform_plugin.agents.types import (
+    AgentDeployment as ClientAgentDeployment,
+)
+from nemo_platform_plugin.agents.types import (
+    CreateAgentRequest,
+    CreateComputeSpecRequest,
+    CreateDeploymentRequest,
+    CreateEnvironmentRequest,
+    CreateEnvironmentSpecRequest,
+    CreateSessionRequest,
+    ListSessionsQueryParams,
+)
 from nemo_platform_plugin.cli import NemoCLI
 from nemo_platform_plugin.cli_errors import print_http_request_error, print_http_status_error
 from nemo_platform_plugin.cli_progress import request_progress
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.errors import (
+    NemoClientError,
+    NemoHTTPError,
+    NemoTransportError,
+)
+from nemo_platform_plugin.client.errors import (
+    NotFoundError as PluginNotFoundError,
+)
+from nemo_platform_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_platform_plugin.discovery import AGENT_CLI_GROUP, discover_entry_points
+from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.job import NemoJob
 from pydantic import ValidationError
 from typer.main import get_command as _typer_get_command
@@ -108,6 +130,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_WORKSPACE = "default"
 _LIST_OUTPUT_FORMAT = Literal["table", "json", "yaml", "csv", "markdown", "raw"]
 _DEPLOYMENT_RESOLUTION_PAGE_SIZE = 100
+_T = TypeVar("_T")
 
 _AGENT_LIST_COLUMNS = [
     Column("name"),
@@ -1048,20 +1071,23 @@ def _register_platform_commands(app: typer.Typer) -> None:
     ) -> None:
         """List persisted sessions, newest first."""
         base_url = _resolve_base_url(base_url)
-        path = f"/apis/agents/v2/workspaces/{workspace}/sessions"
+        client = _agents_client(base_url, workspace)
+        query_params: ListSessionsQueryParams | None = None
         if agent_deployment is not None:
             if not agent_deployment.strip():
                 typer.echo("Error: --agent-deployment must not be empty.", err=True)
                 raise typer.Exit(code=2)
-            deployment = _api_request(
-                "GET",
-                base_url,
-                f"/apis/agents/v2/workspaces/{workspace}/deployments/{agent_deployment}",
+            deployment = _run_sdk(
+                "GET agent API",
+                lambda: _json_from_response(client.get_deployment(workspace=workspace, name=agent_deployment)),
             )
             deployment_id = _require_deployment_id(deployment, agent_deployment)
-            path += f"?{urlencode({'filter[deployment_id]': deployment_id})}"
+            query_params = {"filter[deployment_id]": deployment_id}
 
-        resp = _api_request("GET", base_url, path)
+        resp = _run_sdk(
+            "GET agent API",
+            lambda: _json_from_page(client.list_sessions(workspace=workspace, query_params=query_params)),
+        )
         _print_list_response(
             ctx,
             resp,
@@ -1078,7 +1104,11 @@ def _register_platform_commands(app: typer.Typer) -> None:
     ) -> None:
         """Get a persisted session by name."""
         base_url = _resolve_base_url(base_url)
-        resp = _api_request("GET", base_url, f"/apis/agents/v2/workspaces/{workspace}/sessions/{name}")
+        client = _agents_client(base_url, workspace)
+        resp = _run_sdk(
+            "GET agent API",
+            lambda: _json_from_response(client.get_session(workspace=workspace, name=name)),
+        )
         typer.echo(json.dumps(resp, indent=2))
 
     @sessions_app.command(name="close")
@@ -1092,7 +1122,11 @@ def _register_platform_commands(app: typer.Typer) -> None:
         base_url = _resolve_base_url(base_url)
         if not yes:
             typer.confirm(f"Close session '{name}'? It cannot be resumed after it is closed.", abort=True)
-        _api_request("POST", base_url, f"/apis/agents/v2/workspaces/{workspace}/sessions/{name}/close")
+        client = _agents_client(base_url, workspace)
+        _run_sdk(
+            "POST agent API",
+            lambda: _json_from_response(client.close_session(workspace=workspace, name=name)),
+        )
         typer.echo(f"Session '{name}' closed.")
 
     @app.command(rich_help_panel="Agent Resources (requires running cluster)")
@@ -1142,7 +1176,13 @@ def _register_platform_commands(app: typer.Typer) -> None:
             "config": config_dict,
             "config_format": config_format,
         }
-        resp = _api_request("POST", base_url, f"/apis/agents/v2/workspaces/{workspace}/agents", json_body=payload)
+        client = _agents_client(base_url, workspace)
+        resp = _run_sdk(
+            "POST agent API",
+            lambda: _json_from_response(
+                client.create_agent(workspace=workspace, body=CreateAgentRequest.model_validate(payload))
+            ),
+        )
         if config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
             try:
                 _upload_ethos_fileset(
@@ -1162,8 +1202,8 @@ def _register_platform_commands(app: typer.Typer) -> None:
                         workspace=workspace,
                         base_url=base_url,
                     )
-                # ``typer.Exit`` subclasses ``Exception``, so this also covers the
-                # exit raised by ``_api_request`` on an HTTP error.
+                # ``typer.Exit`` subclasses ``Exception``, so this also covers
+                # the exit raised by ``_run_sdk`` on an HTTP error.
                 except Exception:
                     logger.exception(
                         "Failed to roll back agent %r after fileset upload failure",
@@ -1200,7 +1240,11 @@ def _register_platform_commands(app: typer.Typer) -> None:
     ) -> None:
         """List agents on the platform."""
         base_url = _resolve_base_url(base_url)
-        resp = _api_request("GET", base_url, f"/apis/agents/v2/workspaces/{workspace}/agents")
+        client = _agents_client(base_url, workspace)
+        resp = _run_sdk(
+            "GET agent API",
+            lambda: _json_from_page(client.list_agents(workspace=workspace)),
+        )
         _print_list_response(
             ctx,
             resp,
@@ -1217,7 +1261,11 @@ def _register_platform_commands(app: typer.Typer) -> None:
     ) -> None:
         """Get an agent by name."""
         base_url = _resolve_base_url(base_url)
-        resp = _api_request("GET", base_url, f"/apis/agents/v2/workspaces/{workspace}/agents/{name}")
+        client = _agents_client(base_url, workspace)
+        resp = _run_sdk(
+            "GET agent API",
+            lambda: _json_from_response(client.get_agent(workspace=workspace, name=name)),
+        )
         typer.echo(json.dumps(resp, indent=2))
 
     @app.command(rich_help_panel="Agent Resources (requires running cluster)")
@@ -1319,7 +1367,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         if environment is not None and not environment.strip():
             typer.echo("--environment must not be empty.", err=True)
             raise typer.Exit(code=2)
-        payload: dict = {"agent": agent, "deployment_mode": mode}
+        payload: dict[str, Any] = {"agent": agent, "deployment_mode": mode}
         if name:
             payload["name"] = name
         if image:
@@ -1328,7 +1376,13 @@ def _register_platform_commands(app: typer.Typer) -> None:
             payload["use_image_entrypoint"] = True
         if environment is not None:
             payload["environment"] = environment
-        resp = _api_request("POST", base_url, f"/apis/agents/v2/workspaces/{workspace}/deployments", json_body=payload)
+        client = _agents_client(base_url, workspace)
+        resp = _run_sdk(
+            "POST agent API",
+            lambda: _json_from_response(
+                client.create_deployment(workspace=workspace, body=CreateDeploymentRequest.model_validate(payload))
+            ),
+        )
         if not wait:
             typer.echo(json.dumps(resp, indent=2))
             return
@@ -1345,7 +1399,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             )
             return
 
-        success = _wait_for_deployment(base_url, workspace, deployment_name, timeout=timeout)
+        success = _wait_for_deployment(client, workspace, deployment_name, timeout=timeout)
         raise typer.Exit(code=0 if success else 1)
 
     @app.command(rich_help_panel="Agent Resources (requires running cluster)")
@@ -1407,10 +1461,12 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
         if agent and not name:
             base_url = _resolve_base_url(base_url)
+            client = _agents_client(base_url, workspace)
             candidates = [
                 d
-                for d in _unwrap_list(
-                    _api_request("GET", base_url, f"/apis/agents/v2/workspaces/{workspace}/deployments")
+                for d in _run_sdk(
+                    "GET agent API",
+                    lambda: _list_deployment_maps(client, workspace),
                 )
                 if d.get("agent") == agent and d.get("status") not in ("deleting",)
             ]
@@ -1455,18 +1511,31 @@ def _register_platform_commands(app: typer.Typer) -> None:
     ) -> None:
         """Stop and remove a deployment (or all deployments for an agent)."""
         base_url = _resolve_base_url(base_url)
+        client = _agents_client(base_url, workspace)
         if name:
             if not yes:
                 typer.confirm(f"Undeploy '{name}'?", abort=True)
-            _api_request("DELETE", base_url, f"/apis/agents/v2/workspaces/{workspace}/deployments/{name}")
+            _run_sdk(
+                "DELETE agent API",
+                lambda: client.delete_deployment(workspace=workspace, name=name).data(),
+            )
             typer.echo(f"Deployment '{name}' marked for deletion.")
         elif agent:
-            deps = _unwrap_list(_api_request("GET", base_url, f"/apis/agents/v2/workspaces/{workspace}/deployments"))
-            removed = [d for d in deps if d.get("agent") == agent]
+            deps = _run_sdk(
+                "GET agent API",
+                lambda: list(client.list_deployments(workspace=workspace).items()),
+            )
+            removed = [deployment for deployment in deps if deployment.agent == agent]
             if not yes:
                 typer.confirm(f"Undeploy {len(removed)} deployment(s) for agent '{agent}'?", abort=True)
-            for d in removed:
-                _api_request("DELETE", base_url, f"/apis/agents/v2/workspaces/{workspace}/deployments/{d['name']}")
+            for deployment in removed:
+                _run_sdk(
+                    "DELETE agent API",
+                    lambda deployment_name=deployment.name: client.delete_deployment(
+                        workspace=workspace,
+                        name=deployment_name,
+                    ).data(),
+                )
             typer.echo(f"Marked {len(removed)} deployment(s) for agent '{agent}' for deletion.")
         else:
             typer.echo("Error: provide a deployment name or --agent.", err=True)
@@ -1499,7 +1568,11 @@ def _register_platform_commands(app: typer.Typer) -> None:
     ) -> None:
         """List deployments."""
         base_url = _resolve_base_url(base_url)
-        resp = _api_request("GET", base_url, f"/apis/agents/v2/workspaces/{workspace}/deployments")
+        client = _agents_client(base_url, workspace)
+        resp = _run_sdk(
+            "GET agent API",
+            lambda: _json_from_page(client.list_deployments(workspace=workspace)),
+        )
         _print_list_response(
             ctx,
             resp,
@@ -1516,7 +1589,11 @@ def _register_platform_commands(app: typer.Typer) -> None:
     ) -> None:
         """Get a deployment by name."""
         base_url = _resolve_base_url(base_url)
-        resp = _api_request("GET", base_url, f"/apis/agents/v2/workspaces/{workspace}/deployments/{name}")
+        client = _agents_client(base_url, workspace)
+        resp = _run_sdk(
+            "GET agent API",
+            lambda: _json_from_response(client.get_deployment(workspace=workspace, name=name)),
+        )
         typer.echo(json.dumps(resp, indent=2))
 
     @deps_app.command(name="delete")
@@ -1530,7 +1607,11 @@ def _register_platform_commands(app: typer.Typer) -> None:
         base_url = _resolve_base_url(base_url)
         if not yes:
             typer.confirm(f"Delete deployment '{name}'?", abort=True)
-        _api_request("DELETE", base_url, f"/apis/agents/v2/workspaces/{workspace}/deployments/{name}")
+        client = _agents_client(base_url, workspace)
+        _run_sdk(
+            "DELETE agent API",
+            lambda: client.delete_deployment(workspace=workspace, name=name).data(),
+        )
         typer.echo(f"Deployment '{name}' marked for deletion.")
 
     @deps_app.command(name="wait")
@@ -1561,20 +1642,24 @@ def _register_platform_commands(app: typer.Typer) -> None:
             raise typer.Exit(code=1)
 
         if agent and not name:
+            client = _agents_client(base_url, workspace)
             active = [
                 d
-                for d in _unwrap_list(
-                    _api_request("GET", base_url, f"/apis/agents/v2/workspaces/{workspace}/deployments")
+                for d in _run_sdk(
+                    "GET agent API",
+                    lambda: _list_deployment_maps(client, workspace),
                 )
                 if d.get("agent") == agent and d.get("status") not in ("failed", "deleting")
             ]
             if not active:
                 typer.echo(f"Error: no active deployment found for agent '{agent}'.", err=True)
                 raise typer.Exit(code=1)
+            active.sort(key=_deployment_created_at_key)
             name = active[-1]["name"]
 
         assert name  # guaranteed by the checks above
-        success = _wait_for_deployment(base_url, workspace, name, timeout=timeout, interval=interval)
+        client = _agents_client(base_url, workspace)
+        success = _wait_for_deployment(client, workspace, name, timeout=timeout, interval=interval)
         raise typer.Exit(code=0 if success else 1)
 
 
@@ -1653,10 +1738,15 @@ def _register_environment_commands(app: typer.Typer) -> None:
         """Create an environment spec from a file or inline JSON."""
         base_url = _resolve_base_url(base_url)
         body = _spec_body_from_inputs(name=name, spec_file=spec_file, spec_json=spec)
-        sdk = _agents_sdk(base_url, workspace)
+        client = _agents_client(base_url, workspace)
         resp = _run_sdk(
             "POST agent API",
-            lambda: sdk.environment_specs.create(name=body.pop("name"), workspace=workspace, spec=body),
+            lambda: _json_from_response(
+                client.create_environment_spec(
+                    workspace=workspace,
+                    body=CreateEnvironmentSpecRequest.model_validate(body),
+                )
+            ),
         )
         typer.echo(json.dumps(resp, indent=2))
 
@@ -1683,7 +1773,11 @@ def _register_environment_commands(app: typer.Typer) -> None:
     ) -> None:
         """List environment specs."""
         base_url = _resolve_base_url(base_url)
-        resp = _api_request("GET", base_url, f"/apis/agents/v2/workspaces/{workspace}/environment-specs")
+        client = _agents_client(base_url, workspace)
+        resp = _run_sdk(
+            "GET agent API",
+            lambda: _json_from_page(client.list_environment_specs(workspace=workspace)),
+        )
         _print_list_response(
             ctx,
             resp,
@@ -1700,7 +1794,11 @@ def _register_environment_commands(app: typer.Typer) -> None:
     ) -> None:
         """Get an environment spec by name."""
         base_url = _resolve_base_url(base_url)
-        resp = _api_request("GET", base_url, f"/apis/agents/v2/workspaces/{workspace}/environment-specs/{name}")
+        client = _agents_client(base_url, workspace)
+        resp = _run_sdk(
+            "GET agent API",
+            lambda: _json_from_response(client.get_environment_spec(workspace=workspace, name=name)),
+        )
         typer.echo(json.dumps(resp, indent=2))
 
     @espec_app.command(name="delete")
@@ -1714,7 +1812,11 @@ def _register_environment_commands(app: typer.Typer) -> None:
         base_url = _resolve_base_url(base_url)
         if not yes:
             typer.confirm(f"Delete environment-spec '{name}'?", abort=True)
-        _api_request("DELETE", base_url, f"/apis/agents/v2/workspaces/{workspace}/environment-specs/{name}")
+        client = _agents_client(base_url, workspace)
+        _run_sdk(
+            "DELETE agent API",
+            lambda: client.delete_environment_spec(workspace=workspace, name=name).data(),
+        )
         typer.echo(f"Environment-spec '{name}' deleted.")
 
     # -- environments --------------------------------------------------------
@@ -1751,10 +1853,15 @@ def _register_environment_commands(app: typer.Typer) -> None:
             body["environment_spec"] = environment_spec
         if compute_spec is not None:
             body["compute_spec"] = compute_spec
-        sdk = _agents_sdk(base_url, workspace)
+        client = _agents_client(base_url, workspace)
         resp = _run_sdk(
             "POST agent API",
-            lambda: sdk.environments.create(name=body.pop("name"), workspace=workspace, spec=body),
+            lambda: _json_from_response(
+                client.create_environment(
+                    workspace=workspace,
+                    body=CreateEnvironmentRequest.model_validate(body),
+                )
+            ),
         )
         typer.echo(json.dumps(resp, indent=2))
 
@@ -1781,7 +1888,11 @@ def _register_environment_commands(app: typer.Typer) -> None:
     ) -> None:
         """List environments."""
         base_url = _resolve_base_url(base_url)
-        resp = _api_request("GET", base_url, f"/apis/agents/v2/workspaces/{workspace}/environments")
+        client = _agents_client(base_url, workspace)
+        resp = _run_sdk(
+            "GET agent API",
+            lambda: _json_from_page(client.list_environments(workspace=workspace)),
+        )
         _print_list_response(
             ctx,
             resp,
@@ -1798,7 +1909,11 @@ def _register_environment_commands(app: typer.Typer) -> None:
     ) -> None:
         """Get an environment by name."""
         base_url = _resolve_base_url(base_url)
-        resp = _api_request("GET", base_url, f"/apis/agents/v2/workspaces/{workspace}/environments/{name}")
+        client = _agents_client(base_url, workspace)
+        resp = _run_sdk(
+            "GET agent API",
+            lambda: _json_from_response(client.get_environment(workspace=workspace, name=name)),
+        )
         typer.echo(json.dumps(resp, indent=2))
 
     @env_app.command(name="delete")
@@ -1812,7 +1927,11 @@ def _register_environment_commands(app: typer.Typer) -> None:
         base_url = _resolve_base_url(base_url)
         if not yes:
             typer.confirm(f"Delete environment '{name}'?", abort=True)
-        _api_request("DELETE", base_url, f"/apis/agents/v2/workspaces/{workspace}/environments/{name}")
+        client = _agents_client(base_url, workspace)
+        _run_sdk(
+            "DELETE agent API",
+            lambda: client.delete_environment(workspace=workspace, name=name).data(),
+        )
         typer.echo(f"Environment '{name}' deleted.")
 
     # -- compute-specs -------------------------------------------------------
@@ -1832,10 +1951,15 @@ def _register_environment_commands(app: typer.Typer) -> None:
         """Create a compute spec from a file or inline JSON."""
         base_url = _resolve_base_url(base_url)
         body = _spec_body_from_inputs(name=name, spec_file=spec_file, spec_json=spec)
-        sdk = _agents_sdk(base_url, workspace)
+        client = _agents_client(base_url, workspace)
         resp = _run_sdk(
             "POST agent API",
-            lambda: sdk.compute_specs.create(name=body.pop("name"), workspace=workspace, spec=body),
+            lambda: _json_from_response(
+                client.create_compute_spec(
+                    workspace=workspace,
+                    body=CreateComputeSpecRequest.model_validate(body),
+                )
+            ),
         )
         typer.echo(json.dumps(resp, indent=2))
 
@@ -1862,7 +1986,11 @@ def _register_environment_commands(app: typer.Typer) -> None:
     ) -> None:
         """List compute specs."""
         base_url = _resolve_base_url(base_url)
-        resp = _api_request("GET", base_url, f"/apis/agents/v2/workspaces/{workspace}/compute-specs")
+        client = _agents_client(base_url, workspace)
+        resp = _run_sdk(
+            "GET agent API",
+            lambda: _json_from_page(client.list_compute_specs(workspace=workspace)),
+        )
         _print_list_response(
             ctx,
             resp,
@@ -1879,7 +2007,11 @@ def _register_environment_commands(app: typer.Typer) -> None:
     ) -> None:
         """Get a compute spec by name."""
         base_url = _resolve_base_url(base_url)
-        resp = _api_request("GET", base_url, f"/apis/agents/v2/workspaces/{workspace}/compute-specs/{name}")
+        client = _agents_client(base_url, workspace)
+        resp = _run_sdk(
+            "GET agent API",
+            lambda: _json_from_response(client.get_compute_spec(workspace=workspace, name=name)),
+        )
         typer.echo(json.dumps(resp, indent=2))
 
     @cspec_app.command(name="delete")
@@ -1893,7 +2025,11 @@ def _register_environment_commands(app: typer.Typer) -> None:
         base_url = _resolve_base_url(base_url)
         if not yes:
             typer.confirm(f"Delete compute-spec '{name}'?", abort=True)
-        _api_request("DELETE", base_url, f"/apis/agents/v2/workspaces/{workspace}/compute-specs/{name}")
+        client = _agents_client(base_url, workspace)
+        _run_sdk(
+            "DELETE agent API",
+            lambda: client.delete_compute_spec(workspace=workspace, name=name).data(),
+        )
         typer.echo(f"Compute-spec '{name}' deleted.")
 
 
@@ -1916,7 +2052,7 @@ def _deployment_address(dep: dict[str, Any]) -> str:
 
 
 def _wait_for_deployment(
-    base_url: str,
+    client: AgentsClient,
     workspace: str,
     name: str,
     *,
@@ -1936,14 +2072,16 @@ def _wait_for_deployment(
         ``True`` if the deployment reached ``running``, ``False`` if it
         reached ``failed`` or the timeout expired.
     """
-    path = f"/apis/agents/v2/workspaces/{workspace}/deployments/{name}"
     start = time.monotonic()
     last_status = ""
 
     typer.echo(f"Waiting for deployment '{name}' (timeout={timeout}s)...")
 
     while time.monotonic() - start < timeout:
-        dep = _api_request("GET", base_url, path)
+        dep = _run_sdk(
+            "GET agent API",
+            lambda: _json_from_response(client.get_deployment(workspace=workspace, name=name)),
+        )
         status = dep.get("status", "")
         elapsed = int(time.monotonic() - start)
 
@@ -2354,10 +2492,10 @@ def _create_session_for_deployment(
     session_name: str | None,
 ) -> tuple[AgentDeployment, AgentSession, str]:
     """Validate a Fabric deployment and create its persisted Platform session."""
-    deployment_response = _api_request(
-        "GET",
-        base_url,
-        f"/apis/agents/v2/workspaces/{workspace}/deployments/{deployment_name}",
+    client = _agents_client(base_url, workspace)
+    deployment_response = _run_sdk(
+        "GET agent API",
+        lambda: _json_from_response(client.get_deployment(workspace=workspace, name=deployment_name)),
     )
     deployment_id = _require_deployment_id(deployment_response, deployment_name)
     try:
@@ -2384,11 +2522,11 @@ def _create_session_for_deployment(
     payload = {"deployment_id": deployment_id}
     if session_name is not None:
         payload["name"] = session_name
-    response = _api_request(
-        "POST",
-        base_url,
-        f"/apis/agents/v2/workspaces/{workspace}/sessions",
-        json_body=payload,
+    response = _run_sdk(
+        "POST agent API",
+        lambda: _json_from_response(
+            client.create_session(workspace=workspace, body=CreateSessionRequest.model_validate(payload))
+        ),
     )
     try:
         session_id = response["id"]
@@ -2409,10 +2547,10 @@ def _resolve_existing_session(
     session_name: str,
 ) -> tuple[AgentDeployment, AgentSession, str]:
     """Resolve a resumable persisted session and its bound deployment."""
-    response = _api_request(
-        "GET",
-        base_url,
-        f"/apis/agents/v2/workspaces/{workspace}/sessions/{session_name}",
+    client = _agents_client(base_url, workspace)
+    response = _run_sdk(
+        "GET agent API",
+        lambda: _json_from_response(client.get_session(workspace=workspace, name=session_name)),
     )
     try:
         session_id = response["id"]
@@ -2433,7 +2571,7 @@ def _resolve_existing_session(
         raise typer.Exit(code=1)
 
     deployment = _resolve_deployment_by_id(
-        base_url=base_url,
+        client=client,
         workspace=workspace,
         deployment_id=resolved_session.deployment_id,
         session_name=session_name,
@@ -2443,7 +2581,7 @@ def _resolve_existing_session(
 
 def _resolve_deployment_by_id(
     *,
-    base_url: str,
+    client: AgentsClient,
     workspace: str,
     deployment_id: str,
     session_name: str,
@@ -2451,11 +2589,14 @@ def _resolve_deployment_by_id(
     """Find a session's bound deployment through the paginated list API."""
     page = 1
     while True:
-        query = urlencode({"page": page, "page_size": _DEPLOYMENT_RESOLUTION_PAGE_SIZE})
-        response = _api_request(
-            "GET",
-            base_url,
-            f"/apis/agents/v2/workspaces/{workspace}/deployments?{query}",
+        response = _run_sdk(
+            "GET agent API",
+            lambda: _json_from_page(
+                client.list_deployments(
+                    workspace=workspace,
+                    query_params={"page": page, "page_size": _DEPLOYMENT_RESOLUTION_PAGE_SIZE},
+                )
+            ),
         )
         for candidate in _unwrap_list(response):
             if candidate.get("id") != deployment_id:
@@ -2491,6 +2632,15 @@ def _unwrap_list(resp: Any) -> list[dict[str, Any]]:
     return [d for d in items if isinstance(d, dict)]
 
 
+def _list_deployment_maps(client: AgentsClient, workspace: str) -> list[dict[str, Any]]:
+    """Return every deployment page in the serialized mapping shape used by CLI filters."""
+    return [_deployment_map(deployment) for deployment in client.list_deployments(workspace=workspace).items()]
+
+
+def _deployment_map(deployment: ClientAgentDeployment) -> dict[str, Any]:
+    return deployment.model_dump(mode="json")
+
+
 def _print_list_response(
     ctx: typer.Context,
     response: Any,
@@ -2508,6 +2658,32 @@ def _print_list_response(
         no_truncate=_resolve_no_truncate(ctx, no_truncate),
         timestamp_format=_resolve_timestamp_format(ctx),
     )
+
+
+def _agents_client(base_url: str, workspace: str) -> AgentsClient:
+    return AgentsClient(
+        base_url=base_url,
+        workspace=workspace,
+        default_headers=_resolve_context_headers() or None,
+        timeout=30,
+        http_client=httpx.Client(timeout=30),
+    )
+
+
+def _json_from_response(response: NemoResponse[Any]) -> Any:
+    response.data()
+    return _json_from_http_response(response.http_response)
+
+
+def _json_from_page(response: NemoPaginatedResponse[Any, Any]) -> Any:
+    response.page()
+    return _json_from_http_response(response.http_response)
+
+
+def _json_from_http_response(response: httpx.Response) -> Any:
+    if response.status_code == 204 or not response.content:
+        return None
+    return response.json()
 
 
 def _resolve_list_output_format(ctx: typer.Context, output_format: _LIST_OUTPUT_FORMAT | None) -> str:
@@ -2549,29 +2725,6 @@ def _resolve_timestamp_format(ctx: typer.Context) -> str | None:
     return None
 
 
-def _api_request(method: str, base_url: str, path: str, *, json_body: dict[str, Any] | None = None) -> Any:
-    url = base_url.rstrip("/") + path
-    request_kwargs: dict[str, Any] = {}
-    if json_body is not None:
-        request_kwargs["json"] = json_body
-    headers = _resolve_context_headers()
-    if headers:
-        request_kwargs["headers"] = headers
-    try:
-        with httpx.Client(timeout=30) as client:
-            resp = client.request(method, url, **request_kwargs)
-            resp.raise_for_status()
-            if resp.status_code == 204 or not resp.content:
-                return None
-            return resp.json()
-    except httpx.HTTPStatusError as exc:
-        print_http_status_error(exc, action=f"{method} agent API")
-        raise typer.Exit(code=1)
-    except httpx.RequestError as exc:
-        print_http_request_error(exc, action=f"{method} agent API")
-        raise typer.Exit(code=1)
-
-
 def _platform_sdk(base_url: str) -> Any:
     """Return an auth-aware platform SDK client for fileset upload/delete."""
     headers = _resolve_context_headers()
@@ -2580,39 +2733,43 @@ def _platform_sdk(base_url: str) -> Any:
     return NeMoPlatform(base_url=base_url)
 
 
-def _agents_sdk(base_url: str, workspace: str) -> Any:
-    """Return the agents-plugin SDK resource bound to *base_url* / *workspace*.
-
-    The CLI reuses the plugin SDK (:class:`~nemo_agents_plugin.sdk.AgentsResource`)
-    so request paths and payload shapes are defined once. The SDK reads
-    ``base_url``, ``workspace``, and ``default_headers`` off the object it is
-    handed — mirroring the auth-header threading ``_api_request`` does.
-    """
-    from nemo_agents_plugin.sdk import AgentsResource
-
-    platform = SimpleNamespace(
-        base_url=base_url,
-        workspace=workspace,
-        default_headers=_resolve_context_headers() or None,
-    )
-    return AgentsResource(platform)
-
-
-def _run_sdk(action: str, call: Callable[[], Any]) -> Any:
+def _run_sdk(action: str, call: Callable[[], _T]) -> _T:
     """Invoke an SDK *call*, translating HTTP errors to CLI-friendly output.
 
-    The plugin SDK raises raw ``httpx`` errors; the CLI wants the same rich
-    messages ``_api_request`` prints. This keeps error UX identical whether a
-    command talks to the API directly or through the SDK.
+    Typed client errors and the gateway helpers' raw ``httpx`` errors are
+    translated to the same Rich messages.
     """
     try:
         return call()
+    except NemoHTTPError as exc:
+        print_http_status_error(
+            httpx.HTTPStatusError(str(exc), request=_client_error_request(exc), response=exc.http_response),
+            action=action,
+        )
+        raise typer.Exit(code=1)
+    except NemoTransportError as exc:
+        print_http_request_error(exc.error, action=action)
+        raise typer.Exit(code=1)
+    except ValidationError as exc:
+        typer.echo(f"Error: {action} validation failed: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except NemoClientError as exc:
+        typer.echo(f"Error: {action} failed: {exc}", err=True)
+        raise typer.Exit(code=1)
     except httpx.HTTPStatusError as exc:
         print_http_status_error(exc, action=action)
         raise typer.Exit(code=1)
     except httpx.RequestError as exc:
         print_http_request_error(exc, action=action)
         raise typer.Exit(code=1)
+
+
+def _client_error_request(exc: NemoHTTPError) -> httpx.Request:
+    try:
+        return exc.http_response.request
+    except RuntimeError:
+        url = str(exc.http_response.url) if exc.http_response.url else "http://nemo-platform"
+        return httpx.Request("GET", url)
 
 
 def _collect_text_agent_artifacts(
@@ -2682,14 +2839,13 @@ def _clear_existing_ethos_artifacts(
     workspace: str,
 ) -> None:
     """Remove the previous executable snapshot while preserving durable Ethos."""
-    from nemo_platform import NotFoundError as PlatformNotFoundError
-    from nemo_platform_plugin.client.errors import NotFoundError as PluginNotFoundError
 
     preserved = {ETHOS_FILENAME}
+    files_client = client_from_platform(sdk, FilesClient)
 
     try:
-        existing = sdk.files.list(fileset=fileset, workspace=workspace).data
-    except (FileNotFoundError, PlatformNotFoundError, PluginNotFoundError):
+        existing = files_client.list_files(name=fileset, workspace=workspace).data().data
+    except (FileNotFoundError, PluginNotFoundError):
         return
 
     for artifact in existing:
@@ -2697,8 +2853,8 @@ def _clear_existing_ethos_artifacts(
         if remote_path in preserved:
             continue
         try:
-            sdk.files.delete(remote_path=remote_path, fileset=fileset, workspace=workspace)
-        except (FileNotFoundError, PlatformNotFoundError, PluginNotFoundError):
+            files_client.delete_file(name=fileset, path=remote_path, workspace=workspace)
+        except (FileNotFoundError, PluginNotFoundError):
             # Another client may have removed the same stale file after the list.
             continue
 
@@ -2780,7 +2936,11 @@ def _delete_agent_entity(*, agent_name: str, workspace: str, base_url: str) -> N
     Deleting the fileset here would destroy that durable contract, so the
     executable artifacts it also carries are left behind instead.
     """
-    _api_request("DELETE", base_url, f"/apis/agents/v2/workspaces/{workspace}/agents/{agent_name}")
+    client = _agents_client(base_url, workspace)
+    _run_sdk(
+        "DELETE agent API",
+        lambda: client.delete_agent(workspace=workspace, name=agent_name).data(),
+    )
 
 
 def _load_yaml(path: Path) -> dict:

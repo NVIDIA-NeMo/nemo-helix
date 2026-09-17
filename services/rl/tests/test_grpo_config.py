@@ -67,6 +67,7 @@ def _make_grpo_step(
     activation_checkpointing: bool = False,
     grpo: GRPOConfig | None = None,
     policy_backend: PolicyBackend = PolicyBackend.AUTOMODEL,
+    v4_compatible: bool = True,
 ) -> TrainingStepConfig:
     env_root = tmp_path / "environment"
     env_root.mkdir(exist_ok=True)
@@ -77,7 +78,11 @@ def _make_grpo_step(
     )
     return TrainingStepConfig(
         backend=TrainingBackend.NEMO_RL,
-        model=ModelConfig(path=str(tmp_path / "model"), max_seq_length=512),
+        model=ModelConfig(
+            path=str(tmp_path / "model"),
+            max_seq_length=512,
+            v4_compatible=v4_compatible,
+        ),
         dataset=TrainingStepConfig.DatasetConfig(path=str(dataset_pvc)),
         gym=TrainingStepConfig.GymConfig(
             environment_path=str(env_root),
@@ -117,6 +122,7 @@ def _prepared_step(
     activation_checkpointing: bool = False,
     grpo: GRPOConfig | None = None,
     policy_backend: PolicyBackend = PolicyBackend.AUTOMODEL,
+    v4_compatible: bool = True,
 ) -> tuple[TrainingStepConfig, Path]:
     dataset_pvc = tmp_path / "dataset"
     dataset_pvc.mkdir(exist_ok=True)
@@ -133,6 +139,7 @@ def _prepared_step(
             activation_checkpointing=activation_checkpointing,
             grpo=grpo,
             policy_backend=policy_backend,
+            v4_compatible=v4_compatible,
         ),
         dataset_pvc,
     )
@@ -149,6 +156,7 @@ def test_compile_grpo_config_sandboxed_paths(
     assert cfg["env"]["should_use_nemo_gym"] is True
     assert nemo_gym["sandboxed"] is True
     assert nemo_gym["environment_path"] == "/job/environment"
+    assert nemo_gym["environment_offline"] is True
     # The master reads the dataset itself, so the dataloader path stays on job storage
     # even though the sandbox sees the same file at /job/dataset.
     assert cfg["data"]["train"]["data_path"] == str(dataset_pvc / "training.jsonl")
@@ -499,12 +507,16 @@ def test_sandbox_egress_comes_from_the_compiled_step_not_service_config(
     assert step.gym is not None
     step.gym.allow_internet = False
 
-    sandbox = compile_grpo_config(step, job_ctx)["env"]["nemo_gym"]["sandbox"]
+    nemo_gym = compile_grpo_config(step, job_ctx)["env"]["nemo_gym"]
+    sandbox = nemo_gym["sandbox"]
     assert sandbox["allow_internet"] is False
+    assert nemo_gym["environment_offline"] is True
 
     step.gym.allow_internet = True
-    sandbox = compile_grpo_config(step, job_ctx)["env"]["nemo_gym"]["sandbox"]
+    nemo_gym = compile_grpo_config(step, job_ctx)["env"]["nemo_gym"]
+    sandbox = nemo_gym["sandbox"]
     assert sandbox["allow_internet"] is True
+    assert nemo_gym["environment_offline"] is False
 
 
 def test_public_dns_allow_reaches_the_sandbox_network_policy(
@@ -882,6 +894,110 @@ def test_policy_backend_dtensor_omits_v2(
 
     assert "_v2" not in dtensor_cfg
     assert dtensor_cfg["enabled"] is True
+
+
+def test_automodel_all_weights_requests_consolidated_safetensors(
+    tmp_path: Path, job_ctx: NMPJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NMP_JOB_STORAGE_PVC_CLAIM", "nmp-job-storage")
+    step, _ = _prepared_step(tmp_path)
+    checkpointing = compile_grpo_config(step, job_ctx)["checkpointing"]
+
+    assert checkpointing["model_save_format"] == "safetensors"
+    assert checkpointing["save_consolidated"] is True
+
+
+def test_v4_compatible_defaults_on_for_consolidated_export(
+    tmp_path: Path, job_ctx: NMPJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without this the consolidated export carries a transformers v5 config.json, which the
+    vLLM the platform serves the published model with cannot read."""
+    monkeypatch.setenv("NMP_JOB_STORAGE_PVC_CLAIM", "nmp-job-storage")
+    step, _ = _prepared_step(tmp_path)
+    checkpointing = compile_grpo_config(step, job_ctx)["checkpointing"]
+
+    assert checkpointing["v4_compatible"] is True
+
+
+def test_v4_compatible_can_be_turned_off(
+    tmp_path: Path, job_ctx: NMPJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NMP_JOB_STORAGE_PVC_CLAIM", "nmp-job-storage")
+    step, _ = _prepared_step(tmp_path, v4_compatible=False)
+    checkpointing = compile_grpo_config(step, job_ctx)["checkpointing"]
+
+    assert checkpointing["v4_compatible"] is False
+
+
+def _write_base_model_config(tmp_path: Path, transformers_version: str | None) -> None:
+    model_dir = tmp_path / "model"
+    model_dir.mkdir(exist_ok=True)
+    config: dict[str, object] = {"architectures": ["Qwen3ForCausalLM"]}
+    if transformers_version is not None:
+        config["transformers_version"] = transformers_version
+    (model_dir / "config.json").write_text(json.dumps(config), encoding="utf-8")
+
+
+def test_v4_compatible_warns_when_the_base_checkpoint_is_v5(
+    tmp_path: Path, job_ctx: NMPJobContext, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("NMP_JOB_STORAGE_PVC_CLAIM", "nmp-job-storage")
+    _write_base_model_config(tmp_path, "5.1.0")
+    step, _ = _prepared_step(tmp_path)
+    with caplog.at_level("WARNING"):
+        compile_grpo_config(step, job_ctx)
+
+    assert any("base checkpoint is transformers v5" in record.message for record in caplog.records)
+
+
+def test_v4_compatible_does_not_warn_for_a_v4_checkpoint(
+    tmp_path: Path, job_ctx: NMPJobContext, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("NMP_JOB_STORAGE_PVC_CLAIM", "nmp-job-storage")
+    _write_base_model_config(tmp_path, "4.51.0")
+    step, _ = _prepared_step(tmp_path)
+    with caplog.at_level("WARNING"):
+        compile_grpo_config(step, job_ctx)
+
+    assert not any("base checkpoint is transformers v" in record.message for record in caplog.records)
+
+
+def test_v4_compatible_off_does_not_warn_for_a_v5_checkpoint(
+    tmp_path: Path, job_ctx: NMPJobContext, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("NMP_JOB_STORAGE_PVC_CLAIM", "nmp-job-storage")
+    _write_base_model_config(tmp_path, "5.1.0")
+    step, _ = _prepared_step(tmp_path, v4_compatible=False)
+    with caplog.at_level("WARNING"):
+        compile_grpo_config(step, job_ctx)
+
+    assert not any("base checkpoint is transformers v" in record.message for record in caplog.records)
+
+
+def test_dtensor_v1_omits_model_save_format(
+    tmp_path: Path, job_ctx: NMPJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NMP_JOB_STORAGE_PVC_CLAIM", "nmp-job-storage")
+    step, _ = _prepared_step(tmp_path, policy_backend=PolicyBackend.DTENSOR)
+    checkpointing = compile_grpo_config(step, job_ctx)["checkpointing"]
+
+    assert "model_save_format" not in checkpointing
+    assert "save_consolidated" not in checkpointing
+
+
+def test_automodel_lora_still_requests_consolidated_export(
+    tmp_path: Path, job_ctx: NMPJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NMP_JOB_STORAGE_PVC_CLAIM", "nmp-job-storage")
+    step, _ = _prepared_step(
+        tmp_path,
+        finetuning_type=FinetuningType.LORA,
+        lora=LoRAConfig(rank=8, alpha=16),
+    )
+    checkpointing = compile_grpo_config(step, job_ctx)["checkpointing"]
+
+    assert checkpointing["save_consolidated"] is True
+    assert "model_save_format" not in checkpointing
 
 
 def test_expert_parallel_size_reaches_dtensor(
@@ -1307,6 +1423,7 @@ def test_sequence_packing_rejected_under_context_parallel(
         compile_grpo_config(step, job_ctx)
 
     # dynamic has no such restriction on the GRPO + DTensor path.
+    assert step.training.grpo is not None
     step.training.grpo.batching_strategy = BatchingStrategy.DYNAMIC
     assert compile_grpo_config(step, job_ctx)["policy"]["dynamic_batching"]["enabled"] is True
 

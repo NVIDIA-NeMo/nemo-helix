@@ -30,9 +30,9 @@ from nmp.automodel.tasks.training.integrations import (
     build_wandb_config,
 )
 from nmp.automodel.tasks.training.schemas import (
-    EmbeddingConfig,
     FinetuningType,
     LoRAConfig,
+    RetrievalConfig,
     TrainingRecipe,
     TrainingStepConfig,
     TrainingType,
@@ -122,7 +122,7 @@ def _compile_retrieval_config(
 
     cfg: dict[str, Any] = {}
     is_bi_encoder = recipe == TrainingRecipe.BI_ENCODER
-    embedding_config = customizer_config.embedding or EmbeddingConfig()
+    retrieval_config = customizer_config.retrieval or RetrievalConfig()
     seed = _resolve_seed(customizer_config)
 
     _build_dist_env(cfg)
@@ -161,7 +161,7 @@ def _compile_retrieval_config(
     _build_distributed(
         cfg,
         customizer_config,
-        activation_checkpointing=embedding_config.do_gradient_checkpointing,
+        activation_checkpointing=retrieval_config.do_gradient_checkpointing,
     )
 
     prepared = _prepare_and_validate_dataset(customizer_config, workspace_dir)
@@ -185,7 +185,7 @@ def _compile_retrieval_config(
         customizer_config.model.max_seq_length,
         seed,
         recipe,
-        embedding_config,
+        retrieval_config,
     )
 
     _build_peft(cfg, customizer_config)
@@ -341,10 +341,16 @@ def _prepare_and_validate_dataset(
     workspace_dir: Path,
 ) -> PreparedDataset:
     """Discover, merge, and optionally split dataset files."""
+    split_kwargs = (
+        {}
+        if customizer_config.schedule.validation_split is None
+        else {"val_split_ratio": customizer_config.schedule.validation_split}
+    )
     prepared = prepare_dataset(
         dataset_path=Path(customizer_config.dataset.path),
         output_dir=workspace_dir / "dataset",
         seed=customizer_config.seed,
+        **split_kwargs,
     )
     logger.info(
         f"Prepared dataset: train={prepared.train_samples} samples, validation={prepared.validation_samples} samples, files: "
@@ -708,7 +714,7 @@ def _configure_datasets(
     seq_length: int,
     seed: int,
     recipe: TrainingRecipe = TrainingRecipe.SFT,
-    embedding_config: EmbeddingConfig | None = None,
+    retrieval_config: RetrievalConfig | None = None,
 ) -> None:
     """
     Configure dataset sections based on detected schema.
@@ -728,7 +734,7 @@ def _configure_datasets(
             Otherwise, this is the model's max_seq_length.
         seed: Random seed for reproducibility.
         recipe: Selected training recipe.
-        embedding_config: Retrieval model configuration (required for retrieval datasets).
+        retrieval_config: Retrieval model configuration (required for retrieval datasets).
     """
     train_file = prepared.train_file
     validation_file = prepared.validation_file
@@ -756,15 +762,15 @@ def _configure_datasets(
 
     if schema == DatasetSchema.EMBEDDING:
         # Embedding/retrieval dataset - uses inline format directly
-        if embedding_config is None:
-            raise ValueError("embedding_config is required for embedding dataset configuration")
+        if retrieval_config is None:
+            raise ValueError("retrieval_config is required for retrieval dataset configuration")
         _configure_retrieval_dataset(
             cfg,
             customizer_config,
             train_file,
             validation_file,
             seed,
-            embedding_config,
+            retrieval_config,
             recipe,
         )
     elif schema == DatasetSchema.CHAT:
@@ -885,7 +891,7 @@ def _configure_retrieval_dataset(
     train_file: Path,
     val_file: Path,
     seed: int,
-    embedding_config: EmbeddingConfig,
+    retrieval_config: RetrievalConfig,
     recipe: TrainingRecipe,
 ) -> None:
     """Configure inline retrieval data for bi-encoder or cross-encoder training.
@@ -904,7 +910,7 @@ def _configure_retrieval_dataset(
         train_file: Path to training JSONL file.
         val_file: Path to validation JSONL file.
         seed: Random seed for reproducibility.
-        embedding_config: Embedding model configuration.
+        retrieval_config: Retrieval dataset, collator, and export configuration.
     """
 
     model_type = "bi_encoder" if recipe == TrainingRecipe.BI_ENCODER else "cross_encoder"
@@ -916,23 +922,23 @@ def _configure_retrieval_dataset(
     logger.info(
         "Configuring %s dataset with train_n_passages=%s",
         model_type,
-        embedding_config.train_n_passages,
+        retrieval_config.train_n_passages,
     )
 
     def collator_config(*, validation: bool = False) -> dict[str, Any]:
         if recipe == TrainingRecipe.CROSS_ENCODER:
             return {
                 "_target_": collator_target,
-                "rerank_max_length": embedding_config.passage_max_length,
+                "rerank_max_length": retrieval_config.passage_max_length,
                 "prompt_template": "question:{query} \n \n passage:{passage}",
                 "pad_to_multiple_of": 8,
             }
         result: dict[str, Any] = {
             "_target_": collator_target,
-            "q_max_len": embedding_config.query_max_length,
-            "p_max_len": embedding_config.passage_max_length,
-            "query_prefix": _collator_prefix(embedding_config.query_prefix),
-            "passage_prefix": _collator_prefix(embedding_config.passage_prefix),
+            "q_max_len": retrieval_config.query_max_length,
+            "p_max_len": retrieval_config.passage_max_length,
+            "query_prefix": _collator_prefix(retrieval_config.query_prefix),
+            "passage_prefix": _collator_prefix(retrieval_config.passage_prefix),
             "pad_to_multiple_of": 8,
         }
         if validation:
@@ -946,7 +952,7 @@ def _configure_retrieval_dataset(
             "model_type": model_type,
             "data_dir_list": [str(train_file)],
             "data_type": "train",
-            "n_passages": embedding_config.train_n_passages,
+            "n_passages": retrieval_config.train_n_passages,
             "seed": seed,
             "do_shuffle": True,
         },
@@ -963,8 +969,8 @@ def _configure_retrieval_dataset(
                 "model_type": model_type,
                 "data_dir_list": [str(val_file)],
                 "data_type": "eval",
-                "n_passages": embedding_config.train_n_passages,
-                "eval_negative_size": get_eval_negative_size(embedding_config),
+                "n_passages": retrieval_config.train_n_passages,
+                "eval_negative_size": get_eval_negative_size(retrieval_config),
                 "seed": seed,
                 "do_shuffle": False,
             },
@@ -1064,8 +1070,8 @@ def _configure_kd(cfg: dict[str, Any], customizer_config: TrainingStepConfig, tr
         logger.info("Teacher model will be offloaded to CPU between forward passes")
 
 
-def get_eval_negative_size(embedding_config: EmbeddingConfig) -> int:
-    """Get the effective eval_negative_size value from embedding config.
+def get_eval_negative_size(retrieval_config: RetrievalConfig) -> int:
+    """Get the effective eval_negative_size value from the retrieval config.
 
     Returns the user-specified eval_negative_size if set, otherwise defaults
     to train_n_passages - 1 for consistent train/eval behavior.
@@ -1077,6 +1083,6 @@ def get_eval_negative_size(embedding_config: EmbeddingConfig) -> int:
 
     Example: train_n_passages=5 (1 pos + 4 neg) -> eval_negative_size=4
     """
-    if embedding_config.eval_negative_size is not None:
-        return embedding_config.eval_negative_size
-    return embedding_config.train_n_passages - 1
+    if retrieval_config.eval_negative_size is not None:
+        return retrieval_config.eval_negative_size
+    return retrieval_config.train_n_passages - 1

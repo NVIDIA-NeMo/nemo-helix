@@ -7,6 +7,7 @@ These entities use EntityBase and are stored via EntityClient.
 Jobs are identified by ID rather than by a unique name within a namespace.
 """
 
+from collections.abc import Mapping
 from typing import Any, ClassVar, Dict, Optional, Self
 
 from nmp.common.auth import AuthContext
@@ -14,6 +15,24 @@ from nmp.common.entities.client import EntityBase
 from nmp.common.jobs.schemas import FileStorageType, PlatformJobResultResponse, PlatformJobStatus
 from nmp.core.jobs.app.schemas import PlatformJobSpec, PlatformJobStepSpec
 from pydantic import Field, PrivateAttr, computed_field, model_validator
+
+STEP_SPEC_NAME_CONFIG_KEY = "_step_spec_name"
+
+
+def get_step_spec_name(config: Mapping[str, Any] | None, fallback_name: str | None = None) -> str | None:
+    """Return the original platform step spec name stored on a step entity."""
+    if isinstance(config, Mapping):
+        step_spec_name = config.get(STEP_SPEC_NAME_CONFIG_KEY)
+        if isinstance(step_spec_name, str):
+            return step_spec_name
+    return fallback_name
+
+
+def is_final_platform_step(platform_spec: PlatformJobSpec, step_spec_name: str | None) -> bool:
+    """Return whether ``step_spec_name`` names the final configured step."""
+    if step_spec_name is None or not platform_spec.steps:
+        return False
+    return platform_spec.steps[-1].name == step_spec_name
 
 
 class PlatformJob(EntityBase):
@@ -101,6 +120,10 @@ class PlatformJobAttempt(EntityBase):
             if step.name == current_step_name:
                 found_current = True
         return None
+
+    def is_final_step_spec(self, step_name: str | None) -> bool:
+        """Return whether ``step_name`` is the final configured step in this attempt."""
+        return is_final_platform_step(self.platform_spec, step_name)
 
 
 class PlatformJobStep(EntityBase):

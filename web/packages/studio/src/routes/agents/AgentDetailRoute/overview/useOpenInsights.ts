@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { type InsightListItem, useOptimizerListInsights } from '@studio/api/optimizer';
+import { useInsightsListInsights } from '@nemo/sdk/generated/insights/insights-insights';
+import type { InsightListItem } from '@nemo/sdk/generated/insights/schema';
 import { useMemo } from 'react';
 
 /**
@@ -50,7 +51,7 @@ export const useOpenInsights = ({
   agent,
   enabled,
 }: UseOpenInsightsParams): UseOpenInsightsResult => {
-  const { data, isPending, error } = useOptimizerListInsights(
+  const { data, isPending, error } = useInsightsListInsights(
     workspace,
     {
       agent,

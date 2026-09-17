@@ -3,15 +3,15 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
+import httpx
 import pytest
 from click.testing import Result
 from nemo_experimentalist_plugin import cli
 from nemo_experimentalist_plugin.entities import DatasetRef
 from nemo_experimentalist_plugin.experimentalist.strategies.evolutionary import EvolutionaryOptimizerConfig
 from nemo_experimentalist_plugin.preflight import Probes
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.client import AsyncNemoClient
 from nooa import GenerationError
 from typer.testing import CliRunner
 
@@ -40,18 +40,27 @@ def hermetic_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
 
-@dataclass
-class FakePlatformClient:
-    closed: bool = False
+class FakePlatformClient(AsyncNemoClient):
+    def __init__(self) -> None:
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(500, request=request, json={"detail": "fake client"})
+        )
+        super().__init__(
+            base_url="http://platform.test",
+            workspace="default",
+            http_client=httpx.AsyncClient(transport=transport),
+        )
+        self.closed = False
 
     async def close(self) -> None:
         self.closed = True
+        await super().close()
 
 
 @pytest.fixture(autouse=True)
 def platform_client(monkeypatch: pytest.MonkeyPatch) -> FakePlatformClient:
     client = FakePlatformClient()
-    monkeypatch.setattr(cli, "make_client", lambda _base_url: cast(AsyncNeMoPlatform, client))
+    monkeypatch.setattr(cli, "make_client", lambda _base_url: client)
     return client
 
 
@@ -63,7 +72,7 @@ class CapturedExperimentRun:
     task_template: DatasetRef | None
     experiment_dir: Path
     workspace: str
-    client: AsyncNeMoPlatform | None
+    client: AsyncNemoClient
     config: EvolutionaryOptimizerConfig
     insight: Path | str | None
     ethos: str | None
@@ -106,7 +115,7 @@ class ExperimentRunRecorder:
         validation_dataset: DatasetRef,
         experiment_dir: Path,
         workspace: str,
-        client: AsyncNeMoPlatform | None,
+        client: AsyncNemoClient,
         config: EvolutionaryOptimizerConfig,
         task_template: DatasetRef | None = None,
         insight: Path | str | None = None,

@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 
 __all__ = [
     "CreateVirtualModelRequest",
+    "DeleteVirtualModelQueryParams",
     "ListVirtualModelsQueryParams",
     "MiddlewareCall",
     "UpdateVirtualModelRequest",
@@ -117,3 +118,9 @@ class ListVirtualModelsQueryParams(TypedDict, total=False):
     sort: NotRequired[str]
     filter: NotRequired[str]
     exclude_autoprovisioned: NotRequired[bool]
+
+
+class DeleteVirtualModelQueryParams(TypedDict, total=False):
+    """Query parameters accepted by the VirtualModel delete operation."""
+
+    expected_db_version: NotRequired[int]

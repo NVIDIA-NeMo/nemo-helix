@@ -72,7 +72,12 @@ from abc import ABC
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, AsyncIterator, Protocol, TypeAlias, Union, runtime_checkable
+from typing import TYPE_CHECKING, Any, AsyncIterator, Protocol, TypeAlias, Union, runtime_checkable
+
+if TYPE_CHECKING:
+    # Keep this public base import-light; these imports pull in heavy SDK modules.
+    from nemo_platform import AsyncNeMoPlatform
+    from nemo_platform_plugin.client.client import AsyncNemoClient
 
 
 class BackendFormat(str, Enum):
@@ -361,6 +366,9 @@ class InferenceMiddlewareContext:
             :attr:`InferenceResponse.response_body_annotations` when it builds
             the response envelope, and final serialization uses the
             ``InferenceResponse`` field.
+        request_nemo_client: Request-scoped typed client carrying the caller's
+            delegated identity and trace headers. Middleware can use it for
+            nested platform calls that must preserve request context.
     """
 
     request_id: str
@@ -370,6 +378,7 @@ class InferenceMiddlewareContext:
     proxied_request: InferenceRequest | None = None
     backend_format: BackendFormat | None = None
     response_body_annotations: dict[str, Any] = field(default_factory=dict)
+    request_nemo_client: AsyncNemoClient | None = None
     _state: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
 
     def state(self, plugin_name: str) -> PluginStateNamespace:
@@ -747,6 +756,8 @@ class NemoInferenceMiddleware(ABC):
 
     def __init__(self) -> None:
         self._cache: InferenceMiddlewareCacheAccessor | None = None
+        self._platform_sdk: AsyncNeMoPlatform | None = None
+        self._platform_client: AsyncNemoClient | None = None
 
     # ------------------------------------------------------------------
     # IGW-called injection point (not part of the plugin author API)
@@ -758,6 +769,36 @@ class NemoInferenceMiddleware(ABC):
         Plugin authors must not call this method directly.
         """
         self._cache = cache
+
+    def _inject_platform_sdk(self, sdk: AsyncNeMoPlatform) -> None:
+        """Called by IGW to inject a caller-owned SDK before on_startup().
+
+        Plugin authors must not call or close this SDK directly.
+        """
+        self._platform_sdk = sdk
+
+    def _inject_platform_client(self, client: AsyncNemoClient) -> None:
+        """Called by IGW to inject a caller-owned typed client before on_startup().
+
+        Plugin authors must not call or close this client directly.
+        """
+        self._platform_client = client
+
+    def _get_platform_sdk(self, method_name: str) -> AsyncNeMoPlatform:
+        if self._platform_sdk is None:
+            raise RuntimeError(
+                f"{method_name}() is not available before IGW injects the platform SDK. "
+                f"Call {method_name}() from on_startup() or later."
+            )
+        return self._platform_sdk
+
+    def _get_platform_client(self, method_name: str) -> AsyncNemoClient:
+        if self._platform_client is None:
+            raise RuntimeError(
+                f"{method_name}() is not available before IGW injects the platform client. "
+                f"Call {method_name}() from on_startup() or later."
+            )
+        return self._platform_client
 
     def _get_cache(self, method_name: str) -> InferenceMiddlewareCacheAccessor:
         if self._cache is None:

@@ -12,7 +12,7 @@ import shutil
 import tempfile
 from collections.abc import Collection
 from pathlib import Path, PurePosixPath
-from typing import Any, Protocol
+from typing import Any
 
 import yaml
 from nemo_agents_plugin.entities import (
@@ -23,8 +23,8 @@ from nemo_agents_plugin.entities import (
     ethos_fileset_name,
 )
 from nemo_deployments_plugin.entities import ConfigFile
-from nemo_platform import NotFoundError as PlatformNotFoundError
 from nemo_platform_plugin.client.errors import NotFoundError as PluginClientNotFoundError
+from nemo_platform_plugin.files.client import AsyncFilesClient
 
 logger = logging.getLogger(__name__)
 _CONTRACT_FILENAMES = {ETHOS_FILENAME, AGENT_SPEC_FILENAME}
@@ -34,14 +34,73 @@ class FabricArtifactStagingError(ValueError):
     """Raised when Fabric deployment artifact staging cannot satisfy the agent config."""
 
 
-class _FilesDownloader(Protocol):
-    async def download(
-        self,
-        *,
-        local_path: str,
-        fileset: str | None = None,
-        workspace: str | None = None,
-    ) -> None: ...
+class FabricEthosFilesetNotFound(FileNotFoundError):
+    """Raised when the optional Ethos fileset is genuinely absent."""
+
+
+async def _download_fileset(
+    files_client: AsyncFilesClient,
+    *,
+    workspace: str,
+    fileset_name: str,
+    local_path: Path,
+) -> None:
+    try:
+        listing = (await files_client.list_files(workspace=workspace, name=fileset_name)).data()
+    except PluginClientNotFoundError as exc:
+        raise FabricEthosFilesetNotFound(f"Ethos fileset {workspace}/{fileset_name} was not found") from exc
+
+    for file_info in listing.data:
+        relative_path = _fileset_relative_path(file_info.path)
+        response = await files_client.download_file(
+            workspace=workspace,
+            name=fileset_name,
+            path=relative_path.as_posix(),
+        )
+        content = await response.read()
+        await asyncio.to_thread(_write_downloaded_file, local_path / Path(*relative_path.parts), content)
+
+
+def _fileset_relative_path(path: str) -> PurePosixPath:
+    relative_path = PurePosixPath(path.lstrip("/"))
+    if not relative_path.parts or relative_path.is_absolute() or ".." in relative_path.parts:
+        raise FabricArtifactStagingError(f"Invalid path in Ethos fileset: {path!r}")
+    return relative_path
+
+
+def _write_downloaded_file(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+
+
+def _copy_downloaded_tree(download_root: Path, base_dir: Path, preserved: set[str]) -> None:
+    resolved_base = base_dir.resolve()
+    copies: list[tuple[Path, Path]] = []
+    for source in sorted(download_root.rglob("*")):
+        rel = source.relative_to(download_root)
+        rel_posix = PurePosixPath(rel.as_posix())
+        if rel_posix.parts[0] in preserved:
+            raise FabricArtifactStagingError(
+                f"Ethos fileset path {rel_posix.as_posix()!r} targets preserved runtime directory "
+                f"{rel_posix.parts[0]!r}"
+            )
+        if source.is_symlink():
+            raise FabricArtifactStagingError(
+                f"Staged Ethos path {rel_posix.as_posix()!r} escapes the agent base directory {base_dir}"
+            )
+        if not source.is_file():
+            continue
+
+        destination = base_dir / rel
+        if not destination.resolve(strict=False).is_relative_to(resolved_base):
+            raise FabricArtifactStagingError(
+                f"Staged Ethos path {rel_posix.as_posix()!r} escapes the agent base directory {base_dir}"
+            )
+        copies.append((source, destination))
+
+    for source, destination in copies:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
 
 
 async def stage_fabric_ethos_dir(
@@ -50,7 +109,7 @@ async def stage_fabric_ethos_dir(
     agent_name: str,
     agent_config: dict[str, Any],
     base_dir: Path,
-    sdk: _FilesDownloader | None,
+    files_client: AsyncFilesClient | None = None,
 ) -> None:
     """Download the Ethos fileset into *base_dir* for subprocess deployments.
 
@@ -76,11 +135,19 @@ async def stage_fabric_ethos_dir(
     preserved = _runtime_dir_names(agent_config)
     await asyncio.to_thread(_clear_staged_tree, base_dir, preserved)
 
-    if agent_name and sdk is not None:
+    if agent_name and files_client is not None:
         fileset_name = ethos_fileset_name(agent_name)
         try:
-            await sdk.download(local_path=str(base_dir), fileset=fileset_name, workspace=workspace)
-        except (FileNotFoundError, PlatformNotFoundError, PluginClientNotFoundError) as exc:
+            with tempfile.TemporaryDirectory(prefix=f".fabric-ethos-{agent_name}-") as tmp:
+                tmp_path = Path(tmp)
+                await _download_fileset(
+                    files_client,
+                    workspace=workspace,
+                    fileset_name=fileset_name,
+                    local_path=tmp_path,
+                )
+                await asyncio.to_thread(_copy_downloaded_tree, tmp_path, base_dir, preserved)
+        except FabricEthosFilesetNotFound as exc:
             logger.info(
                 "Ethos fileset %s/%s unavailable (%s); using inline agent.yaml only",
                 workspace,
@@ -180,7 +247,7 @@ async def stage_fabric_ethos_config_files(
     agent_name: str,
     rewritten_agent_config: dict[str, Any],
     agent_yaml_path: str,
-    sdk: _FilesDownloader,
+    files_client: AsyncFilesClient | None = None,
 ) -> list[ConfigFile]:
     """Download the Ethos fileset and return container ``config_files`` entries.
 
@@ -192,12 +259,14 @@ async def stage_fabric_ethos_config_files(
     config_yaml = yaml.safe_dump(rewritten_agent_config, sort_keys=False)
     if not agent_name:
         return [ConfigFile(path=agent_yaml_path, content=config_yaml)]
+    if files_client is None:
+        raise FabricArtifactStagingError("Fabric Ethos staging requires an AsyncFilesClient.")
 
     fileset_name = ethos_fileset_name(agent_name)
     try:
         with tempfile.TemporaryDirectory(prefix=f".fabric-ethos-{agent_name}-") as tmp:
             tmp_path = Path(tmp)
-            await sdk.download(local_path=str(tmp_path), fileset=fileset_name, workspace=workspace)
+            await _download_fileset(files_client, workspace=workspace, fileset_name=fileset_name, local_path=tmp_path)
             config_files = _collect_staged_config_files(
                 root=tmp_path,
                 agent_yaml_path=agent_yaml_path,
@@ -209,7 +278,7 @@ async def stage_fabric_ethos_config_files(
             validate_referenced_skill_paths(rewritten_agent_config, delivered)
             _validate_staged_size(config_files, fileset_name)
             return config_files
-    except (FileNotFoundError, PlatformNotFoundError, PluginClientNotFoundError) as exc:
+    except FabricEthosFilesetNotFound as exc:
         logger.info(
             "Ethos fileset %s/%s unavailable (%s); using inline agent.yaml only",
             workspace,

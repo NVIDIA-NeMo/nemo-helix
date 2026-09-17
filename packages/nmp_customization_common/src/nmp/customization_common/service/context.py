@@ -14,19 +14,19 @@ from typing import Self
 
 from nmp.common.entities.constants import DEFAULT_WORKSPACE
 from nmp.common.jobs.constants import (
-    DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
-    NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR,
     NEMO_JOB_STEP_ENVVAR,
     NEMO_JOB_TASK_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
-    PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
 from nmp.customization_common.service.constants import (
-    DEFAULT_JOB_STORAGE_PATH,
     NMP_FILES_URL_ENVVAR,
     NMP_JOBS_URL_ENVVAR,
+)
+from nmp.customization_common.service.path_utils import (
+    get_job_step_config_path_from_env,
+    get_job_storage_path_from_env,
 )
 
 DEFAULT_JOB_ID = "unknown-job-id"
@@ -97,8 +97,6 @@ class NMPJobContext:
             task=os.environ.get(NEMO_JOB_TASK_ENVVAR, DEFAULT_TASK),
             jobs_url=os.environ.get(NMP_JOBS_URL_ENVVAR),
             files_url=os.environ.get(NMP_FILES_URL_ENVVAR),
-            storage_path=Path(os.environ.get(PERSISTENT_JOB_STORAGE_PATH_ENVVAR, DEFAULT_JOB_STORAGE_PATH)),
-            config_path=Path(
-                os.environ.get(NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR, DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH)
-            ),
+            storage_path=get_job_storage_path_from_env(),
+            config_path=get_job_step_config_path_from_env(),
         )

@@ -25,11 +25,12 @@ from nemo_evaluator.jobs.metric_resolution import to_runtime_bundle, unresolved_
 from nemo_evaluator.jobs.publication_spec import PublicationSpec
 from nemo_evaluator.metric_refs import MetricRefOrInline
 from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
+from nemo_evaluator_sdk.agent_eval.runtimes.provenance import require_no_plaintext_credentials
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
 from nemo_evaluator_sdk.values import Agent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
 from nemo_evaluator_sdk.values.agents import AgentBase
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 
 class ModelTarget(BaseModel):
@@ -122,6 +123,19 @@ class HarborRunnerTarget(BaseModel):
         "The module must already be importable in the run environment.",
     )
     agent_model_name: str | None = Field(default=None, description="Optional model slug passed to the Harbor agent.")
+    agent_kwargs: dict[str, JsonValue] = Field(
+        default_factory=dict,
+        description="Keyword arguments forwarded to the Harbor agent's constructor, the equivalent of Harbor's "
+        "`--ak key=value`. Not for secrets: Harbor persists these unredacted across the job dir. "
+        "Credential-shaped plaintext is rejected, but that check is a heuristic — use `env_secrets` regardless.",
+    )
+    env_secrets: dict[str, SecretRef] = Field(
+        default_factory=dict,
+        description="Environment variables for the Harbor agent, sourced from the secrets service, as "
+        "{ENV_NAME: secret-ref}. The reference travels in the spec; the service resolves it into the job's "
+        "environment at compile time, and Harbor receives a `${ENV_NAME}` template it expands when the agent "
+        "is created, so no credential is stored on the spec, the run bundle, or the job dir's `config.json`.",
+    )
     n_attempts: int = Field(default=1, ge=1, description="Number of attempts Harbor runs per task.")
     n_concurrent_trials: int = Field(default=4, ge=1, description="Maximum concurrent Harbor trials.")
     max_retries: int = Field(default=0, ge=0, description="Harbor per-trial retry attempts on transient failures.")
@@ -134,13 +148,19 @@ class HarborRunnerTarget(BaseModel):
         default="reward", description="Key read from Harbor's per-trial rewards mapping to score against."
     )
 
+    @model_validator(mode="after")
+    def _agent_kwargs_carry_no_credentials(self) -> Self:
+        require_no_plaintext_credentials(self.agent_kwargs, field="agent_kwargs", alternative="env_secrets")
+        return self
+
 
 class GymRunnerTarget(BaseModel):
     """Generate trials by driving a NeMo Gym environment through the SDK's :class:`GymAgentTaskRunner`.
 
-    Gym runs locally in the job container (the ``gym`` CLI must be installed in the same environment
-    as this SDK). The environment dataset is recovered from the tasks at run time — the runner stamps
-    ``gym_dataset_path`` onto each task via ``discover_gym_tasks``, mirroring the Harbor pattern.
+    The deployment chooses colocated execution in the Gym task container or a separate sandboxed
+    Gym host. An environment FileSet requires the sandboxed path. The environment dataset is
+    recovered from the tasks at run time — ``discover_gym_tasks`` records the source row data needed
+    to materialize the selected tasks for rollout collection.
     """
 
     model_config = ConfigDict(extra="forbid")

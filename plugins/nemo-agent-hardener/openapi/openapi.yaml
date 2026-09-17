@@ -1,0 +1,3151 @@
+openapi: 3.1.0
+info:
+  title: agent-hardener (plugin)
+  version: 0.0.0
+paths:
+  /apis/agent-hardener/v1/healthz:
+    get:
+      tags:
+      - Agent Hardener Plugin
+      summary: Healthz
+      operationId: healthz_apis_agent_hardener_v1_healthz_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Healthz Apis Agent Hardener V1 Healthz Get
+  /apis/agent-hardener/v2/workspaces/{workspace}/jobs:
+    post:
+      tags:
+      - Agent Hardener Jobs
+      summary: Create Job
+      operationId: create_job_apis_agent_hardener_v2_workspaces__workspace__jobs_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WarGameJobRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarGameJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Agent Hardener Jobs
+      summary: List Jobs
+      operationId: list_jobs_apis_agent_hardener_v2_workspaces__workspace__jobs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/WarGameJobsSortField'
+          description: The field to sort by. To sort in decreasing order, use `-`
+            in front of the field name.
+          default: -created_at
+        description: The field to sort by. To sort in decreasing order, use `-` in
+          front of the field name.
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/WarGameJobsListFilter'
+        description: Filter jobs on various criteria.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarGameJobsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/jobs/{job}/results/{name}:
+    get:
+      tags:
+      - Agent Hardener Jobs
+      summary: Get Job Result
+      operationId: get_job_result_apis_agent_hardener_v2_workspaces__workspace__jobs__job__results__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformJobResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/jobs/{job}/results/{name}/download:
+    get:
+      tags:
+      - Agent Hardener Jobs
+      summary: Download Job Result
+      operationId: download_job_result_apis_agent_hardener_v2_workspaces__workspace__jobs__job__results__name__download_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/jobs/{name}:
+    get:
+      tags:
+      - Agent Hardener Jobs
+      summary: Get Job
+      operationId: get_job_apis_agent_hardener_v2_workspaces__workspace__jobs__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarGameJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Agent Hardener Jobs
+      summary: Delete Job
+      operationId: delete_job_apis_agent_hardener_v2_workspaces__workspace__jobs__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '404':
+          description: Job not Found
+        '409':
+          description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/jobs/{name}/cancel:
+    post:
+      tags:
+      - Agent Hardener Jobs
+      summary: Cancel Job
+      operationId: cancel_job_apis_agent_hardener_v2_workspaces__workspace__jobs__name__cancel_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarGameJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/jobs/{name}/logs:
+    get:
+      tags:
+      - Agent Hardener Jobs
+      summary: Get Job Logs
+      operationId: get_job_logs_apis_agent_hardener_v2_workspaces__workspace__jobs__name__logs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: limit
+        in: query
+        required: false
+        schema:
+          title: Limit
+          type: integer
+      - name: page_cursor
+        in: query
+        required: false
+        schema:
+          title: Page Cursor
+          type: string
+      - name: tail
+        in: query
+        required: false
+        schema:
+          title: Tail
+          type: integer
+          maximum: 10000
+          exclusiveMinimum: 0
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformJobLogPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/jobs/{name}/results:
+    get:
+      tags:
+      - Agent Hardener Jobs
+      summary: List Job Results
+      operationId: list_job_results_apis_agent_hardener_v2_workspaces__workspace__jobs__name__results_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformJobListResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/jobs/{name}/status:
+    get:
+      tags:
+      - Agent Hardener Jobs
+      summary: Get Job Status
+      operationId: get_job_status_apis_agent_hardener_v2_workspaces__workspace__jobs__name__status_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformJobStatusResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/manifests:
+    get:
+      tags:
+      - Agent Hardener Manifests
+      summary: List Manifests
+      description: List saved manifests in the workspace, with pagination and an ``agent``
+        filter.
+      operationId: list_manifests_apis_agent_hardener_v2_workspaces__workspace__manifests_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 20
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+          default: -created_at
+          title: Sort
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/ManifestFilter'
+        description: 'Filter results on various criteria. Supports bracket notation
+          (?filter[field][$op]=value), JSON ({"field":{"$op":"value"}}), and text
+          syntax (field:"value"). Operators: $eq (exact match), $like (substring),
+          $lt, $lte, $gt, $gte (comparison), $in, $nin (set membership), $and, $or,
+          $not (logical). Default operator is $eq.'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response List Manifests Apis Agent Hardener V2 Workspaces  Workspace  Manifests
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - Agent Hardener Manifests
+      summary: Create Manifest
+      description: '`init`: resolve the named source into a manifest and persist it
+        by ``name``.'
+      operationId: create_manifest_apis_agent_hardener_v2_workspaces__workspace__manifests_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManifestInit'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentHardenerManifest'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/manifests/inspect-agent:
+    post:
+      tags:
+      - Agent Hardener Manifests
+      summary: Inspect Agent Endpoint
+      description: 'Derive the deployed-agent create-form defaults (victim port +
+        secret names) for pre-fill.
+
+
+        Read-only: fetches the stored agent config and its running deployment; nothing
+        is materialized.'
+      operationId: inspect_agent_endpoint_apis_agent_hardener_v2_workspaces__workspace__manifests_inspect_agent_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InspectAgentRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InspectAgentResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/manifests/inspect-project:
+    post:
+      tags:
+      - Agent Hardener Manifests
+      summary: Inspect Project Endpoint
+      description: 'Read an uploaded project bundle and report what it states about
+        itself, and what it cannot.
+
+
+        Read-only: the bundle is expanded into a temp dir and thrown away. Its purpose
+        is to let the caller
+
+        pre-fill everything derivable and prompt for only the rest, so bringing your
+        own image is a short
+
+        form rather than authoring a manifest.'
+      operationId: inspect_project_endpoint_apis_agent_hardener_v2_workspaces__workspace__manifests_inspect_project_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InspectProjectRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InspectProjectResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/manifests/{name}:
+    get:
+      tags:
+      - Agent Hardener Manifests
+      summary: Get Manifest
+      description: Get a single manifest by name.
+      operationId: get_manifest_apis_agent_hardener_v2_workspaces__workspace__manifests__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentHardenerManifest'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Agent Hardener Manifests
+      summary: Update Manifest
+      description: "Edit a manifest's cached benign suite, victim port, egress, or\
+        \ war-game settings.\n\nThe agent source itself is immutable \u2014 re-create\
+        \ the manifest to point at a different agent, or\n`POST /manifests/{name}/refresh`\
+        \ to re-resolve the one it already targets."
+      operationId: update_manifest_apis_agent_hardener_v2_workspaces__workspace__manifests__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManifestUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentHardenerManifest'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Agent Hardener Manifests
+      summary: Delete Manifest
+      description: Delete a saved manifest by name, along with the victim bundle the
+        service created for it.
+      operationId: delete_manifest_apis_agent_hardener_v2_workspaces__workspace__manifests__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/manifests/{name}/refresh:
+    post:
+      tags:
+      - Agent Hardener Manifests
+      summary: Refresh Manifest
+      description: "Re-resolve an agent-source manifest against the agent as it is\
+        \ *now*.\n\nA manifest is a frozen target, so edits to the agent \u2014 a\
+        \ new model, an added tool, a redeploy \u2014\ndo not reach it on their own.\
+        \ This is how you take them, deliberately, when you want the next\nrun to\
+        \ measure the current agent rather than the one you saved.\n\nEverything the\
+        \ operator chose is kept: egress, secrets, models, defenders, intensity, rounds,\
+        \ and\nthe cached benign suite. Only the scaffold and its rendered manifest\
+        \ are rebuilt."
+      operationId: refresh_manifest_apis_agent_hardener_v2_workspaces__workspace__manifests__name__refresh_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentHardenerManifest'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/model-config-defaults:
+    get:
+      tags:
+      - Agent Hardener Manifests
+      summary: Get Model Config Defaults
+      description: The built-in per-group model defaults (attack/analysis) the create/run
+        forms pre-fill.
+      operationId: get_model_config_defaults_apis_agent_hardener_v2_workspaces__workspace__model_config_defaults_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelConfigDefaults'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/model-config/validate:
+    post:
+      tags:
+      - Agent Hardener Manifests
+      summary: Validate Model Config
+      description: "Probe a model choice's endpoint/key (the \"Test connection\" affordance)\
+        \ and list reachable models.\n\nResolves the chosen Secret to its value (if\
+        \ any) and lists ``{base_url}/models``. Never leaks the key \u2014\nonly the\
+        \ boolean verdict + the reachable model ids come back, so the UI can offer\
+        \ real options."
+      operationId: validate_model_config_apis_agent_hardener_v2_workspaces__workspace__model_config_validate_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidateModelRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidateModelResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/runs:
+    get:
+      tags:
+      - Agent Hardener Runs
+      summary: List Runs
+      description: List war-game runs in the workspace, with pagination and an ``agent``/``status``
+        filter.
+      operationId: list_runs_apis_agent_hardener_v2_workspaces__workspace__runs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 20
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+          default: -created_at
+          title: Sort
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/RunFilter'
+        description: 'Filter results on various criteria. Supports bracket notation
+          (?filter[field][$op]=value), JSON ({"field":{"$op":"value"}}), and text
+          syntax (field:"value"). Operators: $eq (exact match), $like (substring),
+          $lt, $lte, $gt, $gte (comparison), $in, $nin (set membership), $and, $or,
+          $not (logical). Default operator is $eq.'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response List Runs Apis Agent Hardener V2 Workspaces  Workspace  Runs
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/runs/{name}:
+    get:
+      tags:
+      - Agent Hardener Runs
+      summary: Get Run
+      description: Get a single war-game run by name.
+      operationId: get_run_apis_agent_hardener_v2_workspaces__workspace__runs__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentHardenerRun'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Agent Hardener Runs
+      summary: Delete Run
+      description: Delete a war-game run record. The underlying platform job is cancelled/deleted
+        separately.
+      operationId: delete_run_apis_agent_hardener_v2_workspaces__workspace__runs__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/runs/{name}/apply-mitigation:
+    post:
+      tags:
+      - Agent Hardener Runs
+      summary: Apply Mitigation
+      description: 'Adopt a run''s hardened guardrails onto the run''s target agent
+        config (no redeploy).
+
+
+        This is the *only* place ``relay.components[]`` is produced. The guardrail
+        runs from a plugins.toml
+
+        inside the victim; the agent registry stores agent config, so adoption re-homes
+        the same component
+
+        onto the entity. Near-identity, not a translation: the ``config`` object is
+        the one Relay loaded.
+
+
+        Reverses the Inference-Gateway injection so the stored config stays deployment-neutral.
+        The user
+
+        must redeploy the agent for the guardrails to take effect.'
+      operationId: apply_mitigation_apis_agent_hardener_v2_workspaces__workspace__runs__name__apply_mitigation_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplyMitigationRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyMitigationResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/runs/{name}/compose-defense:
+    post:
+      tags:
+      - Agent Hardener Runs
+      summary: Compose Defense Route
+      description: 'Compose a chosen subset of a run''s recommended defenses into
+        deployable workflow + policy YAML.
+
+
+        Keeps only the selected guardrails in the workflow and picks the hardened-vs-baseline
+        policy. Powers
+
+        the harden flow''s live preview and feeds the composed YAMLs to a sanity-check
+        (validate-only) run.'
+      operationId: compose_defense_route_apis_agent_hardener_v2_workspaces__workspace__runs__name__compose_defense_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComposeDefenseRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComposeDefenseResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/runs/{name}/events:
+    post:
+      tags:
+      - Agent Hardener Events
+      summary: Ingest Event
+      description: Ingest one run event (the run's EventBus POSTs here).
+      operationId: ingest_event_apis_agent_hardener_v2_workspaces__workspace__runs__name__events_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventIn'
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Agent Hardener Events
+      summary: Get Events
+      description: 'Return all persisted run events with sequence id greater than
+        *after*.
+
+
+        Falls back to downloading from the run''s ``events_fileset`` when the local
+
+        file is absent (e.g. after a pod restart).'
+      operationId: get_events_apis_agent_hardener_v2_workspaces__workspace__runs__name__events_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: after
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          title: After
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventsResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/synth-benign/jobs:
+    post:
+      tags:
+      - Agent Hardener Synth Jobs
+      summary: Create Job
+      operationId: create_job_apis_agent_hardener_v2_workspaces__workspace__synth_benign_jobs_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SynthBenignJobRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SynthBenignJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Agent Hardener Synth Jobs
+      summary: List Jobs
+      operationId: list_jobs_apis_agent_hardener_v2_workspaces__workspace__synth_benign_jobs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          exclusiveMinimum: 0
+          description: Page size.
+          default: 10
+          title: Page Size
+        description: Page size.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/SynthBenignJobsSortField'
+          description: The field to sort by. To sort in decreasing order, use `-`
+            in front of the field name.
+          default: -created_at
+        description: The field to sort by. To sort in decreasing order, use `-` in
+          front of the field name.
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/SynthBenignJobsListFilter'
+        description: Filter jobs on various criteria.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SynthBenignJobsPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/synth-benign/jobs/{job}/results/{name}:
+    get:
+      tags:
+      - Agent Hardener Synth Jobs
+      summary: Get Job Result
+      operationId: get_job_result_apis_agent_hardener_v2_workspaces__workspace__synth_benign_jobs__job__results__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformJobResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/synth-benign/jobs/{job}/results/{name}/download:
+    get:
+      tags:
+      - Agent Hardener Synth Jobs
+      summary: Download Job Result
+      operationId: download_job_result_apis_agent_hardener_v2_workspaces__workspace__synth_benign_jobs__job__results__name__download_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Not Found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/synth-benign/jobs/{name}:
+    get:
+      tags:
+      - Agent Hardener Synth Jobs
+      summary: Get Job
+      operationId: get_job_apis_agent_hardener_v2_workspaces__workspace__synth_benign_jobs__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SynthBenignJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Agent Hardener Synth Jobs
+      summary: Delete Job
+      operationId: delete_job_apis_agent_hardener_v2_workspaces__workspace__synth_benign_jobs__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '404':
+          description: Job not Found
+        '409':
+          description: Job is not in a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/synth-benign/jobs/{name}/cancel:
+    post:
+      tags:
+      - Agent Hardener Synth Jobs
+      summary: Cancel Job
+      operationId: cancel_job_apis_agent_hardener_v2_workspaces__workspace__synth_benign_jobs__name__cancel_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SynthBenignJob'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/synth-benign/jobs/{name}/logs:
+    get:
+      tags:
+      - Agent Hardener Synth Jobs
+      summary: Get Job Logs
+      operationId: get_job_logs_apis_agent_hardener_v2_workspaces__workspace__synth_benign_jobs__name__logs_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: limit
+        in: query
+        required: false
+        schema:
+          title: Limit
+          type: integer
+      - name: page_cursor
+        in: query
+        required: false
+        schema:
+          title: Page Cursor
+          type: string
+      - name: tail
+        in: query
+        required: false
+        schema:
+          title: Tail
+          type: integer
+          maximum: 10000
+          exclusiveMinimum: 0
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformJobLogPage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/synth-benign/jobs/{name}/results:
+    get:
+      tags:
+      - Agent Hardener Synth Jobs
+      summary: List Job Results
+      operationId: list_job_results_apis_agent_hardener_v2_workspaces__workspace__synth_benign_jobs__name__results_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformJobListResultResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/synth-benign/jobs/{name}/status:
+    get:
+      tags:
+      - Agent Hardener Synth Jobs
+      summary: Get Job Status
+      operationId: get_job_status_apis_agent_hardener_v2_workspaces__workspace__synth_benign_jobs__name__status_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformJobStatusResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    AgentHardenerManifest:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        source_type:
+          type: string
+          enum:
+          - agent
+          - project
+          title: Source Type
+          description: Where the victim came from. The run reads this to decide which
+            bundle field to expand.
+          default: agent
+        agent:
+          type: string
+          title: Agent
+          description: Registered agent reference (workspace/name) this manifest targets.
+          default: ''
+        project_fileset:
+          type: string
+          title: Project Fileset
+          description: Fileset ref holding the uploaded project bundle, for a 'project'
+            manifest. The run expands this instead of ``agent_fileset``.
+          default: ''
+        agent_fileset:
+          type: string
+          title: Agent Fileset
+          description: "Fileset ref holding the agent package resolved from the agent\
+            \ \u2014 its config plus the Dockerfile that serves it. Empty on manifests\
+            \ created before targets were frozen; those re-resolve once, then store\
+            \ a ref."
+          default: ''
+        dockerfile:
+          type: string
+          title: Dockerfile
+          description: Path within the package to the Dockerfile the victim image
+            is built from, so a manifest records which image it ran rather than only
+            that it had one.
+          default: ''
+        binaries:
+          items:
+            type: string
+          type: array
+          title: Binaries
+          description: In-container glob patterns scoping which processes may egress;
+            agent-hardener requires them because the layout of an image it did not
+            write cannot be inferred.
+        manifest_yaml:
+          type: string
+          title: Manifest Yaml
+          description: The resolved agent-hardener.yaml content (for display).
+          default: ''
+        port:
+          type: integer
+          title: Port
+          description: Victim port the war-game will target.
+          default: 0
+        secrets:
+          items:
+            type: string
+          type: array
+          title: Secrets
+          description: Secret names the victim agent requires.
+        egress:
+          items:
+            type: string
+          type: array
+          title: Egress
+          description: Allow-listed egress host[:port] entries the victim may reach.
+            Config-only agents keep tool hosts in packaged code, so egress discovery
+            can't find them; without these the victim's outbound calls are dropped.
+        env:
+          additionalProperties:
+            type: string
+          type: object
+          title: Env
+          description: "Non-secret environment variables for the victim (agent-hardener's\
+            \ agent.env) \u2014 a host-backend URL, a feature flag. Stored in plaintext\
+            \ on this entity, so never put credentials here: those belong in `secrets`,\
+            \ which names them and resolves the values from the platform Secrets store\
+            \ at run time."
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+          description: Non-fatal notes from scaffolding.
+        benign_suite:
+          items:
+            additionalProperties:
+              type: string
+            type: object
+          type: array
+          title: Benign Suite
+          description: Cached, reviewed benign test suite (tool,payload,label,rationale,persona
+            rows); generated on the first run and reused/edited thereafter. Empty
+            until generated.
+        benign_interview:
+          items:
+            additionalProperties:
+              type: string
+            type: object
+          type: array
+          title: Benign Interview
+          description: Interview Q&A (gap,question,answer rows) captured during the
+            last benign-suite generation, kept for display. Empty until generated.
+        defenders:
+          items:
+            type: string
+          type: array
+          title: Defenders
+          description: Enabled defender keys ('guardrails','openshell'); empty means
+            agent-hardener's defaults (all applicable). Materialized into the manifest's
+            overrides.defenders at run time.
+        attack_intensity:
+          type: string
+          enum:
+          - light
+          - standard
+          - thorough
+          title: Attack Intensity
+          description: Attacker (garak) effort preset, materialized into the manifest's
+            garak block at run time.
+          default: standard
+        rounds:
+          type: integer
+          minimum: 1.0
+          title: Rounds
+          description: Number of iterative attack/defend/validate hardening rounds;
+            passed to agent-hardener's `run --rounds` at run time.
+          default: 1
+        models:
+          allOf:
+          - $ref: '#/components/schemas/WarGameModels'
+          description: Stored default model selection (attack/analysis/agent groups);
+            an unset group uses agent-hardener's built-in default. A run may override
+            these per-launch.
+        id:
+          type: string
+          title: Id
+          readOnly: true
+        created_at:
+          title: Created At
+          readOnly: true
+          type: string
+          format: date-time
+        created_by:
+          title: Created By
+          readOnly: true
+          nullable: true
+          type: string
+        updated_at:
+          title: Updated At
+          readOnly: true
+          type: string
+          format: date-time
+        updated_by:
+          title: Updated By
+          readOnly: true
+          nullable: true
+          type: string
+        entity_id:
+          type: string
+          title: Entity Id
+          description: Alias for id for backwards compatibility.
+          readOnly: true
+        parent:
+          title: Parent
+          description: Parent entity ID for nested entities.
+          readOnly: true
+          type: string
+        db_version:
+          type: integer
+          title: Db Version
+          description: Database version of the entity for optimistic locking.
+          readOnly: true
+      type: object
+      required:
+      - workspace
+      - id
+      - created_at
+      - created_by
+      - updated_at
+      - updated_by
+      - entity_id
+      - parent
+      - db_version
+      title: AgentHardenerManifest
+      description: "A named, reusable war-game target (``name`` is its id), from a\
+        \ registered agent or an uploaded project.\n\nEither way the package is persisted\
+        \ as a fileset the run re-downloads, so a manifest is a frozen\ntarget rather\
+        \ than a query re-evaluated each run: editing the agent does not change an\
+        \ existing\nmanifest until it is refreshed. A project manifest has nothing\
+        \ to refresh *from* \u2014 its bundle is the\nupload \u2014 which is why the\
+        \ two sources are distinguished rather than merged."
+    AgentHardenerRun:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        agent:
+          type: string
+          title: Agent
+          description: Targeted agent reference (workspace/name).
+          default: ''
+        job_id:
+          type: string
+          title: Job Id
+          description: Platform job that drove this run (for live status/HITL).
+          default: ''
+        port:
+          type: integer
+          title: Port
+          description: Victim port the war-game attacked.
+          default: 0
+        manifest:
+          type: string
+          title: Manifest
+          description: Path to the agent-hardener.yaml manifest used.
+          default: ''
+        manifest_id:
+          type: string
+          title: Manifest Id
+          description: Manifest this run belongs to (scopes 'replay last run').
+          default: ''
+        status:
+          type: string
+          enum:
+          - running
+          - completed
+          - failed
+          title: Status
+          description: Final run status.
+          default: failed
+        returncode:
+          type: integer
+          title: Returncode
+          description: Exit code from `agent-hardener run`.
+          default: -1
+        summary:
+          type: string
+          title: Summary
+          description: Short human-readable outcome summary.
+          default: ''
+        error_category:
+          type: string
+          title: Error Category
+          description: Classified failure category when status is 'failed' (e.g. sandbox,
+            missing_credential, manifest, network); empty for a successful run.
+          default: ''
+        error_message:
+          type: string
+          title: Error Message
+          description: Operator-facing failure message when the run failed.
+          default: ''
+        error_remediation:
+          type: string
+          title: Error Remediation
+          description: Suggested next step to resolve the failure; empty for a successful
+            run.
+          default: ''
+        hitlog_fileset:
+          type: string
+          title: Hitlog Fileset
+          description: Fileset ref of the garak hitlog this run produced, if any;
+            replay a later run from it.
+          default: ''
+        events_fileset:
+          type: string
+          title: Events Fileset
+          description: Fileset ref of the run's events.jsonl, uploaded at completion
+            for durable history.
+          default: ''
+        source_run:
+          type: string
+          title: Source Run
+          description: For a validate-only sanity-check run, the name of the harden
+            run it was launched from; lets the Harden tab re-attach the scorecard
+            on reload. Empty for normal war-game runs.
+          default: ''
+        id:
+          type: string
+          title: Id
+          readOnly: true
+        created_at:
+          title: Created At
+          readOnly: true
+          type: string
+          format: date-time
+        created_by:
+          title: Created By
+          readOnly: true
+          nullable: true
+          type: string
+        updated_at:
+          title: Updated At
+          readOnly: true
+          type: string
+          format: date-time
+        updated_by:
+          title: Updated By
+          readOnly: true
+          nullable: true
+          type: string
+        entity_id:
+          type: string
+          title: Entity Id
+          description: Alias for id for backwards compatibility.
+          readOnly: true
+        parent:
+          title: Parent
+          description: Parent entity ID for nested entities.
+          readOnly: true
+          type: string
+        db_version:
+          type: integer
+          title: Db Version
+          description: Database version of the entity for optimistic locking.
+          readOnly: true
+      type: object
+      required:
+      - workspace
+      - id
+      - created_at
+      - created_by
+      - updated_at
+      - updated_by
+      - entity_id
+      - parent
+      - db_version
+      title: AgentHardenerRun
+      description: A record of one Agent Hardener war-game run.
+    ApplyMitigationRequest:
+      properties:
+        guardrails_toml:
+          type: string
+          title: Guardrails Toml
+          description: Hardened Relay guardrail set (the mitigations 'after' document).
+      type: object
+      required:
+      - guardrails_toml
+      title: ApplyMitigationRequest
+      description: "Body for ``POST /v2/workspaces/{workspace}/runs/{name}/apply-mitigation``\
+        \ \u2014 adopt the hardened workflow.\n\nThe client passes the hardened workflow\
+        \ YAML from the run's mitigations artifact. The endpoint reverses\nthe Inference-Gateway\
+        \ injection and writes it onto the run's target agent config (no redeploy)."
+    ApplyMitigationResponse:
+      properties:
+        applied:
+          type: boolean
+          title: Applied
+          description: True when the agent config was updated.
+        agent:
+          type: string
+          title: Agent
+          description: Name of the agent whose config was updated.
+        detail:
+          type: string
+          title: Detail
+          description: Human-readable note (e.g. a reminder to redeploy).
+      type: object
+      required:
+      - applied
+      - agent
+      - detail
+      title: ApplyMitigationResponse
+      description: Result of applying a hardened workflow to an agent.
+    ComposeDefenseRequest:
+      properties:
+        mitigations:
+          additionalProperties: true
+          type: object
+          title: Mitigations
+          description: The run's mitigations artifact (its 'defenses'/workflow/policy).
+        selected_defense_ids:
+          items:
+            type: string
+          type: array
+          title: Selected Defense Ids
+          description: Ids of the defenses to keep (guardrail ids and/or 'openshell_policy').
+      type: object
+      required:
+      - mitigations
+      title: ComposeDefenseRequest
+      description: "Body for ``POST /v2/workspaces/{workspace}/runs/{name}/compose-defense``\
+        \ \u2014 build a chosen defense subset.\n\nThe client passes the run's ``mitigations``\
+        \ artifact (which it already fetched for the recommendations\nview) plus the\
+        \ ids of the defenses to keep. The endpoint composes the workflow with only\
+        \ the selected\nguardrails and picks the hardened-vs-baseline policy, for\
+        \ live preview and to feed a sanity-check run."
+    ComposeDefenseResponse:
+      properties:
+        guardrails_toml:
+          title: Guardrails Toml
+          description: Plugin config with only the selected guardrails, or null.
+          type: string
+        policy_yaml:
+          title: Policy Yaml
+          description: Hardened policy if selected, else the baseline, or null.
+          type: string
+      type: object
+      title: ComposeDefenseResponse
+      description: The composed workflow + policy for the selected defenses.
+    DatetimeFilter:
+      additionalProperties: false
+      properties:
+        $gte:
+          description: Filter for results greater than or equal to this datetime.
+          title: $Gte
+          format: date-time
+          type: string
+        $lte:
+          description: Filter for results less than or equal to this datetime.
+          title: $Lte
+          format: date-time
+          type: string
+      title: DatetimeFilter
+      type: object
+    EventIn:
+      properties:
+        event:
+          type: string
+          title: Event
+        payload:
+          additionalProperties: true
+          type: object
+          title: Payload
+          default: {}
+      type: object
+      required:
+      - event
+      title: EventIn
+      description: "Body for ``POST /runs/{name}/events`` \u2014 one event emitted\
+        \ by the run's EventBus."
+    EventsResponse:
+      properties:
+        events:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Events
+      type: object
+      required:
+      - events
+      title: EventsResponse
+      description: "Response for GET /runs/{name}/events \u2014 events after the given\
+        \ sequence id."
+    FileStorageType:
+      type: string
+      enum:
+      - fileset
+      title: FileStorageType
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    InspectAgentRequest:
+      properties:
+        agent:
+          type: string
+          title: Agent
+          description: Deployed agent reference (``workspace/name`` or ``name``).
+      type: object
+      required:
+      - agent
+      title: InspectAgentRequest
+      description: "Body for ``POST /v2/workspaces/{workspace}/manifests/inspect-agent``\
+        \ \u2014 a deployed agent ref."
+    InspectAgentResponse:
+      properties:
+        agent:
+          type: string
+          title: Agent
+          description: Resolved ``workspace/name`` of the agent.
+        port:
+          type: integer
+          title: Port
+          description: Victim port derived from the running deployment (else the default).
+        secrets:
+          items:
+            type: string
+          type: array
+          title: Secrets
+          description: Secret names derived from the agent config.
+        egress:
+          items:
+            type: string
+          type: array
+          title: Egress
+          description: Hosts the agent's own config names (model endpoints, network
+            MCP servers). Shown so the form does not read as 'no egress' for an agent
+            that has some.
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+          description: Non-fatal notes (e.g. no running deployment).
+      type: object
+      required:
+      - agent
+      - port
+      title: InspectAgentResponse
+      description: Auto-derived defaults for the deployed-agent create form (port
+        + secret names, editable).
+    InspectProjectRequest:
+      properties:
+        project_fileset:
+          type: string
+          title: Project Fileset
+          description: Fileset ref of the uploaded project bundle to inspect.
+        dockerfile:
+          title: Dockerfile
+          description: Which Dockerfile builds the agent, when the bundle holds more
+            than one.
+          type: string
+      type: object
+      required:
+      - project_fileset
+      title: InspectProjectRequest
+      description: "Body for ``POST /v2/workspaces/{workspace}/manifests/inspect-project``\
+        \ \u2014 read an uploaded project."
+    InspectProjectResponse:
+      properties:
+        dockerfile:
+          type: string
+          title: Dockerfile
+          description: Dockerfile path relative to the project root.
+          default: ''
+        dockerfiles:
+          items:
+            type: string
+          type: array
+          title: Dockerfiles
+          description: Every Dockerfile found, when the choice is ambiguous.
+        start_command:
+          type: string
+          title: Start Command
+          description: Derived from the Dockerfile's ENTRYPOINT/CMD.
+          default: ''
+        binaries:
+          items:
+            type: string
+          type: array
+          title: Binaries
+          description: Proposed interpreter globs, for confirmation.
+        port:
+          type: integer
+          title: Port
+          description: Derived from EXPOSE / ENV PORT.
+          default: 8000
+        secrets:
+          items:
+            type: string
+          type: array
+          title: Secrets
+          description: Secret names derived from .env and ENV.
+        egress:
+          items:
+            type: string
+          type: array
+          title: Egress
+          description: Hosts the project's own files name.
+        env:
+          additionalProperties:
+            type: string
+          type: object
+          title: Env
+          description: Non-secret environment from the Dockerfile.
+        unresolved:
+          items:
+            type: string
+          type: array
+          title: Unresolved
+          description: Fields the project cannot state about itself; the caller must
+            supply these.
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+          description: Non-fatal notes about the derivation.
+      type: object
+      title: InspectProjectResponse
+      description: 'What the project states about itself, plus what it cannot.
+
+
+        ``unresolved`` is the contract with the caller: everything else on this model
+        is a usable value, and
+
+        these are the only fields a human still has to supply. It is the difference
+        between a form that asks
+
+        for everything and one that asks for what is genuinely unknowable.'
+    ManifestFilter:
+      additionalProperties: false
+      description: Query filter for ``GET /v2/workspaces/{workspace}/manifests``.
+      properties:
+        agent:
+          description: Filter to manifests for this agent reference.
+          title: Agent
+          type: string
+      title: ManifestFilter
+      type: object
+    ManifestInit:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: User-defined manifest id (unique within the workspace).
+        source_type:
+          type: string
+          enum:
+          - agent
+          - project
+          title: Source Type
+          description: 'Where the victim comes from: a registered platform agent,
+            or an uploaded project bundle.'
+          default: agent
+        agent:
+          title: Agent
+          description: Agent reference (``name`` or ``workspace/name``) to war-game.
+            Required when ``source_type`` is 'agent'.
+          type: string
+        project_fileset:
+          title: Project Fileset
+          description: Fileset ref (``workspace/name``) of the uploaded project bundle.
+            Required when ``source_type`` is 'project'.
+          type: string
+        dockerfile:
+          title: Dockerfile
+          description: Dockerfile path relative to the project root. Derived when
+            the project holds exactly one.
+          type: string
+        start_command:
+          title: Start Command
+          description: Command that serves the agent. Derived from the Dockerfile's
+            ENTRYPOINT/CMD when it is an exec form we can resolve.
+          type: string
+        binaries:
+          title: Binaries
+          description: Glob(s) matching the victim's interpreter, for the sandbox's
+            egress policy. A glob that matches no process grants nothing while looking
+            like it grants something, so this is confirmed rather than silently guessed.
+          items:
+            type: string
+          type: array
+        harness:
+          title: Harness
+          description: Which harness the agent runs, so the run can say up front whether
+            a guardrail can refuse a tool call. Not knowable from the project.
+          type: string
+        relay_integration_confirmed:
+          type: boolean
+          title: Relay Integration Confirmed
+          description: The author confirms NeMo Relay is attached (middleware + plugin.initialize()).
+            Not knowable from the project; without Relay the victim emits no telemetry
+            and cannot be scored.
+          default: false
+        port:
+          title: Port
+          description: Victim port (defaults to 8000).
+          type: integer
+        secrets:
+          title: Secrets
+          description: Env-var names the victim requires. Derived from the agent's
+            own declarations (``models.*.api_key_env``, MCP server env) when omitted.
+          items:
+            type: string
+          type: array
+        egress:
+          title: Egress
+          description: Allow-listed egress host[:port] entries the victim may reach
+            (external hosts the agent calls, e.g. inference-api.nvidia.com). The sandbox
+            is default-deny, so a host missing here has its traffic dropped mid-run.
+          items:
+            type: string
+          type: array
+        env:
+          title: Env
+          description: "Non-secret environment variables for the victim (agent-hardener's\
+            \ `agent.env`). Stored in plaintext on the manifest \u2014 credentials\
+            \ belong in `secrets`, which names them and resolves the values from the\
+            \ Secrets store at run time."
+          additionalProperties:
+            type: string
+          type: object
+        backends:
+          title: Backends
+          description: Route-only host backends the agent's tools call, each 'NAME:PORT[,PORT2]'
+            (e.g. 'finance:8086'). Rewrites the agent's localhost:PORT to host.docker.internal:PORT
+            and opens the sandbox->host route.
+          items:
+            type: string
+          type: array
+        models:
+          allOf:
+          - $ref: '#/components/schemas/WarGameModels'
+          description: Stored default model selection (attack/analysis/agent groups);
+            omit to use agent-hardener's built-in defaults.
+      type: object
+      required:
+      - name
+      title: ManifestInit
+      description: "Body for ``POST /v2/workspaces/{workspace}/manifests`` \u2014\
+        \ scaffold a named manifest.\n\nTwo sources. ``agent`` is a registered platform\
+        \ agent, which the resolver reads and renders.\n``project`` is an uploaded\
+        \ project bundle \u2014 an image whose author owns the Dockerfile, which a\n\
+        Fabric ``agent.yaml`` cannot express. The user never writes ``agent-hardener.yaml``\
+        \ either way: the\nproject source derives it and asks only for the fields\
+        \ a project cannot state about itself."
+    ManifestUpdate:
+      properties:
+        benign_suite:
+          title: Benign Suite
+          description: Replace the cached benign suite (tool,payload,label,rationale,persona
+            rows).
+          items:
+            additionalProperties:
+              type: string
+            type: object
+          type: array
+        port:
+          title: Port
+          description: Victim port the war-game will target.
+          type: integer
+        egress:
+          title: Egress
+          description: Allow-listed egress host[:port] entries the victim may reach.
+          items:
+            type: string
+          type: array
+        env:
+          title: Env
+          description: "Non-secret environment variables for the victim (agent-hardener's\
+            \ `agent.env`). Stored in plaintext on the manifest \u2014 credentials\
+            \ belong in `secrets`, which names them and resolves the values from the\
+            \ Secrets store at run time."
+          additionalProperties:
+            type: string
+          type: object
+        defenders:
+          title: Defenders
+          description: Enabled defender keys ('guardrails','openshell'); empty means
+            agent-hardener defaults.
+          items:
+            type: string
+          type: array
+        attack_intensity:
+          title: Attack Intensity
+          description: Attacker (garak) effort preset.
+          type: string
+          enum:
+          - light
+          - standard
+          - thorough
+        rounds:
+          title: Rounds
+          description: Number of iterative hardening rounds (agent-hardener `run --rounds`).
+          type: integer
+          minimum: 1.0
+        models:
+          allOf:
+          - $ref: '#/components/schemas/WarGameModels'
+          description: Replace the stored default model selection (attack/analysis/agent
+            groups).
+      type: object
+      title: ManifestUpdate
+      description: "Body for ``PATCH /v2/workspaces/{workspace}/manifests/{name}``\
+        \ \u2014 edit an existing manifest.\n\nOnly editable fields; omitted fields\
+        \ are left unchanged. The agent source is immutable (delete +\nrecreate to\
+        \ retarget)."
+    ModelChoice:
+      properties:
+        model:
+          title: Model
+          description: Model name/URN; null uses the group default.
+          type: string
+        base_url:
+          title: Base Url
+          description: Custom OpenAI-compatible endpoint; null uses the default.
+          type: string
+        api_key_secret:
+          title: Api Key Secret
+          description: Name of a NeMo Secret holding the provider API key for a custom
+            endpoint; null uses the platform's provisioned agent-hardener inference
+            key.
+          type: string
+      type: object
+      title: ModelChoice
+      description: "One group's model selection. Every field is optional; ``None``\
+        \ \u2192 the group's built-in default."
+    ModelConfigDefaults:
+      properties:
+        attack:
+          $ref: '#/components/schemas/ModelGroupDefault'
+        analysis:
+          $ref: '#/components/schemas/ModelGroupDefault'
+      type: object
+      required:
+      - attack
+      - analysis
+      title: ModelConfigDefaults
+      description: Defaults surfaced to the UI so pickers pre-fill without hardcoding
+        agent-hardener's literals.
+    ModelGroupDefault:
+      properties:
+        model:
+          type: string
+          title: Model
+        base_url:
+          type: string
+          title: Base Url
+      type: object
+      required:
+      - model
+      - base_url
+      title: ModelGroupDefault
+      description: The default model + endpoint the UI shows for one group.
+    PaginationData:
+      properties:
+        page:
+          type: integer
+          title: Page
+          description: The current page number.
+        page_size:
+          type: integer
+          title: Page Size
+          description: The page size used for the query.
+        current_page_size:
+          type: integer
+          title: Current Page Size
+          description: The size for the current page.
+        total_pages:
+          type: integer
+          title: Total Pages
+          description: The total number of pages.
+        total_results:
+          type: integer
+          title: Total Results
+          description: The total number of results.
+      type: object
+      required:
+      - page
+      - page_size
+      - current_page_size
+      - total_pages
+      - total_results
+      title: PaginationData
+    PlatformJobListResultResponse:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/PlatformJobResultResponse'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: PlatformJobListResultResponse
+    PlatformJobLog:
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          title: Timestamp
+        job:
+          type: string
+          title: Job
+        job_step:
+          type: string
+          title: Job Step
+        job_task:
+          type: string
+          title: Job Task
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - timestamp
+      - job
+      - job_step
+      - job_task
+      - message
+      title: PlatformJobLog
+    PlatformJobLogPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/PlatformJobLog'
+          type: array
+          title: Data
+        total:
+          type: integer
+          title: Total
+        next_page:
+          title: Next Page
+          type: string
+        prev_page:
+          title: Prev Page
+          type: string
+      type: object
+      required:
+      - data
+      - total
+      - next_page
+      - prev_page
+      title: PlatformJobLogPage
+    PlatformJobResultResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        project:
+          title: Project
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        artifact_url:
+          type: string
+          title: Artifact Url
+        artifact_storage_type:
+          $ref: '#/components/schemas/FileStorageType'
+        download_url:
+          title: Download Url
+          type: string
+      type: object
+      required:
+      - name
+      - job
+      - workspace
+      - artifact_url
+      - artifact_storage_type
+      title: PlatformJobResultResponse
+    PlatformJobStatus:
+      type: string
+      enum:
+      - created
+      - pending
+      - active
+      - cancelled
+      - cancelling
+      - error
+      - completed
+      - paused
+      - pausing
+      - resuming
+      title: PlatformJobStatus
+      description: 'Enumeration of possible job statuses.
+
+
+        This enum represents the various states a job can be in during its lifecycle,
+
+        from creation to a terminal state.'
+    PlatformJobStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/PlatformJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        steps:
+          items:
+            $ref: '#/components/schemas/PlatformJobStepStatusResponse'
+          type: array
+          title: Steps
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - steps
+      - created_at
+      - updated_at
+      title: PlatformJobStatusResponse
+    PlatformJobStepStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/PlatformJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        tasks:
+          items:
+            $ref: '#/components/schemas/PlatformJobTaskStatusResponse'
+          type: array
+          title: Tasks
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - tasks
+      - created_at
+      - updated_at
+      title: PlatformJobStepStatusResponse
+    PlatformJobTaskStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/PlatformJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        error_stack:
+          title: Error Stack
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - error_stack
+      - created_at
+      - updated_at
+      title: PlatformJobTaskStatusResponse
+    RunFilter:
+      additionalProperties: false
+      description: Query filter for ``GET /v2/workspaces/{workspace}/runs``.
+      properties:
+        agent:
+          description: Filter to runs targeting this agent reference (workspace/name).
+          title: Agent
+          type: string
+        manifest_id:
+          description: Filter to runs launched from this manifest (scopes 'replay
+            last run').
+          title: Manifest Id
+          type: string
+        status:
+          description: Filter to runs with this status ('running', 'completed', or
+            'failed').
+          title: Status
+          type: string
+      title: RunFilter
+      type: object
+    StringFilter:
+      additionalProperties: false
+      properties:
+        $eq:
+          description: Filter for results equal to this value.
+          title: $Eq
+          type: string
+        $like:
+          description: Filter for results matching this pattern.
+          title: $Like
+          type: string
+        $in:
+          description: Filter for results in this list of values.
+          title: $In
+          items:
+            type: string
+          type: array
+        $nin:
+          description: Filter for results not in this list of values.
+          title: $Nin
+          items:
+            type: string
+          type: array
+      title: StringFilter
+      type: object
+    SynthBenignJob:
+      properties:
+        id:
+          title: Id
+          type: string
+        name:
+          type: string
+          title: Name
+        description:
+          title: Description
+          type: string
+        project:
+          title: Project
+          type: string
+        workspace:
+          title: Workspace
+          type: string
+        created_at:
+          title: Created At
+          type: string
+          format: date-time
+        updated_at:
+          title: Updated At
+          type: string
+          format: date-time
+        spec:
+          $ref: '#/components/schemas/SynthBenignSpec'
+        status:
+          $ref: '#/components/schemas/PlatformJobStatus'
+        status_details:
+          title: Status Details
+          additionalProperties: true
+          type: object
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - name
+      - spec
+      title: SynthBenignJob
+    SynthBenignJobRequest:
+      properties:
+        name:
+          title: Name
+          type: string
+        description:
+          title: Description
+          type: string
+        project:
+          title: Project
+          type: string
+        spec:
+          $ref: '#/components/schemas/SynthBenignSpec'
+        profile:
+          title: Profile
+          type: string
+        options:
+          title: Options
+          additionalProperties: true
+          type: object
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+        output_location:
+          title: Output Location
+          type: string
+      type: object
+      required:
+      - spec
+      title: SynthBenignJobRequest
+    SynthBenignJobsListFilter:
+      additionalProperties: false
+      properties:
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs created at 'gte' datetime or 'lte' datetime.
+        name:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Name of the job.
+          title: Name
+        workspace:
+          description: Workspace of the job.
+          title: Workspace
+          type: string
+        project:
+          description: Project containing the job.
+          title: Project
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/PlatformJobStatus'
+          description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
+        updated_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs updated at 'gte' datetime or 'lte' datetime.
+      title: SynthBenignJobsListFilter
+      type: object
+    SynthBenignJobsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/SynthBenignJob'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: SynthBenignJobsPage
+    SynthBenignJobsSortField:
+      type: string
+      enum:
+      - created_at
+      - -created_at
+      - updated_at
+      - -updated_at
+      title: SynthBenignJobsSortField
+    SynthBenignSpec:
+      properties:
+        manifest_id:
+          type: string
+          title: Manifest Id
+        driver:
+          type: string
+          title: Driver
+          default: native
+        env_file:
+          title: Env File
+          type: string
+        interview:
+          type: string
+          title: Interview
+          default: interactive
+        run_name:
+          title: Run Name
+          type: string
+        source_run:
+          title: Source Run
+          type: string
+      type: object
+      required:
+      - manifest_id
+      title: SynthBenignSpec
+      description: Inputs for the benign-suite synthesis phase (the shape ``run()``/``compile()``
+        see).
+    ValidateModelRequest:
+      properties:
+        model:
+          title: Model
+          description: Model name to verify against the endpoint's model list.
+          type: string
+        base_url:
+          type: string
+          title: Base Url
+          description: OpenAI-compatible endpoint to probe (`GET {base_url}/models`).
+        api_key_secret:
+          title: Api Key Secret
+          description: Secret name holding the provider key; omitted probes without
+            auth.
+          type: string
+      type: object
+      required:
+      - base_url
+      title: ValidateModelRequest
+      description: "Body for ``POST /v2/workspaces/{workspace}/model-config/validate``\
+        \ \u2014 probe a model choice."
+    ValidateModelResponse:
+      properties:
+        ok:
+          type: boolean
+          title: Ok
+          description: True when the endpoint is reachable, authorized, and serves
+            the model.
+        reason:
+          type: string
+          title: Reason
+          description: ''''' | ''auth'' | ''unreachable'' | ''unknown_model''.'
+          default: ''
+        available:
+          items:
+            type: string
+          type: array
+          title: Available
+          description: Model ids the credentials can reach.
+        detail:
+          type: string
+          title: Detail
+          description: Human-readable diagnostic (status code / transport error).
+          default: ''
+      type: object
+      required:
+      - ok
+      title: ValidateModelResponse
+      description: Verdict for a model choice; ``available`` lists what the credentials
+        can reach so the UI offers real options.
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+          additionalProperties: true
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    WarGameJob:
+      properties:
+        id:
+          title: Id
+          type: string
+        name:
+          type: string
+          title: Name
+        description:
+          title: Description
+          type: string
+        project:
+          title: Project
+          type: string
+        workspace:
+          title: Workspace
+          type: string
+        created_at:
+          title: Created At
+          type: string
+          format: date-time
+        updated_at:
+          title: Updated At
+          type: string
+          format: date-time
+        spec:
+          $ref: '#/components/schemas/WarGameSpec'
+        status:
+          $ref: '#/components/schemas/PlatformJobStatus'
+        status_details:
+          title: Status Details
+          additionalProperties: true
+          type: object
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - name
+      - spec
+      title: WarGameJob
+    WarGameJobRequest:
+      properties:
+        name:
+          title: Name
+          type: string
+        description:
+          title: Description
+          type: string
+        project:
+          title: Project
+          type: string
+        spec:
+          $ref: '#/components/schemas/WarGameSpec'
+        profile:
+          title: Profile
+          type: string
+        options:
+          title: Options
+          additionalProperties: true
+          type: object
+        ownership:
+          title: Ownership
+          additionalProperties: true
+          type: object
+        custom_fields:
+          title: Custom Fields
+          additionalProperties: true
+          type: object
+        output_location:
+          title: Output Location
+          type: string
+      type: object
+      required:
+      - spec
+      title: WarGameJobRequest
+    WarGameJobsListFilter:
+      additionalProperties: false
+      properties:
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs created at 'gte' datetime or 'lte' datetime.
+        name:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Name of the job.
+          title: Name
+        workspace:
+          description: Workspace of the job.
+          title: Workspace
+          type: string
+        project:
+          description: Project containing the job.
+          title: Project
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/PlatformJobStatus'
+          description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
+        updated_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs updated at 'gte' datetime or 'lte' datetime.
+      title: WarGameJobsListFilter
+      type: object
+    WarGameJobsPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/WarGameJob'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: WarGameJobsPage
+    WarGameJobsSortField:
+      type: string
+      enum:
+      - created_at
+      - -created_at
+      - updated_at
+      - -updated_at
+      title: WarGameJobsSortField
+    WarGameModels:
+      properties:
+        attack:
+          allOf:
+          - $ref: '#/components/schemas/ModelChoice'
+          description: garak red-team + detector model.
+        analysis:
+          allOf:
+          - $ref: '#/components/schemas/ModelChoice'
+          description: Defenders + benign validator (synth suite-generation + judge)
+            model.
+        safety:
+          allOf:
+          - $ref: '#/components/schemas/ModelChoice'
+          description: "Guardrail middleware LLM (agent-hardener's `safety_llm`);\
+            \ unset copies the victim's own LLM. Only `model` applies \u2014 agent-hardener\
+            \ pins this LLM's endpoint and key when it writes the guardrail."
+      type: object
+      title: WarGameModels
+      description: The three model groups for a war-game. An unset group uses agent-hardener's
+        built-in default.
+    WarGameSpec:
+      properties:
+        config:
+          title: Config
+          type: string
+        manifest_id:
+          title: Manifest Id
+          type: string
+        env_file:
+          title: Env File
+          type: string
+        driver:
+          title: Driver
+          type: string
+        stop_after_synth:
+          type: boolean
+          title: Stop After Synth
+          default: false
+        replay_hitlog_fileset:
+          title: Replay Hitlog Fileset
+          type: string
+        benign_suite_fileset:
+          title: Benign Suite Fileset
+          type: string
+        port:
+          title: Port
+          type: integer
+        defenders:
+          title: Defenders
+          items:
+            type: string
+          type: array
+        attack_intensity:
+          title: Attack Intensity
+          type: string
+        rounds:
+          title: Rounds
+          type: integer
+        validate_only:
+          type: boolean
+          title: Validate Only
+          default: false
+        defense_guardrails:
+          title: Defense Guardrails
+          type: string
+        defense_policy:
+          title: Defense Policy
+          type: string
+        models:
+          $ref: '#/components/schemas/WarGameModels'
+        source_run:
+          title: Source Run
+          type: string
+      type: object
+      title: WarGameSpec
+      description: "Canonical war-game inputs \u2014 the shape ``run()`` and ``compile()``\
+        \ see.\n\nSupply either a saved ``manifest_id`` (the Studio path \u2014 materialized\
+        \ on the host from the stored\nagent ref) or a ready ``config`` manifest path\
+        \ (the CLI path)."

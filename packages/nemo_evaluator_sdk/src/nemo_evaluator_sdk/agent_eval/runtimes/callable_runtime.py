@@ -16,6 +16,7 @@ from nemo_evaluator_sdk.agent_eval.trials import (
     AgentEvalTrialStatus,
     AgentOutput,
     RunnerInfo,
+    TrialMeasurements,
     callable_identity,
 )
 from nemo_evaluator_sdk.values.evidence import CandidateEvidence
@@ -32,6 +33,7 @@ class TrialDraft:
     output: AgentOutput
     evidence: CandidateEvidence | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    measurements: TrialMeasurements = field(default_factory=TrialMeasurements)
 
 
 AgentTaskFn = Callable[[AgentEvalTask], Awaitable[TrialDraft | AgentOutput | str]]
@@ -100,6 +102,7 @@ class CallableAgentTaskRunner:
             status=AgentEvalTrialStatus.COMPLETED,
             output=draft.output,
             evidence=draft.evidence,
+            measurements=draft.measurements,
             metadata=draft.metadata,
         )
 

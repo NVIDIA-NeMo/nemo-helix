@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
+import { ControlledSliderWithTextInput } from '@nemo/common/src/components/form/ControlledSliderWithTextInput';
+import { ControlledSwitch } from '@nemo/common/src/components/form/ControlledSwitch';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { RadioCard } from '@nemo/common/src/components/RadioCard';
 import {
@@ -9,12 +12,14 @@ import {
   UnslothTrainingSpecFinetuningType,
 } from '@nemo/sdk/generated/customizer/schema';
 import { RadioGroupRoot, Stack, Text } from '@nvidia/foundations-react-core';
+import { TEACHER_PRECISION_ITEMS } from '@studio/components/NewCustomizationForm/constants';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
 import {
   RL_DPO_TRAINING_DEFAULTS,
   RL_GRPO_TRAINING_DEFAULTS,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
+import { AUTOMODEL_SPEC_DEFAULTS, specSliderProps } from '@studio/util/forms/specDefaults';
 import { useFormContext } from 'react-hook-form';
 
 const AUTOMODEL_FINETUNING_TYPES = [
@@ -223,13 +228,63 @@ export const TrainingMethodSection = () => {
               </div>
             </RadioGroupRoot>
             {trainingType === 'distillation' && (
-              <ControlledTextInput
-                useControllerProps={{ name: 'automodel.training.teacher_model', control }}
-                label="Teacher Model"
-                placeholder="workspace/model-name"
-                required
-                disabled={disabled}
-              />
+              <Stack gap="density-lg">
+                <ControlledTextInput
+                  useControllerProps={{ name: 'automodel.training.teacher_model', control }}
+                  label="Teacher Model"
+                  placeholder="workspace/model-name"
+                  required
+                  disabled={disabled}
+                />
+                <ControlledSliderWithTextInput
+                  useControllerProps={{ name: 'automodel.training.distillation_ratio', control }}
+                  formFieldProps={{
+                    slotLabel: 'Distillation Ratio',
+                    slotInfo:
+                      'How much of the loss comes from matching the teacher rather than the training labels. 0 is pure supervised training, 1 is pure distillation.',
+                  }}
+                  {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'training_distillation_ratio')}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  disabled={disabled}
+                />
+                <ControlledSliderWithTextInput
+                  useControllerProps={{
+                    name: 'automodel.training.distillation_temperature',
+                    control,
+                  }}
+                  formFieldProps={{
+                    slotLabel: 'Distillation Temperature',
+                    slotInfo:
+                      'Softens the teacher’s output distribution. Higher values spread probability mass onto lower-ranked tokens, so the student learns more than just the teacher’s top choice.',
+                  }}
+                  {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'training_distillation_temperature')}
+                  min={0.1}
+                  max={10}
+                  step={0.1}
+                  disabled={disabled}
+                />
+                <ControlledSelect
+                  useControllerProps={{ name: 'automodel.training.teacher_precision', control }}
+                  formFieldProps={{
+                    slotLabel: 'Teacher Precision',
+                    slotInfo: 'Precision the teacher runs at. Lower precision frees VRAM.',
+                  }}
+                  items={TEACHER_PRECISION_ITEMS}
+                  disabled={disabled}
+                />
+                <ControlledSwitch
+                  useControllerProps={{ name: 'automodel.training.offload_teacher', control }}
+                  formFieldProps={{
+                    slotLabel: 'Offload Teacher',
+                    labelPosition: 'left',
+                    slotInfo:
+                      'Keep the teacher on CPU between forward passes. Frees VRAM for the student at the cost of transfer time.',
+                  }}
+                  disabled={disabled}
+                />
+              </Stack>
             )}
           </Stack>
         )}

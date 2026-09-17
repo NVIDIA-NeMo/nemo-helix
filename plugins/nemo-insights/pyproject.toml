@@ -9,10 +9,11 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
   "fastapi>=0.115",
   "httpx",
-  "nemo-fabric-adapter-contract>=0.3.0b1",
-  "nemo-fabric-adapters-common>=0.3.0b1",
+  "nemo-fabric-adapter-contract>=0.3.0,<0.4.0",
+  "nemo-fabric-adapters-common>=0.3.0,<0.4.0",
   "nemo-platform",
   "nemo-platform-plugin",
+  "nemo-relay>=0.7,<0.8",
   "nooa>=0.0.9",
   "opentelemetry-exporter-otlp>=1.42.1",
   "opentelemetry-sdk>=1.42.1",

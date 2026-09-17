@@ -4,26 +4,35 @@
 """Adapt one Harbor result directory into an SDK :class:`AgentEvalTrial`.
 
 This module owns the complete Harbor trial-data seam: identity, reward and error
-normalization, measurements, and collision-safe evidence discovery. Harbor job
-execution and result-file discovery remain in :mod:`harbor_runtime`.
+normalization, measurements, Harbor-valid result-file discovery, and
+collision-safe evidence discovery. Harbor job execution and cache orchestration
+remain in :mod:`harbor_runtime`.
 """
 
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import math
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
+from nemo_evaluator_sdk.agent_eval.reward_keys import (
+    HarborRewardValueRejection,
+    ParsedHarborRewards,
+    RewardKeyRejection,
+    reward_key_rejection,
+)
 from nemo_evaluator_sdk.agent_eval.trials import (
     UNKNOWN_ERROR_TYPE,
     AgentEvalTrial,
     AgentEvalTrialStatus,
     AgentOutput,
     TrialError,
+    TrialMeasurements,
     standard_evidence_descriptors,
 )
 from nemo_evaluator_sdk.values.evidence import (
@@ -43,6 +52,7 @@ from nemo_evaluator_sdk.values.otlp import (
     resource_spans_from_text,
 )
 from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +88,34 @@ _TRIAL_LOG_DESCRIPTIONS = {
     "verifier/test-stdout.txt": "Verifier stdout captured while Harbor runs the task tests from the /tests directory.",
 }
 _MAX_TRACEBACK_CHARS = 8192
+_HARBOR_EXTRA_REQUIRED_MESSAGE = (
+    "Harbor execution and result adaptation require the optional `harbor` extra on Python >=3.12. "
+    "If NeMo Platform is installed as a package, run: uv pip install 'harbor>=0.20,<0.21' "
+    "(the `all`, `services`, `plugins`, and `nemo-experimentalist-plugin` extras already include it). "
+    "From a NeMo Platform source checkout's repository root, run: "
+    "uv sync --frozen --package nemo-evaluator-sdk --extra harbor"
+)
+
+
+def _iter_harbor_trial_results(job_dir: Path) -> Iterator[tuple[Path, Mapping[str, Any]]]:
+    """Yield Harbor-valid result mappings in deterministic path order.
+
+    Harbor remains a lazy import. The yielded mapping stays uncoerced because the
+    SDK intentionally applies stricter reward rules than Harbor's Pydantic model.
+    """
+    try:
+        from harbor.models.trial.result import TrialResult  # ty: ignore[unresolved-import,unused-ignore-comment]
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(_HARBOR_EXTRA_REQUIRED_MESSAGE) from exc
+
+    for result_path in sorted(job_dir.glob("*/result.json")):
+        try:
+            result_data = json.loads(result_path.read_bytes())
+            TrialResult.model_validate(result_data)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValidationError) as exc:
+            logger.warning("Skipping invalid Harbor trial result %s: %s", result_path, exc)
+            continue
+        yield result_path.parent, cast(dict[str, Any], result_data)
 
 
 def _trial_from_harbor_result(
@@ -101,18 +139,17 @@ def _trial_from_harbor_result(
     trial_id = str(data.get("trial_name") or trial_dir.name)
     rewards = _rewards_mapping(data)
     reward = _primary_reward(rewards, reward_key)
-    error = _trial_error(data.get("exception_info"))
+    error = _trial_error(_reported_exception_info(data))
 
     metadata: dict[str, Any] = {
         "reward": reward,
-        "reward_details": dict(rewards),
+        **rewards.to_metadata(),
         "harbor_trial_dir": str(trial_dir),
     }
-    metadata.update(_trial_measurements(data))
+    measurements = _trial_measurements(data)
 
-    # An errored trial (or one with no reward) stays PARTIAL so it is still scored
-    # as 0 and counted in the summary; FAILED would exclude it from scoring.
-    status = AgentEvalTrialStatus.COMPLETED if error is None and reward is not None else AgentEvalTrialStatus.PARTIAL
+    is_complete = error is None and reward is not None
+    status = AgentEvalTrialStatus.COMPLETED if is_complete else AgentEvalTrialStatus.PARTIAL
 
     extension_descriptors, atif_trace, otlp_trace = _harbor_extension_evidence(trial_dir)
     descriptors = standard_evidence_descriptors(
@@ -139,6 +176,7 @@ def _trial_from_harbor_result(
         ),
         evidence=CandidateEvidence(descriptors=descriptors),
         error=error,
+        measurements=measurements,
         metadata=metadata,
     )
 
@@ -444,32 +482,57 @@ def _harbor_extension_evidence(
     return descriptors, atif_trace, otlp_trace
 
 
-def _rewards_mapping(data: Mapping[str, Any]) -> dict[str, float]:
+def _rewards_mapping(data: Mapping[str, Any]) -> ParsedHarborRewards:
     """Normalize Harbor verifier rewards into numeric SDK values.
 
     Args:
         data: Parsed Harbor ``result.json`` payload.
 
     Returns:
-        A string-keyed mapping of rewards that can be converted to ``float``.
-        Missing, malformed, and non-numeric reward entries are omitted.
+        Finite numeric values plus sanitized rejection diagnostics. Unusable
+        values and unsafe keys are omitted from the numeric mapping.
     """
     verifier_result = data.get("verifier_result")
     if not isinstance(verifier_result, Mapping):
-        return {}
+        return ParsedHarborRewards()
     rewards = verifier_result.get("rewards")
     if not isinstance(rewards, Mapping):
-        return {}
-    out: dict[str, float] = {}
+        return ParsedHarborRewards()
+    values: dict[str, float] = {}
+    rejected_by_key: dict[str, HarborRewardValueRejection] = {}
+    rejected_entries: list[RewardKeyRejection] = []
     for key, value in rewards.items():
-        try:
-            out[str(key)] = float(value)
-        except (TypeError, ValueError):
+        key_rejection = reward_key_rejection(key)
+        if key_rejection is not None:
+            rejected_entries.append(key_rejection)
             continue
-    return out
+        assert type(key) is str
+        if isinstance(value, bool):
+            rejected_by_key[key] = "boolean"
+            continue
+        if type(value) not in (int, float, str):
+            rejected_by_key[key] = "non_numeric"
+            continue
+        try:
+            parsed = float(value)
+        except OverflowError:  # an int too large to represent
+            rejected_by_key[key] = "non_finite"
+            continue
+        except ValueError:  # a string that is not a number
+            rejected_by_key[key] = "non_numeric"
+            continue
+        if not math.isfinite(parsed):
+            rejected_by_key[key] = "non_finite"
+            continue
+        values[key] = parsed
+    return ParsedHarborRewards(
+        values=values,
+        rejected_by_key=rejected_by_key,
+        rejected_entries=tuple(rejected_entries),
+    )
 
 
-def _primary_reward(rewards: Mapping[str, float], reward_key: str) -> float | None:
+def _primary_reward(rewards: ParsedHarborRewards, reward_key: str) -> float | None:
     """Select the configured primary reward.
 
     Args:
@@ -480,14 +543,47 @@ def _primary_reward(rewards: Mapping[str, float], reward_key: str) -> float | No
         The selected reward, or ``None`` when ``reward_key`` is absent. A warning
         is emitted when other rewards exist but none matches the configured key.
     """
-    if reward_key in rewards:
-        return rewards[reward_key]
-    if rewards:
+    if reward_key in rewards.values:
+        return rewards.values[reward_key]
+    if reason := rewards.rejected_by_key.get(reward_key):
+        logger.warning(
+            "Harbor trial reward_key=%r was emitted but rejected as %s; treating as unusable",
+            reward_key,
+            reason,
+        )
+    elif rewards.values:
         logger.warning(
             "Harbor trial emitted rewards %s but none matches reward_key=%r; treating the trial as having no reward",
-            sorted(rewards),
+            sorted(rewards.values),
             reward_key,
         )
+    return None
+
+
+def _reported_exception_info(data: Mapping[str, Any]) -> Any:
+    """The exception Harbor recorded for a trial, from the trial or from whichever step raised.
+
+    Harbor sets the top-level ``exception_info`` for a single-step trial, but a multi-step trial
+    leaves it ``None`` and records the exception on the ``step_results`` entry that raised.
+
+    Args:
+        data: Parsed Harbor ``result.json`` payload.
+
+    Returns:
+        The first exception payload found, trial-level first, or ``None`` when no step raised.
+    """
+    trial_level = data.get("exception_info")
+    if trial_level is not None:
+        return trial_level
+    steps = data.get("step_results")
+    if not isinstance(steps, Sequence) or isinstance(steps, (str, bytes)):
+        return None
+    for step in steps:
+        if not isinstance(step, Mapping):
+            continue
+        step_level = step.get("exception_info")
+        if step_level is not None:
+            return step_level
     return None
 
 
@@ -561,41 +657,51 @@ def _error_timestamp(value: Any) -> datetime | None:
     return None
 
 
-def _token_measurements(agent_result: Any) -> dict[str, int | float]:
-    """Extract valid token counts and cost from one Harbor agent result.
+def _token_measurements(agent_result: Any, *, trial_id: str) -> tuple[dict[str, int | float], set[str]]:
+    """Extract token counts and cost from one Harbor agent result.
 
     Args:
         agent_result: Harbor agent-result payload to inspect.
 
     Returns:
-        SDK measurement keys for integer token counts and finite numeric cost.
-        Missing, malformed, boolean, and non-finite values are omitted.
+        Valid SDK measurement values and fields that were explicitly invalid.
     """
     if not isinstance(agent_result, Mapping):
-        return {}
+        return {}, set()
     mapping = {
         "prompt_tokens": "n_input_tokens",
         "completion_tokens": "n_output_tokens",
         "cache_read_tokens": "n_cache_tokens",
     }
     out: dict[str, int | float] = {}
+    invalid: set[str] = set()
     for sdk_key, harbor_key in mapping.items():
+        if harbor_key not in agent_result or agent_result[harbor_key] is None:
+            continue
         value = agent_result.get(harbor_key)
-        if isinstance(value, int) and not isinstance(value, bool):
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
             out[sdk_key] = value
-    cost = agent_result.get("cost_usd")
-    if isinstance(cost, (int, float)) and not isinstance(cost, bool):
-        try:
-            numeric_cost = float(cost)
-        except (OverflowError, TypeError, ValueError):
-            numeric_cost = None
-        if numeric_cost is not None and math.isfinite(numeric_cost):
-            out["cost_usd"] = numeric_cost
-    return out
+        else:
+            invalid.add(sdk_key)
+            logger.warning(
+                "Harbor trial %s has invalid %s=%r; omitting %s",
+                trial_id,
+                harbor_key,
+                value,
+                sdk_key,
+            )
+    if "cost_usd" in agent_result and agent_result["cost_usd"] is not None:
+        cost = agent_result["cost_usd"]
+        if _is_finite_nonnegative_number(cost):
+            out["cost_usd"] = float(cost)
+        else:
+            invalid.add("cost_usd")
+            logger.warning("Harbor trial %s has invalid cost_usd=%r; omitting cost_usd", trial_id, cost)
+    return out, invalid
 
 
-def _trial_measurements(data: Mapping[str, Any]) -> dict[str, int | float]:
-    """Extract Harbor token and cost metadata from one result source.
+def _trial_measurements(data: Mapping[str, Any]) -> TrialMeasurements:
+    """Build canonical Harbor measurements from one result source.
 
     A top-level ``agent_result`` takes precedence. When it is absent, valid
     measurements from step-level agent results are aggregated exactly once.
@@ -604,32 +710,113 @@ def _trial_measurements(data: Mapping[str, Any]) -> dict[str, int | float]:
         data: Parsed Harbor ``result.json`` payload.
 
     Returns:
-        SDK measurement keys for token counts and finite cost. Returns an empty
-        mapping when neither result source contains valid measurements.
+        Validated measurements; malformed optional source values are omitted.
     """
+    trial_id = str(data.get("trial_name") or data.get("task_name") or "unknown")
     top_level = data.get("agent_result")
     if isinstance(top_level, Mapping):
-        return _token_measurements(top_level)
+        values, _ = _token_measurements(top_level, trial_id=trial_id)
+    else:
+        values = _aggregate_step_measurements(data.get("step_results"), trial_id=trial_id)
 
-    step_results = data.get("step_results")
+    runtime = _harbor_runtime_sec(data, trial_id=trial_id)
+    if runtime is not None:
+        values["runtime_sec"] = runtime
+    return TrialMeasurements.model_validate(values)
+
+
+def _aggregate_step_measurements(step_results: Any, *, trial_id: str) -> dict[str, int | float]:
     if not isinstance(step_results, list):
         return {}
 
-    totals: dict[str, int | float] = {}
-    costs: list[float] = []
+    contributors: dict[str, list[int | float]] = {}
+    invalid: set[str] = set()
     for step in step_results:
         if not isinstance(step, Mapping):
             continue
-        for key, value in _token_measurements(step.get("agent_result")).items():
-            if key == "cost_usd":
-                costs.append(float(value))
-            else:
-                totals[key] = int(totals.get(key, 0)) + int(value)
-    if costs:
+        captured, rejected = _token_measurements(step.get("agent_result"), trial_id=trial_id)
+        invalid.update(rejected)
+        for key, value in captured.items():
+            contributors.setdefault(key, []).append(value)
+
+    totals: dict[str, int | float] = {}
+    for key, values in contributors.items():
+        if key in invalid:
+            continue
         try:
-            total_cost = math.fsum(costs)
+            total = math.fsum(float(value) for value in values) if key == "cost_usd" else sum(int(v) for v in values)
         except OverflowError:
-            total_cost = None
-        if total_cost is not None and math.isfinite(total_cost):
-            totals["cost_usd"] = total_cost
+            total = float("inf")
+        if _is_finite_nonnegative_number(total):
+            totals[key] = float(total) if key == "cost_usd" else int(total)
+        else:
+            logger.warning("Harbor trial %s has invalid aggregate %s=%r; omitting it", trial_id, key, total)
     return totals
+
+
+def _harbor_runtime_sec(data: Mapping[str, Any], *, trial_id: str) -> float | None:
+    top_level = data.get("agent_execution")
+    if top_level is not None:
+        duration = _execution_duration(top_level)
+        if duration is None:
+            logger.warning(
+                "Harbor trial %s has an invalid top-level agent_execution window; omitting runtime", trial_id
+            )
+        return duration
+
+    step_results = data.get("step_results")
+    if not isinstance(step_results, list):
+        return None
+    durations: list[float] = []
+    for step in step_results:
+        if not isinstance(step, Mapping) or step.get("agent_execution") is None:
+            continue
+        duration = _execution_duration(step.get("agent_execution"))
+        if duration is None:
+            logger.warning("Harbor trial %s has an invalid step agent_execution window; omitting runtime", trial_id)
+            return None
+        durations.append(duration)
+    if not durations:
+        return None
+    try:
+        total = math.fsum(durations)
+    except OverflowError:
+        total = float("inf")
+    if not math.isfinite(total):
+        logger.warning("Harbor trial %s has a non-finite aggregate runtime; omitting runtime", trial_id)
+        return None
+    return total
+
+
+def _execution_duration(window: Any) -> float | None:
+    if not isinstance(window, Mapping):
+        return None
+    started = _as_datetime(window.get("started_at"))
+    finished = _as_datetime(window.get("finished_at"))
+    if started is None or finished is None:
+        return None
+    try:
+        duration = (finished - started).total_seconds()
+    except TypeError:
+        return None
+    if not math.isfinite(duration) or duration < 0:
+        return None
+    return duration
+
+
+def _as_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        with contextlib.suppress(ValueError):
+            return datetime.fromisoformat(value)
+    return None
+
+
+def _is_finite_nonnegative_number(value: Any) -> bool:
+    if not isinstance(value, int | float) or isinstance(value, bool) or value < 0:
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False

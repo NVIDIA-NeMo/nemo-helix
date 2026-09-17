@@ -284,6 +284,7 @@ async def test_completed_run_writes_artifacts_and_evidence(monkeypatch: pytest.M
     assert client.created[0].options.image == "python:test"
     assert client.deleted == client.created
     assert trials[0].status == "completed"
+    assert trials[0].measurements.model_dump(exclude_none=True) == {}
     assert trials[0].output is not None
     assert trials[0].output.output_text == "Runtime answer"
     assert (evidence_dir / "final_output.txt").read_text(encoding="utf-8") == "Runtime answer"
@@ -369,6 +370,7 @@ async def test_runtime_exception_returns_failed_trial(
 
     error_path = tmp_path / "agent-runtime" / "run-1" / "000000-task-1" / "error.json"
     assert trials[0].status == "failed"
+    assert trials[0].measurements.model_dump(exclude_none=True) == {}
     assert trials[0].output is None
     assert trials[0].metadata["error"] == "sandbox run failed"
     assert trials[0].evidence is not None

@@ -7,7 +7,7 @@ import logging
 import re
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Callable
 
@@ -20,11 +20,13 @@ from nemo_platform_plugin.auth.access_keys.issuer import (
     AccessKeyOperationNotImplementedError,
 )
 from nemo_platform_plugin.auth.access_keys.types import (
+    ACCESS_KEY_JTI_PATTERN,
     AccessKeyCreateRequest,
     AccessKeyCreateResponse,
     AccessKeyEntityType,
     AccessKeyListResponse,
     AccessKeyRevokeResponse,
+    AccessKeyRotateResponse,
     AccessKeyStatus,
     AccessKeyStatusChangeResponse,
 )
@@ -39,7 +41,6 @@ ACCESS_KEY_TOKEN_TYPE = "access_key"
 ACCESS_KEY_JWKS_PATH = "/apis/auth/jwks"
 ACCESS_KEY_METADATA_VERSION = 2
 LEGACY_ACCESS_KEY_METADATA_VERSION = 1
-ACCESS_KEY_JTI_PATTERN = r"^ak_[0-9a-f]{32}$"
 _ACCESS_KEY_JTI_RE = re.compile(ACCESS_KEY_JTI_PATTERN)
 _NEWLY_CREATED_STATUS: AccessKeyStatus = "ACTIVE"
 SERVICE_ACCOUNT_PRINCIPAL_PREFIX = "service-account:"
@@ -86,6 +87,7 @@ class _AccessKeyTokenPayload:
     audiences: list[str]
     created_at: datetime
     expires_at: datetime | None
+    scope: list[str] = field(default_factory=list)
 
 
 def clear_access_key_signing_key_cache() -> None:
@@ -221,6 +223,7 @@ class AccessKeyIssuerService(AccessKeyIssuer):
             entity_type=entity_type,
             name=request.name,
             description=request.description,
+            scope=request.scope,
             expires_in_seconds=expires_in_seconds,
             now=self._now(),
         )
@@ -237,6 +240,7 @@ class AccessKeyIssuerService(AccessKeyIssuer):
             entity_type=entity_type,
             name=request.name,
             description=request.description,
+            scope=request.scope,
             expires_in_seconds=expires_in_seconds,
             now=self._now(),
         )
@@ -274,6 +278,10 @@ class AccessKeyIssuerService(AccessKeyIssuer):
         self._ensure_enabled()
         raise AccessKeyOperationNotImplementedError(f"Scoped Access Key unsuspension for {jti} is not implemented.")
 
+    def rotate(self, jti: str, *, grace_period_seconds: int | None = None) -> AccessKeyRotateResponse:  # noqa: ARG002
+        self._ensure_enabled()
+        raise AccessKeyOperationNotImplementedError(f"Scoped Access Key rotation for {jti} is not implemented.")
+
 
 def _create_access_key_token(
     config: AuthConfig,
@@ -282,6 +290,7 @@ def _create_access_key_token(
     entity_type: AccessKeyEntityType = "USER",
     name: str | None = None,
     description: str | None = None,
+    scope: list[str] | None = None,
     expires_in_seconds: int | None = None,
     now: int,
 ) -> AccessKeyCreateResponse:
@@ -291,6 +300,7 @@ def _create_access_key_token(
         entity_type=entity_type,
         name=name,
         description=description,
+        scope=scope,
         expires_in_seconds=expires_in_seconds,
         now=now,
     )
@@ -304,6 +314,7 @@ async def _create_access_key_token_async(
     entity_type: AccessKeyEntityType = "USER",
     name: str | None = None,
     description: str | None = None,
+    scope: list[str] | None = None,
     expires_in_seconds: int | None = None,
     now: int,
 ) -> AccessKeyCreateResponse:
@@ -313,6 +324,7 @@ async def _create_access_key_token_async(
         entity_type=entity_type,
         name=name,
         description=description,
+        scope=scope,
         expires_in_seconds=expires_in_seconds,
         now=now,
     )
@@ -327,6 +339,7 @@ def _build_access_key_token_payload(
     entity_type: AccessKeyEntityType = "USER",
     name: str | None,
     description: str | None,
+    scope: list[str] | None = None,
     expires_in_seconds: int | None,
     now: int,
 ) -> _AccessKeyTokenPayload:
@@ -354,6 +367,9 @@ def _build_access_key_token_payload(
         "nmp_token_type": ACCESS_KEY_TOKEN_TYPE,
         "nmp_access_key": access_key_metadata,
     }
+    resolved_scope = list(dict.fromkeys(service.strip() for service in (scope or []) if service.strip()))
+    if resolved_scope:
+        claims["scope"] = " ".join(f"{service}:{verb}" for service in resolved_scope for verb in ("read", "write"))
     if principal.email:
         claims["email"] = principal.email
     if principal.groups:
@@ -375,6 +391,7 @@ def _build_access_key_token_payload(
         entity_type=entity_type,
         issuer=issuer,
         audiences=audiences,
+        scope=resolved_scope,
         created_at=datetime.fromtimestamp(issued_at, tz=UTC),
         expires_at=expires_at,
     )
@@ -401,6 +418,7 @@ def _access_key_response_from_payload(
         status=_NEWLY_CREATED_STATUS,
         issuer=payload.issuer,
         audiences=payload.audiences,
+        scope=payload.scope,
         created_at=payload.created_at,
         expires_at=payload.expires_at,
     )

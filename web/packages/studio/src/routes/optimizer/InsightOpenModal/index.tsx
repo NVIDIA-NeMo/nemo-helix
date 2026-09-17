@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { Insight } from '@nemo/sdk/generated/insights/schema';
 import { Button, CodeSnippet, Modal, Stack, Text } from '@nvidia/foundations-react-core';
-import type { Insight } from '@studio/api/optimizer';
 import { LINK_DOCS_EXPERIMENTS_CLI } from '@studio/constants/links';
 import { buildOptimizerExperimentCommand } from '@studio/routes/optimizer/InsightOpenModal/command';
 import { ChevronRight, File } from 'lucide-react';

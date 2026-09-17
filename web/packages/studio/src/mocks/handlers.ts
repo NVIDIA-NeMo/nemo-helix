@@ -12,6 +12,7 @@ import {
   TraceMetricBucketParam,
 } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { agentOptimizeJobsHandlers } from '@studio/mocks/handlers/agentOptimizeJobs';
 import { customizerHandlers } from '@studio/mocks/handlers/customizer';
 import { deploymentsHandlers } from '@studio/mocks/handlers/deployments';
 import { evaluatorHandlers } from '@studio/mocks/handlers/evaluator';
@@ -715,6 +716,9 @@ export const handlers = [
       );
     }
   ),
+  http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/package`, () =>
+    HttpResponse.json({ data: [], total: 0 })
+  ),
   http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments`, () =>
     HttpResponse.json({
       data: [
@@ -777,6 +781,7 @@ export const handlers = [
   ...filesetsHandlers,
   ...guardrailsHandlers,
   ...insightsHandlers,
+  ...agentOptimizeJobsHandlers,
 ];
 
 // Re-export EvaluateJob so consumers of this module that previously relied on

@@ -90,11 +90,15 @@ test.describe('Model Deployments', () => {
     await test.step('Open Create Deployment side panel', async () => {
       await page.getByRole('button', { name: 'Create Deployment' }).first().click();
 
-      // NGC is the default source. The Deploy submit button only renders inside the open panel.
+      // The Deploy submit button only renders inside the open panel.
       await expect(page.getByRole('button', { name: 'Deploy', exact: true })).toBeVisible();
     });
 
     await test.step('Fill the NGC NIM Container form', async () => {
+      // Select the source explicitly rather than relying on which one the wizard
+      // preselects — this test covers the NGC path, not the default.
+      await page.getByRole('radio', { name: 'NGC NIM Container' }).click();
+
       const nameField = page.getByRole('textbox', { name: 'Name', exact: true });
       // The wizard pre-fills a generated name; clear it before typing.
       await nameField.fill(baseName);

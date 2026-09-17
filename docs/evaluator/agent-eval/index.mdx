@@ -20,8 +20,9 @@ got there*. Each task carries its own metrics, so a single suite can grade heter
 - Use `await AgentEvaluator().run(tasks=..., target=...)` for local task-driven SDK runs
 that do not require running nemo-platform.
 - Use the Evaluator plugin's `uv run nemo evaluator agent-evaluate submit` job for durable runs with inline
-tasks or stored tasksets. The high-level `client.evaluator.submit` interface
-above remains dataset-driven only.
+tasks or stored tasksets. For a `GymAgentTaskRunner` that you have already validated locally,
+`client.evaluator.submit(tasks=TasksetRef(...), target=runner)` provides a high-level submission
+path; build other runner targets in an agent-evaluate spec.
 
 </Note>
 
@@ -117,6 +118,12 @@ for how to describe an HTTP agent target.
   — point a run at an agent behind an HTTP endpoint.
 - [Evaluate a Harbor Task Suite](/documentation/evaluate-models/agent-eval/harbor-runner) — run an
   existing Harbor dataset in Docker and score its verifier reward.
+- [Evaluate a NeMo Gym Environment](/documentation/evaluate-models/agent-eval/gym-runner) — collect
+  and score Gym rollouts locally or as a platform job.
+- [Run a Custom Gym Environment](/documentation/evaluate-models/agent-eval/gym-custom-environment)
+  — package a Gym environment as a FileSet and evaluate it in OpenSandbox.
+- [Evaluate with a NeMo Fabric Harness](/documentation/evaluate-models/agent-eval/fabric-runner) —
+  drive a supported agent harness and capture its trajectory.
 - [Score by Component](/documentation/evaluate-models/agent-eval/score-by-component) — score the
   trajectory (not just the answer) and roll metrics into a named view.
 - [Targets and Runners](/documentation/evaluate-models/agent-eval/targets-and-runners) — reference for

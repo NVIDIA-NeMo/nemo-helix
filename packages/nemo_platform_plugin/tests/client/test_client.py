@@ -546,6 +546,49 @@ def test_owned_transport_is_built_with_the_default_timeout() -> None:
     assert client._http.timeout == httpx.Timeout(DEFAULT_TIMEOUT)
 
 
+def test_close_skips_external_transport() -> None:
+    mock_http = MagicMock(spec=httpx.Client)
+    client = NemoClient(base_url=BASE, http_client=mock_http)
+
+    client.close()
+
+    mock_http.close.assert_not_called()
+
+
+def test_from_client_close_does_not_close_parent_transport() -> None:
+    parent = NemoClient(base_url=BASE)
+    child = NemoClient.from_client(parent)
+
+    child.close()
+
+    assert not parent._http.is_closed
+    parent.close()
+    assert parent._http.is_closed
+
+
+def test_with_workspace_returns_clone_sharing_transport() -> None:
+    mock_http = MagicMock(spec=httpx.Client)
+    client = NemoClient(base_url=BASE, workspace="team-a", http_client=mock_http)
+
+    clone = client.with_workspace("default")
+
+    assert clone is not client
+    assert clone.workspace == "default"
+    assert client.workspace == "team-a"
+    assert clone._http is mock_http
+
+
+def test_with_workspace_close_does_not_close_parent_transport() -> None:
+    parent = NemoClient(base_url=BASE)
+    child = parent.with_workspace("team-a")
+
+    child.close()
+
+    assert not parent._http.is_closed
+    parent.close()
+    assert parent._http.is_closed
+
+
 def test_from_client_carries_the_timeout() -> None:
     """The clone shares the transport, so it must carry the override too."""
     upload_timeout = httpx.Timeout(30.0, write=10 * 60, read=5 * 60)
@@ -572,6 +615,40 @@ async def test_constructor_timeout_is_sent_with_every_request_async() -> None:
     await client.send(GET_ITEM(name="alice"))
 
     assert mock_http.request.call_args.kwargs["timeout"] == upload_timeout
+
+
+@pytest.mark.asyncio
+async def test_aclose_skips_external_transport_async() -> None:
+    mock_http = AsyncMock(spec=httpx.AsyncClient)
+    client = AsyncNemoClient(base_url=BASE, http_client=mock_http)
+
+    await client.aclose()
+
+    mock_http.aclose.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_from_client_aclose_does_not_close_parent_transport_async() -> None:
+    parent = AsyncNemoClient(base_url=BASE)
+    child = AsyncNemoClient.from_client(parent)
+
+    await child.aclose()
+
+    assert not parent._http.is_closed
+    await parent.aclose()
+    assert parent._http.is_closed
+
+
+@pytest.mark.asyncio
+async def test_with_workspace_aclose_does_not_close_parent_transport_async() -> None:
+    parent = AsyncNemoClient(base_url=BASE)
+    child = parent.with_workspace("team-a")
+
+    await child.aclose()
+
+    assert not parent._http.is_closed
+    await parent.aclose()
+    assert parent._http.is_closed
 
 
 # ---------------------------------------------------------------------------

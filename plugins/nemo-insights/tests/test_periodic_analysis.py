@@ -46,14 +46,12 @@ from nemo_insights_plugin.sdk_resources.analysis_jobs import (
     CreateAnalysisJobRequest,
     ListAnalysisJobsQueryParams,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform, Omit
-from nemo_platform.pagination import AsyncDefaultPagination, DefaultPaginationPagination
-from nemo_platform.types.intake.span_filter_param import SpanFilterParam
-from nemo_platform.types.intake.spans.span_group import SpanGroup
-from nemo_platform.types.intake.spans.span_group_sort_field import SpanGroupSortField
+from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.entities.client import AsyncEntitiesClient
 from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_platform_plugin.intake.client import AsyncIntakeClient
+from nemo_platform_plugin.intake.types import SpanFilterParam, SpanGroup, SpanGroupsPage
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import JobResults, ResultRef
 from nemo_platform_plugin.jobs.constants import (
@@ -62,7 +60,8 @@ from nemo_platform_plugin.jobs.constants import (
 )
 from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
 from nemo_platform_plugin.nooa_model_client import ConfiguredModelRefs
-from pydantic import ValidationError
+from nemo_platform_plugin.schema import PaginationData
+from pydantic import JsonValue, ValidationError
 
 _BASE_URL = "https://example.com"
 _T = TypeVar("_T")
@@ -422,10 +421,10 @@ def test_merge_eval_filter_overwrites_model_supplied_scope() -> None:
 class _SpanGroupsCall:
     workspace: str | None
     by: str
-    filter: SpanFilterParam | Omit
-    page: int | Omit
-    page_size: int | Omit
-    sort: SpanGroupSortField | Omit
+    filter: SpanFilterParam | dict[str, JsonValue] | None
+    page: int | None
+    page_size: int | None
+    sort: str | None
 
 
 class _SpanGroups:
@@ -439,11 +438,11 @@ class _SpanGroups:
         *,
         workspace: str | None = None,
         by: str,
-        filter: SpanFilterParam | Omit,
-        page: int | Omit,
-        page_size: int | Omit,
-        sort: SpanGroupSortField | Omit,
-    ) -> AsyncDefaultPagination[SpanGroup]:
+        filter: SpanFilterParam | dict[str, JsonValue] | None,
+        page: int | None,
+        page_size: int | None,
+        sort: str | None,
+    ) -> SpanGroupsPage:
         self.calls.append(
             _SpanGroupsCall(
                 workspace=workspace,
@@ -454,11 +453,13 @@ class _SpanGroups:
                 sort=sort,
             )
         )
-        size = page_size if isinstance(page_size, int) else len(self.data)
-        return AsyncDefaultPagination[SpanGroup](
+        current_page = page or 1
+        size = page_size or len(self.data)
+        return SpanGroupsPage(
             data=self.data,
-            pagination=DefaultPaginationPagination(
-                page=1,
+            grouped_by=[by],
+            pagination=PaginationData(
+                page=current_page,
                 page_size=size,
                 current_page_size=len(self.data),
                 total_pages=1,
@@ -467,13 +468,33 @@ class _SpanGroups:
         )
 
 
+class _SpansWithGroups:
+    def __init__(self, groups: _SpanGroups) -> None:
+        self.groups = groups
+
+
+class _IntakeWithGroups:
+    def __init__(self, groups: _SpanGroups) -> None:
+        self.spans = _SpansWithGroups(groups)
+
+
+def _patch_intake_groups(monkeypatch: pytest.MonkeyPatch, groups: _SpanGroups) -> None:
+    def fake_client_from_platform(platform: AsyncNeMoPlatform, client_cls: type[object]) -> object:
+        del platform
+        if client_cls is AsyncIntakeClient:
+            return _IntakeWithGroups(groups)
+        raise AssertionError(f"unexpected client type: {client_cls!r}")
+
+    monkeypatch.setattr("nemo_insights_plugin.analyst.analyst_backend.client_from_platform", fake_client_from_platform)
+
+
 @pytest.mark.asyncio
 async def test_count_agent_sessions_uses_server_side_session_groups(monkeypatch: pytest.MonkeyPatch) -> None:
     since = datetime(2026, 6, 4, 12, tzinfo=timezone.utc)
     groups = _SpanGroups(data=[SpanGroup(group={"session_id": "session-1"}, span_count=3, started_at=_STAMP)], total=7)
 
     async with _async_platform() as client:
-        monkeypatch.setattr(client.intake.spans.groups, "list", groups.list)
+        _patch_intake_groups(monkeypatch, groups)
         backend = RemoteAnalystBackend(client)
         count = await backend.count_agent_sessions(
             agent="research-agent",
@@ -509,7 +530,7 @@ async def test_list_span_groups_fans_out_over_sessions(monkeypatch: pytest.Monke
     )
 
     async with _async_platform() as client:
-        monkeypatch.setattr(client.intake.spans.groups, "list", groups.list)
+        _patch_intake_groups(monkeypatch, groups)
         backend = RemoteAnalystBackend(client)
         result = await backend.list_span_groups(
             workspace="default",
@@ -550,7 +571,7 @@ async def test_count_agent_sessions_pins_evaluation_id(monkeypatch: pytest.Monke
     groups = _SpanGroups(data=[SpanGroup(group={"session_id": "session-1"}, span_count=3, started_at=_STAMP)], total=7)
 
     async with _async_platform() as client:
-        monkeypatch.setattr(client.intake.spans.groups, "list", groups.list)
+        _patch_intake_groups(monkeypatch, groups)
         backend = RemoteAnalystBackend(client)
         await backend.count_agent_sessions(
             agent="research-agent",
@@ -578,7 +599,7 @@ async def test_list_span_groups_pins_evaluation_id(monkeypatch: pytest.MonkeyPat
     )
 
     async with _async_platform() as client:
-        monkeypatch.setattr(client.intake.spans.groups, "list", groups.list)
+        _patch_intake_groups(monkeypatch, groups)
         backend = RemoteAnalystBackend(client)
         await backend.list_span_groups(
             workspace="default",

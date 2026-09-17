@@ -5,6 +5,8 @@
 from collections.abc import Iterator
 from unittest.mock import MagicMock
 
+import anyio
+import httpx
 import pytest
 
 pytest.importorskip("scaled_evals")
@@ -70,6 +72,26 @@ def test_healthz() -> None:
     response = client.get("/v1/healthz")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_healthz_responds_when_worker_thread_capacity_is_exhausted() -> None:
+    async def probe() -> None:
+        limiter = anyio.to_thread.current_default_thread_limiter()  # type: ignore[unresolved-attribute]
+        original_capacity = limiter.total_tokens
+        occupied_worker = object()
+        limiter.total_tokens = 1
+        await limiter.acquire_on_behalf_of(occupied_worker)
+        try:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as connection:
+                with anyio.fail_after(1):
+                    response = await connection.get("/v1/healthz")
+            assert response.status_code == 200
+            assert response.json() == {"status": "ok"}
+        finally:
+            limiter.release_on_behalf_of(occupied_worker)
+            limiter.total_tokens = original_capacity
+
+    anyio.run(probe)
 
 
 def test_metrics(monkeypatch) -> None:  # noqa: ANN001
@@ -159,6 +181,28 @@ def test_dependency_checks_require_fresh_build_worker(monkeypatch) -> None:  # n
 
     assert required_ok is False
     assert checks["build_worker"] == "fail: RuntimeError"
+
+
+def test_dependency_checks_require_platform_jobs_controller(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setattr(settings, "platform_build_jobs_enabled", True)
+    monkeypatch.setattr(settings, "platform_evaluation_jobs_enabled", False)
+    monkeypatch.setattr(settings, "buildkit_enabled", False)
+    monkeypatch.setattr(settings, "registry_enabled", False)
+    monkeypatch.setattr(settings, "build_worker_required", False)
+    monkeypatch.setattr(ops, "_postgres_probe", lambda: None)
+    monkeypatch.setattr(ops, "_schema_probe", lambda: None)
+    monkeypatch.setattr(ops.s3, "check_bucket", lambda: None)
+
+    def stale_controller() -> None:
+        raise RuntimeError("no fresh Platform Jobs controller heartbeat")
+
+    monkeypatch.setattr(ops, "_platform_jobs_controller_probe", stale_controller)
+
+    checks, required_ok = ops._run_dependency_checks()
+
+    assert required_ok is False
+    assert checks["platform_jobs_controller"] == "fail: RuntimeError"
+    assert checks["build_worker"] == "skipped: disabled"
 
 
 def test_dependency_checks_require_compatible_schema(monkeypatch) -> None:  # noqa: ANN001

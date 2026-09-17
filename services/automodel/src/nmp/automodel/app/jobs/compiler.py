@@ -5,8 +5,6 @@
 
 import logging
 
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.errors import NotFoundError
 from nemo_platform_plugin.jobs.api_factory import (
     ContainerSpec,
@@ -18,7 +16,6 @@ from nemo_platform_plugin.jobs.api_factory import (
     ResourcesRequestsSpec,
     ResourcesSpec,
 )
-from nemo_platform_plugin.models.client import AsyncModelsClient
 from nemo_platform_plugin.models.types import ModelDeploymentConfig, ModelEntity
 from nmp.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
@@ -46,7 +43,7 @@ from nmp.automodel.images import (
     MODEL_ENTITY_TASK_COMMAND,
     get_tasks_image,
 )
-from nmp.common.auth import AuthClient, auth_client_context
+from nmp.common.auth import auth_client_context
 from nmp.common.entities.utils import parse_entity_ref
 from nmp.common.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nmp.common.jobs.exceptions import PlatformJobCompilationError
@@ -65,7 +62,7 @@ from nmp.customization_common.schemas.model_entity import (
 from nmp.customization_common.schemas.model_entity import (
     PEFTConfig as ModelEntityPEFTConfig,
 )
-from nmp.customization_common.service.platform_client import fetch_model_entity
+from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients, fetch_model_entity
 from nmp.customization_common.tasks.file_io_metadata import build_output_fileset_metadata_from_model_entity
 
 logger = logging.getLogger(__name__)
@@ -287,13 +284,12 @@ def _build_model_entity_config(
 async def _resolve_deployment_config_ref(
     config_ref: str,
     workspace: str,
-    sdk: AsyncNeMoPlatform,
+    platform: AsyncCustomizationPlatformClients,
 ) -> ModelDeploymentConfig:
     """Resolve a ``name`` or ``workspace/name`` string to a ModelDeploymentConfig."""
     ref = parse_entity_ref(config_ref, default_workspace=workspace)
-    models = client_from_platform(sdk, AsyncModelsClient)
     try:
-        response = await models.get_deployment_config(name=ref.name, workspace=ref.workspace)
+        response = await platform.models.get_deployment_config(name=ref.name, workspace=ref.workspace)
         return response.data()
     except NotFoundError as e:
         raise PlatformJobCompilationError(
@@ -303,11 +299,28 @@ async def _resolve_deployment_config_ref(
         raise PlatformJobCompilationError(f"Failed to resolve deployment_config '{config_ref}': {e}") from e
 
 
+async def _require_tool_call_plugin_permission(workspace: str) -> None:
+    """Gate ``tool_call_plugin``, the one deployment field that needs a permission check.
+
+    Auth is resolved here rather than up front: every other deployment_config
+    shape validates without it, so demanding an auth context for all of them
+    would fail compilation for jobs that never consult it.
+    """
+    auth_client = auth_client_context.get()
+    if auth_client is None:
+        raise PlatformJobCompilationError(
+            "No auth context available; cannot validate the tool_call_plugin permission.",
+        )
+    if not await auth_client.has_permissions(workspace, ["models.tool-call-plugin.set"]):
+        raise PlatformJobCompilationError(
+            "Insufficient permissions to set tool_call_plugin. Requires the models.tool-call-plugin.set permission."
+        )
+
+
 async def _validate_deployment_config(
     workspace: str,
     transformed_spec: CustomizationJobOutput,
-    sdk: AsyncNeMoPlatform,
-    auth_client: AuthClient,
+    platform: AsyncCustomizationPlatformClients,
 ) -> None:
     """Validate deployment_config consistency before training starts.
 
@@ -322,11 +335,7 @@ async def _validate_deployment_config(
     if isinstance(dc, DeploymentParams):
         tcc = dc.tool_call_config
         if tcc and tcc.tool_call_plugin:
-            if not await auth_client.has_permissions(workspace, ["models.tool-call-plugin.set"]):
-                raise PlatformJobCompilationError(
-                    "Insufficient permissions to set tool_call_plugin. "
-                    "Requires the models.tool-call-plugin.set permission."
-                )
+            await _require_tool_call_plugin_permission(workspace)
         return
 
     # String reference to an existing deployment config: validate consistency.
@@ -336,7 +345,7 @@ async def _validate_deployment_config(
     ft_type = transformed_spec.training.finetuning_type
     is_lora = ft_type == FinetuningType.LORA
     produces_new_model = ft_type in (FinetuningType.ALL_WEIGHTS, FinetuningType.LORA_MERGED)
-    resolved_config = await _resolve_deployment_config_ref(dc, workspace, sdk)
+    resolved_config = await _resolve_deployment_config_ref(dc, workspace, platform)
 
     # LoRA job referencing a config that has lora_enabled=False
     if is_lora and resolved_config.model_spec.lora_enabled is False:
@@ -350,8 +359,7 @@ async def _validate_deployment_config(
     if produces_new_model:
         output_name = transformed_spec.output.name
         try:
-            models = client_from_platform(sdk, AsyncModelsClient)
-            response = await models.get_model(name=output_name, workspace=workspace)
+            response = await platform.models.get_model(name=output_name, workspace=workspace)
             existing_me = response.data()
         except NotFoundError:
             # Output model entity doesn't exist yet, so a string
@@ -380,7 +388,7 @@ async def _validate_deployment_config(
 async def platform_job_config_compiler(
     workspace: str,
     job_spec: CustomizationJobOutput,
-    sdk: AsyncNeMoPlatform,
+    platform: AsyncCustomizationPlatformClients,
 ) -> PlatformJobSpec:
     """Compile canonical job spec into a four-step PlatformJobSpec."""
     transformed_spec = job_spec
@@ -394,15 +402,16 @@ async def platform_job_config_compiler(
     # output is a required field in CustomizationJobOutput
     cpu_resources = _get_cpu_resources()
     base_env = _get_base_environment()
+    task_profile = transformed_spec.training.execution_profile or config.default_training_execution_profile
 
     # Fetch the primary model entity
-    me = await fetch_model_entity(transformed_spec.model, workspace, sdk)
+    me = await fetch_model_entity(transformed_spec.model, workspace, platform)
 
     # For distillation jobs, also fetch the teacher model entity
     teacher_me: ModelEntity | None = None
     if isinstance(transformed_spec.training, DistillationTraining):
         try:
-            teacher_me = await fetch_model_entity(transformed_spec.training.teacher_model, workspace, sdk)
+            teacher_me = await fetch_model_entity(transformed_spec.training.teacher_model, workspace, platform)
         except ValueError as e:
             raise PlatformJobCompilationError(
                 f"Teacher model '{transformed_spec.training.teacher_model}' not found. "
@@ -414,24 +423,19 @@ async def platform_job_config_compiler(
             ) from e
 
     if transformed_spec.deployment_config is not None:
-        auth_client = auth_client_context.get()
-        if auth_client is None:
-            raise PlatformJobCompilationError(
-                "No auth context available; cannot validate deployment config permissions.",
-            )
-        await _validate_deployment_config(workspace, transformed_spec, sdk, auth_client)
+        await _validate_deployment_config(workspace, transformed_spec, platform)
 
     file_io_download_config = _build_file_download_config(transformed_spec, me, teacher_me)
     training_recipe = _resolve_training_recipe(me, transformed_spec.training.recipe)
 
-    # The embedding NIM requires ONNX format, which cannot represent standalone LoRA adapters.
+    # Embedding and ranking NIMs require ONNX, which cannot represent standalone LoRA adapters.
     # LoRA with merge=True (lora_merged) is allowed because it produces a full-weight model after training.
     if training_recipe.value in ("bi_encoder", "cross_encoder") and (
         transformed_spec.training.finetuning_type == FinetuningType.LORA
     ):
         raise PlatformJobCompilationError(
             "NeMo Platform does not support unmerged LoRA for embedding or cross-encoder models. "
-            "Embedding NIM requires ONNX (no standalone adapters); ranking NIM expects a full-weight checkpoint. "
+            "Embedding and ranking NIMs require ONNX, which cannot represent standalone adapters. "
             "Use peft with merge=True (lora_merged) or omit peft for all_weights training."
         )
 
@@ -447,17 +451,11 @@ async def platform_job_config_compiler(
     trust_remote_code = me.trust_remote_code or False
     model_entity_config = _build_model_entity_config(workspace, transformed_spec, trust_remote_code)
 
-    cpu_profile = (
-        transformed_spec.training.execution_profile
-        if transformed_spec.training.execution_profile is not None
-        else config.default_training_execution_profile
-    )
-
     steps = [
         # Step 1: Download model and dataset files from Files service
         PlatformJobStep(
             name="model-and-dataset-download",
-            executor=_cpu_tasks_executor(FILE_IO_TASK_COMMAND, cpu_resources, cpu_profile),
+            executor=_cpu_tasks_executor(FILE_IO_TASK_COMMAND, cpu_resources, task_profile),
             environment=base_env,
             config=file_io_download_config.model_dump(mode="json"),
         ),
@@ -471,14 +469,14 @@ async def platform_job_config_compiler(
         # Step 3: Upload customized model
         PlatformJobStep(
             name="model-upload",
-            executor=_cpu_tasks_executor(FILE_IO_TASK_COMMAND, cpu_resources, cpu_profile),
+            executor=_cpu_tasks_executor(FILE_IO_TASK_COMMAND, cpu_resources, task_profile),
             environment=base_env,
             config=file_io_upload_config.model_dump(mode="json"),
         ),
         # Step 4: Create model entity
         PlatformJobStep(
             name="model-entity-creation",
-            executor=_cpu_tasks_executor(MODEL_ENTITY_TASK_COMMAND, cpu_resources, cpu_profile),
+            executor=_cpu_tasks_executor(MODEL_ENTITY_TASK_COMMAND, cpu_resources, task_profile),
             environment=base_env,
             config=model_entity_config.model_dump(mode="json"),
         ),

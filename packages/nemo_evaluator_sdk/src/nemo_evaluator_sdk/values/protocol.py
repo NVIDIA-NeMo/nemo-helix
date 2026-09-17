@@ -85,6 +85,7 @@ class MetricOutputSpec(BaseModel):
     name: str
     description: str | None = None
     value_schema: type[BaseModel]
+    required: bool = True
 
     @field_validator("name")
     @classmethod
@@ -94,24 +95,30 @@ class MetricOutputSpec(BaseModel):
         return value
 
     @staticmethod
-    def continuous_score(name: str, description: str | None = None) -> "MetricOutputSpec":
-        return MetricOutputSpec(name=name, description=description, value_schema=ContinuousScore)
+    def continuous_score(name: str, description: str | None = None, *, required: bool = True) -> "MetricOutputSpec":
+        return MetricOutputSpec(name=name, description=description, value_schema=ContinuousScore, required=required)
 
     @staticmethod
-    def discrete_score(name: str, description: str | None = None) -> "MetricOutputSpec":
-        return MetricOutputSpec(name=name, description=description, value_schema=DiscreteScore)
+    def discrete_score(name: str, description: str | None = None, *, required: bool = True) -> "MetricOutputSpec":
+        return MetricOutputSpec(name=name, description=description, value_schema=DiscreteScore, required=required)
 
     @staticmethod
-    def label(name: str, description: str | None = None) -> "MetricOutputSpec":
-        return MetricOutputSpec(name=name, description=description, value_schema=Label)
+    def label(name: str, description: str | None = None, *, required: bool = True) -> "MetricOutputSpec":
+        return MetricOutputSpec(name=name, description=description, value_schema=Label, required=required)
 
     @staticmethod
-    def boolean(name: str, description: str | None = None) -> "MetricOutputSpec":
-        return MetricOutputSpec(name=name, description=description, value_schema=BooleanValue)
+    def boolean(name: str, description: str | None = None, *, required: bool = True) -> "MetricOutputSpec":
+        return MetricOutputSpec(name=name, description=description, value_schema=BooleanValue, required=required)
 
     @staticmethod
-    def model(name: str, value_schema: type[BaseModel], description: str | None = None) -> "MetricOutputSpec":
-        return MetricOutputSpec(name=name, description=description, value_schema=value_schema)
+    def model(
+        name: str,
+        value_schema: type[BaseModel],
+        description: str | None = None,
+        *,
+        required: bool = True,
+    ) -> "MetricOutputSpec":
+        return MetricOutputSpec(name=name, description=description, value_schema=value_schema, required=required)
 
     def coerce_value(self, value: Any) -> BaseModel:
         """Validate and coerce a raw output value to this spec's declared schema."""
@@ -160,12 +167,22 @@ class MetricOutput(BaseModel):
         return value
 
 
+#: ``details`` keys with a meaning beyond the emitting metric, so a consumer can act on them
+#: without knowing which metric wrote them. ``OUTPUT_DETAIL`` names the single metric output a
+#: diagnostic is about (absent when it describes the result as a whole); ``REASON_DETAIL`` carries
+#: the metric's own short machine-readable cause. Named for the same reason ``TRIAL_STATUS_DETAIL``
+#: is: they cross a package boundary, and a rename must not degrade a reader silently.
+OUTPUT_DETAIL = "output"
+REASON_DETAIL = "reason"
+
+
 class MetricDiagnostic(BaseModel):
     """One diagnostic finding explaining how a metric score was derived.
 
     ``message`` is the human-readable entry point. Metric-specific structured
     context (expected/actual values, diffs, check breakdowns, judge rationales,
-    etc.) belongs in ``details``.
+    etc.) belongs in ``details`` -- see :data:`OUTPUT_DETAIL` and :data:`REASON_DETAIL` for the
+    two keys that are read outside the metric that wrote them.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -202,11 +219,11 @@ def validate_metric_result(result: MetricResult, outputs: list[MetricOutputSpec]
     declared_names = [output.name for output in outputs]
     declared = set(declared_names)
     returned = set(returned_names)
-    missing = [name for name in declared_names if name not in returned]
+    missing = [output.name for output in outputs if output.required and output.name not in returned]
     undeclared = [name for name in returned_names if name not in declared]
 
     if missing:
-        raise ValueError(f"Missing declared metric outputs: {missing}")
+        raise ValueError(f"Missing required metric outputs: {missing}")
     if undeclared:
         raise ValueError(f"Undeclared metric outputs: {undeclared}")
     for output in result.outputs:

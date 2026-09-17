@@ -5,8 +5,15 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+import json
+import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
+from unittest import mock
 
+import pytest
 from nemo_fabric_adapter_contract import models as contract
 from nemo_insights_plugin import fabric_adapter
 from nemo_insights_plugin.analyst.result import AnalystResult
@@ -55,6 +62,23 @@ def _stub_sdk_factory(clients: list[_StubClient]) -> Any:
     return factory
 
 
+def _runtime_context(telemetry: contract.RuntimeTelemetryContext | None = None) -> contract.RuntimeContext:
+    """The context Fabric hands every invocation; telemetry is the part we read."""
+    return contract.RuntimeContext(
+        runtime_id="runtime-1",
+        invocation_id="invocation-1",
+        request_id="request-1",
+        environment=contract.EnvironmentHandle(
+            environment_id="environment-1",
+            provider="local",
+            control_location="in_env_control",
+            ownership="caller_owned",
+        ),
+        artifacts=contract.ArtifactManifest(),
+        telemetry=telemetry,
+    )
+
+
 def _request(context: dict[str, Any] | None = None) -> contract.AgentRunRequest:
     return contract.AgentRunRequest(input="Analyze telemetry.", context=context or {})
 
@@ -85,7 +109,7 @@ async def test_fabric_adapter_returns_unpersisted_analyst_result(monkeypatch) ->
         }
     )
 
-    result = await runtime.invoke(_request({"job_workspace": "workspace"}), cast(contract.RuntimeContext, None))
+    result = await runtime.invoke(_request({"job_workspace": "workspace"}), _runtime_context())
 
     assert result.status is contract.AgentRunStatus.SUCCEEDED
     assert result.output == {
@@ -123,7 +147,7 @@ async def test_fabric_adapter_does_not_leak_a_client_when_a_model_ref_is_invalid
     runtime = fabric_adapter.InsightsAnalystRuntime()
     await runtime.start({"config": _agent_config({"agent": "research-agent", "default_model": "   "})})
 
-    result = await runtime.invoke(_request({"job_workspace": "workspace"}), cast(contract.RuntimeContext, None))
+    result = await runtime.invoke(_request({"job_workspace": "workspace"}), _runtime_context())
 
     assert result.status is contract.AgentRunStatus.FAILED
     assert result.error is not None
@@ -135,7 +159,7 @@ async def test_fabric_adapter_reports_configuration_failure() -> None:
     runtime = fabric_adapter.InsightsAnalystRuntime()
     await runtime.start({"config": _agent_config({})})
 
-    result = await runtime.invoke(_request({"job_workspace": "workspace"}), cast(contract.RuntimeContext, None))
+    result = await runtime.invoke(_request({"job_workspace": "workspace"}), _runtime_context())
 
     assert result.status is contract.AgentRunStatus.FAILED
     assert result.error is not None
@@ -159,7 +183,7 @@ async def test_fabric_adapter_logs_the_failure_with_its_traceback(monkeypatch, c
     await runtime.start({"config": _agent_config({"agent": "research-agent"})})
 
     with caplog.at_level("ERROR", logger="nemo_insights_plugin.fabric_adapter"):
-        result = await runtime.invoke(_request({"job_workspace": "workspace"}), cast(contract.RuntimeContext, None))
+        result = await runtime.invoke(_request({"job_workspace": "workspace"}), _runtime_context())
 
     assert result.status is contract.AgentRunStatus.FAILED
     assert result.error is not None
@@ -190,7 +214,108 @@ async def test_fabric_adapter_logs_the_whole_cause_chain(monkeypatch, caplog) ->
     await runtime.start({"config": _agent_config({"agent": "research-agent"})})
 
     with caplog.at_level("ERROR", logger="nemo_insights_plugin.fabric_adapter"):
-        await runtime.invoke(_request({"job_workspace": "workspace"}), cast(contract.RuntimeContext, None))
+        await runtime.invoke(_request({"job_workspace": "workspace"}), _runtime_context())
 
     assert originating in caplog.text, "root cause was dropped"
     assert raised in caplog.text
+
+
+async def test_relay_activates_fabrics_config_and_scopes_the_agent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Fabric resolves the whole export; the adapter activates it and names the scope.
+
+    Nothing about the destination is decided here — the endpoint, credentials
+    and agent name all arrive in the config file Fabric wrote.
+    """
+    relay_config = tmp_path / "relay-config.json"
+    relay_config.write_text(
+        json.dumps(
+            {
+                "relay": {
+                    "config": {
+                        "version": 1,
+                        "components": [
+                            {
+                                "kind": "observability",
+                                "enabled": True,
+                                # The shape Fabric writes from the agents plugin's
+                                # auto-wiring: destination and credentials already
+                                # resolved, nothing for the adapter to decide.
+                                "config": {
+                                    "version": 3,
+                                    "atif": {
+                                        "enabled": True,
+                                        "agent_name": "insights-analyst",
+                                        "storage": [
+                                            {
+                                                "type": "http",
+                                                "endpoint": "http://platform/apis/intake/v2/workspaces/w/ingest/atif",
+                                                "header_env": {"X-NMP-Principal-Id": "NMP_HEADER"},
+                                            }
+                                        ],
+                                    },
+                                },
+                            }
+                        ],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    seen: dict[str, Any] = {}
+
+    async def fake_run_analyst_change_set(**kwargs: Any) -> tuple[AnalystResult, object]:
+        seen.update(kwargs)
+        return AnalystResult(summary="done"), object()
+
+    @asynccontextmanager
+    async def fake_plugin(config: Any) -> AsyncIterator[None]:
+        seen["plugin_config"] = config
+        # Relay resolves header_env against the environment while exporting,
+        # so the variables have to be set for the duration of the run.
+        seen["env_during_run"] = os.environ.get("FABRIC_RELAY_CONFIG_PATH")
+        yield
+
+    monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fake_run_analyst_change_set)
+    monkeypatch.setattr(fabric_adapter.relay_plugin, "plugin", fake_plugin)
+    monkeypatch.setattr(fabric_adapter, "get_async_task_sdk", _stub_sdk_factory([]))
+
+    runtime = fabric_adapter.InsightsAnalystRuntime()
+    await runtime.start({"config": _agent_config({"agent": "research-agent"})})
+    telemetry = contract.RuntimeTelemetryContext(
+        relay_enabled=True,
+        config_path=str(relay_config),
+        env={"FABRIC_RELAY_CONFIG_PATH": str(relay_config)},
+    )
+
+    result = await runtime.invoke(_request({"job_workspace": "w"}), _runtime_context(telemetry))
+
+    assert result.status is contract.AgentRunStatus.SUCCEEDED
+    assert seen["relay_scope_name"] == fabric_adapter.ANALYST_RELAY_SCOPE
+    assert seen["plugin_config"]["components"][0]["kind"] == "observability"
+    assert seen["env_during_run"] == str(relay_config)
+    # The runtime serves many invocations; a leftover config path would make
+    # the next one export against a stale, possibly deleted, config.
+    assert "FABRIC_RELAY_CONFIG_PATH" not in os.environ
+
+
+async def test_without_relay_the_agent_runs_unscoped() -> None:
+    """Relay is opt-in per invocation; Fabric says when."""
+    seen: dict[str, Any] = {}
+
+    async def fake_run_analyst_change_set(**kwargs: Any) -> tuple[AnalystResult, object]:
+        seen.update(kwargs)
+        return AnalystResult(summary="done"), object()
+
+    runtime = fabric_adapter.InsightsAnalystRuntime()
+    await runtime.start({"config": _agent_config({"agent": "research-agent"})})
+
+    with (
+        mock.patch.object(fabric_adapter, "run_analyst_change_set", fake_run_analyst_change_set),
+        mock.patch.object(fabric_adapter, "get_async_task_sdk", _stub_sdk_factory([])),
+    ):
+        await runtime.invoke(_request({"job_workspace": "w"}), _runtime_context(None))
+
+    assert seen["relay_scope_name"] is None

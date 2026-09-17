@@ -22,6 +22,7 @@ import os
 import shutil
 import sys
 import types
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +31,10 @@ from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric import runtime as fabric_runtime
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
-from nemo_evaluator_sdk.values.evidence import EVIDENCE_FORMAT_ATIF, EVIDENCE_TRACE
+from nemo_evaluator_sdk.values.evidence import EVIDENCE_FORMAT_ATIF, EVIDENCE_FORMAT_OTLP, EVIDENCE_TRACE
+from nemo_evaluator_sdk.values.otlp import parse_resource_spans, resource_spans_from_text
+from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Span
 
 
 class _TrajectoryEvidenceMetric:
@@ -51,8 +55,10 @@ class _TrajectoryEvidenceMetric:
         steps = 0
         evidence = input.candidate.evidence
         if evidence is not None:
-            descriptor = evidence.get(EVIDENCE_TRACE)
-            if descriptor is not None and descriptor.ref:
+            # Format-qualified: this metric parses ATIF, and the primary trace key is OTLP
+            # whenever the runner captured one.
+            descriptor = evidence.get(f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}") or evidence.get(EVIDENCE_TRACE)
+            if descriptor is not None and descriptor.ref and descriptor.format == EVIDENCE_FORMAT_ATIF:
                 payload = json.loads(Path(descriptor.ref).read_text(encoding="utf-8"))
                 steps = len(payload.get("steps") or [])
         return MetricResult(outputs=[MetricOutput(name="has_trajectory", value=steps > 0)])
@@ -198,6 +204,8 @@ async def test_fabric_runner_eval_exposes_trajectory_to_metric(tmp_path: Path, m
     setattr(module, "RelayAtifConfig", _FakeRelayModel)
     setattr(module, "RelayAtofConfig", _FakeRelayModel)
     setattr(module, "RelayAtofFileSinkConfig", _FakeRelayModel)
+    setattr(module, "RelayOpenTelemetryConfig", _FakeRelayModel)
+    setattr(module, "RelayOpenTelemetryEndpointConfig", _FakeRelayModel)
     monkeypatch.setitem(sys.modules, "nemo_fabric", module)
     # nemo_relay stays a hard (installed) dependency here so ``run_tasks``'s capture-trajectory fail-fast
     # (``import nemo_relay.observability``) resolves; only the optional native nemo_fabric SDK is faked.
@@ -218,9 +226,16 @@ async def test_fabric_runner_eval_exposes_trajectory_to_metric(tmp_path: Path, m
     # The trajectory is exposed under the standard trace key, as an existing ATIF file.
     assert trial.evidence is not None
     trace = trial.evidence.descriptors[EVIDENCE_TRACE]
+    # ATIF, not OTLP: this test's fake Fabric never runs Relay, so nothing exports a trace to
+    # capture. The primary key is OTLP only when one was actually produced.
     assert trace.format == EVIDENCE_FORMAT_ATIF
     assert trace.ref is not None
     assert Path(trace.ref).exists()
+    # ATIF stays reachable under its own key; the format decides which view is primary, never which
+    # is reachable -- the same rule Harbor follows.
+    atif = trial.evidence.descriptors[f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}"]
+    assert atif.format == EVIDENCE_FORMAT_ATIF
+    assert atif.ref is not None and Path(atif.ref).exists()
     # The metric received the evidence and scored from the trajectory content.
     scores = [s for s in result.scores if s.metric_type == "has-trajectory"]
     assert scores and scores[0].trial_id == trial.id
@@ -297,12 +312,96 @@ def test_fabric_codex_live_eval_captures_atif_trajectory(tmp_path: Path) -> None
     trial = result.trials[0]
     assert trial.status == "completed", trial.metadata
     assert trial.evidence is not None
+    # OTLP is primary because Relay exported one and the runner captured it; ATIF stays reachable
+    # under its own key, so a metric written against either view still finds it.
     trace = trial.evidence.descriptors[EVIDENCE_TRACE]
-    assert trace.format == EVIDENCE_FORMAT_ATIF
+    assert trace.format == EVIDENCE_FORMAT_OTLP
     assert trace.ref is not None
-    atif = Path(trace.ref)
+    otlp = Path(trace.ref)
+    assert otlp.exists() and otlp.stat().st_size > 0
+    spans = parse_resource_spans(resource_spans_from_text(otlp.read_text(encoding="utf-8")))
+    assert [span for rs in spans for ss in rs.scope_spans for span in ss.spans], "captured no spans"
+
+    atif_descriptor = trial.evidence.descriptors[f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}"]
+    assert atif_descriptor.ref is not None
+    atif = Path(atif_descriptor.ref)
     assert atif.exists() and atif.stat().st_size > 0
     assert "steps" in json.loads(atif.read_text(encoding="utf-8"))
     # The metric read the real trajectory and scored on it.
     scores = [s for s in result.scores if s.metric_type == "has-trajectory"]
     assert scores and scores[0].outputs[0].value in (True, 1.0)
+
+
+@pytest.mark.asyncio
+async def test_a_relay_export_is_captured_and_becomes_the_primary_trace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The runtime-to-writer wiring, without needing a live Relay.
+
+    The fake harness does what Relay does: read the OTLP endpoint out of the config it was handed
+    and POST an export to it. That covers the parts a writer unit test cannot -- that the endpoint
+    reaches Relay's config at all, that the capture is still open while the harness runs, and that
+    the resulting file is registered as the primary trace.
+    """
+    atif_path = tmp_path / "trajectory.atif.json"
+    atif_path.write_text(json.dumps({"schema_version": "atif/v1", "steps": [{"kind": "message"}]}), encoding="utf-8")
+    artifacts = [_FakeArtifact("relay_atif", "atif", atif_path)]
+
+    def _endpoint_from(config: Any) -> str:
+        opentelemetry = config.relay["observability"].kwargs["opentelemetry"]
+        return str(opentelemetry.kwargs["endpoints"][0].kwargs["endpoint"])
+
+    class _ExportingClient:
+        async def run(self, agent: Any, **kwargs: Any) -> _FakeResult:
+            span = Span(trace_id=bytes(range(16)), span_id=bytes(range(8)), name="codex-turn")
+            export = ExportTraceServiceRequest(resource_spans=[ResourceSpans(scope_spans=[ScopeSpans(spans=[span])])])
+            request = urllib.request.Request(
+                _endpoint_from(agent),
+                data=export.SerializeToString(),
+                headers={"Content-Type": "application/x-protobuf"},
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=10) as response:
+                assert response.status == 200
+            return _FakeResult(artifacts)
+
+    class _FakeRunRequest:
+        def __init__(self, **kwargs: Any) -> None:
+            self.__dict__.update(kwargs)
+
+    module = types.ModuleType("nemo_fabric")
+    setattr(module, "Fabric", _ExportingClient)
+    setattr(module, "FabricConfig", _FakeConfig)
+    setattr(module, "EnvironmentConfig", _FakeEnvironment)
+    setattr(module, "ModelConfig", _FakeModelConfig)
+    setattr(module, "RunRequest", _FakeRunRequest)
+    for name in (
+        "RelayObservabilityConfig",
+        "RelayAtifConfig",
+        "RelayAtofConfig",
+        "RelayAtofFileSinkConfig",
+        "RelayOpenTelemetryConfig",
+        "RelayOpenTelemetryEndpointConfig",
+    ):
+        setattr(module, name, _FakeRelayModel)
+    monkeypatch.setitem(sys.modules, "nemo_fabric", module)
+
+    runtime = fabric_runtime.FabricAgentRuntime(
+        config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
+        work_root=tmp_path / "fabric",
+    )
+    result = AgentEvaluator().run_sync(
+        tasks=[_task()],
+        target=runtime,
+        config=AgentEvalRunConfig(work_dir=tmp_path / "out", parallelism=1),
+    )
+
+    trial = result.trials[0]
+    assert trial.status == "completed", trial.metadata
+    assert trial.evidence is not None
+    trace = trial.evidence.descriptors[EVIDENCE_TRACE]
+    assert trace.format == EVIDENCE_FORMAT_OTLP
+    assert trace.ref is not None
+    spans = parse_resource_spans(resource_spans_from_text(Path(trace.ref).read_text(encoding="utf-8")))
+    assert [span.name for rs in spans for ss in rs.scope_spans for span in ss.spans] == ["codex-turn"]
+    assert trial.evidence.descriptors[f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}"].format == EVIDENCE_FORMAT_ATIF

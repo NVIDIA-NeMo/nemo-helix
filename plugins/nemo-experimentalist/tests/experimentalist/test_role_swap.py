@@ -758,7 +758,7 @@ async def test_the_terminator_sees_eliminated_candidates_too(
 def test_no_component_constructor_names_a_platform_type(isolated_registry: None) -> None:
     """A component must be constructible by anyone holding a context, and nothing else.
 
-    Trace readers used to take an `AsyncNeMoPlatform` client plus a workspace name, which
+    Trace readers used to take an async platform client plus a workspace name, which
     put a platform type in the public signature of a role a third party is meant to
     implement: to write one you had to obtain a platform client, and the host had to hand
     its client to a component. They take `load_trace` from the context instead.
@@ -777,7 +777,7 @@ def test_no_component_constructor_names_a_platform_type(isolated_registry: None)
         f"{role}:{name}": [
             parameter
             for parameter, value in inspect.signature(cls.__init__).parameters.items()
-            if "NeMoPlatform" in str(value.annotation)
+            if "NemoClient" in str(value.annotation) or "NeMoPlatform" in str(value.annotation)
         ]
         for (role, name), cls in Component._registry.items()
     }

@@ -10,6 +10,7 @@ from nmp_build_tools.hatch import (
     _rewrite_metadata,
     nmp_dynamic_versioning_config,
     read_bundle_force_include,
+    read_bundle_shared_data,
 )
 
 
@@ -126,6 +127,35 @@ pkg = { source = "pkg/src/pkg", module = "pkg", force_include = { "../../**/*.ym
 
     with pytest.raises(ValueError, match="Glob force_include target collision"):
         read_bundle_force_include(str(root))
+
+
+def test_read_bundle_shared_data_resolves_paths_relative_to_the_bundle_source(tmp_path: Path) -> None:
+    root = tmp_path / "wrapper"
+    (root / "pkg" / "src" / "pkg").mkdir(parents=True)
+    (root / "pkg" / "adapter.json").write_text("{}")
+    (root / "pyproject.toml").write_text(
+        """
+[tool.bundle-package]
+pkg = { source = "pkg/src/pkg", module = "pkg", shared_data = { "../../adapter.json" = "share/x/adapter.json" } }
+"""
+    )
+
+    assert read_bundle_shared_data(str(root)) == {
+        str(root / "pkg" / "adapter.json"): "share/x/adapter.json",
+    }
+
+
+def test_read_bundle_shared_data_is_empty_without_declarations(tmp_path: Path) -> None:
+    root = tmp_path / "wrapper"
+    (root / "pkg" / "src" / "pkg").mkdir(parents=True)
+    (root / "pyproject.toml").write_text(
+        """
+[tool.bundle-package]
+pkg = { source = "pkg/src/pkg", module = "pkg" }
+"""
+    )
+
+    assert read_bundle_shared_data(str(root)) == {}
 
 
 def test_rewrite_metadata_replaces_bundled_requirements_with_self_extras() -> None:

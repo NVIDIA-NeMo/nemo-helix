@@ -1083,6 +1083,10 @@ def test_replace_client_methods_updates_init_and_getattr(tmp_path: Path, monkeyp
     source_path.parent.mkdir(parents=True, exist_ok=True)
     plugin_client_path = tmp_path / "nemo_platform_plugin/client"
     plugin_client_path.mkdir(parents=True)
+    plugin_jobs_path = tmp_path / "nemo_platform_plugin/jobs"
+    plugin_jobs_path.mkdir(parents=True)
+    plugin_secrets_path = tmp_path / "nemo_platform_plugin/secrets"
+    plugin_secrets_path.mkdir(parents=True)
     (client_path.parent / "__init__.py").write_text("", encoding="utf-8")
     (client_path.parent / "_base_client.py").write_text(
         """
@@ -1103,6 +1107,30 @@ class DefaultHttpxClient:
     )
     (plugin_client_path / "tls.py").write_text(
         "def client_verify_from_env() -> bool:\n    return True\n",
+        encoding="utf-8",
+    )
+    (plugin_jobs_path / "__init__.py").write_text("", encoding="utf-8")
+    (plugin_jobs_path / "client.py").write_text(
+        """
+class AsyncJobsClient:
+    pass
+
+
+class JobsClient:
+    pass
+""".lstrip(),
+        encoding="utf-8",
+    )
+    (plugin_secrets_path / "__init__.py").write_text("", encoding="utf-8")
+    (plugin_secrets_path / "compat.py").write_text(
+        """
+class AsyncSecretsResource:
+    pass
+
+
+class SecretsResource:
+    pass
+""".lstrip(),
         encoding="utf-8",
     )
 
@@ -1146,6 +1174,14 @@ class NeMoPlatform:
     def __getattr__(self, name: str) -> Any:
         return name
 
+    @property
+    def jobs(self) -> JobsClient:
+        return JobsClient()
+
+    @property
+    def secrets(self) -> SecretsResource:
+        return SecretsResource()
+
 
 class AsyncNeMoPlatform:
     def __init__(self, config_path: Path | None = None) -> None:
@@ -1154,6 +1190,14 @@ class AsyncNeMoPlatform:
 
     def __getattr__(self, name: str) -> Any:
         return name
+
+    @property
+    def jobs(self) -> AsyncJobsClient:
+        return AsyncJobsClient()
+
+    @property
+    def secrets(self) -> AsyncSecretsResource:
+        return AsyncSecretsResource()
 """.strip()
         + "\n",
         encoding="utf-8",
@@ -1170,6 +1214,8 @@ class AsyncNeMoPlatform:
     assert "from nemo_platform._base_client import DefaultAsyncHttpxClient, DefaultHttpxClient" in updated
     assert "from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR" in updated
     assert "from nemo_platform_plugin.client.tls import client_verify_from_env" in updated
+    assert "from nemo_platform_plugin.jobs.client import AsyncJobsClient, JobsClient" in updated
+    assert "from nemo_platform_plugin.secrets.compat import AsyncSecretsResource, SecretsResource" in updated
     assert "from nemo_platform_ext.client.tls import client_verify_from_env" not in updated
     assert "def _should_bootstrap_config(config_path: Path | None = None) -> bool:" in updated
     assert "return config_path is not None" in updated
@@ -1177,6 +1223,10 @@ class AsyncNeMoPlatform:
     assert "def __init__(self, config_path: Path | None = None) -> None:" in updated
     assert updated.count("self.should_bootstrap = _should_bootstrap_config(config_path)") == 2
     assert updated.count("def __getattr__(self, name: str) -> Any:") == 2
+    assert "def jobs(self) -> JobsClient:" in updated
+    assert "def jobs(self) -> AsyncJobsClient:" in updated
+    assert "def secrets(self) -> SecretsResource:" in updated
+    assert "def secrets(self) -> AsyncSecretsResource:" in updated
     assert "self.value = 1" not in updated
     assert "self.value = 2" not in updated
 
@@ -1201,6 +1251,8 @@ class AsyncNeMoPlatform:
         "nemo_platform_plugin.client",
         "nemo_platform_plugin.client.constants",
         "nemo_platform_plugin.client.tls",
+        "nemo_platform_plugin.secrets",
+        "nemo_platform_plugin.secrets.compat",
     )
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.syspath_prepend(str(sdk_path / "src"))

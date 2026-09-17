@@ -23,7 +23,10 @@ from nemo_platform_plugin.auth.access_keys.issuer import (
     AccessKeyFeatureDisabledError,
     AccessKeyOperationNotImplementedError,
 )
-from nemo_platform_plugin.auth.access_keys.types import AccessKeyCreateRequest
+from nemo_platform_plugin.auth.access_keys.types import (
+    AccessKeyCreateRequest,
+    AccessKeyWorkspaceGrant,
+)
 from nemo_platform_plugin.client.adapter import client_from_platform
 from rich.console import Console
 
@@ -88,6 +91,47 @@ def _parse_access_key_expires_in(value: str | None) -> tuple[bool, int | None]:
     if expires_in_seconds < 1:
         raise AuthError("--expires-in must be a positive integer number of seconds or 'none'.")
     return True, expires_in_seconds
+
+
+def _parse_access_key_scope(value: str | None) -> list[str] | None:
+    if value is None:
+        return None
+    services = list(dict.fromkeys(service.strip() for service in value.split(",") if service.strip()))
+    if not services:
+        raise typer.BadParameter("must contain at least one non-empty service name.", param_hint="--scope")
+    return services
+
+
+def _parse_access_key_workspace_grants(
+    values: list[str] | None,
+) -> list[AccessKeyWorkspaceGrant] | None:
+    if values is None:
+        return None
+
+    grants: list[AccessKeyWorkspaceGrant] = []
+    for value in values:
+        # A bare workspace name (no ':') falls through to the Editor default below.
+        workspace, separator, roles_value = value.partition(":")
+        workspace = workspace.strip()
+        roles = [role.strip() for role in roles_value.split(",") if role.strip()] if separator else []
+        if not workspace:
+            raise typer.BadParameter(
+                f"Invalid workspace grant {value!r}: workspace name must not be empty.",
+                param_hint="--workspace",
+            )
+        if separator and not roles:
+            # 'team-a:' with no roles is likely a typo, not a request for the default role.
+            raise typer.BadParameter(
+                f"Invalid workspace grant {value!r}: specify at least one role after ':'.",
+                param_hint="--workspace",
+            )
+        grants.append(
+            AccessKeyWorkspaceGrant(
+                workspace=workspace,
+                roles=roles if separator else ["Editor"],
+            )
+        )
+    return grants
 
 
 def is_auth_disabled(base_url: str, timeout: float = 3.0, certificate_authority: str | None = None) -> bool:
@@ -866,6 +910,35 @@ def create_access_key(
             help="Bind the key to a non-human service account (PlatformAdmin only).",
         ),
     ] = None,
+    scope: Annotated[
+        str | None,
+        typer.Option(
+            "--scope",
+            help="Comma-separated service names to scope this key to, e.g. 'intake,entities'. Omit for an unscoped key.",
+        ),
+    ] = None,
+    rotate: Annotated[
+        str | None,
+        typer.Option(
+            "--rotate",
+            help=(
+                "JTI of a previous Scoped Access Key owned by the caller to revoke once this key is created. "
+                "Primarily for rotating personal keys, which have no service-account identity to correlate "
+                "rotations against automatically."
+            ),
+        ),
+    ] = None,
+    workspace: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--workspace",
+            help=(
+                "Grant the key's principal workspace membership, formatted '<workspace>' or "
+                "'<workspace>:<role1>,<role2>' (role defaults to Editor). Repeat for multiple workspaces. "
+                "Replaces a separate 'nemo workspaces members create' call."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Create a user-bound or service-bound Scoped Access Key."""
     expires_in_was_set, parsed_expires_in = _parse_access_key_expires_in(expires_in)
@@ -873,6 +946,9 @@ def create_access_key(
         name=name,
         description=description,
         service_account_id=service_account,
+        scope=_parse_access_key_scope(scope),
+        rotates=rotate,
+        workspaces=_parse_access_key_workspace_grants(workspace),
         **({"expires_in_seconds": parsed_expires_in} if expires_in_was_set else {}),
     )
     try:
@@ -920,8 +996,11 @@ def list_access_keys(
             Column("status", None),
             Column("issuer", None),
             Column("audiences", None),
+            Column("scope", None),
             Column("created_at", None),
             Column("expires_at", None),
+            Column("last_used_at", None),
+            Column("grace_period_expires_at", None),
         ],
         timestamp_format=state.get_timestamp_format(),
     )
@@ -987,6 +1066,59 @@ def unsuspend_access_key(
         typer.echo(f"Unsuspended Scoped Access Key {jti}.")
     else:
         typer.echo(f"Scoped Access Key {jti} was already {result.status.lower()}.")
+
+
+@access_keys_app.command("rotate")
+@handle_errors
+def rotate_access_key(
+    ctx: typer.Context,
+    jti: Annotated[str, typer.Argument(help="Stable ID of the Scoped Access Key to rotate.")],
+    grace_period_seconds: Annotated[
+        int | None,
+        typer.Option(
+            "--grace-period-seconds",
+            min=1,
+            help=(
+                "Grace period in seconds for the rotated-out key. Defaults to the server's "
+                "`rotation_grace_period_seconds` config (default 48h) when omitted, and is "
+                "capped by `max_rotation_grace_period_seconds`."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Mint a successor Scoped Access Key and start the old key's rotation grace period.
+
+    The old key (jti) keeps working for its rotation grace period so you can cut
+    configuration over to the new key without downtime, then revoke the old key once
+    traffic has moved, or let it expire automatically at the end of the grace period.
+    """
+    try:
+        result = _access_key_issuer(ctx).rotate(jti, grace_period_seconds=grace_period_seconds)
+    except AccessKeyFeatureDisabledError as exc:
+        _raise_access_key_disabled(exc)
+    except AccessKeyOperationNotImplementedError as exc:
+        _raise_access_key_not_implemented(exc)
+    typer.echo(result.new_key.token)
+    if result.previous_status == "ROTATING":
+        if result.grace_period_expires_at is not None:
+            typer.echo(
+                f"Rotated Scoped Access Key {jti} into {result.new_key.jti}; the old key remains "
+                f"usable until {result.grace_period_expires_at.isoformat()} "
+                f"(grace period {result.grace_period_seconds}s).",
+                err=True,
+            )
+        else:
+            typer.echo(
+                f"Rotated Scoped Access Key {jti} into {result.new_key.jti}; the old key remains "
+                f"usable for a grace period of {result.grace_period_seconds}s.",
+                err=True,
+            )
+    else:
+        typer.echo(
+            f"Rotated Scoped Access Key {jti} into {result.new_key.jti}; the old key is now "
+            f"{result.previous_status} and is no longer usable.",
+            err=True,
+        )
 
 
 @app.command("status")

@@ -52,12 +52,14 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym.results import (
     _TOKEN_USAGE_KEYS,
     _agent_never_ran,
     _aggregate_metrics_path_for,
+    _usage_measurements,
+    _warn_invalid_usage_counts,
     ensure_fresh_output,
     read_run_aggregations,
     require_full_coverage,
     trials_from_rollouts,
 )
-from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrialStatus
+from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrialStatus, TrialMeasurements
 from nemo_evaluator_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -359,14 +361,39 @@ def test_failures_sidecar_yields_failed_trials(tmp_path: Path) -> None:
     tasks = discover_gym_tasks(EXAMPLE)
     ordered, index_map = _index_map(tasks, tmp_path)
     bundle = tmp_path / "rollouts.jsonl"
-    bundle.write_text(json.dumps({NG_TASK_INDEX: 0, NG_ROLLOUT_INDEX: 0, "reward": 1.0}) + "\n", encoding="utf-8")
+    bundle.write_text(
+        json.dumps(
+            {
+                NG_TASK_INDEX: 0,
+                NG_ROLLOUT_INDEX: 0,
+                "reward": 1.0,
+                "response": {"usage": {"input_tokens": 8, "output_tokens": 2}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     failures = tmp_path / "rollouts_failures.jsonl"
-    failures.write_text(json.dumps({NG_TASK_INDEX: 1, NG_ROLLOUT_INDEX: 0, "error": "boom"}) + "\n", encoding="utf-8")
+    failures.write_text(
+        json.dumps(
+            {
+                NG_TASK_INDEX: 1,
+                NG_ROLLOUT_INDEX: 0,
+                "error": "boom",
+                "response": {"usage": {"prompt_tokens": 4, "completion_tokens": 1}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     trials = trials_from_rollouts(bundle, tasks, index_map)
     by_status = {trial.task_id: trial.status for trial in trials}
     assert by_status[ordered[0]] == AgentEvalTrialStatus.COMPLETED
     assert by_status[ordered[1]] == AgentEvalTrialStatus.FAILED
     failed = next(trial for trial in trials if trial.status == AgentEvalTrialStatus.FAILED)
+    completed = next(trial for trial in trials if trial.status == AgentEvalTrialStatus.COMPLETED)
+    assert completed.measurements.total_tokens == 10
+    assert failed.measurements.total_tokens == 5
     assert failed.metadata["reward"] is None
     assert failed.metadata["gym_failure"] == "boom"
 
@@ -1157,6 +1184,124 @@ def test_agent_never_ran_is_false_without_usage_to_corroborate() -> None:
     assert _agent_never_ran({"response": "Lyon", "reward": 0.0}) is False
 
 
+@pytest.mark.parametrize(
+    ("usage", "expected"),
+    [
+        (
+            {"prompt_tokens": 10, "completion_tokens": 2, "prompt_tokens_details": {"cached_tokens": 3}},
+            {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12, "cache_read_tokens": 3},
+        ),
+        (
+            {
+                "input_tokens": 5,
+                "output_tokens": 2,
+                "cache_creation_input_tokens": 1,
+                "cache_read_input_tokens": 4,
+            },
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 2,
+                "total_tokens": 12,
+                "cache_creation_tokens": 1,
+                "cache_read_tokens": 4,
+            },
+        ),
+        ({"input_tokens": 0, "output_tokens": 0}, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}),
+        ({"input_tokens": True, "output_tokens": "2"}, {}),
+    ],
+)
+def test_gym_usage_is_captured_as_typed_measurements(usage: dict, expected: dict) -> None:
+    measurements = _usage_measurements({"response": {"usage": usage}})
+
+    assert measurements.model_dump(exclude_none=True) == expected
+
+
+def test_gym_usage_prefers_chat_aliases() -> None:
+    measurements = _usage_measurements(
+        {
+            "response": {
+                "usage": {
+                    "prompt_tokens": 10,
+                    "input_tokens": 1,
+                    "completion_tokens": 2,
+                    "output_tokens": 9,
+                    "total_tokens": 999,
+                }
+            }
+        }
+    )
+
+    assert measurements == TrialMeasurements(prompt_tokens=10, completion_tokens=2)
+
+
+def test_gym_usage_measurements_empty_when_response_or_usage_is_unusable() -> None:
+    assert _usage_measurements({}) == TrialMeasurements()
+    assert _usage_measurements({"response": "Lyon"}) == TrialMeasurements()
+    assert _usage_measurements({"response": {"usage": None}}) == TrialMeasurements()
+
+
+def test_gym_usage_omits_ambiguous_prompt_cache(caplog: pytest.LogCaptureFixture) -> None:
+    measurements = _usage_measurements(
+        {
+            NG_TASK_INDEX: 0,
+            NG_ROLLOUT_INDEX: 1,
+            "response": {
+                "usage": {
+                    "input_tokens": 8,
+                    "output_tokens": 4,
+                    "input_tokens_details": {"cached_tokens": 2},
+                    "cache_read_input_tokens": 2,
+                }
+            },
+        }
+    )
+
+    assert measurements == TrialMeasurements(completion_tokens=4)
+    assert "both inclusive cache details and separate cache fields" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("usage", "expected"),
+    [
+        pytest.param(
+            {
+                "input_tokens": 5,
+                "output_tokens": 2,
+                "input_tokens_details": {"cached_tokens": None},
+                "cache_read_input_tokens": 4,
+            },
+            TrialMeasurements(prompt_tokens=9, completion_tokens=2, cache_read_tokens=4),
+            id="null-inclusive-placeholder",
+        ),
+        pytest.param(
+            {
+                "input_tokens": 5,
+                "output_tokens": 2,
+                "input_tokens_details": {"cached_tokens": 4},
+                "cache_read_input_tokens": None,
+            },
+            TrialMeasurements(prompt_tokens=5, completion_tokens=2, cache_read_tokens=4),
+            id="null-separate-placeholder",
+        ),
+    ],
+)
+def test_gym_usage_ignores_null_cache_format_placeholders(
+    usage: dict,
+    expected: TrialMeasurements,
+) -> None:
+    assert _usage_measurements({"response": {"usage": usage}}) == expected
+
+
+def test_gym_warn_invalid_usage_counts_logs_malformed_fields(caplog: pytest.LogCaptureFixture) -> None:
+    _warn_invalid_usage_counts(
+        {NG_TASK_INDEX: 0, NG_ROLLOUT_INDEX: 1},
+        {"prompt_tokens": True, "prompt_tokens_details": {"cached_tokens": -1}},
+    )
+
+    assert "prompt_tokens=True" in caplog.text
+    assert "prompt_tokens_details.cached_tokens=-1" in caplog.text
+
+
 def test_missing_results_file_names_the_logs_instead_of_raising_filenotfound(tmp_path: Path) -> None:
     # Raised by review on #1295. `ensure_fresh_output` deletes any stale file before the run and
     # `_collect_rollouts` already raised on a non-zero exit, so an absent file here means Gym
@@ -1303,11 +1448,13 @@ def test_some_rollouts_empty_fails_only_those_trials(tmp_path: Path) -> None:
     empty = by_task[tasks[0].id]
     real = by_task[tasks[1].id]
     assert empty.status is AgentEvalTrialStatus.FAILED
+    assert empty.measurements == TrialMeasurements(prompt_tokens=0, completion_tokens=0)
     # The reward Gym reported is withheld so it cannot be averaged in as a real 0.0...
     assert empty.metadata["reward"] is None
     # ...but the reason is recorded.
     assert "never called" in empty.metadata["gym_failure"]
     assert real.status is AgentEvalTrialStatus.COMPLETED
+    assert real.measurements == TrialMeasurements(prompt_tokens=1, completion_tokens=1)
     assert real.metadata["reward"] == 1.0
 
 

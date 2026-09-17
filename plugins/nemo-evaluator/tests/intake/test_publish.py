@@ -16,10 +16,15 @@ from typing import Any
 import httpx
 import pytest
 from nemo_evaluator.intake.publish import PublishError, _token_final_metrics, publish_to_intake
-from nemo_evaluator_sdk.agent_eval.metrics import TrialMeasurements
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary, RunMetadata
 from nemo_evaluator_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
-from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput, TrialError
+from nemo_evaluator_sdk.agent_eval.trials import (
+    AgentEvalTrial,
+    AgentEvalTrialStatus,
+    AgentOutput,
+    TrialError,
+    TrialMeasurements,
+)
 from nemo_evaluator_sdk.metrics.protocol import MetricOutput
 from nemo_evaluator_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nemo_platform_plugin.client.errors import NotFoundError, UnprocessableEntityError
@@ -30,6 +35,7 @@ from nemo_platform_plugin.intake.types import (
     IngestResponse,
     ListTracesQueryParams,
 )
+from pydantic import ValidationError
 
 # --- fakes ------------------------------------------------------------------
 
@@ -268,6 +274,25 @@ async def test_publishes_trajectory_and_scores() -> None:
         "span:run-1:t-1",
         3,
     )
+
+
+async def test_publish_revalidates_model_copy_corrupted_measurements_before_network_calls() -> None:
+    trial = _trial("t-1").model_copy(update={"measurements": TrialMeasurements(prompt_tokens=8, completion_tokens=2)})
+    result = _result([trial], [])
+    corrupted_measurements = trial.measurements.model_copy(update={"prompt_tokens": -1})
+    corrupted_trial = trial.model_copy(update={"measurements": corrupted_measurements})
+    corrupted_result = result.model_copy(update={"trials": [corrupted_trial]})
+    client = _FakeClient()
+
+    with pytest.raises(ValidationError):
+        await publish_to_intake(
+            corrupted_result,
+            client=client,
+            experiment_id="exp-1",
+        )
+
+    assert client.evaluation_calls == []
+    assert (client.otlp_calls, client.atif_calls, client.eval_calls) == ([], [], [])
 
 
 async def test_an_unknown_evaluation_fails_the_run_before_any_trial_is_written() -> None:
@@ -550,7 +575,12 @@ async def test_trial_totals_land_on_the_root_span_only() -> None:
     child = {"traceId": _OTLP_TRACE_ID, "spanId": "aabbccddeeff0011", "parentSpanId": _OTLP_SPAN_ID, "name": "child"}
     trial = _otlp_trial(extra_spans=[child]).model_copy(
         update={
-            "metadata": {"prompt_tokens": 120, "completion_tokens": 45, "cache_read_tokens": 30, "cost_usd": 0.134},
+            "measurements": TrialMeasurements(
+                prompt_tokens=120,
+                completion_tokens=45,
+                cache_read_tokens=30,
+                cost_usd=0.134,
+            ),
             "error": TrialError(type="Timeout", message="agent exceeded its budget"),
         }
     )

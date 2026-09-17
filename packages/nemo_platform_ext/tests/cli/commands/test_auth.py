@@ -20,7 +20,10 @@ from nemo_platform_plugin.auth.access_keys.types import (
     AccessKeyListResponse,
     AccessKeyMetadataResponse,
     AccessKeyRevokeResponse,
+    AccessKeyRotateRequest,
+    AccessKeyRotateResponse,
     AccessKeyStatusChangeResponse,
+    AccessKeyWorkspaceGrant,
 )
 from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_platform_plugin.client.errors import NotFoundError
@@ -459,6 +462,119 @@ def test_auth_access_keys_create_sends_service_account(monkeypatch: pytest.Monke
     )
 
 
+def test_auth_access_keys_create_sends_scope_rotation_and_workspace_grants(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fake_access_keys_client = MagicMock()
+    fake_access_keys_client.create_access_key.return_value.data.return_value = _created_access_key("intake-worker")
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.core.context.CLIContext.get_client",
+        lambda self: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.commands.auth.client_from_platform",
+        lambda platform, client_cls: fake_access_keys_client,
+    )
+    rotated_jti = "ak_00000000000000000000000000000000"
+
+    result = runner.invoke(
+        app,
+        [
+            "auth",
+            "access-keys",
+            "create",
+            "--scope",
+            "intake, entities, intake",
+            "--rotate",
+            rotated_jti,
+            "--workspace",
+            "team-a",
+            "--workspace",
+            "team-b:Viewer, Admin",
+        ],
+    )
+
+    assert_exit_code(result, 0)
+    fake_access_keys_client.create_access_key.assert_called_once_with(
+        body=AccessKeyCreateRequest(
+            scope=["intake", "entities"],
+            rotates=rotated_jti,
+            workspaces=[
+                AccessKeyWorkspaceGrant(workspace="team-a", roles=["Editor"]),
+                AccessKeyWorkspaceGrant(workspace="team-b", roles=["Viewer", "Admin"]),
+            ],
+        )
+    )
+
+
+@pytest.mark.parametrize("workspace_value", ["team-a:", "team-a:,,"])
+def test_auth_access_keys_create_rejects_workspace_grant_with_empty_roles(
+    monkeypatch: pytest.MonkeyPatch, workspace_value: str
+):
+    fake_access_keys_client = MagicMock()
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.core.context.CLIContext.get_client",
+        lambda self: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.commands.auth.client_from_platform",
+        lambda platform, client_cls: fake_access_keys_client,
+    )
+
+    result = runner.invoke(
+        app,
+        ["auth", "access-keys", "create", "--workspace", workspace_value],
+    )
+
+    assert_exit_code(result, 2)
+    assert "specify" in result.output and "role after ':'" in result.output
+    fake_access_keys_client.create_access_key.assert_not_called()
+
+
+@pytest.mark.parametrize("scope_value", ["", " , ", ","])
+def test_auth_access_keys_create_rejects_blank_scope(monkeypatch: pytest.MonkeyPatch, scope_value: str):
+    fake_access_keys_client = MagicMock()
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.core.context.CLIContext.get_client",
+        lambda self: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.commands.auth.client_from_platform",
+        lambda platform, client_cls: fake_access_keys_client,
+    )
+
+    result = runner.invoke(
+        app,
+        ["auth", "access-keys", "create", "--scope", scope_value],
+    )
+
+    assert_exit_code(result, 2)
+    assert "non-empty service" in " ".join(result.output.split())
+    fake_access_keys_client.create_access_key.assert_not_called()
+
+
+@pytest.mark.parametrize("workspace_value", ["", "  ", ":Viewer"])
+def test_auth_access_keys_create_rejects_blank_workspace_name(monkeypatch: pytest.MonkeyPatch, workspace_value: str):
+    fake_access_keys_client = MagicMock()
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.core.context.CLIContext.get_client",
+        lambda self: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.commands.auth.client_from_platform",
+        lambda platform, client_cls: fake_access_keys_client,
+    )
+
+    result = runner.invoke(
+        app,
+        ["auth", "access-keys", "create", "--workspace", workspace_value],
+    )
+
+    assert_exit_code(result, 2)
+    assert "workspace name must not be empty" in " ".join(result.output.split())
+    fake_access_keys_client.create_access_key.assert_not_called()
+
+
 def test_auth_access_keys_create_sends_explicit_null_expiration(monkeypatch: pytest.MonkeyPatch):
     fake_platform_client = MagicMock()
     fake_access_keys_client = MagicMock()
@@ -529,8 +645,10 @@ def test_auth_access_keys_list_outputs_owned_keys(monkeypatch: pytest.MonkeyPatc
                 name="ci-build",
                 principal="alice@example.com",
                 created_at=datetime(2026, 7, 28, 12, 0, tzinfo=UTC),
+                last_used_at=datetime(2026, 7, 28, 12, 30, tzinfo=UTC),
+                grace_period_expires_at=datetime(2026, 7, 28, 13, 0, tzinfo=UTC),
                 description="CI automation",
-                status="ACTIVE",
+                status="ROTATING",
                 issuer="https://platform.example.com/apis/auth",
                 audiences=["nemo-platform-access-key"],
             )
@@ -548,7 +666,9 @@ def test_auth_access_keys_list_outputs_owned_keys(monkeypatch: pytest.MonkeyPatc
     assert '"jti": "ak_example"' in result.output
     assert '"name": "ci-build"' in result.output
     assert '"description": "CI automation"' in result.output
-    assert '"status": "ACTIVE"' in result.output
+    assert '"status": "ROTATING"' in result.output
+    assert '"last_used_at": "2026-07-28T12:30:00Z"' in result.output
+    assert '"grace_period_expires_at": "2026-07-28T13:00:00Z"' in result.output
     fake_access_keys_client.list_access_keys.assert_called_once_with(query_params={"page": 1, "page_size": 100})
 
 
@@ -561,10 +681,13 @@ def test_auth_access_keys_list_table_includes_key_name(monkeypatch: pytest.Monke
                 name="ci-build",
                 principal="alice@example.com",
                 created_at=datetime(2026, 7, 28, 12, 0, tzinfo=UTC),
+                last_used_at=datetime(2026, 7, 28, 12, 30, tzinfo=UTC),
+                grace_period_expires_at=datetime(2026, 7, 28, 13, 0, tzinfo=UTC),
                 description="CI automation",
-                status="ACTIVE",
+                status="ROTATING",
                 issuer="https://platform.example.com/apis/auth",
                 audiences=["nemo-platform-access-key"],
+                scope=["intake"],
             )
         ]
     )
@@ -580,7 +703,12 @@ def test_auth_access_keys_list_table_includes_key_name(monkeypatch: pytest.Monke
     assert "ak_example" in result.output
     assert "ci-build" in result.output
     assert "CI automation" in result.output
-    assert "ACTIVE" in result.output
+    assert "ROTATING" in result.output
+    assert "last_used_at" in result.output
+    assert "grace_period_expires_at" in result.output
+    assert "2026-07-28T12:30:00Z" in result.output
+    assert "2026-07-28T13:00:00Z" in result.output
+    assert "intake" in result.output
     fake_access_keys_client.list_access_keys.assert_called_once_with(query_params={"page": 1, "page_size": 100})
 
 
@@ -702,6 +830,164 @@ def test_auth_access_keys_unsuspend_noop_reports_expired_status(monkeypatch: pyt
     assert "Scoped Access Key ak_example was already expired." in result.output
 
 
+def test_auth_access_keys_rotate_prints_new_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_access_keys_client = MagicMock()
+    fake_access_keys_client.rotate_access_key.return_value.data.return_value = AccessKeyRotateResponse(
+        new_key=AccessKeyCreateResponse(
+            jti="ak_successor",
+            name="ci-intake",
+            token="signed.jwt.token",
+            token_type="Bearer",
+            principal="alice@example.com",
+            created_at=datetime(2026, 7, 28, 12, 0, tzinfo=UTC),
+            expires_at=None,
+            description=None,
+            status="ACTIVE",
+            issuer="https://platform.example.com/apis/auth",
+            audiences=["nemo-platform-access-key"],
+        ),
+        previous_jti="ak_example",
+        previous_status="ROTATING",
+        grace_period_seconds=3600,
+    )
+    monkeypatch.setattr("nemo_platform_ext.cli.core.context.CLIContext.get_client", lambda _self: MagicMock())
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.commands.auth.client_from_platform",
+        lambda _platform, _client_cls: fake_access_keys_client,
+    )
+
+    result = runner.invoke(app, ["auth", "access-keys", "rotate", "ak_example"])
+
+    assert_exit_code(result, 0)
+    assert "signed.jwt.token" in result.output
+    assert (
+        "Rotated Scoped Access Key ak_example into ak_successor; the old key remains usable for a "
+        "grace period of 3600s." in result.output
+    )
+    assert "no longer usable" not in result.output
+    fake_access_keys_client.rotate_access_key.assert_called_once_with(jti="ak_example", body=AccessKeyRotateRequest())
+
+
+def test_auth_access_keys_rotate_passes_explicit_grace_period_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_access_keys_client = MagicMock()
+    fake_access_keys_client.rotate_access_key.return_value.data.return_value = AccessKeyRotateResponse(
+        new_key=AccessKeyCreateResponse(
+            jti="ak_successor",
+            name="ci-intake",
+            token="signed.jwt.token",
+            token_type="Bearer",
+            principal="alice@example.com",
+            created_at=datetime(2026, 7, 28, 12, 0, tzinfo=UTC),
+            expires_at=None,
+            description=None,
+            status="ACTIVE",
+            issuer="https://platform.example.com/apis/auth",
+            audiences=["nemo-platform-access-key"],
+        ),
+        previous_jti="ak_example",
+        previous_status="ROTATING",
+        grace_period_seconds=3600,
+    )
+    monkeypatch.setattr("nemo_platform_ext.cli.core.context.CLIContext.get_client", lambda _self: MagicMock())
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.commands.auth.client_from_platform",
+        lambda _platform, _client_cls: fake_access_keys_client,
+    )
+
+    result = runner.invoke(app, ["auth", "access-keys", "rotate", "ak_example", "--grace-period-seconds", "3600"])
+
+    assert_exit_code(result, 0)
+    fake_access_keys_client.rotate_access_key.assert_called_once_with(
+        jti="ak_example", body=AccessKeyRotateRequest(grace_period_seconds=3600)
+    )
+
+
+def test_auth_access_keys_rotate_reports_grace_period_expiration(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_access_keys_client = MagicMock()
+    fake_access_keys_client.rotate_access_key.return_value.data.return_value = AccessKeyRotateResponse(
+        new_key=AccessKeyCreateResponse(
+            jti="ak_successor",
+            name="ci-intake",
+            token="signed.jwt.token",
+            token_type="Bearer",
+            principal="alice@example.com",
+            created_at=datetime(2026, 7, 28, 12, 0, tzinfo=UTC),
+            expires_at=None,
+            description=None,
+            status="ACTIVE",
+            issuer="https://platform.example.com/apis/auth",
+            audiences=["nemo-platform-access-key"],
+        ),
+        previous_jti="ak_example",
+        previous_status="ROTATING",
+        grace_period_seconds=3600,
+        grace_period_expires_at=datetime(2026, 7, 28, 13, 0, tzinfo=UTC),
+    )
+    monkeypatch.setattr("nemo_platform_ext.cli.core.context.CLIContext.get_client", lambda _self: MagicMock())
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.commands.auth.client_from_platform",
+        lambda _platform, _client_cls: fake_access_keys_client,
+    )
+
+    result = runner.invoke(app, ["auth", "access-keys", "rotate", "ak_example"])
+
+    assert_exit_code(result, 0)
+    assert (
+        "Rotated Scoped Access Key ak_example into ak_successor; the old key remains usable until "
+        "2026-07-28T13:00:00+00:00 (grace period 3600s)." in result.output
+    )
+
+
+def test_auth_access_keys_rotate_reports_revoked_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_access_keys_client = MagicMock()
+    fake_access_keys_client.rotate_access_key.return_value.data.return_value = AccessKeyRotateResponse(
+        new_key=AccessKeyCreateResponse(
+            jti="ak_successor",
+            name="ci-intake",
+            token="signed.jwt.token",
+            token_type="Bearer",
+            principal="alice@example.com",
+            created_at=datetime(2026, 7, 28, 12, 0, tzinfo=UTC),
+            expires_at=None,
+            description=None,
+            status="ACTIVE",
+            issuer="https://platform.example.com/apis/auth",
+            audiences=["nemo-platform-access-key"],
+        ),
+        previous_jti="ak_example",
+        previous_status="REVOKED",
+        grace_period_seconds=3600,
+    )
+    monkeypatch.setattr("nemo_platform_ext.cli.core.context.CLIContext.get_client", lambda _self: MagicMock())
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.commands.auth.client_from_platform",
+        lambda _platform, _client_cls: fake_access_keys_client,
+    )
+
+    result = runner.invoke(app, ["auth", "access-keys", "rotate", "ak_example"])
+
+    assert_exit_code(result, 0)
+    assert (
+        "Rotated Scoped Access Key ak_example into ak_successor; the old key is now REVOKED and is "
+        "no longer usable." in result.output
+    )
+
+
+def test_auth_access_keys_rotate_reports_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_access_keys_client = MagicMock()
+    fake_access_keys_client.rotate_access_key.side_effect = _access_key_not_found_error("ak_unknown")
+    monkeypatch.setattr("nemo_platform_ext.cli.core.context.CLIContext.get_client", lambda _self: MagicMock())
+    monkeypatch.setattr(
+        "nemo_platform_ext.cli.commands.auth.client_from_platform",
+        lambda _platform, _client_cls: fake_access_keys_client,
+    )
+
+    result = runner.invoke(app, ["auth", "access-keys", "rotate", "ak_unknown"])
+
+    assert_exit_code(result, 3)
+    assert "Not found: (404) Scoped Access Key ak_unknown was not found" in result.output
+
+
 def test_auth_access_keys_help_exposes_lifecycle_commands() -> None:
     result = runner.invoke(app, ["auth", "access-keys", "--help"])
 
@@ -711,6 +997,7 @@ def test_auth_access_keys_help_exposes_lifecycle_commands() -> None:
     assert "revoke" in result.output
     assert "suspend" in result.output
     assert "unsuspend" in result.output
+    assert "rotate" in result.output
 
     create_help = runner.invoke(app, ["auth", "access-keys", "create", "--help"])
     assert_exit_code(create_help, 0)

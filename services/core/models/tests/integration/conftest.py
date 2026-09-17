@@ -6,16 +6,31 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Generator, Optional
+from typing import Any, Generator, Optional, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from nemo_deployments_plugin.config import ControllerConfig, DeploymentsConfig, ExecutorConfigEntry
 from nemo_deployments_plugin.controller import DeploymentsController
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform.types.inference.model_deployment import ModelDeployment
-from nemo_platform.types.inference.model_deployment_config import ModelDeploymentConfig
-from nemo_platform.types.models.model_entity import ModelEntity
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.models.client import ModelsClient
+from nemo_platform_plugin.models.types import (
+    ContainerExecutorConfig,
+    CreateModelDeploymentConfigRequest,
+    CreateModelDeploymentRequest,
+    CreateModelProviderRequest,
+    Engine,
+    ModelDeployment,
+    ModelDeploymentConfig,
+    ModelDeploymentConfigModelSpec,
+    ModelDeploymentStatus,
+    ModelEntity,
+    ModelProvider,
+    UpdateModelDeploymentConfigRequest,
+    UpdateModelDeploymentRequest,
+    UpsertModelProviderRequest,
+)
 from nmp.common.config import Runtime
 from nmp.common.secrets.encryption import get_base64_encoded_random_bytes
 from nmp.core.files.app.backends.base import FileInfo
@@ -106,6 +121,166 @@ def secrets_service_config() -> SecretsServiceConfig:
     )
 
 
+def models_client_from_sdk(sdk: NeMoPlatform) -> ModelsClient:
+    """Create a typed Models client sharing the test platform transport."""
+    return client_from_platform(sdk, ModelsClient)
+
+
+def create_provider(
+    client: ModelsClient,
+    *,
+    workspace: str = DEFAULT_WORKSPACE,
+    name: str,
+    host_url: str,
+    **kwargs: Any,
+) -> ModelProvider:
+    return client.create_provider(
+        workspace=workspace,
+        body=CreateModelProviderRequest(name=name, host_url=host_url, **kwargs),
+    ).data()
+
+
+def upsert_provider(
+    client: ModelsClient,
+    *,
+    workspace: str = DEFAULT_WORKSPACE,
+    name: str,
+    host_url: str,
+    **kwargs: Any,
+) -> ModelProvider:
+    return client.upsert_provider(
+        workspace=workspace,
+        name=name,
+        body=UpsertModelProviderRequest(host_url=host_url, **kwargs),
+    ).data()
+
+
+def get_provider(client: ModelsClient, *, workspace: str = DEFAULT_WORKSPACE, name: str) -> ModelProvider:
+    return client.get_provider(workspace=workspace, name=name).data()
+
+
+def list_providers(client: ModelsClient, *, workspace: str = DEFAULT_WORKSPACE) -> list[ModelProvider]:
+    return list(client.list_providers(workspace=workspace).items())
+
+
+def delete_provider(client: ModelsClient, *, workspace: str = DEFAULT_WORKSPACE, name: str) -> None:
+    client.delete_provider(workspace=workspace, name=name).data()
+
+
+def _engine(value: Engine | str) -> Engine:
+    return value if isinstance(value, Engine) else Engine(value)
+
+
+def _model_spec(
+    value: ModelDeploymentConfigModelSpec | dict[str, Any] | None,
+) -> ModelDeploymentConfigModelSpec:
+    if isinstance(value, ModelDeploymentConfigModelSpec):
+        return value
+    return ModelDeploymentConfigModelSpec.model_validate(value or {})
+
+
+def _executor_config(
+    value: ContainerExecutorConfig | dict[str, Any] | None,
+) -> ContainerExecutorConfig:
+    if isinstance(value, ContainerExecutorConfig):
+        return value
+    return ContainerExecutorConfig.model_validate(value or {"gpu": 0})
+
+
+def create_deployment_config(
+    client: ModelsClient,
+    *,
+    workspace: str = DEFAULT_WORKSPACE,
+    name: str,
+    engine: Engine | str,
+    model_spec: ModelDeploymentConfigModelSpec | dict[str, Any] | None = None,
+    executor_config: ContainerExecutorConfig | dict[str, Any] | None = None,
+    model_entity_id: str | None = None,
+) -> ModelDeploymentConfig:
+    body = CreateModelDeploymentConfigRequest(
+        name=name,
+        engine=_engine(engine),
+        model_spec=_model_spec(model_spec),
+        executor_config=_executor_config(executor_config),
+        model_entity_id=model_entity_id,
+    )
+    return client.create_deployment_config(workspace=workspace, body=body).data()
+
+
+def update_deployment_config(
+    client: ModelsClient,
+    *,
+    workspace: str = DEFAULT_WORKSPACE,
+    name: str,
+    engine: Engine | str,
+    model_spec: ModelDeploymentConfigModelSpec | dict[str, Any],
+    executor_config: ContainerExecutorConfig | dict[str, Any],
+    model_entity_id: str | None = None,
+) -> ModelDeploymentConfig:
+    body = UpdateModelDeploymentConfigRequest(
+        engine=_engine(engine),
+        model_spec=_model_spec(model_spec),
+        executor_config=_executor_config(executor_config),
+        model_entity_id=model_entity_id,
+    )
+    return client.update_deployment_config(workspace=workspace, name=name, body=body).data()
+
+
+def get_deployment_config(
+    client: ModelsClient, *, workspace: str = DEFAULT_WORKSPACE, name: str
+) -> ModelDeploymentConfig:
+    return client.get_deployment_config(workspace=workspace, name=name).data()
+
+
+def list_deployment_configs(client: ModelsClient, *, workspace: str = DEFAULT_WORKSPACE) -> list[ModelDeploymentConfig]:
+    return list(client.list_deployment_configs(workspace=workspace).items())
+
+
+def delete_deployment_config(client: ModelsClient, *, workspace: str = DEFAULT_WORKSPACE, name: str) -> None:
+    client.delete_deployment_config(workspace=workspace, name=name).data()
+
+
+def create_deployment(
+    client: ModelsClient,
+    *,
+    workspace: str = DEFAULT_WORKSPACE,
+    name: str,
+    config: str,
+    config_version: int | None = None,
+) -> ModelDeployment:
+    return client.create_deployment(
+        workspace=workspace,
+        body=CreateModelDeploymentRequest(name=name, config=config, config_version=config_version),
+    ).data()
+
+
+def update_deployment(
+    client: ModelsClient,
+    *,
+    workspace: str = DEFAULT_WORKSPACE,
+    name: str,
+    config: str,
+    config_version: int | None = None,
+) -> ModelDeployment:
+    return client.update_deployment(
+        workspace=workspace,
+        name=name,
+        body=UpdateModelDeploymentRequest(config=config, config_version=config_version),
+    ).data()
+
+
+def get_deployment(client: ModelsClient, *, workspace: str = DEFAULT_WORKSPACE, name: str) -> ModelDeployment:
+    return client.get_deployment(workspace=workspace, name=name).data()
+
+
+def list_deployments(client: ModelsClient, *, workspace: str = DEFAULT_WORKSPACE) -> list[ModelDeployment]:
+    return list(client.list_deployments(workspace=workspace).items())
+
+
+def delete_deployment(client: ModelsClient, *, workspace: str = DEFAULT_WORKSPACE, name: str) -> None:
+    client.delete_deployment(workspace=workspace, name=name).data()
+
+
 # =============================================================================
 # Mock Backend for Backend-Agnostic Tests
 # =============================================================================
@@ -133,7 +308,7 @@ class MockServiceBackend(ServiceBackend):
         # Note: host_url is None by default to avoid port conflicts in parallel tests.
         # Tests that need a specific host_url should set it explicitly in status_responses.
         self.create_response = DeploymentStatusUpdate(
-            status="PENDING",
+            status=ModelDeploymentStatus.PENDING,
             status_message="Container created and starting",
             host_url=None,
         )
@@ -141,12 +316,12 @@ class MockServiceBackend(ServiceBackend):
         # If a deployment name is not in this dict, falls back to default_status_response
         self.status_responses: dict[str, DeploymentStatusUpdate] = {}
         self.default_status_response = DeploymentStatusUpdate(
-            status="READY",
+            status=ModelDeploymentStatus.READY,
             status_message="Container is ready",
             host_url=None,
         )
         self.delete_response = DeploymentStatusUpdate(
-            status="DELETED",
+            status=ModelDeploymentStatus.DELETED,
             status_message="Container deleted",
         )
 
@@ -160,12 +335,20 @@ class MockServiceBackend(ServiceBackend):
 
     async def create_model_deployment(self, ctx: ModelContext) -> DeploymentStatusUpdate:
         """Record call and return configured response."""
-        self.create_calls.append((ctx.model_deployment, ctx.model_deployment_config, ctx.model_entity))
+        deployment = ctx.model_deployment
+        config = ctx.model_deployment_config
+        assert deployment is not None
+        assert config is not None
+        self.create_calls.append((deployment, config, ctx.model_entity))
         return self.create_response
 
     async def update_model_deployment(self, ctx: ModelContext) -> DeploymentStatusUpdate:
         """Record call and return configured response."""
-        self.update_calls.append((ctx.model_deployment, ctx.model_deployment_config, ctx.model_entity))
+        deployment = ctx.model_deployment
+        config = ctx.model_deployment_config
+        assert deployment is not None
+        assert config is not None
+        self.update_calls.append((deployment, config, ctx.model_entity))
         return self.create_response  # Update returns same as create
 
     async def get_model_deployment_status(self, ctx: ModelContext) -> DeploymentStatusUpdate:
@@ -179,6 +362,7 @@ class MockServiceBackend(ServiceBackend):
         otherwise falls back to default_status_response.
         """
         deployment = ctx.model_deployment
+        assert deployment is not None
         self.status_calls.append(deployment)
         return self.status_responses.get(deployment.name, self.default_status_response)
 
@@ -232,7 +416,7 @@ def mock_backend_registry(mock_backend: MockServiceBackend) -> BackendRegistry:
 @pytest.fixture
 def controller_with_mock_backend(
     test_clients: ClientContext, mock_backend_registry: BackendRegistry
-) -> Generator[tuple[ModelsController, MockServiceBackend, NeMoPlatform], None, None]:
+) -> Generator[tuple[ModelsController, MockServiceBackend, ModelsClient], None, None]:
     """Create a ModelsController wired to use the test SDK and mock backend.
 
     Note: The ProviderReconciler's autodiscovery is mocked to avoid issues when
@@ -241,9 +425,9 @@ def controller_with_mock_backend(
     would also iterate over providers from other tests running in the same worker.
 
     Yields:
-        Tuple of (controller, mock_backend, sync_sdk) for testing
+        Tuple of (controller, mock_backend, models_client) for testing
     """
-    mock_backend = mock_backend_registry.get_backend()
+    mock_backend = cast(MockServiceBackend, mock_backend_registry.get_backend())
 
     # Create controller with mock backend registry
     # We need to patch the SDK factory and platform config (used in config and main modules)
@@ -267,7 +451,7 @@ def controller_with_mock_backend(
         # which isn't available in models-only tests.
         controller._provider_reconciler.reconcile_model_providers = AsyncMock(return_value=None)
 
-        yield controller, mock_backend, test_clients.sdk
+        yield controller, mock_backend, models_client_from_sdk(test_clients.sdk)
 
         # Clean up controller resources (event loop, backend registry, etc.)
         controller.shutdown()
@@ -444,10 +628,16 @@ def controller_with_deployments_plugin(
             "nmp.core.models.controllers.backends.deployments_plugin.resolve.get_platform_config",
             return_value=mock_platform_config,
         ),
+        patch(
+            "nmp.core.models.controllers.backends.deployments_plugin.backend.get_async_platform_sdk"
+        ) as mock_deployments_backend_sdk,
         patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk") as mock_models_sdk,
+        patch("nemo_deployments_plugin.controller.get_async_platform_sdk") as mock_deployments_controller_sdk,
         patch("nemo_platform_plugin.sdk_provider.get_async_platform_sdk") as mock_sdk,
         patch("nemo_deployments_plugin.config.DeploymentsConfig.get", return_value=deployments_config),
     ):
+        mock_deployments_backend_sdk.return_value = test_clients.async_sdk
+        mock_deployments_controller_sdk.return_value = test_clients.async_sdk
         mock_models_sdk.return_value = test_clients.async_sdk
         mock_sdk.return_value = test_clients.async_sdk
 
@@ -461,7 +651,7 @@ def controller_with_deployments_plugin(
         yield (
             models_controller,
             deployments_controller,
-            test_clients.sdk,
+            models_client_from_sdk(test_clients.sdk),
             mock_nim_image,
             docker_test_context,
             reconcile_stack,
@@ -481,6 +671,6 @@ def controller_with_deployments_plugin(
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> Generator[None, None, None]:
     """Store test results on the item for fixture access."""
-    outcome = yield
+    outcome: Any = yield
     rep = outcome.get_result()
     setattr(item, f"rep_{rep.when}", rep)

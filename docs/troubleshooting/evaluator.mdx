@@ -90,17 +90,66 @@ The error contains the details about the checks that failed.
 For local setup, the platform API defaults to `http://localhost:8080`.
 If you changed the platform URL, use the value configured in `NMP_BASE_URL` or in your CLI context.
 
-## Advanced Troubleshooting
+## Agent evaluation job failures
 
-To troubleshoot an evaluation job that has failed, download the evaluation result archive and inspect the job logs.
+Inspect the platform job and its logs before interpreting a partial result:
+
+```bash
+nemo jobs get-logs <job-name> --workspace default --limit 100
+```
+
+An `agent-evaluate` job can fail while generating trials, scoring them, or publishing optional
+Intake results. The authoritative result bundle is saved before required Intake publication runs,
+so a publication failure can leave a downloadable bundle on a failed job.
+
+Wait for a terminal job state before downloading results. Progress reaching 100 percent does not
+mean artifact finalization is complete.
+
+## Sandboxed Gym failures
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `Gym environment FileSets require sandboxed execution` | The target sets `environment`, but sandboxing is disabled | Enable `evaluator.sandboxed_gym_default` or omit the custom environment |
+| Cluster is not marked sandbox-capable | Evaluator is configured to sandbox, but its capability gate is false | Install OpenSandbox, then enable the platform and Evaluator capability settings |
+| Missing `sandbox_runtime_image` or `sandbox_job_storage_pvc_claim` | Required operator configuration is incomplete | Configure the `nmp-gym-host` image and shared Jobs PVC |
+| Sandbox has no route to a model | Both model base URLs and additional egress lists are empty or incomplete | Add the model endpoint to `sandbox_policy_base_urls` |
+| Credential-shaped `env_vars` are rejected | A plaintext API key, password, or token would be visible to environment code | Store the value in NeMo Platform Secrets and map it through `env_secrets` |
+| Jobs PVC and sandbox PVC do not match | FileSet staging writes to a different claim from the Gym host mount | Set `sandbox_job_storage_pvc_claim` to the Jobs execution profile's PVC |
+| FileSet has the wrong purpose or no manifest | The package is not an Evaluator Gym environment | Use `purpose=environment` and place `nemo-environment.yaml` at the FileSet root |
+| Agent produces no rollout | The package registers the agent instance under another name | Set `agent_ref_name` to the registered instance |
+
+See [Configure Sandboxed Gym](/documentation/evaluate-models/agent-eval/gym-sandbox-configuration)
+for the complete operator configuration and
+[Run a Custom Gym Environment](/documentation/evaluate-models/agent-eval/gym-custom-environment)
+for package requirements.
+
+## Download agent evaluation results
+
+Platform agent evaluations publish `agent-eval-results` and `summary` as named Jobs results:
+
+```bash
+nemo jobs results download agent-eval-results \
+  --job <job-name> \
+  --output-file agent-eval-results.tar.gz
+```
+
+The task-driven job handle does not provide the dataset-evaluation `get_result()` or
+`download_artifacts()` methods. Query aggregates through `client.evaluator.agent_eval_results` and
+download individual trials from its bundle reference.
+
+## Legacy Evaluator API troubleshooting
+
+The endpoints below apply only to deployments that still expose the legacy `/v1/evaluation/jobs`
+API. New Evaluator plugin jobs use `/apis/evaluator/v2`, the Jobs log command above, and named job
+results.
 
 <Warning>
 
-These are advanced troubleshooting steps that should only be done after all other troubleshooting fails.
+Do not use `skip_validation_checks` or the legacy download endpoint with Evaluator plugin jobs.
 
 </Warning>
 
-### Evaluation Job Logs
+### Download legacy evaluation job logs
 
 To download the log files, use the `download-results` endpoint. 
 This endpoint downloads the result directory containing configuration files, logs, and evaluation results for a specific evaluation run. 

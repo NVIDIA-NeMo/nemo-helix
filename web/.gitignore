@@ -9,8 +9,8 @@ node_modules
 .idea
 .vscode
 .plans/
-optimization_results/
-optimizations/
+/optimization_results/
+/optimizations/
 filestorage/
 .agents/skills/kaizen-ui/
 storybook-static

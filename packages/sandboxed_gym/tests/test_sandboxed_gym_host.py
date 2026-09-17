@@ -480,3 +480,69 @@ def test_uv_env_passthrough_carries_no_credentials(monkeypatch):
     monkeypatch.setenv("NEMO_GYM_VENV_DIR", "/opt/gym_venvs")
 
     validate_bootstrap_env(uv_env_passthrough())
+
+
+def _offline_spec(*, environment_offline: bool):
+    from sandboxed_gym.config import BrokerEndpoint
+    from sandboxed_gym.orchestrator import build_gym_host_spec
+    from sandboxed_gym.serve_config import SandboxedGymServeConfig
+
+    cfg = SandboxedGymServeConfig.model_validate(
+        {
+            "job_id": "job-1",
+            "environment_offline": environment_offline,
+            "sandbox": {
+                "image": "runtime:dev",
+                "network_policy": {"egress_allow": []},
+                "environment_pvc_claim": "env",
+                "workspace_pvc_claim": "work",
+            },
+        }
+    )
+    broker = BrokerEndpoint(url="http://broker:1", host="broker", port=1, token="t")
+    return build_gym_host_spec(cfg, broker)
+
+
+def test_gym_host_spec_forwards_an_offline_environment():
+    """Only the caller who built the package knows the wheelhouse is a complete closure.
+
+    The sandbox has no way to find out: a wheels-v1 package can ship wheels and still need an
+    index for its agent, so without this flag the host leaves uv's index fallback in place and a
+    configured-but-unreachable index fails the per-component venvs.
+    """
+    from sandboxed_gym.runtime.gym_host_runtime import ENVIRONMENT_OFFLINE_ENV_KEY
+
+    spec = _offline_spec(environment_offline=True)
+
+    assert spec.bootstrap_env[ENVIRONMENT_OFFLINE_ENV_KEY] == "true"
+
+
+def test_gym_host_spec_leaves_the_index_alone_by_default():
+    from sandboxed_gym.runtime.gym_host_runtime import ENVIRONMENT_OFFLINE_ENV_KEY
+
+    spec = _offline_spec(environment_offline=False)
+
+    assert ENVIRONMENT_OFFLINE_ENV_KEY not in spec.bootstrap_env
+
+
+def test_the_caller_dialect_accepts_an_offline_environment():
+    """`env.nemo_gym` is `extra="forbid"`, so a key the platform emits and this model lacks is
+    not ignored -- it fails validation. nmp/rl's grpo_config sets `environment_offline` on an
+    offline manifest, so without the field a sandboxed run with one cannot start at all."""
+    from sandboxed_gym.host.models import NemoGymSandboxedConfig
+
+    cfg = NemoGymSandboxedConfig.model_validate(
+        {
+            "sandboxed": True,
+            "environment_path": "/job/environment",
+            "environment_offline": True,
+            "sandbox": {
+                "image": "runtime:dev",
+                "network_policy": {"egress_allow": []},
+                "environment_pvc_claim": "env",
+                "workspace_pvc_claim": "work",
+            },
+        }
+    )
+
+    assert cfg.environment_offline is True

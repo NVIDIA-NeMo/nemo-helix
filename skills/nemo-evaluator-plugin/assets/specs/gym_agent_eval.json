@@ -1,0 +1,22 @@
+{
+  "tasks": "default/my-gym-taskset",
+  "target": {
+    "kind": "gym",
+    "environment": "default/my-gym-environment",
+    "agent": "simple_agent",
+    "agent_config": "responses_api_agents/simple_agent/configs/simple_agent.yaml",
+    "resources_server": "custom_greeting",
+    "num_repeats": 1,
+    "concurrency": 1,
+    "hydra_params": {
+      "policy_base_url": "http://nemo-platform-api.default.svc.cluster.local:8080/apis/inference-gateway/v2/workspaces/default/model/my-model/-/v1",
+      "policy_api_key": "not-used",
+      "policy_model_name": "my-model"
+    }
+  },
+  "max_concurrent_tasks": 1,
+  "fail_fast": true,
+  "labels": {
+    "benchmark": "custom-gym-environment"
+  }
+}

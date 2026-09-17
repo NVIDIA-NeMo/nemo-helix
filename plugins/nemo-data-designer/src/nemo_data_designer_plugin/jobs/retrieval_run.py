@@ -11,7 +11,7 @@ from nemo_data_designer_plugin.jobs.retrieval_spec import (
     RetrievalPrepareStepConfig,
     RetrievalRunJobConfig,
 )
-from nemo_platform import NeMoPlatform
+from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
@@ -33,7 +33,7 @@ class RetrievalRunJob(NemoJob):
         input_spec: BaseModel,
         workspace: str,
         entity_client: object,
-        async_sdk: object,
+        async_sdk: AsyncNeMoPlatform,
         is_local: bool,
     ) -> BaseModel:
         run = cast(RetrievalRunJobConfig, input_spec)
@@ -68,7 +68,7 @@ class RetrievalRunJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: object,
+        async_sdk: AsyncNeMoPlatform,
         profile: str | None = None,
         options: dict | None = None,
     ) -> PlatformJobSpec:
@@ -113,5 +113,6 @@ class RetrievalRunJob(NemoJob):
         )
         return PlatformJobSpec(steps=[*generate_job["steps"], *prepare_job["steps"]])
 
-    def run(self, config: dict, ctx: JobContext, sdk: NeMoPlatform) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoPlatform) -> dict:
+        del config, ctx, sdk
         raise NotImplementedError("retrieval-run is remote-only; compile emits generate and prepare steps.")

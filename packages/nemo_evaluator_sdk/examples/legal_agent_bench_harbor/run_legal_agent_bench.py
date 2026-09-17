@@ -25,8 +25,10 @@ Two modes:
 Prerequisites:
 
 * Python >= 3.12 and a running Docker daemon.
-* Harbor, installed separately: ``uv pip install "harbor>=0.16.1"`` (kept out of the
-  SDK's lock so importing the SDK stays lightweight).
+* A NeMo Platform source checkout (see SETUP.md for toolchain prerequisites).
+  From the repository root, install Harbor with
+  ``uv sync --frozen --package nemo-evaluator-sdk --extra harbor``. The SDK is not
+  published as a standalone PyPI package. Harbor is imported lazily.
 * A prepared LAB Harbor suite on disk — a directory of task folders. Generate it
   with the bundled, self-contained ``prepare_lab_suite.py`` (pinned download +
   Harbor-task generation; see the example README).
@@ -151,7 +153,7 @@ async def _main(args: argparse.Namespace) -> None:
     print(f"run_id: {result.run_id}  tasks: {result.summary.task_count}  trials: {result.summary.trial_count}")
     print("Aggregate scores:")
     for aggregate in result.summary.scores.scores:
-        print(f"  {aggregate.name}: mean={aggregate.mean}")
+        print(f"  {aggregate.name}: {aggregate.headline_value}")
     print(f"\nRun bundle (run.json, trials.jsonl, scores.jsonl, summary.json, report.html): {args.output_dir}")
 
 

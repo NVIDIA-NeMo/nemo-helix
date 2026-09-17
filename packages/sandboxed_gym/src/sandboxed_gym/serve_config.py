@@ -30,6 +30,7 @@ class SandboxedGymServeConfig(BaseModel):
     job_id: str = DEFAULT_JOB_ID
     host_provider: str = "opensandbox"
     environment_path: str | None = None
+    environment_offline: bool = False
     sandbox: SandboxConfig
     episode_broker: EpisodeBrokerConfig | dict[str, Any] = Field(default_factory=dict)
     gym_global_config: dict[str, Any] = Field(default_factory=dict)

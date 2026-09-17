@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getErrorMessage, isValidationErrorArray } from '@nemo/common/src/api/common/utils';
+import {
+  getErrorMessage,
+  isValidationErrorArray,
+  swallowConflict,
+} from '@nemo/common/src/api/common/utils';
 import { AxiosError, AxiosHeaders, InternalAxiosRequestConfig } from 'axios';
 
 describe('isValidationErrorArray', () => {
@@ -299,5 +303,38 @@ describe('getErrorMessage', () => {
 
       expect(getErrorMessage(error, 'fallback')).toBe('fallback');
     });
+  });
+});
+
+describe('swallowConflict', () => {
+  const axiosErrorWithStatus = (status: number): AxiosError => {
+    const config: InternalAxiosRequestConfig = { headers: new AxiosHeaders() };
+    return new AxiosError('Request failed', undefined, config, undefined, {
+      status,
+      statusText: '',
+      data: {},
+      headers: {},
+      config,
+    });
+  };
+
+  it('resolves to the value when the promise succeeds', async () => {
+    await expect(swallowConflict(Promise.resolve('created'))).resolves.toBe('created');
+  });
+
+  it('resolves to undefined when the promise rejects with a 409', async () => {
+    await expect(
+      swallowConflict(Promise.reject(axiosErrorWithStatus(409)))
+    ).resolves.toBeUndefined();
+  });
+
+  it('rethrows AxiosErrors that are not 409', async () => {
+    const error = axiosErrorWithStatus(500);
+    await expect(swallowConflict(Promise.reject(error))).rejects.toBe(error);
+  });
+
+  it('rethrows non-Axios errors', async () => {
+    const error = new Error('network down');
+    await expect(swallowConflict(Promise.reject(error))).rejects.toBe(error);
   });
 });

@@ -1,0 +1,178 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Configure Sandboxed Gym for Evaluator"
+description: "Configure OpenSandbox, shared storage, images, and network policy for sandboxed Gym agent-evaluate jobs."
+---
+
+Sandboxed Gym runs NeMo Gym and environment code outside the trusted Evaluator task container.
+The Evaluator task keeps platform and OpenSandbox credentials, starts a per-run Gym host, sends
+rollout requests over HTTP, and destroys the host when the run ends.
+
+This page is for platform operators. Job submitters cannot select the host provider, runtime image,
+PVC, or egress policy.
+
+## Prerequisites
+
+- Complete the shared [OpenSandbox platform setup](/documentation/kubernetes-deployment/setup/helm/open-sandbox).
+  It configures the server connection, credentials, and top-level platform sandbox capability.
+- A Kubernetes or Volcano Jobs execution profile with a shared job-storage PVC. The claim should
+  support `ReadWriteMany` when Jobs and OpenSandbox pods can run on different nodes.
+- Published `nmp-cpu-tasks` and `nmp-gym-host` images for the platform release.
+- An allowlisted model endpoint reachable from the Gym host.
+
+## Execution topology
+
+For a built-in environment, sandboxed execution runs one platform step:
+
+```text
+agent-evaluate (nmp-cpu-tasks)
+  → OpenSandbox
+  → nmp-gym-host
+```
+
+For a custom environment FileSet, Evaluator runs two platform steps:
+
+```text
+stage-environment (nmp-cpu-tasks)
+  → shared job PVC
+  → agent-evaluate (nmp-cpu-tasks)
+  → OpenSandbox
+  → nmp-gym-host
+```
+
+The Gym host mounts the environment read-only and a separate workspace path read-write.
+
+## Configure Evaluator
+
+After completing the shared OpenSandbox setup, add the Evaluator-specific values. Replace the image,
+PVC, and model URL for your deployment:
+
+```yaml
+platformConfig:
+  evaluator:
+    sandboxed_gym_default: true
+    sandbox_cluster_capable: true
+    sandbox_host_provider: opensandbox
+    sandbox_runtime_image: nvcr.io/nvidia/nemo-platform/nmp-gym-host:<release-tag>
+    sandbox_job_storage_pvc_claim: nemo-platform-core-storage
+    sandbox_policy_base_urls:
+      - http://nemo-platform-api.<namespace>.svc.cluster.local:8080
+    sandbox_resources:
+      cpu: "2"
+      memory: 8Gi
+```
+
+The Evaluator-specific `sandbox_cluster_capable` flag is separate from the top-level
+`sandboxClusterCapable` value configured in the shared setup. Both must be `true`: the top-level
+value injects the OpenSandbox connection into Jobs pods, and the Evaluator flag makes its compiler
+fail closed until the remaining Evaluator settings are configured.
+
+<Warning>
+
+`sandbox_job_storage_pvc_claim` must match the PVC configured on the Jobs execution profile.
+Evaluator rejects a FileSet-backed job when staging writes to one claim and OpenSandbox would mount
+another.
+
+</Warning>
+
+## Configuration reference
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `sandboxed_gym_default` | `false` | Run Gym targets in a separate host. Custom environment FileSets require `true`. |
+| `sandbox_cluster_capable` | `false` | Confirm that this Evaluator deployment can provision sandbox hosts. |
+| `sandbox_runtime_image` | unset | Fully qualified `nmp-gym-host` image containing NeMo Gym and the host runtime. |
+| `sandbox_job_storage_pvc_claim` | unset | Shared claim used for staged environments and Gym workspaces. |
+| `sandbox_host_provider` | `opensandbox` | Host provider. `docker` is for local debugging and is not an isolation boundary. |
+| `sandbox_host_provider_options` | `{}` | Provider-specific connection options. Helm supplies the OpenSandbox protocol separately. |
+| `sandbox_environment_sub_path` | `environment` | Read-only environment location within job storage. |
+| `sandbox_workspace_sub_path` | `workspace` | Read-write Gym workspace location within job storage. |
+| `sandbox_resources` | unset | CPU and memory requests for each Gym host. Set these on shared clusters. |
+| `sandbox_policy_base_urls` | `[]` | Model or inference base URLs the Gym host may reach. |
+| `sandbox_egress_allow` | `[]` | Additional allowed destinations in `host:port` form. |
+| `sandbox_episode_backend` | `opensandbox` | Provider for nested episode sandboxes requested by an environment. |
+| `sandbox_allow_insecure_memory_backend` | `false` | Second opt-in required for the non-isolating local memory backend. |
+| `sandbox_approved_images` | `[]` | Images allowed for nested episode sandboxes. Empty rejects every episode request. |
+
+Evaluator requires at least one entry across `sandbox_policy_base_urls` and
+`sandbox_egress_allow`. The OpenSandbox provider applies a deny-by-default policy and adds the
+trusted episode broker automatically.
+
+## Configure model egress
+
+Use `sandbox_policy_base_urls` for model and inference endpoints:
+
+```yaml
+platformConfig:
+  evaluator:
+    sandbox_policy_base_urls:
+      - http://nemo-platform-api.nemo-platform.svc.cluster.local:8080
+      - https://inference-api.nvidia.com/v1
+```
+
+Use `sandbox_egress_allow` for non-model dependencies:
+
+```yaml
+platformConfig:
+  evaluator:
+    sandbox_egress_allow:
+      - artifacts.example.internal:443
+```
+
+Submitters cannot extend these lists from `GymRunnerTarget`. This prevents an environment from
+widening its own network access.
+
+## Configure credentials
+
+OpenSandbox credentials remain in the trusted Evaluator task. The Gym host receives only per-run
+tokens and the environment variables required by its selected Gym components.
+
+For a job-specific model credential, create a NeMo Platform secret and reference it through
+`GymRunnerTarget.env_secrets`:
+
+```yaml
+target:
+  kind: gym
+  # ...
+  env_secrets:
+    EXTERNAL_MODEL_API_KEY: default/my-model-api-key
+```
+
+Do not use `env_vars` for API keys, tokens, passwords, or other secrets. Evaluator rejects
+credential-shaped `env_vars` for sandboxed jobs because environment code can read them.
+
+## Local Docker provider
+
+Set `sandbox_host_provider: docker` only when debugging the runtime contract on a local deployment.
+It runs the same `nmp-gym-host` image but does not enforce the OpenSandbox egress policy and is not
+an isolation boundary.
+
+The `memory` episode backend is also local-only. It requires both:
+
+```yaml
+sandbox_episode_backend: memory
+sandbox_allow_insecure_memory_backend: true
+```
+
+Ordinary evaluations do not create nested episode sandboxes. Environments that request them must
+use the OpenSandbox episode backend and list every permitted image in `sandbox_approved_images`.
+
+## Verify the deployment
+
+Before accepting custom environment jobs, verify:
+
+1. OpenSandbox is ready and reachable over the configured in-cluster protocol.
+2. The selected Jobs profile uses Kubernetes or Volcano and mounts the configured PVC.
+3. `nmp-cpu-tasks` and `nmp-gym-host` can be pulled by pods in the platform namespace.
+4. The Gym host can reach each configured model URL but cannot reach an unlisted destination.
+5. A completed and a failed run both destroy their Gym hosts.
+
+## Related
+
+<Cards>
+  <Card title="Install OpenSandbox" href="/documentation/kubernetes-deployment/setup/helm/open-sandbox" />
+  <Card title="Run a Custom Gym Environment" href="/documentation/evaluate-models/agent-eval/gym-custom-environment" />
+  <Card title="Evaluate a NeMo Gym Environment" href="/documentation/evaluate-models/agent-eval/gym-runner" />
+</Cards>

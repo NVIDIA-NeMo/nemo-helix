@@ -78,12 +78,14 @@ class ResourceReplacement(BaseModel):
 
 
 _CLIENT_CLASS_NAMES = ("NeMoPlatform", "AsyncNeMoPlatform")
-_CLIENT_METHOD_NAMES = ("__init__", "__getattr__", "copy")
+_CLIENT_METHOD_NAMES = ("__init__", "__getattr__", "copy", "jobs", "secrets")
 _CLIENT_HELPER_FUNCTION_NAMES = ("_should_bootstrap_config", "_copy_requires_bootstrap")
 _CLIENT_INIT_REQUIRED_IMPORTS: dict[str, tuple[str, ...]] = {
     "nemo_platform._base_client": ("DefaultAsyncHttpxClient", "DefaultHttpxClient"),
     "nemo_platform_plugin.client.constants": ("WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR",),
     "nemo_platform_plugin.client.tls": ("client_verify_from_env",),
+    "nemo_platform_plugin.jobs.client": ("AsyncJobsClient", "JobsClient"),
+    "nemo_platform_plugin.secrets.compat": ("AsyncSecretsResource", "SecretsResource"),
     "pathlib": ("Path",),
 }
 _STALE_CLIENT_INIT_IMPORTS: dict[str, tuple[str, ...]] = {

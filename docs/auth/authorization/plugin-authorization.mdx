@@ -112,12 +112,13 @@ Stacking `@path_rule` on the same handler adds OR-alternatives: any satisfied ru
 A controller-only write route pins the caller kind to `SERVICE_PRINCIPAL` and requires the compound permission:
 
 ```python
+from typing import Any
 from nemo_platform_plugin.authz import CallerKind, path_rule
 
-@router.put("/deployments/{name}/status", response_model=Deployment)
+@router.put("/v2/workspaces/{workspace}/deployments/{name}/status", response_model=Deployment)
 @scope.write
 @path_rule(callers=[CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentPerms.STATUS_UPDATE])
-async def update_deployment_status(workspace: str, name: str, ...) -> Deployment: ...
+async def update_deployment_status(workspace: str, name: str, body: Any) -> Deployment: ...
 ```
 
 An authenticated-but-permissionless route passes `permissions=[]`:

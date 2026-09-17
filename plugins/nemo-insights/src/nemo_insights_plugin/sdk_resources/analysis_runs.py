@@ -13,9 +13,9 @@ a caller polling on its own would have to know that rule.
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Any, Protocol
+from typing import NotRequired, Protocol, TypedDict
 
 from nemo_insights_plugin.entities import AnalysisRun
 from nemo_insights_plugin.schema import (
@@ -23,7 +23,9 @@ from nemo_insights_plugin.schema import (
     AnalysisRunResponse,
     CreateAnalysisRunRequest,
 )
-from nemo_insights_plugin.sdk_resources._entity import entity_from_response, hydrate_page
+from nemo_insights_plugin.sdk_resources._entity import entity_from_response, hydrate_page, object_dict
+from nemo_insights_plugin.sdk_resources._errors import httpx_status_errors
+from nemo_insights_plugin.types import ListAnalysisRunsQueryParams
 
 DEFAULT_WAIT_TIMEOUT = 900.0
 DEFAULT_POLL_INTERVAL = 5.0
@@ -42,12 +44,58 @@ class AnalysisRunTimeoutError(TimeoutError):
     """The backing job did not reach a terminal state within the wait budget."""
 
 
+class _HTTPResponse(Protocol):
+    def json(self) -> dict[str, object]: ...
+
+
+class _TypedResponse(Protocol):
+    http_response: _HTTPResponse
+
+
+class _PaginatedTypedResponse(_TypedResponse, Protocol):
+    def page(self) -> object: ...
+
+
+class _CreateAnalysisRunFields(TypedDict):
+    agent: str
+    default_model: str
+    fast_model: str
+    ethos: NotRequired[str]
+    since: NotRequired[datetime]
+    evaluation_id: NotRequired[str]
+    timeout_seconds: NotRequired[float]
+
+
+class _AnalysisRunsClient(Protocol):
+    def create_analysis_run(self, *, workspace: str, body: CreateAnalysisRunRequest) -> _TypedResponse: ...
+
+    def list_analysis_runs(
+        self, *, workspace: str, query_params: ListAnalysisRunsQueryParams
+    ) -> _PaginatedTypedResponse: ...
+
+    def get_analysis_run(self, *, workspace: str, name: str) -> _TypedResponse: ...
+
+
+class _AsyncAnalysisRunsClient(Protocol):
+    def create_analysis_run(self, *, workspace: str, body: CreateAnalysisRunRequest) -> Awaitable[_TypedResponse]: ...
+
+    def list_analysis_runs(
+        self, *, workspace: str, query_params: ListAnalysisRunsQueryParams
+    ) -> Awaitable[_PaginatedTypedResponse]: ...
+
+    def get_analysis_run(self, *, workspace: str, name: str) -> Awaitable[_TypedResponse]: ...
+
+
 class _ResourceParent(Protocol):
     """The slice of the insights SDK namespace this sub-resource needs."""
 
-    _http_client: Any
+    @property
+    def _client(self) -> _AnalysisRunsClient: ...
 
-    def _url(self, path: str) -> str: ...
+
+class _AsyncResourceParent(Protocol):
+    @property
+    def _client(self) -> _AsyncAnalysisRunsClient: ...
 
 
 def _build_create_body(
@@ -59,17 +107,21 @@ def _build_create_body(
     since: datetime | None,
     evaluation_id: str | None,
     timeout_seconds: float | None,
-) -> dict[str, Any]:
-    body = CreateAnalysisRunRequest(
-        agent=agent,
-        default_model=default_model,
-        fast_model=fast_model,
-        ethos=ethos,
-        since=since,
-        evaluation_id=evaluation_id,
-        timeout_seconds=timeout_seconds,
-    )
-    return body.model_dump(mode="json", exclude_none=True)
+) -> CreateAnalysisRunRequest:
+    body: _CreateAnalysisRunFields = {
+        "agent": agent,
+        "default_model": default_model,
+        "fast_model": fast_model,
+    }
+    if ethos is not None:
+        body["ethos"] = ethos
+    if since is not None:
+        body["since"] = since
+    if evaluation_id is not None:
+        body["evaluation_id"] = evaluation_id
+    if timeout_seconds is not None:
+        body["timeout_seconds"] = timeout_seconds
+    return CreateAnalysisRunRequest(**body)
 
 
 def _list_params(
@@ -78,23 +130,23 @@ def _list_params(
     page_size: int,
     sort: str,
     agent: str | None,
-) -> dict[str, Any]:
-    params: dict[str, Any] = {"page": page, "page_size": page_size, "sort": sort}
+) -> ListAnalysisRunsQueryParams:
+    params: ListAnalysisRunsQueryParams = {"page": page, "page_size": page_size, "sort": sort}
     if agent is not None:
         params["agent"] = agent
     return params
 
 
-def _run_response_from_response(data: dict[str, Any]) -> AnalysisRunResponse:
+def _run_response_from_response(data: dict[str, object]) -> AnalysisRunResponse:
     """Parse a run-plus-job body, preserving the run's store-assigned metadata."""
     response = AnalysisRunResponse.model_validate(data)
-    raw_run = data.get("run")
-    if isinstance(raw_run, dict):
+    raw_run = object_dict(data.get("run"))
+    if raw_run is not None:
         response.run = entity_from_response(AnalysisRun, raw_run)
     return response
 
 
-def _page_from_response(data: dict[str, Any]) -> AnalysisRunPage:
+def _page_from_response(data: dict[str, object]) -> AnalysisRunPage:
     page = AnalysisRunPage.model_validate(data)
     hydrate_page(page.data, data.get("data"))
     return page
@@ -129,6 +181,10 @@ class _AnalysisRunResource:
     def __init__(self, parent: _ResourceParent) -> None:
         self._parent = parent
 
+    @property
+    def _client(self) -> _AnalysisRunsClient:
+        return self._parent._client
+
     def create(
         self,
         *,
@@ -142,20 +198,20 @@ class _AnalysisRunResource:
         timeout_seconds: float | None = None,
     ) -> AnalysisRunResponse:
         """Submit an analysis run. The model pair is required — see the route."""
-        response = self._parent._http_client.post(
-            self._parent._url(f"/v2/workspaces/{workspace}/analysis-runs"),
-            json=_build_create_body(
-                agent=agent,
-                default_model=default_model,
-                fast_model=fast_model,
-                ethos=ethos,
-                since=since,
-                evaluation_id=evaluation_id,
-                timeout_seconds=timeout_seconds,
-            ),
-        )
-        response.raise_for_status()
-        return _run_response_from_response(response.json())
+        with httpx_status_errors():
+            response = self._client.create_analysis_run(
+                workspace=workspace,
+                body=_build_create_body(
+                    agent=agent,
+                    default_model=default_model,
+                    fast_model=fast_model,
+                    ethos=ethos,
+                    since=since,
+                    evaluation_id=evaluation_id,
+                    timeout_seconds=timeout_seconds,
+                ),
+            )
+            return _run_response_from_response(response.http_response.json())
 
     def list_runs(
         self,
@@ -167,20 +223,19 @@ class _AnalysisRunResource:
         agent: str | None = None,
     ) -> AnalysisRunPage:
         """List analysis runs. Job state is not joined — read one run to get it."""
-        response = self._parent._http_client.get(
-            self._parent._url(f"/v2/workspaces/{workspace}/analysis-runs"),
-            params=_list_params(page=page, page_size=page_size, sort=sort, agent=agent),
-        )
-        response.raise_for_status()
-        return _page_from_response(response.json())
+        with httpx_status_errors():
+            response = self._client.list_analysis_runs(
+                workspace=workspace,
+                query_params=_list_params(page=page, page_size=page_size, sort=sort, agent=agent),
+            )
+            response.page()
+            return _page_from_response(response.http_response.json())
 
     def get(self, *, workspace: str, name: str) -> AnalysisRunResponse:
         """Get one analysis run joined with the live state of its backing job."""
-        response = self._parent._http_client.get(
-            self._parent._url(f"/v2/workspaces/{workspace}/analysis-runs/{name}"),
-        )
-        response.raise_for_status()
-        return _run_response_from_response(response.json())
+        with httpx_status_errors():
+            response = self._client.get_analysis_run(workspace=workspace, name=name)
+            return _run_response_from_response(response.http_response.json())
 
     def wait(
         self,
@@ -214,8 +269,12 @@ class _AnalysisRunResource:
 class _AsyncAnalysisRunResource:
     """Async ``analysis_runs`` sub-resource — mirrors :class:`_AnalysisRunResource`."""
 
-    def __init__(self, parent: _ResourceParent) -> None:
+    def __init__(self, parent: _AsyncResourceParent) -> None:
         self._parent = parent
+
+    @property
+    def _client(self) -> _AsyncAnalysisRunsClient:
+        return self._parent._client
 
     async def create(
         self,
@@ -230,20 +289,20 @@ class _AsyncAnalysisRunResource:
         timeout_seconds: float | None = None,
     ) -> AnalysisRunResponse:
         """Submit an analysis run. The model pair is required — see the route."""
-        response = await self._parent._http_client.post(
-            self._parent._url(f"/v2/workspaces/{workspace}/analysis-runs"),
-            json=_build_create_body(
-                agent=agent,
-                default_model=default_model,
-                fast_model=fast_model,
-                ethos=ethos,
-                since=since,
-                evaluation_id=evaluation_id,
-                timeout_seconds=timeout_seconds,
-            ),
-        )
-        response.raise_for_status()
-        return _run_response_from_response(response.json())
+        with httpx_status_errors():
+            response = await self._client.create_analysis_run(
+                workspace=workspace,
+                body=_build_create_body(
+                    agent=agent,
+                    default_model=default_model,
+                    fast_model=fast_model,
+                    ethos=ethos,
+                    since=since,
+                    evaluation_id=evaluation_id,
+                    timeout_seconds=timeout_seconds,
+                ),
+            )
+            return _run_response_from_response(response.http_response.json())
 
     async def list_runs(
         self,
@@ -255,20 +314,19 @@ class _AsyncAnalysisRunResource:
         agent: str | None = None,
     ) -> AnalysisRunPage:
         """List analysis runs. Job state is not joined — read one run to get it."""
-        response = await self._parent._http_client.get(
-            self._parent._url(f"/v2/workspaces/{workspace}/analysis-runs"),
-            params=_list_params(page=page, page_size=page_size, sort=sort, agent=agent),
-        )
-        response.raise_for_status()
-        return _page_from_response(response.json())
+        with httpx_status_errors():
+            response = await self._client.list_analysis_runs(
+                workspace=workspace,
+                query_params=_list_params(page=page, page_size=page_size, sort=sort, agent=agent),
+            )
+            response.page()
+            return _page_from_response(response.http_response.json())
 
     async def get(self, *, workspace: str, name: str) -> AnalysisRunResponse:
         """Get one analysis run joined with the live state of its backing job."""
-        response = await self._parent._http_client.get(
-            self._parent._url(f"/v2/workspaces/{workspace}/analysis-runs/{name}"),
-        )
-        response.raise_for_status()
-        return _run_response_from_response(response.json())
+        with httpx_status_errors():
+            response = await self._client.get_analysis_run(workspace=workspace, name=name)
+            return _run_response_from_response(response.http_response.json())
 
     async def wait(
         self,

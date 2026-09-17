@@ -37,6 +37,7 @@ from nemo_evaluator_sdk.agent_eval.persistence import read_trials
 from nemo_evaluator_sdk.agent_eval.scores import AgentEvalScoreStatus
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput
+from nemo_evaluator_sdk.metrics.protocol import MetricOutputSpec
 
 
 def _repo_root() -> Path:
@@ -182,6 +183,21 @@ def test_skill_python_examples_import_and_build_agent_spec() -> None:
     )
     assert "CodexRunnerTarget" not in reference
     assert 'labels={"benchmark": "geography-smoke"}' in reference
+
+
+def test_skill_documents_sparse_agent_eval_output_contract() -> None:
+    root = _repo_root() / "skills/nemo-evaluator-plugin"
+    skill = (root / "SKILL.md").read_text(encoding="utf-8")
+    agent_eval = (root / "references/agent-evaluation.md").read_text(encoding="utf-8")
+    execution = (root / "references/execution.md").read_text(encoding="utf-8")
+
+    assert MetricOutputSpec.model_fields["required"].default is True
+    assert "aggregate `count` and `nan_count`, and coverage" in " ".join(skill.split())
+    assert "`required=False` permits the metric to omit an unmeasured output" in agent_eval
+    assert "Emitting a filler (`0.0` or NaN) is allowed but not generally recommended" in agent_eval
+    assert "`count + nan_count` equals applicable opportunities" in agent_eval
+    assert "`reward_key` selects the required primary reward by name" in agent_eval
+    assert "`required=False` is serialized explicitly on optional output entries" in execution
 
 
 def test_skill_standalone_example_scores_pass_and_failure() -> None:
@@ -439,6 +455,8 @@ def test_metric_selection_lists_exactly_the_supported_metric_names() -> None:
             "agent_phase_success",
             "evidence_presence",
             "skill_used",
+            "tool_call_count",
+            "tool_argument_matches_input",
         }
     )
 

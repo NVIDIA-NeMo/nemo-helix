@@ -6,8 +6,12 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from nemo_platform import AsyncNeMoPlatform, Omit
 from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nmp.common.api.common import SecretRef
+from nmp.common.auth import AuthClient, Principal
+from nmp.common.config import AuthConfig
+from nmp.common.observability import MARK_INTERNAL_REQUEST_HEADERS
 from nmp.common.secrets.exceptions import SecretNotFoundError
 from nmp.core.files.api.endpoint_helpers import (
     CacheContext,
@@ -16,6 +20,7 @@ from nmp.core.files.api.endpoint_helpers import (
     get_file_info,
     list_storage_files,
     resolve_storage_secrets,
+    resolve_storage_secrets_for_user,
     stream_file_download,
 )
 from nmp.core.files.app.backends.base import FileInfo
@@ -122,6 +127,45 @@ async def test_resolve_storage_secrets_propagates_not_found(mock_sdk):
 
     with pytest.raises(SecretNotFoundError):
         await resolve_storage_secrets(config, "default", mock_sdk)
+
+
+async def test_resolve_storage_secrets_for_user_delegates_effective_principal_claims():
+    config = HuggingfaceStorageConfig(
+        repo_id="org/repo",
+        token_secret=SecretRef(root="my-hf-token"),
+    )
+    auth_client = AuthClient(
+        config=AuthConfig(),
+        principal=Principal(
+            id="service:jobs",
+            groups=["system:serviceaccounts"],
+            on_behalf_of="creator@example.com",
+            on_behalf_of_email="creator@example.com",
+            on_behalf_of_groups=["workspace-editors", "ml-team"],
+        ),
+    )
+    sdk = AsyncNeMoPlatform(base_url="http://testserver")
+    captured_headers: dict[str, str | Omit] = {}
+    secrets_client = MagicMock()
+    secrets_client.access_secret = AsyncMock(return_value=_access_result("hf_token_value"))
+
+    def capture_service_sdk(service_sdk: AsyncNeMoPlatform, _client_type: type[object]) -> MagicMock:
+        captured_headers.update(service_sdk.default_headers)
+        return secrets_client
+
+    try:
+        with patch("nmp.core.files.api.endpoint_helpers.client_from_platform", side_effect=capture_service_sdk):
+            secrets = await resolve_storage_secrets_for_user(config, "my-workspace", sdk, auth_client)
+    finally:
+        await sdk.close()
+
+    assert secrets == {"token": "hf_token_value"}
+    for header, value in MARK_INTERNAL_REQUEST_HEADERS.items():
+        assert captured_headers[header] == value
+    assert captured_headers["X-NMP-Principal-Id"] == "service:files"
+    assert captured_headers["X-NMP-Principal-On-Behalf-Of"] == "creator@example.com"
+    assert captured_headers["X-NMP-Principal-On-Behalf-Of-Email"] == "creator@example.com"
+    assert captured_headers["X-NMP-Principal-On-Behalf-Of-Groups"] == "workspace-editors,ml-team"
 
 
 # Tests for get_cache_status_for_files

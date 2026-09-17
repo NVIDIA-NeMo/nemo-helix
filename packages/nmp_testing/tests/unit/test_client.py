@@ -5,6 +5,7 @@
 
 import pytest
 from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.client import AsyncNemoClient
 from nemo_platform_plugin.workspaces.client import WorkspacesClient
 from nmp.common.config import Configuration
 from nmp.core.entities.service import EntitiesService
@@ -109,6 +110,7 @@ def test_create_test_client_returns_client_context():
     with create_test_client(EntitiesService, client_type=ClientContext) as ctx:
         assert isinstance(ctx, ClientContext)
         assert ctx.sdk is not None
+        assert isinstance(ctx.async_client, AsyncNemoClient)
         assert ctx.test_client is not None
 
 

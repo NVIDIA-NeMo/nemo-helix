@@ -11,15 +11,16 @@ from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from threading import RLock
-from typing import ClassVar, Dict, Generic, List, Optional, Self, Type, TypeVar, cast, get_args, get_origin
+from typing import Any, ClassVar, Dict, Generic, List, Optional, Self, Type, TypeVar, cast, get_args, get_origin
 
 import httpx
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.openapi.utils import get_openapi
-from nemo_platform import AsyncNeMoPlatform
+from fastapi.routing import APIRoute, iter_route_contexts
+from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.client.client import AsyncNemoClient
 from nmp.common.api.utils import register_query_param_schemas
-from nmp.common.config import Configuration, PlatformConfig, ServiceConfig
+from nmp.common.config import Configuration, PlatformConfig, ServiceConfig, get_platform_config
 from nmp.common.controller import Controller
 from nmp.common.entities.client import EntityClient
 from nmp.common.platform_endpoint import resolve_platform_endpoint, resolve_service_endpoint
@@ -35,6 +36,44 @@ class RouterConfig:
     tag: str
     description: str
     prefix: str = ""
+
+
+class _ServiceFastAPI(FastAPI):
+    """FastAPI app that keeps NeMo service OpenAPI customization lazy."""
+
+    def __init__(
+        self,
+        *,
+        service_title: str,
+        service_version: str,
+        service_openapi_tags: List[Dict[str, str]],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self._nmp_service_title = service_title
+        self._nmp_service_version = service_version
+        self._nmp_service_openapi_tags = service_openapi_tags
+
+    def openapi(self) -> dict[str, Any]:
+        if self.openapi_schema:
+            return self.openapi_schema
+
+        # Keep schema generation lazy. Service construction sits on the hot path for
+        # in-process test apps; eagerly walking all routes and registering schemas
+        # made auth-heavy integration tests spend much of their 120s timeout budget
+        # before the test body ran. FastAPI calls this method only when the schema
+        # is requested, and caches the result in ``openapi_schema``.
+        openapi_schema = get_openapi(
+            title=self._nmp_service_title,
+            version=self._nmp_service_version,
+            summary=f"This is the OpenAPI Schema for the {self._nmp_service_title}.",
+            description="",
+            routes=self.routes,
+            tags=self._nmp_service_openapi_tags,
+        )
+        openapi_schema = register_query_param_schemas(openapi_schema)
+        self.openapi_schema = openapi_schema
+        return self.openapi_schema
 
 
 TConfig = TypeVar("TConfig", bound=ServiceConfig)
@@ -72,7 +111,9 @@ class DependencyProvider:
     def __init__(self) -> None:
         self._client_lock = RLock()
         self._http_client: Optional[httpx.AsyncClient] = None
+        self._sync_http_client: Optional[httpx.Client] = None
         self._sdk_client: Optional[AsyncNeMoPlatform] = None
+        self._sync_sdk_client: Optional[NeMoPlatform] = None
         self._platform_config: Optional[PlatformConfig] = None
         self._service_name: str = "platform"
 
@@ -94,6 +135,13 @@ class DependencyProvider:
             if self._http_client is None:
                 self._http_client = resolve_platform_endpoint().async_sdk_http_client()
             return self._http_client
+
+    def get_sync_http_client(self) -> httpx.Client:
+        """Return the httpx.Client for sync-only SDK consumers."""
+        with self._client_lock:
+            if self._sync_http_client is None:
+                self._sync_http_client = resolve_platform_endpoint().sync_sdk_http_client()
+            return self._sync_http_client
 
     def get_sdk_client(self, as_service: str | None = None) -> AsyncNeMoPlatform:
         """Return the async platform SDK client.
@@ -120,6 +168,18 @@ class DependencyProvider:
             if self._sdk_client is None:
                 self._sdk_client = get_async_platform_sdk(http_client=self.get_http_client())
             return self._sdk_client
+
+    def get_sync_sdk_client(self, as_service: str | None = None) -> NeMoPlatform:
+        """Return the sync platform SDK client."""
+        from nmp.common.sdk_factory import get_platform_sdk
+
+        if as_service is not None:
+            return get_platform_sdk(as_service=as_service, internal=True, http_client=self.get_sync_http_client())
+
+        with self._client_lock:
+            if self._sync_sdk_client is None:
+                self._sync_sdk_client = get_platform_sdk(http_client=self.get_sync_http_client())
+            return self._sync_sdk_client
 
     def get_entity_client(self, as_service: str | None = None) -> Optional[EntityClient]:
         """Return the EntityClient.
@@ -157,19 +217,20 @@ class DependencyProvider:
         Uses the cached base SDK and applies per-request headers via .with_options()
         (lightweight — reuses the HTTP connection pool).
         """
-        from nmp.common.sdk_factory import with_options_preserving_request_router
         from nmp.common.service.headers import build_downstream_service_headers
 
         base_sdk = self.get_sdk_client()
         headers = build_downstream_service_headers(self._service_name)
 
-        return with_options_preserving_request_router(base_sdk, set_default_headers=headers)
+        return base_sdk.with_options(set_default_headers=headers)
 
     def get_platform_config(self) -> PlatformConfig:
         """Return the PlatformConfig (lazily initialized)."""
-        if self._platform_config is None:
-            self._platform_config = Configuration.get_platform_config()
-        return self._platform_config
+        platform_config = self._platform_config
+        if platform_config is None:
+            platform_config = get_platform_config()
+            self._platform_config = platform_config
+        return platform_config
 
     def get_request_scoped_sdk(self) -> AsyncNeMoPlatform:
         """Return a request-scoped SDK with current auth and OTEL headers.
@@ -181,6 +242,13 @@ class DependencyProvider:
 
         base_sdk = self.get_sdk_client()  # Cached base SDK
         return get_request_scoped_sdk(base_sdk)
+
+    def get_request_scoped_sync_sdk(self) -> NeMoPlatform:
+        """Return a request-scoped sync SDK with current auth and OTEL headers."""
+        from nmp.common.sdk_factory import get_request_scoped_sync_sdk
+
+        base_sdk = self.get_sync_sdk_client()
+        return get_request_scoped_sync_sdk(base_sdk)
 
     def get_request_scoped_nemo_client(self) -> AsyncNemoClient:
         """Return a fresh async NemoClient with request-scoped headers."""
@@ -203,9 +271,11 @@ class DependencyProvider:
             get_platform_config,
             get_sdk_client,
             get_service_config,
+            get_sync_sdk_client,
         )
 
         app.dependency_overrides[get_sdk_client] = self.get_request_scoped_sdk
+        app.dependency_overrides[get_sync_sdk_client] = self.get_request_scoped_sync_sdk
         app.dependency_overrides[get_nemo_client] = self.get_request_scoped_nemo_client
         app.dependency_overrides[get_entity_client] = self.get_entity_client
         app.dependency_overrides[get_effective_principal_id] = self.get_effective_principal_id
@@ -217,11 +287,16 @@ class DependencyProvider:
         """Close the provider-owned HTTP transport and clear cached wrappers."""
         with self._client_lock:
             http_client = self._http_client
+            sync_http_client = self._sync_http_client
             self._http_client = None
+            self._sync_http_client = None
             self._sdk_client = None
+            self._sync_sdk_client = None
 
         if http_client is not None:
             await http_client.aclose()
+        if sync_http_client is not None:
+            sync_http_client.close()
 
 
 class Service(ABC, Generic[TConfig]):
@@ -470,7 +545,10 @@ class Service(ABC, Generic[TConfig]):
         router_configs = self.get_routers()
         openapi_tags: List[Dict[str, str]] = [{"name": rc.tag, "description": rc.description} for rc in router_configs]
 
-        app = FastAPI(
+        app = _ServiceFastAPI(
+            service_title=self.title,
+            service_version=self.version,
+            service_openapi_tags=openapi_tags,
             title=self.title,
             description=self.description,
             version=self.version,
@@ -496,35 +574,13 @@ class Service(ABC, Generic[TConfig]):
 
         # Include service-specific routers, tagging any routes that have no tags yet
         for rc in router_configs:
-            for route in rc.router.routes:
-                if hasattr(route, "tags") and not route.tags:
-                    route.tags = [rc.tag]
+            for route_context in iter_route_contexts(rc.router.routes):
+                route = route_context.original_route
+                if isinstance(route, APIRoute) and not route.tags:
+                    route.tags.append(rc.tag)
             app.include_router(rc.router, prefix=rc.prefix)
 
-        # Setup custom OpenAPI schema
-        self._setup_custom_openapi(app, openapi_tags)
-
         return app
-
-    def _setup_custom_openapi(self, app: FastAPI, openapi_tags: List[Dict[str, str]]) -> None:
-        """Configure custom OpenAPI schema generation."""
-
-        def custom_openapi():
-            if app.openapi_schema:
-                return app.openapi_schema
-            openapi_schema = get_openapi(
-                title=self.title,
-                version=self.version,
-                summary=f"This is the OpenAPI Schema for the {self.title}.",
-                description="",
-                routes=app.routes,
-                tags=openapi_tags,
-            )
-            openapi_schema = register_query_param_schemas(openapi_schema)
-            app.openapi_schema = openapi_schema
-            return app.openapi_schema
-
-        app.openapi = custom_openapi  # type: ignore[method-assign]
 
     # =========================================================================
     # Startup and readiness

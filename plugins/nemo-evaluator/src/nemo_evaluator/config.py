@@ -50,7 +50,9 @@ class EvaluatorConfig(NemoConfig):
     )
     sandbox_runtime_image: str | None = Field(
         default=None,
-        description="Image the sandboxed Gym host runs. Must carry NeMo-Gym and the host runtime.",
+        description="Optional fully qualified image for the sandboxed Gym host. When unset, the deployment "
+        "uses the qualified `nmp-gym-host` image matching the platform registry and tag. Set this only to "
+        "override that release-coupled default.",
     )
     sandbox_episode_backend: Literal["opensandbox", "memory"] = Field(
         default="opensandbox",

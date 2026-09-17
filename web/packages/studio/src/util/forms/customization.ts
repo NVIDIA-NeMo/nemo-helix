@@ -11,6 +11,7 @@ import {
   type RlJobInput,
   type RlJobsJobRequest,
   type UnslothJobInput,
+  type IntegrationsSpec,
   type UnslothJobsJobRequest,
 } from '@nemo/sdk/generated/customizer/schema';
 import { CustomizationCreateAutomodelJobBody } from '@nemo/sdk/generated/customizer/zod/automodel-jobs';
@@ -20,6 +21,9 @@ import {
   CustomizationBackend,
   isAutomodelJob,
   isRlJob,
+  isAutomodelSpec,
+  isRlSpec,
+  isUnslothSpec,
   type CustomizationJob,
 } from '@studio/util/customizationBackend';
 import type { TrainingType } from '@studio/util/customizerSchema';
@@ -257,10 +261,15 @@ export const formToAutomodelCreate = (f: CustomizationFormFields): AutomodelJobs
     description: f.description || undefined,
     spec: {
       ...f.automodel,
+      integrations: cleanIntegrations(f.automodel.integrations),
       training: {
         ...training,
         lora: usesLora ? training.lora : undefined,
         teacher_model: isDistillation ? training.teacher_model || undefined : undefined,
+        teacher_precision: isDistillation ? training.teacher_precision : undefined,
+        distillation_ratio: isDistillation ? training.distillation_ratio : undefined,
+        distillation_temperature: isDistillation ? training.distillation_temperature : undefined,
+        offload_teacher: isDistillation ? training.offload_teacher : undefined,
       },
       output: { name: f.outputName, description: f.description || undefined },
     },
@@ -272,8 +281,8 @@ export const formToAutomodelCreate = (f: CustomizationFormFields): AutomodelJobs
  * empty values, then drop a provider whose fields are all empty, then the whole block.
  */
 const cleanIntegrations = (
-  integrations: RlJobInput['integrations']
-): RlJobInput['integrations'] => {
+  integrations: IntegrationsSpec | undefined | null
+): IntegrationsSpec | undefined => {
   if (!integrations) return undefined;
   const prune = <T extends object>(obj: T | undefined | null): T | undefined => {
     if (!obj) return undefined;
@@ -445,6 +454,7 @@ export const formToUnslothCreate = (f: CustomizationFormFields): UnslothJobsJobR
     description: f.description || undefined,
     spec: {
       ...f.unsloth,
+      integrations: cleanIntegrations(f.unsloth.integrations),
       model: usesLora
         ? f.unsloth.model
         : { ...f.unsloth.model, load_in_4bit: false, load_in_8bit: false },
@@ -547,4 +557,31 @@ export const jobToFormFields = (job: CustomizationJob): CustomizationFormFields 
     backend: 'unsloth',
     unsloth: stripNulls(job.spec) as UnslothJobInput,
   };
+};
+
+/**
+ * Form values for a route entered with state: either a template supplying `initialValues`
+ * outright, or a job to clone.
+ */
+export const getInitialFormValuesFromState = (
+  state: unknown
+): CustomizationFormFields | undefined => {
+  if (typeof state !== 'object' || state === null) return undefined;
+  const { initialValues, cloneFromJob } = state as {
+    initialValues?: unknown;
+    cloneFromJob?: unknown;
+  };
+
+  if (customizationFormSchema.safeParse(initialValues).success) {
+    return initialValues as CustomizationFormFields;
+  }
+
+  if (typeof cloneFromJob === 'object' && cloneFromJob !== null) {
+    const spec = (cloneFromJob as Record<string, unknown>).spec;
+    if (isAutomodelSpec(spec) || isUnslothSpec(spec) || isRlSpec(spec)) {
+      return jobToFormFields(cloneFromJob as CustomizationJob);
+    }
+  }
+
+  return undefined;
 };

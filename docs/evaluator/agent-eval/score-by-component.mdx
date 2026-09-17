@@ -139,6 +139,15 @@ Attach both metrics to each task, then define a **view** — a named roll-up of 
 outputs. `SemanticView` reduces its `signals` (each a `metric.output`) into one score; `MEAN` averages
 them. The view is reported per task and aggregated across the run as `view.<name>`.
 
+<Note>
+
+A trial contributes to a view only when every signal is present and finite. If a metric omits an
+optional signal, the entire view reduction for that trial is unmeasured and contributes to the view's
+`nan_count`. Views do not partially reduce the remaining signals or replace the missing signal with
+zero.
+
+</Note>
+
 ```python
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask, SemanticReducer, SemanticView, ViewSignal
 

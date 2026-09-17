@@ -16,6 +16,7 @@ import { type FC, useState } from 'react';
 const ANCHOR = new Date('2026-07-01T00:00:00Z').getTime();
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
+const WEEK_MS = 7 * DAY_MS;
 
 /** Deterministic LCG — fixtures must not change between story renders. */
 const makeRandom = (seed: number): (() => number) => {
@@ -81,11 +82,13 @@ const makeFixture = ({
 const MONTH = makeFixture({ buckets: 31, bucketMs: DAY_MS });
 const WEEK = makeFixture({ buckets: 7, bucketMs: DAY_MS, seed: 7 });
 const DAY = makeFixture({ buckets: 24, bucketMs: HOUR_MS, runsPerBucket: 3, seed: 11 });
+const MAX = makeFixture({ buckets: 13, bucketMs: WEEK_MS, runsPerBucket: 30, seed: 23 });
 
 const FIXTURE_BY_RANGE: Record<TraceStatisticsRange, Fixture> = {
   day: DAY,
   week: WEEK,
   month: MONTH,
+  max: MAX,
 };
 
 const meta: Meta<typeof AgentTraceStatistics> = {
@@ -99,7 +102,7 @@ const meta: Meta<typeof AgentTraceStatistics> = {
     onViewTraces: () => {},
   },
   argTypes: {
-    range: { control: 'select', options: ['day', 'week', 'month'] },
+    range: { control: 'select', options: ['day', 'week', 'month', 'max'] },
     chartHeight: { control: { type: 'range', min: 160, max: 600, step: 20 } },
   },
   decorators: [

@@ -15,12 +15,25 @@ from nemo_platform_plugin.jobs.result_manager import AsyncResultManager as Async
 from nemo_platform_plugin.jobs.result_manager import ResultManager as ResultManager
 from nemo_platform_plugin.jobs.result_manager import async_result_manager_factory as typed_async_result_manager_factory
 from nemo_platform_plugin.jobs.result_manager import result_manager_factory as typed_result_manager_factory
+from nmp.common.sdk_factory import get_async_platform_sdk
+
+__all__ = [
+    "AsyncFilesetFileManager",
+    "AsyncResultManager",
+    "FilesetFileManager",
+    "ResultManager",
+    "TmpDirPath",
+    "async_result_manager_factory",
+    "download_from_result_info",
+    "result_manager_factory",
+]
 
 
 def result_manager_factory(
     job_name: str,
     *,
     attempt_id: str | None = None,
+    workspace: str | None = None,
     sdk: NeMoPlatform,
 ) -> ResultManager:
     """Create a sync ResultManager for uploading job results.
@@ -31,6 +44,7 @@ def result_manager_factory(
     return typed_result_manager_factory(
         job_name=job_name,
         attempt_id=attempt_id,
+        workspace=workspace,
         files_client=client_from_platform(sdk, FilesClient),
         jobs_client=client_from_platform(sdk, JobsClient),
     )
@@ -40,12 +54,14 @@ def async_result_manager_factory(
     job_name: str,
     *,
     attempt_id: str | None = None,
+    workspace: str | None = None,
     sdk: AsyncNeMoPlatform,
 ) -> AsyncResultManager:
     """Create an async ResultManager for uploading job results."""
     return typed_async_result_manager_factory(
         job_name=job_name,
         attempt_id=attempt_id,
+        workspace=workspace,
         files_client=client_from_platform(sdk, AsyncFilesClient),
         jobs_client=client_from_platform(sdk, AsyncJobsClient),
     )
@@ -56,7 +72,8 @@ async def download_from_result_info(
     job_name: str,
     *,
     artifact_url: str,
-    sdk: AsyncNeMoPlatform,
+    workspace: str | None = None,
+    sdk: AsyncNeMoPlatform | None = None,
 ) -> tuple[str, TmpDirPath]:
     """Backward-compatible wrapper that uses the local async result manager factory.
 
@@ -64,20 +81,30 @@ async def download_from_result_info(
     in tests also affects download_from_result_info, preserving the old monkeypatch
     behavior.
     """
-    mgr = async_result_manager_factory(
-        job_name=job_name,
-        sdk=sdk,
-    )
+    owned_sdk: AsyncNeMoPlatform | None = None
+    if sdk is None:
+        owned_sdk = get_async_platform_sdk()
+        sdk = owned_sdk
 
-    tmp_dir_path = await mgr.download_artifact(artifact_url=artifact_url)
-    filename = result_name
+    try:
+        mgr = async_result_manager_factory(
+            job_name=job_name,
+            workspace=workspace,
+            sdk=sdk,
+        )
 
-    if tmp_dir_path.path.is_dir():
-        filename = f"{filename}.tar.gz"
-        tar_path = tmp_dir_path.tmp_dir / filename
-        with tarfile.open(tar_path, "w:gz") as tar:
-            tar.add(tmp_dir_path.path, arcname=os.path.basename(tmp_dir_path.path))
+        tmp_dir_path = await mgr.download_artifact(artifact_url=artifact_url)
+        filename = result_name
 
-        tmp_dir_path.path = tar_path
+        if tmp_dir_path.path.is_dir():
+            filename = f"{filename}.tar.gz"
+            tar_path = tmp_dir_path.tmp_dir / filename
+            with tarfile.open(tar_path, "w:gz") as tar:
+                tar.add(tmp_dir_path.path, arcname=os.path.basename(tmp_dir_path.path))
 
-    return filename, tmp_dir_path
+            tmp_dir_path.path = tar_path
+
+        return filename, tmp_dir_path
+    finally:
+        if owned_sdk is not None:
+            await owned_sdk.close()

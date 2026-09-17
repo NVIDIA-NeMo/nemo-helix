@@ -14,6 +14,7 @@ from nemo_experimentalist_plugin.entities import Dataset, DatasetRef, ResourceRe
 from nemo_experimentalist_plugin.eval_author import run as eval_author_run
 from nemo_experimentalist_plugin.eval_author.agent import EvalAuthor
 from nemo_experimentalist_plugin.eval_author.models import EvalAuthorConfig, EvalAuthorResult
+from nemo_experimentalist_plugin.experimentalist.components import dataset_staging
 from nemo_experimentalist_plugin.experimentalist.components.evaluator.base import EvaluatorType
 from nemo_experimentalist_plugin.experimentalist.components.evaluator.harbor import HarborDataset
 from nemo_insights_plugin.entities import Insight
@@ -22,7 +23,6 @@ from nemo_insights_plugin.entities import Insight
 @dataclass
 class ClosingClient:
     closed: bool = False
-    files: Any = None
 
     async def close(self) -> None:
         self.closed = True
@@ -362,21 +362,41 @@ async def test_run_eval_author_hydrates_fileset_task_template(
     tmp_path: Path,
     evaluator_type: EvaluatorType,
 ) -> None:
+    listings: list[tuple[str, str, object]] = []
     downloads: list[tuple[str, str, str]] = []
 
-    class FakeFiles:
-        async def download(self, *, remote_path: str, local_path: str, workspace: str) -> None:
-            downloads.append((remote_path, local_path, workspace))
-            destination = Path(local_path)
-            destination.mkdir(parents=True)
-            (destination / "task.toml").write_text("template\n", encoding="utf-8")
+    @dataclass(frozen=True)
+    class _FilesetItem:
+        path: str
 
-    client = ClosingClient(files=FakeFiles())
+    @dataclass(frozen=True)
+    class _FilesetListing:
+        data: list[_FilesetItem]
+
+    class _FilesetResponse:
+        def data(self) -> _FilesetListing:
+            return _FilesetListing([_FilesetItem("task.toml")])
+
+    class _Download:
+        async def read(self) -> bytes:
+            return b"template\n"
+
+    class FakeFiles:
+        async def list_files(self, *, workspace: str, name: str, query_params: object) -> _FilesetResponse:
+            listings.append((workspace, name, query_params))
+            return _FilesetResponse()
+
+        async def download_file(self, *, workspace: str, name: str, path: str) -> _Download:
+            downloads.append((workspace, name, path))
+            return _Download()
+
+    client = ClosingClient()
     backend = FakeBackend(
         Insight(workspace="workspace-a", title="failure", description="description", agent="insight-agent")
     )
     dataset_factory = FakeDatasetFactory()
     monkeypatch.setattr(eval_author_run, "make_client", lambda _: client)
+    monkeypatch.setattr(dataset_staging.AsyncFilesClient, "from_client", lambda _: FakeFiles())
     monkeypatch.setattr(eval_author_run, "make_experimentalist_backend", lambda **_: backend)
     monkeypatch.setattr(eval_author_run, "DatasetFactory", lambda: dataset_factory)
     monkeypatch.setattr(eval_author_run, "build_eval_author_agent", lambda **_: FakeEvalAuthor())
@@ -399,7 +419,9 @@ async def test_run_eval_author_hydrates_fileset_task_template(
     )
 
     staged = (tmp_path / "experiment").resolve() / "dataset" / "task-template"
-    assert downloads == [(template_ref.uri, str(staged), "workspace-a")]
+    assert listings == [("workspace-a", "template", None)]
+    assert downloads == [("workspace-a", "template", "task.toml")]
+    assert (staged / "task.toml").read_text(encoding="utf-8") == "template\n"
     assert dataset_factory.template_calls == [(evaluator_type, template_ref.model_copy(update={"uri": str(staged)}))]
     assert [Path(ref.uri).name for _, ref in dataset_factory.dataset_calls] == ["train", "validation"]
     assert [call[0] for call in dataset_factory.dataset_calls] == [evaluator_type, evaluator_type]

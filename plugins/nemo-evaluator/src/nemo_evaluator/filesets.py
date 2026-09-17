@@ -8,8 +8,7 @@ from __future__ import annotations
 from fnmatch import fnmatchcase
 from pathlib import Path
 
-import fsspec.asyn
-from filesets import FilesetFileSystem
+from filesets import AsyncFilesetFileSystem, FilesetFileSystem
 from nemo_evaluator_sdk.retrieval.beir import BeirDataset
 from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
@@ -96,7 +95,7 @@ async def download_dataset(
 ) -> Path:
     """Download a FilesetRef dataset to a local directory."""
     files_client = AsyncFilesClient.from_client(client)
-    fs = FilesetFileSystem(client=files_client)
+    fs = AsyncFilesetFileSystem(client=files_client)
     return await _download_fileset_ref(dataset, destination, recursive=recursive, fs=fs)
 
 
@@ -136,7 +135,7 @@ async def _download_fileset_ref(
     destination: str,
     recursive: bool = True,
     *,
-    fs: FilesetFileSystem,
+    fs: AsyncFilesetFileSystem,
 ) -> Path:
     ref = dataset.root
 
@@ -188,7 +187,53 @@ def _download_fileset_ref_sync(
 ) -> Path:
     files_client = FilesClient.from_client(client)
     fs = FilesetFileSystem(client=files_client)
-    result = fsspec.asyn.sync(fs.loop, _download_fileset_ref, dataset, destination, recursive, fs=fs)
-    if result is None:
-        raise RuntimeError(f"FilesetRef download returned no path for dataset {dataset.root!r}")
-    return result
+    return _download_fileset_ref_with_sync_filesystem(dataset, destination, recursive=recursive, fs=fs)
+
+
+def _download_fileset_ref_with_sync_filesystem(
+    dataset: FilesetRef,
+    destination: str,
+    recursive: bool = True,
+    *,
+    fs: FilesetFileSystem,
+) -> Path:
+    ref = dataset.root
+
+    if "#" in ref:
+        base_path, pattern = ref.split("#", 1)
+        pattern = pattern.lstrip("/")
+
+        if not pattern:
+            return _download_fileset_ref_with_sync_filesystem(
+                FilesetRef(root=base_path),
+                destination,
+                recursive=recursive,
+                fs=fs,
+            )
+
+        base_dest = _safe_child_path(Path(destination), base_path)
+        base_dest.mkdir(parents=True, exist_ok=True)
+
+        if is_fileset_glob_pattern(pattern):
+            all_files = fs.find(base_path)
+            for file_path in all_files:
+                if "#" in file_path:
+                    relative_path = file_path.split("#", 1)[1]
+                else:
+                    relative_path = file_path.replace(f"{base_path}/", "", 1)
+                if matches_fileset_glob(relative_path, pattern):
+                    file_dest = _safe_child_path(base_dest, relative_path)
+                    file_dest.parent.mkdir(parents=True, exist_ok=True)
+                    fs.get_file(file_path, str(file_dest))
+            return base_dest
+
+        full_remote_path = f"{base_path}/{pattern}"
+        file_dest = _safe_child_path(base_dest, pattern)
+        file_dest.parent.mkdir(parents=True, exist_ok=True)
+        fs.get_file(full_remote_path, str(file_dest))
+        return file_dest
+
+    dest = _safe_child_path(Path(destination), normalize_fileset_path(ref))
+    source = ref.rstrip("/") + "/"
+    fs.get(source, str(dest), recursive=recursive)
+    return dest

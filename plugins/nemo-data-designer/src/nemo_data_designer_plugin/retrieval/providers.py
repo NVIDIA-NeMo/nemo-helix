@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import data_designer.config as dd
-from data_designer_nemo.context import DataDesignerContext
+from data_designer_nemo.context import DataDesignerValidationContext
 from data_designer_nemo.errors import NDDInvalidConfigError
 
 
@@ -51,7 +51,7 @@ def build_retrieval_model_configs(
 
 
 async def resolve_retrieval_providers(
-    dd_ctx: DataDesignerContext,
+    dd_ctx: DataDesignerValidationContext,
     model_configs: list[dd.ModelConfig],
 ) -> list[dd.ModelProvider]:
     """Resolve Inference Gateway providers for retrieval model configs."""

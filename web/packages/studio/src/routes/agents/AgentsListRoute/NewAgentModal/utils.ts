@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { CreateAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/CreateAgentRequestConfig';
 import {
   AGENT_CONFIG_FILENAME,
   AGENT_SPEC_FILENAME,
@@ -18,12 +19,15 @@ import type {
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
 import YAML from 'yaml';
 
-/** Convention only — the Agent entity stores no reference to it. */
-export const agentSpecFilesetName = (agentName: string): string => `${agentName}-spec`;
+/**
+ * Convention only — the Agent entity stores no reference to it. Must match
+ * `ethos_fileset_name` in the agents plugin, which is what deployments stage from.
+ */
+export const agentSpecFilesetName = (agentName: string): string => `${agentName}-ethos`;
 
 export const tooManyPickedFiles = (pickedCount: number): string | undefined =>
   pickedCount > MAX_PICKED_FILES
-    ? `That directory holds ${pickedCount.toLocaleString()} files, far more than an agent directory should. Point at the agent's own directory.`
+    ? `That selection holds ${pickedCount.toLocaleString()} files, far more than an agent should. Select the agent's own files, or the directory holding them.`
     : undefined;
 
 export const isIgnoredPath = (path: string): boolean => {
@@ -38,12 +42,22 @@ export const isIgnoredPath = (path: string): boolean => {
 
 const pathCollator = new Intl.Collator();
 
-/** The fileset holds the directory's contents, so the picked root is stripped from each path. */
+/** The one directory a whole selection sits under, or empty when it does not sit under one. */
+export const selectionRootName = (picked: PickedFile[]): string => {
+  const first = picked[0]?.relativePath ?? '';
+  if (!first.includes('/')) return '';
+
+  const root = first.split('/')[0] ?? '';
+  return picked.every(({ relativePath }) => relativePath.startsWith(`${root}/`)) ? root : '';
+};
+
+/** The fileset holds the agent's own files, so a whole selection's shared root directory is stripped from every path. */
 export const collectAgentEntries = (picked: PickedFile[]): UploadAgentEntry[] => {
+  const root = selectionRootName(picked);
   const entries: UploadAgentEntry[] = [];
 
   for (const { file, relativePath } of picked) {
-    const path = relativePath.split('/').slice(1).join('/') || file.name;
+    const path = (root ? relativePath.split('/').slice(1).join('/') : relativePath) || file.name;
     if (!path || isIgnoredPath(path)) continue;
     entries.push({ path, file });
   }
@@ -116,28 +130,28 @@ export const totalEntryBytes = (entries: UploadAgentEntry[]): number =>
   entries.reduce((total, entry) => total + entry.file.size, 0);
 
 export const validateAgentEntries = (entries: UploadAgentEntry[]): string | undefined => {
-  if (entries.length === 0) return 'That directory has no uploadable files.';
+  if (entries.length === 0) return 'That selection has no uploadable files.';
 
   // Two directories dropped at once merge, and a path they share would upload twice.
   const seen = new Set<string>();
   for (const { path } of entries) {
     if (seen.has(path)) {
-      return `That selection holds more than one ${path}. Select a single agent directory.`;
+      return `That selection holds more than one ${path}. Select the files for a single agent.`;
     }
     seen.add(path);
   }
 
   if (!entries.some((entry) => entry.path === AGENT_CONFIG_FILENAME)) {
-    return `No ${AGENT_CONFIG_FILENAME} at the top level of that directory.`;
+    return `No ${AGENT_CONFIG_FILENAME} at the top level of that selection.`;
   }
 
   if (entries.length > MAX_AGENT_SPEC_FILES) {
-    return `That directory holds ${entries.length} files; the limit is ${MAX_AGENT_SPEC_FILES}. Point at a directory containing only the agent's own files.`;
+    return `That selection holds ${entries.length} files; the limit is ${MAX_AGENT_SPEC_FILES}. Select only the agent's own files.`;
   }
 
   const bytes = totalEntryBytes(entries);
   if (bytes > MAX_AGENT_SPEC_BYTES) {
-    return `That directory is ${Math.round(bytes / 1000)} KB; the limit is ${Math.round(MAX_AGENT_SPEC_BYTES / 1000)} KB. Point at a directory containing only the agent's own files.`;
+    return `That selection is ${Math.round(bytes / 1000)} KB; the limit is ${Math.round(MAX_AGENT_SPEC_BYTES / 1000)} KB. Select only the agent's own files.`;
   }
 
   return undefined;
@@ -164,7 +178,7 @@ export const findNonUtf8Path = async (entries: UploadAgentEntry[]): Promise<stri
 
 export class AgentConfigParseError extends Error {}
 
-export const parseAgentConfig = (text: string): Record<string, unknown> => {
+export const parseAgentConfig = (text: string): CreateAgentRequestConfig => {
   let parsed: unknown;
   try {
     parsed = YAML.parse(text);
@@ -178,7 +192,7 @@ export const parseAgentConfig = (text: string): Record<string, unknown> => {
     throw new AgentConfigParseError(`${AGENT_CONFIG_FILENAME} must contain a YAML mapping.`);
   }
 
-  const config = parsed as Record<string, unknown>;
+  const config = parsed as CreateAgentRequestConfig;
   const configFormat = config.config_format;
   if (configFormat !== FABRIC_CONFIG_FORMAT) {
     throw new AgentConfigParseError(

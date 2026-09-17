@@ -23,14 +23,12 @@ import logging
 from pathlib import Path
 
 import httpx
-from nemo_platform import (
-    NeMoPlatform,
-    NotFoundError,
-)
-from nemo_platform_plugin.client.adapter import client_from_platform
+from filesets.filesystem.filesystem import FilesetFileSystem, build_fileset_ref
+from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.client.errors import (
     ConflictError,
     NemoTransportError,
+    NotFoundError,
     RateLimitError,
 )
 from nemo_platform_plugin.client.errors import (
@@ -40,8 +38,9 @@ from nemo_platform_plugin.client.types import RetryPolicy
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.files.metadata import FilesetMetadata
 from nemo_platform_plugin.files.types import CreateFilesetRequest, FilesetFileOutput, UpdateFilesetRequest
+from nemo_platform_plugin.jobs.client import JobsClient
+from nmp.common.client_factory import get_task_nemo_client
 from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.common.sdk_factory import get_task_sdk
 from nmp.customization_common.schemas.file_io import (
     DownloadItem,
     DownloadStats,
@@ -108,24 +107,31 @@ class FileIORunner:
 
     def __init__(
         self,
-        sdk: NeMoPlatform,
+        files: FilesClient,
         progress_reporter: ProgressReporter,
         job_ctx: NMPJobContext,
         *,
         service_source: str,
     ):
-        self.sdk = sdk
+        self.files = files
         self.progress_reporter = progress_reporter
         self.job_ctx = job_ctx
         self.service_source = service_source
+
+    def _workspace_for(self, fileset: FileSetRef) -> str:
+        return fileset.workspace or self.job_ctx.workspace
 
     def list_fileset_files(self, fileset: FileSetRef) -> list[FilesetFileOutput]:
         """List files in a FileSet. Returns a list of ``FilesetFileOutput`` objects."""
         try:
             with sdk_error_handler(FileDownloadError, f"list files in fileset {fileset}", passthrough=(NotFoundError,)):
-                response = self.sdk.with_options(timeout=LIST_FILES_TIMEOUT).files.list(
-                    fileset=fileset.name,
-                    workspace=fileset.workspace,
+                response = (
+                    self.files.with_options(timeout=LIST_FILES_TIMEOUT)
+                    .list_files(
+                        name=fileset.name,
+                        workspace=self._workspace_for(fileset),
+                    )
+                    .data()
                 )
                 logger.info(f"Found {len(response.data)} files in FileSet {fileset!s}")
                 return response.data
@@ -157,7 +163,7 @@ class FileIORunner:
         ):
             stats = self._download_with_retry(
                 fileset_name=fileset.name,
-                fileset_workspace=fileset.workspace,
+                fileset_workspace=self._workspace_for(fileset),
                 dest_dir=str(dest_dir),
                 fileset_display_name=fileset_name,
                 dest_path=dest_dir,
@@ -179,7 +185,7 @@ class FileIORunner:
     def _download_with_retry(
         self,
         fileset_name: str,
-        fileset_workspace: str | None,
+        fileset_workspace: str,
         dest_dir: str,
         fileset_display_name: str,
         dest_path: Path,
@@ -203,10 +209,10 @@ class FileIORunner:
         )
         composite_callback = CompositeCallback(tqdm_callback, jobs_callback)
 
-        self.sdk.with_options(timeout=DOWNLOAD_TIMEOUT).files.download(
-            fileset=fileset_name,
-            workspace=fileset_workspace,
-            local_path=dest_dir,
+        FilesetFileSystem(client=self.files.with_options(timeout=DOWNLOAD_TIMEOUT)).get(
+            build_fileset_ref("", workspace=fileset_workspace, fileset=fileset_name),
+            dest_dir,
+            recursive=True,
             callback=composite_callback,
         )
         return stats
@@ -230,7 +236,7 @@ class FileIORunner:
                 local_path=local_path,
                 remote_path=remote_path,
                 fileset_name=fileset.name,
-                fileset_workspace=fileset.workspace,
+                fileset_workspace=self._workspace_for(fileset),
                 fileset_display_name=fileset_name,
                 src_path=src_path,
             )
@@ -250,7 +256,7 @@ class FileIORunner:
         local_path: str,
         remote_path: str,
         fileset_name: str,
-        fileset_workspace: str | None,
+        fileset_workspace: str,
         fileset_display_name: str,
         src_path: Path,
     ) -> UploadStats:
@@ -265,11 +271,10 @@ class FileIORunner:
         )
         composite_callback = CompositeCallback(tqdm_callback, jobs_callback)
 
-        self.sdk.with_options(timeout=UPLOAD_TIMEOUT).files.upload(
-            local_path=local_path,
-            remote_path=remote_path,
-            fileset=fileset_name,
-            workspace=fileset_workspace,
+        FilesetFileSystem(client=self.files.with_options(timeout=UPLOAD_TIMEOUT)).put(
+            local_path,
+            build_fileset_ref(remote_path, workspace=fileset_workspace, fileset=fileset_name),
+            recursive=True,
             callback=composite_callback,
         )
         return stats
@@ -288,9 +293,8 @@ class FileIORunner:
     )
     def _create_fileset_with_retry(self, fileset: FileSetRef, metadata: dict | None = None) -> None:
         """Internal method with retry logic for creating a FileSet."""
-        files = client_from_platform(self.sdk, FilesClient).with_options(
-            timeout=CREATE_FILESET_TIMEOUT, retry=RetryPolicy(max_retries=0)
-        )
+        files = self.files.with_options(timeout=CREATE_FILESET_TIMEOUT, retry=RetryPolicy(max_retries=0))
+        workspace = self._workspace_for(fileset)
         try:
             body_kwargs: dict = {
                 "name": fileset.name,
@@ -298,10 +302,9 @@ class FileIORunner:
             }
             if metadata is not None:
                 body_kwargs["metadata"] = FilesetMetadata.model_validate(metadata)
-            result = files.create_fileset(workspace=fileset.workspace, body=CreateFilesetRequest(**body_kwargs)).data()
+            result = files.create_fileset(workspace=workspace, body=CreateFilesetRequest(**body_kwargs)).data()
             logger.info(f"Created FileSet: {result.workspace}/{result.name}")
         except ConflictError:
-            workspace = fileset.workspace or self.job_ctx.workspace
             if metadata is not None:
                 try:
                     files.update_fileset(
@@ -421,7 +424,7 @@ class FileIORunner:
 
 
 def run(
-    sdk: NeMoPlatform | None = None,
+    client: NemoClient | None = None,
     job_ctx: NMPJobContext | None = None,
     *,
     service_source: str,
@@ -431,13 +434,15 @@ def run(
     job_ctx = job_ctx or NMPJobContext.from_env()
     validate_storage_path(job_ctx.storage_path)
 
-    sdk_owned = sdk is None
+    client_owned = client is None
     progress_reporter: ProgressReporter | None = None
     try:
-        sdk = sdk or get_task_sdk(service_name)
-        progress_reporter = JobsServiceProgressReporter.create_progress_reporter(sdk, job_ctx)
+        client = client or get_task_nemo_client(service_name)
+        files = FilesClient.from_client(client)
+        jobs = JobsClient.from_client(client)
+        progress_reporter = JobsServiceProgressReporter.create_progress_reporter(jobs, job_ctx)
         runner = FileIORunner(
-            sdk=sdk,
+            files=files,
             progress_reporter=progress_reporter,
             job_ctx=job_ctx,
             service_source=service_source,
@@ -447,7 +452,7 @@ def run(
 
         logger.info(f"Starting file I/O task with job context: {job_ctx}")
         logger.info(f"Config: {config.model_dump_json(indent=2)}")
-        logger.info(f"NeMo Platform service URL: {sdk.base_url}")
+        logger.info(f"NeMo Platform service URL: {client.base_url}")
 
         runner.run_upload(config.upload)
         runner.run_download(config.download)
@@ -483,5 +488,8 @@ def run(
             )
         return 1
     finally:
-        if sdk_owned and sdk is not None:
-            sdk.close()
+        if client_owned and client is not None:
+            try:
+                client.close()
+            except Exception:
+                logger.warning("Failed to close sync platform client during file I/O task cleanup", exc_info=True)

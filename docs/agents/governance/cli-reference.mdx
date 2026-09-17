@@ -1,0 +1,268 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Agent Hardener CLI Reference"
+description: ""
+---
+<a id="agents-governance-cli-reference"></a>
+
+<Warning>
+
+Agent Governance is released with _early access_ availability and is subject to limited support and potential API changes in future releases.
+
+</Warning>
+
+Every command in the `nemo agent-hardener` group. For the workflow these fit into,
+see [Run a War-Game](/documentation/agents/governance/run-a-war-game).
+
+## Command Summary
+
+| Command | Purpose |
+|---------|---------|
+| `doctor` | Read-only preflight of the agent-hardener venv, garak venv, inference credential, Docker daemon and OpenShell gateway |
+| `setup` | Provision the virtual environments and the inference credential |
+| `init` | Resolve an agent or project into a saved manifest |
+| `refresh` | Re-resolve a saved manifest against its agent as it is now |
+| `synth-benign` | Generate the benign request suite and cache it on the manifest |
+| `run` | Run the attack, defend and validate cycle |
+| `sanity-check` | Score a chosen subset of a run's defenses without applying them |
+| `status` | Show recent runs |
+| `manifest show` | Print a saved manifest's stored defaults |
+| `manifest set` | Change a saved manifest's stored defaults |
+
+Applying a mitigation is not a CLI operation. See
+[Review and Apply Mitigations](/documentation/agents/governance/apply-mitigations).
+
+## Setup and Diagnostics
+
+### `doctor`
+
+```bash
+nemo agent-hardener doctor
+```
+
+Read-only. Checks the agent-hardener venv, the garak venv, the inference
+credential, the Docker daemon and the OpenShell gateway.
+
+### `setup`
+
+```bash
+nemo agent-hardener setup [--force]
+```
+
+Creates the agent-hardener and garak virtual environments and the inference
+credential, then checks prerequisites.
+
+| Option | Effect |
+|--------|--------|
+| `--force`, `-f` | Recreate the virtual environment even if it exists |
+
+## Manifests
+
+### `init`
+
+```bash
+nemo agent-hardener init --agent <name>
+nemo agent-hardener init --project-dir <path>
+```
+
+Resolves a target once and saves it as a manifest. Pass either `--agent` or
+`--project-dir`.
+
+| Option | Effect |
+|--------|--------|
+| `--agent <ref>` | Registered agent, as `name` or `workspace/name`. Deployment is not required |
+| `--project-dir <path>` | Local agent project to upload and war-game |
+| `--name <name>` | Manifest name. Defaults to the agent name |
+| `--workspace <name>` | Agent workspace |
+| `--output`, `-o <path>` | Where to write the rendered YAML. Default `agent-hardener.yaml` |
+| `--egress <host[:port]>` | Allow-list an outbound host. Repeatable. A bare host opens 443 only |
+| `--secrets <name>` | Override the derived secret names. Repeatable |
+| `--env <KEY=VALUE>` | Non-secret environment variable. Repeatable, splits on the first `=` |
+| `--port <n>` | Victim port |
+| `--dockerfile <path>` | Project-relative Dockerfile to build the victim from |
+| `--start-command <cmd>` | Absolute command that serves the agent inside the sandbox. Required when the Dockerfile's `ENTRYPOINT`/`CMD` is a shell form |
+| `--harness <name>` | Which harness the agent runs: `deepagents`, `hermes`, `langchain`, `langgraph` or `other` |
+| `--relay-confirmed` | Assert the agent is instrumented with NeMo Relay. Without it the victim emits no telemetry and the run cannot be scored |
+| `--binary <glob>` | In-container glob scoping which processes may egress. Repeatable |
+
+Model defaults can also be set here and are stored on the manifest:
+`--attack-model`, `--attack-base-url`, `--attack-key-secret`, `--analysis-model`,
+`--analysis-base-url`, `--analysis-key-secret` and `--safety-model`. They take the
+same values as the matching options on [`run`](#run).
+
+`--binary` is derived for you and rarely needed: derivation proposes the image's
+virtualenv plus `/usr/local/bin/python*` and `/usr/bin/python*`. Set it for a
+**non-Python agent** (Node, Go, Java). The sandbox matches its policy against the
+*resolved* executable, so globs that match no process grant nothing and the
+agent's outbound calls are refused mid-run.
+
+`--env` values are stored in plaintext on the manifest. `--secrets` stores only
+the names and resolves values from the platform Secrets store at run time, so
+use it for credentials.
+
+The rendered `agent-hardener.yaml` is a readable rendering. Editing it does not
+affect `--manifest-id` runs, which read the saved manifest — but `run --config`
+reads this local file, so edits do take effect there.
+
+### `refresh`
+
+```bash
+nemo agent-hardener refresh --manifest-id <name>
+```
+
+Re-resolves the manifest against the agent as it is now. Egress, secrets, models,
+defenders and the cached benign suite are preserved.
+
+### `manifest show`
+
+```bash
+nemo agent-hardener manifest show <name>
+```
+
+### `manifest set`
+
+```bash
+nemo agent-hardener manifest set <name> [options]
+```
+
+Changes stored defaults. The same knobs exist as per-launch flags on `run`, which
+apply to one launch only.
+
+| Option | Effect |
+|--------|--------|
+| `--rounds <n>` | Default hardening rounds |
+| `--defender <guardrails\|openshell>` | Default defender. Repeatable |
+| `--attack-intensity <light\|standard\|thorough>` | Default attacker effort preset |
+| `--port <n>` | Default victim port |
+| `--egress <host[:port]>` | Default egress host. Repeatable. Replaces the stored list |
+| `--env <KEY=VALUE>` | Default environment variable. Repeatable |
+| `--attack-model <name>` | Default model for garak's red team and detector |
+| `--attack-base-url <url>` | Custom OpenAI-compatible endpoint for the attack model |
+| `--attack-key-secret <name>` | Secrets-store name holding the attack endpoint's API key |
+| `--analysis-model <name>` | Default model for the defenders and the benign validator |
+| `--analysis-base-url <url>` | Custom OpenAI-compatible endpoint for the analysis model |
+| `--analysis-key-secret <name>` | Secrets-store name holding the analysis endpoint's API key |
+| `--safety-model <name>` | Default model the generated guardrail uses to screen traffic |
+
+## Running
+
+### `synth-benign`
+
+```bash
+nemo agent-hardener synth-benign --manifest-id <name>
+```
+
+Generates the benign request suite and caches it on the manifest. Required before
+the first `run`.
+
+| Option | Effect |
+|--------|--------|
+| `--manifest-id <name>` | Saved manifest. Required |
+| `--yes` | Accept the interview's suggested answers |
+| `--no-interactive` | Skip the interview and generate from rules alone |
+| `--env-file <path>` | Dotenv supplying the agent's secrets |
+| `--workspace <name>` | Workspace of the manifest |
+
+### `run`
+
+```bash
+nemo agent-hardener run --manifest-id <name>
+```
+
+Runs the attack, defend and validate cycle. Pass either `--manifest-id` or
+`--config`, not both. Prefer `--manifest-id`, because the cached benign suite is
+looked up by manifest id; with `--config` you must pass `--benign-suite` yourself.
+
+| Option | Effect |
+|--------|--------|
+| `--manifest-id <name>` | Saved manifest to run |
+| `--config`, `-c <path>` | Local manifest from `init`. Default `agent-hardener.yaml` |
+| `--benign-suite <path>` | Benign-suite CSV (`tool,payload,label,rationale,persona`), overriding the cache |
+| `--rounds <n>` | Iterative hardening rounds. Default 1 |
+| `--defender <guardrails\|openshell>` | Enable a defender. Repeatable. Requires `--manifest-id` |
+| `--attack-intensity <light\|standard\|thorough>` | garak effort preset. Requires `--manifest-id` |
+| `--port <n>` | Override the victim port for this launch. Requires `--manifest-id` |
+| `--replay-hitlog <fileset-ref>` | Replay a recorded garak hitlog instead of attacking live |
+| `--attack-model <name>` | Model for garak's red team and detector |
+| `--attack-base-url <url>` | Custom OpenAI-compatible endpoint for the attack model |
+| `--attack-key-secret <name>` | Secrets-store name holding the attack endpoint's API key |
+| `--analysis-model <name>` | Model for the defenders and benign validator |
+| `--analysis-base-url <url>` | Custom OpenAI-compatible endpoint for the analysis model |
+| `--analysis-key-secret <name>` | Secrets-store name holding the analysis endpoint's API key |
+| `--safety-model <name>` | Model the generated guardrail uses to screen traffic. Unset reuses the agent's own model |
+| `--env-file <path>` | Dotenv supplying the agent's secrets |
+| `--workspace <name>` | Workspace for the run |
+
+Override flags apply to one launch and never edit the saved manifest, so a run can
+deviate from the frozen baseline without breaking comparability.
+
+Every model group you set explicitly is preflighted against its endpoint before
+the sandbox is built, so a bad name or key fails in seconds with the list of
+models those credentials can reach. Groups left at their built-in defaults are
+not probed.
+
+### `sanity-check`
+
+```bash
+nemo agent-hardener sanity-check --manifest-id <name> \
+  --mitigations <path> --replay-hitlog <fileset-ref>
+```
+
+Freezes a chosen subset of a run's defenses and replays the recorded attacks plus
+the benign suite against it. Applies nothing.
+
+| Option | Effect |
+|--------|--------|
+| `--manifest-id <name>` | Saved manifest to validate against. Required |
+| `--mitigations <path>` | The run's proposed defenses. Required |
+| `--replay-hitlog <fileset-ref>` | Recorded attacks to replay. Required |
+| `--keep <id>` | Keep this defense. Repeatable |
+| `--exclude <id>` | Drop this defense. Repeatable |
+| `--env-file <path>` | Dotenv supplying the agent's secrets |
+| `--workspace <name>` | Workspace for the run |
+
+### `status`
+
+```bash
+nemo agent-hardener status [--limit <n>]
+```
+
+| Option | Effect |
+|--------|--------|
+| `--limit <n>` | How many recent runs to show. Default 5 |
+| `--workspace <name>` | Workspace to read runs from |
+
+## Python SDK
+
+Agent Hardener resources are available on the platform client as `client.agent_hardener`:
+
+```python
+import os
+from nemo_platform import NeMoPlatform
+
+client = NeMoPlatform(
+    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+    workspace="default",
+)
+
+manifest = client.agent_hardener.manifests.get("react-agent")
+result = client.agent_hardener.run(manifest_id="react-agent")
+
+for run in client.agent_hardener.runs.list(limit=5):
+    print(run["name"], run["status"])
+```
+
+| Resource | Methods |
+|----------|---------|
+| `client.agent_hardener.manifests` | `list`, `get`, `create`, `update`, `refresh`, `inspect_project`, `validate_model` |
+| `client.agent_hardener.runs` | `list`, `latest` |
+| `client.agent_hardener` | `run`, `synth_benign`, `submit`, `sanity_check` |
+
+`inspect_project` takes a project fileset rather than a manifest name.
+
+## Related Topics
+
+- [Run a War-Game](/documentation/agents/governance/run-a-war-game): the workflow these commands fit into.
+- [Troubleshooting](/documentation/agents/governance/troubleshooting): setup, sandbox and victim failures.

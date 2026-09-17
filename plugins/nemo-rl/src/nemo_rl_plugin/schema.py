@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nmp.rl.schemas import (
+    DEPLOYMENT_CONFIG_DESCRIPTION,
+    DeploymentParams,
     DPOTraining,
     GRPOTraining,
     LoRAParams,
@@ -21,12 +23,15 @@ from nmp.rl.schemas import (
     ParallelismParams,
     RlJobOutput,
     RlSchema,
+    ToolCallParams,
     TrainingMethod,
+    trains_lora_adapter,
 )
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 __all__ = [
     "DPOTraining",
+    "DeploymentParams",
     "GRPOTraining",
     "LoRAParams",
     "OutputRequest",
@@ -34,6 +39,7 @@ __all__ = [
     "ParallelismParams",
     "RlJobInput",
     "RlJobOutput",
+    "ToolCallParams",
     "TrainingMethod",
 ]
 
@@ -66,3 +72,29 @@ class RlJobInput(RlSchema):
     training: TrainingMethod = Field(description="Training method and hyperparameters (DPO or GRPO).")
     integrations: IntegrationsSpec | None = None
     output: OutputRequest | None = None
+    deployment_config: str | DeploymentParams | None = Field(
+        default=None,
+        description=DEPLOYMENT_CONFIG_DESCRIPTION,
+    )
+
+    @property
+    def trains_lora_adapter(self) -> bool:
+        """True when the job produces a LoRA adapter rather than a full-weight model."""
+        return trains_lora_adapter(self.training)
+
+    @model_validator(mode="after")
+    def _reject_lora_without_lora_enabled(self) -> RlJobInput:
+        # A LoRA adapter cannot be served by a base deployment with lora_enabled=false --
+        # the deployed NIM would refuse to load it. Surface this at submit time rather
+        # than after an expensive GRPO run has already finished.
+        if (
+            self.trains_lora_adapter
+            and isinstance(self.deployment_config, DeploymentParams)
+            and not self.deployment_config.lora_enabled
+        ):
+            raise ValueError(
+                "deployment_config.lora_enabled must be true (or omitted) when training a LoRA adapter. "
+                "Setting lora_enabled=false would deploy the base model without LoRA support, "
+                "making the trained adapter unservable."
+            )
+        return self

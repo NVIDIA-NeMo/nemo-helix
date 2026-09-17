@@ -1145,6 +1145,49 @@ async def test_create_deployment_fabric_k8s_auth_on_rewrites_to_auth_proxy() -> 
 
 
 @pytest.mark.asyncio
+async def test_deploying_one_config_twice_does_not_carry_the_first_workspace_over() -> None:
+    """Telemetry wiring must not mutate the caller's config.
+
+    ``create_deployment`` receives the deployment entity's own config dict, and
+    the wiring keeps an ATIF storage endpoint it finds already present -- so a
+    mutated dict would send the second deployment's trajectories to the first
+    deployment's workspace.
+    """
+    backend = _backend(
+        default_image="fabric:latest", default_executor="k8s", k8s_internal_base_url="http://nmp-api:8080"
+    )
+    backend._entities = AsyncMock()
+    config = {
+        "config_format": "nemo-agents-spec-v1",
+        "name": "fabric-agent",
+        "default_harness": "main",
+        # A config the telemetry guard can actually plan: it validates as
+        # spec-v1 and names a harness whose adapter advertises Relay ATIF.
+        "harnesses": {"main": {"kind": "hermes"}},
+        "models": {"default": {"provider": "platform", "model": "default/m"}},
+        "environment": {"provider": "local"},
+    }
+
+    with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"):
+        await backend.create_deployment(
+            workspace="workspace-a", name="dep-a", config=config, port=0, deployment_mode="k8s"
+        )
+        assert "telemetry" not in config, "the caller's config was mutated"
+        await backend.create_deployment(
+            workspace="workspace-b", name="dep-b", config=config, port=0, deployment_mode="k8s"
+        )
+
+    # Each deployment creates a DeploymentConfig and a Deployment; only the
+    # former carries the baked agent config.
+    configs = [
+        call.args[0] for call in backend._entities.create.await_args_list if hasattr(call.args[0], "config_files")
+    ]
+    baked = yaml.safe_load(configs[1].config_files[0].content)
+    endpoint = baked["telemetry"]["atif"]["storage"][0]["endpoint"]
+    assert "workspace-b" in endpoint and "workspace-a" not in endpoint
+
+
+@pytest.mark.asyncio
 async def test_create_deployment_missing_image_fails() -> None:
     backend = _backend(default_image="")
     info = await backend.create_deployment(
@@ -1288,6 +1331,7 @@ async def test_create_deployment_fabric_docker_stages_fileset_artifacts() -> Non
         ConfigFile(path="/tmp/nemo/skills/review/SKILL.md", content="# Review\n"),
     ]
     sdk = MagicMock()
+    files_client = object()
 
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
@@ -1295,6 +1339,7 @@ async def test_create_deployment_fabric_docker_stages_fileset_artifacts() -> Non
             "nemo_agents_plugin.runner.deployments_backend.get_async_platform_sdk",
             return_value=sdk,
         ),
+        patch("nemo_agents_plugin.runner.deployments_backend.client_from_platform", return_value=files_client),
         patch(
             "nemo_agents_plugin.runner.deployments_backend.stage_fabric_ethos_config_files",
             new_callable=AsyncMock,
@@ -1312,6 +1357,9 @@ async def test_create_deployment_fabric_docker_stages_fileset_artifacts() -> Non
 
     assert info.status == "starting"
     mock_stage.assert_awaited_once()
+    stage_args = mock_stage.await_args
+    assert stage_args is not None
+    assert stage_args.kwargs["files_client"] is files_client
     created_config = entities.create.await_args_list[0].args[0]
     assert len(created_config.config_files) == 2
     assert not any(e.name == "STAGED_CONFIG_FILES_B64_JSON" for e in created_config.containers[0].env)
@@ -1338,6 +1386,7 @@ async def test_create_deployment_fabric_k8s_stages_fileset_artifacts() -> None:
         ConfigFile(path="/tmp/nemo/skills/review/SKILL.md", content="# Review\n"),
     ]
     sdk = MagicMock()
+    files_client = object()
 
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
@@ -1345,6 +1394,7 @@ async def test_create_deployment_fabric_k8s_stages_fileset_artifacts() -> None:
             "nemo_agents_plugin.runner.deployments_backend.get_async_platform_sdk",
             return_value=sdk,
         ),
+        patch("nemo_agents_plugin.runner.deployments_backend.client_from_platform", return_value=files_client),
         patch(
             "nemo_agents_plugin.runner.deployments_backend.stage_fabric_ethos_config_files",
             new_callable=AsyncMock,
@@ -1379,6 +1429,7 @@ async def test_create_deployment_fabric_staging_error_fails_before_entity_create
         "harnesses": {"main": {"kind": "codex", "settings": {}}},
     }
     sdk = MagicMock()
+    files_client = object()
 
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
@@ -1386,6 +1437,7 @@ async def test_create_deployment_fabric_staging_error_fails_before_entity_create
             "nemo_agents_plugin.runner.deployments_backend.get_async_platform_sdk",
             return_value=sdk,
         ),
+        patch("nemo_agents_plugin.runner.deployments_backend.client_from_platform", return_value=files_client),
         patch(
             "nemo_agents_plugin.runner.deployments_backend.stage_fabric_ethos_config_files",
             new_callable=AsyncMock,

@@ -116,6 +116,7 @@ auth:
    audience: "nemo-platform-access-key"
    default_expires_in_seconds: 2592000
    max_expires_in_seconds: 2592000
+   rotation_grace_period_seconds: 172800
 ```
 
 Equivalent environment overrides:
@@ -130,6 +131,7 @@ NMP_AUTH_ACCESS_KEYS__ACCEPTED_FORMATS=jwt
 NMP_AUTH_ACCESS_KEYS__AUDIENCE=nemo-platform-access-key
 NMP_AUTH_ACCESS_KEYS__DEFAULT_EXPIRES_IN_SECONDS=2592000
 NMP_AUTH_ACCESS_KEYS__MAX_EXPIRES_IN_SECONDS=2592000
+NMP_AUTH_ACCESS_KEYS__ROTATION_GRACE_PERIOD_SECONDS=172800
 ```
 
 List-valued env vars for accepted Scoped Access Key formats are written as
@@ -159,6 +161,13 @@ With a finite `max_expires_in_seconds` and `default_expires_in_seconds: null`,
 callers must provide a finite `expires_in_seconds`. When
 `max_expires_in_seconds` is `null`, callers may still provide a finite
 `expires_in_seconds`, and the auth service honors that finite lifetime.
+
+`POST /apis/auth/v2/access-keys/{jti}/rotate` mints a successor key and puts the
+rotated-out key into a `ROTATING` state that still authenticates for
+`auth.access_keys.rotation_grace_period_seconds` (48 hours by default), so
+deployments can cut over configuration before the old key is finalized. Call
+`DELETE /apis/auth/v2/access-keys/{jti}` on the old key to finalize rotation
+immediately, or let it lapse automatically once the grace period elapses.
 
 The issuer defaults to `<platform.base_url>/apis/auth` when
 `auth.token_signing.issuer` is unset. Use an externally reachable issuer URL

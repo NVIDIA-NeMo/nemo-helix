@@ -22,18 +22,13 @@ from nemo_platform_plugin.iam.types import (
 
 @get("/apis/auth/v2/iam/role-bindings")
 @abstractmethod
-def list_role_bindings(
-    *,
-    query_params: ListRoleBindingsQueryParams = {"page": 1, "page_size": 10, "sort": "created_at"},
-) -> Paginated[RoleBinding]: ...
+def list_role_bindings(*, query_params: ListRoleBindingsQueryParams | None = None) -> Paginated[RoleBinding]: ...
 
 
 @post("/apis/auth/v2/iam/role-bindings")
 @abstractmethod
 def create_role_binding(
-    *,
-    body: RoleBindingInput,
-    query_params: RolePropagationQueryParams = {"wait_role_propagation": True},
+    *, body: RoleBindingInput, query_params: RolePropagationQueryParams | None = None
 ) -> RoleBinding: ...
 
 
@@ -45,7 +40,7 @@ def get_role_binding(*, name: str) -> RoleBinding: ...
 @delete("/apis/auth/v2/iam/role-bindings/{name}")
 @abstractmethod
 def revoke_role_binding(
-    *, name: str, query_params: RolePropagationQueryParams = {"wait_role_propagation": True}
+    *, name: str, query_params: RolePropagationQueryParams | None = None
 ) -> RoleBindingDeleteResponse: ...
 
 

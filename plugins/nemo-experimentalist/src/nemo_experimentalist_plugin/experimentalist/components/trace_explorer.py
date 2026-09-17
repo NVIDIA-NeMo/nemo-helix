@@ -10,10 +10,12 @@ import re
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from nemo_experimentalist_plugin.entities import ResourceRef
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_platform_plugin.intake.client import AsyncIntakeClient
+from nemo_platform_plugin.intake.types import ListEvaluatorResultsQueryParams, ListSpansQueryParams
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -1066,7 +1068,7 @@ def _load_span_models(path: str | Path) -> list[TraceSpan]:
 
 async def _fetch_intake_eval_contexts(
     *,
-    client: AsyncNeMoPlatform,
+    client: AsyncNemoClient,
     workspace: str,
     session_ids: set[str],
     page_size: int,
@@ -1074,14 +1076,15 @@ async def _fetch_intake_eval_contexts(
     results: list[EvalContextData] = []
     seen: set[str] = set()
 
+    intake = AsyncIntakeClient.from_client(client)
     for session_id in sorted(session_ids):
-        paginator = client.intake.evaluator_results.list(
-            workspace=workspace,
-            filter=cast(Any, {"session_id": session_id}),
-            page_size=max(1, page_size),
-            sort="created_at",
-        )
-        async for item in paginator:
+        query_params: ListEvaluatorResultsQueryParams = {
+            "filter": {"session_id": session_id},
+            "page_size": max(1, page_size),
+            "sort": "created_at",
+        }
+        paginator = await intake.list_evaluator_results(workspace=workspace, query_params=query_params)
+        async for item in paginator.items():
             row = item.model_dump(mode="json", exclude_none=True)
             result = _eval_context_from_record(row)
             dedupe_key = result.evaluator_result_id or json.dumps(row, sort_keys=True, default=str)
@@ -1538,7 +1541,7 @@ class TraceExplorer:
 
     @classmethod
     async def from_ref(
-        cls, ref: ResourceRef, client: AsyncNeMoPlatform | None = None, workspace: str | None = None
+        cls, ref: ResourceRef, client: AsyncNemoClient | None = None, workspace: str | None = None
     ) -> TraceExplorer:
         """Load a trace from a resource reference."""
         if ref.uri.startswith("file://"):
@@ -1562,7 +1565,7 @@ class TraceExplorer:
     @classmethod
     async def from_intake(
         cls,
-        client: AsyncNeMoPlatform,
+        client: AsyncNemoClient,
         trace_id: str,
         *,
         workspace: str,
@@ -1574,14 +1577,16 @@ class TraceExplorer:
         spans: list[TraceSpan] = []
         session_ids: set[str] = set()
 
-        paginator = client.intake.spans.list(
-            workspace=workspace,
-            filter=cast(Any, {"trace_id": trace_id}),
-            mode="detailed",
-            page_size=max(1, page_size),
-            sort="started_at",
+        query_params: ListSpansQueryParams = {
+            "filter": {"trace_id": trace_id},
+            "mode": "detailed",
+            "page_size": max(1, page_size),
+            "sort": "started_at",
+        }
+        paginator = await AsyncIntakeClient.from_client(client).list_spans(
+            workspace=workspace, query_params=query_params
         )
-        async for item in paginator:
+        async for item in paginator.items():
             row = item.model_dump(mode="json", exclude_none=True)
             if row.get("session_id"):
                 session_ids.add(str(row["session_id"]))

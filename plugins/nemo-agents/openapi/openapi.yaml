@@ -3932,6 +3932,20 @@ components:
             as ENV_VAR_NAME -> 'workspace/secret-name'. Compiled into secret-backed
             container env vars (never plaintext) for docker/k8s modes; ignored for
             subprocess.
+        spec_revision:
+          type: string
+          title: Spec Revision
+          description: Revision of the agent spec fileset this deployment last staged,
+            for source-backed filesets (e.g. a GitHub commit SHA). Empty when the
+            fileset has no revision.
+          default: ''
+        spec_tracked_revision:
+          type: string
+          title: Spec Tracked Revision
+          description: Mutable ref the spec fileset tracked when this deployment last
+            staged it (e.g. 'main'). Empty when the fileset was pinned to an immutable
+            id.
+          default: ''
         status:
           type: string
           enum:
@@ -4640,6 +4654,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/PlatformJobStatus'
           description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
         updated_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -5299,6 +5318,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/PlatformJobStatus'
           description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
         updated_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -5530,6 +5554,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/PlatformJobStatus'
           description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
         updated_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -5707,6 +5736,23 @@ components:
           title: Timeout Seconds
           description: Maximum time to wait for Fabric to return an execution result.
           default: 3600
+        auto_telemetry:
+          type: boolean
+          title: Auto Telemetry
+          description: Let the server fill in the agent's telemetry export -- an Intake
+            destination for a config that asks for one and does not say where. False
+            submits the agent config as written, which still exports if the config
+            says to; an agent config is the place to say a run should not be traced.
+          default: true
+        image:
+          type: string
+          title: Image
+          description: Container image to execute the agent in. Mirrors CreateDeploymentRequest.image.
+            Typically the output of `nemo agents package`, which contains both the
+            agent's Fabric adapter and the execute task module. Empty falls back to
+            agents.jobs.default_image, then to the jobs substrate's chain (the execution
+            profile's default_task_image, then the platform CPU tasks image).
+          default: ''
         extension:
           allOf:
           - $ref: '#/components/schemas/ExecuteAgentExtensionConfig'
@@ -5849,6 +5895,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/PlatformJobStatus'
           description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
         updated_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -6241,6 +6292,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/PlatformJobStatus'
           description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
         updated_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -6473,6 +6529,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/PlatformJobStatus'
           description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
         updated_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
@@ -6794,6 +6855,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/PlatformJobStatus'
           description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
         updated_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'

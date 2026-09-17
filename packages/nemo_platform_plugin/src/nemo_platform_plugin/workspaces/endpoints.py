@@ -24,6 +24,7 @@ from nemo_platform_plugin.workspaces.types import (
     Workspace,
     WorkspaceMember,
     WorkspaceMemberListResponse,
+    WorkspaceMemberQueryParams,
 )
 
 # ---------------------------------------------------------------------------
@@ -73,21 +74,32 @@ def delete_workspace(*, name: str) -> DeleteResponse: ...
 
 @get("/apis/entities/v2/workspaces/{workspace}/members")
 @abstractmethod
-def list_workspace_members(*, workspace: str) -> WorkspaceMemberListResponse: ...
+def list_workspace_members(*, workspace: str | None = None) -> WorkspaceMemberListResponse: ...
 
 
 @post("/apis/entities/v2/workspaces/{workspace}/members")
 @abstractmethod
-def create_workspace_member(*, workspace: str, body: CreateWorkspaceMemberRequest) -> WorkspaceMember: ...
+def create_workspace_member(
+    *,
+    workspace: str | None = None,
+    body: CreateWorkspaceMemberRequest,
+    query_params: WorkspaceMemberQueryParams | None = None,
+) -> WorkspaceMember: ...
 
 
 @put("/apis/entities/v2/workspaces/{workspace}/members/{principal_id}")
 @abstractmethod
 def update_workspace_member(
-    *, workspace: str, principal_id: str, body: UpdateWorkspaceMemberRequest
+    *,
+    workspace: str | None = None,
+    principal_id: str,
+    body: UpdateWorkspaceMemberRequest,
+    query_params: WorkspaceMemberQueryParams | None = None,
 ) -> WorkspaceMember: ...
 
 
 @delete("/apis/entities/v2/workspaces/{workspace}/members/{principal_id}")
 @abstractmethod
-def delete_workspace_member(*, workspace: str, principal_id: str) -> DeleteResponse: ...
+def delete_workspace_member(
+    *, workspace: str | None = None, principal_id: str, query_params: WorkspaceMemberQueryParams | None = None
+) -> DeleteResponse: ...

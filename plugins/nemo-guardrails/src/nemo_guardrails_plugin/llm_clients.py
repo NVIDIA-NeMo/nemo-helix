@@ -24,8 +24,8 @@ from types import MappingProxyType
 from typing import Any, cast
 
 from langchain_core.language_models import BaseChatModel
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.sdk_provider import get_forwarding_headers
+from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_platform_plugin.client_provider import get_forwarding_headers
 from nemoguardrails.integrations.langchain.llm_adapter import LangChainLLMAdapter
 from nemoguardrails.llm.providers import register_provider
 from nemoguardrails.types import LLMModel
@@ -49,7 +49,7 @@ def get_request_headers() -> RequestHeaders:
 
 
 @contextmanager
-def platform_headers_context(sdk: AsyncNeMoPlatform) -> Iterator[None]:
+def platform_headers_context(client: AsyncNemoClient) -> Iterator[None]:
     """Make platform headers visible to rail model calls in this context.
 
     Model calls happen deep inside nemoguardrails/LangChain library code that
@@ -58,13 +58,13 @@ def platform_headers_context(sdk: AsyncNeMoPlatform) -> Iterator[None]:
     on the cached LangChain client itself.
 
     Args:
-        sdk: The SDK whose forwarding headers should be propagated.
-            For per-request auth, pass a request-scoped SDK built via
-            ``sdk.with_options(set_default_headers=...)``.
+        client: The client whose forwarding headers should be propagated.
+            For per-request auth, pass a request-scoped client built via
+            ``client.with_options(headers=...)``.
 
     The data flow is:
 
-    1. ``get_forwarding_headers(sdk)`` extracts the per-request
+    1. ``get_forwarding_headers(client)`` extracts the per-request
        service-principal, on-behalf-of, and tracing headers.
     2. This context manager stores them in ``_request_headers_ctx`` for the
        current execution context.
@@ -78,7 +78,7 @@ def platform_headers_context(sdk: AsyncNeMoPlatform) -> Iterator[None]:
        ``_prepare_inputs_and_payload`` override reads ``_request_headers_ctx``
        and merges those headers into the request.
     """
-    headers = _request_headers_ctx.set(get_forwarding_headers(sdk))
+    headers = _request_headers_ctx.set(get_forwarding_headers(client))
     try:
         yield
     finally:

@@ -106,7 +106,7 @@ def autoprovisioned_vms_for_cache(model_cache: ModelCache) -> list[VirtualModel]
     keying plus the request-side rewrite of ``parse_model_entity_ref`` to surface composite
     LoRA ids through whichever VirtualModel the operator manually associated with them.
     """
-    now = "2026-01-01T00:00:00Z"
+    now = datetime.fromisoformat("2026-01-01T00:00:00+00:00")
     return [
         VirtualModel(
             id=f"{workspace}/{name}",
@@ -170,9 +170,8 @@ def app_and_client(
         ],
     )
 
-    mocker.patch("nmp.core.inference_gateway.service.get_async_platform_sdk", return_value=mock_nmp_sdk)
-
     service = InferenceGatewayService()
+    mocker.patch.object(service.dependency_provider, "get_sdk_client", return_value=mock_nmp_sdk)
     app = service.app
     app.dependency_overrides[global_http_client] = lambda: mock_proxy_client
     app.dependency_overrides[global_model_cache] = lambda: model_cache

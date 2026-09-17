@@ -8,10 +8,11 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
 
+import httpx
 import pytest
+from nemo_platform_plugin.client.client import AsyncNemoClient
 from nemo_platform_plugin.files.client import AsyncFilesClient
 from nemo_platform_plugin.models.client import AsyncModelsClient
 from nemo_unsloth_plugin.schema import (
@@ -25,71 +26,91 @@ from nemo_unsloth_plugin.schema import (
     UnslothJobOutput,
 )
 from nemo_unsloth_plugin.transform import transform_input_to_output
+from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
 from pydantic import ValidationError
 
-
-def _stub_sdk(*, is_embedding: bool = False, head_type: str | None = None) -> tuple[SimpleNamespace, SimpleNamespace]:
-    """Build a minimal async SDK + the model entity the models client returns.
-
-    Returns ``(sdk, model_entity)`` so callers can wire the same entity into the
-    ``AsyncModelsClient`` mock dispatched by ``client_from_platform``.
-    """
-    spec = (
-        SimpleNamespace(is_embedding_model=is_embedding, head_type=head_type or "unknown")
-        if is_embedding or head_type
-        else None
-    )
-    model_entity = SimpleNamespace(
-        name="m",
-        workspace="default",
-        spec=spec,
-        fileset="m",
-        trust_remote_code=False,
-    )
-    sdk = SimpleNamespace(
-        models=SimpleNamespace(retrieve=AsyncMock(return_value=model_entity)),
-        files=SimpleNamespace(
-            filesets=SimpleNamespace(retrieve=AsyncMock(return_value=SimpleNamespace())),
-        ),
-    )
-    return sdk, model_entity
+BASE_URL = "http://test"
 
 
-def _mock_files_client() -> AsyncMock:
-    """Build a mock AsyncFilesClient for check_dataset_access."""
-    mock = AsyncMock()
-    mock.get_fileset.return_value = MagicMock()
-    return mock
+def _model_spec_json(*, is_embedding: bool, head_type: str | None) -> dict[str, object] | None:
+    if not is_embedding and head_type is None:
+        return None
+    return {
+        "context_size": 2048,
+        "head_type": head_type or "unknown",
+        "is_embedding_model": is_embedding,
+        "checkpoint_model_name": "Qwen2.5-0.5B-Instruct",
+        "family": "qwen",
+        "num_layers": 1,
+        "hidden_size": 1,
+        "num_attention_heads": 1,
+        "num_kv_heads": 1,
+        "ffn_hidden_size": 1,
+        "vocab_size": 1,
+        "tied_embeddings": True,
+        "gated_mlp": True,
+        "base_num_parameters": 1,
+        "precision": "bf16",
+    }
 
 
-def _client_from_platform_side_effect(model_entity: SimpleNamespace):
-    """Dispatch ``client_from_platform`` to a files or models mock by client class.
+def _model_json(*, is_embedding: bool = False, head_type: str | None = None) -> dict[str, object]:
+    return {
+        "id": "model-m",
+        "name": "m",
+        "workspace": "default",
+        "created_at": "2020-01-01T00:00:00Z",
+        "updated_at": "2020-01-01T00:00:00Z",
+        "spec": _model_spec_json(is_embedding=is_embedding, head_type=head_type),
+        "fileset": "default/m",
+        "trust_remote_code": False,
+    }
 
-    ``fetch_model_entity`` now resolves models via ``AsyncModelsClient.get_model``
-    (``.data()`` unwraps the typed response) and ``check_dataset_access`` via
-    ``AsyncFilesClient.get_fileset`` — both through ``client_from_platform``.
-    """
-    files = _mock_files_client()
-    models = AsyncMock()
-    models.get_model.return_value = SimpleNamespace(data=lambda: model_entity)
 
-    def _dispatch(platform: object, client_cls: type, *args: object, **kwargs: object):
-        if client_cls is AsyncModelsClient:
-            return models
-        if client_cls is AsyncFilesClient:
-            return files
-        raise AssertionError(f"unexpected client class: {client_cls!r}")
+def _fileset_json(workspace: str, name: str) -> dict[str, object]:
+    return {
+        "id": f"{workspace}-{name}",
+        "name": name,
+        "workspace": workspace,
+        "description": "",
+        "purpose": "generic",
+        "storage": {"type": "local", "path": "/tmp/files"},
+        "metadata": {},
+        "custom_fields": {},
+        "project": "",
+        "created_at": "2020-01-01T00:00:00Z",
+        "updated_at": "2020-01-01T00:00:00Z",
+    }
 
-    return _dispatch
+
+async def _run_transform_async(
+    spec: UnslothJobInput,
+    *,
+    is_embedding: bool = False,
+    head_type: str | None = None,
+) -> UnslothJobOutput:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        parts = path.split("/")
+        if path.startswith("/apis/models/v2/workspaces/"):
+            return httpx.Response(
+                200, request=request, json=_model_json(is_embedding=is_embedding, head_type=head_type)
+            )
+        if path.startswith("/apis/files/v2/workspaces/"):
+            return httpx.Response(200, request=request, json=_fileset_json(parts[5], parts[7]))
+        return httpx.Response(404, request=request, json={"detail": "unexpected request"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        client = AsyncNemoClient(base_url=BASE_URL, workspace="default", http_client=http_client)
+        platform = AsyncCustomizationPlatformClients(
+            files=AsyncFilesClient.from_client(client),
+            models=AsyncModelsClient.from_client(client),
+        )
+        return await transform_input_to_output(spec, "default", platform)
 
 
 def _run_transform(spec: UnslothJobInput) -> UnslothJobOutput:
-    sdk, model_entity = _stub_sdk()
-    with patch(
-        "nmp.customization_common.service.platform_client.client_from_platform",
-        side_effect=_client_from_platform_side_effect(model_entity),
-    ):
-        return asyncio.run(transform_input_to_output(spec, "default", sdk))
+    return asyncio.run(_run_transform_async(spec))
 
 
 class TestCanonicalReexport:
@@ -102,7 +123,8 @@ class TestCanonicalReexport:
         assert UnslothJobOutput.__module__ == "nmp.unsloth.schemas"
 
 
-def _minimal_payload() -> dict[str, object]:
+# Raw Pydantic payload under mutation in validation tests.
+def _minimal_payload() -> dict[str, Any]:
     return {
         "model": {"name": "unsloth/Qwen2.5-0.5B-Instruct", "max_seq_length": 2048},
         "dataset": {"path": "/data/sample.jsonl"},
@@ -272,16 +294,9 @@ class TestTransformOutput:
         ids=["legacy-embedding", "cross-encoder"],
     )
     def test_encoder_model_rejected(self, is_embedding: bool, head_type: str | None) -> None:
-        sdk, model_entity = _stub_sdk(is_embedding=is_embedding, head_type=head_type)
         spec = UnslothJobInput.model_validate(_minimal_payload())
-        with (
-            patch(
-                "nmp.customization_common.service.platform_client.client_from_platform",
-                side_effect=_client_from_platform_side_effect(model_entity),
-            ),
-            pytest.raises(ValueError, match="Encoder-model SFT"),
-        ):
-            asyncio.run(transform_input_to_output(spec, "default", sdk))
+        with pytest.raises(ValueError, match="Encoder-model SFT"):
+            asyncio.run(_run_transform_async(spec, is_embedding=is_embedding, head_type=head_type))
 
 
 class TestSubSpecExtras:

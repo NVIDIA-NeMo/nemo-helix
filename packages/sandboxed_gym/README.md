@@ -24,7 +24,7 @@ wheel exists.
 
 ## Architecture
 
-![Architecture](docs/architecture.png)
+![Architecture](docs/architecture.svg)
 
 The trusted side holds the OpenSandbox credential and the episode broker; the sandbox gets a
 per-run token and nothing else. The episode tier is only used by environments that ask for nested
@@ -32,7 +32,7 @@ sandboxes -- an ordinary evaluation never creates one.
 
 ### Two job-host providers
 
-![Host provider paths](docs/host-provider-paths.png)
+![Host provider paths](docs/host-provider-paths.svg)
 
 `get_host_provider` selects by name. **`docker` is for local execution only**: it runs the host as
 a container, records the egress allowlist rather than applying it, and bind-mounts host

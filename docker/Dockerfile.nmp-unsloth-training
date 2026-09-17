@@ -202,7 +202,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "mistune>=3.3.3,<4" \
     "pillow>=12.3.0,<13" \
     "soupsieve>=2.8.4,<3" \
-    "GitPython>=3.1.58,<4" \
+    "GitPython>=3.1.60,<4" \
     "mlflow-skinny>=3.15.0,<3.16.0" \
     "sqlparse>=0.6.0,<0.7"
 

@@ -23,6 +23,7 @@ Modeled on ``nemo_auditor.sdk`` — same shape, same hand-written CRUD-only
 resource pattern. No Stainless codegen.
 """
 
+from nemo_insights_plugin.client import AsyncInsightsClient, InsightsClient
 from nemo_insights_plugin.sdk_resources.analysis_configs import (
     _AnalysisConfigResource,
     _AnalysisRunStatusResource,
@@ -38,6 +39,7 @@ from nemo_insights_plugin.sdk_resources.insights import (
     _InsightResource,
 )
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.sdk import NemoPluginSDKResources
 
 
@@ -46,7 +48,7 @@ class InsightsPluginResource:
 
     def __init__(self, platform: NeMoPlatform) -> None:
         self._platform = platform
-        self._http_client = platform._client
+        self._client = client_from_platform(platform, InsightsClient)
         self._insights: _InsightResource | None = None
         self._analysis_configs: _AnalysisConfigResource | None = None
         self._analysis_runs: _AnalysisRunResource | None = None
@@ -76,16 +78,13 @@ class InsightsPluginResource:
             self._analysis_run_statuses = _AnalysisRunStatusResource(self)
         return self._analysis_run_statuses
 
-    def _url(self, path: str) -> str:
-        return str(self._platform.base_url).rstrip("/") + "/apis/insights" + path
-
 
 class AsyncInsightsPluginResource:
     """Async SDK namespace mounted as ``client.insights``."""
 
     def __init__(self, platform: AsyncNeMoPlatform) -> None:
         self._platform = platform
-        self._http_client = platform._client
+        self._client = client_from_platform(platform, AsyncInsightsClient)
         self._insights: _AsyncInsightResource | None = None
         self._analysis_configs: _AsyncAnalysisConfigResource | None = None
         self._analysis_runs: _AsyncAnalysisRunResource | None = None
@@ -114,9 +113,6 @@ class AsyncInsightsPluginResource:
         if self._analysis_run_statuses is None:
             self._analysis_run_statuses = _AsyncAnalysisRunStatusResource(self)
         return self._analysis_run_statuses
-
-    def _url(self, path: str) -> str:
-        return str(self._platform.base_url).rstrip("/") + "/apis/insights" + path
 
 
 insights_sdk_resources = NemoPluginSDKResources(

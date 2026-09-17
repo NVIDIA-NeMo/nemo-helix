@@ -16,6 +16,8 @@ from nemo_platform_plugin.auth.access_keys.types import (
     AccessKeyCreateRequest,
     AccessKeyCreateResponse,
     AccessKeyRevokeResponse,
+    AccessKeyRotateRequest,
+    AccessKeyRotateResponse,
     AccessKeyStatusChangeResponse,
 )
 from nemo_platform_plugin.client.errors import NemoHTTPError
@@ -28,6 +30,7 @@ class _AccessKeysClientStub:
         self.revoke_access_key = MagicMock()
         self.suspend_access_key = MagicMock()
         self.unsuspend_access_key = MagicMock()
+        self.rotate_access_key = MagicMock()
 
     def as_client(self) -> AccessKeysClient:
         return cast(AccessKeysClient, self)
@@ -83,6 +86,47 @@ def test_access_key_issuer_client_suspends_and_unsuspends_by_jti() -> None:
     assert issuer.unsuspend("ak_example").changed
     client.suspend_access_key.assert_called_once_with(jti="ak_example")
     client.unsuspend_access_key.assert_called_once_with(jti="ak_example")
+
+
+def test_access_key_issuer_client_rotates_by_jti() -> None:
+    client = _AccessKeysClientStub()
+    rotated = AccessKeyRotateResponse(
+        new_key=AccessKeyCreateResponse(
+            jti="ak_successor",
+            name=None,
+            token="signed.jwt.token",
+            token_type="Bearer",
+            principal="alice@example.com",
+            created_at=datetime(2026, 7, 28, 12, 0, tzinfo=UTC),
+            expires_at=None,
+            description=None,
+            status="ACTIVE",
+            issuer="https://platform.example.com/apis/auth",
+            audiences=["nemo-platform-access-key"],
+        ),
+        previous_jti="ak_example",
+        previous_status="ROTATING",
+        grace_period_seconds=3600,
+    )
+    client.rotate_access_key.return_value.data.return_value = rotated
+
+    issuer = AccessKeyIssuerClient(client.as_client())
+    result = issuer.rotate("ak_example")
+
+    assert result == rotated
+    client.rotate_access_key.assert_called_once_with(jti="ak_example", body=AccessKeyRotateRequest())
+
+
+def test_access_key_issuer_client_rotates_with_explicit_grace_period() -> None:
+    client = _AccessKeysClientStub()
+    client.rotate_access_key.return_value.data.return_value = None
+
+    issuer = AccessKeyIssuerClient(client.as_client())
+    issuer.rotate("ak_example", grace_period_seconds=3600)
+
+    client.rotate_access_key.assert_called_once_with(
+        jti="ak_example", body=AccessKeyRotateRequest(grace_period_seconds=3600)
+    )
 
 
 def test_access_key_issuer_client_lists_requested_page() -> None:

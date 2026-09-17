@@ -764,6 +764,33 @@ class TestLoadMiddlewarePlugins:
         injected = instance._inject_cache.call_args[0][0]
         assert isinstance(injected, InferenceMiddlewareCacheAccessorImpl)
 
+    @pytest.mark.asyncio
+    async def test_load_injects_typed_client_from_plugin_sdk(self):
+        plugin_cls = MagicMock()
+        instance = _make_mock_plugin()
+        plugin_cls.return_value = instance
+        sdk = MagicMock()
+        client = MagicMock()
+
+        with patch(
+            "nmp.core.inference_gateway.api.middleware_registry.discover_inference_middleware",
+            return_value={"my-plugin": plugin_cls},
+        ):
+            with patch(
+                "nmp.core.inference_gateway.api.middleware_registry.client_from_platform",
+                return_value=client,
+            ) as adapt:
+                await load_middleware_plugins(
+                    ModelCache(),
+                    VirtualModelCache(),
+                    plugin_sdk_factory=lambda _name: sdk,
+                )
+
+        adapt.assert_called_once()
+        assert adapt.call_args.args[0] is sdk
+        instance._inject_platform_sdk.assert_called_once_with(sdk)
+        instance._inject_platform_client.assert_called_once_with(client)
+
     @skip_flaky_caplog
     @pytest.mark.asyncio
     async def test_load_fault_isolation_broken_import(self, caplog):

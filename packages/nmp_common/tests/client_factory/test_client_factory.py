@@ -4,10 +4,11 @@
 """Tests for :mod:`nmp.common.client_factory` — the rich NemoClient provider.
 
 Covers what the platform provider adds over the plugin's env-var default:
-per-service URL routing, shared HTTP clients, principal/auth + internal +
-OTEL headers, workspace defaults, and test-client injection.
+per-service URL routing, endpoint-aware HTTP clients, principal/auth +
+internal + OTEL headers, workspace defaults, and explicit client injection.
 """
 
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
@@ -18,18 +19,16 @@ from nemo_platform_plugin.client_provider import NemoClientProvider
 from nmp.common import client_factory as cf
 from nmp.common.config import Configuration
 from nmp.common.observability.otel import scoped_otel_headers
+from nmp.common.platform_endpoint import _AsyncPlatformEndpointRoutingTransport, _SyncPlatformEndpointRoutingTransport
 
 
 @pytest.fixture(autouse=True)
 def _reset_client_factory_state():
-    """Keep tests order-independent: clear the injected test client and config cache."""
-    old = cf._test_http_client
-    cf._test_http_client = None
+    """Keep tests order-independent by clearing the config cache."""
     Configuration.clear_cache()
     try:
         yield
     finally:
-        cf._test_http_client = old
         Configuration.clear_cache()
 
 
@@ -76,9 +75,14 @@ class TestSyncConstruction:
         client = cf.get_nemo_client(workspace="team-a")
         assert client.workspace == "team-a"
 
-    def test_reuses_shared_sync_http_client(self):
+    def test_uses_endpoint_sync_http_client(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("NMP_BASE_URL", "https://nemo-gateway:8080")
+        monkeypatch.setenv("NMP_ENTITIES_URL", "http://entities-svc:9999")
+        Configuration.clear_cache()
+
         client = cf.get_nemo_client()
-        assert client._http is cf.shared_sync_http_client()
+
+        assert isinstance(client._http._transport, _SyncPlatformEndpointRoutingTransport)
 
     def test_explicit_http_client_wins(self):
         with httpx.Client() as explicit:
@@ -102,9 +106,15 @@ class TestAsyncConstruction:
         assert client._default_headers["X-NMP-Principal-Id"] == "service:evaluator"
         assert client._default_headers["X-NMP-Internal"] == "true"
 
-    def test_falls_back_to_shared_async_client(self):
+    async def test_uses_endpoint_async_http_client(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+        socket_path = tmp_path / "entities.sock"
+        monkeypatch.setenv("NMP_BASE_URL", "https://nemo-gateway:8080")
+        monkeypatch.setenv("NMP_ENTITIES_URL", f"unix://{socket_path}")
+        Configuration.clear_cache()
+
         client = cf.get_async_nemo_client()
-        assert isinstance(client._http, httpx.AsyncClient)
+
+        assert isinstance(client._http._transport, _AsyncPlatformEndpointRoutingTransport)
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +135,23 @@ class TestUrlRouting:
         assert str(captured[0].url) == "http://entities-svc:9999/apis/entities/v2/foo"
         assert captured[0].headers["X-NMP-Principal-Id"] == "service:entities"
         assert captured[0].headers["X-NMP-Internal"] == "true"
+
+    def test_allows_credentialed_uds_service_route(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        socket_path = tmp_path / "entities.sock"
+        monkeypatch.setenv("NMP_BASE_URL", "https://nemo-gateway:8080")
+        monkeypatch.setenv("NMP_ENTITIES_URL", f"unix://{socket_path}")
+        Configuration.clear_cache()
+
+        captured: list[httpx.Request] = []
+        client = cf.get_nemo_client(as_service="entities", internal=True, http_client=_mock_client(captured))
+        client.send(_get("/apis/entities/v2/foo"))
+
+        assert str(captured[0].url) == "http://nemo-platform.local/apis/entities/v2/foo"
+        assert captured[0].headers["X-NMP-Principal-Id"] == "service:entities"
 
     def test_preserves_query_string_when_routing(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("NMP_BASE_URL", "https://nemo-gateway:8080")
@@ -206,24 +233,13 @@ class TestHeadersAuth:
 
 
 class TestTestClientInjection:
-    def test_async_uses_module_level_test_client(self):
+    async def test_async_uses_explicit_http_client(self):
         test_client = httpx.AsyncClient(base_url="http://testserver")
-        cf._test_http_client = test_client
         try:
-            client = cf.get_async_nemo_client(as_service="evaluator")
+            client = cf.get_async_nemo_client(as_service="evaluator", http_client=test_client)
             assert client._http is test_client
         finally:
-            cf._test_http_client = None
-
-    def test_async_explicit_http_client_beats_module_level(self):
-        module_client = httpx.AsyncClient(base_url="http://module")
-        explicit = httpx.AsyncClient(base_url="http://explicit")
-        cf._test_http_client = module_client
-        try:
-            client = cf.get_async_nemo_client(http_client=explicit)
-            assert client._http is explicit
-        finally:
-            cf._test_http_client = None
+            await test_client.aclose()
 
 
 # ---------------------------------------------------------------------------
@@ -371,23 +387,21 @@ class TestUdsTransport:
         # concatenating an API path yields a valid URL, not a broken one.
         assert client.base_url + "/apis/entities/v2/foo" == "http://nemo-platform.local/apis/entities/v2/foo"
 
-    def test_uds_sync_client_binds_socket_transport(self, monkeypatch: pytest.MonkeyPatch):
+    def test_uds_sync_client_uses_http_transport(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("NMP_BASE_URL", "unix:///tmp/nemo-platform.sock")
         Configuration.clear_cache()
         client = cf.get_nemo_client()
         transport = client._http._transport
         assert isinstance(transport, httpx.HTTPTransport)
-        assert transport._pool._uds == "/tmp/nemo-platform.sock"
 
-    async def test_uds_async_client_binds_socket_transport(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_uds_async_client_uses_http_transport(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("NMP_BASE_URL", "unix:///tmp/nemo-platform.sock")
         Configuration.clear_cache()
         client = cf.get_async_nemo_client()
         transport = client._http._transport
         assert isinstance(transport, httpx.AsyncHTTPTransport)
-        assert transport._pool._uds == "/tmp/nemo-platform.sock"
 
-    def test_tcp_client_uses_shared_client(self, monkeypatch: pytest.MonkeyPatch):
+    def test_tcp_client_uses_platform_base_url(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("NMP_BASE_URL", "http://platform:8080")
         Configuration.clear_cache()
         client = cf.get_nemo_client()

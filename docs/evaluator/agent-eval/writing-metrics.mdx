@@ -39,8 +39,13 @@ No base class — a metric is any object with these three members (a structural 
 | Field | Type | What it holds |
 |---|---|---|
 | `candidate.output_text` | `str \| None` | the agent's final answer |
+| `candidate.response` | `Any \| None` | the raw model or agent response payload |
+| `candidate.trajectory` | `Any \| None` | the candidate trajectory when supplied directly |
 | `candidate.evidence` | `CandidateEvidence \| None` | trajectory, final filesystem state, logs — see [Reading evidence](#reading-evidence) |
-| `candidate.metadata` | `dict` | trial metadata (e.g. a reward a runner stamped on) |
+| `candidate.metadata` | `dict` | free-form trial and output metadata, excluding the dedicated fields above; empty when the trial has no output |
+
+For a trial with an output, `candidate.metadata` starts with `AgentEvalTrial.metadata` and then adds
+`AgentOutput.metadata`. If both contain the same key, the value from the output wins.
 
 `input.row.data` is a dict describing the task and trial:
 
@@ -49,16 +54,21 @@ No base class — a metric is any object with these three members (a structural 
 | `input.row.data["reference"]` | grader-only ground truth (the task's `reference`), never shown to the agent |
 | `input.row.data["inputs"]` | the task `inputs` (`instruction`, …) |
 | `input.row.data["task"]` | `{id, intent, metadata}` |
-| `input.row.data["trial"]` | `{id, task_id, status, metadata}` |
+| `input.row.data["trial"]` | `{id, task_id, status, error, measurements, metadata}` |
+
 
 So an **outcome** metric reads `candidate.output_text` and `row.data["reference"]`; a **trajectory**
 metric reads `candidate.evidence`.
 
 ## Declaring outputs
 
-A metric declares its outputs up front; the runtime validates that `compute_scores` returns **exactly**
-those names, each coercible to the declared type (a missing or undeclared output raises). Build specs
-with the `MetricOutputSpec` factories:
+A metric declares its outputs up front. Outputs are required by default: `compute_scores` must return
+every output whose spec has `required=True` (default is True if not specified). Set `required=False` only when the producer can
+legitimately leave that value unmeasured. The runtime rejects missing required outputs, undeclared or
+duplicate outputs, and present values that cannot be coerced to their declared type.
+
+Build specs with the `MetricOutputSpec` factories. Pass `required=False` to mark an
+output optional.
 
 | Factory | Value type | Use for |
 |---|---|---|
@@ -89,6 +99,59 @@ contributes as 0/1 to a [view](/documentation/evaluate-models/agent-eval/score-b
 
 </Tip>
 
+### Optional outputs
+
+Declare an output as optional when the metric cannot (or not expected) measure it on every otherwise scoreable trial.
+Return the output when measured and omit it when unmeasured:
+
+```python
+from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
+
+class AnswerFormatMetric:
+    @property
+    def type(self) -> str:
+        return "answer_format"
+
+    def output_spec(self) -> list[MetricOutputSpec]:
+        return [
+            MetricOutputSpec.continuous_score("score"),
+            # required=False makes the output optional
+            MetricOutputSpec.continuous_score("format_ok", required=False),
+        ]
+
+    async def compute_scores(self, input: MetricInput) -> MetricResult:
+        answer = input.candidate.output_text
+        outputs = [MetricOutput(name="score", value=1.0 if answer else 0.0)]
+        if answer is not None:
+            outputs.append(MetricOutput(name="format_ok", value=float(answer.startswith("{"))))
+        return MetricResult(outputs=outputs)
+```
+
+`required=False` flag is a producer contract, not an aggregation policy.
+The metric author decides how to interpret and score missing optional metric scores.
+
+#### Recommended
+
+Omit the output when unmeasured, as in the example.
+- The mean is calculated over finite measured values (`count`). An omitted output is not averaged in and does not count as zero.
+- An omission stays in the applicable set as `nan_count` and coverage `missing`.
+- `count + nan_count` equals that output's coverage `total`.
+
+See [Reading Results](/documentation/evaluate-models/agent-eval/reading-results) for the two-trial `format_ok` example.
+
+#### Not recommended
+
+A metric author is allowed to emit a filler. That puts the trial in the measured set and changes aggregates:
+
+- `0.0` is a finite measurement: it enters `count` and `mean`, and coverage counts it as
+  `scored`. The mean is pulled toward zero as if the metric measured failure.
+- NaN is observed but non-finite: it is excluded from `count` and `mean`, increments
+  `nan_count`, and coverage still counts it as `scored` (not `missing`). The trial looks
+  measured when it was not.
+- `None` is rejected.
+
+Use a filler only when you intend that trial to count as measured.
+
 ## Returning a result
 
 Return a `MetricResult` whose `outputs` match `output_spec` by name:
@@ -108,6 +171,32 @@ class KeywordMatchMetric:
         expected = str(input.row.data.get("reference", {}).get("expected", "")).lower()
         answer = (input.candidate.output_text or "").lower()
         return MetricResult(outputs=[MetricOutput(name="score", value=1.0 if expected and expected in answer else 0.0)])
+```
+
+## Reading measurements
+
+Metrics read measurements from `input.row.data["trial"]["measurements"]`. The complete
+[`TrialMeasurements`](https://github.com/NVIDIA-NeMo/nemo-platform/blob/main/packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/agent_eval/trials.py)
+schema is always present: unavailable values are `None`, while a measured zero remains `0` (or
+`0.0`). Persisted or imported measurement values belong exclusively in `measurements`; free-form
+metadata values are never converted into measurements, even when their keys resemble measurement
+names.
+
+```python
+class TotalTokensMetric:
+    @property
+    def type(self) -> str:
+        return "usage"
+
+    def output_spec(self) -> list[MetricOutputSpec]:
+        return [MetricOutputSpec.discrete_score("total_tokens", required=False)]
+
+    async def compute_scores(self, input: MetricInput) -> MetricResult:
+        total_tokens = input.row.data["trial"]["measurements"]["total_tokens"]
+        outputs = []
+        if total_tokens is not None:
+            outputs.append(MetricOutput(name="total_tokens", value=total_tokens))
+        return MetricResult(outputs=outputs)
 ```
 
 ## Reading evidence
@@ -152,8 +241,9 @@ consumer's job.
 ### Asking for one trace format
 
 A runner may record the same trial in more than one encoding. Harbor registers both under
-`trace:atif` and `trace:otlp` when the agent under test emits both. Pass `format=` to choose one
-and get a narrowed handle back, with no runtime branch:
+`trace:atif` and `trace:otlp` when the agent under test emits both, and Fabric registers both
+whenever it captures an OTLP trace from Relay. Pass `format=` to choose one and get a narrowed
+handle back, with no runtime branch:
 
 ```python
 from nemo_evaluator_sdk.values.evidence import CandidateEvidence
@@ -167,8 +257,8 @@ async def read_both_views(evidence: CandidateEvidence) -> None:
 ```
 
 `trace()` with no `format` still returns whichever encoding the runner made primary. For Harbor
-that is the OTLP trace when the agent emits one and the ATIF trace otherwise — there is no setting
-to choose between them. A `format=` request raises `KeyError` when the trial carries no trace in
+and Fabric alike that is the OTLP trace when one was recorded and the ATIF trace otherwise — there
+is no setting to choose between them. A `format=` request raises `KeyError` when the trial carries no trace in
 that encoding, so a metric that depends on one specific view fails loudly instead of silently
 scoring nothing.
 
@@ -178,14 +268,23 @@ complete, runnable trajectory metric; the SDK's `example_metrics.py` (under
 
 ## How outputs are reported
 
-Each output aggregates in `result.summary` under the key `<metric.type>.<output>` (mean / min / max /
-std-dev). To roll several outputs into one reported score, define a **view** on the task — see
+Each output aggregates in `result.summary` under `<metric.type>.<output>`. The aggregate reports
+`mean`, extrema, population and sample statistics, `count`, and `nan_count`:
+
+- `count` is the number of finite measured values.
+- `nan_count` is the number of applicable opportunities that were unmeasured or failed.
+- An optional output omitted everywhere keeps a row with `count=0` and `mean=None`.
+- `summary.metric_coverage` separately reports `total`, `scored`, `missing`, and `failed`.
+
+See [Reading Results](/documentation/evaluate-models/agent-eval/reading-results) for exact examples. To
+roll several outputs into one reported score, define a **view** on the task — see
 [Score by Component](/documentation/evaluate-models/agent-eval/score-by-component).
 
 ## Related
 
 <Cards>
   <Card title="Score by Component" href="/documentation/evaluate-models/agent-eval/score-by-component" />
+  <Card title="Reading Results" href="/documentation/evaluate-models/agent-eval/reading-results" />
   <Card title="Agent Evaluation (concepts)" href="/documentation/evaluate-models/agent-eval" />
   <Card title="Quickstart" href="/documentation/evaluate-models/agent-eval/quickstart" />
 </Cards>

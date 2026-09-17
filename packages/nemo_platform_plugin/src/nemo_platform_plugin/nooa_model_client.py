@@ -9,24 +9,27 @@ and client lifetime behavior without making Nooa a required dependency of the
 public plugin contract.
 """
 
-from collections.abc import Iterator
+import inspect
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
-from models import parse_workspace_name_ref
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_ext.config import get_context
-from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.auth import AsyncTokenProvider, TokenProvider, resolve_token_async
+from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_platform_plugin.client.config.config import get_context
 from nemo_platform_plugin.models.client import AsyncModelsClient
+from nemo_platform_plugin.models.refs import parse_workspace_name_ref
 from nemo_platform_plugin.models.types import ModelEntity, ModelProvider
-from nooa.unifiedllm import CompletionClient, UnifiedLLM
+from nooa.unifiedllm import CompletionClient, LLMResponse, Tool, UnifiedLLM
+from pydantic import BaseModel
 
 _PLACEHOLDER_API_KEY = "not-needed"
 _OPENAI_FORMAT = "OPENAI_CHAT"
 _ANTHROPIC_FORMAT = "ANTHROPIC_MESSAGES"
 _ACCEPT_ENCODING_HEADER = "accept-encoding"
 _IDENTITY_ENCODING = "identity"
+_AUTHORIZATION_HEADER = "Authorization"
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,95 @@ def _validate_configured_ref(model_ref: str, env_var: str) -> None:
         ) from None
 
 
+def _normalize_extra_headers(headers: object, *, label: str) -> dict[str, str]:
+    if headers is None:
+        return {}
+    if not isinstance(headers, Mapping):
+        raise TypeError(f"{label} must be a mapping of string headers")
+    normalized: dict[str, str] = {}
+    for key, value in headers.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise TypeError(f"{label} must contain only string header names and values")
+        normalized[key] = value
+    return normalized
+
+
+class _AuthenticatedCompletionClient(CompletionClient):
+    """CompletionClient that resolves Platform auth at each Nooa call boundary."""
+
+    def __init__(
+        self,
+        model: str,
+        *,
+        platform_auth: TokenProvider | AsyncTokenProvider,
+        **config,
+    ) -> None:
+        self._platform_auth = platform_auth
+        super().__init__(model, **config)
+
+    def _extra_headers(self, token: str, call_headers: object) -> dict[str, str]:
+        headers = _normalize_extra_headers(self.config.get("extra_headers"), label="CompletionClient extra_headers")
+        headers.update(_normalize_extra_headers(call_headers, label="Per-call extra_headers"))
+        headers = {key: value for key, value in headers.items() if key.lower() != _AUTHORIZATION_HEADER.lower()}
+        headers[_AUTHORIZATION_HEADER] = f"Bearer {token}"
+        return headers
+
+    def _sync_access_token(self) -> str:
+        get_token = self._platform_auth.get_access_token
+        if inspect.iscoroutinefunction(get_token):
+            raise TypeError("Async token provider cannot be used from a synchronous Nooa completion call")
+        token = get_token()
+        if inspect.isawaitable(token):
+            raise TypeError("Async token provider cannot be used from a synchronous Nooa completion call")
+        return token
+
+    def call(
+        self,
+        messages: list[dict[str, object]],
+        tools: list[Tool] | None = None,
+        output_model: type[BaseModel] | None = None,
+        cache_control_injection_points: list[dict[str, object]] | None = None,
+        **kwargs,
+    ) -> LLMResponse:
+        kwargs["extra_headers"] = self._extra_headers(self._sync_access_token(), kwargs.get("extra_headers"))
+        return super().call(
+            messages,
+            tools=tools,
+            output_model=output_model,
+            cache_control_injection_points=cache_control_injection_points,
+            **kwargs,
+        )
+
+    async def acall(
+        self,
+        messages: list[dict[str, object]],
+        tools: list[Tool] | None = None,
+        output_model: type[BaseModel] | None = None,
+        cache_control_injection_points: list[dict[str, object]] | None = None,
+        **kwargs,
+    ) -> LLMResponse:
+        token = await resolve_token_async(self._platform_auth)
+        kwargs["extra_headers"] = self._extra_headers(token, kwargs.get("extra_headers"))
+        return await super().acall(
+            messages,
+            tools=tools,
+            output_model=output_model,
+            cache_control_injection_points=cache_control_injection_points,
+            **kwargs,
+        )
+
+
+def _platform_completion_client(
+    model: str,
+    *,
+    platform_auth: TokenProvider | AsyncTokenProvider | None,
+    **config,
+) -> CompletionClient:
+    if platform_auth is None:
+        return CompletionClient(model, **config)
+    return _AuthenticatedCompletionClient(model, platform_auth=platform_auth, **config)
+
+
 def _completion_client(
     models_client: AsyncModelsClient,
     model_entity: ModelEntity,
@@ -115,10 +207,12 @@ def _completion_client(
     extra_headers[_ACCEPT_ENCODING_HEADER] = _IDENTITY_ENCODING
     # Backend format is the Platform-facing wire contract, not the upstream
     # provider identity. The LiteLLM prefix selects the adapter for that shape.
+    platform_auth = models_client._auth
     if model_entity.backend_format == _OPENAI_FORMAT:
         litellm_model = f"openai/{served_model_name}"
-        return CompletionClient(
+        return _platform_completion_client(
             litellm_model,
+            platform_auth=platform_auth,
             api_base=api_base,
             api_key=_PLACEHOLDER_API_KEY,
             # Platform rewrites the response model to the Model Entity ID. Keep
@@ -141,8 +235,9 @@ def _completion_client(
         )
 
     litellm_model = f"anthropic/{served_model_name}"
-    return CompletionClient(
+    return _platform_completion_client(
         litellm_model,
+        platform_auth=platform_auth,
         api_base=api_base,
         api_key=_PLACEHOLDER_API_KEY,
         base_model=litellm_model,
@@ -174,11 +269,11 @@ async def _served_model_name(
 
 
 async def resolve_model_clients(
-    async_sdk: AsyncNeMoPlatform,
+    client: AsyncNemoClient | AsyncModelsClient,
     refs: ConfiguredModelRefs | None = None,
 ) -> ConfiguredModelClients:
     """Resolve configured Model Entities and construct each distinct client once."""
-    models_client = client_from_platform(async_sdk, AsyncModelsClient)
+    models_client = client if isinstance(client, AsyncModelsClient) else AsyncModelsClient.from_client(client)
     selected = refs or configured_model_refs()
     resolved: dict[str, UnifiedLLM] = {}
     provider_cache: dict[str, ModelProvider] = {}

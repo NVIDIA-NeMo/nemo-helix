@@ -93,6 +93,104 @@ describe('CustomizationFilesetSelect', () => {
     );
   });
 
+  /**
+   * Automodel and unsloth take a second reference for validation, and the canonical job
+   * JSON points both at the same fileset. Without this the picker filled only the training
+   * reference, so a dataset carrying validation rows trained without them.
+   */
+  it('mirrors the fileset into automodel.dataset.validation when it has validation files', async () => {
+    const user = userEvent.setup();
+    renderRoute(
+      <Harness overrides={{ backend: 'automodel' }}>
+        <CustomizationFilesetSelect />
+        <FieldSpy name="automodel.dataset.validation" />
+      </Harness>
+    );
+
+    await user.click(await screen.findByRole('combobox', { name: /dataset/i }));
+    await user.click(await screen.findByRole('option', { name: firstFileset.name ?? '' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('spy:automodel.dataset.validation')).toHaveTextContent(firstRef)
+    );
+  });
+
+  it('mirrors the fileset into unsloth.dataset.validation_path', async () => {
+    const user = userEvent.setup();
+    renderRoute(
+      <Harness overrides={{ backend: 'unsloth' }}>
+        <CustomizationFilesetSelect />
+        <FieldSpy name="unsloth.dataset.validation_path" />
+      </Harness>
+    );
+
+    await user.click(await screen.findByRole('combobox', { name: /dataset/i }));
+    await user.click(await screen.findByRole('option', { name: firstFileset.name ?? '' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('spy:unsloth.dataset.validation_path')).toHaveTextContent(firstRef)
+    );
+  });
+
+  /** No validation files means the backend should apply its own 90/10 split instead. */
+  it('leaves the validation reference unset when the fileset has none', async () => {
+    mockValidation.mockReturnValue(
+      buildValidation({ hasValidation: false, autoSplitNotice: true, validationRowCount: 0 })
+    );
+    const user = userEvent.setup();
+    renderRoute(
+      <Harness overrides={{ backend: 'automodel' }}>
+        <CustomizationFilesetSelect />
+        <FieldSpy name="automodel.dataset.training" />
+        <FieldSpy name="automodel.dataset.validation" />
+      </Harness>
+    );
+
+    await user.click(await screen.findByRole('combobox', { name: /dataset/i }));
+    await user.click(await screen.findByRole('option', { name: firstFileset.name ?? '' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('spy:automodel.dataset.training')).toHaveTextContent(firstRef)
+    );
+    expect(screen.getByTestId('spy:automodel.dataset.validation')).toHaveTextContent('');
+  });
+
+  /**
+   * Discovery reports no files both while it runs and when it fails, so neither state is
+   * evidence that the fileset lacks validation rows. The field is editable by hand, so
+   * writing on that non-evidence would also wipe what the user typed.
+   */
+  it.each([
+    ['discovery is still running', { isPending: true, hasValidation: false }],
+    ['discovery failed', { discoveryError: new Error('boom'), hasValidation: false }],
+  ])('leaves a hand-entered validation reference alone while %s', async (_label, overrides) => {
+    mockValidation.mockReturnValue(buildValidation(overrides));
+    const user = userEvent.setup();
+    renderRoute(
+      <Harness
+        overrides={{
+          backend: 'automodel',
+          automodel: {
+            ...FORM_DEFAULTS.automodel,
+            dataset: { ...FORM_DEFAULTS.automodel.dataset, validation: 'default/typed-by-hand' },
+          },
+        }}
+      >
+        <CustomizationFilesetSelect />
+        <FieldSpy name="automodel.dataset.validation" />
+      </Harness>
+    );
+
+    await user.click(await screen.findByRole('combobox', { name: /dataset/i }));
+    await user.click(await screen.findByRole('option', { name: firstFileset.name ?? '' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('spy:automodel.dataset.validation')).toHaveTextContent(
+        'default/typed-by-hand'
+      )
+    );
+  });
+
   it('writes the picked fileset reference into unsloth.dataset.path', async () => {
     const user = userEvent.setup();
     renderRoute(

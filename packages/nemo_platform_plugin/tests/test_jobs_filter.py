@@ -203,6 +203,53 @@ class TestPluginJobsFilter:
         assert any("$or" in c for c in clauses)
         assert {"source": {"$eq": "widgets"}} in clauses
 
+    def test_spec_subpath_is_accepted_and_forwarded(self):
+        """``spec`` is a namespace: ``spec.<path>`` addresses the stored job spec."""
+        app, sdk = _build_app()
+        client = TestClient(app)
+        resp = client.get(
+            "/apis/widgets/v2/workspaces/default/jobs",
+            params={"filter[spec.target.format]": "generic"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert _forwarded_filter(sdk) == {
+            "$and": [
+                {"spec.target.format": {"$eq": "generic"}},
+                {"source": {"$eq": "widgets"}},
+            ]
+        }
+
+    def test_spec_subpath_null_branch_survives_a_logical_root(self):
+        """The exact shape the Model Evaluations table sends.
+
+        ``$nin`` alone drops rows whose spec names no target, so the null branch is
+        what keeps offline runs; it has to survive $and composition with source.
+        Passed as a raw JSON ``filter=`` param rather than bracket notation, which
+        the query serializer mangles for the array-of-objects a logical operator
+        produces.
+        """
+        app, sdk = _build_app()
+        client = TestClient(app)
+        user_filter = {
+            "$or": [
+                {"spec.target.format": {"$nin": ["generic", "nemo_agent_toolkit"]}},
+                {"spec.target.format": {"$eq": None}},
+            ]
+        }
+        resp = client.get("/apis/widgets/v2/workspaces/default/jobs", params={"filter": json.dumps(user_filter)})
+        assert resp.status_code == 200, resp.text
+        clauses = _forwarded_filter(sdk)["$and"]
+        assert user_filter in clauses
+        assert {"source": {"$eq": "widgets"}} in clauses
+
+    def test_dotted_path_outside_a_namespace_is_400(self):
+        """Only declared namespaces take sub-paths; everything else stays flat."""
+        app, _ = _build_app()
+        client = TestClient(app)
+        resp = client.get("/apis/widgets/v2/workspaces/default/jobs", params={"filter[status.value]": "active"})
+        assert resp.status_code == 400
+        assert "status.value" in resp.json()["detail"]
+
     def test_response_filter_echoes_user_facing_shape(self):
         app, _ = _build_app()
         client = TestClient(app)

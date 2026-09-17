@@ -10,6 +10,7 @@ import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { PlatformJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { formatDurationMs, formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import {
@@ -17,7 +18,7 @@ import {
   getListEvaluationsQueryKey,
 } from '@nemo/sdk/generated/platform/evaluations';
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
-import { type EvalJobRow, evalDurationMs, evalJobDetailRoute } from '@studio/api/evaluation/utils';
+import { type EvalJobRow, evalDurationMs } from '@studio/api/evaluation/utils';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { evaluationFilesetName } from '@studio/components/evaluation/experimentEvalConfig';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
@@ -26,7 +27,7 @@ import {
   type AgentEvaluationRow,
   primaryExperimentName,
 } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
-import { getEvaluationDetailRoute } from '@studio/routes/utils';
+import { getEvaluationDetailRoute, getWorkspaceJobDetailRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import { FlaskConical, Trash } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
@@ -112,6 +113,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
   jobs,
 }) => {
   const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const queryClient = useQueryClient();
   const dataViewState = useStudioDataViewState();
   const [deleteRows, setDeleteRows] = useState<AgentEvaluationRow[]>([]);
@@ -274,7 +276,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
             if (!job) return <Text>—</Text>;
             return (
               <Link
-                to={evalJobDetailRoute(workspace, job)}
+                to={getWorkspaceJobDetailRoute(workspace, job.name)}
                 className="text-primary underline"
                 title={job.name}
               >
@@ -301,7 +303,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
                 ? [
                     {
                       children: 'View job',
-                      onSelect: () => navigate(evalJobDetailRoute(workspace, job)),
+                      onSelect: () => navigate(getWorkspaceJobDetailRoute(workspace, job.name)),
                     },
                   ]
                 : []),
@@ -318,9 +320,9 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
       <StudioDataView<AgentEvalTableRow>
         dataViewState={dataViewState}
         makeColumns={makeColumns}
-        onRowClick={(row) => {
+        onRowClick={(row, _index, event) => {
           const destination = destinationFor(row);
-          if (destination) navigate(destination);
+          if (destination) openRow(event, destination);
         }}
         renderBulkActions={({ selectedRows }) => (
           <Button

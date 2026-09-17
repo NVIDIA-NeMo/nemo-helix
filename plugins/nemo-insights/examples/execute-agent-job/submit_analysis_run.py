@@ -28,7 +28,7 @@ import json
 from typing import Any
 
 import httpx
-from nemo_insights_plugin.client import make_client
+from nemo_insights_plugin.platform_client import make_client
 from nemo_platform import AsyncNeMoPlatform
 
 REPORT_RESULT_NAME = "analysis-report"

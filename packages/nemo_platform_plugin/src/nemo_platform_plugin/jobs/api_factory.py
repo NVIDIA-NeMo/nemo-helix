@@ -74,6 +74,7 @@ from nemo_platform_plugin.jobs.spec import (
 from nemo_platform_plugin.jobs.spec import (
     StepLifecycle as PlatformJobStepLifecycle,
 )
+from nemo_platform_plugin.jobs.telemetry import stamp_job_telemetry_plugins
 from nemo_platform_plugin.jobs.types import (
     CreatePlatformJobRequest,
     JobLogsQueryParams,
@@ -167,9 +168,17 @@ class BaseJobsListFilter(Filter):
     workspace: str | None = Field(default=None, description="Workspace of the job.")
     project: str | None = Field(default=None, description="Project containing the job.")
     status: PlatformJobStatus | None = Field(default=None, description="The current status.")
+    spec: dict[str, Any] | None = Field(
+        default=None, description="Filter on a path within the job's spec, e.g. `spec.target.format`."
+    )
     updated_at: DatetimeFilter | None = Field(
         default=None, description="Jobs updated at 'gte' datetime or 'lte' datetime."
     )
+
+    @classmethod
+    def _get_entity_namespace_map(cls) -> dict[str, str]:
+        """Declare ``spec`` as a namespace so ``spec.<path>`` passes field validation."""
+        return {"spec": "data.spec"}
 
 
 class BaseJobsSortField(StrEnum):
@@ -995,8 +1004,9 @@ def job_route_factory(
                 create_fields["description"] = request.description
             if request.ownership is not None:
                 create_fields["ownership"] = request.ownership
-            if request.custom_fields is not None:
-                create_fields["custom_fields"] = request.custom_fields
+            custom_fields = stamp_job_telemetry_plugins(request.custom_fields, service_name)
+            if custom_fields:
+                create_fields["custom_fields"] = custom_fields
             if request.project:
                 create_fields["project"] = request.project
             if request.output_location is not None:

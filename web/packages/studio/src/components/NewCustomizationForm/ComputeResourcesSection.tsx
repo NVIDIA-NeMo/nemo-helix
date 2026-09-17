@@ -53,7 +53,10 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
             <Stack gap="density-md" className="pt-density-md">
               <ControlledSliderWithTextInput
                 useControllerProps={{ name: 'automodel.parallelism.tensor_parallel_size', control }}
-                formFieldProps={{ slotLabel: 'Tensor Parallel Size' }}
+                formFieldProps={{
+                  slotLabel: 'Tensor Parallel Size',
+                  slotInfo: 'Splits each layer across GPUs.',
+                }}
                 {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_tensor_parallel_size')}
                 min={1}
                 max={8}
@@ -65,7 +68,10 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
                   name: 'automodel.parallelism.pipeline_parallel_size',
                   control,
                 }}
-                formFieldProps={{ slotLabel: 'Pipeline Parallel Size' }}
+                formFieldProps={{
+                  slotLabel: 'Pipeline Parallel Size',
+                  slotInfo: 'Splits layers into stages across GPUs.',
+                }}
                 {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_pipeline_parallel_size')}
                 min={1}
                 max={8}
@@ -77,8 +83,25 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
                   name: 'automodel.parallelism.context_parallel_size',
                   control,
                 }}
-                formFieldProps={{ slotLabel: 'Context Parallel Size' }}
+                formFieldProps={{
+                  slotLabel: 'Context Parallel Size',
+                  slotInfo:
+                    'Splits the sequence dimension across GPUs, for long-sequence training.',
+                }}
                 {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_context_parallel_size')}
+                min={1}
+                max={8}
+                step={1}
+                disabled={disabled}
+              />
+              <ControlledSliderWithTextInput
+                useControllerProps={{ name: 'automodel.parallelism.expert_parallel_size', control }}
+                formFieldProps={{
+                  slotLabel: 'Expert Parallel Size',
+                  slotInfo:
+                    'Expert parallel size for MoE models. Must divide data_parallel_size × context_parallel_size, and tensor parallel size must be 1 when this is above 1.',
+                }}
+                {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_expert_parallel_size')}
                 min={1}
                 max={8}
                 step={1}
@@ -123,7 +146,7 @@ const RlParallelism = ({ disabled }: { disabled: boolean }) => {
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'rl.training.parallelism.tensor_parallel_size', control }}
         formFieldProps={{
-          slotLabel: 'Tensor (TP)',
+          slotLabel: 'Tensor Parallel Size',
           slotInfo: 'Splits each layer across GPUs. NeMo RL key: tensor_parallel_size.',
         }}
         {...specSliderProps(DPO_SPEC_DEFAULTS, 'parallelism_tensor_parallel_size')}
@@ -135,7 +158,7 @@ const RlParallelism = ({ disabled }: { disabled: boolean }) => {
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'rl.training.parallelism.pipeline_parallel_size', control }}
         formFieldProps={{
-          slotLabel: 'Pipeline (PP)',
+          slotLabel: 'Pipeline Parallel Size',
           slotInfo: 'Splits layers into stages across GPUs. NeMo RL key: pipeline_parallel_size.',
         }}
         {...specSliderProps(DPO_SPEC_DEFAULTS, 'parallelism_pipeline_parallel_size')}
@@ -147,7 +170,7 @@ const RlParallelism = ({ disabled }: { disabled: boolean }) => {
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'rl.training.parallelism.context_parallel_size', control }}
         formFieldProps={{
-          slotLabel: 'Context (CP)',
+          slotLabel: 'Context Parallel Size',
           slotInfo:
             'Splits the sequence dimension across GPUs — how long-sequence GRPO becomes feasible at all. NeMo RL key: context_parallel_size.',
         }}
@@ -160,7 +183,7 @@ const RlParallelism = ({ disabled }: { disabled: boolean }) => {
       <ControlledSliderWithTextInput
         useControllerProps={{ name: 'rl.training.parallelism.expert_parallel_size', control }}
         formFieldProps={{
-          slotLabel: 'Expert (EP)',
+          slotLabel: 'Expert Parallel Size',
           slotInfo:
             'Expert parallel size for MoE models. GRPO only — a value above 1 selects the DTensor v2 backend. NeMo RL key: expert_parallel_size.',
         }}

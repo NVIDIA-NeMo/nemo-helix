@@ -9,6 +9,7 @@ import json
 from typing import Any
 from unittest.mock import patch
 
+import httpx
 import pytest
 from nemo_agents_plugin.cli import AgentsCLI
 from typer.testing import CliRunner
@@ -36,7 +37,13 @@ def _agents_response() -> dict[str, Any]:
                 "created_at": "2026-05-12T19:56:53.332720",
             }
         ],
-        "pagination": {"total": 1},
+        "pagination": {
+            "page": 1,
+            "page_size": 1,
+            "current_page_size": 1,
+            "total_pages": 1,
+            "total_results": 1,
+        },
     }
 
 
@@ -55,13 +62,31 @@ def _deployments_response() -> dict[str, Any]:
                 "created_at": "2026-05-12T20:01:00.123456",
             }
         ],
-        "pagination": {"total": 1},
+        "pagination": {
+            "page": 1,
+            "page_size": 1,
+            "current_page_size": 1,
+            "total_pages": 1,
+            "total_results": 1,
+        },
     }
+
+
+def _install_mock_transport(response: dict[str, Any]):
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, request=request, json=response))
+    real_client = httpx.Client
+
+    class _Client(real_client):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    return patch(f"{_PATCH_PREFIX}.httpx.Client", _Client)
 
 
 class TestListAgentsOutput:
     def test_agents_list_defaults_to_table(self, app) -> None:
-        with patch(f"{_PATCH_PREFIX}._api_request", return_value=_agents_response()):
+        with _install_mock_transport(_agents_response()):
             result = runner.invoke(app, ["list"])
 
         assert result.exit_code == 0, result.output
@@ -74,7 +99,7 @@ class TestListAgentsOutput:
     @pytest.mark.parametrize("flag", ["--format", "-o", "--output-format", "-f"])
     def test_agents_list_supports_json_output(self, app, flag: str) -> None:
         response = _agents_response()
-        with patch(f"{_PATCH_PREFIX}._api_request", return_value=response):
+        with _install_mock_transport(response):
             result = runner.invoke(app, ["list", flag, "json"])
 
         assert result.exit_code == 0, result.output
@@ -84,7 +109,7 @@ class TestListAgentsOutput:
 
 class TestDeploymentsListOutput:
     def test_deployments_list_defaults_to_table(self, app) -> None:
-        with patch(f"{_PATCH_PREFIX}._api_request", return_value=_deployments_response()):
+        with _install_mock_transport(_deployments_response()):
             result = runner.invoke(app, ["deployments", "list"])
 
         assert result.exit_code == 0, result.output
@@ -100,7 +125,7 @@ class TestDeploymentsListOutput:
     @pytest.mark.parametrize("flag", ["--format", "-o", "--output-format", "-f"])
     def test_deployments_list_supports_json_output(self, app, flag: str) -> None:
         response = _deployments_response()
-        with patch(f"{_PATCH_PREFIX}._api_request", return_value=response):
+        with _install_mock_transport(response):
             result = runner.invoke(app, ["deployments", "list", flag, "json"])
 
         assert result.exit_code == 0, result.output

@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-/** Window the statistics cover. Drives both the header label and the bucket size. */
-export type TraceStatisticsRange = 'day' | 'week' | 'month';
+/**
+ * Window the statistics cover. Drives both the header label and the bucket size. `max` reaches
+ * Intake's full retention window (90 days of ClickHouse TTL), for finding traces older than a month.
+ */
+export type TraceStatisticsRange = 'day' | 'week' | 'month' | 'max';
 
 /**
  * Headline numbers for the range, as returned by Intake's `bucket=total` rollup. The caller owns

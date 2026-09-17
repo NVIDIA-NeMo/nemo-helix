@@ -124,6 +124,7 @@ class AgentEvalTask(BaseModel):
                     "name": output.name,
                     "description": output.description,
                     "value_schema": output.value_schema.__name__,
+                    **({"required": False} if not output.required else {}),
                 }
                 for output in metric.output_spec()
             ]

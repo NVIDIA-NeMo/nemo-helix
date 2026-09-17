@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { EvalJobRow } from '@studio/api/evaluation/utils';
 import { EvaluationsTable } from '@studio/routes/agents/AgentDetailRoute/evaluations/EvaluationsTable';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import { LG_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
@@ -16,11 +17,11 @@ const makeEval = (overrides: Partial<AgentEvaluationRow> & { name: string }): Ag
     ...overrides,
   }) as AgentEvaluationRow;
 
-const renderTable = (evaluations: AgentEvaluationRow[]) =>
+const renderTable = (evaluations: AgentEvaluationRow[], jobs: EvalJobRow[] = []) =>
   render(
     <TestProviders>
       <MemoryRouter>
-        <EvaluationsTable workspace="default" evaluations={evaluations} jobs={[]} />
+        <EvaluationsTable workspace="default" evaluations={evaluations} jobs={jobs} />
       </MemoryRouter>
     </TestProviders>
   );
@@ -48,5 +49,33 @@ describe('EvaluationsTable Duration column', () => {
     expect(
       (await screen.findAllByText('10m 12s', undefined, { timeout: LG_SELECTOR_TIMEOUT })).length
     ).toBeGreaterThan(0);
+  });
+});
+
+describe('EvaluationsTable Job column', () => {
+  it('links to the generic job detail route, not the evaluation result route', async () => {
+    const job: EvalJobRow = {
+      id: 'job-1',
+      name: 'my-eval-job',
+      status: 'completed',
+      created_at: '2024-12-17T16:08:56.880768',
+      kind: 'dataset',
+      agentName: 'my-agent',
+      configLabel: null,
+      evaluationName: null,
+    };
+    renderTable([], [job]);
+
+    const links = await screen.findAllByRole(
+      'link',
+      { name: 'my-eval-job' },
+      {
+        timeout: LG_SELECTOR_TIMEOUT,
+      }
+    );
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      expect(link).toHaveAttribute('href', '/workspaces/default/jobs/my-eval-job');
+    }
   });
 });

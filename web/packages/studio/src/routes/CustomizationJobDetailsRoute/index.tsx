@@ -177,6 +177,7 @@ export const CustomizationJobDetailsRoute: FC = () => {
                     model={output_model}
                     workspace={workspace}
                     modelChatStatus={modelChatStatus}
+                    deployModelRef={`${workspace}/${output_model}`}
                   />
                 </Stack>
               )}

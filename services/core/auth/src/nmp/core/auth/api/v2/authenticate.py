@@ -10,10 +10,16 @@ from typing import Annotated, Any
 import httpx
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from nemo_platform_plugin.auth.types import (
+    AuthenticateErrorResponse as AuthenticateErrorResponse,
+)
+from nemo_platform_plugin.auth.types import (
+    AuthenticateResponse as AuthenticateResponse,
+)
 from nmp.common.auth.bearer import MalformedBearerTokenError, parse_bearer_authorization_header
 from nmp.common.auth.jwt import JWTValidator
 from nmp.common.auth.token_claims import ActorClaims, TokenClaims, groups_from_claim, scopes_from_claim
-from nmp.common.auth.token_resolver import ResolvedBearerToken, ResolvedTokenKind, resolve_bearer_token
+from nmp.common.auth.token_resolver import ResolvedBearerToken, resolve_bearer_token
 from nmp.common.config import AuthConfig, get_auth_config
 from nmp.core.auth.api.v2.workload_token_exchange import (
     WorkloadTokenExchangeService,
@@ -23,30 +29,9 @@ from nmp.core.auth.api.v2.workload_token_exchange import (
     workload_token_issuer,
 )
 from nmp.core.auth.app.access_keys import AccessKeyRegistry, get_access_key_registry
-from pydantic import BaseModel, Field
 
 router = APIRouter(tags=["Authentication"])
 logger = logging.getLogger(__name__)
-
-
-class AuthenticateErrorResponse(BaseModel):
-    """Bearer token authentication error response."""
-
-    detail: str
-
-
-class AuthenticateResponse(BaseModel):
-    """Successful bearer token authentication response for direct callers."""
-
-    principal: str
-    email: str | None = Field(default=None, json_schema_extra={"nullable": True})
-    groups: list[str] = Field(default_factory=list)
-    scopes: list[str] = Field(default_factory=list)
-    jti: str | None = Field(default=None, json_schema_extra={"nullable": True})
-    token_kind: ResolvedTokenKind
-    on_behalf_of: str | None = Field(default=None, json_schema_extra={"nullable": True})
-    on_behalf_of_email: str | None = Field(default=None, json_schema_extra={"nullable": True})
-    on_behalf_of_groups: list[str] = Field(default_factory=list)
 
 
 _AUTHENTICATE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {

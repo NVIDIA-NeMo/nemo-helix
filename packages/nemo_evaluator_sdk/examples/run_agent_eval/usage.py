@@ -3,18 +3,27 @@
 
 """Token-usage extraction ported from ``tests/agentic-use/nat_runner.py``.
 
-Reports the same token/runtime measurements ``nat_runner`` writes into
-``result.json["metrics"]`` (the keys the SDK's ``TrialMeasurements`` reads):
+Normalizes the token/runtime measurements ``nat_runner`` writes into
+``result.json["metrics"]`` for construction of ``TrialMeasurements``:
 ``prompt_tokens``/``completion_tokens``/``cache_creation_tokens``/
-``cache_read_tokens`` plus their ``total_tokens`` sum, and ``duration_ms``
-(the ``runtime_sec`` fallback). Buckets follow Anthropic's prompt-caching shape
-so AUT (``nemo agents invoke``) and other backends are comparable.
+``cache_read_tokens`` plus the canonical prompt/completion total, and
+``duration_ms``. Cache subsets are included in prompt exactly once.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, TypedDict
+
+logger = logging.getLogger(__name__)
+
+_INPUT_TOKEN_KEYS = ("input_tokens", "prompt_tokens", "inputTokens")
+_OUTPUT_TOKEN_KEYS = ("output_tokens", "completion_tokens", "outputTokens")
+_CACHE_CREATION_KEYS = ("cache_creation_input_tokens", "cacheWriteTokens")
+_SEPARATE_CACHE_READ_KEYS = ("cache_read_input_tokens", "cacheReadTokens")
+_CACHE_READ_KEYS = (*_SEPARATE_CACHE_READ_KEYS, "cached_input_tokens")
+_SEPARATE_CACHE_KEYS = (*_CACHE_CREATION_KEYS, *_SEPARATE_CACHE_READ_KEYS)
 
 
 class TokenMetrics(TypedDict):
@@ -26,6 +35,10 @@ class TokenMetrics(TypedDict):
     cache_creation_tokens: int | None
     cache_read_tokens: int | None
     duration_ms: float | None
+
+
+def _is_nonnegative_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def iter_agent_log_json_payloads(agent_log: str) -> list[dict[str, Any]]:
@@ -59,37 +72,58 @@ def agent_log_has_workflow_error(agent_log: str) -> bool:
 def _first_int(usage_obj: dict[str, Any], keys: tuple[str, ...]) -> tuple[int | None, bool]:
     for key in keys:
         value = usage_obj.get(key)
-        if isinstance(value, int):
+        if _is_nonnegative_int(value):
             return value, True
+        if key in usage_obj and value is not None:
+            logger.warning("Invalid usage %s=%r; expected a non-negative integer and omitted it", key, value)
     return None, False
 
 
-def _bucket_from_usage(usage_obj: dict[str, Any]) -> tuple[int | None, int | None, int | None, int | None, bool]:
-    """Return ``(input, output, cache_creation, cache_read, has_known_key)``."""
-    input_tokens, has_input = _first_int(usage_obj, ("input_tokens", "prompt_tokens", "inputTokens"))
-    output_tokens, has_output = _first_int(usage_obj, ("output_tokens", "completion_tokens", "outputTokens"))
-    cache_creation_tokens, has_cache_creation = _first_int(
-        usage_obj, ("cache_creation_input_tokens", "cacheWriteTokens")
-    )
-    cache_read_tokens, has_cache_read = _first_int(
-        usage_obj, ("cache_read_input_tokens", "cacheReadTokens", "cached_input_tokens")
-    )
+def _bucket_from_usage(
+    usage_obj: dict[str, Any],
+) -> tuple[int | None, int | None, int | None, int | None, bool, set[str]]:
+    """Return normalized buckets, whether usage was recognized, and invalid buckets."""
+    input_tokens, has_input = _first_int(usage_obj, _INPUT_TOKEN_KEYS)
+    output_tokens, has_output = _first_int(usage_obj, _OUTPUT_TOKEN_KEYS)
+    cache_creation_tokens, has_cache_creation = _first_int(usage_obj, _CACHE_CREATION_KEYS)
+    cache_read_tokens, has_cache_read = _first_int(usage_obj, _CACHE_READ_KEYS)
     details = usage_obj.get("input_token_details")
     if isinstance(details, dict):
         if not has_cache_creation:
             cache_creation_tokens, has_cache_creation = _first_int(details, ("cache_creation",))
         if not has_cache_read:
             cache_read_tokens, has_cache_read = _first_int(details, ("cache_read",))
-    if (
-        "cached_input_tokens" in usage_obj
-        and has_input
-        and has_cache_read
-        and input_tokens is not None
-        and cache_read_tokens is not None
-    ):
-        input_tokens = max(input_tokens - cache_read_tokens, 0)
-    has_known_key = has_input or has_output or has_cache_creation or has_cache_read
-    return input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, has_known_key
+    separate_cache = any(usage_obj.get(key) is not None for key in _SEPARATE_CACHE_KEYS)
+    invalid_cache_creation = any(
+        key in usage_obj and usage_obj[key] is not None and not _is_nonnegative_int(usage_obj[key])
+        for key in _CACHE_CREATION_KEYS
+    )
+    invalid_cache_read = any(
+        key in usage_obj and usage_obj[key] is not None and not _is_nonnegative_int(usage_obj[key])
+        for key in _SEPARATE_CACHE_READ_KEYS
+    )
+    invalid_separate_cache = invalid_cache_creation or invalid_cache_read
+    inclusive_cache = usage_obj.get("cached_input_tokens") is not None
+    if separate_cache and inclusive_cache:
+        logger.warning(
+            "Usage contains both inclusive cached_input_tokens and separate cache fields; "
+            "omitting ambiguous prompt/cache measurements"
+        )
+        poisoned_buckets = {"input_tokens", "cache_creation_tokens", "cache_read_tokens"}
+        return None, output_tokens, None, None, True, poisoned_buckets
+    if separate_cache and input_tokens is not None:
+        input_tokens = (
+            None if invalid_separate_cache else input_tokens + (cache_creation_tokens or 0) + (cache_read_tokens or 0)
+        )
+    poisoned_buckets: set[str] = set()
+    if invalid_separate_cache:
+        poisoned_buckets.add("input_tokens")
+        if invalid_cache_creation:
+            poisoned_buckets.add("cache_creation_tokens")
+        if invalid_cache_read:
+            poisoned_buckets.add("cache_read_tokens")
+    has_known_key = has_input or has_output or has_cache_creation or has_cache_read or bool(poisoned_buckets)
+    return input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, has_known_key, poisoned_buckets
 
 
 def _looks_usage_bearing(d: dict[str, Any]) -> bool:
@@ -140,13 +174,15 @@ def extract_usage_metrics(agent_log: str) -> TokenMetrics:
 
     sums = {"input_tokens": 0, "output_tokens": 0, "cache_creation_tokens": 0, "cache_read_tokens": 0}
     bucket_presence = dict.fromkeys(sums, False)
+    poisoned_buckets: set[str] = set()
     has_data = False
 
     def _accumulate(usage_obj: dict[str, Any], *, replace: bool) -> bool:
         nonlocal has_data
-        input_tokens, output_tokens, cache_creation, cache_read, has_known_key = _bucket_from_usage(usage_obj)
+        input_tokens, output_tokens, cache_creation, cache_read, has_known_key, poisoned = _bucket_from_usage(usage_obj)
         if not has_known_key:
             return False
+        poisoned_buckets.update(poisoned)
         for key, value in (
             ("input_tokens", input_tokens),
             ("output_tokens", output_tokens),
@@ -197,12 +233,15 @@ def extract_usage_metrics(agent_log: str) -> TokenMetrics:
     if not has_data:
         return zero
 
-    present = {key: sums[key] if bucket_presence[key] else None for key in sums}
-    components = [value for value in present.values() if value is not None]
+    present = {key: sums[key] if bucket_presence[key] and key not in poisoned_buckets else None for key in sums}
+    input_tokens = present["input_tokens"]
+    output_tokens = present["output_tokens"]
     out: TokenMetrics = {
         "prompt_tokens": present["input_tokens"],
         "completion_tokens": present["output_tokens"],
-        "total_tokens": sum(components) if components else None,
+        "total_tokens": input_tokens + output_tokens
+        if input_tokens is not None and output_tokens is not None
+        else None,
         "cache_creation_tokens": present["cache_creation_tokens"],
         "cache_read_tokens": present["cache_read_tokens"],
         "duration_ms": None,

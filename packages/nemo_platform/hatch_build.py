@@ -17,6 +17,9 @@
 
 - Wheel builds: reads [tool.bundle-package] from pyproject.toml and generates
   force-include mappings dynamically, merged with static wheel force-includes.
+  Bundle entries declaring `shared_data` also contribute wheel shared-data, so
+  files a bundled package would install under the environment prefix survive
+  bundling.
   Also attempts to build the Studio UI bundle so it is picked up by the
   force-include.
 - Editable installs: suppresses force-include so workspace packages stay resolved
@@ -34,6 +37,7 @@ from pathlib import Path
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 from nmp_build_tools.hatch import (
     apply_bundle_force_include,
+    apply_bundle_shared_data,
     disable_bundle_force_include_for_editable,
     rewrite_bundled_dependencies_in_wheel,
 )
@@ -49,6 +53,9 @@ class CustomBuildHook(BuildHookInterface):
         # This replaces the hardcoded [tool.hatch.build.targets.wheel.force-include]
         # section that was previously in pyproject.toml.
         apply_bundle_force_include(self.root, build_data)
+        # Prefix-installed data files (<sys.prefix>/share/...) that a bundled
+        # package would otherwise ship as its own distribution's shared-data.
+        apply_bundle_shared_data(self.root, build_data)
 
         self._build_studio_ui()
 

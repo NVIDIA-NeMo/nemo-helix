@@ -3,6 +3,7 @@
 
 import json
 from datetime import datetime, timezone
+from inspect import signature
 from typing import Annotated, Any, Dict, List, Literal, Optional
 from unittest.mock import AsyncMock, Mock
 
@@ -70,7 +71,7 @@ def test_entity_base_get_data_fields():
         field_7: float
         field_8: bool
         field_9: bytes
-        _field_10: str | None = PrivateAttr(default="some_string")
+        _field_10: str = PrivateAttr(default="some_string")
 
         @property
         def field_10(self) -> str:
@@ -113,7 +114,7 @@ def test_entity_base_convert_api_entity_to_model():
         field_1: str
         field_2: str | None
         field_3: int
-        _field_4: str | None = PrivateAttr(default="some_string")
+        _field_4: str = PrivateAttr(default="some_string")
 
         @property
         def field_4(self) -> str:
@@ -575,19 +576,10 @@ async def test_entity_client_list_rejects_combined_filter_operation_and_filter_s
     mock_api.list.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_entity_client_list_rejects_search_kwarg():
-    """The legacy `search` alias is gone — passing it must be a TypeError."""
+def test_entity_client_list_rejects_search_kwarg():
+    """The legacy `search` alias is gone from the typed public signature."""
 
-    class TestEntity(EntityBase):
-        field_1: str
-
-    mock_api = Mock()
-    mock_api.list = AsyncMock()
-    client = EntityClient(mock_api)
-
-    with pytest.raises(TypeError):
-        await client.list(TestEntity, search='{"field_1":"value"}')  # type: ignore[call-arg]
+    assert "search" not in signature(EntityClient.list).parameters
 
 
 def test_sync_entity_client_create_uses_generic_entity_conversion():
@@ -636,32 +628,32 @@ class TestDatetimeFilter:
     def test_accepts_gte_without_dollar(self):
         """Test that DatetimeFilter accepts 'gte' (without $) as input."""
         dt = datetime(2025, 1, 1, 0, 0, 0)
-        f = DatetimeFilter(gte=dt)
+        f = DatetimeFilter.model_validate({"gte": dt})
         assert f.gte == dt
 
     def test_accepts_gte_with_dollar(self):
         """Test that DatetimeFilter accepts '$gte' (with $) as input."""
         dt = datetime(2025, 1, 1, 0, 0, 0)
-        f = DatetimeFilter(**{"$gte": dt})
+        f = DatetimeFilter.model_validate({"$gte": dt})
         assert f.gte == dt
 
     def test_accepts_lte_without_dollar(self):
         """Test that DatetimeFilter accepts 'lte' (without $) as input."""
         dt = datetime(2025, 12, 31, 23, 59, 59)
-        f = DatetimeFilter(lte=dt)
+        f = DatetimeFilter.model_validate({"lte": dt})
         assert f.lte == dt
 
     def test_accepts_lte_with_dollar(self):
         """Test that DatetimeFilter accepts '$lte' (with $) as input."""
         dt = datetime(2025, 12, 31, 23, 59, 59)
-        f = DatetimeFilter(**{"$lte": dt})
+        f = DatetimeFilter.model_validate({"$lte": dt})
         assert f.lte == dt
 
     def test_model_dump_outputs_dollar_prefix(self):
         """Test that model_dump outputs $gte/$lte with by_alias=True."""
         dt_start = datetime(2025, 1, 1, 0, 0, 0)
         dt_end = datetime(2025, 12, 31, 23, 59, 59)
-        f = DatetimeFilter(gte=dt_start, lte=dt_end)
+        f = DatetimeFilter.model_validate({"gte": dt_start, "lte": dt_end})
         result = f.model_dump(exclude_none=True, by_alias=True, mode="json")
 
         assert "$gte" in result
@@ -674,7 +666,7 @@ class TestDatetimeFilter:
     def test_model_dump_json_serializes_datetime(self):
         """Test that mode='json' serializes datetime to ISO string."""
         dt = datetime(2025, 1, 1, 0, 0, 0)
-        f = DatetimeFilter(gte=dt)
+        f = DatetimeFilter.model_validate({"gte": dt})
         result = f.model_dump(exclude_none=True, by_alias=True, mode="json")
 
         # Result should be JSON-serializable (datetime as string)
@@ -686,14 +678,14 @@ class TestDatetimeFilter:
         """Test that DatetimeFilter accepts both fields together."""
         dt_start = datetime(2025, 1, 1, 0, 0, 0)
         dt_end = datetime(2025, 12, 31, 23, 59, 59)
-        f = DatetimeFilter(gte=dt_start, lte=dt_end)
+        f = DatetimeFilter.model_validate({"gte": dt_start, "lte": dt_end})
         assert f.gte == dt_start
         assert f.lte == dt_end
 
     def test_handles_timezone_aware_datetime(self):
         """Test that timezone-aware datetimes are handled correctly."""
         dt = datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-        f = DatetimeFilter(gte=dt)
+        f = DatetimeFilter.model_validate({"gte": dt})
         result = f.model_dump(exclude_none=True, by_alias=True, mode="json")
         # Pydantic serializes UTC as "Z" suffix instead of "+00:00"
         assert result["$gte"] in (dt.isoformat(), "2025-01-01T00:00:00Z")
@@ -709,47 +701,47 @@ class TestStringFilter:
 
     def test_accepts_eq_without_dollar(self):
         """Test that StringFilter accepts 'eq' (without $) as input."""
-        f = StringFilter(eq="value")
+        f = StringFilter.model_validate({"eq": "value"})
         assert f.eq == "value"
 
     def test_accepts_eq_with_dollar(self):
         """Test that StringFilter accepts '$eq' (with $) as input."""
-        f = StringFilter(**{"$eq": "value"})
+        f = StringFilter.model_validate({"$eq": "value"})
         assert f.eq == "value"
 
     def test_accepts_like_without_dollar(self):
         """Test that StringFilter accepts 'like' (without $) as input."""
-        f = StringFilter(like="%pattern%")
+        f = StringFilter.model_validate({"like": "%pattern%"})
         assert f.like == "%pattern%"
 
     def test_accepts_like_with_dollar(self):
         """Test that StringFilter accepts '$like' (with $) as input."""
-        f = StringFilter(**{"$like": "%pattern%"})
+        f = StringFilter.model_validate({"$like": "%pattern%"})
         assert f.like == "%pattern%"
 
     def test_accepts_in_without_dollar(self):
         """Test that StringFilter accepts 'in_' (without $) as input."""
-        f = StringFilter(in_=["a", "b"])
+        f = StringFilter.model_validate({"in_": ["a", "b"]})
         assert f.in_ == ["a", "b"]
 
     def test_accepts_in_with_dollar(self):
         """Test that StringFilter accepts '$in' (with $) as input."""
-        f = StringFilter(**{"$in": ["a", "b"]})
+        f = StringFilter.model_validate({"$in": ["a", "b"]})
         assert f.in_ == ["a", "b"]
 
     def test_accepts_nin_without_dollar(self):
         """Test that StringFilter accepts 'nin' (without $) as input."""
-        f = StringFilter(nin=["x", "y"])
+        f = StringFilter.model_validate({"nin": ["x", "y"]})
         assert f.nin == ["x", "y"]
 
     def test_accepts_nin_with_dollar(self):
         """Test that StringFilter accepts '$nin' (with $) as input."""
-        f = StringFilter(**{"$nin": ["x", "y"]})
+        f = StringFilter.model_validate({"$nin": ["x", "y"]})
         assert f.nin == ["x", "y"]
 
     def test_model_dump_outputs_dollar_prefix(self):
         """Test that model_dump outputs $eq/$like/$in/$nin with by_alias=True."""
-        f = StringFilter(eq="a", like="%b%", in_=["c", "d"], nin=["e"])
+        f = StringFilter.model_validate({"eq": "a", "like": "%b%", "in_": ["c", "d"], "nin": ["e"]})
         result = f.model_dump(exclude_none=True, by_alias=True, mode="json")
 
         assert "$eq" in result
@@ -767,7 +759,7 @@ class TestStringFilter:
 
     def test_model_dump_json_serializable(self):
         """Test that model_dump output is JSON-serializable."""
-        f = StringFilter(eq="value", in_=["a", "b"])
+        f = StringFilter.model_validate({"eq": "value", "in_": ["a", "b"]})
         result = f.model_dump(exclude_none=True, by_alias=True, mode="json")
 
         json_str = json.dumps(result)
@@ -777,7 +769,7 @@ class TestStringFilter:
 
     def test_accepts_multiple_operators(self):
         """Test that StringFilter accepts several operators together."""
-        f = StringFilter(eq="a", like="%b%")
+        f = StringFilter.model_validate({"eq": "a", "like": "%b%"})
         assert f.eq == "a"
         assert f.like == "%b%"
 
@@ -1463,10 +1455,8 @@ class TestAuthContextSanitization:
 # ---------------------------------------------------------------------------
 #
 # ``as_service()`` re-expresses service-principal elevation on top of
-# ``NemoClient.with_options``. The Stainless transport it replaced needed
-# ``with_options_preserving_request_router`` because its ``with_options`` built a
-# fresh client and dropped the platform ``_prepare_url`` hook. ``NemoClient``
-# clones with ``copy.copy``, so ``_url_resolver`` survives and no fixup is needed.
+# ``NemoClient.with_options``. ``NemoClient`` clones with ``copy.copy``, so the
+# typed-client URL resolver survives and no fixup is needed.
 #
 # That is an assumption about someone else's implementation, so these tests pin
 # it. If ``with_options`` ever stops shallow-copying, the resolver assertion here

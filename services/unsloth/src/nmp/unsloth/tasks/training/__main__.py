@@ -65,17 +65,14 @@ def main() -> int:
     # Local imports so the parent process (e.g. CLI discovery, pytest
     # collection) does not pay the ML import cost.
     from nemo_platform_plugin.job_context import JobContext, StoragePaths
-    from nmp.common.jobs.constants import (
-        DEFAULT_JOB_STORAGE_PATH,
-        PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
-    )
+    from nmp.customization_common.service.path_utils import get_job_storage_path_from_env, remap_job_storage_path
     from nmp.unsloth.app.jobs.training.schemas import TrainingStepConfig
     from nmp.unsloth.tasks.training.backends.unsloth_sft import train_sft
 
     config = TrainingStepConfig.model_validate(raw)
     spec = config.spec
 
-    persistent_root = Path(os.environ.get(PERSISTENT_JOB_STORAGE_PATH_ENVVAR, DEFAULT_JOB_STORAGE_PATH))
+    persistent_root = get_job_storage_path_from_env()
     storage = StoragePaths(
         ephemeral=persistent_root / "ephemeral",
         persistent=persistent_root,
@@ -113,14 +110,19 @@ def main() -> int:
         f"Container: UNSLOTH_COMPILE_LOCATION={os.environ['UNSLOTH_COMPILE_LOCATION']} HF_HOME={os.environ['HF_HOME']}"
     )
 
+    def _storage_path(value: str | None) -> str | None:
+        if value is None:
+            return None
+        return str(remap_job_storage_path(persistent_root, value))
+
     try:
         result = train_sft(
             spec,
             ctx,
-            model_path=config.model_path,
-            dataset_path=config.dataset_path,
-            validation_path=config.validation_path,
-            output_path=config.output_path,
+            model_path=_storage_path(config.model_path),
+            dataset_path=_storage_path(config.dataset_path),
+            validation_path=_storage_path(config.validation_path),
+            output_path=_storage_path(config.output_path),
         )
     except Exception:
         logger.exception("Unsloth training step failed")

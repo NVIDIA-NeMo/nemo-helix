@@ -5,15 +5,26 @@
 Common functions shared by the nemo-guardrails plugin integration tests.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from http import HTTPStatus
+from typing import Any, TypedDict
 
+import httpx
 from nemo_guardrails_plugin.constants import GUARDRAILS_PLUGIN_CONFIG_TYPE
-from nemo_platform import NotFoundError
-from nemo_platform.types.guardrail import GuardrailConfig
-from nemo_platform.types.inference.middleware_call_param import MiddlewareCallParam
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.errors import NotFoundError
+from nemo_platform_plugin.guardrail.client import GuardrailClient
+from nemo_platform_plugin.guardrail.types import (
+    CreateGuardrailConfigRequest,
+    GuardrailConfig,
+    UpdateGuardrailConfigRequest,
+)
+from nemo_platform_plugin.virtual_models.client import VirtualModelsClient
+from nemo_platform_plugin.virtual_models.types import UpdateVirtualModelRequest
 from nmp.testing.utils import short_unique_name
+from typing_extensions import Required
 
 DEFAULT_WORKSPACE = "default"
 """Default workspace seeded by the module-scoped IGW fixture. Helpers
@@ -39,6 +50,51 @@ class GuardrailsTestDataNames:
     request_virtual_model_name: str
     guardrail_config_name: str
     model_provider_name: str
+
+
+@dataclass(frozen=True)
+class HarnessHTTPError:
+    status_code: int
+    body: object | None
+
+
+class GuardrailsMiddlewareCall(TypedDict, total=False):
+    name: Required[str]
+    config_type: Required[str]
+    config: dict[str, object]
+    config_id: str
+
+
+EntityGuardrailsMiddlewareCall = GuardrailsMiddlewareCall
+InlineGuardrailsMiddlewareCall = GuardrailsMiddlewareCall
+
+
+def expect_harness_http_error(action: Callable[[], object], expected_status: HTTPStatus) -> HarnessHTTPError:
+    """Run a harness action and return HTTP error details.
+
+    The IGW integration harness raises generated SDK HTTP errors for sync SDK
+    calls and ``httpx.HTTPStatusError`` for direct TestClient streaming calls.
+    Keep that dynamic boundary here so tests assert typed status/body values
+    without importing generated SDK errors in the plugin suite.
+    """
+    try:
+        action()
+    except httpx.HTTPStatusError as exc:
+        try:
+            body = exc.response.json()
+        except ValueError:
+            body = exc.response.text
+        error = HarnessHTTPError(status_code=exc.response.status_code, body=body)
+    except Exception as exc:
+        status_code = getattr(exc, "status_code", None)
+        if not isinstance(status_code, int):
+            raise AssertionError(f"Expected HTTP error with status_code, got {type(exc).__name__}") from exc
+        error = HarnessHTTPError(status_code=status_code, body=getattr(exc, "body", None))
+    else:
+        raise AssertionError(f"Expected HTTP {expected_status.value}, but request succeeded")
+
+    assert error.status_code == expected_status
+    return error
 
 
 def make_served_model(
@@ -87,10 +143,11 @@ def detach_guardrail_config(harness: Any, config_name: str) -> None:
     """
     config_ref = f"{harness.workspace}/{config_name}"
     phases = ("request_middleware", "response_middleware", "post_response_middleware")
+    virtual_models_client = client_from_platform(harness.sdk, VirtualModelsClient)
 
     for workspace, name in harness.virtual_models:
         try:
-            virtual_model = harness.sdk.inference.virtual_models.retrieve(name=name, workspace=workspace)
+            virtual_model = virtual_models_client.get_virtual_model(name=name, workspace=workspace).data()
         except NotFoundError:
             continue
 
@@ -111,7 +168,58 @@ def detach_guardrail_config(harness: Any, config_name: str) -> None:
         if not remaining:
             continue
 
-        harness.sdk.inference.virtual_models.patch(name=name, workspace=workspace, **remaining)
+        virtual_models_client.update_virtual_model(
+            name=name,
+            workspace=workspace,
+            body=UpdateVirtualModelRequest.model_validate(remaining),
+        ).data()
+
+
+def guardrail_client(harness: Any) -> GuardrailClient:
+    return client_from_platform(harness.sdk, GuardrailClient)
+
+
+def create_guardrail_config(
+    harness: Any,
+    *,
+    name: str,
+    description: str | None,
+    data: dict[str, Any],
+) -> GuardrailConfig:
+    return (
+        guardrail_client(harness)
+        .create_guardrail_config(
+            workspace=harness.workspace,
+            body=CreateGuardrailConfigRequest(name=name, description=description, data=data),
+        )
+        .data()
+    )
+
+
+def update_guardrail_config(
+    harness: Any,
+    *,
+    name: str,
+    description: str | None = None,
+    data: dict[str, Any] | None = None,
+) -> GuardrailConfig:
+    return (
+        guardrail_client(harness)
+        .update_guardrail_config(
+            workspace=harness.workspace,
+            name=name,
+            body=UpdateGuardrailConfigRequest(description=description, data=data),
+        )
+        .data()
+    )
+
+
+def delete_guardrail_config_if_present(harness: Any, config_name: str) -> None:
+    detach_guardrail_config(harness, config_name)
+    try:
+        guardrail_client(harness).delete_guardrail_config(name=config_name, workspace=harness.workspace).data()
+    except NotFoundError:
+        pass
 
 
 class RailType(str, Enum):
@@ -151,15 +259,12 @@ def make_guardrail_config(
     )
 
 
-def make_middleware_call(config: GuardrailConfig) -> MiddlewareCallParam:
+def make_middleware_call(config: GuardrailConfig) -> InlineGuardrailsMiddlewareCall:
     # validate_middleware_config expects the inner PlatformRailsConfig data
     # block (models / rails / prompts), not the entity envelope. The full
     # GuardrailConfig dump silently absorbs envelope fields into model_extra
     # and rails.rails ends up None, so the plugin's input rail gets bypassed.
-    if config.data is None:
-        raise ValueError("GuardrailConfig.data is required for inline middleware calls.")
-
-    payload = config.data.model_dump(mode="json", exclude_none=True)
+    payload: dict[str, object] = config.data.model_dump(mode="json", exclude_none=True)
 
     # Thread the config name through as the inline diagnostic label so
     # log lines and the response's guardrails_data carry ``<inline:<name>>``

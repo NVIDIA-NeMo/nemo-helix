@@ -7,12 +7,17 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Mapping, Sequence
+from collections import deque
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
+from nemo_evaluator_sdk.agent_eval.output_observations import (
+    OutputObservation,
+    project_output_observations,
+)
 from nemo_evaluator_sdk.agent_eval.scores import (
     AgentEvalDiagnosticSeverity,
     AgentEvalScoreStatus,
@@ -36,6 +41,9 @@ from nemo_evaluator_sdk.values.results import (
     summary_aggregate_record,
 )
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+
+#: Key an observation grouping is bucketed by — a metric output, optionally scoped to a task.
+_GroupKey = TypeVar("_GroupKey", bound=tuple[str, ...])
 
 #: Metric-output value schemas retained in the ordered per-task value mapping. Broader than
 #: :data:`_PASS_AT_K_VALUE_SCHEMAS` on purpose: a :class:`TrialMetricValue` is per-trial evidence, so a
@@ -426,7 +434,13 @@ class AgentEvalSummary(BaseModel):
         ],
     )
     task_count: int = Field(default=0, description="Number of tasks represented in the run.")
-    trial_count: int = Field(default=0, description="Number of distinct trials scored.")
+    trial_count: int = Field(
+        default=0,
+        description=(
+            "Number of trial records in the run. Uses len(trials) when supplied, including duplicate "
+            "ids and trials without scores; otherwise counts distinct (task_id, trial_id) score pairs."
+        ),
+    )
     score_count: int = Field(default=0, description="Total number of metric scores.")
     error_count: int = Field(
         default=0,
@@ -516,24 +530,34 @@ class AgentEvalSummary(BaseModel):
         :attr:`error_trial_ids` empty rather than raising -- the same silent-skip contract ``tasks``
         already has for pass@k. It may legitimately be *wider* than ``scores`` (a caller
         re-aggregating a subset), so the rollup can name trial ids absent from
-        :attr:`task_metric_values`.
+        :attr:`task_metric_values`. :attr:`trial_count` uses ``len(trials)`` when supplied; otherwise
+        it counts distinct ``(task_id, trial_id)`` pairs among ``scores``.
         """
+        score_list = list(scores)
         task_list = list(tasks) if tasks is not None else None
-        task_metric_values = _task_metric_values(scores, task_list)
+        observations = project_output_observations(score_list, task_list)
+        # The aggregates and the coverage counts read the same index; build it once here rather
+        # than have each of them walk the observations again.
+        observations_by_output = _group_by(observations, _by_output)
+        task_metric_values = _task_metric_values(observations, task_list)
         error_trial_ids = _error_trial_ids(trials)
+        if trials is None:
+            trial_count = len({(score.task_id, score.trial_id) for score in score_list})
+        else:
+            trial_count = len(trials)
         return AgentEvalSummary(
             scores=_aggregate_scores(
-                scores,
+                observations,
+                observations_by_output,
                 task_list,
                 extra_scores,
-                task_metric_values=task_metric_values,
             ),
-            metric_coverage=_metric_coverage(scores, task_list),
+            metric_coverage=_metric_coverage(observations_by_output),
             task_metric_values=task_metric_values,
             error_trial_ids=error_trial_ids,
-            task_count=len(task_list) if task_list is not None else len({score.task_id for score in scores}),
-            trial_count=len({score.trial_id for score in scores}),
-            score_count=len(scores),
+            task_count=len(task_list) if task_list is not None else len({score.task_id for score in score_list}),
+            trial_count=trial_count,
+            score_count=len(score_list),
             error_count=sum(len(ids) for ids in error_trial_ids.values()),
         )
 
@@ -739,6 +763,7 @@ class AgentEvalResult(BaseModel):
                     format_table(preview),
                 ]
             )
+        parts.extend(_format_trial_errors(self))
         parts.extend(_format_score_errors(self.scores, max_error_rows=max_error_rows))
         return "\n".join(parts)
 
@@ -840,8 +865,65 @@ def _agent_eval_summary_header(result: AgentEvalResult) -> str:
         f"scores={len(result.scores)}",
         f"aggregate_scores={len(result.summary.scores.scores)}",
     ]
+    if result.summary.error_count:
+        fields.append(f"errors={result.summary.error_count}")
     fields.extend(f"{status}={count}" for status, count in sorted(status_counts.items()))
     return f"AgentEvalResult({', '.join(fields)})"
+
+
+#: Trial ids named per error type before the line truncates; the full list stays on
+#: ``summary.error_trial_ids``.
+_MAX_ERROR_TRIAL_IDS = 5
+
+
+def _error_messages_by_occurrence(trials: Sequence[AgentEvalTrial]) -> dict[tuple[str, str], deque[str | None]]:
+    """Error messages keyed by ``(error type, trial id)``, each key holding every occurrence in order.
+
+    Trial ids are not unique -- Gym derives them from a rollout index in two separate loops -- and
+    ``error_trial_ids`` preserves each occurrence rather than deduplicating. Keying on the id alone
+    would let a later duplicate supply the message for an earlier one, printed under an error type
+    that trial never had.
+    """
+    messages: dict[tuple[str, str], deque[str | None]] = {}
+    for trial in trials:
+        if trial.error is not None:
+            messages.setdefault((trial.error.type, trial.id), deque()).append(trial.error.message)
+    return messages
+
+
+def _format_trial_errors(result: AgentEvalResult) -> list[str]:
+    """Render the failed-trial section: what failed, how often, and where to read the rest.
+
+    Rendered from ``summary.error_trial_ids`` rather than from the scores, because a trial whose
+    agent or harness never ran produces no failed score to report — it produces a reward of zero,
+    which is indistinguishable from a genuine zero anywhere else in this output.
+    """
+    error_trial_ids = result.summary.error_trial_ids
+    if not error_trial_ids:
+        return []
+
+    messages = _error_messages_by_occurrence(result.trials)
+    failed = result.summary.error_count
+    parts = [
+        "",
+        f"Failed trials ({failed} of {len(result.trials)})"
+        if len(result.trials) >= failed
+        else f"Failed trials ({failed})",
+    ]
+    for error_type, trial_ids in sorted(error_trial_ids.items()):
+        shown = trial_ids[:_MAX_ERROR_TRIAL_IDS]
+        line = f"  {error_type} ({len(trial_ids)}): {', '.join(shown)}"
+        if len(trial_ids) > len(shown):
+            line += f", ... ({len(trial_ids) - len(shown)} more)"
+        parts.append(line)
+        for trial_id in shown:
+            occurrences = messages.get((error_type, trial_id))
+            message = occurrences.popleft() if occurrences else None
+            if message:
+                parts.append(f"    {trial_id}: {message}")
+    if result.work_dir is not None:
+        parts.append(f"  Trial evidence: {result.work_dir}")
+    return parts
 
 
 def _format_score_errors(
@@ -875,12 +957,27 @@ def _format_score_errors(
     return parts
 
 
+def _group_by(
+    observations: Sequence[OutputObservation],
+    key: Callable[[OutputObservation], _GroupKey],
+) -> dict[_GroupKey, list[OutputObservation]]:
+    """Observations bucketed by ``key``, each bucket in the order they were projected."""
+    grouped: dict[_GroupKey, list[OutputObservation]] = {}
+    for observation in observations:
+        grouped.setdefault(key(observation), []).append(observation)
+    return grouped
+
+
+def _by_output(observation: OutputObservation) -> tuple[str, str]:
+    """The metric output an observation belongs to, across every task and trial."""
+    return (observation.metric_type, observation.output_name)
+
+
 def _aggregate_scores(
-    scores: Sequence[AgentEvalTaskScore],
+    observations: Sequence[OutputObservation],
+    observations_by_output: Mapping[tuple[str, str], list[OutputObservation]],
     tasks: Sequence[AgentEvalTask] | None,
     extra_scores: Sequence[AggregateScore] = (),
-    *,
-    task_metric_values: dict[str, TrialValuesByMetric],
 ) -> AggregatedMetricResult:
     """Aggregate per-metric-output, per-semantic-view, and task-level pass@k values into range scores.
 
@@ -892,30 +989,18 @@ def _aggregate_scores(
     """
     aggregated: list[AggregateScore] = []
 
-    output_names = _metric_output_names(scores, tasks)
-    for metric_type, names in sorted(output_names.items()):
-        metric_records = [score for score in scores if score.metric_type == metric_type]
-        total = len(metric_records)
-        for output_name in names:
-            values: list[float] = []
-            for score in metric_records:
-                value = None
-                # PARTIAL scores can still emit valid per-output values; include them so
-                # stats agree with coverage (which counts non-FAILED outputs as scored).
-                # Outputs actually missing on a PARTIAL score stay None -> counted as nan.
-                if score.status in (AgentEvalScoreStatus.COMPLETED, AgentEvalScoreStatus.PARTIAL):
-                    output = _score_output(score, output_name)
-                    value = _numeric_value(output) if output is not None else None
-                if value is not None:
-                    values.append(value)
-            aggregated.append(_aggregate_range_score(f"{metric_type}.{output_name}", values, total))
+    for (metric_type, output_name), output_observations in sorted(observations_by_output.items()):
+        values = [
+            value
+            for observation in output_observations
+            if observation.output is not None and (value := _numeric_value(observation.output)) is not None
+        ]
+        aggregated.append(_aggregate_range_score(f"{metric_type}.{output_name}", values, len(output_observations)))
 
-    for view_name, (values, total) in sorted(_semantic_view_values(scores, tasks).items()):
+    for view_name, (values, total) in sorted(_semantic_view_values(observations, tasks).items()):
         aggregated.append(_aggregate_range_score(f"view.{view_name}", values, total))
 
-    # Required rather than recomputed here: the summary needs the same mapping, and deriving it
-    # twice is what this rewiring exists to stop. The one caller builds it once and shares it.
-    aggregated.extend(_task_pass_at_k_scores(task_metric_values, tasks))
+    aggregated.extend(_task_pass_at_k_scores(observations, tasks))
     aggregated.extend(extra_scores)
 
     return AggregatedMetricResult(scores=aggregated)
@@ -972,14 +1057,14 @@ def _pass_at_k(n: int, c: int, k: int) -> float:
     return 1.0 - product
 
 
-def _scorelike_outputs(tasks: Sequence[AgentEvalTask] | None) -> set[tuple[str, str]]:
-    """``(metric_type, output_name)`` pairs whose declared value is a score (continuous or boolean).
+def _scorelike_outputs(tasks: Sequence[AgentEvalTask] | None) -> set[tuple[str, str, str]]:
+    """``(task_id, metric_type, output_name)`` triples declared as continuous or boolean scores.
 
     pass@k is only meaningful for a per-trial pass/fail signal, so labels, discrete/count outputs,
     and free models (e.g. token measurements) are excluded. Needs task metric specs; with no tasks
     the set is empty and pass@k is skipped.
     """
-    scorelike: set[tuple[str, str]] = set()
+    scorelike: set[tuple[str, str, str]] = set()
     if tasks is None:
         return scorelike
     for task in tasks:
@@ -987,7 +1072,7 @@ def _scorelike_outputs(tasks: Sequence[AgentEvalTask] | None) -> set[tuple[str, 
             metric_type = metric_type_name(metric)
             for spec in metric.output_spec():
                 if issubclass(spec.value_schema, _PASS_AT_K_VALUE_SCHEMAS):
-                    scorelike.add((metric_type, spec.name))
+                    scorelike.add((task.id, metric_type, spec.name))
     return scorelike
 
 
@@ -1018,7 +1103,7 @@ def _error_trial_ids(trials: Sequence[AgentEvalTrial] | None) -> dict[str, list[
 
 
 def _task_metric_values(
-    scores: Sequence[AgentEvalTaskScore],
+    observations: Sequence[OutputObservation],
     tasks: Sequence[AgentEvalTask] | None,
 ) -> dict[str, TrialValuesByMetric]:
     """Ordered per-trial records per task, keyed ``<metric_type>.<output>``.
@@ -1046,7 +1131,7 @@ def _task_metric_values(
     - declared by its metric spec under :data:`_TASK_METRIC_VALUE_SCHEMAS` -> kept
     - declared under any other schema -> dropped, even when the emitted value is numeric, so a
       ``MetricOutputSpec.model("prompt_tokens", TokenCount)`` measurement never becomes a key
-    - undeclared, but some score emitted a recordable value for it -> kept
+    - undeclared with task specs -> dropped, even when a score emitted it
     - ``tasks is None`` -> no specs to filter against, so every recordable output observed is kept
 
     What each score contributes to its key, in trial order:
@@ -1064,10 +1149,6 @@ def _task_metric_values(
     reuses one costs pass@k nothing.
     """
     output_keys: dict[str, set[tuple[str, str]]] = {}
-    # Outputs a task declared under a schema this mapping does not retain. Tracked so an emitted
-    # numeric value cannot add back what that task's spec filter just excluded, and carrying the task
-    # id because tasks in one run need not declare the same output under the same schema.
-    excluded: set[tuple[str, str, str]] = set()
     if tasks is not None:
         for task in tasks:
             task_keys = output_keys.setdefault(task.id, set())
@@ -1076,81 +1157,62 @@ def _task_metric_values(
                 for spec in metric.output_spec():
                     if issubclass(spec.value_schema, _TASK_METRIC_VALUE_SCHEMAS):
                         task_keys.add((metric_type, spec.name))
-                    else:
-                        excluded.add((task.id, metric_type, spec.name))
+    else:
+        recordable_pairs = {
+            _by_output(observation)
+            for observation in observations
+            if observation.output is not None and _native_value(observation.output) is not None
+        }
+        for observation in observations:
+            pair = _by_output(observation)
+            if pair in recordable_pairs:
+                output_keys.setdefault(observation.task_id, set()).add(pair)
 
-    # Materialized once: the key set has to be settled before any record can be filed (a trial
-    # failure reaches every key of its metric, including keys only a later score reveals), and
-    # `scores` is walked exactly once so a one-shot sequence still works.
-    ordered = list(scores)
-    for score in ordered:
-        # setdefault, not add: a task whose every score failed still earns an entry, so it reads as
-        # measured-and-empty rather than absent.
-        task_keys = output_keys.setdefault(score.task_id, set())
-        if score.status in (AgentEvalScoreStatus.COMPLETED, AgentEvalScoreStatus.PARTIAL):
-            for output in score.outputs:
-                if (score.task_id, score.metric_type, output.name) in excluded:
-                    continue
-                if _native_value(output) is not None:
-                    task_keys.add((score.metric_type, output.name))
-
-    # Key set settled, so the records fill in score order -- which is what puts each key's list in
-    # trial order.
-    outputs_by_task_metric: dict[tuple[str, str], list[str]] = {}
     by_task: dict[str, TrialValuesByMetric] = {}
     for task_id, keys in output_keys.items():
-        ordered_keys = sorted(keys)
-        by_task[task_id] = {f"{metric_type}.{name}": [] for metric_type, name in ordered_keys}
-        for metric_type, name in ordered_keys:
-            outputs_by_task_metric.setdefault((task_id, metric_type), []).append(name)
+        by_task[task_id] = {f"{metric_type}.{name}": [] for metric_type, name in sorted(keys)}
 
-    for score in ordered:
-        output_names = outputs_by_task_metric.get((score.task_id, score.metric_type))
-        if not output_names:
+    for observation in observations:
+        # `output_keys` is the whole of "is this recordable": both branches above put a key there
+        # exactly when the task/metric/output triple qualifies.
+        if _by_output(observation) not in output_keys.get(observation.task_id, ()):
             continue
-        task_values = by_task[score.task_id]
-        if is_trial_failure(score):
-            for name in output_names:
-                task_values[f"{score.metric_type}.{name}"].append(
-                    TrialMetricValue(trial_id=score.trial_id, value_type=TrialMetricValueType.MISSING, value=None)
+        records = by_task[observation.task_id][f"{observation.metric_type}.{observation.output_name}"]
+        if observation.state == "trial_failed":
+            records.append(
+                TrialMetricValue(
+                    trial_id=observation.trial_id,
+                    value_type=TrialMetricValueType.MISSING,
+                    value=None,
                 )
+            )
             continue
-        if score.status not in (AgentEvalScoreStatus.COMPLETED, AgentEvalScoreStatus.PARTIAL):
+        if observation.output is None:
             continue
-        # Indexed once per score rather than rescanned per output, and first-wins on a duplicate name
-        # to match :func:`_score_output`.
-        outputs: dict[str, MetricOutput] = {}
-        for output in score.outputs:
-            outputs.setdefault(output.name, output)
-        for name in output_names:
-            output = outputs.get(name)
-            payload = _native_value(output) if output is not None else None
-            if payload is not None:
-                value_type, value = payload
-                task_values[f"{score.metric_type}.{name}"].append(
-                    TrialMetricValue(trial_id=score.trial_id, value_type=value_type, value=value)
-                )
+        payload = _native_value(observation.output)
+        if payload is not None:
+            value_type, value = payload
+            records.append(TrialMetricValue(trial_id=observation.trial_id, value_type=value_type, value=value))
     return by_task
 
 
 def _task_pass_at_k_scores(
-    task_metric_values: dict[str, TrialValuesByMetric],
+    observations: Sequence[OutputObservation],
     tasks: Sequence[AgentEvalTask] | None,
 ) -> list[AggregateScore]:
     """Task-level pass@k over the R trials per task, aggregated across tasks (uniform for any runner).
 
-    For each score-like metric output, group trials by task, count trials ``n`` and passes ``c``
-    (value ``>= _PASS_VALUE``), then emit ``<metric>.<output>.pass@k`` for ``k`` in ``1..max(n)`` as
-    the across-task mean of the unbiased per-task estimator (over tasks with at least ``k`` trials).
-    ``pass@1`` equals the macro per-task pass rate, i.e. the task-level mean.
+    For each score-like metric output, group observations by task, count measured numeric values plus
+    failed trials as estimator ``n``, and values ``>= _PASS_VALUE`` as passes ``c``. Emit
+    ``<metric>.<output>.pass@k`` through the maximum task-local observation count, not merely the
+    maximum surviving ``n``. ``pass@1`` equals the macro per-task pass rate.
 
     **A failed trial did not pass.** It counts toward ``n`` and never toward ``c``: an agent that
     solved a task once and crashed once did not go one-for-one. A failed *metric* is different — it
     leaves the trial unmeasured rather than unsuccessful, so it stays out of ``n`` entirely rather
-    than being charged to the agent (see :func:`is_trial_failure`). Tasks left with no usable value at
-    all drop out of the estimate and are reported as ``nan_count``, uniform across ``k``, so a shrinking
-    denominator is never silent. (Tasks excluded from a given ``k`` merely for having fewer than ``k``
-    trials are *not* counted there — that is the estimator working as defined, not missing data.)
+    than being charged to the agent (see :func:`is_trial_failure`). Every task declaring the output
+    contributes either an estimate or one ``nan_count`` at every emitted k, so omission, metric
+    failure, and ``n < k`` never silently shrink the task denominator.
 
     "No usable value" includes a task that was never scored at all: it declares the metric, holds an
     empty value list, and lands in ``nan_count`` like any other unmeasured task. That is the same
@@ -1165,28 +1227,34 @@ def _task_pass_at_k_scores(
     scorelike = _scorelike_outputs(tasks)
     if not scorelike:
         return []
+    observations_by_output = _group_by(
+        observations, lambda observation: (observation.task_id, *_by_output(observation))
+    )
+    tasks_by_output: dict[tuple[str, str], list[str]] = {}
+    for task_id, metric_type, output_name in sorted(scorelike):
+        tasks_by_output.setdefault((metric_type, output_name), []).append(task_id)
+
     aggregated: list[AggregateScore] = []
-    for metric_type, output_name in sorted(scorelike):
+    for (metric_type, output_name), task_ids in sorted(tasks_by_output.items()):
         key = f"{metric_type}.{output_name}"
-        values_by_task = [
-            numeric_metric_values(outputs[key]) for outputs in task_metric_values.values() if key in outputs
+        observations_by_task = [
+            observations_by_output.get((task_id, metric_type, output_name), []) for task_id in task_ids
         ]
-        measured = [values for values in values_by_task if values]
-        if not measured:
+        max_attempts = max((len(task_observations) for task_observations in observations_by_task), default=0)
+        if max_attempts == 0:
             continue
-        # Empty value lists stay in nan_count (via total); for each k, mean the unbiased
-        # estimator over tasks with n >= k (None / < full credit do not count as passes).
-        unmeasured = sum(not values for values in values_by_task)
-        # (n, c) per task, counted once: neither depends on k, so counting inside the k loop would
-        # re-walk every task's values max_n times over.
-        counts = [
-            (len(values), sum(value is not None and value >= _PASS_VALUE for value in values)) for values in measured
-        ]
-        max_n = max(n for n, _ in counts)
-        for k in range(1, max_n + 1):
+        counts: list[tuple[int, int]] = []
+        for task_observations in observations_by_task:
+            values: list[float | None] = []
+            for observation in task_observations:
+                if observation.state == "trial_failed":
+                    values.append(None)
+                elif observation.output is not None and (value := _semantic_value(observation.output)) is not None:
+                    values.append(value)
+            counts.append((len(values), sum(value is not None and value >= _PASS_VALUE for value in values)))
+        for k in range(1, max_attempts + 1):
             per_task = [_pass_at_k(n, c, k) for n, c in counts if n >= k]
-            if per_task:
-                aggregated.append(_aggregate_range_score(f"{key}.pass@{k}", per_task, len(per_task) + unmeasured))
+            aggregated.append(_aggregate_range_score(f"{key}.pass@{k}", per_task, len(task_ids)))
     return aggregated
 
 
@@ -1227,110 +1295,72 @@ def _aggregate_range_score(name: str, values: list[float], total: int) -> Aggreg
 
 
 def _metric_coverage(
-    scores: Sequence[AgentEvalTaskScore],
-    tasks: Sequence[AgentEvalTask] | None,
+    observations_by_output: Mapping[tuple[str, str], list[OutputObservation]],
 ) -> dict[str, dict[str, AgentEvalMetricOutputCoverage]]:
-    output_names = _metric_output_names(scores, tasks)
     coverage: dict[str, dict[str, AgentEvalMetricOutputCoverage]] = {}
-    for metric_type, names in sorted(output_names.items()):
-        metric_records = [score for score in scores if score.metric_type == metric_type]
-        metric_coverage: dict[str, AgentEvalMetricOutputCoverage] = {}
-        for output_name in names:
-            total = len(metric_records)
-            failed = sum(1 for score in metric_records if score.status == AgentEvalScoreStatus.FAILED)
-            scored = sum(
-                1
-                for score in metric_records
-                if score.status != AgentEvalScoreStatus.FAILED
-                and any(output.name == output_name for output in score.outputs)
-            )
-            metric_coverage[output_name] = AgentEvalMetricOutputCoverage(
-                total=total,
-                scored=scored,
-                failed=failed,
-                missing=max(total - scored - failed, 0),
-            )
-        coverage[metric_type] = metric_coverage
+    for (metric_type, output_name), output_observations in sorted(observations_by_output.items()):
+        coverage.setdefault(metric_type, {})[output_name] = AgentEvalMetricOutputCoverage(
+            total=len(output_observations),
+            scored=sum(observation.state == "observed" for observation in output_observations),
+            failed=sum(observation.state in ("metric_failed", "trial_failed") for observation in output_observations),
+            missing=sum(observation.state == "missing" for observation in output_observations),
+        )
     return coverage
 
 
-def _metric_output_names(
-    scores: Sequence[AgentEvalTaskScore],
-    tasks: Sequence[AgentEvalTask] | None,
-) -> dict[str, list[str]]:
-    names: dict[str, set[str]] = {}
-    if tasks is not None:
-        for task in tasks:
-            for metric in task.metrics:
-                metric_type = metric_type_name(metric)
-                for output in metric.output_spec():
-                    names.setdefault(metric_type, set()).add(output.name)
-
-    for score in scores:
-        for output in score.outputs:
-            names.setdefault(score.metric_type, set()).add(output.name)
-    return {metric_type: sorted(output_names) for metric_type, output_names in names.items()}
-
-
 def _semantic_view_values(
-    scores: Sequence[AgentEvalTaskScore],
+    observations: Sequence[OutputObservation],
     tasks: Sequence[AgentEvalTask] | None,
 ) -> dict[str, tuple[list[float], int]]:
     """Return reduced view values and the number of attempted reductions per view.
 
-    The integer in each tuple is the total number of trial/view reductions
-    attempted (the denominator for nan_count); the list holds the values that
-    reduced successfully.
+    The integer in each tuple is the total number of task/trial occurrence reductions attempted
+    (the denominator for nan_count); the list holds the values that reduced successfully. Repeated
+    observations sharing a trial id are paired across signals by occurrence index rather than keyed
+    into one row. Every signal must be observed and finite before its reducer may run.
     """
     if tasks is None:
         return {}
 
     tasks_by_id = {task.id: task for task in tasks}
-    # Match the stats path: PARTIAL scores may carry usable signal outputs. Missing
-    # signals still skip the view reduction below, so admitting PARTIAL is safe.
-    score_by_key = {
-        (score.task_id, score.trial_id, score.metric_type): score
-        for score in scores
-        if score.status in (AgentEvalScoreStatus.COMPLETED, AgentEvalScoreStatus.PARTIAL)
-    }
-    trials_by_task: dict[str, set[str]] = {}
-    for score in scores:
-        trials_by_task.setdefault(score.task_id, set()).add(score.trial_id)
+    observations_by_key: dict[tuple[str, str, str, str], list[OutputObservation]] = {}
+    attempts_by_task_trial: dict[tuple[str, str], int] = {}
+    for observation in observations:
+        key = (observation.task_id, observation.trial_id, observation.metric_type, observation.output_name)
+        sequence = observations_by_key.setdefault(key, [])
+        sequence.append(observation)
+        task_trial = (observation.task_id, observation.trial_id)
+        attempts_by_task_trial[task_trial] = max(attempts_by_task_trial.get(task_trial, 0), len(sequence))
 
     values_by_view: dict[str, list[float]] = {}
     totals_by_view: dict[str, int] = {}
-    for task_id, trial_ids in trials_by_task.items():
+    for (task_id, trial_id), attempt_count in attempts_by_task_trial.items():
         task = tasks_by_id.get(task_id)
         if task is None:
             continue
-        for trial_id in trial_ids:
+        for occurrence in range(attempt_count):
             for view_name, view in task.views.items():
                 totals_by_view[view_name] = totals_by_view.get(view_name, 0) + 1
                 signal_values: list[float] = []
                 for signal in view.signals:
-                    score = score_by_key.get((task_id, trial_id, signal.metric))
-                    output = _score_output(score, signal.output) if score is not None else None
-                    value = _semantic_value(output) if output is not None else None
-                    if value is None:
+                    signal_observations = observations_by_key.get((task_id, trial_id, signal.metric, signal.output), ())
+                    observation = signal_observations[occurrence] if occurrence < len(signal_observations) else None
+                    value = (
+                        _semantic_value(observation.output)
+                        if observation is not None and observation.output is not None
+                        else None
+                    )
+                    if value is None or not math.isfinite(value):
                         signal_values = []
                         break
                     signal_values.append(value)
                 if not signal_values:
                     continue
                 reduced = _reduce_semantic_view(view.reducer, signal_values, view.signals)
-                if reduced is not None:
+                if reduced is not None and math.isfinite(reduced):
                     values_by_view.setdefault(view_name, []).append(reduced)
 
     return {view_name: (values_by_view.get(view_name, []), total) for view_name, total in totals_by_view.items()}
-
-
-def _score_output(score: AgentEvalTaskScore | None, output_name: str) -> MetricOutput | None:
-    if score is None:
-        return None
-    for output in score.outputs:
-        if output.name == output_name:
-            return output
-    return None
 
 
 def _reduce_semantic_view(

@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import cast
 from unittest.mock import AsyncMock, Mock
 
 import data_designer.config as dd
@@ -56,22 +55,22 @@ def _restore_task_loggers(snapshot: dict[str, tuple[list[logging.Handler], int, 
         logger.propagate = propagate
 
 
+def _make_async_sdk() -> AsyncNeMoPlatform:
+    return AsyncMock(spec=AsyncNeMoPlatform)
+
+
 async def _to_run_spec(
     request: AnonymizerRequest,
     *,
-    async_sdk: AsyncNeMoPlatform | None = None,
+    async_sdk: AsyncNeMoPlatform,
 ) -> AnonymizerStepConfig:
-    resolved_async_sdk = (
-        async_sdk if async_sdk is not None else cast(AsyncNeMoPlatform, AsyncMock(spec=AsyncNeMoPlatform))
-    )
-    spec = await RunJob.to_spec(
+    return await RunJob.to_spec(
         request,
         workspace="team-a",
         entity_client=object(),
-        async_sdk=resolved_async_sdk,
+        async_sdk=async_sdk,
         is_local=False,
     )
-    return cast(AnonymizerStepConfig, spec)
 
 
 @pytest.mark.asyncio
@@ -86,7 +85,7 @@ async def test_run_job_rejects_selected_models_without_model_configs(
     monkeypatch.setattr(RunJob, "_validate_anonymizer_config", classmethod(lambda cls, config: None))
 
     with pytest.raises(PlatformJobCompilationError, match="selected_models requires model_configs"):
-        await _to_run_spec(request)
+        await _to_run_spec(request, async_sdk=_make_async_sdk())
 
 
 @pytest.mark.asyncio
@@ -106,7 +105,7 @@ async def test_run_job_wraps_shared_provider_config_errors(
     )
 
     with pytest.raises(PlatformJobCompilationError, match="bad provider"):
-        await _to_run_spec(request)
+        await _to_run_spec(request, async_sdk=_make_async_sdk())
 
 
 @pytest.mark.asyncio
@@ -120,7 +119,7 @@ async def test_run_submit_requires_model_configs(
     monkeypatch.setattr(RunJob, "_validate_anonymizer_config", classmethod(lambda cls, config: None))
 
     with pytest.raises(PlatformJobCompilationError, match="model_configs are required"):
-        await _to_run_spec(request)
+        await _to_run_spec(request, async_sdk=_make_async_sdk())
 
 
 @pytest.mark.asyncio
@@ -138,7 +137,7 @@ async def test_run_job_uses_igw_provider_registry(
     )
     monkeypatch.setattr(RunJob, "_validate_anonymizer_config", classmethod(lambda cls, config: None))
     monkeypatch.setattr(context_module, "make_model_provider_registry", igw_lookup)
-    async_sdk = AsyncMock(spec=AsyncNeMoPlatform)
+    async_sdk = _make_async_sdk()
 
     step_config = await _to_run_spec(request, async_sdk=async_sdk)
 
@@ -164,7 +163,7 @@ async def test_run_serialized_step_config_can_be_revalidated(
     monkeypatch.setattr(context_module, "make_model_provider_registry", AsyncMock(return_value=None))
     monkeypatch.setattr(run_module, "run_step_config", lambda *args, **kwargs: 0)
 
-    step_config = await _to_run_spec(request)
+    step_config = await _to_run_spec(request, async_sdk=_make_async_sdk())
 
     ctx = _make_job_context(tmp_path)
     assert RunJob().run(
@@ -307,4 +306,4 @@ async def test_run_submit_rejects_local_file(
     monkeypatch.setattr(RunJob, "_validate_anonymizer_config", classmethod(lambda cls, config: None))
 
     with pytest.raises(PlatformJobCompilationError, match="local path"):
-        await _to_run_spec(request)
+        await _to_run_spec(request, async_sdk=_make_async_sdk())

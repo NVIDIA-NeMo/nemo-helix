@@ -1,0 +1,133 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Scan Trace Data"
+description: ""
+---
+<a id="agents-scan-trace-data"></a>
+
+Use the telemetry scan to check an agent's trace data for PII and leaked
+credentials before you reuse those traces. Agent traces are the input to
+evaluation and optimization, so sensitive data captured in a trace spreads into
+every dataset built from it.
+
+The scan samples recent files from the `nemo-agent-telemetry` fileset, runs a
+pattern match over them, and writes findings with masked previews, file
+locations and follow-up actions to `nemo-agent-security`.
+
+## What the Scan Looks For
+
+| Finding type | Signal | Result |
+|--------------|--------|--------|
+| Leaked credentials | Private keys, JWTs and common model-provider API keys | Rotate the credential, then clean up the trace |
+| PII | Email addresses, SSNs, phone numbers and credit card numbers | Redact or regenerate the affected traces |
+| Deep scan | Pattern matching is not enough for the data risk profile | Suggests a higher-recall GLiNER or NemoGuard check on a subset of traces |
+
+Matching is pattern-based, so it's most reliable on credentials, which have
+fixed published formats. For broader entity coverage, including names and
+locations, run a deep scan or use [Anonymizer](/documentation/anonymize-data).
+
+Rotate or revoke leaked credentials promptly to block further use. Rotation
+does not prove the credential went unused or that no data was accessed before
+it happened, so preserve the trace as evidence and investigate prior access
+before cleaning it up.
+
+## Prerequisites
+
+Before scanning telemetry, make sure you have:
+
+1. Local services running (`nemo services run`).
+1. At least one deployed platform-managed agent.
+1. Telemetry in the `nemo-agent-telemetry` fileset. The agent must use the
+   `nemo_files` telemetry exporter and have completed recent invocations. See
+   [Observe Agents](/documentation/agents/observe-agents).
+
+## Run the Scan
+
+<Tabs>
+
+<Tab title="CLI">
+
+```bash
+nemo files list nemo-agent-telemetry
+```
+
+Inspect the most recent trace files, or use the security skill to do it for
+you. Cap the data you download, because telemetry can be large.
+
+</Tab>
+<Tab title="Skill">
+
+Ask your coding agent:
+
+> Scan recent telemetry for my agent for PII and leaked secrets.
+
+The `agents-secure` skill caps downloaded telemetry at 1 GB and walks the
+most recent traces first. Verify it is installed:
+
+```bash
+nemo skills show agents-secure
+```
+
+What it does under the hood:
+
+- Samples recent files from `nemo-agent-telemetry` until the 1 GB cap.
+- Runs a high-confidence pattern match for PII and leaked credentials.
+- Writes findings with masked previews and follow-up actions to
+  `nemo-agent-security/security_suggestions.jsonl`.
+- Suggests a higher-recall GLiNER or NemoGuard scan on a subset of traces
+  when pattern coverage is not enough.
+
+</Tab>
+<Tab title="Python SDK">
+
+The skill drives this workflow directly. To inspect what was written, list
+and download files from the security fileset:
+
+```python
+import os
+from nemo_platform import NeMoPlatform
+
+client = NeMoPlatform(
+    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+    workspace="default",
+)
+
+for f in client.files.list(fileset="nemo-agent-security"):
+    print(f.remote_path)
+```
+
+</Tab>
+
+</Tabs>
+
+## Review Findings
+
+Findings are written to the `nemo-agent-security` fileset:
+
+- `security_snapshot.json`
+- `security_suggestions.jsonl`
+
+Use the Files service to inspect them:
+
+```bash
+nemo files list nemo-agent-security
+
+nemo files download nemo-agent-security \
+  --remote-path security_suggestions.jsonl \
+  -o security_suggestions.jsonl
+```
+
+## Troubleshooting
+
+**No findings were written.** Confirm the `nemo-agent-security` fileset exists with `nemo files list nemo-agent-security`. If it is empty, the scan has not run yet.
+
+**The fileset is empty even after scanning.** Scans require telemetry. Confirm the `nemo-agent-telemetry` fileset exists with `nemo files list nemo-agent-telemetry`. If it is empty, the agent is not exporting traces. Verify the agent uses the `nemo_files` telemetry exporter and that recent invocations have completed.
+
+**The `agents-secure` skill is not available.** Run `nemo skills list` to confirm the skill is installed. If it is missing, install it with `nemo skills install --agent <claude|codex|cursor|opencode>`.
+
+## Related Topics
+
+- [Observe Agents](/documentation/agents/observe-agents): ingest and query the telemetry this scan reads.
+- [Anonymizer](/documentation/anonymize-data): detect and replace sensitive entities across a dataset.

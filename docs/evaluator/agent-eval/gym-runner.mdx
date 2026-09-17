@@ -13,12 +13,27 @@ through agent-eval — the same [`AgentEvaluator`](/documentation/evaluate-model
 same result and bundle as the [quickstart](/documentation/evaluate-models/agent-eval/quickstart).
 Only the runner changes.
 
-Gym owns execution **and** scoring here. The runner shells out to the `gym` CLI and adapts the
-rollout bundle into trials; `GymRewardMetric` surfaces Gym's per-attempt reward.
+## Choose how to run the evaluation
+
+There are two user-facing interfaces:
+
+| Interface | Use it for | How it runs |
+|---|---|---|
+| **Local SDK** | Developing the task set and runner on your machine | `AgentEvaluator().run(...)` invokes local `gym` subprocesses |
+| **Platform job** | Durable, repeatable execution with platform storage and results | Submit `agent-evaluate`; the deployment controls where Gym runs |
+
+On the platform, sandbox placement is an operator decision rather than another submission mode. A
+sandbox-enabled deployment runs Gym in a separate `nmp-gym-host`. A deployment without OpenSandbox
+can still run trusted, built-in Gym components inside the `nmp-gym-tasks` job container; this
+compatibility path is called **colocated execution**. Submitters do not select between them, and
+custom environment FileSets always require the sandboxed path.
+
+Gym owns execution **and** scoring through either interface. Both produce the same trial shape, and
+`GymRewardMetric` surfaces Gym's per-attempt reward.
 
 <Warning>
 
-Like the Harbor runner, this one is **not** zero-dependency — it shells out to the `gym` CLI:
+For a local SDK run, this runner is **not** zero-dependency — it shells out to the `gym` CLI:
 
 - **NeMo Gym**, installed into its own `uv` environment (below)
 - **The target environment's own dependencies** — each resources-server ships its own
@@ -35,12 +50,13 @@ Install Gym into **its own environment** and put that environment's `bin` on `PA
 at module load, and `nemo-platform` excludes Ray by constraint, so the two generally cannot share a
 virtualenv. The runner resolves `gym` from `PATH` only — there is deliberately no setting pointing at
 a checkout or another venv, because this config becomes a serialized job spec when Gym runs as a
-platform job, and a local path means nothing on the other side of that boundary. In a job image, the
-image owns `PATH` and this resolves normally.
+platform job, and a local path means nothing on the other side of that boundary. In a colocated job
+image, the image owns `PATH` and this resolves normally. A sandboxed job runs the CLI in a separate
+`nmp-gym-host` image instead.
 
 </Warning>
 
-## Credentials
+## Credentials for local SDK runs
 
 Gym's collector calls your model endpoint directly. It reads the credentials from an `env.yaml` in
 the directory you run from — **this SDK never reads or handles that file**:
@@ -52,6 +68,9 @@ policy_model_name: <model, e.g. meta/llama-3.1-8b-instruct>
 ```
 
 Keep it out of version control. Gym searches the working directory first, then its install root.
+Platform jobs do not read this local file. Configure their model route with `hydra_params`, and map
+secret environment variables through `GymRunnerTarget.env_secrets`. See
+[Configure Sandboxed Gym](/documentation/evaluate-models/agent-eval/gym-sandbox-configuration).
 
 ## The dataset
 
@@ -116,7 +135,7 @@ The mapping is:
 
 So `num_repeats=2` over a 5-row dataset yields 5 tasks and 10 trials.
 
-### Configuration
+### Local runner configuration
 
 | Field | Required | Notes |
 |---|---|---|
@@ -137,6 +156,20 @@ So `num_repeats=2` over a 5-row dataset yields 5 tasks and 10 trials.
 Anything `GymRuntimeConfig` does not expose can go through `hydra_params`, which is flattened to
 Hydra's override grammar and applied to `gym env start`. For the full set of knobs, see the
 [NeMo Gym documentation](https://github.com/NVIDIA-NeMo/Gym).
+
+Platform job specs use `GymRunnerTarget`, the serializable counterpart of the local
+`GymRuntimeConfig`. It adds three platform-only fields:
+
+- `environment` points to a FileSet containing Gym component configuration, code, and dependencies
+  that are not built into the runtime image.
+- `agent_ref_name` identifies the agent instance registered inside the sandbox when that instance
+  name differs from the `agent` component name.
+- `env_secrets` maps environment variable names to NeMo Platform secret references without placing
+  secret values in the job spec.
+
+`agent_config` remains required when the target uses an agent built into the Gym image. It becomes
+optional only when the environment FileSet supplies and registers the selected agent configuration.
+See [Run a Custom Gym Environment](/documentation/evaluate-models/agent-eval/gym-custom-environment).
 
 ## Read the results
 
@@ -182,7 +215,7 @@ Gym's own artifacts land in a `gym_run/` subdirectory — `rollouts.jsonl`,
 `rollouts_failures.jsonl`, `rollouts_aggregate_metrics.json`, and the materialized
 `gym_input.jsonl` handed to collection.
 
-## How it runs Gym
+## How local SDK and colocated platform runs execute Gym
 
 The runner uses Gym's **two-step** flow, which reads a dataset file directly — no split-driven data
 preparation and no HuggingFace downloads:
@@ -294,12 +327,14 @@ A value with no JSON form — a callable in `hydra_params`, say — is refused w
 that names neither the runner nor the field.
 
 The returned handle is an `AgentEvaluatorJobResource`. Unlike a dataset-driven job it has no
-`get_result()` or `download_artifacts()`, because an agent evaluation publishes agent-eval results
-and a summary rather than row scores. Read the scores through
-`client.evaluator.agent_eval_results`.
+`get_result()` or `download_artifacts()`. Wait for completion, then read the queryable record through
+`client.evaluator.agent_eval_results` or download the named `agent-eval-results` job result. See
+[Reading Results](/documentation/evaluate-models/agent-eval/reading-results#results-from-platform-jobs).
 
-Gym jobs run on their own `nmp-gym-tasks` container image rather than the shared CPU task image,
-because Gym requires Ray. No configuration is needed — the target selects it.
+On a sandbox-enabled deployment, the Evaluator step runs in `nmp-cpu-tasks` and calls a separate
+`nmp-gym-host`. On a deployment using the compatibility path, Evaluator and Gym run together in
+`nmp-gym-tasks`. A target with an `environment` FileSet is rejected on the compatibility path and
+adds `stage-environment` before `agent-evaluate` on a sandbox-enabled deployment.
 
 ## Caveats
 
@@ -309,13 +344,15 @@ because Gym requires Ray. No configuration is needed — the target selects it.
 - **`--no-serve --input` bypasses Gym's data-prep** — prompt templating and dataset materialization.
   Rows that are already complete, like the bundled `example.jsonl`, are faithful; an environment
   whose rows need templating would need that step run first.
-- **Service-side execution** — Docker or Kubernetes, Ray provisioning — is out of scope for this SDK
-  path. That is the evaluator plugin's concern.
+- **Custom environments require platform support.** Package the environment as a FileSet and use
+  sandboxed execution; a live `GymAgentTaskRunner` cannot carry `environment`, `agent_ref_name`, or
+  `env_secrets`.
 
 ## Next steps
 
 <Cards>
   <Card title="Agent Evaluation (concepts)" href="/documentation/evaluate-models/agent-eval" />
   <Card title="Targets and Runners" href="/documentation/evaluate-models/agent-eval/targets-and-runners" />
-  <Card title="Evaluate a Harbor Task Suite" href="/documentation/evaluate-models/agent-eval/harbor-runner" />
+  <Card title="Run a Custom Gym Environment" href="/documentation/evaluate-models/agent-eval/gym-custom-environment" />
+  <Card title="Configure Sandboxed Gym" href="/documentation/evaluate-models/agent-eval/gym-sandbox-configuration" />
 </Cards>

@@ -1,0 +1,46 @@
+{
+  "schema_version": "ATIF-v1.5",
+  "session_id": "3f2a1c00-0001-4a00-8000-000000000001",
+  "trajectory_id": "3f2a1c00-0001-4a00-8000-000000000001",
+  "agent": {
+    "name": "email-security-triage",
+    "version": "0.7.0",
+    "model_name": "nvidia-nemotron-3-nano-30b-a3b"
+  },
+  "final_metrics": {
+    "total_prompt_tokens": 3680,
+    "total_completion_tokens": 96,
+    "total_cost_usd": 0.0006096,
+    "total_steps": 2
+  },
+  "extra": {
+    "task_id": "email-security-triage/triage-phishing-quota",
+    "verifier_result": {
+      "rewards": {
+        "correctness": 1.0,
+        "format": 1.0,
+        "routing": 1.0
+      }
+    }
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-08-26T21:50:23Z",
+      "source": "user",
+      "message": "{\"user_message\": \"is this legit?\", \"emails\": [{\"from\": \"it-support@corpmail-support.com\", \"subject\": \"Action Required: Mailbox Quota Almost Full\", \"body\": \"Hello Team,\\n\\nOur monitoring shows your mailbox has reached 94% of its allocated storage. To prevent any disruption in sending or receiving messages, please confirm your account details by visiting the secure portal below:\\n\\nhttps://mailverify.corpmail-support.com/login\\n\\nOnce verified, your quota will be refreshed and normal service will resume.\\n\\nThank you,\\nIT Helpdesk\"}]}"
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-08-26T21:50:29Z",
+      "source": "agent",
+      "model_name": "default/nvidia-nemotron-3-nano-30b-a3b",
+      "message": "phishing\nThe sender domain corpmail-support.com is a lookalike for the corporate mail provider and does not match any internal domain. The message manufactures urgency around a quota deadline and drives the reader to a credential form at mailverify.corpmail-support.com, which is the classic quota-expiry credential harvest.",
+      "metrics": {
+        "prompt_tokens": 3680,
+        "completion_tokens": 96,
+        "cost_usd": 0.0006096
+      }
+    }
+  ]
+}

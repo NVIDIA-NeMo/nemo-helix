@@ -13,7 +13,7 @@ Two list-response wrappers (``PlatformJobListResultResponse``,
 entity instances server-side; the plugin exposes DTO equivalents for clients.
 """
 
-from typing import List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 # Re-exported shared types (single source of truth in the plugin).
 # NB: ``AuthContext`` is intentionally NOT re-exported from the plugin here —
@@ -27,6 +27,7 @@ from nmp.common.entities import (
     StringFilter,
     Value,
     get_random_id,
+    map_entity_field,
 )
 from nmp.common.jobs.schemas import PlatformJobResultResponse
 from nmp.common.jobs.schemas import PlatformJobStatus as PlatformJobStatus
@@ -101,6 +102,9 @@ class PlatformJobsListFilter(Filter):
     updated_at: Optional[DatetimeFilter] = Field(None, description="Jobs updated at 'gte' datetime or 'lte' datetime.")
     status: Optional[PlatformJobStatus | list[PlatformJobStatus]] = Field(None, description="The current status.")
     source: StringFilter | str | None = Field(None, description="The source of the job.")
+    spec: Annotated[Optional[Dict[str, Any]], map_entity_field("data.spec", namespace=True)] = Field(
+        None, description="Filter on a path within the job's plugin-defined spec, e.g. `spec.target.format`."
+    )
 
 
 class PlatformJobAttemptsListFilter(Filter):

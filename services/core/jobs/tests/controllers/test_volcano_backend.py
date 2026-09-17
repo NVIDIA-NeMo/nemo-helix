@@ -1164,9 +1164,8 @@ def test_schedule_with_storage_integration(
 def test_cleanup_steps_by_ttl(volcano_job: VolcanoJobBackend, status):
     """Test job cleanup with one active, one recently completed, one harvestable completed."""
 
-    # Both return True when terminal or when entity not found (404). Persistent storage cleanup uses check_job_is_terminal.
+    # Step cleanup proceeds for terminal steps or when the step entity is gone.
     volcano_job.check_step_is_terminal = MagicMock(return_value=True)  # type: ignore[assignment]
-    volcano_job.check_job_is_terminal = MagicMock(return_value=True)  # type: ignore[assignment]
 
     status_key = status.lower()
     two_hours_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=7200)
@@ -1434,8 +1433,8 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(volcano_job:
 
     volcano_job.check_step_is_terminal = MagicMock(side_effect=check_step_side_effect)  # type: ignore[assignment]
 
-    # Mock check_job_is_terminal to return False (job is not terminal - has more steps)
-    volcano_job.check_job_is_terminal = MagicMock(return_value=False)  # type: ignore[assignment]
+    # Mock persistent storage cleanup eligibility to return False (job has more steps)
+    volcano_job.check_job_persistent_storage_cleanup_allowed = MagicMock(return_value=False)  # type: ignore[assignment]
 
     # Create mock Volcano job for step 1 that completed successfully
     two_minutes_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=120)
@@ -1499,8 +1498,10 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(volcano_job:
         volcano_job.check_step_is_terminal.assert_any_call(job="multi-step-job", step_name="step1", workspace="default")
         volcano_job.check_step_is_terminal.assert_any_call(job="multi-step-job", step_name="step2", workspace="default")
 
-        # Verify job terminal check was called once for step 1 (only for terminal steps with persistent storage)
-        volcano_job.check_job_is_terminal.assert_called_once_with(job="multi-step-job", workspace="default")
+        # Verify persistent storage cleanup eligibility was checked once for step 1
+        volcano_job.check_job_persistent_storage_cleanup_allowed.assert_called_once_with(
+            job="multi-step-job", step_name="step1", workspace="default"
+        )
 
         # Verify persistent storage cleanup was NOT called
         # because the job is not terminal yet (step 2 still active)
@@ -1510,13 +1511,12 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(volcano_job:
 def test_cleanup_steps_proceeds_when_entity_not_found(volcano_job: VolcanoJobBackend):
     """When step/job entities are gone (e.g. workspace deleted) but the backend job is terminal and ours, still clean up.
 
-    check_step_is_terminal and check_job_is_terminal return True when terminal or when the entity is not found (404).
+    check_step_is_terminal returns True when terminal or when the entity is not found (404).
     """
     volcano_job._execution_profile_config.cleanup_completed_jobs_immediately = True
 
     # Simulate entity-not-found: both return True so cleanup proceeds
     volcano_job.check_step_is_terminal = MagicMock(return_value=True)  # type: ignore[assignment]
-    volcano_job.check_job_is_terminal = MagicMock(return_value=True)  # type: ignore[assignment]
 
     two_minutes_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=120)
     mock_job = {
@@ -1548,7 +1548,7 @@ def test_cleanup_steps_proceeds_when_entity_not_found(volcano_job: VolcanoJobBac
 def test_cleanup_steps_proceeds_when_job_entity_not_found_with_persistent_storage(volcano_job: VolcanoJobBackend):
     """When job entity is not found (404) but backend job is completed and uses persistent storage, still run full cleanup.
 
-    check_job_is_terminal returns True when job is terminal or when job entity is not found (404).
+    check_job_persistent_storage_cleanup_allowed returns True when cleanup should proceed.
     """
     volcano_job._execution_profile_config.cleanup_completed_jobs_immediately = True
     volcano_job._execution_profile_config.storage = MagicMock()
@@ -1556,7 +1556,7 @@ def test_cleanup_steps_proceeds_when_job_entity_not_found_with_persistent_storag
     volcano_job._execution_profile_config.storage.volume_permissions_image = "busybox"
 
     volcano_job.check_step_is_terminal = MagicMock(return_value=True)  # type: ignore[assignment]
-    volcano_job.check_job_is_terminal = MagicMock(return_value=True)  # type: ignore[assignment]  # job entity 404 → True
+    volcano_job.check_job_persistent_storage_cleanup_allowed = MagicMock(return_value=True)  # type: ignore[assignment]
 
     two_minutes_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=120)
     mock_job = {

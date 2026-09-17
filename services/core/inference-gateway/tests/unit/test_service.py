@@ -17,7 +17,6 @@ async def test_debug_startup_hydrates_model_entity_metadata(mocker):
     http_client = Mock()
     http_client.close = AsyncMock()
 
-    mocker.patch("nmp.core.inference_gateway.service.get_async_platform_sdk", return_value=sdk)
     mocker.patch(
         "nmp.core.inference_gateway.api.middleware_registry.load_middleware_plugins",
         AsyncMock(return_value=MiddlewareRegistry()),
@@ -38,8 +37,11 @@ async def test_debug_startup_hydrates_model_entity_metadata(mocker):
     )
 
     service = InferenceGatewayService()
+    mocker.patch.object(service.dependency_provider, "get_sdk_client", return_value=sdk)
     await service.on_startup()
     await service.on_shutdown()
 
     refresh_model_cache.assert_awaited_once()
-    assert refresh_model_cache.await_args.kwargs["model_entity_getter"] is model_entity_getter
+    await_args = refresh_model_cache.await_args
+    assert await_args is not None
+    assert await_args.kwargs["model_entity_getter"] is model_entity_getter

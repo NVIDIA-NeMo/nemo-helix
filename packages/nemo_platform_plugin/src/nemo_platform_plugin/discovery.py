@@ -314,9 +314,7 @@ def discover_jobs() -> dict[str, type[NemoJob]]:
 
     Entry-point key convention: ``<plugin-name>.<job-name>`` (e.g.
     ``"example.say-hello"``).  The platform instantiates each class and calls
-    :meth:`~nemo_platform_plugin.job.NemoJob.run` with the job config dict — programmatic
-    callers drive that through
-    :meth:`nemo_platform_plugin.scheduler.NemoJobScheduler.run_local`.
+    :meth:`~nemo_platform_plugin.job.NemoJob.run` with the job config dict.
 
     Validates that each class's ``name`` attribute matches the job-name suffix
     of its entry-point key (the part after the first ``"."``).
@@ -431,7 +429,7 @@ def discover_seed_jobs() -> dict[str, type[NemoSeedJob]]:
     return result
 
 
-def discover_sdk() -> dict[str, NemoPluginSDKResources[Any, Any]]:
+def discover_sdk() -> dict[str, NemoPluginSDKResources[Any, Any, Any, Any]]:
     """Typed wrapper: discover ``nemo.sdk`` → :class:`~nemo_platform_plugin.sdk.NemoPluginSDKResources`.
 
     Each container carries one or both of:
@@ -449,7 +447,7 @@ def discover_sdk() -> dict[str, NemoPluginSDKResources[Any, Any]]:
     :class:`~nemo_platform_plugin.sdk.NemoPluginSDKResources` are logged as a
     warning and excluded.
     """
-    result: dict[str, NemoPluginSDKResources[Any, Any]] = {}
+    result: dict[str, NemoPluginSDKResources[Any, Any, Any, Any]] = {}
     for key, value in discover("nemo.sdk").items():
         if not isinstance(value, NemoPluginSDKResources):
             logger.warning(

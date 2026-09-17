@@ -7,25 +7,25 @@ from typing import Any, Iterable
 
 from nemo_deployments_plugin.entities import Deployment, Volume
 from nemo_deployments_plugin.types import Endpoint
-from nemo_platform.types.inference import ModelDeploymentStatus
+from nemo_platform_plugin.models.types import ModelDeploymentStatus
 from nmp.core.models.controllers.backends.backends import DeploymentStatusUpdate
 from nmp.core.models.controllers.backends.common import format_duration
 
 _STATUS_MAP: dict[str, ModelDeploymentStatus] = {
-    "PENDING": "PENDING",
-    "STARTING": "PENDING",
-    "READY": "READY",
-    "FAILED": "ERROR",
-    "LOST": "LOST",
-    "UNKNOWN": "UNKNOWN",
-    "DELETING": "DELETING",
-    "SUCCEEDED": "PENDING",
+    "PENDING": ModelDeploymentStatus.PENDING,
+    "STARTING": ModelDeploymentStatus.PENDING,
+    "READY": ModelDeploymentStatus.READY,
+    "FAILED": ModelDeploymentStatus.ERROR,
+    "LOST": ModelDeploymentStatus.LOST,
+    "UNKNOWN": ModelDeploymentStatus.UNKNOWN,
+    "DELETING": ModelDeploymentStatus.DELETING,
+    "SUCCEEDED": ModelDeploymentStatus.PENDING,
 }
 
 
 def map_status(status: str) -> ModelDeploymentStatus:
     """Map a deployments-plugin status to a ModelDeployment status."""
-    return _STATUS_MAP.get(status, "UNKNOWN")
+    return _STATUS_MAP.get(status, ModelDeploymentStatus.UNKNOWN)
 
 
 def project_host_url(endpoints: Iterable[Endpoint]) -> str | None:
@@ -57,7 +57,7 @@ def _substrate_issue(
 ) -> DeploymentStatusUpdate | None:
     if entity is None or entity.status not in _ATTENTION_SUBSTRATE_STATUSES:
         return None
-    status: ModelDeploymentStatus = "UNKNOWN" if entity.status == "UNKNOWN" else "ERROR"
+    status = ModelDeploymentStatus.UNKNOWN if entity.status == "UNKNOWN" else ModelDeploymentStatus.ERROR
     return DeploymentStatusUpdate(
         status=status,
         status_message=entity.status_message or f"{label} is {entity.status}.",
@@ -80,11 +80,11 @@ def aggregate_status(
             status=status,
             status_message=server.status_message or f"Server deployment is {server.status}.",
             error_details={"substrate": substrate},
-            host_url=project_host_url(server.endpoints) if status == "READY" else None,
+            host_url=project_host_url(server.endpoints) if status == ModelDeploymentStatus.READY else None,
         )
     if previously_ready:
         return DeploymentStatusUpdate(
-            status="LOST",
+            status=ModelDeploymentStatus.LOST,
             status_message="Serving deployment is missing after reporting READY.",
             error_details={"substrate": substrate},
         )
@@ -94,7 +94,7 @@ def aggregate_status(
     if issue is not None:
         return issue
     return DeploymentStatusUpdate(
-        status="PENDING",
+        status=ModelDeploymentStatus.PENDING,
         status_message="Waiting for deployments-plugin substrate resources.",
         error_details={"substrate": substrate},
     )
@@ -121,7 +121,7 @@ def build_pending_timeout_error(
     if substrate is not None:
         error_details["substrate"] = substrate
     return DeploymentStatusUpdate(
-        status="ERROR",
+        status=ModelDeploymentStatus.ERROR,
         status_message=status_msg,
         error_details=error_details,
     )
@@ -135,7 +135,7 @@ def apply_pending_timeout(
     deployment_name: str,
 ) -> DeploymentStatusUpdate:
     """Escalate a PENDING projection to ERROR once the deployment ages out."""
-    if result.status != "PENDING" or elapsed_seconds < timeout_seconds:
+    if result.status != ModelDeploymentStatus.PENDING or elapsed_seconds < timeout_seconds:
         return result
     substrate = result.error_details.get("substrate") if result.error_details else None
     return build_pending_timeout_error(
@@ -158,7 +158,7 @@ def build_deleting_timeout_error(
         f"deployments-plugin substrate teardown (timeout: {format_duration(timeout_seconds)})."
     )
     return DeploymentStatusUpdate(
-        status="ERROR",
+        status=ModelDeploymentStatus.ERROR,
         status_message=status_msg,
         error_details={
             "reason": "deleting_timeout",
@@ -177,7 +177,7 @@ def apply_deleting_timeout(
     deployment_name: str,
 ) -> DeploymentStatusUpdate:
     """Escalate a DELETING delete result to ERROR once teardown ages out."""
-    if result.status != "DELETING" or timeout_seconds <= 0 or elapsed_seconds < timeout_seconds:
+    if result.status != ModelDeploymentStatus.DELETING or timeout_seconds <= 0 or elapsed_seconds < timeout_seconds:
         return result
     return build_deleting_timeout_error(
         deployment_name=deployment_name,

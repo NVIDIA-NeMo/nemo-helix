@@ -61,6 +61,17 @@ class StainlessConfig:
         logger.info(f"Extracted {len(existing_models)} models from Stainless config.")
         return existing_models
 
+    def top_level_resource_names(self) -> set[str]:
+        resources = self._stainless_config.get("resources", {})
+        if not isinstance(resources, dict):
+            return set()
+
+        return {
+            resource_name
+            for resource_name in resources
+            if isinstance(resource_name, str) and resource_name != "$shared"
+        }
+
     def clear_models(self) -> None:
         """
         Clear all models from the Stainless config.

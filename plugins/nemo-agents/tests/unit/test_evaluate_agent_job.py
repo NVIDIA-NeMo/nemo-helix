@@ -90,21 +90,28 @@ def test_resolve_eval_config_fileset_downloads_via_sdk(tmp_path: Path, ctx: JobC
     )
 
     sdk = MagicMock()
+    manager = MagicMock()
 
-    def _fake_download(local_path: str, fileset: str, workspace: str) -> None:
-        Path(local_path, "config.yml").write_text("eval: {}")
+    def _fake_download(_ref: str, *, local_dir: Path) -> None:
+        Path(local_dir, "config.yml").write_text("eval: {}")
 
-    sdk.files.download.side_effect = _fake_download
+    manager.download_from_url.side_effect = _fake_download
 
-    with job._resolve_eval_config(spec, ctx=ctx, sdk=sdk) as resolved:
-        assert resolved.exists()
-        assert resolved.name == "config.yml"
-        assert resolved.read_text() == "eval: {}"
+    with (
+        patch("nemo_agents_plugin.jobs.evaluate_agent.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileSystem", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileManager", return_value=manager) as manager_cls,
+    ):
+        with job._resolve_eval_config(spec, ctx=ctx, sdk=sdk) as resolved:
+            assert resolved.exists()
+            assert resolved.name == "config.yml"
+            assert resolved.read_text() == "eval: {}"
 
-    sdk.files.download.assert_called_once()
-    kwargs = sdk.files.download.call_args.kwargs
-    assert kwargs["fileset"] == "nemo-agent-eval-calc"
-    assert kwargs["workspace"] == "default"
+    manager_cls.assert_called_once()
+    assert manager_cls.call_args.kwargs["fileset_name"] == "nemo-agent-eval-calc"
+    assert manager_cls.call_args.kwargs["workspace"] == "default"
+    manager.download_from_url.assert_called_once()
+    assert manager.download_from_url.call_args.args == ("default/nemo-agent-eval-calc",)
 
 
 def test_resolve_eval_config_fileset_without_sdk_raises(tmp_path: Path, ctx: JobContext) -> None:
@@ -119,28 +126,37 @@ def test_resolve_eval_config_fileset_without_sdk_raises(tmp_path: Path, ctx: Job
 def test_resolve_output_fileset_uploads_on_clean_exit(tmp_path: Path, ctx: JobContext) -> None:
     job = EvaluateAgentJob()
     sdk = MagicMock()
-    sdk.files.upload.return_value = MagicMock(name="fake-fileset")
+    manager = MagicMock()
 
-    with job._resolve_output(FilesetRef("eval-out"), workspace="default", ctx=ctx, sdk=sdk):
-        pass
+    with (
+        patch("nemo_agents_plugin.jobs.evaluate_agent.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileSystem", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileManager", return_value=manager) as manager_cls,
+    ):
+        with job._resolve_output(FilesetRef("eval-out"), workspace="default", ctx=ctx, sdk=sdk):
+            pass
 
-    sdk.files.upload.assert_called_once()
-    kwargs = sdk.files.upload.call_args.kwargs
-    assert kwargs["fileset"] == "eval-out"
-    assert kwargs["workspace"] == "default"
-    assert kwargs["fileset_auto_create"] is True
-    assert kwargs["local_path"].endswith("/")
+    manager_cls.assert_called_once()
+    assert manager_cls.call_args.kwargs["fileset_name"] == "eval-out"
+    assert manager_cls.call_args.kwargs["workspace"] == "default"
+    assert manager_cls.call_args.kwargs["ensure_fileset_exists"] is True
+    manager.validate_storage.assert_called_once_with()
+    manager.upload.assert_called_once()
+    assert manager.upload.call_args.kwargs["remote_path"] == ""
 
 
 def test_resolve_output_fileset_skips_upload_when_body_raises(tmp_path: Path, ctx: JobContext) -> None:
     job = EvaluateAgentJob()
     sdk = MagicMock()
 
-    with pytest.raises(RuntimeError, match="nat eval blew up"):
+    with (
+        patch.object(EvaluateAgentJob, "_upload_to_fileset") as upload,
+        pytest.raises(RuntimeError, match="nat eval blew up"),
+    ):
         with job._resolve_output(FilesetRef("eval-out"), workspace="default", ctx=ctx, sdk=sdk):
             raise RuntimeError("nat eval blew up")
 
-    sdk.files.upload.assert_not_called()
+    upload.assert_not_called()
 
 
 def test_run_failed_subprocess_skips_fileset_upload(tmp_path: Path, ctx: JobContext) -> None:
@@ -156,11 +172,14 @@ def test_run_failed_subprocess_skips_fileset_upload(tmp_path: Path, ctx: JobCont
     }
 
     cpe = subprocess.CalledProcessError(returncode=2, cmd=["nat", "eval"])
-    with patch("nemo_agents_plugin.jobs.evaluate_agent.subprocess.run", side_effect=cpe):
+    with (
+        patch.object(EvaluateAgentJob, "_upload_to_fileset") as upload,
+        patch("nemo_agents_plugin.jobs.evaluate_agent.subprocess.run", side_effect=cpe),
+    ):
         result = EvaluateAgentJob().run(spec, ctx=ctx, sdk=sdk)
 
     assert result == {"status": "failed", "returncode": 2}
-    sdk.files.upload.assert_not_called()
+    upload.assert_not_called()
 
 
 def test_run_subprocess_timeout_skips_fileset_upload(tmp_path: Path, ctx: JobContext) -> None:
@@ -178,11 +197,14 @@ def test_run_subprocess_timeout_skips_fileset_upload(tmp_path: Path, ctx: JobCon
     }
 
     timeout = subprocess.TimeoutExpired(cmd=["nat", "eval"], timeout=3600)
-    with patch("nemo_agents_plugin.jobs.evaluate_agent.subprocess.run", side_effect=timeout):
+    with (
+        patch.object(EvaluateAgentJob, "_upload_to_fileset") as upload,
+        patch("nemo_agents_plugin.jobs.evaluate_agent.subprocess.run", side_effect=timeout),
+    ):
         result = EvaluateAgentJob().run(spec, ctx=ctx, sdk=sdk)
 
     assert result == {"status": "failed", "returncode": 124}
-    sdk.files.upload.assert_not_called()
+    upload.assert_not_called()
 
 
 def test_resolve_output_no_output_uses_persistent_results(tmp_path: Path, ctx: JobContext) -> None:
@@ -204,17 +226,23 @@ def test_resolve_eval_config_fileset_tempdir_lands_under_ctx_ephemeral(tmp_path:
         workspace="default",
     )
     sdk = MagicMock()
+    manager = MagicMock()
 
     seen: dict[str, Path] = {}
 
-    def _fake_download(local_path: str, fileset: str, workspace: str) -> None:
-        seen["local_path"] = Path(local_path)
-        Path(local_path, "config.yml").write_text("eval: {}")
+    def _fake_download(_ref: str, *, local_dir: Path) -> None:
+        seen["local_path"] = local_dir
+        Path(local_dir, "config.yml").write_text("eval: {}")
 
-    sdk.files.download.side_effect = _fake_download
+    manager.download_from_url.side_effect = _fake_download
 
-    with job._resolve_eval_config(spec, ctx=ctx, sdk=sdk):
-        pass
+    with (
+        patch("nemo_agents_plugin.jobs.evaluate_agent.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileSystem", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileManager", return_value=manager),
+    ):
+        with job._resolve_eval_config(spec, ctx=ctx, sdk=sdk):
+            pass
 
     assert seen["local_path"].parent == ctx.storage.ephemeral
 
@@ -225,7 +253,8 @@ def test_resolve_output_fileset_tempdir_lands_under_ctx_ephemeral(tmp_path: Path
     sdk = MagicMock()
 
     captured: dict[str, Path] = {}
-    with job._resolve_output(FilesetRef("eval-out"), workspace="default", ctx=ctx, sdk=sdk) as base:
-        captured["base"] = base
+    with patch.object(EvaluateAgentJob, "_upload_to_fileset"):
+        with job._resolve_output(FilesetRef("eval-out"), workspace="default", ctx=ctx, sdk=sdk) as base:
+            captured["base"] = base
 
     assert captured["base"].parent == ctx.storage.ephemeral

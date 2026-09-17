@@ -171,6 +171,31 @@ def build_fabric_agent_eval_spec() -> dict[str, Any]:
     }
 
 
+def build_gym_agent_eval_spec() -> dict[str, Any]:
+    """Return a durable custom-environment Gym agent-evaluation spec."""
+    return {
+        "tasks": "default/my-gym-taskset",
+        "target": {
+            "kind": "gym",
+            "environment": "default/my-gym-environment",
+            "agent": "simple_agent",
+            "agent_config": "responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            "resources_server": "custom_greeting",
+            "num_repeats": 1,
+            "concurrency": 1,
+            "hydra_params": {
+                "policy_base_url": "http://nemo-platform-api.default.svc.cluster.local:8080/"
+                "apis/inference-gateway/v2/workspaces/default/model/my-model/-/v1",
+                "policy_api_key": "not-used",
+                "policy_model_name": "my-model",
+            },
+        },
+        "max_concurrent_tasks": 1,
+        "fail_fast": True,
+        "labels": {"benchmark": "custom-gym-environment"},
+    }
+
+
 SPEC_BUILDERS: dict[str, SpecBuilder] = {
     "exact_match_metric.json": build_exact_match_spec,
     "llm_as_judge.json": build_llm_as_judge_spec,
@@ -178,6 +203,7 @@ SPEC_BUILDERS: dict[str, SpecBuilder] = {
 
 AGENT_SPEC_BUILDERS: dict[str, SpecBuilder] = {
     "fabric_agent_eval.json": build_fabric_agent_eval_spec,
+    "gym_agent_eval.json": build_gym_agent_eval_spec,
 }
 
 

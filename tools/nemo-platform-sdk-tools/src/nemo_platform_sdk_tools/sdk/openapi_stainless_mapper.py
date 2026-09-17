@@ -11,13 +11,22 @@ See README.md(https://nv/nmp/tools/nemo-platform-sdk-tools/src/nemo_platform_sdk
 import logging
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from caseutil import to_snake
-from nemo_platform_sdk_tools.sdk.core.openapi import OpenAPI
+from nemo_platform_sdk_tools.sdk.core.openapi import OpenAPI, OpenAPIEndpoint
 from nemo_platform_sdk_tools.sdk.core.stainless import StainlessConfig, StainlessMethod, StainlessModel
+from nemo_platform_sdk_tools.sdk.source_owned_resources import (
+    SOURCE_OWNED_RESOURCE_EXCLUSIONS,
+    SourceOwnedResource,
+    active_source_owned_resources,
+    derive_source_owned_schema_names,
+    endpoint_is_source_owned,
+    filter_schema_usage_for_generated_resources,
+)
 from ruamel.yaml import YAML
 
 logger = logging.getLogger(__name__)
@@ -152,20 +161,42 @@ class SchemaMapper:
     Maps OpenAPI schemas to Stainless model locations.
     """
 
-    def __init__(self, openapi_spec: OpenAPI, stainless_config: StainlessConfig):
+    def __init__(
+        self,
+        openapi_spec: OpenAPI,
+        stainless_config: StainlessConfig,
+        source_owned_resources: Sequence[SourceOwnedResource] = SOURCE_OWNED_RESOURCE_EXCLUSIONS,
+    ):
         self._openapi_spec = openapi_spec
         self._stainless_config = stainless_config
-        self._schemas = set(openapi_spec.schemas())
+        self._active_source_owned_resources = active_source_owned_resources(
+            configured_resource_names=self._stainless_config.top_level_resource_names(),
+            source_owned_resources=source_owned_resources,
+        )
+
+        schema_usage = self._openapi_spec.calculate_schema_to_endpoints()
+        excluded_schema_names = derive_source_owned_schema_names(
+            schema_usage,
+            self._active_source_owned_resources,
+        )
+        excluded_schema_names.update(self._openapi_spec.calculate_sdk_excluded_schema_names())
+        self._schemas = set(openapi_spec.schemas()) - excluded_schema_names
 
         # Extract existing models from Stainless config
         self._existing_models = self._stainless_config.extract_models()
         self._existing_methods = self._stainless_config.extract_methods()
 
         # Analyze schema usage
-        self._schema_usage = self._openapi_spec.calculate_schema_to_endpoints()
+        self._schema_usage = filter_schema_usage_for_generated_resources(
+            schema_usage,
+            self._active_source_owned_resources,
+        )
 
         # Report
         self._report = MappingReport()
+
+    def _endpoint_is_excluded(self, endpoint: OpenAPIEndpoint) -> bool:
+        return endpoint_is_source_owned(endpoint, self._active_source_owned_resources)
 
     def determine_schema_locations(self, *, skip_existing: bool = True) -> dict[str, list[str]]:
         """
@@ -325,7 +356,9 @@ class SchemaMapper:
         endpoint_to_stainless = {m.endpoint: m for m in self._existing_methods}
 
         updates = False
-        openapi_endpoints = list(self._openapi_spec.extract_endpoints())
+        openapi_endpoints = [
+            endpoint for endpoint in self._openapi_spec.extract_endpoints() if not self._endpoint_is_excluded(endpoint)
+        ]
         for endpoint in openapi_endpoints:
             if endpoint not in endpoint_to_stainless:
                 print(endpoint)

@@ -8,6 +8,17 @@ Run a Harbor **local dataset directory**,
 example scores with Harbor's deterministic **oracle** agent, so it needs no model
 or API key — only the `harbor` extra installed and a working Docker daemon.
 
+## Install
+
+The base SDK supports Python ≥ 3.11, while Harbor-backed execution and result
+adaptation require Python ≥ 3.12. The SDK is not published as a standalone PyPI
+package. Use a NeMo Platform source checkout; see [SETUP.md](../../../../SETUP.md)
+for toolchain prerequisites. From the repository root, install the optional extra:
+
+```bash
+uv sync --frozen --package nemo-evaluator-sdk --extra harbor
+```
+
 ## Minimal plumbing
 
 The SDK owns the Harbor plumbing. Apart from imports, running a whole dataset is
@@ -24,18 +35,8 @@ result = await run_harbor_eval(config, "hello_world_dataset")  # loads tasks, ru
 
 `run_harbor_eval` discovers the tasks, builds and runs Harbor's `JobConfig`, and
 scores each task with `HarborRewardMetric` — the caller never imports `harbor` or
-assembles a job. `harbor` is imported lazily inside the runtime, so importing the
-SDK never requires it.
-
-## Install
-
-Harbor is imported lazily and is **not** in the SDK's locked dependencies (it
-requires Python ≥ 3.12 while the workspace supports ≥ 3.11, like `nemo_fabric`).
-Install it separately into the environment that runs the example:
-
-```bash
-uv pip install "harbor>=0.16.1"
-```
+assembles a job. `harbor` is imported lazily: the base SDK does not require it,
+but Harbor execution and existing-result adaptation do.
 
 ## The dataset directory (how Harbor tasks are found)
 
@@ -70,15 +71,14 @@ The runtime is [`harbor_runtime.py`](../../src/nemo_evaluator_sdk/agent_eval/run
   `AgentEvalTrial`s.
 - `HarborTasksetLoader` / `discover_harbor_tasks` — turn a dataset dir into tasks.
 - `HarborRewardMetric` — scores the verifier reward stamped on each trial.
-- `reward_payload_from_result` — collapses a scored `AgentEvalResult` back into
-  the legacy `{reward, reward_details, exceptions}` shape older NeMo Optimizer
-  consumers expect.
 
 ### Re-running and caching
 
 In native mode the `job_dir` doubles as a cache: if every requested task already
-has `n_attempts` completed (non-errored) results there, the Harbor run is skipped
-and the results are re-adapted instead. This only engages when you **pin a stable
+has `n_attempts` Harbor-valid results there, the Harbor run is skipped
+and the results are re-adapted instead. Valid errored results count because Harbor
+also treats them as completed attempts; their SDK trials remain `PARTIAL` and
+scoreable. This only engages when you **pin a stable
 `job_name`** on the config — the default `job_name` is a timestamp, so each run
 writes a fresh dir and never hits the cache. Set `force_rerun=True` to delete the
 job dir and re-run unconditionally.
@@ -94,14 +94,27 @@ await run_harbor_eval(config, "hello_world_dataset")  # second call re-adapts th
 From the repository root:
 
 ```bash
-# Native path: run and print the SDK summary.
-uv run python -m packages.nemo_evaluator_sdk.examples.harbor.run_harbor_example --mode native
-
-# Optimizer path: run, then rebuild NeMo Optimizer's legacy reward payload.
-uv run python -m packages.nemo_evaluator_sdk.examples.harbor.run_harbor_example --mode optimizer
+uv run python -m packages.nemo_evaluator_sdk.examples.harbor.run_harbor_example
 ```
 
-Both modes call `run_harbor_eval`; the only difference is what they print.
+## A NeMo Fabric harness inside Harbor
+
+`fabric_agent/fabric_hello_world_dataset/` is the same hello-world task on a `python:3.12-slim`
+image, so [NeMo Fabric](https://github.com/NVIDIA/NeMo-Fabric) can install itself into the task
+container. `fabric_agent/run_fabric_deepagents_example.py` runs it with the LangChain deepagents
+harness on a Nemotron model:
+
+```bash
+export NVIDIA_API_KEY=...   # https://build.nvidia.com
+uv run python -m packages.nemo_evaluator_sdk.examples.harbor.fabric_agent.run_fabric_deepagents_example
+```
+
+The agent is `nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent`, a subclass
+of `FabricAgent`, Fabric's custom Harbor agent, that resolves the model credential variable and
+endpoint from the `provider/model` slug. The key reaches the container through `agent_env_from_host`, so the job
+directory's `config.json` records `${NVIDIA_API_KEY}` rather than the value. See
+[Run a NeMo Fabric Agent inside Harbor](https://docs.nvidia.com/nemo-platform/documentation/evaluate-models/agent-eval/harbor-fabric-agent)
+for the platform job form.
 
 ## Custom (wrapped) agents
 
@@ -120,6 +133,8 @@ config = HarborRuntimeConfig(
 config = HarborRuntimeConfig(
     jobs_dir=jobs_dir,
     agent_import_path="mypkg.agent:WrappedAgent",
+    # Constructor arguments for the agent — Harbor's `--ak key=value`.
+    agent_kwargs={"max_turns": 20},
 )
 
 result = await run_harbor_eval(config, "hello_world_dataset")

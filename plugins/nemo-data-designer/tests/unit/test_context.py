@@ -9,7 +9,7 @@ import data_designer.config as dd
 import nemo_data_designer_plugin.testing.utils as u
 import pandas as pd
 import pytest
-from data_designer_nemo.context import DataDesignerContext
+from data_designer_nemo.context import DataDesignerValidationContext
 from data_designer_nemo.errors import NDDInvalidConfigError
 from nemo_platform import AsyncNeMoPlatform
 
@@ -78,7 +78,7 @@ async def test_remote_validate_runs_remote_validators(monkeypatch: pytest.Monkey
     monkeypatch.setattr("data_designer_nemo.context.validate_seed", validate_seed)
     monkeypatch.setattr("data_designer_nemo.context.ensure_nemotron_personas_filesets", validate_personas)
 
-    errors = await DataDesignerContext(sdk, u.WORKSPACE_NAME).validate(config)
+    errors = await DataDesignerValidationContext(sdk, u.WORKSPACE_NAME).validate(config)
 
     assert errors == []
     assert calls == ["tools", "seed", "personas"]
@@ -86,7 +86,7 @@ async def test_remote_validate_runs_remote_validators(monkeypatch: pytest.Monkey
 
 async def test_remote_validate_rejects_unsupported_seed_config() -> None:
     config = _simple_config(seed_source=dd.DataFrameSeedSource(df=pd.DataFrame(data={"a": [1, 2, 3]})))
-    dd_ctx = DataDesignerContext(AsyncMock(spec=AsyncNeMoPlatform), u.WORKSPACE_NAME)
+    dd_ctx = DataDesignerValidationContext(AsyncMock(spec=AsyncNeMoPlatform), u.WORKSPACE_NAME)
 
     errors = await dd_ctx.validate(config)
 
@@ -102,7 +102,7 @@ async def test_remote_validate_aggregates_multiple_failures() -> None:
         seed_source=dd.DataFrameSeedSource(df=pd.DataFrame(data={"a": [1, 2, 3]})),
     )
     sdk = AsyncMock(spec=AsyncNeMoPlatform)
-    dd_ctx = DataDesignerContext(sdk, u.WORKSPACE_NAME)
+    dd_ctx = DataDesignerValidationContext(sdk, u.WORKSPACE_NAME)
 
     errors = await dd_ctx.validate(config)
 

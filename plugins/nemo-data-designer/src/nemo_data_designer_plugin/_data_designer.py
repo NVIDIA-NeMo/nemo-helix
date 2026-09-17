@@ -8,14 +8,14 @@ from pathlib import Path
 import data_designer.config as dd
 import data_designer.interface.data_designer as data_designer_interface
 from data_designer.interface.data_designer import DataDesigner
-from data_designer_nemo.context import DataDesignerContext
+from data_designer_nemo.context import DataDesignerExecutionContext
 
 
 def create_data_designer(
     *,
     artifact_path: Path | str,
     model_providers: list[dd.ModelProvider],
-    dd_ctx: DataDesignerContext,
+    dd_ctx: DataDesignerExecutionContext,
 ) -> DataDesigner:
     """Create the library interface without letting it reconfigure process logging."""
     data_designer_interface.configure_logging = _noop_configure_logging  # ty: ignore[invalid-assignment]

@@ -233,6 +233,11 @@ rules:
     exception: TrainingConfigError
     error_details: "Dynamic sampling exceeded the maximum number of generation batches allowed per training step. This means the training data or reward signal is too challenging for the model to produce enough valid samples. Consider: 1) Simplifying your dataset, 2) Adjusting num_prompts_per_step or num_generations_per_prompt, 3) Checking that your reward function is not too strict."
 
+  # Dynamic sampling exhausted a finite dataloader without forming one trainable group
+  - contains: "Dynamic sampling found no prompt group with non-zero reward standard deviation"
+    exception: TrainingConfigError
+    error_details: "Dynamic sampling discarded every prompt group because all generations for each prompt earned the same reward. Check that the reward function produces varied scores, add more diverse prompts, or disable dynamic sampling."
+
   # Batch size not divisible by DP
   - regex: "Configuration error: \\(num_prompts_per_step \\* num_generations_per_prompt\\) = \\d+ must be divisible by data_parallel size \\d+"
     exception: TrainingConfigError
@@ -393,6 +398,11 @@ rules:
   - regex: "^HF checkpoint already exists at .+\\. Delete it to run or set overwrite=True\\.$"
     exception: CheckpointError
     error_details: "The HuggingFace checkpoint output directory already exists from a previous training run or conversion. This typically happens when a previous training job left partial output behind. Please use a clean output directory, or contact your administrator to remove the existing checkpoint."
+
+  # Training returned without producing anything to publish
+  - exact: "Training finished without saving a checkpoint."
+    exception: CheckpointError
+    error_details: "Training finished without saving any checkpoint, so there is no model to publish. This usually means no training step completed. Please check the training logs for the step count, and verify max_steps, the epoch count, and your dataset size are large enough for at least one step to run."
 
   # ===========================================================================
   # 11. CUDA/GPU ERRORS (500)

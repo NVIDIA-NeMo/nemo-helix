@@ -8,6 +8,8 @@ from pathlib import Path
 from nemo_data_designer_plugin.jobs.run import run_step_config
 from nemo_data_designer_plugin.jobs.spec import DataDesignerStepConfig
 from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import PlatformJobResults
 from nemo_platform_plugin.jobs.constants import (
@@ -49,7 +51,7 @@ def _get_ctx(sdk: NeMoPlatform) -> JobContext:
     results = PlatformJobResults(
         workspace=workspace,
         job_name=job_name,
-        sdk=sdk,
+        client=client_from_platform(sdk, NemoClient),
     )
     return JobContext(
         workspace=workspace,

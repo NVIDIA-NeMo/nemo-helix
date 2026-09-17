@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
+import { useInsightsGetInsight } from '@nemo/sdk/generated/insights/insights-insights';
 import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import { useGetExperiment } from '@nemo/sdk/generated/platform/experiments';
 import { Badge, Card, Flex, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
-import { useOptimizerGetInsight } from '@studio/api/optimizer';
 import { EvaluationSessionsDataView } from '@studio/components/dataViews/EvaluationSessionsDataView';
 import { OriginatingInsightLink } from '@studio/components/OriginatingInsightLink';
 import { OPTIMIZER_ENABLED } from '@studio/constants/environment';
@@ -27,7 +27,7 @@ export const EvaluationDetailRoute: FC = () => {
   // Evaluations reach their originating insight through the owning group's insight_id.
   const { data: experiment } = useGetExperiment(workspace, experimentName);
   const insightId = experiment?.insight_id ?? '';
-  const { data: insight } = useOptimizerGetInsight(workspace, insightId, {
+  const { data: insight } = useInsightsGetInsight(workspace, insightId, {
     query: { enabled: OPTIMIZER_ENABLED && Boolean(insightId) },
   });
   const showInsightCard = Boolean(insight?.description);

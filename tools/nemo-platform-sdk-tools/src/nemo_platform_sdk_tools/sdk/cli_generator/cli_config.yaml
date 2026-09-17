@@ -41,32 +41,18 @@ top_level:
   guardrail:
     panel: Functional plugins
     help: Manage guardrails.
-  iam:
-    panel: Core plugins
-    help: IAM operations.
-    hidden: true
   inference:
     panel: Core plugins
     help: Inference operations.
   intake:
     panel: Functional plugins
     help: Intake operations.
-  jobs:
-    panel: Core plugins
-    help: Manage jobs.
   models:
     panel: Core plugins
     help: Manage models.
-  projects:
-    panel: Core plugins
-    help: Manage projects.
-    hidden: true
   secrets:
     panel: Core plugins
     help: Manage secrets.
-  workspaces:
-    panel: Core plugins
-    help: Manage workspaces.
 
 # Resource-specific configurations
 config:
@@ -74,27 +60,14 @@ config:
   skip: true
 - resource: [access_keys]
   skip: true
+- resource: [iam]
+  skip: true
 - resource: [models]
   methods:
     list:
       columns:
       - name
       - description
-- resource: [workspaces, members]
-  methods:
-    list:
-      columns:
-      - principal
-      - roles
-      - granted_by
-      - granted_at
-- resource: [workspaces]
-  methods:
-    list:
-      columns:
-      - name
-      - description
-      - created_at
 - resource: [datasets]
   methods:
     list:
@@ -103,13 +76,6 @@ config:
       - description
       - format
       - files_url
-      - created_at
-- resource: [projects]
-  methods:
-    list:
-      columns:
-      - name
-      - description
       - created_at
 - resource: [evaluation, configs]
   methods:
@@ -169,31 +135,7 @@ config:
       - description
       - created_at
 - resource: [jobs]
-  additional_methods:
-    watch:
-      override: jobs/watch.py
-    tail:
-      override: jobs/tail.py
-  methods:
-    create:
-      wait:
-        type: platform_job
-        resource_label: job
-      watch:
-        type: platform_job
-        resource_label: job
-    list:
-      columns:
-      - name
-      - description
-      - status
-      - created_at
-    list_execution_profiles:
-      columns:
-      - profile
-      - backend
-      - provider
-      - config
+  skip: true
 - resource: [models]
   methods:
     list:
@@ -251,11 +193,13 @@ config:
     list:
       columns:
       - name
+      - status
       - description
       - created_at
     list_workspace:
       columns:
       - name
+      - status
       - description
       - created_at
 - resource: [inference, models]
@@ -317,11 +261,7 @@ config:
   skip: true
 
 - resource: [secrets]
-  methods:
-    create:
-      override: secrets/create.py
-    update:
-      override: secrets/update.py
+  skip: true
 
 # Gateway proxy commands: `name` is a workspace query param, not a resource identifier
 - resource: [inference, gateway, model]
@@ -375,3 +315,9 @@ config:
   additional_methods:
     get-url:
       override: inference/get_url.py
+
+- resource: [workspaces]
+  skip: true
+
+- resource: [projects]
+  skip: true

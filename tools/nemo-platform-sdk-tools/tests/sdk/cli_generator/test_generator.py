@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 from jinja2 import Environment, FileSystemLoader
 from nemo_platform._types import Omit
-from nemo_platform_sdk_tools.sdk.cli_generator.config import CLIConfig, get_templates_dir
+from nemo_platform_sdk_tools.sdk.cli_generator.config import CLIConfig, get_cli_generator_root, get_templates_dir
 from nemo_platform_sdk_tools.sdk.cli_generator.context_collectors.base import (
     build_path_params,
     promote_name_to_positional,
@@ -30,7 +30,7 @@ from nemo_platform_sdk_tools.sdk.cli_generator.models import (
     sanitize_help_text,
     strip_api_only_lines,
 )
-from nemo_platform_sdk_tools.sdk.cli_generator.sdk_introspector import SDKIntrospector, SDKMethod, SDKParameter
+from nemo_platform_sdk_tools.sdk.cli_generator.sdk_introspector import SDKMethod, SDKParameter
 from nemo_platform_sdk_tools.sdk.cli_generator.type_formatter import format_type_for_help, get_type_schema
 
 
@@ -523,42 +523,11 @@ config: []
 class TestGeneratorIntegration:
     """Integration tests for the generator with real SDK types."""
 
-    def test_jobs_filter_has_all_simple_fields(self):
-        """Jobs filter should expose every simple field as a CLI option."""
-        introspector = SDKIntrospector()
-        methods = introspector.introspect_resource(["jobs"])
-        list_method = methods["list"]
+    def test_jobs_resource_is_skipped_by_real_cli_config(self):
+        """Jobs CLI generation should not introspect the deleted Stainless resource."""
+        config = CLIConfig(get_cli_generator_root() / "cli_config.yaml")
 
-        filter_param = next(p for p in list_method.optional_parameters if p.name == "filter")
-        simple_fields = [f for f in filter_param.typed_dict_fields if f.is_simple_cli_type]
-        field_names = {f.name for f in simple_fields}
-
-        assert field_names == {"name", "project", "source", "status", "workspace"}
-
-    def test_jobs_filter_has_list_type_fields(self):
-        """Jobs status filter should support multiple values."""
-        introspector = SDKIntrospector()
-        methods = introspector.introspect_resource(["jobs"])
-        list_method = methods["list"]
-
-        filter_param = next(p for p in list_method.optional_parameters if p.name == "filter")
-        list_fields = [f for f in filter_param.typed_dict_fields if f.is_list_type and f.is_simple_cli_type]
-        field_names = {f.name for f in list_fields}
-
-        assert field_names == {"status"}
-
-    def test_jobs_filter_excludes_complex_fields(self):
-        """Jobs filter should not explode nested datetime filters as scalar options."""
-        introspector = SDKIntrospector()
-        methods = introspector.introspect_resource(["jobs"])
-        list_method = methods["list"]
-
-        filter_param = next(p for p in list_method.optional_parameters if p.name == "filter")
-        simple_fields = [f for f in filter_param.typed_dict_fields if f.is_simple_cli_type]
-        field_names = {f.name for f in simple_fields}
-
-        assert "created_at" not in field_names
-        assert "updated_at" not in field_names
+        assert config.should_skip(["jobs"])
 
 
 def _make_sdk_method(path_params: list[tuple[str, str | None]]) -> SDKMethod:

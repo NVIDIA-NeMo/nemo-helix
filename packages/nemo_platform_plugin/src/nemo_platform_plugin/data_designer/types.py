@@ -11,11 +11,14 @@ exposes a streaming preview function and a job-submission collection
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
 from nemo_platform_plugin.schema import Page
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, JsonValue
+
+JsonMap = dict[str, JsonValue]
+DataDesignerJobCollection = Literal["create", "retrieval-generate", "retrieval-prepare", "retrieval-run"]
 
 # ---------------------------------------------------------------------------
 # Preview types
@@ -32,8 +35,15 @@ class PreviewRequest(BaseModel):
     ``.to_dict()`` (or ``model_dump(mode="json")``) to produce this dict.
     """
 
-    config: dict[str, Any]
+    config: JsonMap
     num_records: int | None = None
+
+
+class RetrievalPreviewRequest(BaseModel):
+    """Request body for the retrieval-preview endpoint."""
+
+    generate: JsonMap
+    num_records: int = Field(default=1, ge=1)
 
 
 class PreviewFrameData(BaseModel):
@@ -65,9 +75,11 @@ class DataDesignerJobRequest(BaseModel):
     name: str | None = None
     description: str | None = None
     project: str | None = None
-    spec: dict[str, Any] = Field(default_factory=dict)
-    ownership: dict[str, Any] | None = None
-    custom_fields: dict[str, Any] | None = None
+    spec: JsonMap = Field(default_factory=dict)
+    profile: str | None = None
+    options: JsonMap | None = None
+    ownership: JsonMap | None = None
+    custom_fields: JsonMap | None = None
     output_location: str | None = None
 
 
@@ -85,12 +97,12 @@ class DataDesignerJobResponse(BaseModel):
     workspace: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
-    spec: dict[str, Any] = Field(default_factory=dict)
+    spec: JsonMap = Field(default_factory=dict)
     status: PlatformJobStatus | None = None
-    status_details: dict[str, Any] | None = None
-    error_details: dict[str, Any] | None = None
-    ownership: dict[str, Any] | None = None
-    custom_fields: dict[str, Any] | None = None
+    status_details: JsonMap | None = None
+    error_details: JsonMap | None = None
+    ownership: JsonMap | None = None
+    custom_fields: JsonMap | None = None
 
 
 DataDesignerJobPage = Page[DataDesignerJobResponse]

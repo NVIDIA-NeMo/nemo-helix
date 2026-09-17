@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from nemo_agents_plugin.entities import ComputeResources, DeploymentMode, DeploymentStatus, Endpoint
+from nemo_agents_plugin.spec_revision import SpecRevision
 from nemo_platform_plugin.auth import AuthContext
 
 
@@ -68,6 +69,8 @@ class DeploymentInfo:
     """Absolute path to the subprocess log file (empty if not applicable)."""
     extra: dict[str, Any] = field(default_factory=dict)
     """Backend-specific metadata (e.g. container ID for Docker)."""
+    staged_spec: SpecRevision | None = None
+    """What the spec fileset resolved to when staged; None when the backend staged nothing."""
 
 
 class RunnerBackend(ABC):

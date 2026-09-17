@@ -34,6 +34,7 @@ def persist_run(
     Set ``write_html_dashboard=False`` to skip rendering ``report.html`` — the dashboard is written
     here so the manifest can record it in a single pass.
     """
+    validated_trials = [AgentEvalTrial.model_validate(trial) for trial in result.trials]
     path = Path(output_dir)
     path.mkdir(parents=True, exist_ok=True)
 
@@ -42,7 +43,7 @@ def persist_run(
 
     _write_json(path / "metadata.json", result.metadata)
     _write_jsonl(path / "tasks.jsonl", result.tasks)
-    _write_trials(path / "trials.jsonl", result.trials, base=path)
+    _write_trials(path / "trials.jsonl", validated_trials, base=path)
     _write_jsonl(path / "scores.jsonl", result.scores)
     _write_json(path / "summary.json", result.summary)
 
@@ -82,7 +83,7 @@ def _write_jsonl(path: Path, rows: Sequence[BaseModel]) -> None:
             handle.write("\n")
 
 
-def _write_trials(path: Path, trials: Sequence[BaseModel], *, base: Path) -> None:
+def _write_trials(path: Path, trials: Sequence[AgentEvalTrial], *, base: Path) -> None:
     """Write trials, rewriting evidence refs bundle-relative so the bundle is self-contained.
 
     A trial's evidence lives under the bundle (``<output_dir>/evidence/...``); storing the ref relative to
@@ -111,7 +112,7 @@ def _relativize_ref(ref: str | None, base: Path) -> str | None:
 
 
 def read_trials(run_dir: str | Path) -> list[AgentEvalTrial]:
-    """Hydrate the persisted trials of a run bundle — the inverse of the ``trials.jsonl`` ``persist_run`` writes.
+    """Read the persisted trials of a run bundle — the inverse of the ``trials.jsonl`` ``persist_run`` writes.
 
     Each row is loaded back into an ``AgentEvalTrial`` with its evidence pointing at the on-disk
     deliverables, so a stored run can be **re-scored** — ``AgentEvaluator().run(tasks=…, trials=…)`` with
@@ -156,7 +157,7 @@ def _resolves_within(base: Path, path: Path) -> bool:
     """Whether ``path`` exists and stays inside ``base`` after resolving — no ``..``/symlink escape.
 
     Rebuilt refs are joined onto ``run_dir``; a bundle is designed to be moved/copied, so a ref with ``..``
-    (or a symlink) must not be allowed to point the hydrated evidence outside the bundle it was loaded from.
+    (or a symlink) must not be allowed to point loaded evidence outside the bundle it was loaded from.
     """
     resolved = path.resolve()
     if not resolved.exists():

@@ -12,10 +12,11 @@ having built one.
 
 import json
 import shutil
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
-from doubles import FakeBackend, make_candidate, make_context
+from doubles import FakeBackend, fake_client, make_candidate, make_context
 from nemo_experimentalist_plugin.entities import (
     Candidate,
     Dataset,
@@ -171,7 +172,7 @@ async def test_updating_a_committed_candidate_persists_the_change(tmp_path: Path
     """
     from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import LocalExperimentalistBackend
 
-    ctx = make_context(root=tmp_path, backend=LocalExperimentalistBackend(path=tmp_path))
+    ctx = make_context(root=tmp_path, backend=LocalExperimentalistBackend(client=fake_client(), path=tmp_path))
     baseline = await _import_baseline(ctx)
 
     await ctx.update_candidate(baseline, killed_generation=2)
@@ -204,7 +205,7 @@ async def test_candidates_are_listed_from_the_store_not_from_a_directory_walk(tm
     """A strategy that does not produce one directory per candidate can still list them."""
     from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import LocalExperimentalistBackend
 
-    backend = LocalExperimentalistBackend(path=tmp_path)
+    backend = LocalExperimentalistBackend(client=fake_client(), path=tmp_path)
     ctx = make_context(root=tmp_path, backend=backend)
     committed = await _import_baseline(ctx)
 
@@ -235,6 +236,7 @@ async def test_a_fork_does_not_inherit_the_ancestors_architecture_doc(tmp_path: 
 
     assert (fork.workdir / "main.py").read_text() == "print('ancestor')\n"
     assert not (fork.workdir / "architecture.md").exists()
+    assert fork.upstream is not None
     assert (fork.upstream / "architecture.md").exists(), "still reachable through the fork's upstream"
 
 
@@ -384,7 +386,7 @@ async def test_the_store_itself_hides_discarded_candidates(tmp_path: Path) -> No
     """
     from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import LocalExperimentalistBackend
 
-    ctx = make_context(root=tmp_path, backend=LocalExperimentalistBackend(path=tmp_path))
+    ctx = make_context(root=tmp_path, backend=LocalExperimentalistBackend(client=fake_client(), path=tmp_path))
     baseline = await _import_baseline(ctx)
     await ctx.discard_candidate(baseline)
 
@@ -437,6 +439,8 @@ async def test_a_builder_documents_the_candidates_it_builds(tmp_path: Path) -> N
     bypassed it for every candidate built after.
     """
     from nemo_experimentalist_plugin.experimentalist.components.coder import CodeEditBuilder
+    from nemo_experimentalist_plugin.experimentalist.components.evaluator.base import Evaluator
+    from nemo_experimentalist_plugin.experimentalist.components.proposer import CodeChange
 
     described: list[Path] = []
 
@@ -446,19 +450,33 @@ async def test_a_builder_documents_the_candidates_it_builds(tmp_path: Path) -> N
         async def describe(self, artifact: Path) -> None:
             described.append(artifact)
 
-        async def apply_change(self, *args: object, **kwargs: object) -> None:
+        async def apply_change(self, workdir: Path, optimization: str, change: CodeChange) -> None:
             return None
 
-        async def wire_up_change(self, *args: object, **kwargs: object) -> None:
+        async def wire_up_change(self, workdir: Path, optimization: str, change: CodeChange) -> None:
             return None
 
-        async def run_pyright(self, *args: object, **kwargs: object) -> None:
+        async def run_pyright(self, workdir: Path) -> str:
+            return ""
+
+        async def optimize_subproblem(
+            self,
+            workdir: Path,
+            optimization: str,
+            change: CodeChange,
+            dataset: Dataset,
+            evaluator: Evaluator,
+        ) -> None:
             return None
 
-        async def optimize_subproblem(self, *args: object, **kwargs: object) -> None:
-            return None
-
-        async def integration_check(self, *args: object, **kwargs: object) -> bool:
+        async def integration_check(
+            self,
+            workdir: Path,
+            dataset: Dataset,
+            evaluator: Evaluator,
+            max_fix_attempts: int | None = None,
+            task_ids: Sequence[str] | None = None,
+        ) -> bool:
             return True
 
     ctx = make_context(root=tmp_path, backend=FakeBackend())

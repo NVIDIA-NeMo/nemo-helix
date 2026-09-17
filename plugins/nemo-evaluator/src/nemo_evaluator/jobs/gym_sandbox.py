@@ -28,6 +28,7 @@ from nemo_platform_plugin.jobs.execution_profiles import (
     KubernetesJobExecutionProfile,
     VolcanoJobExecutionProfile,
 )
+from nemo_platform_plugin.jobs.image import get_qualified_image
 from nemo_platform_plugin.jobs.spec import BaseExecutionProfile
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -36,6 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field
 _CREDENTIAL_PATTERN = re.compile(r"(API_?KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|PRIVATE_?KEY)", re.IGNORECASE)
 #: Removed by the Gym host before handing the config to NeMo Gym.
 ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY = "_nmp_environment_component_selection"
+GYM_HOST_IMAGE = "nmp-gym-host"
 
 
 class SandboxUnavailableError(RuntimeError):
@@ -122,12 +124,7 @@ def require_sandbox_available(config: EvaluatorConfig) -> None:
             "`sandboxed_gym_default` to run Gym in the job container."
         )
     missing = [
-        name
-        for name, value in (
-            ("sandbox_runtime_image", config.sandbox_runtime_image),
-            ("sandbox_job_storage_pvc_claim", config.sandbox_job_storage_pvc_claim),
-        )
-        if not value
+        name for name, value in (("sandbox_job_storage_pvc_claim", config.sandbox_job_storage_pvc_claim),) if not value
     ]
     if missing:
         raise SandboxUnavailableError(
@@ -207,8 +204,8 @@ def resolve_sandbox_plan(
         return None
     require_sandbox_available(config)
     require_no_plaintext_credentials(target)
-    # `require_sandbox_available` has just established that neither is empty.
-    assert config.sandbox_runtime_image is not None
+    runtime_image = config.sandbox_runtime_image or get_qualified_image(GYM_HOST_IMAGE)
+    # `require_sandbox_available` has just established that this is not empty.
     assert config.sandbox_job_storage_pvc_claim is not None
     host_provider_options = dict(config.sandbox_host_provider_options)
     # In-cluster OpenSandbox speaks http. If we leave this unset, the host probes the
@@ -219,7 +216,7 @@ def resolve_sandbox_plan(
         host_provider_options["connection"] = connection
     return SandboxPlan(
         host_provider=config.sandbox_host_provider,
-        runtime_image=config.sandbox_runtime_image,
+        runtime_image=runtime_image,
         job_storage_pvc_claim=config.sandbox_job_storage_pvc_claim,
         environment_sub_path=config.sandbox_environment_sub_path,
         workspace_sub_path=config.sandbox_workspace_sub_path,
@@ -402,7 +399,7 @@ class SessionBackedGymRunner:
     failed collection reclaims it too.
     """
 
-    #: Job id used when the run has none -- a local run outside the platform. The broker requires a
+    #: Job id used when the run has none -- an in-process run outside the platform. The broker requires a
     #: non-empty id because it scopes episode ownership and orphan reconciliation by it.
     LOCAL_JOB_ID = "agent-eval-local"
 

@@ -11,6 +11,7 @@ import pytest
 import typer
 from click.testing import CliRunner as ClickCliRunner
 from nemo_platform_ext.cli.app import app
+from nemo_platform_ext.cli.commands.api import API_TOP_LEVEL_ENTRIES
 from nemo_platform_ext.cli.commands.manifest_registry import TOP_LEVEL_ENTRIES
 from nemo_platform_ext.cli.core.lazy_load import (
     ManifestBackedNmpGroup,
@@ -87,6 +88,12 @@ def test_generated_list_validates_stream_output_before_client_setup():
     assert result.exit_code == 2
     assert "--stream requires --output json or --output raw" in result.stderr
     mock_get_client.assert_not_called()
+
+
+def test_generated_api_manifest_excludes_source_owned_auth_commands():
+    entry_names = {entry.name for entry in API_TOP_LEVEL_ENTRIES}
+
+    assert {"auth", "access-keys", "iam"}.isdisjoint(entry_names)
 
 
 @pytest.mark.parametrize(
@@ -274,27 +281,26 @@ def test_entities_api_command_is_not_registered():
 
 def test_members_api_command_is_nested_under_workspaces():
     runner = CliRunner()
-    sys.modules.pop("nemo_platform_ext.cli.commands.api.members", None)
-    sys.modules.pop("nemo_platform_ext.cli.commands.api.workspaces", None)
-    sys.modules.pop("nemo_platform_ext.cli.commands.api.workspaces.members", None)
+    sys.modules.pop("nemo_platform_ext.cli.commands.members", None)
+    sys.modules.pop("nemo_platform_ext.cli.commands.workspaces", None)
 
     result = runner.invoke(app, ["workspaces", "members", "--help"])
 
     assert result.exit_code == 0
     assert "Manage members" in result.stdout
-    assert "nemo_platform_ext.cli.commands.api.workspaces.members" in sys.modules
-    assert "nemo_platform_ext.cli.commands.api.members" not in sys.modules
+    assert "nemo_platform_ext.cli.commands.workspaces" in sys.modules
+    assert "nemo_platform_ext.cli.commands.members" not in sys.modules
 
 
 def test_members_api_command_is_not_registered_at_top_level():
     runner = CliRunner()
-    sys.modules.pop("nemo_platform_ext.cli.commands.api.members", None)
+    sys.modules.pop("nemo_platform_ext.cli.commands.members", None)
 
     result = runner.invoke(app, ["members", "--help"])
 
     assert result.exit_code != 0
     assert "No such command 'members'" in result.stderr
-    assert "nemo_platform_ext.cli.commands.api.members" not in sys.modules
+    assert "nemo_platform_ext.cli.commands.members" not in sys.modules
 
 
 def test_jobs_watch_command_is_registered():

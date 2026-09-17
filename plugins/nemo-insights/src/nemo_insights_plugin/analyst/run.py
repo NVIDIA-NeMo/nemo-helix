@@ -22,6 +22,8 @@ from nemo_insights_plugin.analyst.observability import (
 )
 from nemo_insights_plugin.analyst.result import AnalystResult
 from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.models.client import AsyncModelsClient
 from nemo_platform_plugin.nooa_model_client import (
     ConfiguredModelClients,
     ConfiguredModelRefs,
@@ -117,18 +119,25 @@ async def run_analyst_change_set(
     evaluation_id: str | None = None,
     analyst_evaluation: AnalystEvaluationContext | None = None,
     enable_observability: bool = True,
+    relay_scope_name: str | None = None,
     model_refs: ConfiguredModelRefs | None = None,
 ) -> tuple[AnalystResult, AnalystBackend]:
     """Build and run the analyst agent without persisting its change-set.
 
     The caller owns *client* and is responsible for closing it; this function
     never does.
+
+    Compared to run_analyst, this function adds the following args:
+        relay_scope_name: Scope to run the agent under when NeMo Relay is
+            instrumenting it. ``None`` runs uninstrumented. Independent of
+            *enable_observability*, which is the older direct-to-Intake path.
     """
     observability = None
     model_clients: ConfiguredModelClients | None = None
     insights_output_path = str(insights_output) if insights_output else None
     try:
-        model_clients = await resolve_model_clients(client, model_refs)
+        models_client = client_from_platform(client, AsyncModelsClient)
+        model_clients = await resolve_model_clients(models_client, model_refs)
         backend = make_analyst_backend(
             client=client,
             insights_output=insights_output_path,
@@ -156,7 +165,17 @@ async def run_analyst_change_set(
                 agent=agent,
                 ethos=ethos,
             )
-            result = await _run_agent(analyst, verbose=verbose)
+            # Relay instruments the agent through Nooa middleware, so the scope
+            # has to wrap the run and needs the agent object -- which only
+            # exists here. The caller decides whether Relay is active; it holds
+            # the Fabric context that says so.
+            if relay_scope_name is None:
+                result = await _run_agent(analyst, verbose=verbose)
+            else:
+                from nooa.nemo_relay_middleware import nemo_relay_scope
+
+                async with nemo_relay_scope(analyst, relay_scope_name):
+                    result = await _run_agent(analyst, verbose=verbose)
         return result, backend
     finally:
         # *client* is deliberately absent here: it belongs to the caller, who

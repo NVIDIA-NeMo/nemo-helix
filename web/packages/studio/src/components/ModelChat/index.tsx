@@ -7,11 +7,13 @@ import {
   type AssistantChatProps,
 } from '@nemo/common/src/components/AssistantChat';
 import type { AssistantMessageCompletion } from '@nemo/common/src/components/AssistantChat/types';
+import type { ResourceRef } from '@nemo/common/src/types';
 import { handleGenericError } from '@nemo/common/src/utils/logger';
 import type { ModelChatStatus } from '@nemo/common/src/utils/models';
 import { DEFAULT_SEED_QUESTIONS } from '@studio/components/chat/defaultSeedQuestions';
 import { SeedQuestions } from '@studio/components/chat/SeedQuestions';
 import { StatsBadge, type ChatMetrics } from '@studio/components/chat/StatsBadge';
+import { DeployModelCta } from '@studio/components/ModelChat/DeployModelCta';
 import type { ComposerSeed } from '@studio/routes/ModelCompareRoute/types';
 import { type ReactNode, useEffect, useRef, useState, type FC } from 'react';
 
@@ -53,21 +55,37 @@ interface ModelChatProps extends Pick<
   composerSeed?: ComposerSeed;
   /** Fires when this panel's thread transitions between empty and non-empty. */
   onEmptyChange?: (isEmpty: boolean) => void;
+  /**
+   * `<workspace>/<name>` of the model entity behind this chat. When set and the
+   * status is `disabled`, the empty state offers a "Deploy this model" action.
+   * For an adapter's chat this is the *base model* — deploying it is what makes
+   * the adapter servable.
+   */
+  deployModelRef?: ResourceRef;
+  /** Overrides the deploy button's copy. Defaults to "Deploy this model". */
+  deployModelLabel?: string;
 }
 
-const STATUS_EMPTY_STATE: Record<
-  Exclude<ModelChatStatus, 'enabled'>,
-  NonNullable<AssistantChatProps['emptyState']>
-> = {
-  disabled: {
+function statusEmptyState(
+  status: Exclude<ModelChatStatus, 'enabled'>,
+  deployModelRef?: ResourceRef,
+  deployModelLabel?: string
+): NonNullable<AssistantChatProps['emptyState']> {
+  if (status === 'pending') {
+    return {
+      slotHeading: 'Model Deployment in Progress',
+      slotSubheading: 'Check back in a few minutes to chat with this model.',
+    };
+  }
+  return {
     slotHeading: 'Chat Unavailable',
     slotSubheading: 'This model does not have an active deployment.',
-  },
-  pending: {
-    slotHeading: 'Model Deployment in Progress',
-    slotSubheading: 'Check back in a few minutes to chat with this model.',
-  },
-};
+    // Only `disabled` gets the CTA: `pending` already has a deployment coming up.
+    slotAction: deployModelRef ? (
+      <DeployModelCta modelRef={deployModelRef} label={deployModelLabel} />
+    ) : undefined,
+  };
+}
 
 export const ModelChat: FC<ModelChatProps> = ({
   model,
@@ -83,12 +101,14 @@ export const ModelChat: FC<ModelChatProps> = ({
   composerSeed,
   onEmptyChange,
   workspace,
+  deployModelRef,
+  deployModelLabel,
   ...rest
 }) => {
   const resolvedDisabled = disabled ?? (modelChatStatus ? modelChatStatus !== 'enabled' : false);
   const statusDerivedEmptyState =
     disabled === undefined && modelChatStatus && modelChatStatus !== 'enabled'
-      ? STATUS_EMPTY_STATE[modelChatStatus]
+      ? statusEmptyState(modelChatStatus, deployModelRef, deployModelLabel)
       : undefined;
   // In broadcast-all mode the page-level composer is the affordance, so the
   // per-panel subhead "Prompt your model to get started." is redundant.

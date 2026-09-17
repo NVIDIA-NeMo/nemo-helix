@@ -332,6 +332,7 @@ class Config(BaseModel):
             effective_workspace = DEFAULT_WORKSPACE
 
         effective_default_model = os.environ.get("NEMO_DEFAULT_MODEL") or context.default_model
+        effective_fast_model = os.environ.get("NEMO_FAST_MODEL") or context.fast_model or effective_default_model
 
         return Context(
             context_name=context_name,
@@ -339,6 +340,7 @@ class Config(BaseModel):
             user=user,
             workspace=effective_workspace,
             default_model=effective_default_model,
+            fast_model=effective_fast_model,
             preferences=prefs,
         )
 
@@ -371,12 +373,16 @@ class Config(BaseModel):
         if self.color_output is not None:
             prefs.color_output = self.color_output
 
+        effective_default_model = os.environ.get("NEMO_DEFAULT_MODEL") or context_def.default_model
+        effective_fast_model = os.environ.get("NEMO_FAST_MODEL") or context_def.fast_model or effective_default_model
+
         return Context(
             context_name=context_name,
             cluster=cluster,
             user=user,
             workspace=context_def.workspace or DEFAULT_WORKSPACE,
-            default_model=os.environ.get("NEMO_DEFAULT_MODEL") or context_def.default_model,
+            default_model=effective_default_model,
+            fast_model=effective_fast_model,
             preferences=prefs,
         )
 

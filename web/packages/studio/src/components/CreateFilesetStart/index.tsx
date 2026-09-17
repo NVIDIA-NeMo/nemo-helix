@@ -13,12 +13,12 @@ import {
   Text,
 } from '@nvidia/foundations-react-core';
 import { START_OPTIONS } from '@studio/components/CreateFilesetStart/constants';
-import { StartOptionCard } from '@studio/components/CreateFilesetStart/StartOptionCard';
 import { StartOptionDetail } from '@studio/components/CreateFilesetStart/StartOptionDetail';
 import type {
   CreateFilesetStartProps,
   StartOptionId,
 } from '@studio/components/CreateFilesetStart/types';
+import { StartOptionCard } from '@studio/components/StartOptions/StartOptionCard';
 import { ArrowRight } from 'lucide-react';
 import { useCallback, useState, type FC } from 'react';
 

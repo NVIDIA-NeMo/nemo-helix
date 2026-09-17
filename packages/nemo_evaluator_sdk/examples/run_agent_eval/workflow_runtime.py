@@ -31,6 +31,7 @@ from nemo_evaluator_sdk.agent_eval.trials import (
     AgentEvalTrialStatus,
     AgentOutput,
     RunnerInfo,
+    TrialMeasurements,
     resolve_trial_status,
     standard_evidence_descriptors,
 )
@@ -152,12 +153,12 @@ class WorkflowAgentRuntime:
                 metadata={"runtime": RUNTIME_NAME, "agent_model": self.config.agent_model},
             ),
             evidence=CandidateEvidence(descriptors=descriptors, metadata={"runtime": RUNTIME_NAME}),
+            measurements=TrialMeasurements(runtime_sec=runtime_sec),
             metadata={
                 "runtime": RUNTIME_NAME,
                 "agent_model": self.config.agent_model,
                 "agent_ok": agent_ok,
                 "exit_code": process.returncode,
-                "runtime_sec": runtime_sec,
                 "run_dir": str(layout.run_dir),
                 "generated": True,
             },

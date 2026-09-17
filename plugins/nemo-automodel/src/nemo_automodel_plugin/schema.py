@@ -17,13 +17,16 @@ __all__ = [
     "AutomodelJobOutput",
     "BatchSpec",
     "DatasetSpec",
-    "EmbeddingSpec",
+    "DeploymentParams",
+    "ExportSpec",
     "LoRAParams",
     "OptimizerSpec",
     "OutputRequest",
     "OutputResponse",
     "ParallelismSpec",
+    "RetrievalSpec",
     "ScheduleSpec",
+    "ToolCallParams",
     "TrainingSpec",
     "ValidationError",
 ]
@@ -60,8 +63,31 @@ class DatasetSpec(AutomodelSchema):
     prompt_template: str | None = None
 
 
-class EmbeddingSpec(AutomodelSchema):
-    """Collator and dataset knobs for bi_encoder / cross_encoder recipes."""
+class ExportSpec(AutomodelSchema):
+    """ONNX export and fileset layout. ``primary`` is the artifact at the root; the other is under ``alternates/``."""
+
+    primary: Literal["onnx", "hf"] = Field(
+        default="onnx", description="Artifact at the fileset root. Use 'hf' when the NIM loads PyTorch weights."
+    )
+    opset: int = Field(default=17, gt=0)
+    precision: Literal["fp32", "fp16"] = Field(
+        default="fp16",
+        description="ONNX graph dtype. Defaults to fp16 to match typical Hugging Face checkpoints.",
+    )
+    attn_implementation: Literal["eager", "sdpa", "flash_attention_2"] = Field(
+        default="eager", description="Attention backend for tracing. The exporter cannot trace SDPA/GQA."
+    )
+    pooling: Literal["avg", "cls", "last"] = Field(
+        default="avg", description="Embedding pooling. Ignored for cross_encoder."
+    )
+    normalize: bool = Field(default=True, description="L2-normalize embeddings. Ignored for cross_encoder.")
+    dimensions: bool = Field(
+        default=False, description="Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings."
+    )
+
+
+class RetrievalSpec(AutomodelSchema):
+    """Dataset, collator, and export knobs for bi_encoder / cross_encoder recipes."""
 
     train_n_passages: int = Field(default=5, ge=2)
     eval_negative_size: int | None = Field(default=None, ge=1)
@@ -70,9 +96,14 @@ class EmbeddingSpec(AutomodelSchema):
     passage_max_length: int = Field(default=512, ge=1)
     query_prefix: str = Field(default="query:", description="Collator-side prefix; BiEncoderCollator adds a space.")
     passage_prefix: str = Field(default="passage:", description="Collator-side prefix; BiEncoderCollator adds a space.")
+    export: ExportSpec | None = Field(
+        default=None, description="Artifact layout and ONNX export settings. Defaults are applied when omitted."
+    )
 
 
 class TrainingSpec(AutomodelSchema):
+    model_config = AutomodelSchema.model_config | {"populate_by_name": True}
+
     training_type: Literal["sft", "distillation"] = "sft"
     recipe: Literal["auto", "sft", "bi_encoder", "cross_encoder"] = Field(
         default="auto",
@@ -98,9 +129,9 @@ class TrainingSpec(AutomodelSchema):
     distillation_temperature: float = Field(default=1.0, gt=0.0)
     teacher_precision: Literal["bf16", "fp16", "fp32"] = "bf16"
     offload_teacher: bool = False
-    embedding: EmbeddingSpec | None = Field(
+    retrieval: RetrievalSpec | None = Field(
         default=None,
-        description="Retrieval collator/dataset knobs. Used when recipe is bi_encoder or cross_encoder.",
+        description="Retrieval dataset, collator, and export knobs. Used when recipe is bi_encoder or cross_encoder.",
     )
 
     @model_validator(mode="after")
@@ -118,8 +149,23 @@ class ScheduleSpec(AutomodelSchema):
     epochs: int = Field(default=1, gt=0)
     max_steps: int | None = Field(default=None, gt=0)
     val_check_interval: float | None = None
+    validation_split: float | None = Field(
+        default=0.1,
+        gt=0,
+        lt=1,
+        description="Validation split to use when a validation dataset is not provided.",
+    )
     seed: int | None = None
     progress_reporting: ProgressReportingConfig = Field(default_factory=ProgressReportingConfig)
+
+
+# (global_batch_size, micro_batch_size) per retrieval recipe. bi_encoder takes its
+# in-batch negatives from the micro batch, which accumulation does not widen, so
+# lowering micro costs retrieval quality; cross_encoder scores pairs independently.
+RETRIEVAL_BATCH_DEFAULTS: dict[str, tuple[int, int]] = {
+    "bi_encoder": (256, 8),
+    "cross_encoder": (128, 8),
+}
 
 
 class BatchSpec(AutomodelSchema):
@@ -175,6 +221,60 @@ class OutputResponse(AutomodelSchema):
     description: str | None = None
 
 
+class ToolCallParams(AutomodelSchema):
+    """Tool calling configuration for NIM deployments."""
+
+    tool_call_parser: str | None = Field(
+        default=None,
+        description=(
+            "Name of the tool call parser to use (e.g., 'openai', 'hermes', 'pythonic', 'llama3_json', 'mistral')."
+        ),
+    )
+    tool_call_plugin: str | None = Field(
+        default=None,
+        pattern=r"^[\w\-.]+/[\w\-.]+$",
+        description=(
+            "Reference to a fileset containing the custom tool call plugin Python file. "
+            "Expected format: '{workspace}/{fileset_name}'."
+        ),
+    )
+    auto_tool_choice: bool | None = Field(
+        default=None,
+        description="Whether to enable automatic tool choice.",
+    )
+
+
+class DeploymentParams(AutomodelSchema):
+    """Inline deployment parameters for auto-deploying a trained model.
+
+    Used in :class:`AutomodelJobInput.deployment_config` and passed through to
+    the model_entity task at compile time. When unset, no deployment is launched.
+    """
+
+    gpu: int = Field(default=1, gt=0, description="Number of GPUs required for the deployment.")
+    additional_envs: dict[str, str] | None = Field(
+        default=None,
+        description="Additional environment variables for the deployment.",
+    )
+    disk_size: str | None = Field(default=None, description="Disk size for the deployment.")
+    image_name: str | None = Field(
+        default=None,
+        description="Container image name from NGC. If not specified, defaults to multi-llm.",
+    )
+    image_tag: str | None = Field(default=None, description="Container image tag from NGC.")
+    lora_enabled: bool = Field(
+        default=True,
+        description=(
+            "When auto-deploying a full SFT training, setting this true allows subsequent "
+            "LoRA adapters to be deployed against it."
+        ),
+    )
+    tool_call_config: ToolCallParams | None = Field(
+        default=None,
+        description="Tool calling configuration override for the NIM deployment.",
+    )
+
+
 class AutomodelJobInput(AutomodelSchema):
     """POST body / CLI JSON."""
 
@@ -188,6 +288,15 @@ class AutomodelJobInput(AutomodelSchema):
     parallelism: ParallelismSpec = Field(default_factory=ParallelismSpec)
     output: OutputRequest | None = None
     integrations: IntegrationsSpec | None = None
+    deployment_config: str | DeploymentParams | None = Field(
+        default=None,
+        description=(
+            "Deployment configuration for auto-deploying the model after training. "
+            "Pass a string to reference an existing ModelDeploymentConfig by name "
+            "('my-config' or 'workspace/my-config'). An object provides inline NIM "
+            "deployment parameters. Omit to skip deployment."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -195,6 +304,32 @@ class AutomodelJobInput(AutomodelSchema):
         if isinstance(data, dict) and "output_model" in data:
             raise ValueError("spec.output_model was removed. Use spec.output instead.")
         return data
+
+    def trains_standalone_lora_adapter(self) -> bool:
+        """True when the job produces a LoRA adapter rather than a full-weight model.
+
+        ``merge=True`` folds the adapter back into the base weights, which yields a
+        standalone model; only the unmerged case needs a LoRA-enabled deployment.
+        """
+        lora = self.training.lora
+        return self.training.finetuning_type == "lora" and lora is not None and not lora.merge
+
+    @model_validator(mode="after")
+    def _reject_lora_without_lora_enabled(self) -> Self:
+        # A LoRA adapter cannot be served by a base deployment with lora_enabled=false --
+        # the deployed NIM would refuse to load it. Surface this at submit time rather
+        # than after training has already burned the GPU hours.
+        if (
+            self.trains_standalone_lora_adapter()
+            and isinstance(self.deployment_config, DeploymentParams)
+            and not self.deployment_config.lora_enabled
+        ):
+            raise ValueError(
+                "deployment_config.lora_enabled must be true (or omitted) when training a LoRA adapter. "
+                "Setting lora_enabled=false would deploy the base model without LoRA support, "
+                "making the trained adapter unservable."
+            )
+        return self
 
     def with_resolved_recipe(self, checkpoint_head_type: str) -> Self:
         """Return the canonical job input after resolving its recipe and defaults."""
@@ -207,16 +342,18 @@ class AutomodelJobInput(AutomodelSchema):
         training = self.training.model_copy(update={"recipe": recipe})
         if recipe == "bi_encoder":
             learning_rate, warmup_steps = 1e-5, 5
+            global_batch_size, micro_batch_size = RETRIEVAL_BATCH_DEFAULTS["bi_encoder"]
         elif recipe == "cross_encoder":
             learning_rate, warmup_steps = 3e-6, 100
+            global_batch_size, micro_batch_size = RETRIEVAL_BATCH_DEFAULTS["cross_encoder"]
         else:
             return self.model_copy(update={"training": training})
 
         batch_updates: dict[str, int] = {}
         if "global_batch_size" not in self.batch.model_fields_set:
-            batch_updates["global_batch_size"] = 128
+            batch_updates["global_batch_size"] = global_batch_size
         if "micro_batch_size" not in self.batch.model_fields_set:
-            batch_updates["micro_batch_size"] = 4
+            batch_updates["micro_batch_size"] = micro_batch_size
 
         optimizer_updates: dict[str, float | int] = {}
         if "learning_rate" not in self.optimizer.model_fields_set:
@@ -246,6 +383,15 @@ class AutomodelJobOutput(AutomodelSchema):
     parallelism: ParallelismSpec
     output: OutputResponse
     integrations: IntegrationsSpec | None = None
+    deployment_config: str | DeploymentParams | None = Field(
+        default=None,
+        description=(
+            "Deployment configuration for auto-deploying the model after training. "
+            "Pass a string to reference an existing ModelDeploymentConfig by name "
+            "('my-config' or 'workspace/my-config'). An object provides inline NIM "
+            "deployment parameters. Omit to skip deployment."
+        ),
+    )
 
     def validate_for_training(self) -> None:
         """MoE / parallelism constraints (ported from legacy CustomizationJobOutput)."""

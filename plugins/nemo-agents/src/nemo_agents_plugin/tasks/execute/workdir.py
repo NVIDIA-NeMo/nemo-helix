@@ -6,19 +6,14 @@
 from __future__ import annotations
 
 import shutil
+import tempfile
 from pathlib import Path, PurePosixPath
-from typing import Any, Protocol
 
-from filesets import FilesetPathError, build_fileset_ref, parse_fileset_ref
+from filesets import FilesetFileSystem, FilesetPathError, build_fileset_ref, parse_fileset_ref
+from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_platform_plugin.files.types import ListFilesQueryParams
+from nemo_platform_plugin.jobs.file_manager import FilesetFileManager, TmpDirPath
 from pydantic import BaseModel, Field, field_validator, model_validator
-
-
-class AsyncFilesClient(Protocol):
-    async def list(self, *, remote_path: str) -> Any: ...
-
-
-class FilesClient(Protocol):
-    def download(self, *, remote_path: str, local_path: str) -> Any: ...
 
 
 class AgentWorkdirArtifactMount(BaseModel):
@@ -89,14 +84,13 @@ async def validate_agent_workdir(
 def materialize_agent_workdir(spec: AgentWorkdir, files_client: FilesClient, target_dir: Path) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
     if spec.base_workdir is not None:
-        files_client.download(remote_path=spec.base_workdir, local_path=str(target_dir))
+        _download_fileset_ref(files_client, spec.base_workdir, local_dir=target_dir)
 
     for mount in spec.artifact_mounts:
         mount_local_path = target_dir / mount.mount_path
-        mount_local_path.parent.mkdir(parents=True, exist_ok=True)
-        if mount_local_path.is_dir() and not mount_local_path.is_symlink():
-            shutil.rmtree(mount_local_path)
-        files_client.download(remote_path=mount.ref, local_path=str(mount_local_path))
+        with tempfile.TemporaryDirectory(prefix=".nemo-agent-workdir-mount-") as download_dir:
+            downloaded = _download_fileset_ref(files_client, mount.ref, local_dir=Path(download_dir))
+            _replace_mount_path(downloaded.path, mount_local_path)
 
 
 async def _validate_ref(
@@ -113,12 +107,42 @@ async def _validate_ref(
         field=field,
         directory_like=directory_like,
     )
-    response = await files_client.list(remote_path=canonical_ref)
-    if not response.data:
+    ws, fileset, path = parse_fileset_ref(canonical_ref, workspace_fallback=default_workspace)
+    query_params: ListFilesQueryParams = {"path": path} if path else {}
+    response = await files_client.list_files(
+        workspace=ws,
+        name=fileset,
+        query_params=query_params or None,
+    )
+    if not response.data().data:
         if directory_like:
             raise ValueError(f"{field} must point to a non-empty directory or fileset root.")
         raise ValueError(f"{field} must point to an existing fileset artifact.")
     return canonical_ref
+
+
+def _download_fileset_ref(files_client: FilesClient, ref: str, *, local_dir: Path) -> TmpDirPath:
+    ws, fileset, _ = parse_fileset_ref(ref, workspace_fallback="")
+    manager = FilesetFileManager(
+        workspace=ws,
+        fileset_name=fileset,
+        filesystem=FilesetFileSystem(client=files_client),
+        ensure_fileset_exists=False,
+    )
+    return manager.download_from_url(ref, local_dir=local_dir)
+
+
+def _replace_mount_path(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_dir() and not destination.is_symlink():
+        shutil.rmtree(destination)
+    elif destination.exists() or destination.is_symlink():
+        destination.unlink()
+
+    if source.is_dir() and not source.is_symlink():
+        shutil.copytree(source, destination)
+    else:
+        shutil.copy2(source, destination)
 
 
 def _canonical_files_ref(ref: str, *, default_workspace: str, field: str, directory_like: bool) -> str:

@@ -44,8 +44,8 @@ from nemo_insights_plugin.contracts.profile import (
     load_env_file,
     resolve_base_url,
 )
-from nemo_platform import NeMoPlatformError
 from nemo_platform_plugin.cli import NemoCLI
+from nemo_platform_plugin.client.errors import NemoClientError
 from nooa import GenerationError
 
 DEFAULT_WORKSPACE = "default"
@@ -54,7 +54,7 @@ _PREFLIGHT_PROBES: Probes | None = None  # test seam; None → real probes
 
 run_experimentalist = None  # lazily imported by the run command; tests monkeypatch it
 
-_PLATFORM_CLIENT_ERRORS = (NeMoPlatformError, httpx.HTTPError, OSError, RuntimeError, ValueError)
+_PLATFORM_CLIENT_ERRORS = (NemoClientError, httpx.HTTPError, OSError, RuntimeError, ValueError)
 
 # TODO: Add remote train/validation dataset support when remote experiment mode is implemented.
 
@@ -200,7 +200,7 @@ class ExperimentalistCLI(NemoCLI):
                 readable=True,
             ),
         ) -> None:
-            """Run offline optimization for a baseline agent (local dir or git source)."""
+            """Run local optimization for a baseline agent (local dir or git source)."""
 
             if no_insight and (insight is not None or insight_id is not None):
                 typer.echo("--no-insight cannot be combined with --insight or --insight-id", err=True)

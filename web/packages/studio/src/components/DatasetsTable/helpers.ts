@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  type GithubStorageConfig,
   type HuggingfaceStorageConfig,
   type LocalStorageConfig,
   type NGCStorageConfig,
@@ -23,6 +24,8 @@ export function getStoragePath(storage: StorageConfig | undefined): string | nul
     team?: string;
     target?: string;
     repo_id?: string;
+    owner?: string;
+    repo?: string;
     bucket?: string;
     prefix?: string;
   };
@@ -35,6 +38,12 @@ export function getStoragePath(storage: StorageConfig | undefined): string | nul
   }
   if (s.type === 'huggingface' && 'repo_id' in storage) {
     return (storage as HuggingfaceStorageConfig).repo_id;
+  }
+  if (s.type === 'github' && 'owner' in storage && 'repo' in storage) {
+    const github = storage as GithubStorageConfig;
+    return github.path
+      ? `${github.owner}/${github.repo}/${github.path}`
+      : `${github.owner}/${github.repo}`;
   }
   if (s.type === 's3' && 'bucket' in storage) {
     const s3 = storage as S3StorageConfig;

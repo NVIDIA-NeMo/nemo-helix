@@ -352,7 +352,11 @@ def controller_with_docker_and_igw(
             return_value=mock_platform_config,
         ),
         patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk") as mock_sdk_factory,
+        patch("nemo_deployments_plugin.controller.get_async_platform_sdk") as mock_deployments_controller_sdk,
         patch("nemo_platform_plugin.sdk_provider.get_async_platform_sdk") as mock_sdk,
+        patch(
+            "nmp.core.models.controllers.backends.deployments_plugin.backend.get_async_platform_sdk"
+        ) as mock_deployments_backend_sdk,
         patch("nemo_deployments_plugin.config.DeploymentsConfig.get", return_value=deployments_config),
         patch(
             "nemo_platform_plugin.jobs.image.get_qualified_image",
@@ -360,7 +364,9 @@ def controller_with_docker_and_igw(
         ),
     ):
         mock_sdk_factory.return_value = test_clients.async_sdk
+        mock_deployments_controller_sdk.return_value = test_clients.async_sdk
         mock_sdk.return_value = test_clients.async_sdk
+        mock_deployments_backend_sdk.return_value = test_clients.async_sdk
 
         controller = ModelsController(
             backend_registry=backend_registry,

@@ -901,6 +901,24 @@ class TestBenchmarkHelpers:
         assert [output.name for output in result.outputs] == ["first", "second"]
         assert [output.value for output in result.outputs] == [1.0, 2.0]
 
+    def test_normalize_metric_result_preserves_declared_order_while_omitting_optional_outputs(self) -> None:
+        result = _normalize_metric_result(
+            MetricResult(
+                outputs=[
+                    MetricOutput(name="third", value=3.0),
+                    MetricOutput(name="first", value=1.0),
+                ]
+            ),
+            [
+                MetricOutputSpec.continuous_score("first"),
+                MetricOutputSpec.continuous_score("second", required=False),
+                MetricOutputSpec.continuous_score("third"),
+            ],
+        )
+
+        assert [output.name for output in result.outputs] == ["first", "third"]
+        assert [output.value for output in result.outputs] == [1.0, 3.0]
+
     def test_benchmark_error_from_exception_returns_none_without_typed_leaf(self) -> None:
         assert _benchmark_error_from_exception(ValueError("plain failure")) is None
 

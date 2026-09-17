@@ -9,19 +9,30 @@ import type {
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
+const WEEK_MS = 7 * DAY_MS;
 
 export const RANGE_LABELS: Record<TraceStatisticsRange, string> = {
   day: 'Day',
   week: 'Week',
   month: 'Month',
+  max: 'Max',
 };
 
-/** A day range is too short for daily buckets — it would collapse to a single point. */
-export const bucketParamForRange = (range: TraceStatisticsRange): TraceMetricBucketParam =>
-  range === 'day' ? 'hour' : 'day';
+/**
+ * A day range is too short for daily buckets — it would collapse to a single point. `max` spans
+ * up to 90 days, so daily buckets would be too many points to read; bucket by week instead.
+ */
+export const bucketParamForRange = (range: TraceStatisticsRange): TraceMetricBucketParam => {
+  if (range === 'day') return 'hour';
+  if (range === 'max') return 'week';
+  return 'day';
+};
 
-export const bucketMsForRange = (range: TraceStatisticsRange): number =>
-  range === 'day' ? HOUR_MS : DAY_MS;
+export const bucketMsForRange = (range: TraceStatisticsRange): number => {
+  if (range === 'day') return HOUR_MS;
+  if (range === 'max') return WEEK_MS;
+  return DAY_MS;
+};
 
 /**
  * Day buckets start at local midnight, and a DST transition makes consecutive midnights 23 or 25
@@ -31,12 +42,15 @@ export const bucketMsForRange = (range: TraceStatisticsRange): number =>
 const nextBucketStart = (timestamp: number, range: TraceStatisticsRange): number => {
   if (range === 'day') return timestamp + HOUR_MS;
   const next = new Date(timestamp);
-  next.setDate(next.getDate() + 1);
+  next.setDate(next.getDate() + (range === 'max' ? 7 : 1));
   return next.getTime();
 };
 
-export const bucketAdverbForRange = (range: TraceStatisticsRange): string =>
-  range === 'day' ? 'Hourly' : 'Daily';
+export const bucketAdverbForRange = (range: TraceStatisticsRange): string => {
+  if (range === 'day') return 'Hourly';
+  if (range === 'max') return 'Weekly';
+  return 'Daily';
+};
 
 /**
  * Intake only emits buckets that saw runs. Re-inserting the empty ones as `null` points breaks the

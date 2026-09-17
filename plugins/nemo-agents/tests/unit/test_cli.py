@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
@@ -18,6 +19,7 @@ from nemo_agents_plugin.cli import (
     MAX_ETHOS_STAGED_BYTES,
     MAX_ETHOS_STAGED_FILES,
     AgentsCLI,
+    _agents_client,
     _collect_text_agent_artifacts,
     _spec_package_warning,
     _upload_ethos_fileset,
@@ -34,21 +36,29 @@ class _ValidatedAgentConfig:
         return self._config
 
 
+class _FakeFilesResponse:
+    def __init__(self, paths: Sequence[str]) -> None:
+        self._body = SimpleNamespace(data=[SimpleNamespace(path=path) for path in paths])
+
+    def data(self) -> SimpleNamespace:
+        return self._body
+
+
 class _FakeEthosFiles:
     def __init__(self, existing_paths: Sequence[str] = (), *, delete_error: Exception | None = None) -> None:
         self.existing_paths = existing_paths
         self.delete_error = delete_error
         self.deleted: list[str] = []
 
-    def list(self, *, fileset: str, workspace: str) -> SimpleNamespace:
-        assert fileset == "fabric-agent-ethos"
+    def list_files(self, *, name: str, workspace: str) -> _FakeFilesResponse:
+        assert name == "fabric-agent-ethos"
         assert workspace == "default"
-        return SimpleNamespace(data=[SimpleNamespace(path=path) for path in self.existing_paths])
+        return _FakeFilesResponse(self.existing_paths)
 
-    def delete(self, *, remote_path: str, fileset: str, workspace: str) -> None:
-        assert fileset == "fabric-agent-ethos"
+    def delete_file(self, *, path: str, name: str, workspace: str) -> None:
+        assert name == "fabric-agent-ethos"
         assert workspace == "default"
-        self.deleted.append(remote_path)
+        self.deleted.append(path)
         if self.delete_error is not None:
             raise self.delete_error
 
@@ -65,6 +75,7 @@ def _upload_ethos_snapshot(agent_root: Path, *, existing_paths: Sequence[str] = 
 
     with (
         patch("nemo_agents_plugin.cli._platform_sdk", return_value=sdk),
+        patch("nemo_agents_plugin.cli.client_from_platform", return_value=files),
         patch("nemo_agents_plugin.jobs.fileset_io.upload_to_fileset", _capture_upload),
     ):
         _upload_ethos_fileset(
@@ -83,13 +94,14 @@ def _install_mock_transport(
     transport = httpx.MockTransport(handler)
     real_client = httpx.Client
 
-    def _factory(*args, **kwargs):
-        if on_create is not None:
-            on_create(kwargs)
-        kwargs["transport"] = transport
-        return real_client(*args, **kwargs)
+    class _Client(real_client):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            if on_create is not None:
+                on_create(kwargs)
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
 
-    return patch("nemo_agents_plugin.cli.httpx.Client", _factory)
+    return patch("nemo_agents_plugin.cli.httpx.Client", _Client)
 
 
 def test_no_args_prints_help_successfully() -> None:
@@ -99,6 +111,23 @@ def test_no_args_prints_help_successfully() -> None:
     assert result.exit_code == 0
     assert "Usage:" in result.stdout
     assert "Agent lifecycle management" in result.stdout
+
+
+def test_agents_client_preserves_legacy_cli_timeout() -> None:
+    captured_timeout: list[float | None] = []
+
+    with (
+        patch("nemo_agents_plugin.cli._resolve_context_headers", return_value={}),
+        _install_mock_transport(
+            lambda _request: httpx.Response(200, json={}),
+            on_create=lambda kwargs: captured_timeout.append(kwargs.get("timeout")),
+        ),
+    ):
+        client = _agents_client("http://test", "default")
+
+    assert captured_timeout == [30]
+    assert client._timeout == 30
+    assert client._client.timeout == httpx.Timeout(30)
 
 
 def test_run_starts_nat_server_for_nat_config(tmp_path: Path) -> None:
@@ -456,6 +485,7 @@ def test_create_fabric_uploads_ethos_fileset(tmp_path: Path, monkeypatch: pytest
         _install_mock_transport(handler),
         patch("nemo_agents_plugin.fabric.validation.validate_platform_agent_config", _validate_platform_agent_config),
         patch("nemo_agents_plugin.jobs.fileset_io.upload_to_fileset", fake_upload),
+        patch("nemo_agents_plugin.cli.client_from_platform", return_value=files),
         patch("nemo_agents_plugin.cli._platform_sdk") as mock_sdk,
     ):
         mock_sdk.return_value = SimpleNamespace(base_url="http://test", files=files)
@@ -563,6 +593,7 @@ def test_upload_ethos_fileset_preserves_remote_ethos_over_local(tmp_path: Path) 
 
     with (
         patch("nemo_agents_plugin.cli._platform_sdk", return_value=sdk),
+        patch("nemo_agents_plugin.cli.client_from_platform", return_value=files),
         patch("nemo_agents_plugin.jobs.fileset_io.upload_to_fileset", _capture_upload),
     ):
         _upload_ethos_fileset(
@@ -1143,6 +1174,28 @@ def test_environment_spec_create_from_inline_json() -> None:
     assert body == {"provider": "local", "name": "prod"}
 
 
+def test_environment_spec_create_reports_validation_errors_without_traceback() -> None:
+    called = False
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(201, json={"name": "bad"})
+
+    app = AgentsCLI().get_cli()
+    with _install_mock_transport(handler):
+        result = CliRunner().invoke(
+            app,
+            ["environment-specs", "create", "bad", "--spec", '{"env":{"PORT":1}}', "--base-url", "http://test"],
+        )
+
+    assert result.exit_code == 2
+    assert "Error: POST agent API validation failed:" in result.stderr
+    assert "env.PORT" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not called
+
+
 def test_environment_spec_create_rejects_both_sources(tmp_path: Path) -> None:
     spec = tmp_path / "spec.json"
     spec.write_text("{}")
@@ -1198,7 +1251,19 @@ def test_compute_spec_create_and_list() -> None:
         if req.method == "POST":
             captured["body"] = req.read()
             return httpx.Response(201, json={"name": "big"})
-        return httpx.Response(200, json={"data": [{"name": "big", "workspace": "default"}], "pagination": {}})
+        return httpx.Response(
+            200,
+            json={
+                "data": [{"name": "big", "workspace": "default"}],
+                "pagination": {
+                    "page": 1,
+                    "page_size": 1,
+                    "current_page_size": 1,
+                    "total_pages": 1,
+                    "total_results": 1,
+                },
+            },
+        )
 
     app = AgentsCLI().get_cli()
     with _install_mock_transport(handler):
@@ -1236,24 +1301,18 @@ def test_environment_delete_confirmation() -> None:
     assert "Environment 'env1' deleted." in result.stdout
 
 
-def test_environment_spec_create_routes_through_sdk() -> None:
-    """The CLI builds the request via the plugin SDK (single source of truth).
-
-    Spy the SDK resource method to prove the CLI delegates to it rather than
-    hand-rolling the request path/body.
-    """
-    from nemo_agents_plugin import sdk as sdk_module
-
+def test_environment_spec_create_routes_through_typed_client() -> None:
+    """The CLI builds the request through the source-owned typed client."""
     captured: dict[str, Any] = {}
 
-    def _spy(self, *, name, workspace=None, spec=None):
-        captured["name"] = name
-        captured["workspace"] = workspace
-        captured["spec"] = spec
-        return {"name": name}
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["method"] = req.method
+        captured["url"] = str(req.url)
+        captured["body"] = req.read()
+        return httpx.Response(201, request=req, json={"name": "ben"})
 
     app = AgentsCLI().get_cli()
-    with patch.object(sdk_module._EnvironmentSpecResource, "create", _spy):
+    with _install_mock_transport(handler):
         result = CliRunner().invoke(
             app,
             [
@@ -1270,18 +1329,13 @@ def test_environment_spec_create_routes_through_sdk() -> None:
         )
 
     assert result.exit_code == 0, result.stderr
-    assert captured["name"] == "ben"
-    assert captured["workspace"] == "team-a"
-    assert captured["spec"] == {"env": {"LOG_LEVEL": "debug"}}
+    assert captured["method"] == "POST"
+    assert captured["url"].endswith("/apis/agents/v2/workspaces/team-a/environment-specs")
+    assert json.loads(captured["body"]) == {"name": "ben", "env": {"LOG_LEVEL": "debug"}}
 
 
-def test_compute_spec_create_via_sdk_translates_http_error() -> None:
-    """A server error raised inside the SDK is translated to the CLI's rich message.
-
-    The rerouted create commands call the SDK inside ``_run_sdk``; this asserts an
-    httpx.HTTPStatusError from the SDK surfaces as the same ``... agent API`` stderr
-    message + exit 1 the old direct ``_api_request`` path produced.
-    """
+def test_compute_spec_create_via_typed_client_translates_http_error() -> None:
+    """A server error raised inside the typed client uses the CLI's rich message."""
 
     def handler(req: httpx.Request) -> httpx.Response:
         return httpx.Response(500, json={"detail": "boom"})
@@ -1305,13 +1359,8 @@ def test_compute_spec_create_via_sdk_translates_http_error() -> None:
     assert "POST agent API" in result.stderr
 
 
-def test_environment_spec_create_via_sdk_sends_auth_header() -> None:
-    """The CLI threads its resolved auth header through the SDK to the wire.
-
-    Covers the ``_agents_sdk`` seam: the CLI builds an AgentsResource whose
-    ``default_headers`` carry the context auth token, so a create routed through the
-    SDK carries ``Authorization`` on the actual request.
-    """
+def test_environment_spec_create_via_typed_client_sends_auth_header() -> None:
+    """The CLI threads its resolved auth header through the typed client."""
     captured: dict[str, Any] = {}
 
     def handler(req: httpx.Request) -> httpx.Response:

@@ -21,6 +21,7 @@ from pydantic import (
     ConfigDict,
     Field,
     SerializeAsAny,
+    StrictBool,
     StringConstraints,
     field_serializer,
     field_validator,
@@ -55,6 +56,7 @@ class BundledMetricOutputSpec(BaseModel):
     name: str
     description: str | None = None
     value_json_schema: dict[str, Any]
+    required: StrictBool = Field(default=True, exclude_if=lambda value: value is True)
 
     @classmethod
     def from_output_spec(cls, output: MetricOutputSpec) -> BundledMetricOutputSpec:
@@ -63,6 +65,7 @@ class BundledMetricOutputSpec(BaseModel):
             name=output.name,
             description=output.description,
             value_json_schema=output.value_json_schema(),
+            required=output.required,
         )
 
 
@@ -216,7 +219,14 @@ def _validate_metric_matches_bundle(metric: object, bundle: MetricBundle) -> Non
 
     hydrated_outputs = [BundledMetricOutputSpec.from_output_spec(output) for output in metric.output_spec()]
     if hydrated_outputs != bundle.outputs:
-        raise MetricBundlingError("unbundled metric output spec does not match bundle metadata")
+        mismatches = {
+            field
+            for expected, actual in zip(bundle.outputs, hydrated_outputs, strict=False)
+            for field in BundledMetricOutputSpec.model_fields
+            if getattr(expected, field) != getattr(actual, field)
+        }
+        suffix = f" (mismatched fields: {sorted(mismatches)})" if mismatches else ""
+        raise MetricBundlingError(f"unbundled metric output spec does not match bundle metadata{suffix}")
     if validate_metric_type(metric) != bundle.metric_type:
         raise MetricBundlingError("unbundled metric type does not match bundle metadata")
 

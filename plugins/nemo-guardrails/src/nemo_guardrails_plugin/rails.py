@@ -23,11 +23,10 @@ from typing import Any
 from nemo_guardrails_plugin.constants import DEFAULT_MAIN_ENGINE, W3C_TRACE_CONTEXT_HEADERS
 from nemo_guardrails_plugin.llmrails_cache import InferenceTargetResolver
 from nemo_guardrails_plugin.transforms import GenerationResponseMapper
-from nemo_platform.types.guardrail import GenerationLog, GenerationLogOptionsParam
-from nemo_platform.types.guardrail import (
+from nemo_platform_plugin.guardrail.types import GenerationLog, GenerationLogOptionsParam, GuardrailsData
+from nemo_platform_plugin.guardrail.types import (
     GenerationStats as PlatformGenerationStats,
 )
-from nemo_platform.types.guardrail.guardrails_data import GuardrailsData
 from nemoguardrails.llm.models.initializer import init_llm_model
 from nemoguardrails.rails.llm.config import Model
 from nemoguardrails.rails.llm.llmrails import LLMRails

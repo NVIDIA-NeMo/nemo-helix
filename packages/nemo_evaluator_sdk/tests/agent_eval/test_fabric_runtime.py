@@ -253,6 +253,8 @@ def _install_fake_fabric(monkeypatch: pytest.MonkeyPatch, handler: Any) -> type:
     module.RelayAtifConfig = _FakeRelayModel  # type: ignore[attr-defined]
     module.RelayAtofConfig = _FakeRelayModel  # type: ignore[attr-defined]
     module.RelayAtofFileSinkConfig = _FakeRelayModel  # type: ignore[attr-defined]
+    module.RelayOpenTelemetryConfig = _FakeRelayModel  # type: ignore[attr-defined]
+    module.RelayOpenTelemetryEndpointConfig = _FakeRelayModel  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "nemo_fabric", module)
 
     # ``run_tasks`` fails fast on ``import nemo_relay.observability`` when capture_trajectory is on
@@ -349,6 +351,16 @@ async def test_fabric_runtime_maps_atif_artifact_to_trace_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     atif = _FakeArtifact("relay_atif", "atif", tmp_path / "trajectory.atif.json", "application/json")
+    atif.path.write_text(
+        json.dumps(
+            {
+                "schema_version": "ATIF-v1.7",
+                "steps": [_step(prompt_tokens=8, completion_tokens=2)],
+                "final_metrics": {"total_cost_usd": 0.25},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
         return _FakeResult(status="succeeded", output={"response": "ok"}, artifacts=[atif])
@@ -365,6 +377,14 @@ async def test_fabric_runtime_maps_atif_artifact_to_trace_evidence(
     trace = evidence.descriptors[EVIDENCE_TRACE]
     assert trace.format == EVIDENCE_FORMAT_ATIF
     assert trace.ref == str(tmp_path / "trajectory.atif.json")
+    assert trials[0].measurements.model_dump(exclude_none=True) == {
+        "prompt_tokens": 8,
+        "completion_tokens": 2,
+        "total_tokens": 10,
+        "cost_usd": 0.25,
+    }
+    assert trials[0].measurements.runtime_sec is None
+    assert "prompt_tokens" not in trials[0].metadata
 
 
 def _workspace_from_config(config: Any) -> Path:
@@ -483,112 +503,6 @@ async def test_fabric_runtime_bad_seed_fails_only_that_task(tmp_path: Path, monk
 
 
 @pytest.mark.asyncio
-async def test_fabric_runtime_invokes_task_hook_lifecycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    events: list[str] = []
-
-    class _Hook:
-        def prepare(self, *, config, task, evidence_dir, workspace_dir, session):  # noqa: ANN001
-            events.append("prepare")
-            session.state["ok"] = True
-            return config
-
-        def after_success(self, *, task, result, session):  # noqa: ANN001
-            events.append("after_success")
-            assert session.state["ok"] is True
-            return {"analyzer_analysis": {"label": "benign"}}
-
-        def cleanup(self, *, session):  # noqa: ANN001
-            events.append("cleanup")
-
-    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
-        return _FakeResult(status="succeeded", output={"response": "ok"})
-
-    _install_fake_fabric(monkeypatch, handler)
-    runtime = fabric_runtime.FabricAgentRuntime(
-        config=_CONFIG,
-        work_root=tmp_path / "fabric",
-        capture_trajectory=False,
-        task_hook=_Hook(),
-    )
-
-    trials = await runtime.run_tasks([_TASK])
-
-    assert events == ["prepare", "after_success", "cleanup"]
-    assert trials[0].status == "completed"
-    assert trials[0].metadata["analyzer_analysis"]["label"] == "benign"
-    assert trials[0].output is not None
-    assert trials[0].output.metadata["analyzer_analysis"]["label"] == "benign"
-
-
-@pytest.mark.asyncio
-async def test_fabric_runtime_recovers_mcp_binding_when_fabric_status_not_succeeded(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    class _Hook:
-        def prepare(self, *, config, task, evidence_dir, workspace_dir, session):  # noqa: ANN001
-            return config
-
-        def after_success(self, *, task, result, session):  # noqa: ANN001
-            return {"analyzer_analysis": {"label": "phishing", "is_likely_phishing": True}}
-
-        def cleanup(self, *, session):  # noqa: ANN001
-            return None
-
-    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
-        return _FakeResult(status="failed", output={"response": ""})
-
-    _install_fake_fabric(monkeypatch, handler)
-    runtime = fabric_runtime.FabricAgentRuntime(
-        config=_CONFIG,
-        work_root=tmp_path / "fabric",
-        capture_trajectory=False,
-        task_hook=_Hook(),
-    )
-
-    trials = await runtime.run_tasks([_TASK])
-
-    assert trials[0].status == "completed"
-    assert trials[0].metadata.get("recovered_from_mcp_binding") is True
-    assert trials[0].output is not None
-    assert "phishing" in (trials[0].output.output_text or "")
-
-
-@pytest.mark.asyncio
-async def test_fabric_runtime_task_hook_cleanup_runs_on_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    events: list[str] = []
-
-    class _Hook:
-        def prepare(self, *, config, task, evidence_dir, workspace_dir, session):  # noqa: ANN001
-            events.append("prepare")
-            return config
-
-        def after_success(self, *, task, result, session):  # noqa: ANN001
-            events.append("after_success")
-            return None
-
-        def cleanup(self, *, session):  # noqa: ANN001
-            events.append("cleanup")
-
-    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
-        raise RuntimeError("boom")
-
-    _install_fake_fabric(monkeypatch, handler)
-    runtime = fabric_runtime.FabricAgentRuntime(
-        config=_CONFIG,
-        work_root=tmp_path / "fabric",
-        capture_trajectory=False,
-        task_hook=_Hook(),
-    )
-
-    trials = await runtime.run_tasks([_TASK])
-
-    assert events == ["prepare", "cleanup"]
-    assert trials[0].status == "failed"
-
-
-@pytest.mark.asyncio
 async def test_fabric_runtime_passes_trajectory_extra_to_atif_relay(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -661,6 +575,13 @@ async def test_fabric_runtime_maps_timeout_to_failed_trial(tmp_path: Path, monke
 
     async def fake_wait_for(awaitable: Any, timeout: float) -> Any:
         awaitable.close()
+        evidence_dir = next((tmp_path / "fabric").glob("*/000000-task-1"))
+        relay_dir = evidence_dir / "relay"
+        relay_dir.mkdir(exist_ok=True)
+        (relay_dir / "trajectory-timeout.atif.json").write_text(
+            json.dumps({"schema_version": "ATIF-v1.7", "steps": [_step(prompt_tokens=5, completion_tokens=1)]}),
+            encoding="utf-8",
+        )
         raise TimeoutError
 
     monkeypatch.setattr(fabric_runtime.asyncio, "wait_for", fake_wait_for)
@@ -670,6 +591,7 @@ async def test_fabric_runtime_maps_timeout_to_failed_trial(tmp_path: Path, monke
 
     assert trials[0].status == "failed"
     assert trials[0].metadata["error_type"] == "TimeoutError"
+    assert trials[0].measurements.total_tokens == 6
 
 
 @pytest.mark.asyncio
@@ -1115,6 +1037,10 @@ def _step(**metrics: int) -> dict[str, Any]:
     return {"source": "agent", "message": "", "metrics": metrics}
 
 
+def _measurement_values(path: Path | None) -> dict[str, int | float]:
+    return fabric_runtime._atif_measurements(path).model_dump(exclude_none=True)
+
+
 def test_final_metrics_totals_are_projected_onto_the_token_keys(tmp_path: Path) -> None:
     path = _atif(
         tmp_path,
@@ -1128,9 +1054,10 @@ def test_final_metrics_totals_are_projected_onto_the_token_keys(tmp_path: Path) 
             },
         },
     )
-    assert fabric_runtime._atif_token_metadata(path) == {
+    assert _measurement_values(path) == {
         "prompt_tokens": 358,
         "completion_tokens": 19324,
+        "total_tokens": 19682,
         "cache_read_tokens": 3984621,
     }
 
@@ -1143,9 +1070,10 @@ def test_steps_are_summed_when_the_trajectory_has_no_aggregate_block(tmp_path: P
             "steps": [_step(prompt_tokens=100, completion_tokens=10), _step(prompt_tokens=58, cached_tokens=7)],
         },
     )
-    assert fabric_runtime._atif_token_metadata(path) == {
+    assert _measurement_values(path) == {
         "prompt_tokens": 158,
         "completion_tokens": 10,
+        "total_tokens": 168,
         "cache_read_tokens": 7,
     }
 
@@ -1161,7 +1089,12 @@ def test_a_partial_aggregate_does_not_suppress_the_fields_only_the_steps_report(
             "final_metrics": {"total_steps": 2, "total_cost_usd": 0.12},
         },
     )
-    assert fabric_runtime._atif_token_metadata(path) == {"prompt_tokens": 158, "completion_tokens": 10}
+    assert _measurement_values(path) == {
+        "prompt_tokens": 158,
+        "completion_tokens": 10,
+        "total_tokens": 168,
+        "cost_usd": 0.12,
+    }
 
 
 def test_a_reported_total_wins_over_the_step_sum_for_that_field_alone(tmp_path: Path) -> None:
@@ -1174,10 +1107,10 @@ def test_a_reported_total_wins_over_the_step_sum_for_that_field_alone(tmp_path: 
             "final_metrics": {"total_prompt_tokens": 358},
         },
     )
-    assert fabric_runtime._atif_token_metadata(path) == {"prompt_tokens": 358, "completion_tokens": 10}
+    assert _measurement_values(path) == {"prompt_tokens": 358, "completion_tokens": 10, "total_tokens": 368}
 
 
-def test_an_unvalidatable_aggregate_still_falls_back_to_the_steps(tmp_path: Path) -> None:
+def test_an_invalid_aggregate_field_is_omitted_instead_of_falling_back(tmp_path: Path) -> None:
     path = _atif(
         tmp_path,
         {
@@ -1186,21 +1119,74 @@ def test_an_unvalidatable_aggregate_still_falls_back_to_the_steps(tmp_path: Path
             "final_metrics": {"total_prompt_tokens": "not-an-int"},
         },
     )
-    assert fabric_runtime._atif_token_metadata(path) == {"prompt_tokens": 158}
+    assert _measurement_values(path) == {}
 
 
 def test_a_trajectory_with_no_counts_anywhere_records_nothing(tmp_path: Path) -> None:
     path = _atif(tmp_path, {"schema_version": "ATIF-v1.7", "steps": [_step()], "final_metrics": {}})
-    assert fabric_runtime._atif_token_metadata(path) == {}
+    assert _measurement_values(path) == {}
 
 
-@pytest.mark.parametrize("payload", ["[]", "{ not json", '"a string"'])
+@pytest.mark.parametrize("payload", ["[]", "{ not json", '"a string"', '{"steps": 7}'])
 def test_an_unreadable_trajectory_records_nothing_rather_than_failing(tmp_path: Path, payload: str) -> None:
     path = tmp_path / "trajectory-abc.atif.json"
     path.write_text(payload, encoding="utf-8")
-    assert fabric_runtime._atif_token_metadata(path) == {}
+    assert _measurement_values(path) == {}
 
 
 def test_a_missing_trajectory_records_nothing(tmp_path: Path) -> None:
-    assert fabric_runtime._atif_token_metadata(None) == {}
-    assert fabric_runtime._atif_token_metadata(tmp_path / "absent.atif.json") == {}
+    assert _measurement_values(None) == {}
+    assert _measurement_values(tmp_path / "absent.atif.json") == {}
+
+
+@pytest.mark.parametrize(
+    ("value", "is_float", "expected"),
+    [
+        (0, False, True),
+        (1.5, True, True),
+        (1.5, False, False),
+        (True, False, False),
+        (-1, False, False),
+        (float("nan"), True, False),
+        (float("inf"), True, False),
+        ("1", False, False),
+    ],
+)
+def test_valid_atif_measurement(value: object, is_float: bool, expected: bool) -> None:
+    assert fabric_runtime._valid_atif_measurement(value, is_float=is_float) is expected
+
+
+def test_sum_step_metric_treats_missing_steps_as_unmeasured_and_non_list_as_invalid() -> None:
+    assert fabric_runtime._sum_step_metric({}, "prompt_tokens", is_float=False) == (None, True)
+    assert fabric_runtime._sum_step_metric({"steps": None}, "prompt_tokens", is_float=False) == (None, True)
+    assert fabric_runtime._sum_step_metric({"steps": 7}, "prompt_tokens", is_float=False) == (None, False)
+
+
+@pytest.mark.asyncio
+async def test_a_failing_trace_fold_costs_the_trace_not_the_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fold that raises must not take the other tasks' trials with it.
+
+    The fold runs in ``finally``, past the per-task exception handlers, so an unguarded raise
+    propagates into the ``asyncio.gather`` over every task — turning one unwritable evidence
+    directory into a run with no results at all.
+    """
+
+    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
+        return _FakeResult(status="succeeded", output={"response": "ok"})
+
+    _install_fake_fabric(monkeypatch, handler)
+
+    def explode(directory: Path) -> int:
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(fabric_runtime, "fold_exports", explode)
+    runtime = fabric_runtime.FabricAgentRuntime(config=_CONFIG, work_root=tmp_path / "fabric", capture_trajectory=True)
+
+    first, second = await runtime.run_tasks([_TASK, _TASK])
+
+    for trial in (first, second):
+        assert trial.status == "completed"
+        assert trial.evidence is not None
+        assert EVIDENCE_TRACE not in trial.evidence.descriptors

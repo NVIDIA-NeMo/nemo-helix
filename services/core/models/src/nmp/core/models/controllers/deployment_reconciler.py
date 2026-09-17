@@ -11,9 +11,18 @@ from logging import getLogger
 from typing import Awaitable, Callable, Optional
 
 from nemo_platform import AsyncNeMoPlatform
-from nemo_platform._exceptions import ConflictError, NotFoundError
-from nemo_platform.types.inference.model_deployment import ModelDeployment
-from nemo_platform.types.inference.model_provider import ModelProvider
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.errors import ConflictError, NotFoundError
+from nemo_platform_plugin.models.client import AsyncModelsClient
+from nemo_platform_plugin.models.types import (
+    CreateModelProviderRequest,
+    ModelDeployment,
+    ModelDeploymentStatus,
+    ModelProvider,
+    ModelProviderStatus,
+    UpdateModelDeploymentStatusRequest,
+    UpsertModelProviderRequest,
+)
 from nmp.common.entities.utils import parse_entity_ref
 from nmp.core.models.config import ControllerConfig
 from nmp.core.models.controllers.backends.backends import DeploymentStatusUpdate, ServiceBackend
@@ -159,6 +168,7 @@ class ModelDeploymentReconciler:
                 distinguishable from a stalled one
         """
         self._models_sdk = models_sdk
+        self._models_client = client_from_platform(models_sdk, AsyncModelsClient)
         self._backend_registry = backend_registry
         self._controller_config = controller_config
         self._entity_cache = entity_cache
@@ -178,6 +188,28 @@ class ModelDeploymentReconciler:
         """
         return self._backend_registry.get_backend()
 
+    async def _update_deployment_status(
+        self,
+        deployment: ModelDeployment,
+        *,
+        status: ModelDeploymentStatus,
+        status_message: str = "",
+        model_provider_id: str | None = None,
+    ) -> ModelDeployment:
+        """Write a controller-owned deployment status update via the typed Models client."""
+        return (
+            await self._models_client.update_deployment_status(
+                name=deployment.name,
+                workspace=deployment.workspace,
+                body=UpdateModelDeploymentStatusRequest(
+                    status=status,
+                    status_message=status_message,
+                    model_provider_id=model_provider_id,
+                ),
+                query_params={"version": str(deployment.entity_version)},
+            )
+        ).data()
+
     async def reconcile_deployments(self, deployment_contexts: list[ModelContext]) -> None:
         """Process deployments and reconcile their state with backends.
 
@@ -189,12 +221,16 @@ class ModelDeploymentReconciler:
         """
         for ctx in deployment_contexts:
             deployment = ctx.model_deployment
+            if deployment is None:
+                logger.warning("Skipping deployment reconciliation for context with no model_deployment")
+                self._emit_heartbeat()
+                continue
             model_deployment_id = f"{deployment.workspace}/{deployment.name}"
             try:
                 backend = self.get_service_backend()
 
                 match deployment.status:
-                    case "CREATED":
+                    case ModelDeploymentStatus.CREATED:
                         # Lambda needed to bind ctx (the reconcile context bundles
                         # the deployment, config, and model entity).
                         await self._reconcile_individual_deployment(
@@ -203,22 +239,22 @@ class ModelDeploymentReconciler:
                             "create",
                             existing_provider=ctx.model_provider,
                         )
-                    case "PENDING" | "READY" | "UNKNOWN":
+                    case ModelDeploymentStatus.PENDING | ModelDeploymentStatus.READY | ModelDeploymentStatus.UNKNOWN:
                         # Check status and handle drift/backend issues. The ctx
                         # carries the config + entity so backends that advance
                         # creation in the status path (k8s vLLM) can compile the
                         # serving objects.
                         status_update = await backend.get_model_deployment_status(ctx)
 
-                        if status_update.status == "LOST":
+                        if status_update.status == ModelDeploymentStatus.LOST:
                             # Drift detected - attempt recovery
                             await self._handle_drift_recovery(deployment, ctx, backend)
                             continue
-                        elif status_update.status == "UNKNOWN":
+                        elif status_update.status == ModelDeploymentStatus.UNKNOWN:
                             # Backend communication failure - track attempts, eventually error out
                             await self._handle_unknown_status(deployment, status_update)
                             continue
-                        elif status_update.status in ("READY", "ERROR"):
+                        elif status_update.status in (ModelDeploymentStatus.READY, ModelDeploymentStatus.ERROR):
                             # Clear recovery state - deployment is healthy or in terminal state
                             self._drift_recovery_cache.remove(model_deployment_id)
 
@@ -226,7 +262,7 @@ class ModelDeploymentReconciler:
                         # fetched above, so ``_reconcile_individual_deployment``
                         # won't invoke this callable; it's passed only for the
                         # generic signature (bind ctx for type consistency).
-                        action = "check status of" if deployment.status == "PENDING" else "monitor"
+                        action = "check status of" if deployment.status == ModelDeploymentStatus.PENDING else "monitor"
                         await self._reconcile_individual_deployment(
                             deployment,
                             lambda _dep, _ctx=ctx: backend.get_model_deployment_status(_ctx),
@@ -234,7 +270,7 @@ class ModelDeploymentReconciler:
                             existing_provider=ctx.model_provider,
                             status_update=status_update,
                         )
-                    case "DELETING":
+                    case ModelDeploymentStatus.DELETING:
                         await self._reconcile_individual_deployment(
                             deployment,
                             lambda d: backend.delete_model_deployment(
@@ -245,7 +281,7 @@ class ModelDeploymentReconciler:
                             "delete",
                             existing_provider=ctx.model_provider,
                         )
-                    case "DELETED":
+                    case ModelDeploymentStatus.DELETED:
                         # Check if deployment has been in DELETED state long enough to hard-delete
                         await self._handle_deleted_deployment(deployment)
             except Exception as e:
@@ -374,11 +410,9 @@ class ModelDeploymentReconciler:
                 if original_message:
                     gc_message = f"{gc_message} Original error: {original_message}"
 
-                await self._models_sdk.inference.deployments.update_status(
-                    name=deployment.name,
-                    workspace=deployment.workspace,
-                    status="DELETING",
-                    version=deployment.entity_version,
+                await self._update_deployment_status(
+                    deployment,
+                    status=ModelDeploymentStatus.DELETING,
                     status_message=gc_message,
                 )
 
@@ -431,7 +465,7 @@ class ModelDeploymentReconciler:
             )
             if (
                 action_description == "monitor"
-                and status_update.status == "READY"
+                and status_update.status == ModelDeploymentStatus.READY
                 and not (status_update.status_message or "").strip()
             ):
                 # DEBUG level for routine READY monitoring with nothing to report.
@@ -442,11 +476,9 @@ class ModelDeploymentReconciler:
 
             model_provider_id = await self._reconcile_model_provider(deployment, status_update, existing_provider)
 
-            await self._models_sdk.inference.deployments.update_status(
-                name=deployment.name,
-                workspace=deployment.workspace,
+            await self._update_deployment_status(
+                deployment,
                 status=status_update.status,
-                version=deployment.entity_version,
                 status_message=status_update.status_message,
                 model_provider_id=model_provider_id,
             )
@@ -457,11 +489,9 @@ class ModelDeploymentReconciler:
         except Exception as e:
             logger.exception(f"Failed to {action_description} deployment {model_deployment_id}: {e}")
             try:
-                await self._models_sdk.inference.deployments.update_status(
-                    name=deployment.name,
-                    workspace=deployment.workspace,
-                    status="ERROR",
-                    version=deployment.entity_version,
+                await self._update_deployment_status(
+                    deployment,
+                    status=ModelDeploymentStatus.ERROR,
                     status_message=f"Failed to {action_description} deployment {model_deployment_id}",
                 )
             except ConflictError as e:
@@ -499,11 +529,9 @@ class ModelDeploymentReconciler:
                 attempts = cache.get_attempts(model_deployment_id)
                 logger.error(f"Drift recovery failed for {model_deployment_id} after {attempts} attempts")
                 try:
-                    await self._models_sdk.inference.deployments.update_status(
-                        name=deployment.name,
-                        workspace=deployment.workspace,
-                        status="ERROR",
-                        version=deployment.entity_version,
+                    await self._update_deployment_status(
+                        deployment,
+                        status=ModelDeploymentStatus.ERROR,
                         status_message=(
                             f"Drift recovery failed after {attempts} attempts. "
                             f"Backend resources could not be recreated. Manual intervention required."
@@ -538,11 +566,9 @@ class ModelDeploymentReconciler:
                 f"{status_update.status_message}"
             )
 
-            await self._models_sdk.inference.deployments.update_status(
-                name=deployment.name,
-                workspace=deployment.workspace,
+            await self._update_deployment_status(
+                deployment,
                 status=status_update.status,
-                version=deployment.entity_version,
                 status_message=recovery_message,
                 model_provider_id=None,  # Provider will be recreated when READY
             )
@@ -558,11 +584,9 @@ class ModelDeploymentReconciler:
             # Update status to PENDING with error info for visibility, but don't set ERROR
             # The next cycle will retry (respecting backoff) and can detect if recovery succeeded
             try:
-                await self._models_sdk.inference.deployments.update_status(
-                    name=deployment.name,
-                    workspace=deployment.workspace,
-                    status="PENDING",
-                    version=deployment.entity_version,
+                await self._update_deployment_status(
+                    deployment,
+                    status=ModelDeploymentStatus.PENDING,
                     status_message=f"Recovery attempt {attempt_count}/{max_attempts} failed: {e}. Will retry.",
                 )
             except Exception:
@@ -596,11 +620,9 @@ class ModelDeploymentReconciler:
                 attempts = cache.get_attempts(model_deployment_id)
                 logger.error(f"Backend communication failed for {model_deployment_id} after {attempts} attempts")
                 try:
-                    await self._models_sdk.inference.deployments.update_status(
-                        name=deployment.name,
-                        workspace=deployment.workspace,
-                        status="ERROR",
-                        version=deployment.entity_version,
+                    await self._update_deployment_status(
+                        deployment,
+                        status=ModelDeploymentStatus.ERROR,
                         status_message=(
                             f"Unable to communicate with backend after {attempts} attempts. "
                             f"Last error: {status_update.status_message}. Manual intervention required."
@@ -628,11 +650,9 @@ class ModelDeploymentReconciler:
         )
 
         try:
-            await self._models_sdk.inference.deployments.update_status(
-                name=deployment.name,
-                workspace=deployment.workspace,
-                status="UNKNOWN",
-                version=deployment.entity_version,
+            await self._update_deployment_status(
+                deployment,
+                status=ModelDeploymentStatus.UNKNOWN,
                 status_message=(
                     f"Unable to determine deployment status (attempt {attempt_count}/{max_attempts}). "
                     f"{status_update.status_message}"
@@ -663,9 +683,9 @@ class ModelDeploymentReconciler:
         model_deployment_id = f"{deployment.workspace}/{deployment.name}"
 
         try:
-            if status_update.status == "READY":
+            if status_update.status == ModelDeploymentStatus.READY:
                 return await self._ensure_model_provider(deployment, status_update.host_url, existing_provider)
-            elif status_update.status in ("DELETING", "DELETED"):
+            elif status_update.status in (ModelDeploymentStatus.DELETING, ModelDeploymentStatus.DELETED):
                 await self._delete_model_provider(deployment)
             return None
         except Exception as e:
@@ -704,23 +724,27 @@ class ModelDeploymentReconciler:
                 provider_workspace, provider_name = _provider_ref.workspace, _provider_ref.name
 
                 if not existing_provider:
-                    existing_provider = await self._models_sdk.inference.providers.retrieve(
-                        name=provider_name,
-                        workspace=provider_workspace,
-                    )
+                    existing_provider = (
+                        await self._models_client.get_provider(
+                            name=provider_name,
+                            workspace=provider_workspace,
+                        )
+                    ).data()
 
                 if existing_provider.host_url != host_url:
                     logger.info(
                         f"ModelProvider {deployment.model_provider_id} host_url changed from "
                         f"{existing_provider.host_url} to {host_url}, updating provider"
                     )
-                    await self._models_sdk.inference.providers.update(
+                    await self._models_client.upsert_provider(
                         name=provider_name,
                         workspace=provider_workspace,
-                        host_url=host_url,
-                        description=existing_provider.description,
-                        enabled_models=existing_provider.enabled_models,
-                        status="READY",
+                        body=UpsertModelProviderRequest(
+                            host_url=host_url,
+                            description=existing_provider.description,
+                            enabled_models=existing_provider.enabled_models,
+                            status=ModelProviderStatus.READY,
+                        ),
                     )
                 else:
                     logger.debug(
@@ -743,10 +767,7 @@ class ModelDeploymentReconciler:
         provider_workspace = deployment.workspace
 
         try:
-            await self._models_sdk.inference.providers.retrieve(
-                name=provider_name,
-                workspace=provider_workspace,
-            )
+            await self._models_client.get_provider(name=provider_name, workspace=provider_workspace)
             unique_suffix = uuid.uuid4().hex[:8]
             provider_name = f"{deployment.name}_{unique_suffix}"
             logger.info(
@@ -756,14 +777,16 @@ class ModelDeploymentReconciler:
         except NotFoundError:
             logger.debug(f"Creating ModelProvider {provider_workspace}/{provider_name} for deployment")
 
-        await self._models_sdk.inference.providers.create(
+        await self._models_client.create_provider(
             workspace=provider_workspace,
-            name=provider_name,
-            host_url=host_url,
-            description=f"Auto-created provider for deployment {deployment.name}",
-            project=deployment.project,
-            model_deployment_id=model_deployment_id,
-            status="READY",
+            body=CreateModelProviderRequest(
+                name=provider_name,
+                host_url=host_url,
+                description=f"Auto-created provider for deployment {deployment.name}",
+                project=deployment.project,
+                model_deployment_id=model_deployment_id,
+                status=ModelProviderStatus.READY,
+            ),
         )
 
         model_provider_id = f"{provider_workspace}/{provider_name}"
@@ -783,10 +806,7 @@ class ModelDeploymentReconciler:
         """
         try:
             # Get the provider to see what models it was serving
-            provider = await self._models_sdk.inference.providers.retrieve(
-                name=provider_name,
-                workspace=provider_workspace,
-            )
+            provider = (await self._models_client.get_provider(name=provider_name, workspace=provider_workspace)).data()
 
             if not provider.served_models:
                 logger.debug(f"Provider {provider_id} has no served_models, no cleanup needed")
@@ -868,7 +888,7 @@ class ModelDeploymentReconciler:
 
         try:
             logger.info(f"Deleting ModelProvider {model_provider_id} for deployment {model_deployment_id}")
-            await self._models_sdk.inference.providers.delete(
+            await self._models_client.delete_provider(
                 name=provider_name,
                 workspace=provider_workspace,
             )
@@ -903,7 +923,7 @@ class ModelDeploymentReconciler:
             )
             try:
                 # Hard-delete this specific version by calling the delete API again on a DELETED deployment
-                await self._models_sdk.inference.deployments.versions.delete(
+                await self._models_client.delete_deployment_version(
                     name=str(deployment.entity_version),  # version number
                     workspace=deployment.workspace,  # workspace
                     deployment=deployment.name,  # deployment name

@@ -10,6 +10,7 @@ import …`` statements working without changes.
 
 from nemo_platform_plugin.files.storage_config import DEFAULT_READ_CHUNK_SIZE as DEFAULT_READ_CHUNK_SIZE
 from nemo_platform_plugin.files.storage_config import BaseStorageConfig as BaseStorageConfig
+from nemo_platform_plugin.files.storage_config import GithubStorageConfig as GithubStorageConfig
 from nemo_platform_plugin.files.storage_config import HuggingfaceStorageConfig as HuggingfaceStorageConfig
 from nemo_platform_plugin.files.storage_config import LocalStorageConfig as LocalStorageConfig
 from nemo_platform_plugin.files.storage_config import NGCStorageConfig as NGCStorageConfig

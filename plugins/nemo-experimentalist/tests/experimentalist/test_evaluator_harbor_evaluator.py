@@ -11,7 +11,6 @@ types read their results from.
 from __future__ import annotations
 
 import inspect
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -35,6 +34,8 @@ from nemo_experimentalist_plugin.experimentalist.components.evaluator.harbor_nat
     HarborNativeOutcomeEvaluator,
 )
 from pydantic import ValidationError
+
+from packages.nemo_evaluator_sdk.tests.harbor_fixtures import write_harbor_trial_result
 
 
 def _write(path: Path, text: str) -> None:
@@ -69,18 +70,21 @@ def _write_trial(
     agent_result: dict[str, int] | None = None,
 ) -> None:
     trial_dir = job_dir / trial_name
-    _write(
-        trial_dir / "result.json",
-        json.dumps(
-            {
-                "trial_name": trial_name,
-                "task_name": task_name,
-                "task_id": {"path": str(task_dir.resolve())},
-                "verifier_result": {"rewards": rewards if rewards is not None else {}},
-                "exception_info": exception_info,
-                "agent_result": agent_result,
-            }
-        ),
+    exception = None
+    if exception_info is not None:
+        exception = {
+            "exception_type": exception_info["exception_type"],
+            "exception_message": exception_info.get("exception_message", ""),
+            "exception_traceback": exception_info.get("exception_traceback", ""),
+        }
+    write_harbor_trial_result(
+        trial_dir,
+        task_name=task_name,
+        rewards=rewards if rewards is not None else {},
+        exception=exception,
+        task_path=task_dir.resolve(),
+        source="nemo-experimentalist-tests",
+        agent_result=agent_result,
     )
 
 
@@ -428,30 +432,32 @@ async def test_complete_cached_job_is_not_rerun(
     assert {trial.task_id for trial in trials} == {"sum-two", "sum-three"}
 
 
-async def test_errored_cached_job_is_rerun(
+async def test_harbor_valid_errored_cached_job_is_reused(
     tmp_path: Path,
     dataset: HarborDataset,
     agent_dir: Path,
     cached_job_dir: Path,
     fake_job: type[_FakeJob],
 ) -> None:
-    """An errored trial must force a rerun even when the cache is otherwise valid.
+    """A Harbor-valid errored result is a complete attempt and remains cached."""
+    _write_trial(
+        cached_job_dir,
+        trial_name="sum-three__0",
+        task_name="hello/sum-three",
+        task_dir=_dataset_root(dataset) / "sum-three",
+        rewards={"reward": 0.8},
+        exception_info={"exception_type": "TimeoutError", "exception_message": "boom"},
+    )
 
-    Built on the *stamped* `cached_job_dir` on purpose. A hand-rolled job dir has
-    no fingerprint, so it is rejected as untrusted and the run happens for that
-    reason instead — the assertion would then hold even if error-awareness were
-    completely broken. Mutating one trial in place keeps the stamp valid, so the
-    error is the only thing left that can trigger the rerun.
-    """
-    errored = json.loads((cached_job_dir / "sum-three__0" / "result.json").read_text(encoding="utf-8"))
-    errored["exception_info"] = {"exception_type": "TimeoutError"}
-    _write(cached_job_dir / "sum-three__0" / "result.json", json.dumps(errored))
-
-    await HarborRunnerOutcomeEvaluator(experiment_dir=tmp_path)._run(
+    trials = await HarborRunnerOutcomeEvaluator(experiment_dir=tmp_path)._run(
         agent_dir, dataset, HarborRunnerConfig(jobs_dir=Path("jobs"))
     )
 
-    assert len(fake_job.calls) == 1, "an errored cached trial must not be served from cache"
+    assert fake_job.calls == []
+    by_task = {trial.task_id: trial for trial in trials}
+    assert by_task["sum-three"].status == "failed"
+    assert by_task["sum-three"].metrics["reward"].value == 0.8
+    assert by_task["sum-three"].error == {"type": "TimeoutError", "message": "boom", "traceback": ""}
 
 
 async def test_under_sampled_cached_job_is_rerun(
@@ -702,7 +708,7 @@ async def test_failed_trials_keep_their_error_shape(
 
     by_task = {trial.task_id: trial for trial in trials}
     assert by_task["sum-three"].status == "failed"
-    assert by_task["sum-three"].error == {"type": "TimeoutError", "message": "boom"}
+    assert by_task["sum-three"].error == {"type": "TimeoutError", "message": "boom", "traceback": ""}
     assert by_task["sum-two"].status == "completed"
     assert by_task["sum-two"].attempt == 0
 

@@ -30,7 +30,19 @@ from nemo_evaluator_sdk.agent_eval.scores import (
     AgentEvalScoreStatus,
     AgentEvalTaskScore,
 )
-from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput
+from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput, TrialMeasurements
+from nemo_evaluator_sdk.agent_eval.usage_keys import (
+    CACHE_CREATION_INPUT_TOKENS_KEY,
+    CACHE_READ_INPUT_TOKENS_KEY,
+    CACHED_TOKENS_KEY,
+    COMPLETION_TOKEN_KEYS,
+    PROMPT_TOKEN_KEYS,
+    SEPARATE_CACHE_KEYS,
+    USAGE_COUNT_KEYS,
+    USAGE_DETAILS_KEYS,
+    _first_nonnegative_int,
+    _first_usage_details,
+)
 from nemo_evaluator_sdk.values.dataset_schemas import _KNOWN_BINDING_FIELDS
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.results import EvaluationResult, RowScore
@@ -85,33 +97,15 @@ def _output(row: RowScore) -> AgentOutput | None:
     return AgentOutput(output_text=output_text, response=response)
 
 
-def _first_int(usage: Mapping[str, Any], *keys: str) -> int | None:
-    """First key in ``keys`` holding a token count, or ``None``.
-
-    A count is a non-negative int that is not a bool. Negatives are rejected because they are used
-    as an unknown-value sentinel rather than a measurement, and nothing downstream would catch one:
-    Intake's ``total_prompt_tokens`` is an unconstrained ``int | None``, so a negative would be
-    summed into the evaluation rollup and shown as a real total.
-    """
-    for key in keys:
-        value = usage.get(key)
-        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-            return value
-    return None
-
-
-def _token_metadata(row: RowScore) -> dict[str, int]:
-    """Project the generation response's ``usage`` block onto the trial-metadata token keys.
+def _token_measurements(row: RowScore) -> TrialMeasurements:
+    """Normalize the generation response's ``usage`` block into typed measurements.
 
     A row's generation response is the only place its token usage survives: ``row.requests`` mixes
     the generation call with each metric's judge calls, so summing that would credit judge tokens to
-    the agent. ``total_tokens`` is left unset — Intake recomputes it from the parts.
+    the agent. ``TrialMeasurements`` derives the canonical total from the parts.
 
-    Both usage schemas a target can return are read, OpenAI's first: a ``GenericAgent`` points at an
-    arbitrary URL, so the response is whatever that endpoint emits, and an Anthropic-shaped block
-    would otherwise be dropped whole. Note the two disagree on whether cache reads are already
-    counted in the prompt total (OpenAI includes them, Anthropic does not); the values are recorded
-    as reported rather than reconciled, since nothing downstream adds them together.
+    OpenAI's cache detail is already included in prompt tokens. Anthropic's cache
+    creation/read fields are separate and are added to input tokens exactly once.
 
     No key list covers every provider, and a renamed key would fail the same silent way this
     function exists to fix, so a usage block that yields nothing is logged with the keys it actually
@@ -120,24 +114,73 @@ def _token_metadata(row: RowScore) -> dict[str, int]:
     response = row.sample.get("response")
     usage = response.get("usage") if isinstance(response, Mapping) else None
     if not isinstance(usage, Mapping):
-        return {}
-    details = usage.get("prompt_tokens_details")
-    cache_read = _first_int(details, "cached_tokens") if isinstance(details, Mapping) else None
-    if cache_read is None:
-        cache_read = _first_int(usage, "cache_read_input_tokens")
+        return TrialMeasurements()
+    _warn_invalid_usage_counts(usage, row_index=row.row_index)
+
+    separate_cache = any(key in usage for key in SEPARATE_CACHE_KEYS)
+    details = _first_usage_details(usage)
+    inclusive_cache = details is not None and CACHED_TOKENS_KEY in details
+    completion = _first_nonnegative_int(usage, *COMPLETION_TOKEN_KEYS)
+
+    if separate_cache and inclusive_cache:
+        logger.warning(
+            "Row %r generation usage contains both inclusive cache details and separate cache fields; "
+            "omitting ambiguous prompt/cache measurements",
+            row.row_index,
+        )
+        return TrialMeasurements(completion_tokens=completion)
+
+    cache_read = _first_nonnegative_int(usage, CACHE_READ_INPUT_TOKENS_KEY) if separate_cache else None
+    cache_creation = _first_nonnegative_int(usage, CACHE_CREATION_INPUT_TOKENS_KEY) if separate_cache else None
+    invalid_separate_cache = any(
+        key in usage and usage[key] is not None and _first_nonnegative_int(usage, key) is None
+        for key in SEPARATE_CACHE_KEYS
+    )
+    prompt = _first_nonnegative_int(usage, *PROMPT_TOKEN_KEYS)
+    if separate_cache and prompt is not None:
+        prompt = None if invalid_separate_cache else prompt + (cache_creation or 0) + (cache_read or 0)
+    elif details is not None and CACHED_TOKENS_KEY in details:
+        cache_read = _first_nonnegative_int(details, CACHED_TOKENS_KEY)
+
     captured = {
-        "prompt_tokens": _first_int(usage, "prompt_tokens", "input_tokens"),
-        "completion_tokens": _first_int(usage, "completion_tokens", "output_tokens"),
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
         "cache_read_tokens": cache_read,
-        "cache_creation_tokens": _first_int(usage, "cache_creation_input_tokens"),
+        "cache_creation_tokens": cache_creation,
     }
     recorded = {key: value for key, value in captured.items() if value is not None}
     if not recorded:
         logger.warning(
-            "No token counts recognized in the generation response's usage block; keys present: %s",
+            "Row %r has no recognized token counts in the generation response's usage block; keys present: %s",
+            row.row_index,
             sorted(str(key) for key in usage),
         )
-    return recorded
+    return TrialMeasurements(**recorded)
+
+
+def _warn_invalid_usage_counts(usage: Mapping[str, Any], *, row_index: int | None) -> None:
+    for key in USAGE_COUNT_KEYS:
+        if key in usage and usage[key] is not None and _first_nonnegative_int(usage, key) is None:
+            logger.warning(
+                "Row %r has invalid generation usage %s=%r; expected a non-negative integer and omitted it",
+                row_index,
+                key,
+                usage[key],
+            )
+    for details_key in USAGE_DETAILS_KEYS:
+        details = usage.get(details_key)
+        if (
+            isinstance(details, Mapping)
+            and CACHED_TOKENS_KEY in details
+            and details[CACHED_TOKENS_KEY] is not None
+            and _first_nonnegative_int(details, CACHED_TOKENS_KEY) is None
+        ):
+            logger.warning(
+                "Row %r has invalid generation usage %s.cached_tokens=%r; expected a non-negative integer and omitted it",
+                row_index,
+                details_key,
+                details[CACHED_TOKENS_KEY],
+            )
 
 
 def _scores(row: RowScore, *, run_id: str, task_id: str, trial_id: str) -> list[AgentEvalTaskScore]:
@@ -147,10 +190,14 @@ def _scores(row: RowScore, *, run_id: str, task_id: str, trial_id: str) -> list[
     scores: list[AgentEvalTaskScore] = []
     for metric_key, outputs in row.metrics.items():
         error = errors.get(metric_key)
-        # Error first: `score_to_evaluator_results` publishes `diagnostics[0].message` as the row's
-        # comment, and the failure is what a reader needs to see there.
+        # Error first: this is the leading general diagnostic, and the failure is what a reader
+        # needs to see when a score can eventually be published as a failed measurement.
         row_diagnostics = [
-            AgentEvalDiagnostic(severity=AgentEvalDiagnosticSeverity.WARNING, message=item.message)
+            AgentEvalDiagnostic(
+                severity=AgentEvalDiagnosticSeverity.WARNING,
+                message=item.message,
+                details=dict(item.details or {}),
+            )
             for item in diagnostics.get(metric_key, [])
         ]
         if error:
@@ -212,7 +259,7 @@ def row_result_to_agent_eval_result(
                 task_id=task_id,
                 status=AgentEvalTrialStatus.COMPLETED if output is not None else AgentEvalTrialStatus.FAILED,
                 output=output,
-                metadata=_token_metadata(row),
+                measurements=_token_measurements(row),
             )
         )
         scores.extend(_scores(row, run_id=run_id, task_id=task_id, trial_id=trial_id))

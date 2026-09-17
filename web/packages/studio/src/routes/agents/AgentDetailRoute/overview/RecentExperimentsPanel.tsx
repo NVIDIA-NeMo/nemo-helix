@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { formatSignedDelta } from '@nemo/common/src/components/DeltaText';
 import { formatEvaluatorScore } from '@nemo/common/src/utils/formatters';
 import {
   Anchor,
@@ -40,8 +41,7 @@ interface RecentExperimentsPanelProps {
  * relative change (a ratio of two same-unit scores), so the percent sign is accurate whatever the
  * underlying scale. One decimal keeps it to the width the tag has room for.
  */
-const formatDelta = (delta: number): string =>
-  `${delta > 0 ? '+' : delta < 0 ? '−' : ''}${Math.abs(delta).toFixed(1)}%`;
+const formatDelta = (delta: number): string => `${formatSignedDelta(delta, 1)}%`;
 
 /**
  * What the agent is measured against, one card per experiment.

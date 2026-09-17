@@ -37,3 +37,17 @@ def test_extract_methods():
     assert ndd_endpoint.method_name == "retrieve"
     assert ndd_endpoint.endpoint.method == "get"
     assert ndd_endpoint.resource_path == ["beta", "data_designer", "jobs", "results"]
+
+
+def test_top_level_resource_names_omits_shared():
+    st_config = StainlessConfig(
+        {
+            "resources": {
+                "jobs": {},
+                "models": {},
+                "$shared": {"models": {}},
+            }
+        }
+    )
+
+    assert st_config.top_level_resource_names() == {"jobs", "models"}

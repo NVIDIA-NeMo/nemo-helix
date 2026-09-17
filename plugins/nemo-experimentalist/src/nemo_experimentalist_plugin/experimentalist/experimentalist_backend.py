@@ -24,7 +24,6 @@ from pathlib import Path
 from typing import Any, TypeVar, cast
 from urllib.parse import urlparse
 
-import httpx
 from nemo_experimentalist_plugin.config import CandidateStorageConfig
 from nemo_experimentalist_plugin.entities import (
     Candidate,
@@ -48,7 +47,16 @@ from nemo_experimentalist_plugin.experimentalist.experiment_mirror import Experi
 from nemo_experimentalist_plugin.experimentalist.otlp import jsonl_to_protobuf, read_trace_id, spans_to_protobuf
 from nemo_experimentalist_plugin.experimentalist.result import ExperimentalistResult
 from nemo_insights_plugin.entities import Insight
-from nemo_platform import AsyncNeMoPlatform
+from nemo_insights_plugin.typed_client import AsyncInsightsClient
+from nemo_platform_plugin.client.client import AsyncNemoClient
+from nemo_platform_plugin.client.errors import NemoHTTPError, NotFoundError
+from nemo_platform_plugin.intake.client import AsyncIntakeClient
+from nemo_platform_plugin.intake.types import (
+    AtifCreateRequest,
+    EvaluatorResultCreateRequest,
+    ListSpansQueryParams,
+    Trace,
+)
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -56,7 +64,7 @@ _ModelT = TypeVar("_ModelT", bound=BaseModel)
 
 
 async def _ingest_otlp(
-    client: AsyncNeMoPlatform,
+    client: AsyncIntakeClient,
     payloads: Iterable[bytes],
     *,
     workspace: str,
@@ -70,7 +78,7 @@ async def _ingest_otlp(
     trial, so the run continues.
     """
     for payload in payloads:
-        response = await client.intake.ingest.otlp.v1.traces.create(body=payload, workspace=workspace)
+        response = (await client.create_otlp_traces(content=payload, workspace=workspace)).data()
         if response.errors:
             raise RuntimeError(
                 f"Intake rejected {len(response.errors)} span(s) for trial {trial_id}: {response.errors}"
@@ -78,7 +86,7 @@ async def _ingest_otlp(
 
 
 async def _upload_trace_otlp(
-    client: AsyncNeMoPlatform,
+    client: AsyncIntakeClient,
     workspace: str,
     ref: ResourceRef,
     *,
@@ -102,7 +110,7 @@ async def _upload_trace_otlp(
 
 
 async def _upload_trace_atif(
-    client: AsyncNeMoPlatform,
+    client: AsyncIntakeClient,
     workspace: str,
     ref: ResourceRef,
     *,
@@ -123,8 +131,8 @@ async def _upload_trace_atif(
         task_id=task_id,
         agent_attrs=extra_attrs or {},
     )
-    payload["workspace"] = workspace
-    await client.intake.ingest.atif.create(**payload)
+    payload.pop("workspace", None)
+    await client.create_atif(workspace=workspace, body=AtifCreateRequest(root=payload))
 
 
 _BASELINE_AGENT_LABEL = "agent-0"
@@ -152,7 +160,7 @@ class ExperimentalistBackend(ABC):
 
     def __init__(
         self,
-        client: AsyncNeMoPlatform | None = None,
+        client: AsyncNemoClient,
         path: Path | None = None,
         storage: CandidateStorageConfig | None = None,
     ) -> None:
@@ -239,8 +247,8 @@ class ExperimentalistBackend(ABC):
     async def get_evaluation_name(self, *, workspace: str, candidate: Candidate, split: str) -> str:
         """Best-effort Evaluation name for *candidate* × *split* in *workspace*.
 
-        Returns "" when there is no projection (offline) or it fails — the name only
-        tags Intake resource attributes, so a run must not break on it.
+        Returns "" when projection fails — the name only tags Intake resource
+        attributes, so a run must not break on it.
         """
         ...
 
@@ -368,7 +376,7 @@ def _load_entity(cls: type[_ModelT], path: Path) -> _ModelT:
 
 
 class LocalExperimentalistBackend(ExperimentalistBackend):
-    """Persist entities under the optimizer's working directory (offline mode).
+    """Persist entities under the optimizer's working directory.
 
     Entity CRUD and result persistence land in local files under the same
     ``eval-and-optimize/`` tree that AAD created::
@@ -398,19 +406,19 @@ class LocalExperimentalistBackend(ExperimentalistBackend):
     def __init__(
         self,
         *,
-        client: AsyncNeMoPlatform | None = None,
+        client: AsyncNemoClient,
         path: Path,
         storage: CandidateStorageConfig | None = None,
     ) -> None:
         super().__init__(client, path, storage)
         self.path = path
+        self.intake_client = AsyncIntakeClient.from_client(client)
         self._eo = path / "eval-and-optimize"
         for subdir in ("agents", "analysis", "candidates", "results"):
             (self._eo / subdir).mkdir(parents=True, exist_ok=True)
-        # Best-effort, one-way projection onto native platform Experiments. Active only when
-        # a platform client is present (offline/local-only runs leave it a no-op); mirrors are
-        # built lazily by ``_project_best_effort`` and cached per workspace so reusing this
-        # backend across workspaces never projects into the wrong one.
+        # Best-effort, one-way projection onto native platform Experiments. Mirrors are built
+        # lazily by ``_project_best_effort`` and cached per workspace so reusing this backend
+        # across workspaces never projects into the wrong one.
         self._mirrors: dict[str, ExperimentMirror] = {}
         # Run-level git provenance captured by get_agent_code: the fetched AgentSource (repo,
         # ref, sub-path) and the local .git clone that is the push target. archive_candidate /
@@ -425,17 +433,14 @@ class LocalExperimentalistBackend(ExperimentalistBackend):
     async def _project_best_effort(self, workspace: str, call: Callable[[ExperimentMirror], Awaitable[None]]) -> None:
         """Run a mirror projection best-effort (spec §3 / F).
 
-        No-op when the backend has no platform client (pure-offline runs). Otherwise builds
-        the workspace's mirror lazily (cached per workspace), runs *call* against it, and
+        Builds the workspace's mirror lazily (cached per workspace), runs *call* against it, and
         logs+swallows any failure so a projection problem can never fail the run or the
         local-file persistence. One-way: nothing read back into the loop.
         """
-        if self.client is None:
-            return
         mirror = self._mirrors.get(workspace)
-        if mirror is None:
-            mirror = self._mirrors[workspace] = ExperimentMirror(self.client, workspace)
         try:
+            if mirror is None:
+                mirror = self._mirrors[workspace] = ExperimentMirror(self.intake_client, workspace)
             await call(mirror)
         except Exception as exc:  # noqa: BLE001 - projection must never fail the run
             logger.warning("[MIRROR] projection failed (run continues): %s", exc)
@@ -443,7 +448,7 @@ class LocalExperimentalistBackend(ExperimentalistBackend):
     # -- Insight read --------------------------------------------------------
 
     async def get_insight(self, *, workspace: str, insight_id: str) -> Insight:
-        # A local insight file preserves offline behavior; otherwise treat
+        # A local insight file preserves local-fixture behavior; otherwise treat
         # ``insight_id`` as a platform insight id and fetch it from the Insights
         # API. The dispatch is heuristic: an id that happens to match a path in
         # the cwd is read as a file, so callers wanting the platform must use an id
@@ -451,18 +456,13 @@ class LocalExperimentalistBackend(ExperimentalistBackend):
         p = Path(insight_id)
         if p.exists():
             return _load_entity(Insight, p)
-        if self.client is None:
-            raise ValueError(
-                f"Insight {insight_id!r} is not an existing local file and no platform "
-                "client is available to fetch it from the platform."
-            )
         try:
-            return await self.client.insights.insights.get(workspace=workspace, insight_id=insight_id)
-        except httpx.HTTPStatusError as exc:
-            # Surface as ValueError so the CLI's clean-error path reports it instead
-            # of dumping a raw traceback (mirrors the local-file FileNotFoundError).
-            if exc.response.status_code == 404:
-                raise ValueError(f"Insight not found on the platform: {insight_id!r}") from exc
+            return await AsyncInsightsClient.from_client(self.client).get_insight(
+                workspace=workspace, insight_id=insight_id
+            )
+        except NotFoundError as exc:
+            raise ValueError(f"Insight not found on the platform: {insight_id!r}") from exc
+        except NemoHTTPError as exc:
             raise ValueError(f"Failed to fetch insight {insight_id!r} from the platform: {exc}") from exc
 
     # -- Agent code access ---------------------------------------------------
@@ -708,9 +708,6 @@ class LocalExperimentalistBackend(ExperimentalistBackend):
         task before _reward_trajectories (which reads intake:// URIs), or (b) fall back
         to reading local file:// traces if upload is still in progress.
         """
-        if self.client is None:
-            return  # pure-offline run: traces stay on local disk
-
         evaluation_name = await self.get_evaluation_name(workspace=workspace, candidate=candidate, split=split)
         if not evaluation_name:
             return  # projection failed (shouldn't happen, but defensive)
@@ -738,20 +735,20 @@ class LocalExperimentalistBackend(ExperimentalistBackend):
         self, trial: TrialResult, *, workspace: str, evaluation_name: str, agent_attrs: dict[str, str]
     ) -> None:
         assert trial.trace is not None
-        assert self.client is not None
         uri = trial.trace.uri
         if uri.startswith("intake://"):
             trace_id = uri.removeprefix("intake://traces/")
             trace = await self._retrieve_trace_with_retry(trace_id, workspace=workspace)
-            ctx = getattr(trace, "evaluation_context", None)
-            if ctx is None or getattr(ctx, "evaluation_name", None) != evaluation_name:
-                rows: list[dict] = []
-                async for span in self.client.intake.spans.list(
-                    workspace=workspace,
-                    filter=cast(Any, {"trace_id": trace_id}),
-                    mode="detailed",
-                    page_size=1000,
-                ):
+            ctx = trace.evaluation_context
+            if ctx is None or ctx.get("evaluation_name") != evaluation_name:
+                rows: list[dict[str, Any]] = []
+                query_params: ListSpansQueryParams = {
+                    "filter": {"trace_id": trace_id},
+                    "mode": "detailed",
+                    "page_size": 1000,
+                }
+                spans = await self.intake_client.list_spans(workspace=workspace, query_params=query_params)
+                async for span in spans.items():
                     rows.append(span.model_dump(mode="json", exclude_none=True))
                 attrs = {
                     "nemo.evaluation.name": evaluation_name,
@@ -759,7 +756,9 @@ class LocalExperimentalistBackend(ExperimentalistBackend):
                     "nemo.trial.id": trial.id,
                     **agent_attrs,
                 }
-                await _ingest_otlp(self.client, spans_to_protobuf(rows, attrs), workspace=workspace, trial_id=trial.id)
+                await _ingest_otlp(
+                    self.intake_client, spans_to_protobuf(rows, attrs), workspace=workspace, trial_id=trial.id
+                )
                 trace = await self._retrieve_trace_with_retry(trace_id, workspace=workspace)
         else:
             trace_format = str(trial.trace.metadata.get("trace_format", "otlp"))
@@ -772,7 +771,7 @@ class LocalExperimentalistBackend(ExperimentalistBackend):
             original_uri = uri
             if trace_format == "atif":
                 await _upload_trace_atif(
-                    self.client,
+                    self.intake_client,
                     workspace,
                     trial.trace,
                     evaluation_name=evaluation_name,
@@ -781,7 +780,7 @@ class LocalExperimentalistBackend(ExperimentalistBackend):
                 )
             else:
                 await _upload_trace_otlp(
-                    self.client,
+                    self.intake_client,
                     workspace,
                     trial.trace,
                     evaluation_name=evaluation_name,
@@ -796,31 +795,36 @@ class LocalExperimentalistBackend(ExperimentalistBackend):
             )
             trace = await self._retrieve_trace_with_retry(trace_id, workspace=workspace)
         for name, metric in trial.metrics.items():
-            await self.client.intake.evaluator_results.create(
+            if trace.root_span_id is None:
+                raise RuntimeError(f"Trace {trace.id!r} has no root span id; cannot attach evaluator result {name!r}")
+            await self.intake_client.create_evaluator_result(
                 workspace=workspace,
-                span_id=trace.root_span_id,
-                session_id=trace.session_id,
-                name=name,
-                value=float(metric.value),
-                data_type="NUMERIC",
+                body=EvaluatorResultCreateRequest(
+                    span_id=trace.root_span_id,
+                    session_id=trace.session_id,
+                    name=name,
+                    value=float(metric.value),
+                    data_type="NUMERIC",
+                ),
             )
 
     async def _retrieve_trace_with_retry(
         self, trace_id: str, *, workspace: str, retries: int = 5, initial_delay: float = 1.0
-    ) -> Any:
+    ) -> Trace:
         """Retrieve trace with exponential backoff.
 
         Intake indexing after OTLP upload can take several seconds. Uses exponential
         backoff: 1s, 2s, 4s, 8s, 16s (up to 31s total) by default.
         """
-        from nemo_platform import NotFoundError
-
-        assert self.client is not None
         last_exc: Exception = RuntimeError(f"trace {trace_id!r} not found after {retries} retries")
         delay = initial_delay
         for attempt in range(retries):
             try:
-                return await self.client.intake.traces.retrieve(trace_id, workspace=workspace)
+                return (
+                    await self.intake_client.get_trace(
+                        id=trace_id, workspace=workspace, query_params={"mode": "detailed"}
+                    )
+                ).data()
             except NotFoundError as exc:
                 last_exc = exc
                 if attempt < retries - 1:  # Don't sleep after the last attempt
@@ -829,12 +833,10 @@ class LocalExperimentalistBackend(ExperimentalistBackend):
         raise last_exc
 
     async def get_evaluation_name(self, *, workspace: str, candidate: Candidate, split: str) -> str:
-        if self.client is None:
-            return ""
         mirror = self._mirrors.get(workspace)
-        if mirror is None:
-            mirror = self._mirrors[workspace] = ExperimentMirror(self.client, workspace)
         try:
+            if mirror is None:
+                mirror = self._mirrors[workspace] = ExperimentMirror(self.intake_client, workspace)
             return await mirror.ensure_experiment(candidate, split=split)
         except Exception as exc:  # noqa: BLE001 - projection is best-effort
             logger.warning("[MIRROR] ensure_experiment failed: %s", exc)
@@ -865,18 +867,18 @@ class LocalExperimentalistBackend(ExperimentalistBackend):
 
 def make_experimentalist_backend(
     *,
-    client: AsyncNeMoPlatform | None,
+    client: AsyncNemoClient,
     experiments_output: str,
     storage: CandidateStorageConfig | None = None,
 ) -> ExperimentalistBackend:
     """Build the Experimentalist backend.
 
     Entity state is written under *experiments_output* using the ``eval-and-optimize/``
-    tree layout. When a platform client is supplied, evaluations and candidates are also
-    projected to native Experiments on a best-effort basis.
+    tree layout. Evaluations and candidates are also projected to native Experiments on
+    a best-effort basis.
 
     Args:
-        client(AsyncNeMoPlatform | None): Optional platform API client.
+        client(AsyncNemoClient): Platform API client.
         experiments_output(str): Local output directory.
         storage(CandidateStorageConfig | None): Candidate-archival / winner-PR settings.
     Returns:

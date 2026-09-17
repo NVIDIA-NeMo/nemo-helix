@@ -36,9 +36,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
-from nemo_evaluator_sdk.agent_eval.metrics import TrialMeasurements
 from nemo_evaluator_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
-from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
+from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, TrialMeasurements
 from nemo_evaluator_sdk.values.evidence import EVIDENCE_FORMAT_ATIF, EVIDENCE_FORMAT_OTLP, EVIDENCE_TRACE
 from nemo_evaluator_sdk.values.otlp import (
     fill_missing_start_times,
@@ -47,6 +46,7 @@ from nemo_evaluator_sdk.values.otlp import (
     set_root_span_error,
     set_span_attributes,
 )
+from nemo_evaluator_sdk.values.protocol import OUTPUT_DETAIL
 from nemo_platform_plugin.intake.types import (
     AtifAgentParam,
     AtifCreateParams,
@@ -318,7 +318,6 @@ def score_to_evaluator_results(
         ]
         return [], skipped
 
-    comment = score.diagnostics[0].message if score.diagnostics else None
     rows: list[EvaluatorResultCreateParams] = []
     skipped: list[SkippedOutput] = []
     for output in score.outputs:
@@ -337,10 +336,26 @@ def score_to_evaluator_results(
             row["value"] = value
         if string_value is not None:
             row["string_value"] = string_value
+        comment = _comment_for_output(score, output.name)
         if comment is not None:
             row["comment"] = comment
         rows.append(row)
     return rows, skipped
+
+
+def _comment_for_output(score: AgentEvalTaskScore, output_name: str) -> str | None:
+    """Select the diagnostic comment that describes one emitted output.
+
+    A diagnostic naming this output wins; otherwise the first that names no output at all, which
+    is the one describing the score as a whole.
+    """
+    for diagnostic in score.diagnostics:
+        if diagnostic.details.get(OUTPUT_DETAIL) == output_name:
+            return diagnostic.message
+    for diagnostic in score.diagnostics:
+        if OUTPUT_DETAIL not in diagnostic.details:
+            return diagnostic.message
+    return None
 
 
 def _coerce_metric_value(value: object) -> tuple[EvaluatorResultDataType, float | None, str | None]:

@@ -153,6 +153,7 @@ def _job_logs_query_params(
     page_cursor: str | None,
     attempt_id: int | None,
     step_id: str | None,
+    tail: int | None,
     task_id: str | None,
 ) -> JobLogsQueryParams | None:
     query_params: JobLogsQueryParams = {}
@@ -164,6 +165,8 @@ def _job_logs_query_params(
         query_params["attempt_id"] = attempt_id
     if step_id is not None:
         query_params["step_id"] = step_id
+    if tail is not None:
+        query_params["tail"] = tail
     if task_id is not None:
         query_params["task_id"] = task_id
     return query_params or None
@@ -256,6 +259,7 @@ class JobsResource:
         page_cursor: str | None = None,
         attempt_id: int | None = None,
         step_id: str | None = None,
+        tail: int | None = None,
         task_id: str | None = None,
     ) -> NemoPaginatedResponse[PlatformJobLog, CursorPagination]:
         """Fetch job logs from the core Jobs service."""
@@ -267,6 +271,7 @@ class JobsResource:
                 page_cursor=page_cursor,
                 attempt_id=attempt_id,
                 step_id=step_id,
+                tail=tail,
                 task_id=task_id,
             ),
         )
@@ -359,6 +364,7 @@ class AsyncJobsResource:
         page_cursor: str | None = None,
         attempt_id: int | None = None,
         step_id: str | None = None,
+        tail: int | None = None,
         task_id: str | None = None,
     ) -> AsyncNemoPaginatedResponse[PlatformJobLog, CursorPagination]:
         """Fetch job logs from the core Jobs service."""
@@ -370,6 +376,7 @@ class AsyncJobsResource:
                 page_cursor=page_cursor,
                 attempt_id=attempt_id,
                 step_id=step_id,
+                tail=tail,
                 task_id=task_id,
             ),
         )

@@ -3,16 +3,16 @@
 
 from typing import Any, TypeAlias
 
-from nemo_platform.types.guardrail import (
+from nemo_platform_plugin.guardrail.types import (
     ActivatedRail as PlatformActivatedRail,
 )
-from nemo_platform.types.guardrail import (
+from nemo_platform_plugin.guardrail.types import (
     GenerationLog as PlatformGenerationLog,
 )
-from nemo_platform.types.guardrail import (
+from nemo_platform_plugin.guardrail.types import (
     GenerationStats as PlatformGenerationStats,
 )
-from nemo_platform.types.guardrail import (
+from nemo_platform_plugin.guardrail.types import (
     LLMCallInfo as PlatformLLMCallInfo,
 )
 from nemoguardrails.logging.explain import LLMCallInfo as LibraryLLMCallInfo
@@ -35,7 +35,7 @@ GenerateAsyncResponse: TypeAlias = (
 
 
 class GenerationResponseMapper:
-    """Transforms nemoguardrails Generation-related models into the corresponding nemo_platform models."""
+    """Transforms nemoguardrails generation models into guardrail client DTOs."""
 
     @staticmethod
     def parse(value: GenerateAsyncResponse) -> LibraryGenerationResponse:

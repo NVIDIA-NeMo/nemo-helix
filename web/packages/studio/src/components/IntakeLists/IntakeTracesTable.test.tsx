@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
+import { getListTracesQueryKey } from '@nemo/sdk/generated/platform/traces';
 import { IntakeTracesTable } from '@studio/components/IntakeLists/IntakeTracesTable';
 import { ROUTES } from '@studio/constants/routes';
 import { mockTracesPage } from '@studio/mocks/intake/telemetry';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
@@ -16,7 +18,7 @@ describe('IntakeTracesTable', () => {
   it('loads trace rows in preview mode for bounded payloads and aggregate metrics', async () => {
     const requestedModes: Array<string | null> = [];
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces', ({ request }) => {
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), ({ request }) => {
         requestedModes.push(new URL(request.url).searchParams.get('mode'));
         return HttpResponse.json(mockTracesPage);
       })
@@ -68,7 +70,7 @@ describe('IntakeTracesTable', () => {
     const user = userEvent.setup();
     const startedAtParams: Array<string | null> = [];
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces', ({ request }) => {
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), ({ request }) => {
         startedAtParams.push(new URL(request.url).searchParams.get('filter[started_at][$gte]'));
         return HttpResponse.json(mockTracesPage);
       })
@@ -109,7 +111,7 @@ describe('IntakeTracesTable', () => {
   it('offers the intake skill and CLI when no traces have been ingested', async () => {
     const user = userEvent.setup();
     server.use(
-      http.get('*/apis/intake/v2/workspaces/:workspace/traces', () =>
+      http.get(mockApiUrl(getListTracesQueryKey, ':workspace'), () =>
         HttpResponse.json({ data: [], pagination: { total_results: 0 } })
       )
     );

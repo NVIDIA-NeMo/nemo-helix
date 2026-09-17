@@ -36,8 +36,8 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
-from nemo_platform.types.guardrail import OutputRailsStreamingConfig
-from nemo_platform.types.guardrail import RailsConfig as PlatformRailsConfig
+from nemo_platform_plugin.guardrail.types import OutputRailsStreamingConfig
+from nemo_platform_plugin.guardrail.types import RailsConfig as PlatformRailsConfig
 from nemo_platform_plugin.inference_middleware import OpenAICompatibleInferenceTarget
 from nemoguardrails import RailsConfig as LibraryRailsConfig
 from nemoguardrails.rails.llm.config import Model

@@ -107,7 +107,7 @@ export const ENTITY_MODE_OPTIONS: { value: EntityMode; children: string }[] = [
 
 /** The count comes from the entity-labels endpoint, so it is unknown until that call lands. */
 export const defaultEntitiesLabel = (count: number): string =>
-  count ? `all ${count} default entities` : 'all default entities';
+  count ? `all ${count} available entities` : 'all available entities';
 
 export const ENTITY_MODE_DESCRIPTIONS: Record<EntityMode, (defaults: string) => string> = {
   [ENTITY_MODE_AUTO]: (defaults) =>
@@ -295,10 +295,27 @@ export const ROLE_LABELS: Record<string, string> = {
   evaluator: 'Evaluator',
 };
 
-export const GLINER_ROLE = 'entity_detector';
+export const DETECTOR_ROLE = 'entity_detector';
 
-/** GLiNER is a token-classification NIM: it takes labels and a threshold, not sampling params. */
-export const supportsSamplingParams = (role: string): boolean => role !== GLINER_ROLE;
+export const DETECTOR_GROUP_SUGGESTED = 'suggested';
+export const DETECTOR_GROUP_OTHER = 'other';
+
+export const DETECTOR_GROUP_LABELS: Record<string, string> = {
+  [DETECTOR_GROUP_SUGGESTED]: 'Suggested',
+  [DETECTOR_GROUP_OTHER]: 'Other models',
+};
+
+/**
+ * Names of NER families known to work as the detector. Nothing on a ModelEntity states a model's
+ * task, so this only promotes the known ones — every model stays selectable.
+ */
+export const NER_DETECTOR_PATTERNS: readonly RegExp[] = [/gliner/i, /privacy[-_ ]?filter/i];
+
+export const DETECTOR_MODEL_HINT =
+  'Runs token classification, so it needs an NER model such as GLiNER or a privacy filter rather than a chat model.';
+
+/** The detector is a token-classification NIM: it takes labels and a threshold, not sampling params. */
+export const supportsSamplingParams = (role: string): boolean => role !== DETECTOR_ROLE;
 
 export const activeRolesForStrategy = (strategy: Strategy): string[] => {
   // rewrite reuses the replacement generator, so the backend validates that role too

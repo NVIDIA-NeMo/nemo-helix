@@ -9,7 +9,7 @@ requires-python = ">=3.12,<3.14"
 dependencies = [
     "pydantic>=2",
     "httpx",
-    "harbor>=0.16",
+    "harbor>=0.20,<0.21",
     "nemo-evaluator-sdk",
     "opentelemetry-proto>=1.42.1",
     "protobuf>=6.0.0",

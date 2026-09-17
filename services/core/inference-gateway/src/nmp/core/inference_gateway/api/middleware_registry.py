@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, NamedTuple
+from typing import Any, Callable, NamedTuple
 
 from fastapi import HTTPException
+from nemo_platform import AsyncNeMoPlatform
 from nemo_platform.types.inference.middleware_call import MiddlewareCall as SDKMiddlewareCall
 from nemo_platform.types.inference.virtual_model import VirtualModel as SDKVirtualModel
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.client import AsyncNemoClient
 from nemo_platform_plugin.discovery import discover_inference_middleware
 from nemo_platform_plugin.inference_middleware import (
     BackendFormat,
@@ -734,6 +737,8 @@ def _sdk_vm_to_plugin_vm(vm: SDKVirtualModel) -> PluginVirtualModel:
 async def load_middleware_plugins(
     model_cache: Any,  # ModelCache
     virtual_model_cache: Any,  # VirtualModelCache
+    *,
+    plugin_sdk_factory: Callable[[str], AsyncNeMoPlatform] | None = None,
 ) -> MiddlewareRegistry:
     """Discover ``nemo.inference_middleware`` entry-points, load, and start each plugin.
 
@@ -748,6 +753,7 @@ async def load_middleware_plugins(
     Args:
         model_cache: The IGW's :class:`~nmp.core.inference_gateway.api.model_cache.ModelCache`.
         virtual_model_cache: The IGW's :class:`~nmp.core.inference_gateway.api.virtual_model_cache.VirtualModelCache`.
+        plugin_sdk_factory: Optional factory for caller-owned service SDKs keyed by plugin name.
 
     Returns:
         A :class:`MiddlewareRegistry` containing all successfully loaded plugins.
@@ -764,6 +770,10 @@ async def load_middleware_plugins(
         try:
             instance = cls()
             instance._inject_cache(accessor)
+            if plugin_sdk_factory is not None:
+                sdk = plugin_sdk_factory(name)
+                instance._inject_platform_sdk(sdk)
+                instance._inject_platform_client(client_from_platform(sdk, AsyncNemoClient))
             await instance.on_startup()
             plugins[name] = instance
             logger.info("Loaded inference middleware plugin %r (%s)", name, cls.__qualname__)

@@ -2,14 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
-import { withOperators } from '@nemo/common/src/api/filterOperators';
+import { type FilterTree, jsonFilter } from '@nemo/common/src/api/filterOperators';
 import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
-import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
+import {
+  type ApiFilter,
+  useStudioDataViewState,
+} from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
 import { useEvaluatorListEvaluateJobs } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
 import {
@@ -22,16 +26,38 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationResultDetailsRoute } from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
 import { ComponentProps } from 'react';
-import { useNavigate } from 'react-router';
 
 const STATUS_OPTIONS_WITH_ALL = [{ value: '', label: 'All' }, ...STATUS_FILTER_OPTIONS];
 
 const SORTABLE_FIELDS = Object.values(EvaluateJobsSortField).filter((v) => !v.startsWith('-'));
 const DEFAULT_SORT = EvaluateJobsSortField['-created_at'];
 
+const AGENT_TARGET_FORMATS = ['generic', 'nemo_agent_toolkit'];
+
+// `$nin` alone drops runs whose spec names no target, so the null branch keeps those.
+const NOT_AGENT_TRIGGERED: FilterTree<EvaluateJobsListFilter> = {
+  $or: [
+    { 'spec.target.format': { $nin: AGENT_TARGET_FORMATS } },
+    { 'spec.target.format': { $eq: null } },
+  ],
+};
+
+const buildFilter = (apiFilter: ApiFilter<EvaluateJobsListFilter>): EvaluateJobsListFilter => {
+  const conditions: FilterTree<EvaluateJobsListFilter>[] = [NOT_AGENT_TRIGGERED];
+  if (apiFilter.filter && Object.keys(apiFilter.filter).length > 0) {
+    conditions.push(apiFilter.filter);
+  }
+  if (apiFilter.searchText) {
+    conditions.push({ name: { $like: apiFilter.searchText } });
+  }
+  return jsonFilter<EvaluateJobsListFilter>(
+    conditions.length === 1 ? conditions[0] : { $and: conditions }
+  );
+};
+
 export const EvaluationResultsDataView = () => {
   const workspace = useWorkspaceFromPath();
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
 
   const dataViewState = useStudioDataViewState<EvaluateJobsListFilter>({
     defaultSort: [{ id: 'created_at', desc: true }],
@@ -46,19 +72,8 @@ export const EvaluationResultsDataView = () => {
     {
       page: dataViewState.pagination.state.pageIndex + 1,
       page_size: dataViewState.pagination.state.pageSize,
-      sort: getSortParamWithWhitelist(
-        dataViewState.sorting.state,
-        SORTABLE_FIELDS,
-        DEFAULT_SORT
-      ) as EvaluateJobsSortField,
-      filter: {
-        ...dataViewState.apiFilter.filter,
-        ...(dataViewState.apiFilter.searchText
-          ? withOperators<EvaluateJobsListFilter>({
-              name: { $like: dataViewState.apiFilter.searchText },
-            })
-          : {}),
-      },
+      sort: getSortParamWithWhitelist(dataViewState.sorting.state, SORTABLE_FIELDS, DEFAULT_SORT),
+      filter: buildFilter(dataViewState.apiFilter),
     },
     {
       query: {
@@ -116,9 +131,9 @@ export const EvaluationResultsDataView = () => {
       dataViewState={dataViewState}
       searchField="name"
       makeColumns={makeColumns}
-      onRowClick={(row) => {
+      onRowClick={(row, _index, event) => {
         if (!row.name) return;
-        navigate(getEvaluationResultDetailsRoute(workspace, row.name));
+        openRow(event, getEvaluationResultDetailsRoute(workspace, row.name));
       }}
       attributes={{
         DataViewSearchBar: {

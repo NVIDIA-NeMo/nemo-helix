@@ -287,10 +287,11 @@ def test_policy_backend_has_no_megatron_member_yet() -> None:
     assert {b.value for b in PolicyBackend} == {"dtensor", "automodel"}
 
 
-def test_automodel_backend_rejects_full_weight() -> None:
-    """It trains fine, then saves a checkpoint the publisher cannot read -- fail before the GPU."""
-    with pytest.raises(ValueError, match="requires policy_backend='dtensor'"):
-        GRPOTraining(type="grpo", finetuning_type="all_weights", policy_backend=PolicyBackend.AUTOMODEL)
+def test_automodel_backend_accepts_full_weight() -> None:
+    """Automodel writes a consolidated HuggingFace tree the publisher can copy."""
+    t = GRPOTraining(type="grpo", finetuning_type="all_weights", policy_backend=PolicyBackend.AUTOMODEL)
+    assert t.policy_backend is PolicyBackend.AUTOMODEL
+    assert t.finetuning_type == "all_weights"
 
 
 def test_dtensor_backend_rejects_lora() -> None:
@@ -344,7 +345,7 @@ def test_grpo_lora_rejects_lora_merged() -> None:
     # looked at -- this would pass even if lora_merged were accepted. Match on the
     # field name so the assertion is about lora_merged and nothing else.
     with pytest.raises(ValueError, match="finetuning_type"):
-        GRPOTraining(type="grpo", finetuning_type="lora_merged")  # type: ignore[arg-type]
+        GRPOTraining.model_validate({"type": "grpo", "finetuning_type": "lora_merged"})
 
 
 def test_grpo_lora_requires_adapter_output() -> None:
@@ -493,3 +494,25 @@ def test_no_validation_generations_knob_is_exposed() -> None:
     be accepted and read by nothing. mean@k comes from repeating rows in validation.jsonl.
     """
     assert "num_val_generations_per_prompt" not in GRPOTraining.model_fields
+
+
+def test_job_output_trains_lora_adapter_for_grpo_lora() -> None:
+    job = RlJobOutput(
+        model="default/base-model",
+        dataset="default/gym",
+        environment="default/my-env",
+        training=GRPOTraining(type="grpo", finetuning_type="lora"),
+        output=_make_output(out_type=OutputNameType.ADAPTER),
+    )
+
+    assert job.trains_lora_adapter is True
+
+
+def test_job_output_does_not_train_lora_adapter_for_dpo() -> None:
+    job = _make_job_output(DPOTraining(type="dpo"))
+
+    assert job.trains_lora_adapter is False
+
+
+def test_job_output_deployment_config_defaults_to_none() -> None:
+    assert _make_job_output(DPOTraining(type="dpo")).deployment_config is None

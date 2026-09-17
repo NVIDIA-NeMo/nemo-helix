@@ -115,3 +115,22 @@ async def test_upload_step_stamps_output_metadata() -> None:
 
     upload = next(s for s in job["steps"] if s["name"] == "model-upload")
     assert upload["config"]["upload"][0]["metadata"] is None
+
+
+@pytest.mark.asyncio
+async def test_compiler_applies_profile_to_task_steps() -> None:
+    from nmp.unsloth.app.jobs import compiler as compiler_mod
+
+    original_fetch = compiler_mod.fetch_model_entity
+    compiler_mod.fetch_model_entity = AsyncMock(return_value=_model_entity())
+    try:
+        job = await platform_job_config_compiler(
+            workspace="default",
+            job_spec=_spec(validation_path=None),
+            sdk=MagicMock(),
+            profile="custom-gpu",
+        )
+    finally:
+        compiler_mod.fetch_model_entity = original_fetch
+
+    assert [step["executor"]["profile"] for step in job["steps"]] == ["custom-gpu"] * 4

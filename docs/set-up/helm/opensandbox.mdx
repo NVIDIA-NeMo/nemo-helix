@@ -9,7 +9,10 @@ description: "Install OpenSandbox as a cluster engine and point NeMo Platform jo
 
 The NeMo Platform Helm chart does **not** install [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox). Install the upstream charts, then point the platform at the running server.
 
-Install OpenSandbox when you run **sandboxed GRPO / NeMo Gym**: untrusted custom environment FileSets run in isolated pods, not in the training container. It does **not** sandbox the rest of the platform (API, DPO, SFT, inference).
+Install OpenSandbox when you run **sandboxed GRPO or Evaluator Gym jobs**: untrusted custom
+environment FileSets run in isolated pods, not in the training or evaluation container. It does
+**not** sandbox the rest of the platform (API, DPO, SFT, inference). For Evaluator-specific settings,
+see [Configure Sandboxed Gym for Evaluator](/documentation/evaluate-models/agent-eval/gym-sandbox-configuration).
 
 This page is the **shared-kernel** path: sandbox pods use the cluster default OCI runtime. That is often **runc** (containerd) or **crun** (CRI-O, including OKE and OpenShift). **A kernel-isolated runtime is not required.** Use [OpenSandbox with Kata](/documentation/kubernetes-deployment/setup/helm/opensandbox-kata) when those Gym/GRPO sandbox pods must be isolated from the host kernel. The documented path is Kata QEMU because it gives each sandbox its own guest kernel; other isolated runtimes may work but have not been tested. Example Helm values live in [`k8s/helm/examples/opensandbox/`](https://github.com/NVIDIA-NeMo/nemo-platform/tree/main/k8s/helm/examples/opensandbox).
 
@@ -38,7 +41,7 @@ Training and other job pods are OpenSandbox **clients**. They do not need a kube
 | Scheme | `platform.sandbox_server_protocol` / Gym `host_provider_options.connection.protocol` | Set **`http`** for the in-cluster Service. If unset, NeMo-RL health URLs default to **https** and stall |
 | Proxy | `use_server_proxy` | Leave true. Jobs cannot reach sandbox pod IPs |
 | Capability | `sandboxClusterCapable` / `platform.sandbox_cluster_capable` | Defaults to `false` (sandboxed GRPO fail-closes) |
-| Job PVC | `rl.job_storage_pvc_claim` | Required for sandboxed GRPO; sandboxes remount the same claim |
+| Job PVC | `rl.job_storage_pvc_claim` or `evaluator.sandbox_job_storage_pvc_claim` | Sandboxes remount the same claim used by the selected Jobs execution profile |
 
 Gym sample YAML uses `OPENSANDBOX_DOMAIN` / `OPENSANDBOX_API_KEY`. NeMo Platform and the SDK use `OPEN_SANDBOX_*`. Do not mix the names.
 

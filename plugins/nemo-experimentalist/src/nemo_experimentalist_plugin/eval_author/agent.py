@@ -38,7 +38,7 @@ from nemo_experimentalist_plugin.experimentalist.components.trace_explorer impor
 )
 from nemo_experimentalist_plugin.experimentalist.reporting import RunReporter
 from nemo_insights_plugin.entities import Insight
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.client import AsyncNemoClient
 from nemo_platform_plugin.nooa_model_client import get_default_model, get_fast_model
 from nooa import Agent, CodeActStrategy, strategy
 from nooa.agentdoc import doc
@@ -79,7 +79,7 @@ class EvalAuthor(Agent):
         self.experiment_dir = experiment_dir
         # Set by the standalone entry point before it queries production traces. The
         # Experimentalist path leaves both unset and passes a client to ``run`` instead.
-        self.client: AsyncNeMoPlatform | None = None
+        self.client: AsyncNemoClient | None = None
         self.workspace: str | None = None
         self.shell = GuardedShellTools(cwd=experiment_dir)
         self.todos = TodoManager()
@@ -97,7 +97,7 @@ class EvalAuthor(Agent):
             config=TokenBudgetConfig(max_tokens=self._config.max_summary_tokens),
         )
 
-    def _intake(self) -> tuple[AsyncNeMoPlatform, str]:
+    def _intake(self) -> tuple[AsyncNemoClient, str]:
         """Return the client and workspace for Intake reads, or name what is missing."""
         if self.client is None or self.workspace is None:
             raise traces.TraceQueryError(
@@ -317,7 +317,7 @@ class EvalAuthor(Agent):
         self,
         trace_ref: str,
         task_template: Task,
-        client: AsyncNeMoPlatform,
+        client: AsyncNemoClient,
         workspace: str,
     ) -> Task:
         """Fill a pre-staged task template with values from a production trace.
@@ -370,7 +370,7 @@ class EvalAuthor(Agent):
         train_dataset: Dataset,
         validation_dataset: Dataset,
         *,
-        client: AsyncNeMoPlatform,
+        client: AsyncNemoClient,
     ) -> EvalAuthorResult:
         """Curate an evaluation suite and always close the owned shell session."""
         try:
@@ -393,7 +393,7 @@ class EvalAuthor(Agent):
         train_dataset: Dataset,
         validation_dataset: Dataset,
         *,
-        client: AsyncNeMoPlatform,
+        client: AsyncNemoClient,
     ) -> EvalAuthorResult:
         """Curate an evaluation suite from an Insight and its production traces.
 

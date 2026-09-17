@@ -161,7 +161,10 @@ docs/helm/index.mdx
 .act-variables
 .act-secrets
 
-# iron-swarm CLI run artifacts (builds, policies, run-logs) written into the working dir
+# agent-hardener CLI run artifacts (builds, policies, run-logs) written into the working dir
+.agent-hardener/
+agent-hardener.yaml
+# Pre-rename run artifacts still on developer machines
 .iron-swarm/
 iron-swarm.yaml
 # Playwright MCP session output

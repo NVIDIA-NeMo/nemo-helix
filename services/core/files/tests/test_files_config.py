@@ -14,10 +14,13 @@ class TestFilesConfigAllowedExternalHosts:
     def test_allowed_external_hosts_default(self) -> None:
         """Test allowed_external_hosts default value and get_allowed_external_hosts() parsing."""
         config = FilesConfig()
-        assert config.allowed_external_hosts == "https://api.ngc.nvidia.com,https://huggingface.co"
+        assert config.allowed_external_hosts == (
+            "https://api.ngc.nvidia.com,https://huggingface.co,https://api.github.com"
+        )
         assert config.get_allowed_external_hosts() == [
             "https://api.ngc.nvidia.com",
             "https://huggingface.co",
+            "https://api.github.com",
         ]
 
     def test_allowed_external_hosts_from_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:

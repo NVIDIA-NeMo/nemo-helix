@@ -7,9 +7,10 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_OPTIMIZER_ENABLED', 'true');
 });
 
-import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { getInsightsListInsightsQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import { getAgentDetailRoute } from '@studio/routes/utils';
@@ -19,7 +20,7 @@ import { http, HttpResponse } from 'msw';
 
 const agentName = 'react-agent';
 const workspace = workspace1.workspace;
-const INSIGHTS_URL = `${PLATFORM_BASE_URL}/apis/insights/v2/workspaces/:workspace/insights`;
+const INSIGHTS_URL = mockApiUrl(getInsightsListInsightsQueryKey, ':workspace');
 
 const renderDetail = () =>
   renderRoute(undefined, {
@@ -103,12 +104,13 @@ describe('Open insights on the agent overview', () => {
     expect(screen.queryByRole('button', { name: 'View all' })).not.toBeInTheDocument();
   });
 
-  it('surfaces a failing insights service without breaking the tab', async () => {
+  it('scopes a failing insights service to Insights, not to trace statistics', async () => {
     server.use(http.get(INSIGHTS_URL, () => HttpResponse.json({}, { status: 500 })));
 
     renderDetail();
 
-    expect(await screen.findByText('Insights are unavailable')).toBeInTheDocument();
-    expect(screen.getByText('Trace statistics')).toBeInTheDocument();
+    expect(await screen.findByText("Insights couldn't be loaded right now.")).toBeInTheDocument();
+    expect(screen.getByText('Open insights')).toBeInTheDocument();
+    expect(screen.queryByText('Trace statistics are unavailable')).not.toBeInTheDocument();
   });
 });

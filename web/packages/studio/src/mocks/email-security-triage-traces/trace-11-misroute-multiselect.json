@@ -1,0 +1,46 @@
+{
+  "schema_version": "ATIF-v1.5",
+  "session_id": "3f2a1c00-0011-4a00-8000-000000000011",
+  "trajectory_id": "3f2a1c00-0011-4a00-8000-000000000011",
+  "agent": {
+    "name": "email-security-triage",
+    "version": "0.7.0",
+    "model_name": "nvidia-nemotron-3-nano-30b-a3b"
+  },
+  "final_metrics": {
+    "total_prompt_tokens": 4210,
+    "total_completion_tokens": 196,
+    "total_cost_usd": 0.0007491,
+    "total_steps": 2
+  },
+  "extra": {
+    "task_id": "email-security-triage/misroute-multiselect-11",
+    "verifier_result": {
+      "rewards": {
+        "correctness": 1.0,
+        "format": 0.0,
+        "routing": 0.0
+      }
+    }
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-08-24T22:18:55Z",
+      "source": "user",
+      "message": "{\"user_message\": \"do you think this is real?\", \"emails\": [{\"from\": \"support@okta-verify.support\", \"subject\": \"Sign-in blocked from a new device\", \"body\": \"Confirm it was you at https://okta-verify.support/confirm.\"}, {\"from\": \"travel@company.com\", \"subject\": \"Your trip itinerary\", \"body\": \"Attached is your approved itinerary for next week.\"}]}"
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-08-24T22:19:01Z",
+      "source": "agent",
+      "model_name": "default/nvidia-nemotron-3-nano-30b-a3b",
+      "message": "ANALYSIS\n\n[1]\nVERDICT: phishing\nATTACK_TYPE: credential\nIOCS: okta-verify.support\nACTION: quarantine\nREASONING: Non-corporate lookalike SSO domain requesting sign-in confirmation.\n\n[2]\nVERDICT: benign\nATTACK_TYPE: benign\nIOCS: none\nACTION: deliver\nREASONING: Internal travel desk, no links or credential prompts.",
+      "metrics": {
+        "prompt_tokens": 4210,
+        "completion_tokens": 196,
+        "cost_usd": 0.0007491
+      }
+    }
+  ]
+}

@@ -46,3 +46,39 @@ export type WithFilterOperators<F> = {
  * filter: withOperators<FilesetFilter>({ name: { $like: `%${search}%` } })
  */
 export const withOperators = <F>(filter: WithFilterOperators<F>): F => filter as F;
+
+/**
+ * A predicate on a namespaced sub-path, addressed as a dotted key at the filter
+ * root (e.g. `{ 'spec.target.format': { $eq: 'generic' } }`). Generated filter
+ * types model the namespace as a single opaque field, so its sub-paths have no
+ * generated key to check against.
+ */
+export type PathFilter = Record<string, FilterOperators<unknown>>;
+
+/**
+ * A filter tree: field predicates, sub-path predicates, or those grouped under a
+ * logical operator. `$and` / `$or` take an array of nodes rather than sibling
+ * keys — the server's parser reads a logical operator as the whole node, so a
+ * key alongside `$or` is dropped.
+ */
+export type FilterTree<F> =
+  | WithFilterOperators<F>
+  | PathFilter
+  | { $and: readonly FilterTree<F>[] }
+  | { $or: readonly FilterTree<F>[] }
+  | { $not: FilterTree<F> };
+
+/**
+ * Serialize a filter tree to the raw JSON the `filter=` query param accepts, and
+ * coerce it to the generated SDK filter type in one step.
+ *
+ * Filters are normally passed as an object and expanded into bracket notation by
+ * the query serializer, but that mangles the array of nodes a logical operator
+ * takes. Endpoints also accept the whole filter as a JSON string, which round-trips
+ * a tree intact. Like {@link withOperators}, this keeps the cast at the SDK
+ * boundary instead of at each call site.
+ *
+ * @example
+ * filter: jsonFilter<EvaluateJobsListFilter>({ $or: [{ name: { $like: 'a' } }, { status: 'failed' }] })
+ */
+export const jsonFilter = <F>(filter: FilterTree<F>): F => JSON.stringify(filter) as unknown as F;

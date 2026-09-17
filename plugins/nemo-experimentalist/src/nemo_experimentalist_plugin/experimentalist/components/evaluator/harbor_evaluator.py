@@ -5,7 +5,7 @@
 
 ``HarborEvaluator`` builds Harbor's ``JobConfig`` and drives ``Job`` itself. This
 evaluator hands that job to the SDK's ``HarborAgentTaskRunner`` instead: the SDK
-owns the ``JobConfig``, the success-aware job-directory cache, and the scoped
+owns the ``JobConfig``, the Harbor-valid result cache, and the scoped
 agent import. Harbor still does the work underneath — the difference is who owns
 the orchestration.
 
@@ -84,7 +84,7 @@ class HarborRunnerConfig(EvaluatorConfig):
         default=None,
         description=(
             "Harbor job name. Defaults to the loop's deterministic '<candidate>-<dataset>', "
-            "which is what makes the SDK's success-aware job-dir cache usable."
+            "which is what makes the SDK's Harbor-valid result cache usable."
         ),
     )
     jobs_dir: Path = Field(

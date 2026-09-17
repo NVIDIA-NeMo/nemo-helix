@@ -38,6 +38,7 @@ from nemo_evaluator_sdk.agent_eval.trials import (
     AgentEvalTrialStatus,
     AgentOutput,
     RunnerInfo,
+    TrialMeasurements,
     resolve_trial_status,
     standard_evidence_descriptors,
 )
@@ -453,19 +454,23 @@ def build_trial_from_artifacts(
     )
 
     output_text = log_text.strip() or ("" if agent_ok else "(agent phase failed)")
+    measurements = TrialMeasurements(
+        prompt_tokens=usage["prompt_tokens"],
+        completion_tokens=usage["completion_tokens"],
+        cache_creation_tokens=usage["cache_creation_tokens"],
+        cache_read_tokens=usage["cache_read_tokens"],
+        runtime_sec=runtime_sec,
+    )
     metadata: dict[str, Any] = {
         "agent_runtime": runtime_name,
         "agent_model": agent_model,
         "agent_ok": agent_ok,
         "exit_code": exit_code,
-        "runtime_sec": runtime_sec,
         "run_dir": str(layout.run_dir),
         "agent_log_dir": str(layout.agent_log_dir),
         "workspace_dir": str(layout.workspace_dir),
         "state_dir": str(layout.state_dir),
         "generated": True,
-        # Token measurements (same keys nat_runner writes into result.json["metrics"]).
-        **{key: value for key, value in usage.items() if value is not None},
     }
     return AgentEvalTrial(
         id=f"{task.id}:{runtime_name}",
@@ -476,6 +481,7 @@ def build_trial_from_artifacts(
             metadata={"runtime": runtime_name, "agent_model": agent_model},
         ),
         evidence=CandidateEvidence(descriptors=descriptors, metadata={"runtime": runtime_name}),
+        measurements=measurements,
         metadata=metadata,
     )
 

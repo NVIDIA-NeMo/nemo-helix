@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { InsightStatus } from '@nemo/sdk/generated/insights/schema';
 import type { Button, Tag } from '@nvidia/foundations-react-core';
-import type { InsightStatus } from '@studio/api/optimizer';
 import type { ComponentProps } from 'react';
 
 type TagColor = ComponentProps<typeof Tag>['color'];

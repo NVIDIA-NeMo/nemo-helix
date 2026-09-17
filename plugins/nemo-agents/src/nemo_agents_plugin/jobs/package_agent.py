@@ -38,6 +38,7 @@ from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.entities.client import AsyncEntitiesClient
 from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_platform_plugin.files.client import AsyncFilesClient
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.job_results import ResultRef
@@ -171,8 +172,8 @@ class PackageAgentSpec(PackageAgentInput):
     @model_validator(mode="after")
     def _push_tag_stays_in_the_workspace_namespace(self) -> PackageAgentSpec:
         # 'workspace' isn't known on PackageAgentInput (it comes from the URL / --workspace,
-        # not the request body), so this check can only run here, once to_spec()/run_local()
-        # has stamped it onto the spec.
+        # not the request body), so this check can only run here, once to_spec()
+        # has stamped it onto the canonical spec.
         if self.push_tag and self.registry and self.workspace:
             # Anchored on 'registry' too, not just the 'nemo-agents/{workspace}/' segment —
             # otherwise push_tag could silently redirect to a registry other than the one
@@ -440,5 +441,5 @@ class PackageAgentJob(NemoJob):
             agent_name=cfg.agent,
             agent_config=cfg.agent_config,
             base_dir=build_dir,
-            sdk=async_sdk.files if async_sdk is not None else None,
+            files_client=client_from_platform(async_sdk, AsyncFilesClient) if async_sdk is not None else None,
         )

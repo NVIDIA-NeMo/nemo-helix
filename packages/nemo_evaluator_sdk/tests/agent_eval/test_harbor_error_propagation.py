@@ -9,8 +9,9 @@ changing *what* it stamps rather than the SDK mis-reading what it stamped.
 
 Marked ``integration`` rather than ``e2e``/``slow`` on purpose: that combination (used by
 ``test_harbor_runtime_e2e.py``) is selected by no make target and no CI job. ``integration`` at least
-runs wherever the plugin's ``test_harbor_plugin_run.py`` does. It still skips in CI today, because
-``harbor`` is an optional SDK extra and nothing depends on ``nemo-evaluator-sdk[harbor]``.
+runs wherever the plugin's ``test_harbor_plugin_run.py`` does. This older error-rollup check remains
+optional; the Experimentalist integration suite owns the required Harbor 0.20 error-plus-reward
+parity contract.
 """
 
 from __future__ import annotations
@@ -22,7 +23,6 @@ from pathlib import Path
 import pytest
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
     HarborRuntimeConfig,
-    reward_payload_from_result,
     run_harbor_eval,
 )
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrialStatus
@@ -73,6 +73,3 @@ async def test_a_real_harbor_timeout_lands_in_the_summary_error_rollup(tmp_path:
     # already carries Harbor's exception_stats shape, keyed by trial id.
     assert result.summary.error_trial_ids == {"AgentTimeoutError": [trial.id]}
     assert result.summary.error_count == 1
-
-    # Harbor runs the verifier even after recording the timeout, so the same trial is also scored.
-    assert reward_payload_from_result(result)["exceptions"] == {"AgentTimeoutError": [_ERROR_TASK_NAME]}

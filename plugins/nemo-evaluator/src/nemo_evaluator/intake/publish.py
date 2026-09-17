@@ -25,10 +25,9 @@ from datetime import timedelta
 from typing import cast
 
 from nemo_evaluator.intake import mapping
-from nemo_evaluator_sdk.agent_eval.metrics import TrialMeasurements
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
 from nemo_evaluator_sdk.agent_eval.scores import AgentEvalTaskScore
-from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
+from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, TrialMeasurements
 from nemo_platform_plugin.client.errors import NotFoundError, UnprocessableEntityError
 from nemo_platform_plugin.intake.client import AsyncIntakeClient
 from nemo_platform_plugin.intake.types import (
@@ -179,6 +178,7 @@ async def publish_to_intake(
     arguments because it lives on the run *target*, which ``AgentEvalResult`` does
     not carry (design §3.9 #6).
     """
+    validated_trials = [AgentEvalTrial.model_validate(trial) for trial in result.trials]
     intake = client
     resolved_workspace = intake.require_workspace(workspace)
 
@@ -285,7 +285,7 @@ async def publish_to_intake(
 
     async def _publish_trial(trial: AgentEvalTrial) -> PublishedTrial:
         async with semaphore:
-            measurements = TrialMeasurements.from_metadata(trial.metadata)
+            measurements = trial.measurements
             session_id = mapping.session_id_for(result.run_id, trial.id)
             span_id = await _publish_otlp(trial, measurements=measurements, session_id=session_id)
             if span_id is None:
@@ -312,11 +312,11 @@ async def publish_to_intake(
             evaluator_result_count=written,
         )
 
-    outcomes = await asyncio.gather(*(_publish_trial(trial) for trial in result.trials), return_exceptions=True)
+    outcomes = await asyncio.gather(*(_publish_trial(trial) for trial in validated_trials), return_exceptions=True)
 
     published: list[PublishedTrial] = []
     failures: list[tuple[str, BaseException]] = []
-    for trial, outcome in zip(result.trials, outcomes, strict=True):
+    for trial, outcome in zip(validated_trials, outcomes, strict=True):
         if isinstance(outcome, PublishedTrial):
             published.append(outcome)
         else:

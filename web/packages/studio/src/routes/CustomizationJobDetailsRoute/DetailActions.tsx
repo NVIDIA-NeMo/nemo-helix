@@ -5,6 +5,7 @@ import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { CJobCancellableStatuses, CJobLaunchableStatuses } from '@nemo/common/src/constants/query';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { toError } from '@nemo/common/src/utils/logger';
 import { useCustomizationCancelAutomodelJob } from '@nemo/sdk/generated/customizer/automodel-jobs';
 import { useCustomizationCancelRlJob } from '@nemo/sdk/generated/customizer/rl-jobs';
 import { useCustomizationCancelUnslothJob } from '@nemo/sdk/generated/customizer/unsloth-jobs';
@@ -16,7 +17,6 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getNewCustomizationJobRoute, getNewEvaluationMetricRoute } from '@studio/routes/utils';
 import { CustomizationBackend, type CustomizationJob } from '@studio/util/customizationBackend';
 import { useQueryClient } from '@tanstack/react-query';
-import { AxiosError } from 'axios';
 import { Ban, Copy } from 'lucide-react';
 import { FC } from 'react';
 import { useNavigate } from 'react-router';
@@ -80,11 +80,7 @@ export const DetailActions: FC<DetailActionsProps> = ({ model, status, backend, 
     try {
       await cancel({ workspace, name });
     } catch (e) {
-      if (e instanceof AxiosError || e instanceof Error) {
-        toast.error(`Failed to cancel job: ${getErrorMessage(e)}`);
-      } else {
-        toast.error('Failed to cancel job: Unknown error');
-      }
+      toast.error(`Failed to cancel job: ${getErrorMessage(toError(e))}`);
     }
   };
 

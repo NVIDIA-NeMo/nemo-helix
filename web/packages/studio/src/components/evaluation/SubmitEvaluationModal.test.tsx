@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
+import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
+import { getListExperimentsQueryKey } from '@nemo/sdk/generated/platform/experiments';
 import type { EvaluationResponse, ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { EVAL_CONFIG_FILESET_KEY } from '@studio/components/evaluation/experimentEvalConfig';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
@@ -48,14 +51,14 @@ const EVALUATIONS = [
 
 const mockLists = () => {
   server.use(
-    http.get('*/apis/intake/v2/workspaces/:workspace/experiments', ({ request }) => {
+    http.get(mockApiUrl(getListExperimentsQueryKey, ':workspace'), ({ request }) => {
       // The name-conflict probe asks for one exact name; everything else is the group lookup.
       const name = new URL(request.url).searchParams.get('filter[name]');
       return HttpResponse.json({
         data: name ? EXPERIMENTS.filter((item) => item.name === name) : EXPERIMENTS,
       });
     }),
-    http.get('*/apis/intake/v2/workspaces/:workspace/evaluations', ({ request }) => {
+    http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), ({ request }) => {
       const url = new URL(request.url);
       // The name-conflict probe asks for one exact name; everything else is the picker's list.
       const name = url.searchParams.get('filter[name]');
@@ -66,11 +69,7 @@ const mockLists = () => {
         });
       }
       return HttpResponse.json({ data: EVALUATIONS });
-    }),
-    // The wizard checks a picked run's saved config before letting Next through.
-    http.get('*/apis/files/v1/workspaces/:workspace/filesets/:fileset/files', () =>
-      HttpResponse.json({ data: [{ path: 'eval-config.json' }] })
-    )
+    })
   );
 };
 

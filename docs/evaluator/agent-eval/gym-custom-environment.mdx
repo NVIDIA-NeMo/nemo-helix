@@ -1,0 +1,195 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Run a Custom NeMo Gym Environment"
+description: "Package a custom NeMo Gym environment as a FileSet and run it as a sandboxed agent-evaluate job."
+---
+
+A custom Gym environment runs from a NeMo Platform FileSet rather than from the components bundled
+in the Gym task image. Evaluator stages the FileSet onto job storage, mounts it read-only in an
+OpenSandbox Gym host, and returns the rollouts through the normal agent-evaluation result bundle.
+
+## Prerequisites
+
+- A running NeMo Platform with the Evaluator plugin.
+- An OpenSandbox-capable Kubernetes deployment configured for sandboxed Gym. See
+  [Configure Sandboxed Gym](/documentation/evaluate-models/agent-eval/gym-sandbox-configuration).
+- A taskset built from Gym rows as described in
+  [Evaluate a NeMo Gym Environment](/documentation/evaluate-models/agent-eval/gym-runner#submit-as-a-platform-job).
+- A model endpoint reachable from the sandbox.
+
+<Warning>
+
+FileSet-backed Gym environments cannot use colocated platform execution. Evaluator rejects the
+submission when
+`sandboxed_gym_default` is disabled or the selected execution profile does not provide compatible
+shared PVC storage.
+
+</Warning>
+
+## 1. Package the environment
+
+The FileSet must contain `nemo-environment.yaml` at its root. Evaluator accepts two formats:
+
+- `native-v1` installs component dependencies from each component's `requirements.txt`.
+- `wheels-v1` installs dependencies from a flat, non-empty `wheels/` directory without contacting a
+  package index.
+
+A minimal `native-v1` resource-server package looks like this:
+
+```text
+my-gym-environment/
+├── nemo-environment.yaml
+└── resources_servers/
+    └── custom_greeting/
+        ├── app.py
+        ├── requirements.txt
+        └── configs/
+            └── custom_greeting.yaml
+```
+
+```yaml
+format: native-v1
+config_paths:
+  - resources_servers/custom_greeting/configs/custom_greeting.yaml
+metadata:
+  name: custom-greeting
+  description: Return and score a requested greeting.
+```
+
+For `wheels-v1`, use the same manifest shape with `format: wheels-v1` and add the wheelhouse:
+
+```text
+my-gym-environment/
+├── nemo-environment.yaml
+├── wheels/
+│   ├── custom_greeting-0.1.0-py3-none-any.whl
+│   └── dependency-1.0.0-py3-none-any.whl
+└── resources_servers/
+    └── custom_greeting/
+        └── configs/
+            └── custom_greeting.yaml
+```
+
+The package must follow these rules:
+
+- Every `config_paths` entry is relative to the FileSet root and names an uploaded file.
+- `native-v1` config paths stay under `resources_servers/` or `responses_api_agents/`.
+- `wheels/` is flat and contains only `.whl` files.
+- Do not include `responses_api_models/`; model configuration is operator-owned.
+- Do not include dataset `.jsonl` files. Store evaluation rows in a separate taskset.
+
+## 2. Upload the environment
+
+Create an environment FileSet and upload the directory contents:
+
+```bash
+nemo files filesets create my-gym-environment \
+  --workspace default \
+  --purpose environment \
+  --description "Custom Gym environment"
+
+nemo files upload ./my-gym-environment/ my-gym-environment \
+  --workspace default
+
+nemo files list my-gym-environment --workspace default
+```
+
+Keep the trailing slash on `./my-gym-environment/`. It places `nemo-environment.yaml` at the FileSet
+root instead of creating an extra directory level.
+
+## 3. Create the job specification
+
+Create `gym-custom-environment.yaml`:
+
+```yaml
+tasks: default/my-gym-taskset
+target:
+  kind: gym
+  environment: default/my-gym-environment
+  agent: simple_agent
+  agent_config: responses_api_agents/simple_agent/configs/simple_agent.yaml
+  resources_server: custom_greeting
+  num_repeats: 1
+  concurrency: 1
+  hydra_params:
+    policy_base_url: http://nemo-platform-api.default.svc.cluster.local:8080/apis/inference-gateway/v2/workspaces/default/model/my-model/-/v1
+    policy_api_key: not-used
+    policy_model_name: my-model
+max_concurrent_tasks: 1
+fail_fast: true
+labels:
+  benchmark: custom-greeting
+```
+
+The Evaluator plugin skill includes the same shape as a validated JSON starting point at
+`skills/nemo-evaluator-plugin/assets/specs/gym_agent_eval.json`.
+
+Replace the service URL, workspace, model, taskset, and component names for your deployment.
+The model URL must be present in the deployment's sandbox egress configuration.
+
+If the package declares the selected agent instance, you can omit `agent_config`. Set
+`agent_ref_name` when the instance name registered by the package differs from `agent`.
+
+For an environment variable containing a credential, use a platform secret reference:
+
+```yaml
+target:
+  kind: gym
+  # ...
+  env_secrets:
+    EXTERNAL_MODEL_API_KEY: default/my-model-api-key
+```
+
+Do not place credentials in `env_vars`. Sandboxed submissions reject credential-shaped plaintext
+environment variables.
+
+## 4. Submit the job
+
+```bash
+nemo evaluator agent-evaluate submit \
+  --spec-file gym-custom-environment.yaml \
+  --workspace default \
+  --profile default
+```
+
+Evaluator compiles two ordered steps:
+
+1. `stage-environment` downloads the FileSet onto job-scoped persistent storage.
+2. `agent-evaluate` provisions `nmp-gym-host`, collects rollouts, scores them, and destroys the host.
+
+Both platform steps use `nmp-cpu-tasks`; Gym and Ray run in the separate sandbox host.
+
+## 5. Read the results
+
+Wait for the job to finish, then download the result bundle:
+
+```bash
+nemo jobs results download agent-eval-results \
+  --job <job-name> \
+  --output-file agent-eval-results.tar.gz
+```
+
+The archive contains `trials.jsonl`, `scores.jsonl`, `tasks.jsonl`, and `summary.json`. See
+[Reading Results](/documentation/evaluate-models/agent-eval/reading-results#results-from-platform-jobs)
+for the queryable result record and SDK retrieval path.
+
+## Troubleshooting
+
+- **FileSet purpose or manifest error:** Confirm the FileSet uses `purpose=environment` and contains
+  a valid root `nemo-environment.yaml`.
+- **Sandbox unavailable:** Confirm the deployment enabled sandboxed Gym and configured OpenSandbox,
+  the runtime image, a shared PVC, and model egress.
+- **PVC mismatch:** The Jobs execution profile and `sandbox_job_storage_pvc_claim` must name the same
+  claim.
+- **Agent returns no rollout:** Set `agent_ref_name` to the agent instance registered by the package.
+- **Model connection failure:** Add the model host and port to the deployment-owned egress allowlist.
+
+## Related
+
+<Cards>
+  <Card title="Evaluate a NeMo Gym Environment" href="/documentation/evaluate-models/agent-eval/gym-runner" />
+  <Card title="Configure Sandboxed Gym" href="/documentation/evaluate-models/agent-eval/gym-sandbox-configuration" />
+  <Card title="Reading Results" href="/documentation/evaluate-models/agent-eval/reading-results" />
+</Cards>

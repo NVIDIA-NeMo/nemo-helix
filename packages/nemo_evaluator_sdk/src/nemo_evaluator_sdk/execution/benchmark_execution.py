@@ -131,7 +131,7 @@ def _normalize_metric_result(metric_result: MetricResult, expected_outputs: list
     validated = validate_metric_result(metric_result, expected_outputs)
     actual_outputs = {output.name: output for output in validated.outputs}
     return MetricResult(
-        outputs=[actual_outputs[output.name] for output in expected_outputs],
+        outputs=[actual_outputs[output.name] for output in expected_outputs if output.name in actual_outputs],
         diagnostics=validated.diagnostics,
     )
 

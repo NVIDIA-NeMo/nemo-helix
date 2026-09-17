@@ -24,10 +24,10 @@ import { ComputeResourcesSection } from '@studio/components/NewCustomizationForm
 import { DpoParametersSection } from '@studio/components/NewCustomizationForm/DpoParametersSection';
 import { GeneralParametersSection } from '@studio/components/NewCustomizationForm/GeneralParametersSection';
 import { GrpoParametersSection } from '@studio/components/NewCustomizationForm/GrpoParametersSection';
+import { IntegrationsSection } from '@studio/components/NewCustomizationForm/IntegrationsSection';
 import { LoraParametersSection } from '@studio/components/NewCustomizationForm/LoraParametersSection';
 import { ModelSelectionSection } from '@studio/components/NewCustomizationForm/ModelSelectionSection';
 import { RewardEnvironmentSection } from '@studio/components/NewCustomizationForm/RewardEnvironmentSection';
-import { RlIntegrationsSection } from '@studio/components/NewCustomizationForm/RlIntegrationsSection';
 import { TrainingMethodSection } from '@studio/components/NewCustomizationForm/TrainingMethodSection';
 import { getWorkspaceCustomizationJobDetailsRoute } from '@studio/routes/utils';
 import {
@@ -229,12 +229,8 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
                         <DpoParametersSection />
                       </>
                     )}
-                    {backend === 'rl' && (
-                      <>
-                        <Divider />
-                        <RlIntegrationsSection />
-                      </>
-                    )}
+                    <Divider />
+                    <IntegrationsSection backend={backend} />
                     <Divider />
                     <ComputeResourcesSection />
                     {validationErrors.length > 0 && (

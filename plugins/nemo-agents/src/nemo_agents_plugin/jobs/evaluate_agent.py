@@ -29,6 +29,7 @@ import tempfile
 from pathlib import Path
 from typing import ClassVar, Iterator
 
+from filesets import FilesetFileSystem
 from nemo_agents_plugin.refs import AgentRef, AgentTarget, classify_agent_target
 from nemo_agents_plugin.utils import (
     get_base_url,
@@ -37,9 +38,13 @@ from nemo_agents_plugin.utils import (
     temp_injected_config,
 )
 from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.errors import LocalRunError
+from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
+from nemo_platform_plugin.jobs.file_manager import FilesetFileManager
 from nemo_platform_plugin.refs import (
     EndpointURL,
     FilesetRef,
@@ -47,7 +52,6 @@ from nemo_platform_plugin.refs import (
     OutputTarget,
     classify_output_target,
 )
-from nemo_platform_plugin.run_dependencies import LocalRunError
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -229,18 +233,13 @@ class EvaluateAgentJob(NemoJob):
 
         Args:
             config: Dict matching :class:`EvaluateAgentSpec`.
-            sdk: Platform SDK handle, injected by the
-                :class:`~nemo_platform_plugin.scheduler.NemoJobScheduler` (locally) or
-                :func:`~nemo_platform_plugin.tasks.dispatcher.run_task`
-                (in-container) from the ambient SDK handle.  Required when
+            sdk: Platform SDK handle passed by the task entrypoint. Required when
                 ``cfg.eval_config_fileset`` or a fileset-shaped ``cfg.output``
                 is set (download / upload respectively); a local-directory
                 output runs without it, so the parameter is declared optional
                 and validated at the point of use.
-            ctx: Runtime context bound by signature DI.  Both
-                :class:`~nemo_platform_plugin.scheduler.NemoJobScheduler.run_local`
-                and :func:`~nemo_platform_plugin.tasks.dispatcher.run_task`
-                always supply one; the no-output fallback writes to
+            ctx: Runtime context passed by the task entrypoint. The no-output
+                fallback writes to
                 ``ctx.storage.persistent / "results"`` and tempdirs land
                 under ``ctx.storage.ephemeral`` so they sit on the
                 platform-injected scratch volume.
@@ -352,7 +351,7 @@ class EvaluateAgentJob(NemoJob):
             raise LocalRunError(
                 "EvaluateAgentJob.run requires a 'sdk: NeMoPlatform' to download "
                 "eval_config_fileset contents, but no platform SDK was available. "
-                "Set NMP_BASE_URL or pass sdk via NemoJobScheduler.run_local(sdk=...)."
+                "Set NMP_BASE_URL before using fileset inputs."
             )
 
         ref = FilesetRef(cfg.eval_config_fileset)
@@ -367,7 +366,14 @@ class EvaluateAgentJob(NemoJob):
         ) as tmp:
             tmp_path = Path(tmp)
             logger.info("Downloading fileset %s/%s into %s for eval config.", ws, name, tmp_path)
-            sdk.files.download(local_path=str(tmp_path), fileset=name, workspace=ws)
+            files_client = client_from_platform(sdk, FilesClient)
+            manager = FilesetFileManager(
+                workspace=ws,
+                fileset_name=name,
+                filesystem=FilesetFileSystem(client=files_client),
+                ensure_fileset_exists=False,
+            )
+            manager.download_from_url(f"{ws}/{name}", local_dir=tmp_path)
             # ``cfg.eval_config`` is caller-controlled — resolve and confirm
             # it stays inside the downloaded fileset before yielding it, so
             # an absolute path or ``..`` segment can't make ``nat eval`` read
@@ -401,7 +407,7 @@ class EvaluateAgentJob(NemoJob):
         - :class:`FilesetRef` → a fresh tempdir under
           ``ctx.storage.ephemeral``; on successful exit the tempdir is
           uploaded to the named fileset (auto-created if missing) via
-          ``sdk.files.upload`` before being cleaned up.
+          the typed Files client before being cleaned up.
 
         The tempdir is removed regardless of whether the upload
         succeeds; failures during upload propagate so the caller sees
@@ -438,9 +444,7 @@ class EvaluateAgentJob(NemoJob):
             raise LocalRunError(
                 "EvaluateAgentJob.run requires a 'sdk: NeMoPlatform' to upload "
                 "results to a fileset, but no platform SDK was available. "
-                "Set NMP_BASE_URL (so the local CLI can build a default SDK), "
-                "pass an explicit sdk via NemoJobScheduler.run_local(sdk=...), "
-                "or use --output <path> to write results to a local directory instead."
+                "Set NMP_BASE_URL or use --output <path> to write results to a local directory instead."
             )
 
         ref = FilesetRef(output)
@@ -486,18 +490,21 @@ class EvaluateAgentJob(NemoJob):
 
         *sdk* is the platform SDK handle injected into :meth:`run` by
         the :class:`~nemo_platform_plugin.scheduler.NemoJobScheduler` (signature-based
-        DI). The upload goes through :meth:`sdk.files.upload`.
+        DI). The upload goes through the typed Files client that shares the
+        SDK's transport.
         """
-        # Trailing slash uploads contents, not the dir itself.
-        result = sdk.files.upload(
-            local_path=str(local_dir) + "/",
-            fileset=fileset,
+        files_client = client_from_platform(sdk, FilesClient)
+        manager = FilesetFileManager(
             workspace=workspace,
-            fileset_auto_create=True,
+            fileset_name=fileset,
+            filesystem=FilesetFileSystem(client=files_client),
+            ensure_fileset_exists=True,
         )
+        manager.validate_storage()
+        manager.upload(local_path=local_dir, remote_path="")
         logger.info(
             "Uploaded eval outputs from %s to fileset %s/%s.",
             local_dir,
             workspace,
-            result.name,
+            fileset,
         )

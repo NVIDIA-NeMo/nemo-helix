@@ -238,6 +238,7 @@ def test_resolve_model_reference_fetches_model_and_provider(sdk):
     provider.workspace = "default"
     provider.name = "provider"
     provider.host_url = "http://nim.example.test:8000"
+    provider.served_models = [MagicMock(model_entity_id="default/judge", served_model_name="publisher/upstream-judge")]
 
     with (
         patch.object(models, "retrieve", return_value=model_entity) as mock_retrieve,
@@ -250,6 +251,7 @@ def test_resolve_model_reference_fetches_model_and_provider(sdk):
     assert result.name == "judge"
     assert result.url == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
     assert result.host_url == "http://nim.example.test:8000"
+    assert result.served_model_name == "publisher/upstream-judge"
 
 
 def test_resolve_model_reference_ignores_missing_provider(sdk):

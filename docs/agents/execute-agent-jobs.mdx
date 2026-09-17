@@ -1,0 +1,357 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Execute Agents as Jobs"
+description: ""
+---
+<a id="execute-agent-jobs"></a>
+
+An **execute-agent job** (`agents.execute`) runs an agent once, to completion,
+as a scheduled platform job. You give it an agent and a prompt; the platform
+schedules a container, runs the agent until it finishes or times out, saves
+everything the run produced, and exits.
+
+This is the bounded counterpart to [Deploy Agents](/documentation/agents/deploy-agents).
+A deployment is a service that stays up waiting for requests. An execute job is
+a single unit of work with a beginning and an end — you are asking an agent to
+do one thing, not to be available.
+
+## When to Use a Job Instead of a Deployment
+
+| | Agent deployment | Execute-agent job |
+| --- | --- | --- |
+| Shape | Long-running service | One bounded run |
+| Invoked by | HTTP request through the Agents gateway | Job submission |
+| Lifetime | Until you `undeploy` | Until the agent finishes or the timeout fires |
+| Result | An HTTP response | Durable job results you fetch later |
+| Cost when idle | Holds resources | None — nothing runs between jobs |
+| Good for | Chat, interactive sessions, anything latency-sensitive with many callers | Batch work, scheduled analysis, long autonomous tasks, one-off tasks over a set of files |
+
+Reach for a job when the work is long enough that holding an HTTP connection
+open is the wrong shape, when the run produces files rather than a reply, or
+when the agent only needs to exist for the duration of one task.
+
+<Markdown src="/snippets/_snippets/tutorials/cli-sdk-setup.mdx" />
+---
+
+## How It Works
+
+1. **Submission resolves and snapshots everything.** When the job is created,
+   the platform resolves the agent reference, resolves and merges the
+   [agent environment](/documentation/agents/deploy-agents#agent-environments),
+   and validates any working-directory references. A bad agent name, a missing
+   secret, or a nonexistent fileset fails your create request rather than the
+   run. The resolved config, compute, and secret references are snapshotted
+   onto the job, so a later edit to the underlying entities does not change what
+   an already-submitted job runs.
+1. **The job runs the agent once.** The scheduled step stages the working
+   directory, invokes the agent through Fabric with your prompt, and waits up to
+   `timeout_seconds` for a result.
+1. **Everything is saved as job results.** The input working directory, the
+   output working directory, the run's artifacts, and Fabric's own run record
+   are all saved and downloadable after the job finishes — including when it
+   fails.
+
+## Submit a Job
+
+The examples below use the calculator agent that ships with the source checkout.
+Register it first if you have not already:
+
+```bash
+nemo agents create \
+  --name calculator-agent \
+  --agent-config plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml
+```
+
+<Tabs>
+
+<Tab title="CLI">
+
+```bash
+nemo agents execute \
+  --agent calculator-agent \
+  --input "What is 12 multiplied by 8?"
+```
+
+The command prints the created job record, including the generated `name` you
+use to track it.
+
+</Tab>
+<Tab title="Python SDK">
+
+```python
+import os
+
+from nemo_platform import NeMoPlatform
+
+client = NeMoPlatform(
+    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+    workspace="default",
+)
+
+job = client.agents.jobs.execute.create(
+    spec={
+        "agent": "calculator-agent",
+        "input": "What is 12 multiplied by 8?",
+    },
+)
+print(job["name"], job["status"])
+```
+
+</Tab>
+
+</Tabs>
+
+### Job Spec Fields
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `agent` | Yes | An Agent entity name, a `workspace/name` ref, or an [inline agent definition](#inline-agents). |
+| `input` | Yes | The prompt handed to the agent. |
+| `environment` | No | A `workspace/name` ref to a stored `AgentEnvironment`, or an inline environment. Supplies secrets, environment variables, tool settings, and compute. |
+| `workdir` | No | The [working directory](#working-directories) the agent starts from. |
+| `timeout_seconds` | No | Maximum time to wait for a result. Defaults to 3600 (one hour). |
+| `auto_telemetry` | No | Automatically configures supported ATIF telemetry to export to Intake. Defaults to `true`. |
+| `image` | No | The [container image](#execution-image) to run the agent in. Defaults to the platform's task image. |
+| `extension` | No | A trusted [execute extension](#execute-extensions) contributed by an installed plugin. |
+
+The CLI generates one flag per spec field (`--agent`, `--input`,
+`--environment`, `--workdir.base-workdir`, `--timeout-seconds`,
+`--auto-telemetry`, `--image`). Fields that do not reduce to a single flag — an
+inline agent, an inline environment, `workdir.artifact_mounts` — are supplied
+with `--spec` (a JSON string) or `--spec-file` (a YAML or JSON file). Individual
+flags override values from the supplied spec.
+
+### Execution Image
+
+The job runs the agent inside a container image. That image must contain the
+Fabric adapter the agent's harness names, so the image you need depends on the
+harness:
+
+- **A first-party harness** (`claude`, `codex`, `hermes`, `deepagents`) needs no
+  image at all. Its adapter ships in the platform's task image, which is what
+  the job uses when you omit `image`.
+- **Your own Fabric adapter** needs an image that contains it. Build one with
+  `nemo agents package` and pass it as `image`; the packaged image carries both
+  the adapter and the execute task module.
+
+Resolution is, in order: the request's `image`; the
+`agents.jobs.default_image` platform setting; the execution profile's
+`default_task_image`; the platform CPU tasks image. Setting
+`agents.jobs.default_image` changes the default for every execute job on the
+install, and is unrelated to `agents.deployments.default_image`, which is the
+fallback for `AgentDeployment` images only.
+
+<Note>
+A custom image is pulled with the credentials the jobs runtime already has:
+the Docker daemon's for `docker` mode, and the platform's `image_pull_secrets`
+merged with the execution profile's for `k8s`. There is no per-job pull
+credential, so a private image has to be reachable with those.
+</Note>
+
+## Track a Job and Fetch Its Results
+
+An execute job is an ordinary platform job. `nemo agents execute` submits it;
+from there it is tracked and read back like any other job, by name (e.g.
+`"calc-run-1"` below), using the generic `nemo jobs` commands. The Python SDK
+does mirror the whole lifecycle under `agents.jobs.execute`.
+
+<Tabs>
+
+<Tab title="CLI">
+
+```bash
+# Block until the job reaches a terminal status, streaming logs
+nemo jobs watch calc-run-1
+
+# Or poll it yourself
+nemo jobs get-status calc-run-1
+nemo jobs tail calc-run-1 -n 200
+
+# List what the run produced, then download one result
+nemo jobs results list --job calc-run-1
+nemo jobs results download output_workdir --job calc-run-1 -o output_workdir.tar.gz
+```
+
+</Tab>
+<Tab title="Python SDK">
+
+```python
+import json
+import tarfile
+from io import BytesIO
+
+job = client.agents.jobs.execute.get("calc-run-1")
+print(job["status"])
+
+results = client.agents.jobs.execute.list_results("calc-run-1")
+for result in results["data"]:
+    print(result["name"])
+
+# Directory results arrive as a gzipped tarball...
+workdir = client.agents.jobs.execute.download_result("output_workdir", job="calc-run-1")
+with tarfile.open(fileobj=BytesIO(workdir), mode="r:gz") as tar:
+    print(tar.getnames())
+
+# ...and the run record as JSON.
+run = json.loads(client.agents.jobs.execute.download_result("fabric_run_result", job="calc-run-1"))
+print(run["status"], run["response"])
+```
+
+`download_result` returns bytes rather than writing a file, so results can be
+read in memory. The same calls exist on `AsyncNeMoPlatform`.
+
+</Tab>
+
+</Tabs>
+
+### Result Names
+
+Results download as gzipped tarballs of a directory, or as a single JSON file.
+
+| Result | Saved | Contains |
+| --- | --- | --- |
+| `input_workdir` | Always | The working directory as the agent found it, after staging. The record of what the run was given. |
+| `output_workdir` | Always | The working directory as the agent left it — every file it created or modified. |
+| `output_artifacts` | Always | Fabric's per-run artifacts, including the agent process's captured stdout and stderr. |
+| `fabric_run_result` | On a completed run | Fabric's run record: status, response, runtime and invocation IDs. |
+| `fabric_error` | When the invocation itself raised | The error type, message, and whether it was a timeout. |
+
+<Note>
+
+`output_workdir` and `output_artifacts` are saved on failure too, on a
+best-effort basis. When a run fails, that may be where the explanation is —
+the job also logs the tail of the agent's stderr so the initial diagnosis needs no
+downloads.
+
+</Note>
+
+## Working Directories
+
+An agent that reads and writes files needs somewhere to do it. `workdir` builds
+that directory from the [Files service](/documentation/get-started/core-concepts)
+before the agent starts.
+
+| Field | Description |
+| --- | --- |
+| `base_workdir` | A Files reference (`workspace/fileset` or `fileset#path/`) copied in as the starting tree. |
+| `artifact_mounts` | Individual fileset artifacts layered on top, each at a relative `mount_path`. |
+
+Mounts are applied after the base tree, so a mount at the same path wins. Mount
+paths must be relative and must not overlap each other.
+
+```yaml
+# run.yaml
+agent: research-agent
+input: Review the config and summarize the risks.
+workdir:
+  base_workdir: default/project-source
+  artifact_mounts:
+    - ref: default/config-artifact#config.yaml
+      mount_path: app/config.yaml
+    - ref: default/notes-artifact#notes.txt
+      mount_path: notes/notes.txt
+```
+
+```bash
+nemo agents execute --spec-file run.yaml
+```
+
+Whatever the agent leaves behind in that directory comes back as
+`output_workdir`.
+
+## Environments, Secrets, and Compute
+
+Execute jobs use the same environment model as deployments. Pass
+`--environment default/research` and the environment's spec is merged into the
+agent config, its secret references become secret-backed environment variables
+on the job step, and its compute spec sizes the container.
+
+```bash
+nemo agents execute \
+  --agent research-agent \
+  --environment default/research \
+  --input "Summarize this repo's dependencies and risks."
+```
+
+Compute is expressed the Kubernetes way on the compute spec. Execute jobs
+support `cpu`, `memory`, and `nvidia.com/gpu`; any other resource key is
+rejected at submission rather than silently dropped.
+
+See [Agent Environments](/documentation/agents/deploy-agents#agent-environments)
+for how to create the environment, environment spec, and compute spec.
+
+<a id="inline-agents"></a>
+
+## Inline Agents
+
+`agent` also accepts a full agent definition instead of a reference. The config
+is validated at submission and snapshotted onto the job, but it is never stored
+as an Agent entity. This suits an agent composed per request — models chosen by
+the caller, harness settings scoped to a single run — where there would be
+nothing to keep in sync afterward.
+
+```json
+{
+  "agent": {
+    "config_format": "nemo-agents-spec-v1",
+    "config": {
+      "config_format": "nemo-agents-spec-v1",
+      "name": "one-off-analyst",
+      "default_harness": "deepagents",
+      "harnesses": {"deepagents": {"kind": "deepagents", "settings": {"deepagents": {}}}},
+      "models": {
+        "default": {
+          "provider": "nvidia",
+          "model": "nvidia-nemotron-3-nano-30b-a3b",
+          "api_key_env": "NVIDIA_API_KEY"
+        }
+      }
+    }
+  },
+  "input": "Summarize yesterday's failures."
+}
+```
+
+Supply it with `--spec`/`--spec-file` from the CLI, or as the `spec` body from
+the SDK.
+
+<a id="execute-extensions"></a>
+
+## Execute Extensions
+
+A plugin can register a trusted extension that runs after a successful
+invocation and turns the agent's output into something the plugin owns — for
+example, the Insights plugin's analysis runs attach an extension that saves an
+`analysis-report` result and files the insights it found.
+
+Extensions are named by `extension.kind` and configured by
+`extension.config`. Only kinds registered by an installed plugin are accepted;
+an unknown kind fails the create request. If you are using a feature built on
+execute jobs, its own commands set this for you.
+
+## Requirements and Limits
+
+- **Config format.** Only `nemo-agents-spec-v1` agents can run as execute jobs.
+  Legacy NAT workflow configs are rejected; use `nemo agents evaluate` or a
+  deployment for those.
+- **Fabric environment.** The merged agent config must select the `local` Fabric
+  environment provider. Because an environment spec can override the provider,
+  this is checked after the merge.
+- **Timeout.** `timeout_seconds` bounds the wait for a Fabric result and
+  defaults to one hour. A run that exceeds it fails with a saved `fabric_error`
+  rather than hanging.
+- **Reserved environment variables.** A secret cannot be bound to an environment
+  variable name the platform injects itself (the `NEMO_JOB_*` family,
+  `NMP_BASE_URL`, `AGENT_CONFIG_PATH`, and similar). The collision is rejected
+  at submission.
+
+## Clean Up
+
+Job records and their results persist until you remove them.
+
+```bash
+nemo jobs cancel calc-run-1   # stop a running job
+nemo jobs delete calc-run-1   # remove the record and its results
+```

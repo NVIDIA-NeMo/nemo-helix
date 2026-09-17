@@ -14,7 +14,7 @@ from typing import Any, cast
 from urllib.parse import urlparse
 
 from nemo_experimentalist_plugin.entities import ResourceRef
-from nemo_platform.types.intake.ingest.atif_create_params import AtifCreateParams
+from nemo_platform_plugin.intake.types import AtifCreateParams
 
 # ATIF carries agent identity on the trajectory; the Experimentalist carries it as
 # OTLP-style span attributes. This maps one onto the other.

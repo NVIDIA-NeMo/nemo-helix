@@ -35,8 +35,8 @@ from nemo_guardrails_plugin.requests import (
     sanitize_request_body_for_proxy,
 )
 from nemo_guardrails_plugin.responses import extract_response_content
-from nemo_platform.types.guardrail import GenerationLogOptionsParam
-from nemo_platform.types.guardrail import RailsConfig as SDKRailsConfig
+from nemo_platform_plugin.guardrail.types import GenerationLogOptionsParam
+from nemo_platform_plugin.guardrail.types import RailsConfig as SDKRailsConfig
 from nemo_platform_plugin.inference_middleware import InferenceMiddlewareError, OpenAICompatibleInferenceTarget
 from nemoguardrails.rails.llm.config import Model
 from nemoguardrails.rails.llm.options import (

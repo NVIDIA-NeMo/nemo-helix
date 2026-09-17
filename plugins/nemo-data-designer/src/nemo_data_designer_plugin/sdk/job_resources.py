@@ -9,17 +9,19 @@ import tarfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Awaitable, Callable, TypeVar
+from typing import Awaitable, Callable, TypeVar, overload
 
-import httpx
 from data_designer.config.analysis.dataset_profiler import DatasetProfilerResults
 from data_designer.config.utils.visualization import WithRecordSamplerMixin
 from data_designer.logging import RandomEmoji
-from nemo_data_designer_plugin.sdk import http
-from nemo_data_designer_plugin.sdk.errors import DataDesignerJobError, extract_http_error_info
+from nemo_data_designer_plugin.sdk.errors import DataDesignerJobError
 from nemo_data_designer_plugin.sdk.job_results import DataDesignerJobResults
 from nemo_data_designer_plugin.sdk.logging import with_logging
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.errors import NemoHTTPError, NotFoundError
+from nemo_platform_plugin.data_designer.client import AsyncDataDesignerClient, DataDesignerClient
+from nemo_platform_plugin.data_designer.types import DataDesignerJobCollection, DataDesignerJobLogsQueryParams
 from nemo_platform_plugin.jobs.archive import safe_extract_tar
 from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
 from typing_extensions import Self
@@ -47,26 +49,17 @@ async def _async_pause(seconds: float) -> None:
     await asyncio.sleep(seconds)
 
 
-def _job_url(
-    platform: http.PlatformClient,
-    workspace: str | None,
-    path: str,
-    *,
-    collection: str = "create",
-) -> str:
-    return http.url(platform, workspace, f"/jobs/{collection}{path}")
-
-
-def _raise_for_status(resp: httpx.Response) -> None:
-    try:
-        resp.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        status_code, detail = extract_http_error_info(exc)
-        raise DataDesignerJobError(detail, status_code=status_code) from exc
+def _get_job_error(exc: NemoHTTPError) -> DataDesignerJobError:
+    return DataDesignerJobError(exc.detail, status_code=exc.status_code)
 
 
 def _safe_extract_tar(tar: tarfile.TarFile, output_path: Path) -> None:
     safe_extract_tar(tar, output_path, error_cls=DataDesignerJobError)
+
+
+def _extract_artifact_bytes(artifact_bytes: bytes, output_path: Path) -> None:
+    with tarfile.open(fileobj=io.BytesIO(artifact_bytes), mode="r:*") as tar:
+        _safe_extract_tar(tar, output_path)
 
 
 @dataclass
@@ -107,16 +100,44 @@ class _WaitLogCollector:
 
 @with_logging
 class DataDesignerJobResource(WithRecordSamplerMixin):
+    @overload
+    def __init__(
+        self,
+        *,
+        job_name: str,
+        client: DataDesignerClient,
+        workspace: str | None,
+        job_collection: DataDesignerJobCollection = "create",
+    ) -> None: ...
+
+    @overload
     def __init__(
         self,
         *,
         job_name: str,
         platform: NeMoPlatform,
         workspace: str | None,
-        job_collection: str = "create",
+        job_collection: DataDesignerJobCollection = "create",
+    ) -> None: ...
+
+    def __init__(
+        self,
+        *,
+        job_name: str,
+        client: DataDesignerClient | None = None,
+        platform: NeMoPlatform | None = None,
+        workspace: str | None,
+        job_collection: DataDesignerJobCollection = "create",
     ):
+        if client is None:
+            if platform is None:
+                raise TypeError("DataDesignerJobResource requires either client= or platform=")
+            client = client_from_platform(platform, DataDesignerClient)
+        elif platform is not None:
+            raise TypeError("Pass only one of client= or platform=")
+
         self._job_name = job_name
-        self._platform = platform
+        self._client = client
         self._workspace = workspace
         self._job_collection = job_collection
         self._consecutive_poll_errors = 0
@@ -136,12 +157,13 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         Returns:
             The job dict with up-to-date details.
         """
-        resp = self._platform._client.get(
-            _job_url(self._platform, self._workspace, f"/{self._job_name}", collection=self._job_collection),
-            headers=http.headers(self._platform),
-        )
-        _raise_for_status(resp)
-        return resp.json()
+        try:
+            job = self._client.get_job(
+                workspace=self._workspace, job_collection=self._job_collection, name=self._job_name
+            ).data()
+        except NemoHTTPError as exc:
+            raise _get_job_error(exc) from exc
+        return job.model_dump(mode="json")
 
     def get_job_status(self) -> PlatformJobStatus | None:
         """Get the current status of the job.
@@ -149,12 +171,13 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         Returns:
             The current job status.
         """
-        resp = self._platform._client.get(
-            _job_url(self._platform, self._workspace, f"/{self._job_name}/status", collection=self._job_collection),
-            headers=http.headers(self._platform),
-        )
-        _raise_for_status(resp)
-        return resp.json().get("status")
+        try:
+            status = self._client.get_job_status(
+                workspace=self._workspace, job_collection=self._job_collection, name=self._job_name
+            ).data()
+        except NemoHTTPError as exc:
+            raise _get_job_error(exc) from exc
+        return status.status
 
     def check_if_complete(self, *, raise_if_not_complete: bool = False) -> bool:
         """Check if the job is in a completed state.
@@ -206,19 +229,21 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         logs = []
         page_cursor = None
         while True:
-            params = {"page_cursor": page_cursor} if page_cursor else None
-            resp = self._platform._client.get(
-                _job_url(self._platform, self._workspace, f"/{self._job_name}/logs", collection=self._job_collection),
-                headers=http.headers(self._platform),
-                params=params,
-            )
-            _raise_for_status(resp)
-            response = resp.json()
-            for log in response.get("data", []):
-                deserialized = _try_parse_log_message(log.get("message", ""))
+            query_params: DataDesignerJobLogsQueryParams | None = {"page_cursor": page_cursor} if page_cursor else None
+            try:
+                page = self._client.get_job_logs(
+                    workspace=self._workspace,
+                    job_collection=self._job_collection,
+                    name=self._job_name,
+                    query_params=query_params,
+                ).data()
+            except NemoHTTPError as exc:
+                raise _get_job_error(exc) from exc
+            for log in page.data:
+                deserialized = _try_parse_log_message(log.message)
                 if deserialized is not None:
                     logs.append(deserialized)
-            page_cursor = response.get("next_page")
+            page_cursor = page.next_page
             if page_cursor is None:
                 break
         return logs
@@ -236,31 +261,25 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         output_path = Path(path or self._job_name)
         logger.info(f"🏺 Downloading artifacts from Job {self._job_name!r}")
 
-        resp = self._platform._client.get(
-            _job_url(
-                self._platform,
-                self._workspace,
-                f"/{self._job_name}/results/artifacts/download",
-                collection=self._job_collection,
-            ),
-            headers=http.headers(self._platform),
-        )
-        _raise_for_status(resp)
-        with tarfile.open(fileobj=io.BytesIO(resp.content), mode="r:*") as tar:
-            _safe_extract_tar(tar, output_path)
+        try:
+            artifact_bytes = self._client.download_job_result(
+                workspace=self._workspace,
+                job_collection=self._job_collection,
+                job=self._job_name,
+                name=ARTIFACTS_RESULT_NAME,
+            ).read()
+        except NemoHTTPError as exc:
+            raise _get_job_error(exc) from exc
+        _extract_artifact_bytes(artifact_bytes, output_path)
 
         try:
-            analysis_resp = self._platform._client.get(
-                _job_url(
-                    self._platform,
-                    self._workspace,
-                    f"/{self._job_name}/results/analysis/download",
-                    collection=self._job_collection,
-                ),
-                headers=http.headers(self._platform),
-            )
-            _raise_for_status(analysis_resp)
-            analysis = DatasetProfilerResults.model_validate(analysis_resp.json())
+            analysis_bytes = self._client.download_job_result(
+                workspace=self._workspace,
+                job_collection=self._job_collection,
+                job=self._job_name,
+                name=ANALYSIS_RESULT_NAME,
+            ).read()
+            analysis = DatasetProfilerResults.model_validate_json(analysis_bytes)
         except Exception as e:
             msg = f"Unable to fetch analysis: {e}"
             logger.warning(msg)
@@ -281,17 +300,13 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         """
         self._check_if_result_available(ANALYSIS_RESULT_NAME)
         try:
-            resp = self._platform._client.get(
-                _job_url(
-                    self._platform,
-                    self._workspace,
-                    f"/{self._job_name}/results/analysis/download",
-                    collection=self._job_collection,
-                ),
-                headers=http.headers(self._platform),
-            )
-            _raise_for_status(resp)
-            return DatasetProfilerResults.model_validate(resp.json())
+            analysis_bytes = self._client.download_job_result(
+                workspace=self._workspace,
+                job_collection=self._job_collection,
+                job=self._job_name,
+                name=ANALYSIS_RESULT_NAME,
+            ).read()
+            return DatasetProfilerResults.model_validate_json(analysis_bytes)
         except Exception as e:
             raise DataDesignerJobError(f"🛑 Error loading analysis: {e}") from e
 
@@ -301,16 +316,12 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
             return
         if status == "active" or status in TERMINAL_INCOMPLETE_STATUSES:
             try:
-                resp = self._platform._client.get(
-                    _job_url(
-                        self._platform,
-                        self._workspace,
-                        f"/{self._job_name}/results/{result_name}",
-                        collection=self._job_collection,
-                    ),
-                    headers=http.headers(self._platform),
-                )
-                _raise_for_status(resp)
+                self._client.get_job_result(
+                    workspace=self._workspace,
+                    job_collection=self._job_collection,
+                    job=self._job_name,
+                    name=result_name,
+                ).data()
                 if status == "active":
                     logger.info(
                         f"{RandomEmoji.cooking()} Your dataset is still cooking. "
@@ -318,10 +329,10 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
                     )
                 else:
                     logger.warning(f"Job ended with status {status!r}. Fetching completed {result_name} result.")
-            except DataDesignerJobError as e:
-                if e.status_code == 404:
-                    raise DataDesignerJobError(f"{result_name!r} result is not available.") from e
-                raise DataDesignerJobError(f"🛑 Error loading dataset: {e}") from e
+            except NotFoundError as e:
+                raise DataDesignerJobError(f"{result_name!r} result is not available.") from e
+            except NemoHTTPError as e:
+                raise DataDesignerJobError(f"🛑 Error loading dataset: {e.detail}", status_code=e.status_code) from e
         else:
             raise DataDesignerJobError(f"Current job status is {status!r}, results are not available.")
 
@@ -351,16 +362,44 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
 
 @with_logging
 class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
+    @overload
+    def __init__(
+        self,
+        *,
+        job_name: str,
+        client: AsyncDataDesignerClient,
+        workspace: str | None,
+        job_collection: DataDesignerJobCollection = "create",
+    ) -> None: ...
+
+    @overload
     def __init__(
         self,
         *,
         job_name: str,
         platform: AsyncNeMoPlatform,
         workspace: str | None,
-        job_collection: str = "create",
+        job_collection: DataDesignerJobCollection = "create",
+    ) -> None: ...
+
+    def __init__(
+        self,
+        *,
+        job_name: str,
+        client: AsyncDataDesignerClient | None = None,
+        platform: AsyncNeMoPlatform | None = None,
+        workspace: str | None,
+        job_collection: DataDesignerJobCollection = "create",
     ):
+        if client is None:
+            if platform is None:
+                raise TypeError("AsyncDataDesignerJobResource requires either client= or platform=")
+            client = client_from_platform(platform, AsyncDataDesignerClient)
+        elif platform is not None:
+            raise TypeError("Pass only one of client= or platform=")
+
         self._job_name = job_name
-        self._platform = platform
+        self._client = client
         self._workspace = workspace
         self._job_collection = job_collection
         self._consecutive_poll_errors = 0
@@ -380,12 +419,13 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         Returns:
             The job dict with up-to-date details.
         """
-        resp = await self._platform._client.get(
-            _job_url(self._platform, self._workspace, f"/{self._job_name}", collection=self._job_collection),
-            headers=http.headers(self._platform),
-        )
-        _raise_for_status(resp)
-        return resp.json()
+        try:
+            response = await self._client.get_job(
+                workspace=self._workspace, job_collection=self._job_collection, name=self._job_name
+            )
+        except NemoHTTPError as exc:
+            raise _get_job_error(exc) from exc
+        return response.data().model_dump(mode="json")
 
     async def get_job_status(self) -> PlatformJobStatus | None:
         """Get the current status of the job.
@@ -393,12 +433,13 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         Returns:
             The current job status.
         """
-        resp = await self._platform._client.get(
-            _job_url(self._platform, self._workspace, f"/{self._job_name}/status", collection=self._job_collection),
-            headers=http.headers(self._platform),
-        )
-        _raise_for_status(resp)
-        return resp.json().get("status")
+        try:
+            response = await self._client.get_job_status(
+                workspace=self._workspace, job_collection=self._job_collection, name=self._job_name
+            )
+        except NemoHTTPError as exc:
+            raise _get_job_error(exc) from exc
+        return response.data().status
 
     async def check_if_complete(self, *, raise_if_not_complete: bool = False) -> bool:
         """Check if the job is in a completed state.
@@ -450,19 +491,22 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         logs = []
         page_cursor = None
         while True:
-            params = {"page_cursor": page_cursor} if page_cursor else None
-            resp = await self._platform._client.get(
-                _job_url(self._platform, self._workspace, f"/{self._job_name}/logs", collection=self._job_collection),
-                headers=http.headers(self._platform),
-                params=params,
-            )
-            _raise_for_status(resp)
-            response = resp.json()
-            for log in response.get("data", []):
-                deserialized = _try_parse_log_message(log.get("message", ""))
+            query_params: DataDesignerJobLogsQueryParams | None = {"page_cursor": page_cursor} if page_cursor else None
+            try:
+                response = await self._client.get_job_logs(
+                    workspace=self._workspace,
+                    job_collection=self._job_collection,
+                    name=self._job_name,
+                    query_params=query_params,
+                )
+            except NemoHTTPError as exc:
+                raise _get_job_error(exc) from exc
+            page = response.data()
+            for log in page.data:
+                deserialized = _try_parse_log_message(log.message)
                 if deserialized is not None:
                     logs.append(deserialized)
-            page_cursor = response.get("next_page")
+            page_cursor = page.next_page
             if page_cursor is None:
                 break
         return logs
@@ -480,31 +524,27 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         output_path = Path(path or self._job_name)
         logger.info(f"🏺 Downloading artifacts from Job {self._job_name!r}")
 
-        resp = await self._platform._client.get(
-            _job_url(
-                self._platform,
-                self._workspace,
-                f"/{self._job_name}/results/artifacts/download",
-                collection=self._job_collection,
-            ),
-            headers=http.headers(self._platform),
-        )
-        _raise_for_status(resp)
-        with tarfile.open(fileobj=io.BytesIO(resp.content), mode="r:*") as tar:
-            _safe_extract_tar(tar, output_path)
+        try:
+            artifact_response = await self._client.download_job_result(
+                workspace=self._workspace,
+                job_collection=self._job_collection,
+                job=self._job_name,
+                name=ARTIFACTS_RESULT_NAME,
+            )
+            artifact_bytes = await artifact_response.read()
+        except NemoHTTPError as exc:
+            raise _get_job_error(exc) from exc
+        await asyncio.to_thread(_extract_artifact_bytes, artifact_bytes, output_path)
 
         try:
-            analysis_resp = await self._platform._client.get(
-                _job_url(
-                    self._platform,
-                    self._workspace,
-                    f"/{self._job_name}/results/analysis/download",
-                    collection=self._job_collection,
-                ),
-                headers=http.headers(self._platform),
+            analysis_response = await self._client.download_job_result(
+                workspace=self._workspace,
+                job_collection=self._job_collection,
+                job=self._job_name,
+                name=ANALYSIS_RESULT_NAME,
             )
-            _raise_for_status(analysis_resp)
-            analysis = DatasetProfilerResults.model_validate(analysis_resp.json())
+            analysis_bytes = await analysis_response.read()
+            analysis = DatasetProfilerResults.model_validate_json(analysis_bytes)
         except Exception as e:
             msg = f"Unable to fetch analysis: {e}"
             logger.warning(msg)
@@ -525,17 +565,14 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         """
         await self._check_if_result_available(ANALYSIS_RESULT_NAME)
         try:
-            resp = await self._platform._client.get(
-                _job_url(
-                    self._platform,
-                    self._workspace,
-                    f"/{self._job_name}/results/analysis/download",
-                    collection=self._job_collection,
-                ),
-                headers=http.headers(self._platform),
+            response = await self._client.download_job_result(
+                workspace=self._workspace,
+                job_collection=self._job_collection,
+                job=self._job_name,
+                name=ANALYSIS_RESULT_NAME,
             )
-            _raise_for_status(resp)
-            return DatasetProfilerResults.model_validate(resp.json())
+            analysis_bytes = await response.read()
+            return DatasetProfilerResults.model_validate_json(analysis_bytes)
         except Exception as e:
             raise DataDesignerJobError(f"🛑 Error loading analysis: {e}") from e
 
@@ -545,16 +582,13 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
             return
         if status == "active" or status in TERMINAL_INCOMPLETE_STATUSES:
             try:
-                resp = await self._platform._client.get(
-                    _job_url(
-                        self._platform,
-                        self._workspace,
-                        f"/{self._job_name}/results/{result_name}",
-                        collection=self._job_collection,
-                    ),
-                    headers=http.headers(self._platform),
+                response = await self._client.get_job_result(
+                    workspace=self._workspace,
+                    job_collection=self._job_collection,
+                    job=self._job_name,
+                    name=result_name,
                 )
-                _raise_for_status(resp)
+                response.data()
                 if status == "active":
                     logger.info(
                         f"{RandomEmoji.cooking()} Your dataset is still cooking. "
@@ -562,10 +596,10 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
                     )
                 else:
                     logger.warning(f"Job ended with status {status!r}. Fetching completed {result_name} result.")
-            except DataDesignerJobError as e:
-                if e.status_code == 404:
-                    raise DataDesignerJobError(f"{result_name!r} result is not available.") from e
-                raise DataDesignerJobError(f"🛑 Error loading dataset: {e}") from e
+            except NotFoundError as e:
+                raise DataDesignerJobError(f"{result_name!r} result is not available.") from e
+            except NemoHTTPError as e:
+                raise DataDesignerJobError(f"🛑 Error loading dataset: {e.detail}", status_code=e.status_code) from e
         else:
             raise DataDesignerJobError(f"Current job status is {status!r}, results are not available.")
 

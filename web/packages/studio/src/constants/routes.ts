@@ -35,6 +35,7 @@ export const ROUTE_PARAMS = {
   agentName: 'agentName',
   agentDeploymentName: 'agentDeploymentName',
   agentEvalJobName: 'agentEvalJobName',
+  optimizeJobName: 'optimizeJobName',
   jobName: 'jobName',
   /** Benchmark entity name segment under evaluation/benchmarks/:name */
   benchmarkName: 'benchmarkName',
@@ -99,6 +100,14 @@ export const ROUTES = {
     virtualModelChat: `/workspaces/:${P.workspace}/virtual-models/:${P.virtualModelName}/chat`,
     deploymentConfigs: `/workspaces/:${P.workspace}/deployment-configs`,
     deployments: `/workspaces/:${P.workspace}/deployments`,
+    /**
+     * Dedicated Create Deployment wizard page.
+     *
+     * `~new`, not `new`: `~` is outside the entity-name charset (see
+     * `resourceRefRegExp`), so this segment can never collide with a deployment
+     * name — including if deployments ever get a single-segment detail route.
+     */
+    deploymentsNew: `/workspaces/:${P.workspace}/deployments/~new`,
     /** Deployments list with details side panel (deployment name + panel segment, e.g. `details`). */
     deploymentsDeployment: `/workspaces/:${P.workspace}/deployments/:${P.deploymentName}/:${P.deploymentPanelView}`,
     intake: `/workspaces/:${P.workspace}/intake`,
@@ -137,6 +146,7 @@ export const ROUTES = {
     agentDeploymentDetail: `/workspaces/:${P.workspace}/agent-deployments/:${P.agentDeploymentName}`,
     /** Detail view for a single agent-evaluation job. */
     agentEvaluationDetail: `/workspaces/:${P.workspace}/agents/evaluations/:${P.agentEvalJobName}`,
+    agentOptimizationDetail: `/workspaces/:${P.workspace}/agents/optimizations/:${P.optimizeJobName}`,
     modelCompare: `/workspaces/:${P.workspace}/playground`,
     agentMonitor: `/workspaces/:${P.workspace}/agents/monitor`,
     /** Plugin-owned page; the plugin's internal router owns sub-paths via a `/*` suffix. */

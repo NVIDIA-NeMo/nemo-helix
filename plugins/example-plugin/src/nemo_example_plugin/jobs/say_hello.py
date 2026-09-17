@@ -4,10 +4,9 @@
 """say-hello job — registered under ``nemo.jobs``.
 
 Writes a greeting to persistent storage and registers it as a result
-via :attr:`~nemo_platform_plugin.job_context.JobContext.results`. Local runs use
-:class:`~nemo_platform_plugin.job_results.LocalJobResults` wired by
-:class:`~nemo_platform_plugin.scheduler.NemoJobScheduler`, so the artefact lands
-under ``<persistent>/results/greeting`` with no clients and no SDK.
+via :attr:`~nemo_platform_plugin.job_context.JobContext.results`. Programmatic
+tests can provide :class:`~nemo_platform_plugin.job_results.LocalJobResults` so
+the artefact lands under ``<persistent>/results/greeting`` with no clients.
 """
 
 from __future__ import annotations
@@ -27,7 +26,12 @@ class SayHelloJob(NemoJob):
     description = "Greet a name and save the greeting as a registered job result."
     container = "cpu-tasks"
 
-    def run(self, config: dict, *, ctx: JobContext) -> dict:
+    def run(
+        self,
+        config: dict,
+        *,
+        ctx: JobContext,
+    ) -> dict:
         name = config.get("name", "world")
         greeting = say_hello(name)
 

@@ -104,8 +104,37 @@ def read_bundle_force_include(root: str) -> dict[str, str]:
     return force_include
 
 
+def read_bundle_shared_data(root: str) -> dict[str, str]:
+    """Return Hatch shared-data mappings for bundled packages.
+
+    A bundled package that installs data files under the environment prefix
+    (``<sys.prefix>/share/...``) cannot express that through ``force_include``:
+    force-includes land in site-packages, while shared-data lands in the wheel's
+    ``.data`` directory and is unpacked relative to the install prefix. Bundle
+    entries therefore declare ``shared_data`` separately, with source paths
+    resolved relative to that entry's ``source`` directory.
+    """
+    pyproject_path = Path(root) / "pyproject.toml"
+    with open(pyproject_path, "rb") as f:
+        config = tomllib.load(f)
+
+    bundle_packages = config.get("tool", {}).get("bundle-package", {})
+
+    shared_data: dict[str, str] = {}
+    for pkg_config in bundle_packages.values():
+        source_path = (Path(root) / pkg_config["source"]).resolve()
+        for extra_source, target in pkg_config.get("shared_data", {}).items():
+            shared_data[str((source_path / extra_source).resolve())] = target
+
+    return shared_data
+
+
 def apply_bundle_force_include(root: str, build_data: dict[str, Any]) -> None:
     build_data["force_include"] = read_bundle_force_include(root)
+
+
+def apply_bundle_shared_data(root: str, build_data: dict[str, Any]) -> None:
+    build_data["shared_data"] = {**build_data.get("shared_data", {}), **read_bundle_shared_data(root)}
 
 
 def disable_bundle_force_include_for_editable(build_data: dict[str, Any]) -> None:

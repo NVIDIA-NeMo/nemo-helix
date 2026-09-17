@@ -38,6 +38,20 @@ from nemo_evaluator_sdk.agent_eval.trials import (
     AgentTaskRunner,
     RunAggregationsProvider,
     RunnerInfo,
+    TrialAwareMetricsProvider,
+    TrialMeasurements,
+)
+from nemo_evaluator_sdk.agent_eval.usage_keys import (
+    CACHE_CREATION_INPUT_TOKENS_KEY,
+    CACHE_READ_INPUT_TOKENS_KEY,
+    CACHED_TOKENS_KEY,
+    COMPLETION_TOKEN_KEYS,
+    PROMPT_TOKEN_KEYS,
+    SEPARATE_CACHE_KEYS,
+    USAGE_COUNT_KEYS,
+    USAGE_DETAILS_KEYS,
+    _first_nonnegative_int,
+    _first_usage_details,
 )
 from nemo_evaluator_sdk.agent_inference import (
     AgentInferenceContext,
@@ -174,11 +188,31 @@ class AgentEvaluator:
             # Branch on which seam was supplied so the type checker narrows each of ``trials`` and
             # ``target`` to a concrete type without a cast. The final arm is the "neither" case.
             if trials is not None:
-                trial_list = list(trials)
+                source_trial_list = list(trials)
             elif target is not None:
-                trial_list = await self._generate_trials(tasks=task_list, target=target, config=runtime_config)
+                source_trial_list = await self._generate_trials(tasks=task_list, target=target, config=runtime_config)
             else:
                 raise ValueError(seam_error)
+            # ``model_copy(update=...)`` skips nested validation. Revalidate so corrupted
+            # measurements cannot reach scoring, and derived fields (e.g. total_tokens) are filled.
+            trial_list = [AgentEvalTrial.model_validate(trial) for trial in source_trial_list]
+            if isinstance(target, TrialAwareMetricsProvider):
+                # Some runners only know their full metric list after trials exist
+                # (Harbor extras in reward_details). Ask for this task's metrics and
+                # copy the task with that list before scoring.
+                trials_by_task = _trials_by_task(task_list, trial_list)
+                original_task_ids = tuple(trial.task_id for trial in trial_list)
+                # Revalidation creates normalized copies. Audit the runner-returned instances too:
+                # a provider can retain and mutate those references instead of the sequence it receives.
+                source_task_ids = tuple(trial.task_id for trial in source_trial_list)
+                task_list = [
+                    _task_with_updated_metrics(task, target.scoring_metrics(task, trials_by_task[task.id]))
+                    for task in task_list
+                ]
+                changed_assignments = _changed_trial_assignments(trial_list, original_task_ids)
+                changed_assignments.extend(_changed_trial_assignments(source_trial_list, source_task_ids))
+                if changed_assignments:
+                    raise ValueError(_scoring_metrics_assignment_error(changed_assignments))
             scores = await self._score_trials(
                 tasks=task_list,
                 trials=trial_list,
@@ -228,20 +262,11 @@ class AgentEvaluator:
         config: AgentEvalRunConfig,
         run_id: str,
     ) -> list[AgentEvalTaskScore]:
-        tasks_by_id = {task.id: task for task in tasks}
         task_index_by_id = {task.id: index for index, task in enumerate(tasks)}
-        trials_by_task: dict[str, list[AgentEvalTrial]] = defaultdict(list)
-        for trial in trials:
-            if trial.task_id not in tasks_by_id:
-                raise ValueError(f"trial {trial.id!r} references unknown task {trial.task_id!r}")
-            trials_by_task[trial.task_id].append(trial)
-
-        # Fail loudly when a task produced no trial. Imported trials or an AgentTaskRunner may omit a
-        # task entirely; without this an incomplete run would look successful aside from lower summary
-        # counts. (A richer alternative is to emit a "missing trial" failed score per metric.)
-        tasks_without_trials = [task.id for task in tasks if not trials_by_task.get(task.id)]
-        if tasks_without_trials:
-            raise ValueError(f"no trials produced for tasks: {sorted(tasks_without_trials)}")
+        # Regrouped here even when `run` already grouped for the metric-finalization hook. This also
+        # validates direct callers of `_score_trials`; `run` separately rejects hook-side assignment
+        # changes, including balanced swaps that regrouping alone cannot detect.
+        trials_by_task = _trials_by_task(tasks, trials)
 
         for task in tasks:
             if not task.metrics:
@@ -388,6 +413,84 @@ class AgentEvaluator:
                 await close_client()
 
 
+def _trials_by_task(
+    tasks: Sequence[AgentEvalTask],
+    trials: Sequence[AgentEvalTrial],
+) -> dict[str, list[AgentEvalTrial]]:
+    """Group trials by ``task_id``. Two hard checks:
+
+    Check 1 — unknown task. A trial names a ``task_id`` that is not in ``tasks``.
+    Typical cause: imported ``trials.jsonl`` mixed with a different taskset, or a
+    runner stamp typo. Fail the run; there is no task in this eval to attach it to.
+
+    Check 2 — task with no trial. ``tasks`` asked for work the runner/import did
+    not produce. Fail the run rather than ranking on a quieter subset: dropping
+    the missing task would shrink the mean (easy tasks succeed, ``hard`` never
+    ran). Missing expected tasks fail explicitly
+    instead of silently shrinking coverage, and an absent Harbor ``result.json``
+    must not be fabricated into a ``FAILED`` trial. That is distinct from an
+    errored trial that *did* land: those stay ``PARTIAL`` and remain
+    in the denominator.
+    """
+    task_ids = {task.id for task in tasks}
+    trials_by_task: dict[str, list[AgentEvalTrial]] = defaultdict(list)
+    for trial in trials:
+        if trial.task_id not in task_ids:
+            raise ValueError(f"trial {trial.id!r} references unknown task {trial.task_id!r}")
+        trials_by_task[trial.task_id].append(trial)
+    tasks_without_trials = [task.id for task in tasks if not trials_by_task.get(task.id)]
+    if tasks_without_trials:
+        raise ValueError(f"no trials produced for tasks: {sorted(tasks_without_trials)}")
+    return dict(trials_by_task)
+
+
+def _changed_trial_assignments(
+    trials: Sequence[AgentEvalTrial],
+    original_task_ids: Sequence[str],
+) -> list[tuple[int, str, str, str]]:
+    """Rows whose ``task_id`` changed from the snapshot in ``original_task_ids``.
+
+    ``scoring_metrics`` must not reassign trials. Compare after the hook so a
+    balanced swap (which regrouping would miss) still fails.
+    """
+    return [
+        (index, trial.id, original_task_id, trial.task_id)
+        for index, (trial, original_task_id) in enumerate(zip(trials, original_task_ids, strict=True))
+        if trial.task_id != original_task_id
+    ]
+
+
+def _scoring_metrics_assignment_error(changed: Sequence[tuple[int, str, str, str]]) -> str:
+    """Explain a ``task_id`` mutation and what ``scoring_metrics`` should do instead."""
+    seen: set[tuple[str, str, str]] = set()
+    parts: list[str] = []
+    for _, trial_id, original_task_id, task_id in changed:
+        key = (trial_id, original_task_id, task_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        parts.append(f"trial {trial_id!r} task_id {original_task_id!r} -> {task_id!r}")
+    return (
+        "scoring_metrics must not mutate trials "
+        f"({'; '.join(parts)}). Return a new metric list; leave each trial.task_id "
+        "as the runner assigned it."
+    )
+
+
+def _task_with_updated_metrics(task: AgentEvalTask, metrics: Sequence[Metric]) -> AgentEvalTask:
+    """Copy ``task`` with ``metrics`` replaced, through the constructor rather than ``model_copy``.
+
+    ``model_copy(update=...)`` skips validation; the constructor re-runs the check that rejects
+    duplicate metric types and views referencing outputs the new metrics do not declare. Every
+    other field is carried over by value, so a field added to :class:`AgentEvalTask` later cannot
+    quietly revert to its default here -- ``extra="forbid"`` catches an unknown key, not an
+    omitted one.
+    """
+    fields: dict[str, Any] = dict(task)
+    fields["metrics"] = list(metrics)
+    return AgentEvalTask(**fields)
+
+
 async def _preflight_task_metrics(
     tasks: Sequence[AgentEvalTask],
     trials_by_task: Mapping[str, Sequence[AgentEvalTrial]],
@@ -506,9 +609,10 @@ def _trial_from_sample(task: AgentEvalTask, target: Model | Agent, sample: dict[
     invocation_metadata = sample.get("invocation_metadata")
     if not isinstance(invocation_metadata, dict):
         invocation_metadata = {}
+    trial_id = f"{task.id}:{target.name}"
 
     return AgentEvalTrial(
-        id=f"{task.id}:{target.name}",
+        id=trial_id,
         task_id=task.id,
         status=status,
         output=AgentOutput(
@@ -522,6 +626,7 @@ def _trial_from_sample(task: AgentEvalTask, target: Model | Agent, sample: dict[
             },
         ),
         evidence=evidence,
+        measurements=_live_response_usage_measurements(sample.get("response"), trial_id=trial_id),
         metadata={
             **invocation_metadata,
             "model_id": target.name,
@@ -529,6 +634,84 @@ def _trial_from_sample(task: AgentEvalTask, target: Model | Agent, sample: dict[
             "generated": True,
         },
     )
+
+
+def _live_response_usage_measurements(response: Any, *, trial_id: str) -> TrialMeasurements:
+    """Normalize a live model or agent response's usage into typed measurements."""
+    if not isinstance(response, Mapping):
+        return TrialMeasurements()
+    usage = response.get("usage")
+    if usage is None:
+        return TrialMeasurements()
+    if not isinstance(usage, Mapping):
+        log.warning("Trial %r has invalid live response usage=%r; expected an object and omitted it", trial_id, usage)
+        return TrialMeasurements()
+
+    _warn_invalid_live_usage_counts(trial_id, usage)
+    separate_cache = any(usage.get(key) is not None for key in SEPARATE_CACHE_KEYS)
+    details = _first_usage_details(usage)
+    inclusive_cache = details is not None and details.get(CACHED_TOKENS_KEY) is not None
+    completion = _first_nonnegative_int(usage, *COMPLETION_TOKEN_KEYS)
+    if separate_cache and inclusive_cache:
+        log.warning(
+            "Trial %r live response usage contains both inclusive cache details and separate cache fields; "
+            "omitting ambiguous prompt/cache measurements",
+            trial_id,
+        )
+        return TrialMeasurements(completion_tokens=completion)
+
+    prompt = _first_nonnegative_int(usage, *PROMPT_TOKEN_KEYS)
+    cache_read = _first_nonnegative_int(usage, CACHE_READ_INPUT_TOKENS_KEY) if separate_cache else None
+    cache_creation = _first_nonnegative_int(usage, CACHE_CREATION_INPUT_TOKENS_KEY) if separate_cache else None
+    invalid_separate_cache = any(
+        key in usage and usage[key] is not None and _first_nonnegative_int(usage, key) is None
+        for key in SEPARATE_CACHE_KEYS
+    )
+    if separate_cache and prompt is not None:
+        prompt = None if invalid_separate_cache else prompt + (cache_creation or 0) + (cache_read or 0)
+    elif details is not None and CACHED_TOKENS_KEY in details:
+        cache_read = _first_nonnegative_int(details, CACHED_TOKENS_KEY)
+
+    return TrialMeasurements(
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        cache_creation_tokens=cache_creation,
+        cache_read_tokens=cache_read,
+    )
+
+
+def _warn_invalid_live_usage_counts(trial_id: str, usage: Mapping[str, Any]) -> None:
+    """Log malformed live usage fields that the adapter omits."""
+    for key in USAGE_COUNT_KEYS:
+        if key in usage and usage[key] is not None and _first_nonnegative_int(usage, key) is None:
+            log.warning(
+                "Trial %r has invalid live response usage %s=%r; expected a non-negative integer and omitted it",
+                trial_id,
+                key,
+                usage[key],
+            )
+    for details_key in USAGE_DETAILS_KEYS:
+        details = usage.get(details_key)
+        if details is not None and not isinstance(details, Mapping):
+            log.warning(
+                "Trial %r has invalid live response usage %s=%r; expected an object and omitted it",
+                trial_id,
+                details_key,
+                details,
+            )
+        elif (
+            isinstance(details, Mapping)
+            and CACHED_TOKENS_KEY in details
+            and details[CACHED_TOKENS_KEY] is not None
+            and _first_nonnegative_int(details, CACHED_TOKENS_KEY) is None
+        ):
+            log.warning(
+                "Trial %r has invalid live response usage %s.cached_tokens=%r; "
+                "expected a non-negative integer and omitted it",
+                trial_id,
+                details_key,
+                details[CACHED_TOKENS_KEY],
+            )
 
 
 def _reasoning_content_fallback(response: Any) -> str | None:
@@ -651,6 +834,14 @@ def _score_id(run_id: str, task_id: str, trial_id: str, metric_type: str) -> str
 
 
 def _trial_sample(trial: AgentEvalTrial) -> dict[str, Any]:
+    """Flatten one trial into the sample dict that becomes ``MetricInput.candidate``.
+
+    A metric never calls this. Scoring path, once per ``(task, trial, metric)``::
+
+        _score_metric
+          -> build_metric_input(_metric_row(task, trial), _trial_sample(trial), ...)
+          -> metric.compute_scores(MetricInput)
+    """
     if trial.output is None:
         return {}
     sample: dict[str, Any] = {
@@ -733,7 +924,8 @@ def _metric_row(task: AgentEvalTask, trial: AgentEvalTrial) -> dict[str, Any]:
             "status": trial.status.value,
             # How the trial failed, for a metric that grades on it. None when the producer reported no failure.
             "error": trial.error.model_dump(mode="json") if trial.error is not None else None,
-            "metadata": trial.metadata,
+            "measurements": trial.measurements.model_dump(mode="json"),
+            "metadata": dict(trial.metadata),
         },
     }
 

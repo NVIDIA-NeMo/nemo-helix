@@ -27,7 +27,19 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym.records import (
     read_jsonl,
 )
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
-from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput
+from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput, TrialMeasurements
+from nemo_evaluator_sdk.agent_eval.usage_keys import (
+    CACHE_CREATION_INPUT_TOKENS_KEY,
+    CACHE_READ_INPUT_TOKENS_KEY,
+    CACHED_TOKENS_KEY,
+    COMPLETION_TOKEN_KEYS,
+    PROMPT_TOKEN_KEYS,
+    SEPARATE_CACHE_KEYS,
+    USAGE_COUNT_KEYS,
+    USAGE_DETAILS_KEYS,
+    _first_nonnegative_int,
+    _first_usage_details,
+)
 from nemo_evaluator_sdk.ng_trajectory_otlp import rollout_to_resource_spans
 from nemo_evaluator_sdk.values.evidence import (
     EVIDENCE_FORMAT_OTLP,
@@ -101,6 +113,73 @@ def _agent_never_ran(record: Mapping[str, Any]) -> bool:
     # only `completion_tokens: 0` — rather than excluding those shapes one at a time.
     input_side = [usage[key] for key in _INPUT_TOKEN_KEYS if isinstance(usage.get(key), (int, float))]
     return bool(input_side) and all(value == 0 for value in input_side)
+
+
+def _usage_measurements(record: Mapping[str, Any]) -> TrialMeasurements:
+    """Normalize Gym response usage for both rollout and failure records."""
+    response = record.get("response")
+    usage = response.get("usage") if isinstance(response, Mapping) else None
+    if not isinstance(usage, Mapping):
+        return TrialMeasurements()
+    _warn_invalid_usage_counts(record, usage)
+
+    separate_cache = any(usage.get(key) is not None for key in SEPARATE_CACHE_KEYS)
+    details = _first_usage_details(usage)
+    inclusive_cache = details is not None and details.get(CACHED_TOKENS_KEY) is not None
+    completion = _first_nonnegative_int(usage, *COMPLETION_TOKEN_KEYS)
+    if separate_cache and inclusive_cache:
+        logger.warning(
+            "Gym task=%r rollout=%r usage contains both inclusive cache details and separate cache fields; "
+            "omitting ambiguous prompt/cache measurements",
+            record.get(NG_TASK_INDEX),
+            record.get(NG_ROLLOUT_INDEX),
+        )
+        return TrialMeasurements(completion_tokens=completion)
+
+    prompt = _first_nonnegative_int(usage, *PROMPT_TOKEN_KEYS)
+    cache_read = _first_nonnegative_int(usage, CACHE_READ_INPUT_TOKENS_KEY) if separate_cache else None
+    cache_creation = _first_nonnegative_int(usage, CACHE_CREATION_INPUT_TOKENS_KEY) if separate_cache else None
+    invalid_separate_cache = any(
+        key in usage and usage[key] is not None and _first_nonnegative_int(usage, key) is None
+        for key in SEPARATE_CACHE_KEYS
+    )
+    if separate_cache and prompt is not None:
+        prompt = None if invalid_separate_cache else prompt + (cache_creation or 0) + (cache_read or 0)
+    elif details is not None and CACHED_TOKENS_KEY in details:
+        cache_read = _first_nonnegative_int(details, CACHED_TOKENS_KEY)
+
+    return TrialMeasurements(
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        cache_creation_tokens=cache_creation,
+        cache_read_tokens=cache_read,
+    )
+
+
+def _warn_invalid_usage_counts(record: Mapping[str, Any], usage: Mapping[str, Any]) -> None:
+    trial_label = f"task={record.get(NG_TASK_INDEX)!r} rollout={record.get(NG_ROLLOUT_INDEX)!r}"
+    for key in USAGE_COUNT_KEYS:
+        if key in usage and usage[key] is not None and _first_nonnegative_int(usage, key) is None:
+            logger.warning(
+                "Gym %s has invalid usage %s=%r; expected a non-negative integer and omitted it",
+                trial_label,
+                key,
+                usage[key],
+            )
+    for details_key in USAGE_DETAILS_KEYS:
+        details = usage.get(details_key)
+        if (
+            isinstance(details, Mapping)
+            and CACHED_TOKENS_KEY in details
+            and details[CACHED_TOKENS_KEY] is not None
+            and _first_nonnegative_int(details, CACHED_TOKENS_KEY) is None
+        ):
+            logger.warning(
+                "Gym %s has invalid usage %s.cached_tokens=%r; expected a non-negative integer and omitted it",
+                trial_label,
+                details_key,
+                details[CACHED_TOKENS_KEY],
+            )
 
 
 def require_full_coverage(tasks: Sequence[AgentEvalTask], *, covered_task_ids: set[str], rollouts_path: Path) -> None:
@@ -576,6 +655,7 @@ def trials_from_rollouts(
                     trial_id=trial_id,
                     capture_dir=capture_dir,
                 ),
+                measurements=_usage_measurements(record),
                 metadata=metadata,
             )
         )
@@ -612,6 +692,7 @@ def trials_from_rollouts(
                         response=record.get("response"), metadata={"agent_ref": record.get("agent_ref")}
                     ),
                     evidence=failure_evidence,
+                    measurements=_usage_measurements(record),
                     metadata={
                         "reward": None,
                         # best-effort: Gym's failure-record schema isn't contractual, so probe common keys.

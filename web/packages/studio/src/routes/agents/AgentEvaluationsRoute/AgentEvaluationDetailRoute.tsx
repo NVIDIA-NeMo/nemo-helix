@@ -91,7 +91,11 @@ export const AgentEvaluationDetailRoute: FC = () => {
     setBreadcrumbs([
       { slotLabel: 'Agents', href: getAgentsListRoute(workspace) },
       agentName
-        ? { slotLabel: 'Evaluations', href: getAgentEvaluationsTabRoute(workspace, agentName) }
+        ? {
+            slotLabel: 'Evaluations',
+            href: getAgentEvaluationsTabRoute(workspace, agentName),
+            preserveQuery: true,
+          }
         : { slotLabel: 'Evaluations' },
       { slotLabel: jobName },
     ]);

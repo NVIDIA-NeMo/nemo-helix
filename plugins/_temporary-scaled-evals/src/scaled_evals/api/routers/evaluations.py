@@ -73,6 +73,22 @@ Principal = Annotated[CurrentPrincipal, Depends(current_principal)]
 StreamDatabaseFactory = Annotated[Callable[[], AbstractContextManager[Database]], Depends(get_stream_database_factory)]
 
 _TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
+
+
+def _evaluation_reads(db: Database) -> Any:
+    """Return the source for evaluation list/get reads.
+
+    Entity Store reads are served by the plugin's projection. The import is
+    deferred so this package keeps working without the plugin installed, and
+    Postgres stays both the default and the fallback.
+    """
+    if not settings.entity_store_reads_enabled:
+        return db.evaluations
+    from nemo_scaled_evals_plugin.projection import evaluation_reader  # noqa: PLC0415
+
+    return evaluation_reader()
+
+
 _EVENT_STREAM_BATCH_SIZE = 100
 _sse_connection_lock = Lock()
 _sse_active_connections = 0
@@ -591,7 +607,7 @@ def list_evaluations(
     more rows exist.
     """
     _ = team_id  # Teams are deliberately deferred.
-    rows = db.evaluations.list(
+    rows = _evaluation_reads(db).list(
         limit=limit,
         cursor=cursor,
         order=order,
@@ -614,7 +630,7 @@ def get_evaluation(evaluation_id: str, db: Db) -> EvaluationResponse:
     `result` JSON once the run has reached a terminal state (all null/None until
     then). 404 if not found or soft-deleted.
     """
-    row = db.evaluations.get(evaluation_id)
+    row = _evaluation_reads(db).get(evaluation_id)
     if row is None:
         raise _http_error(404, "not_found", "evaluation not found")
     return _response(row)
@@ -1006,12 +1022,16 @@ def list_artifacts(evaluation_id: str, db: Db, prefix: str = "") -> ListEnvelope
 
 
 @router.get("/{evaluation_id}/artifacts/{path:path}")
-def get_artifact(evaluation_id: str, path: str, db: Db) -> StreamingResponse:
+def get_artifact(evaluation_id: str, path: str, database_factory: StreamDatabaseFactory) -> StreamingResponse:
     try:
         object_key = s3.evaluation_artifact_key(evaluation_id, path)
     except ValueError:
         raise _http_error(404, "not_found", "not found") from None
-    _ensure_evaluation_exists(db, evaluation_id)
+    # Short-lived checkout: a request-scoped Db dependency would hold the pooled
+    # connection for the entire stream, and enough concurrent slow downloads then
+    # exhaust the pool and stall unrelated requests.
+    with database_factory() as db:
+        _ensure_evaluation_exists(db, evaluation_id)
     filename = path.rsplit("/", 1)[-1]
     return StreamingResponse(
         s3.stream_object(object_key),
@@ -1021,8 +1041,9 @@ def get_artifact(evaluation_id: str, path: str, db: Db) -> StreamingResponse:
 
 
 @router.get("/{evaluation_id}/archive/download")
-def download_archive(evaluation_id: str, db: Db) -> StreamingResponse:
-    row = _load_archive_row(db, evaluation_id)
+def download_archive(evaluation_id: str, database_factory: StreamDatabaseFactory) -> StreamingResponse:
+    with database_factory() as db:
+        row = _load_archive_row(db, evaluation_id)
     if row.get("archive_status") != "ready" or not row.get("archive_object_key"):
         raise _http_error(404, "not_found", "archive not ready")
     return StreamingResponse(
@@ -1033,8 +1054,9 @@ def download_archive(evaluation_id: str, db: Db) -> StreamingResponse:
 
 
 @router.get("/{evaluation_id}/harbor-viewer/archive")
-def download_harbor_viewer_archive(evaluation_id: str, db: Db) -> StreamingResponse:
-    row = _load_observability_row(db, evaluation_id)
+def download_harbor_viewer_archive(evaluation_id: str, database_factory: StreamDatabaseFactory) -> StreamingResponse:
+    with database_factory() as db:
+        row = _load_observability_row(db, evaluation_id)
     if not harbor_viewer_archive_available_from_result(row.get("result")):
         raise _http_error(404, "not_found", "Harbor Viewer archive not ready")
     return StreamingResponse(

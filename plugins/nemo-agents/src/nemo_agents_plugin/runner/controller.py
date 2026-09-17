@@ -572,6 +572,9 @@ class AgentDeploymentController(NemoController):
             return
 
         spawn_ms = (time.perf_counter() - t0) * 1000
+        if info.staged_spec is not None:
+            dep.spec_revision = info.staged_spec.revision
+            dep.spec_tracked_revision = info.staged_spec.tracked_revision
         dep.status = info.status
         dep.port = info.port
         dep.pid = info.pid

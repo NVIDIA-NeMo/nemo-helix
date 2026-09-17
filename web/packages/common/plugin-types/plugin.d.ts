@@ -727,6 +727,7 @@ interface AssistantChatProps {
   emptyState?: {
     slotHeading?: string;
     slotSubheading?: string;
+    slotAction?: ReactNode;
   };
   /** Overrides used when rendering Markdown inside chat messages. */
   messageContentProps?: AssistantChatMessageContentProps;
@@ -9245,6 +9246,9 @@ declare namespace index_d_exports {
   export { AppliedFilters, BulkActions, ColumnFilterTag, CopyCell, CustomContent, CustomContentProps, DEFAULT_VIEW_ITEMS, DataMode, DataViewBulkActionsProps, DataViewCommonProps, DataViewContext, DataViewFilterFns, DataViewPaginationProps, DataViewProps, DataViewSearchBarProps, DataViewState, DataViewTab, DateCell, DebouncedTextInput, DebouncedTextInputProps, DefaultCell, DownloadButton, DownloadButtonFileContent, DownloadButtonProps, EditColumnsMenu, FilterItem, FilterMenu, FilterValue, IntentionalAny, LoadingCell, MakeColumns, Pagination, PaginationStatus, PrebuiltColumnIds, PrebuiltColumns, PrepareDownloadContext, QueryStatus, RefreshButton, Root, RowActionsCell, RowActionsCellProps, RowExpansionCell, RowExpansionCellProps, RowExpansionHeaderCell, RowExpansionHeaderCellProps, RowSelectionCell, RowSelectionHeaderCell, SearchBar, StatusResult, StatusResultProps, TSFixMe, TableContent, TableContentProps, Tabs, index_d_exports$1 as TanstackTable, Toolbar, ViewToggleButton, VirtualizedTableContent, VirtualizedTableContentProps, WithDataViewDataMode, filterFunctions, formatMultiCapitalize, formatSimplifiedDateTime, getCellTitle, isCellContext, makeCell, makeDateFormatter, makeTriggerCell, renderCell, useDataViewState, useInnerDataViewContext };
 }
 //#endregion
+//#region src/components/DataView/useRowClick.d.ts
+type RowClickHandler<DataType> = (row: DataType, index: number, event: React.MouseEvent) => void;
+//#endregion
 //#region src/components/DataView/StudioDataViewToolbar.d.ts
 interface StudioDataViewToolbarProps<DataType = unknown> {
   searchField?: string;
@@ -9288,7 +9292,7 @@ interface Props$4<DataType> {
    * Clicks on interactive child elements (buttons, links, inputs, etc.) are excluded automatically.
    * Add `data-no-row-click` to any element to opt it out of row-click delegation.
    */
-  onRowClick?: (row: DataType, index: number) => void;
+  onRowClick?: RowClickHandler<DataType>;
   /**
    * Maximum number of text lines to show in each data cell before truncating
    * with an ellipsis. Prebuilt columns (row-selection, row-actions) are not affected.
@@ -10633,8 +10637,12 @@ export declare const getSortParam: (sortingState: SortingState) => string;
 /**
  * Maps DataView sorting state to a sort query value when the API only allows specific fields.
  * Table columns often use client-only ids (e.g. model_name); URL bookmarking can also reference invalid ids.
+ *
+ * Pass a generated sort-field enum as `allowedFieldIds` to get that enum back rather than a bare
+ * `string`, so the result drops straight into the SDK params. Descending sort prefixes an allowed
+ * field with `-`; the enum is expected to carry both directions, as the generated ones do.
  */
-export declare const getSortParamWithWhitelist: (sortingState: SortingState, allowedFieldIds: readonly string[], fallbackWhenEmptyOrInvalid: string) => string;
+export declare const getSortParamWithWhitelist: <S extends string = string>(sortingState: SortingState, allowedFieldIds: readonly S[], fallbackWhenEmptyOrInvalid: S) => S;
 //#endregion
 //#region src/utils/file.d.ts
 /**

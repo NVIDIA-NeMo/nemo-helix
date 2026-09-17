@@ -83,7 +83,13 @@ if TYPE_CHECKING:
         TopicAdherence,
         TunableRagEvaluator,
     )
-    from nemo_evaluator_sdk.values.models import Model, ModelRef, ReasoningParams
+    from nemo_evaluator_sdk.values.models import (
+        InferenceConfig,
+        Model,
+        ModelRef,
+        RankingInference,
+        ReasoningParams,
+    )
     from nemo_evaluator_sdk.values.retrieval import Retrieval
     from nemo_evaluator_sdk.values.targets import EvalTarget
     from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
@@ -201,6 +207,8 @@ _LAZY_ATTRS: dict[str, str] = {
     "TunableRagEvaluator": ".metrics",
     "Model": ".models",
     "ModelRef": ".models",
+    "InferenceConfig": ".models",
+    "RankingInference": ".models",
     "ReasoningParams": ".models",
     "Retrieval": ".retrieval",
     "EvalTarget": ".targets",
@@ -306,6 +314,8 @@ __all__ = [
     "MetricScore",
     "Model",
     "ModelRef",
+    "InferenceConfig",
+    "RankingInference",
     "EvalTarget",
     "Retrieval",
     "DatasetArg",

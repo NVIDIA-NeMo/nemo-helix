@@ -10,6 +10,7 @@ mapping of ``k8s_nim_operator_config`` → plugin ``K8sDeploymentConfig``.
 from __future__ import annotations
 
 import math
+from pathlib import PurePosixPath
 from typing import Any
 
 from nemo_deployments_plugin.entities import (
@@ -27,14 +28,14 @@ from nemo_deployments_plugin.entities import (
     Toleration,
     VolumeMount,
 )
-from nemo_platform.types.inference.k8s_nim_operator_config import K8sNIMOperatorConfig
-from nemo_platform_plugin.models.types import ModelEntity
+from nemo_platform_plugin.models.types import K8sNIMOperatorConfig, ModelEntity
 from nmp.common.config import Runtime
 from nmp.core.models.app import is_multi_llm_image, parse_model_name_revision
 from nmp.core.models.controllers.backends.common import DeploymentConfigView
 from nmp.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
 from nmp.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
 from nmp.core.models.controllers.backends.engine import ENGINE_GENERIC, ENGINE_NIM, ENGINE_VLLM
+from pydantic import TypeAdapter
 
 _WEIGHTS_MOUNT = "/model-store"
 _SCRATCH_MOUNT = "/scratch"
@@ -59,6 +60,12 @@ if [ "$plugin_file" != "{plugin_path}" ]; then
 fi
 """
 
+# Platform directive, not a NIMService Spec field. NIMs that retired
+# NIM_MODEL_NAME / NIM_MODEL_PATH reject them even alongside the
+# NIM_ENGINE_MODEL_* replacements, so only one generation can be emitted.
+_NIM_LEGACY_OVERRIDE_KEY = "nimLegacy"
+_BOOL_ADAPTER = TypeAdapter(bool)
+
 _SUPPORTED_NIM_OVERRIDE_CONFIG_KEYS = frozenset(
     {
         "image",
@@ -78,6 +85,40 @@ _SUPPORTED_NIM_OVERRIDE_CONFIG_KEYS = frozenset(
         "sidecarContainers",
     }
 )
+
+
+def nim_legacy_weight_env(view: DeploymentConfigView) -> bool:
+    """Whether the NIM image still expects the legacy weight env var names."""
+    value = (view.override_config or {}).get(_NIM_LEGACY_OVERRIDE_KEY)
+    if value is None:
+        return True
+    try:
+        return _BOOL_ADAPTER.validate_python(value)
+    except ValueError as error:
+        raise ValueError(f"{_NIM_LEGACY_OVERRIDE_KEY} must be a boolean-like value; got {value!r}") from error
+
+
+_NIM_WEIGHT_PATH_ENV_KEYS = ("NIM_ENGINE_MODEL_PATH", "NIM_MODEL_PATH")
+
+
+def normalize_nim_weights_path(raw: str) -> str:
+    """Join a fileset-relative weights path onto ``/model-store``."""
+    relative = raw.strip().lstrip("/")
+    if not relative:
+        return _WEIGHTS_MOUNT
+    if ".." in PurePosixPath(relative).parts:
+        raise ValueError(f"NIM model path {raw!r} must stay under {_WEIGHTS_MOUNT}")
+    return f"{_WEIGHTS_MOUNT}/{relative}"
+
+
+def resolve_nim_weights_path(view: DeploymentConfigView) -> str:
+    """Weights dir: additional_envs PATH (either generation) else ``/model-store``."""
+    additional = view.additional_envs or {}
+    for key in _NIM_WEIGHT_PATH_ENV_KEYS:
+        value = additional.get(key)
+        if value:
+            return normalize_nim_weights_path(value)
+    return _WEIGHTS_MOUNT
 
 
 def _plugin_fileset(view: DeploymentConfigView, model_entity: ModelEntity | None) -> str | None:
@@ -200,18 +241,31 @@ def compile_nim_server_env(
     if model_fqdn:
         env["NIM_SERVED_MODEL_NAME"] = model_fqdn
 
+    legacy = nim_legacy_weight_env(view)
     if weighted:
-        env["NIM_MODEL_NAME"] = _WEIGHTS_MOUNT
-        env["NIM_MODEL_PATH"] = _WEIGHTS_MOUNT
+        weights_path = resolve_nim_weights_path(view)
+        if legacy:
+            env["NIM_MODEL_NAME"] = weights_path
+            env["NIM_MODEL_PATH"] = weights_path
+        else:
+            env["NIM_ENGINE_MODEL_PATH"] = weights_path
         effective_image = view.image_name or config.default_nimservice_image
         if not is_multi_llm_image(effective_image):
-            env["NIM_FT_MODEL"] = _WEIGHTS_MOUNT
-            env["NIM_CUSTOM_MODEL"] = _WEIGHTS_MOUNT
+            env["NIM_FT_MODEL"] = weights_path
+            env["NIM_CUSTOM_MODEL"] = weights_path
     elif resolved.model_name:
         served = (
             f"{resolved.model_namespace}/{resolved.model_name}" if resolved.model_namespace else resolved.model_name
         )
         env.setdefault("NIM_SERVED_MODEL_NAME", served)
+
+    if not legacy:
+        # NIM 2.x advertises this as the /v1/models id, which provider discovery
+        # matches against the model entity.
+        entity = resolved.model_entity
+        engine_name = env.get("NIM_SERVED_MODEL_NAME") or (f"{entity.workspace}/{entity.name}" if entity else None)
+        if engine_name:
+            env["NIM_ENGINE_MODEL_NAME"] = engine_name
 
     model_entity = resolved.model_entity
     if model_entity:
@@ -251,12 +305,10 @@ def _image(name: str, tag: str) -> str:
     return name if "@" in name or name.endswith(f":{tag}") else f"{name}:{tag}"
 
 
-def _k8s_config_dict(k8s_config: K8sNIMOperatorConfig | dict[str, Any] | Any) -> dict[str, Any]:
-    if hasattr(k8s_config, "model_dump"):
+def _k8s_config_dict(k8s_config: K8sNIMOperatorConfig | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(k8s_config, K8sNIMOperatorConfig):
         return k8s_config.model_dump(exclude_none=True)
-    if isinstance(k8s_config, dict):
-        return {key: value for key, value in k8s_config.items() if value is not None}
-    return {}
+    return {key: value for key, value in k8s_config.items() if value is not None}
 
 
 def _tolerations_from_config(raw: list[dict[str, Any]]) -> list[Toleration]:
@@ -268,16 +320,19 @@ def _tolerations_from_config(raw: list[dict[str, Any]]) -> list[Toleration]:
 
 
 def _affinity_from_node_selector(node_selector: dict[str, str]) -> Affinity:
-    return Affinity(
-        node_affinity={
-            "requiredDuringSchedulingIgnoredDuringExecution": {
-                "nodeSelectorTerms": [
-                    {
-                        "matchExpressions": [
-                            {"key": key, "operator": "In", "values": [value]} for key, value in node_selector.items()
-                        ]
-                    }
-                ]
+    return Affinity.model_validate(
+        {
+            "nodeAffinity": {
+                "requiredDuringSchedulingIgnoredDuringExecution": {
+                    "nodeSelectorTerms": [
+                        {
+                            "matchExpressions": [
+                                {"key": key, "operator": "In", "values": [value]}
+                                for key, value in node_selector.items()
+                            ]
+                        }
+                    ]
+                }
             }
         }
     )
@@ -323,7 +378,13 @@ def pod_security_context_for_engine(
         group_id = view.run_as_group if view.run_as_group is not None else config.default_group_id
     if user_id is None and group_id is None:
         return None
-    return PodSecurityContext(run_as_user=user_id, run_as_group=group_id, fs_group=group_id)
+    return PodSecurityContext.model_validate(
+        {
+            "runAsUser": user_id,
+            "runAsGroup": group_id,
+            "fsGroup": group_id,
+        }
+    )
 
 
 def _default_tolerations(config: DeploymentsPluginConfig) -> list[Toleration]:
@@ -408,8 +469,10 @@ def startup_probe_failure_threshold(view: DeploymentConfigView, *, period_second
 
 def apply_container_resources(container: Container, resources: dict[str, Any]) -> None:
     """Apply k8s resource requirements to a plugin container."""
-    requests = resources.get("requests") if isinstance(resources.get("requests"), dict) else {}
-    limits = resources.get("limits") if isinstance(resources.get("limits"), dict) else {}
+    raw_requests = resources.get("requests")
+    raw_limits = resources.get("limits")
+    requests = raw_requests if isinstance(raw_requests, dict) else {}
+    limits = raw_limits if isinstance(raw_limits, dict) else {}
     if not requests and not limits:
         return
     existing = container.resources
@@ -565,7 +628,8 @@ def apply_nim_override_config(
     """
     if engine != ENGINE_NIM or runtime != Runtime.KUBERNETES:
         return
-    override = view.override_config
+    override = (view.override_config or {}).copy()
+    override.pop(_NIM_LEGACY_OVERRIDE_KEY, None)
     if not override:
         return
 

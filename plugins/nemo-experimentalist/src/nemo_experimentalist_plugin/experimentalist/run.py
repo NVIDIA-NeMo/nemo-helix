@@ -15,7 +15,7 @@ from nemo_experimentalist_plugin.experimentalist.experimentalist_backend import 
 from nemo_experimentalist_plugin.experimentalist.reporting import RunReporter, Verbosity
 from nemo_experimentalist_plugin.experimentalist.runner import ExperimentRunner
 from nemo_experimentalist_plugin.experimentalist.strategies.evolutionary import EvolutionaryOptimizerConfig
-from nemo_platform import AsyncNeMoPlatform
+from nemo_platform_plugin.client.client import AsyncNemoClient
 from nemo_platform_plugin.nooa_model_client import (
     ConfiguredModelClients,
     ConfiguredModelRefs,
@@ -50,7 +50,7 @@ async def run_experimentalist(
     validation_dataset: DatasetRef,
     experiment_dir: Path,
     workspace: str,
-    client: AsyncNeMoPlatform | None,
+    client: AsyncNemoClient,
     model_refs: ConfiguredModelRefs | None = None,
     config: EvolutionaryOptimizerConfig,
     task_template: DatasetRef | None = None,
@@ -74,9 +74,7 @@ async def run_experimentalist(
         workspace: Platform workspace.
         model_refs: Optional explicit default/fast Model Entity IDs. Unset uses the
             active Platform CLI context.
-        client: Optional caller-owned Platform client. Local-only Mode 2 runs
-            may pass ``None``; Platform Insight access, mirroring, and Intake
-            persistence require a client.
+        client: Caller-owned Platform client.
         config: Evolutionary optimizer configuration.
 
     Returns:
@@ -98,18 +96,16 @@ async def run_experimentalist(
         insight=str(insight) if insight is not None else None,
     )
 
-    backend = make_experimentalist_backend(
-        client=client,
-        experiments_output=str(experiment_dir),
-        storage=config.storage,
-    )
-    # Every component resolves its models through the platform (#1159), so the resolved
-    # clients have to stay active for the whole run, not just while the runner is built.
-    model_platform_client = client or AsyncNeMoPlatform()
-    owns_model_platform_client = client is None
     model_clients: ConfiguredModelClients | None = None
     try:
-        model_clients = await resolve_model_clients(model_platform_client, model_refs)
+        backend = make_experimentalist_backend(
+            client=client,
+            experiments_output=str(experiment_dir),
+            storage=config.storage,
+        )
+        # Every component resolves its models through the platform (#1159), so the resolved
+        # clients have to stay active for the whole run, not just while the runner is built.
+        model_clients = await resolve_model_clients(client, model_refs)
         with activate_model_clients(model_clients):
             result = await ExperimentRunner(
                 backend=backend,
@@ -130,12 +126,8 @@ async def run_experimentalist(
                 reporter=reporter,
             ).run()
     finally:
-        try:
-            if model_clients is not None:
-                await model_clients.aclose()
-        finally:
-            if owns_model_platform_client:
-                await model_platform_client.close()
+        if model_clients is not None:
+            await model_clients.aclose()
 
     winner = result.winner
     reporter.run_finished(

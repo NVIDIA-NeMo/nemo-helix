@@ -3,32 +3,19 @@
 
 import type { CreateJobRequest as DataDesignerJobRequest } from '@nemo/sdk/generated/data-designer/schema';
 import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
-import type { BadgeProps } from '@nvidia/foundations-react-core';
 import type { AddColumnSelection } from '@studio/components/AddColumnPalette/types';
+import type {
+  StartOption as SharedStartOption,
+  StartOptionTag,
+} from '@studio/components/StartOptions/types';
 import type { GeneratedConfigValidation } from '@studio/routes/DataDesignerJobBuildRoute/aiSeed';
 import type { LucideIcon } from 'lucide-react';
 
 export type StartOptionId = 'ai' | 'template' | 'clone' | 'scratch';
 
-export interface StartOptionTag {
-  label: string;
-  color: NonNullable<BadgeProps['color']>;
-  kind: NonNullable<BadgeProps['kind']>;
-}
+export type { StartOptionTag };
 
-export interface StartOption {
-  id: StartOptionId;
-  title: string;
-  description: string;
-  icon: LucideIcon;
-  tag?: StartOptionTag;
-  /**
-   * Whether this option is wired up. Disabled options still render (so the full set
-   * of future entry points is visible) but are no-ops — they cannot be selected and
-   * never reveal a detail panel or the Continue footer.
-   */
-  enabled: boolean;
-}
+export type StartOption = SharedStartOption<StartOptionId>;
 
 export interface TemplateColumnSpec extends AddColumnSelection {
   /** The column name (Jinja2 identifier); referenced by later columns via `{{ name }}`. */
@@ -68,13 +55,6 @@ export interface FilesetTemplate {
 export interface TemplateCardProps {
   template: FilesetTemplate;
   selected: boolean;
-  onSelect: () => void;
-}
-
-export interface StartOptionCardProps {
-  option: StartOption;
-  selected: boolean;
-  /** Fired on click / keyboard activation. Only invoked for enabled options. */
   onSelect: () => void;
 }
 

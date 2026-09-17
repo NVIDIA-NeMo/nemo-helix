@@ -264,8 +264,15 @@ class GRPOTraining(_TrainingBase):
         default=None,
         description="NeMo-RL policy worker that trains the model. `lora` requires `automodel` "
         "(NeMo Automodel + Transformer Engine, Hopper or newer; the only backend with expert "
-        "parallelism and automodel_kwargs). `all_weights` requires `dtensor` (stock HuggingFace "
-        "on PyTorch FSDP2, also the pre-Hopper option). Omit it to get the supported one.",
+        "parallelism and automodel_kwargs). `all_weights` defaults to `dtensor` (stock HuggingFace "
+        "on PyTorch FSDP2, also the pre-Hopper option) and may be set to `automodel` for a "
+        "consolidated HuggingFace export. Omit it to get the default for the finetuning type.",
+    )
+    v4_compatible: bool = Field(
+        default=True,
+        description="Keep the base checkpoint's transformers-v4 config.json on the trained "
+        "export. The platform's vLLM cannot read the v5 config Automodel otherwise writes. "
+        "Set false to export that v5 config instead.",
     )
     val_at_start: bool = Field(
         default=False,
@@ -521,12 +528,10 @@ class GRPOTraining(_TrainingBase):
     def _policy_backend_supports_requested_features(self) -> Self:
         """Reject pairings the backend does not support, before the job reaches a GPU.
 
-        ``dtensor`` asserts ``lora_cfg.enabled is False`` and ignores the other two;
-        ``automodel`` trains full weights but saves a checkpoint the publisher cannot read.
+        ``dtensor`` asserts ``lora_cfg.enabled is False`` and ignores expert parallelism
+        and ``automodel_kwargs``. ``automodel`` trains LoRA and full weights.
         """
         if self.policy_backend is not PolicyBackend.DTENSOR:
-            if self.finetuning_type != "lora":
-                raise ValueError(f"finetuning_type='{self.finetuning_type}' requires policy_backend='dtensor'.")
             return self
         conflicts = []
         if self.finetuning_type == "lora":
@@ -644,6 +649,77 @@ class OutputResponse(_OutputBase):
     fileset: str = Field(max_length=255)
 
 
+class ToolCallParams(RlSchema):
+    """Tool calling configuration for NIM deployments."""
+
+    tool_call_parser: str | None = Field(
+        default=None,
+        description=(
+            "Name of the tool call parser to use (e.g., 'openai', 'hermes', 'pythonic', 'llama3_json', 'mistral')."
+        ),
+    )
+    tool_call_plugin: str | None = Field(
+        default=None,
+        pattern=r"^[\w\-.]+/[\w\-.]+$",
+        description=(
+            "Reference to a fileset containing the custom tool call plugin Python file. "
+            "Expected format: '{workspace}/{fileset_name}'."
+        ),
+    )
+    auto_tool_choice: bool | None = Field(
+        default=None,
+        description="Whether to enable automatic tool choice.",
+    )
+
+
+class DeploymentParams(RlSchema):
+    """Inline deployment parameters for auto-deploying a trained model.
+
+    Used in :class:`RlJobInput.deployment_config` and passed through to the
+    model_entity task at compile time. When unset, no deployment is launched.
+    """
+
+    gpu: int = Field(default=1, gt=0, description="Number of GPUs required for the deployment.")
+    additional_envs: dict[str, str] | None = Field(
+        default=None,
+        description="Additional environment variables for the deployment.",
+    )
+    disk_size: str | None = Field(default=None, description="Disk size for the deployment.")
+    image_name: str | None = Field(
+        default=None,
+        description="Container image name from NGC. If not specified, defaults to multi-llm.",
+    )
+    image_tag: str | None = Field(default=None, description="Container image tag from NGC.")
+    lora_enabled: bool = Field(
+        default=True,
+        description=(
+            "When auto-deploying a full-weight training, setting this true allows subsequent "
+            "LoRA adapters to be deployed against it."
+        ),
+    )
+    tool_call_config: ToolCallParams | None = Field(
+        default=None,
+        description="Tool calling configuration override for the NIM deployment.",
+    )
+
+
+def trains_lora_adapter(training: TrainingMethod) -> bool:
+    """True when ``training`` produces a LoRA adapter rather than a full-weight model.
+
+    Only GRPO can train LoRA, and the platform DTensor path has no merge-at-export,
+    so an unmerged adapter is the only possible LoRA output.
+    """
+    return isinstance(training, GRPOTraining) and training.finetuning_type == "lora"
+
+
+DEPLOYMENT_CONFIG_DESCRIPTION = (
+    "Deployment configuration for auto-deploying the model after training. "
+    "Pass a string to reference an existing ModelDeploymentConfig by name "
+    "('my-config' or 'workspace/my-config'). An object provides inline NIM "
+    "deployment parameters. Omit to skip deployment."
+)
+
+
 class RlJobOutput(RlSchema):
     """Canonical NeMo-RL job spec (output of the plugin transform)."""
 
@@ -656,10 +732,19 @@ class RlJobOutput(RlSchema):
     training: TrainingMethod = Field(description="Training method and hyperparameters.")
     integrations: IntegrationsSpec | None = Field(default=None)
     output: OutputResponse = Field(description="Output artifact created by this job.")
+    deployment_config: str | DeploymentParams | None = Field(
+        default=None,
+        description=DEPLOYMENT_CONFIG_DESCRIPTION,
+    )
 
     @property
     def training_type(self) -> TrainingType:
         return TrainingType(self.training.type)
+
+    @property
+    def trains_lora_adapter(self) -> bool:
+        """True when this job produces a LoRA adapter rather than a full-weight model."""
+        return trains_lora_adapter(self.training)
 
     def validate_for_training(self) -> None:
         """Validate parallelism/batch consistency before compiling."""

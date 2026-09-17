@@ -70,7 +70,11 @@ class RuntimeConfig(BaseModel):
 class TelemetryConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = False
+    # Tri-state so a config can decline telemetry without being mistaken for one
+    # that never mentioned it: unset lets the backend wire an export for this
+    # deployment context, False opts out, True turns it on and still lets the
+    # backend fill in whatever the config left out.
+    enabled: bool | None = None
     provider: str | None = None
     output_dir: str | None = None
     project: str | None = None

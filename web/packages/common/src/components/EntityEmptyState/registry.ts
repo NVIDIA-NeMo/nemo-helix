@@ -216,7 +216,6 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     subheading: 'Trace summaries will appear here after spans are ingested.',
     cliCommand:
       'nemo intake ingest otlp v1 traces create --input-file <otlp-traces>.json --workspace <workspace>',
-    // The skill id is what makes an agent load it; rewording it to prose matches nothing.
     skillPrompt:
       'Help me import traces into the "<workspace>" workspace with the nemo-intake skill.',
   },
@@ -228,6 +227,14 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     heading: 'No runs yet',
     subheading:
       'Agent invocations populate this list once telemetry reaches the nemo-agent-telemetry fileset.',
+  },
+  agentOptimizations: {
+    heading: 'No optimizations yet',
+    subheading:
+      "Sweep your agent's parameters against an evaluation to find a config that scores better.",
+    cliCommand:
+      'nemo agents optimize submit --optimize-config <config>.yaml --fileset <bundle> --agent <agent-name> --workspace <workspace>',
+    skillPrompt: 'Help me run my first agent optimization with the nemo-optimization skill',
   },
   agents: {
     heading: 'No agents yet',

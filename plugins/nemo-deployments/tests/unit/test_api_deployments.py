@@ -13,7 +13,11 @@ from nemo_deployments_plugin.api.v2 import deployments as deployments_module
 from nemo_deployments_plugin.api.v2.dependencies import get_entity_client
 from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, Prerequisite
 from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_platform_plugin.entity_client import (
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+    NemoEntityValidationError,
+)
 
 
 @pytest.fixture
@@ -131,6 +135,18 @@ def test_delete_deployment_conflict_409(client: TestClient, mock_entity_client: 
     mock_entity_client.update.side_effect = NemoEntityConflictError("conflict")
     resp = client.delete("/apis/deployments/v2/workspaces/default/deployments/dep1")
     assert resp.status_code == 409
+
+
+def test_create_deployment_validation_422(client: TestClient, mock_entity_client: AsyncMock) -> None:
+    mock_entity_client.get.return_value = make_deployment_config()
+    mock_entity_client.list.return_value = list_response([])
+    mock_entity_client.create.side_effect = NemoEntityValidationError("name: string does not match pattern")
+    resp = client.post(
+        "/apis/deployments/v2/workspaces/default/deployments",
+        json={"name": "dep 1", "deployment_config": "cfg1"},
+    )
+    assert resp.status_code == 422
+    assert "pattern" in resp.json()["detail"]
 
 
 def test_create_deployment_ignores_raw_auth_context_headers(client: TestClient, mock_entity_client: AsyncMock) -> None:

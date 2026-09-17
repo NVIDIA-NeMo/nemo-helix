@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timezone
 
+import nemo_evaluator.shared.metric_bundles.inline  # noqa: F401
 import pytest
 from nemo_evaluator.api.schemas import MetricInline
 from nemo_evaluator.api.service.metric_service import MetricService
@@ -18,6 +21,15 @@ from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEnti
 from nemo_platform_plugin.files.client import AsyncFilesClient
 from nemo_platform_plugin.files.types import CreateFilesetRequest
 from nemo_platform_plugin.filter_ops import FilterOperation
+
+_LEGACY_REQUIRED_BUNDLE_JSON = (
+    '{"bundle_kind":"metric-bundle","bundle_format_version":"v1","metric_type":"exact-match",'
+    '"metadata":{"description":null,"labels":{}},"outputs":[{"name":"exact-match","description":null,'
+    '"value_json_schema":{"description":"Continuous numeric metric value.","title":"ContinuousScore",'
+    '"type":"number"}}],"secrets":{},"payload":{"metric":{"type":"exact-match","description":null,'
+    '"labels":{},"supported_job_types":["online","offline"],"reference":"x","candidate":"y"},'
+    '"digest":"cdcbd7ba2c83a314ce2f682a1ff5a86fb48dceb33452006e373894d82984686c","kind":"inline"}}'
+)
 
 # ---- in-memory fakes -------------------------------------------------------
 
@@ -154,6 +166,11 @@ def _bundle(metric=None) -> MetricInline:
     return MetricInline.model_validate_json(runtime_bundle.model_dump_json())
 
 
+def _legacy_required_bundle() -> MetricInline:
+    """Load a frozen all-required bundle emitted by origin/main."""
+    return MetricInline.model_validate_json(_LEGACY_REQUIRED_BUNDLE_JSON)
+
+
 def _fileset_of(service: MetricService, bundle_ref: str) -> tuple[str, str]:
     workspace, fileset, _ = parse_bundle_ref(bundle_ref)
     return (workspace, fileset)
@@ -162,9 +179,12 @@ def _fileset_of(service: MetricService, bundle_ref: str) -> tuple[str, str]:
 # ---- tests -----------------------------------------------------------------
 
 
-async def test_create_stores_bundle_and_indexes_entity(service: MetricService, fake_files) -> None:
+async def test_create_stores_bundle_and_indexes_entity(
+    service: MetricService, fake_files, fake_entity_client: _FakeEntityClient
+) -> None:
     bundle = _bundle()
     created = await service.create_metric("exact", bundle, workspace="default")
+    entity = fake_entity_client.entities[("default", "exact")]
 
     assert created.name == "exact"
     assert created.metric_type == bundle.metric_type
@@ -174,6 +194,21 @@ async def test_create_stores_bundle_and_indexes_entity(service: MetricService, f
     assert created.description == bundle.metadata.description
     assert created.labels == bundle.metadata.labels
     assert _fileset_of(service, created.bundle_ref) in fake_files._store
+    assert "required" not in entity.model_dump(mode="json")["outputs"][0]
+    assert "required" not in created.model_dump(mode="json")["outputs"][0]
+
+
+async def test_create_preserves_optional_output_in_entity_and_response(
+    service: MetricService, fake_entity_client: _FakeEntityClient
+) -> None:
+    bundle = _bundle()
+    optional = bundle.model_copy(update={"outputs": [bundle.outputs[0].model_copy(update={"required": False})]})
+
+    created = await service.create_metric("optional", optional, workspace="default")
+    entity = fake_entity_client.entities[("default", "optional")]
+
+    assert entity.model_dump(mode="json")["outputs"][0]["required"] is False
+    assert created.model_dump(mode="json")["outputs"][0]["required"] is False
 
 
 async def test_create_rejects_duplicate_without_clobbering_existing(service: MetricService, fake_files) -> None:
@@ -265,6 +300,30 @@ async def test_store_derived_metric_is_content_addressed_dedup(
     assert first.root == second.root
     assert len(fake_entity_client.entities) == 1
     assert len(fake_files._store) == 1
+
+
+async def test_store_derived_metric_preserves_legacy_required_identity_and_bytes(
+    service: MetricService, fake_files: _FakeFiles, fake_entity_client: _FakeEntityClient
+) -> None:
+    legacy = _legacy_required_bundle()
+    explicit_required = legacy.model_copy(update={"outputs": [legacy.outputs[0].model_copy(update={"required": True})]})
+    optional = legacy.model_copy(update={"outputs": [legacy.outputs[0].model_copy(update={"required": False})]})
+    legacy_content = json.loads(_LEGACY_REQUIRED_BUNDLE_JSON)
+    expected_digest = hashlib.sha256(
+        json.dumps(legacy_content, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+    first = await service.store_derived_metric(legacy, workspace="default")
+    second = await service.store_derived_metric(explicit_required, workspace="default")
+    third = await service.store_derived_metric(optional, workspace="default")
+
+    assert first.root == second.root == f"default/derived.{expected_digest[:55]}"
+    assert third.root != first.root
+    assert len(fake_entity_client.entities) == 2
+    _, _, name = first.root.partition("/")
+    entity = fake_entity_client.entities[("default", name)]
+    workspace, fileset = _fileset_of(service, entity.bundle_ref)
+    assert fake_files._store[(workspace, fileset)]["bundle.json"] == _LEGACY_REQUIRED_BUNDLE_JSON.encode("utf-8")
 
 
 async def test_list_excludes_derived_by_default(service: MetricService, fake_entity_client: _FakeEntityClient) -> None:

@@ -42,6 +42,13 @@ def _suspended_record() -> AccessKeyEntity:
     return _record(jti="ak_suspended").model_copy(update={"status": "SUSPENDED"})
 
 
+def _rotating_record(*, grace_period_expires_at: datetime | None = None) -> AccessKeyEntity:
+    grace_period_expires_at = grace_period_expires_at or datetime.now(tz=UTC) + timedelta(days=2)
+    return _record(jti="ak_rotating").model_copy(
+        update={"status": "ROTATING", "grace_period_expires_at": grace_period_expires_at}
+    )
+
+
 def _expired_record() -> AccessKeyEntity:
     return _record(jti="ak_expired").model_copy(update={"expires_at": datetime(2000, 1, 1, tzinfo=UTC)})
 
@@ -121,6 +128,7 @@ async def test_registry_persists_created_key_metadata() -> None:
         status="ACTIVE",
         issuer="https://platform.example.com/apis/auth",
         audiences=["nemo-platform-access-key"],
+        scope=["intake", "entities"],
         token="secret-token",
         token_type="Bearer",
     )
@@ -132,6 +140,7 @@ async def test_registry_persists_created_key_metadata() -> None:
     assert saved.name == "ak_example"
     assert saved.key_name == "ci-build"
     assert saved.description == "CI build automation"
+    assert saved.scope == ["intake", "entities"]
     assert "secret-token" not in saved.model_dump_json()
 
 
@@ -163,9 +172,39 @@ async def test_registry_separates_service_key_owner_from_token_subject() -> None
 
 
 @pytest.mark.asyncio
+async def test_registry_discards_unreturned_key() -> None:
+    entity_client = AsyncMock()
+    registry = AccessKeyRegistry(entity_client)
+
+    await registry.discard_unreturned("ak_orphaned")
+
+    entity_client.delete.assert_awaited_once_with(
+        AccessKeyEntity,
+        name="ak_orphaned",
+        workspace="system",
+    )
+
+
+@pytest.mark.asyncio
+async def test_registry_discard_unreturned_is_idempotent_when_record_is_missing() -> None:
+    entity_client = AsyncMock()
+    entity_client.delete.side_effect = EntityNotFoundError("missing")
+    registry = AccessKeyRegistry(entity_client)
+
+    await registry.discard_unreturned("ak_missing")
+
+    entity_client.delete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_registry_lists_principals_keys_with_status_across_pages() -> None:
     entity_client = AsyncMock()
-    active_record = _record().model_copy(update={"audiences": ["nemo-platform-access-key", "nemo-platform-access-key"]})
+    active_record = _record().model_copy(
+        update={
+            "audiences": ["nemo-platform-access-key", "nemo-platform-access-key"],
+            "scope": ["intake", "intake"],
+        }
+    )
     entity_client.list.return_value = SimpleNamespace(
         data=[
             active_record,
@@ -181,6 +220,7 @@ async def test_registry_lists_principals_keys_with_status_across_pages() -> None
     assert [key.jti for key in result.data] == ["ak_example", "ak_revoked"]
     assert [key.status for key in result.data] == ["ACTIVE", "REVOKED"]
     assert result.data[0].audiences == ["nemo-platform-access-key"]
+    assert result.data[0].scope == ["intake"]
     assert result.has_more
     entity_client.list.assert_awaited_once()
     assert entity_client.list.await_args.kwargs["page"] == 1
@@ -319,6 +359,126 @@ async def test_registry_can_newly_revoke_expired_key() -> None:
 
 
 @pytest.mark.asyncio
+async def test_registry_active_authentication_updates_last_used_at() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.return_value = _record()
+    registry = AccessKeyRegistry(entity_client)
+
+    assert await registry.is_active("ak_example", "alice@example.com")
+
+    updated = entity_client.update.await_args.args[0]
+    assert updated.last_used_at is not None
+    assert updated.last_used_at.tzinfo is UTC
+
+
+@pytest.mark.asyncio
+async def test_registry_rotating_authentication_updates_last_used_at() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.return_value = _record(jti="ak_rotating").model_copy(
+        update={
+            "status": "ROTATING",
+            "grace_period_expires_at": datetime.now(tz=UTC) + timedelta(minutes=5),
+        }
+    )
+    registry = AccessKeyRegistry(entity_client)
+
+    assert await registry.is_active("ak_rotating", "alice@example.com")
+
+    updated = entity_client.update.await_args.args[0]
+    assert updated.last_used_at is not None
+
+
+@pytest.mark.asyncio
+async def test_registry_rotating_authentication_bypasses_last_used_at_coalescing() -> None:
+    # ROTATING keys skip the 5-minute coalescing window: last_used_at is the signal
+    # callers rely on to confirm traffic has moved off a rotated-out key before
+    # revoking it, so it must reflect every authenticated request during the
+    # bounded grace window, not just one every 5 minutes.
+    entity_client = AsyncMock()
+    entity_client.get.return_value = _record(jti="ak_rotating").model_copy(
+        update={
+            "status": "ROTATING",
+            "grace_period_expires_at": datetime.now(tz=UTC) + timedelta(minutes=5),
+            "last_used_at": datetime.now(tz=UTC) - timedelta(seconds=5),
+        }
+    )
+    registry = AccessKeyRegistry(entity_client)
+
+    assert await registry.is_active("ak_rotating", "alice@example.com")
+
+    entity_client.update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_registry_last_used_at_update_retries_transient_conflict() -> None:
+    stale, fresh = _record(), _record()
+    stale._db_version = 1
+    fresh._db_version = 2
+    entity_client = AsyncMock()
+    entity_client.get.side_effect = [stale, fresh]
+    entity_client.update.side_effect = [EntityConflictError("entity version changed"), None]
+    registry = AccessKeyRegistry(entity_client)
+
+    assert await registry.is_active("ak_example", "alice@example.com")
+
+    assert entity_client.get.await_count == 2
+    assert entity_client.update.await_count == 2
+    first_attempt, second_attempt = (call.args[0] for call in entity_client.update.await_args_list)
+    assert first_attempt.db_version == 1
+    assert second_attempt.db_version == 2
+    assert first_attempt.last_used_at is not None
+    assert second_attempt.last_used_at is not None
+    assert second_attempt.last_used_at >= first_attempt.last_used_at
+
+
+@pytest.mark.asyncio
+async def test_registry_last_used_at_update_stops_when_conflict_reveals_revocation() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.side_effect = [_record(), _record(revoked=True)]
+    entity_client.update.side_effect = EntityConflictError("entity version changed")
+    registry = AccessKeyRegistry(entity_client)
+
+    assert not await registry.is_active("ak_example", "alice@example.com")
+
+    assert entity_client.get.await_count == 2
+    entity_client.update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "record",
+    [
+        _record(revoked=True),
+        _suspended_record(),
+        _expired_record(),
+        _record(principal="bob@example.com"),
+    ],
+)
+async def test_registry_rejected_authentication_does_not_update_last_used_at(record: AccessKeyEntity) -> None:
+    entity_client = AsyncMock()
+    entity_client.get.return_value = record
+    registry = AccessKeyRegistry(entity_client)
+
+    assert not await registry.is_active(record.name, "alice@example.com")
+
+    entity_client.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [EntityConflictError("entity version changed"), RuntimeError("storage unavailable")],
+)
+async def test_registry_last_used_at_update_failure_does_not_reject_authentication(failure: Exception) -> None:
+    entity_client = AsyncMock()
+    entity_client.get.return_value = _record()
+    entity_client.update.side_effect = failure
+    registry = AccessKeyRegistry(entity_client)
+
+    assert await registry.is_active("ak_example", "alice@example.com")
+
+
+@pytest.mark.asyncio
 async def test_registry_reports_revoked_key_as_inactive() -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _record(revoked=True)
@@ -442,6 +602,7 @@ async def test_registry_is_active_for_service_bound_key_checks_subject_not_owner
 async def test_registry_backfills_missing_legacy_access_key_from_validated_claims() -> None:
     entity_client = AsyncMock()
     entity_client.get.side_effect = EntityNotFoundError("missing")
+    entity_client.create.side_effect = lambda record: record
     registry = AccessKeyRegistry(entity_client)
     claims = TokenClaims(
         subject="alice@example.com",
@@ -522,17 +683,39 @@ async def test_registry_revoke_transitions_suspended_key_to_revoked() -> None:
 
 
 @pytest.mark.asyncio
-async def test_registry_concurrent_revoke_retries_when_key_is_only_suspended() -> None:
+async def test_registry_revoke_retries_transient_conflict_when_key_is_only_suspended() -> None:
+    # A conflict from something unrelated (e.g. is_active's last_used_at update landing
+    # between our read and update) shouldn't fail the revoke outright: since the key is
+    # merely suspended (not revoked) on re-read, revoke should retry and succeed.
+    stale, fresh = _record(), _suspended_record()
+    stale._db_version = 1
+    fresh._db_version = 2
     entity_client = AsyncMock()
-    entity_client.get.side_effect = [_record(), _suspended_record()]
+    entity_client.get.side_effect = [stale, fresh]
+    entity_client.update.side_effect = [EntityConflictError("entity version changed"), None]
+    registry = AccessKeyRegistry(entity_client)
+
+    assert await registry.revoke("ak_suspended", "alice@example.com")
+
+    assert entity_client.get.await_count == 2
+    assert entity_client.update.await_count == 2
+    first_attempt, second_attempt = (call.args[0] for call in entity_client.update.await_args_list)
+    assert first_attempt.db_version == 1
+    assert second_attempt.db_version == 2
+
+
+@pytest.mark.asyncio
+async def test_registry_revoke_gives_up_after_persistent_conflict_when_key_is_only_suspended() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.side_effect = [_record(), *([_suspended_record()] * 3)]
     entity_client.update.side_effect = EntityConflictError("entity version changed")
     registry = AccessKeyRegistry(entity_client)
 
     with pytest.raises(EntityConflictError, match="entity version changed"):
         await registry.revoke("ak_suspended", "alice@example.com")
 
-    assert entity_client.get.await_count == 2
-    entity_client.update.assert_awaited_once()
+    assert entity_client.get.await_count == 4
+    assert entity_client.update.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -637,6 +820,44 @@ async def test_registry_concurrent_suspension_transition_rejects_revocation() ->
 
 
 @pytest.mark.asyncio
+async def test_registry_suspend_retries_transient_conflict_from_unrelated_write() -> None:
+    # A conflict from something unrelated (e.g. is_active's last_used_at update landing
+    # between our read and update) shouldn't fail the suspension outright: since the
+    # key is still eligible on re-read, suspend should retry and succeed.
+    stale, fresh = _record(), _record()
+    stale._db_version = 1
+    fresh._db_version = 2
+    entity_client = AsyncMock()
+    entity_client.get.side_effect = [stale, fresh]
+    entity_client.update.side_effect = [EntityConflictError("entity version changed"), None]
+    registry = AccessKeyRegistry(entity_client)
+
+    changed, effective_status = await registry.suspend("ak_example", "alice@example.com")
+
+    assert changed
+    assert effective_status == "SUSPENDED"
+    assert entity_client.get.await_count == 2
+    assert entity_client.update.await_count == 2
+    first_attempt, second_attempt = (call.args[0] for call in entity_client.update.await_args_list)
+    assert first_attempt.db_version == 1
+    assert second_attempt.db_version == 2
+
+
+@pytest.mark.asyncio
+async def test_registry_suspend_gives_up_after_persistent_conflict() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.side_effect = [_record() for _ in range(4)]
+    entity_client.update.side_effect = EntityConflictError("entity version changed")
+    registry = AccessKeyRegistry(entity_client)
+
+    with pytest.raises(EntityConflictError, match="entity version changed"):
+        await registry.suspend("ak_example", "alice@example.com")
+
+    assert entity_client.get.await_count == 4
+    assert entity_client.update.await_count == 3
+
+
+@pytest.mark.asyncio
 async def test_registry_rejects_missing_current_access_key_record() -> None:
     entity_client = AsyncMock()
     entity_client.get.side_effect = EntityNotFoundError("missing")
@@ -661,3 +882,209 @@ async def test_registry_rejects_missing_current_access_key_record() -> None:
 
     assert not await registry.is_active("ak_current", "alice@example.com", claims=claims)
     entity_client.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_registry_reports_rotating_key_as_active_during_grace_period() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.return_value = _rotating_record(grace_period_expires_at=datetime(2999, 1, 1, tzinfo=UTC))
+    registry = AccessKeyRegistry(entity_client)
+
+    assert await registry.is_active("ak_rotating", "alice@example.com")
+
+
+@pytest.mark.asyncio
+async def test_registry_reports_rotated_key_as_inactive_after_grace_period() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.return_value = _rotating_record(grace_period_expires_at=datetime(2000, 1, 1, tzinfo=UTC))
+    registry = AccessKeyRegistry(entity_client)
+
+    assert not await registry.is_active("ak_rotating", "alice@example.com")
+
+
+@pytest.mark.asyncio
+async def test_registry_is_active_does_not_extend_grace_deadline_by_auth_leeway() -> None:
+    # is_active's 30s clock-skew leeway is meant only for validating a JWT's own exp
+    # claim, not the server-side-only rotation grace deadline. A key just past its
+    # grace deadline must be rejected immediately, not for another 30 seconds.
+    entity_client = AsyncMock()
+    entity_client.get.return_value = _rotating_record(
+        grace_period_expires_at=datetime.now(tz=UTC) - timedelta(seconds=5)
+    )
+    registry = AccessKeyRegistry(entity_client)
+
+    assert not await registry.is_active("ak_rotating", "alice@example.com")
+
+
+@pytest.mark.asyncio
+async def test_registry_reports_rotating_key_status_in_listing() -> None:
+    entity_client = AsyncMock()
+    entity_client.list.return_value = SimpleNamespace(
+        data=[_rotating_record(grace_period_expires_at=datetime(2999, 1, 1, tzinfo=UTC))],
+        pagination=SimpleNamespace(total_pages=1),
+    )
+    registry = AccessKeyRegistry(entity_client)
+
+    result = await registry.list_for_principal("alice@example.com", page=1, page_size=100)
+
+    assert result.data[0].status == "ROTATING"
+
+
+def test_registry_metadata_exposes_grace_expiry_for_rotating_key() -> None:
+    grace_period_expires_at = datetime(2999, 1, 1, tzinfo=UTC)
+
+    metadata = AccessKeyRegistry._metadata(_rotating_record(grace_period_expires_at=grace_period_expires_at))
+
+    assert metadata.grace_period_expires_at == grace_period_expires_at
+
+
+@pytest.mark.parametrize("status", ["ACTIVE", "REVOKED", "SUSPENDED"])
+def test_registry_metadata_hides_stale_grace_expiry_when_not_rotating(status: str) -> None:
+    record = _record().model_copy(
+        update={
+            "status": status,
+            "grace_period_expires_at": datetime(2999, 1, 1, tzinfo=UTC),
+        }
+    )
+
+    metadata = AccessKeyRegistry._metadata(record)
+
+    assert metadata.grace_period_expires_at is None
+
+
+@pytest.mark.asyncio
+async def test_registry_get_rotatable_returns_active_record() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.return_value = _record()
+    registry = AccessKeyRegistry(entity_client)
+
+    record = await registry.get_rotatable("ak_example", "alice@example.com")
+
+    assert record.name == "ak_example"
+    entity_client.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "record",
+    [_suspended_record(), _record(revoked=True), _rotating_record(), _expired_record()],
+    ids=["suspended", "revoked", "rotating", "expired"],
+)
+async def test_registry_get_rotatable_rejects_non_active_key(record: AccessKeyEntity) -> None:
+    entity_client = AsyncMock()
+    entity_client.get.return_value = record
+    registry = AccessKeyRegistry(entity_client)
+
+    with pytest.raises(AccessKeyStateConflictError):
+        await registry.get_rotatable(record.name, record.principal)
+
+
+@pytest.mark.asyncio
+async def test_registry_begin_rotation_transitions_active_key_to_rotating() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.return_value = _record()
+    registry = AccessKeyRegistry(entity_client)
+
+    result = await registry.begin_rotation(
+        "ak_example", "alice@example.com", grace_period_seconds=3600, successor_jti="ak_successor"
+    )
+
+    assert isinstance(result, AccessKeyEntity)
+    assert result.status == "ROTATING"
+    assert result.grace_period_expires_at is not None
+    assert result.grace_period_expires_at > datetime.now(tz=UTC)
+    assert result.rotation_successor_jti == "ak_successor"
+    updated = entity_client.update.await_args.args[0]
+    assert result is updated
+    assert updated.status == "ROTATING"
+    assert updated.grace_period_expires_at == result.grace_period_expires_at
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "record",
+    [_suspended_record(), _record(revoked=True), _rotating_record(), _expired_record()],
+    ids=["suspended", "revoked", "rotating", "expired"],
+)
+async def test_registry_begin_rotation_rejects_non_active_key(record: AccessKeyEntity) -> None:
+    entity_client = AsyncMock()
+    entity_client.get.return_value = record
+    registry = AccessKeyRegistry(entity_client)
+
+    with pytest.raises(AccessKeyStateConflictError):
+        await registry.begin_rotation(
+            record.name, record.principal, grace_period_seconds=3600, successor_jti="ak_successor"
+        )
+
+    entity_client.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_registry_begin_rotation_caps_grace_deadline_at_natural_expiry() -> None:
+    # Natural expiry always takes precedence over rotation grace (AIRCORE-985): a key
+    # expiring sooner than the configured grace period must not have its reported
+    # deadline pushed out past that natural expiry.
+    soon_expiring = _record().model_copy(update={"expires_at": datetime.now(tz=UTC) + timedelta(minutes=10)})
+    entity_client = AsyncMock()
+    entity_client.get.return_value = soon_expiring
+    registry = AccessKeyRegistry(entity_client)
+
+    result = await registry.begin_rotation(
+        "ak_example", "alice@example.com", grace_period_seconds=3600, successor_jti="ak_successor"
+    )
+
+    assert result.grace_period_expires_at == soon_expiring.expires_at
+
+
+@pytest.mark.asyncio
+async def test_registry_begin_rotation_retries_transient_conflict_from_unrelated_write() -> None:
+    # A conflict from something unrelated (e.g. is_active's last_used_at update landing
+    # between our read and update) shouldn't fail the rotation outright: since the
+    # record is still rotatable on re-read, begin_rotation should retry and succeed.
+    stale, fresh = _record(), _record()
+    stale._db_version = 1
+    fresh._db_version = 2
+    entity_client = AsyncMock()
+    entity_client.get.side_effect = [stale, fresh]
+    entity_client.update.side_effect = [EntityConflictError("entity version changed"), None]
+    registry = AccessKeyRegistry(entity_client)
+
+    result = await registry.begin_rotation(
+        "ak_example", "alice@example.com", grace_period_seconds=3600, successor_jti="ak_successor"
+    )
+
+    assert result.status == "ROTATING"
+    assert entity_client.get.await_count == 2
+    assert entity_client.update.await_count == 2
+    first_attempt, second_attempt = (call.args[0] for call in entity_client.update.await_args_list)
+    assert first_attempt.db_version == 1
+    assert second_attempt.db_version == 2
+
+
+@pytest.mark.asyncio
+async def test_registry_begin_rotation_gives_up_after_persistent_conflict() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.side_effect = [_record() for _ in range(4)]
+    entity_client.update.side_effect = EntityConflictError("entity version changed")
+    registry = AccessKeyRegistry(entity_client)
+
+    with pytest.raises(EntityConflictError):
+        await registry.begin_rotation(
+            "ak_example", "alice@example.com", grace_period_seconds=3600, successor_jti="ak_successor"
+        )
+
+    assert entity_client.get.await_count == 4
+    assert entity_client.update.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_registry_begin_rotation_concurrent_conflict_surfaces_state_conflict_when_no_longer_rotatable() -> None:
+    entity_client = AsyncMock()
+    entity_client.get.side_effect = [_record(), _record(revoked=True)]
+    entity_client.update.side_effect = EntityConflictError("entity version changed")
+    registry = AccessKeyRegistry(entity_client)
+
+    with pytest.raises(AccessKeyStateConflictError):
+        await registry.begin_rotation(
+            "ak_example", "alice@example.com", grace_period_seconds=3600, successor_jti="ak_successor"
+        )

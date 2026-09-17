@@ -10,6 +10,7 @@ from data_designer_nemo.nemotron_personas import WORKSPACE, get_resource_name_fo
 from nemo_data_designer_plugin.cli import personas as personas_module
 from nemo_platform import NeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.files.storage_config import NGCStorageConfig
 from nemo_platform_plugin.secrets.client import SecretsClient
@@ -55,7 +56,8 @@ def sdk(monkeypatch: pytest.MonkeyPatch, mock_ngc_client: dict[str, Mock]) -> Ge
 
 @pytest.fixture
 def cli_sdk(monkeypatch: pytest.MonkeyPatch, sdk: NeMoPlatform) -> NeMoPlatform:
-    monkeypatch.setattr(personas_module, "NeMoPlatform", lambda: sdk)
+    client = client_from_platform(sdk, NemoClient)
+    monkeypatch.setattr(personas_module.NemoClient, "from_config", staticmethod(lambda: client))
     return sdk
 
 
@@ -197,12 +199,11 @@ def test_make_fileset_create_secret_internal_error_surfaces_clearly(
     def _boom(*args: object, **kwargs: object) -> None:
         raise RuntimeError("secrets backend exploded")
 
-    # The CLI creates secrets via ``client_from_platform(sdk, SecretsClient).create_secret``.
-    # ``create_secret`` is a descriptor whose ``__get__`` rejects class-level access, so it
-    # can't be patched on the class; intercept at the ``client_from_platform`` boundary instead.
+    # ``create_secret`` is a descriptor whose ``__get__`` rejects class-level access,
+    # so patch the typed-client constructor boundary.
     mock_secrets = Mock()
     mock_secrets.create_secret.side_effect = _boom
-    with patch.object(personas_module, "client_from_platform", return_value=mock_secrets):
+    with patch.object(personas_module.SecretsClient, "from_client", return_value=mock_secrets):
         result = u.invoke_cli(
             [
                 "personas",
@@ -266,7 +267,7 @@ def test_make_fileset_create_fileset_internal_error_surfaces_clearly(cli_sdk: Ne
     mock_files = Mock()
     mock_files.create_fileset.side_effect = RuntimeError(error_message)
 
-    with patch("data_designer_nemo.nemotron_personas.client_from_platform", return_value=mock_files):
+    with patch.object(personas_module.FilesClient, "from_client", return_value=mock_files):
         result = u.invoke_cli(
             [
                 "personas",

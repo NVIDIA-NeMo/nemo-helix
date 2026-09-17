@@ -137,9 +137,13 @@ Step 2's requirements are unpinned on purpose (`wheelhouse_requirements`): the w
 |---|---|---|
 | `native-v1` | An index, per the server's `requirements.txt` | **Yes** |
 | `wheels-v1` | The package's `wheels/`, for whatever it vendors | **No**, if the closure covers step 1 as well |
-| `adapter-wheels-v1` | The package's `wheels/`, plus the agent harness's own requirements | **Yes** — see below |
+| `adapter-wheels-v1` | The package's complete `wheels/` closure, including the agent harness dependencies | **No** |
 
-**`adapter-wheels-v1` requires network at job start.** The wheelhouse covers the hub environment; the `verifiers_agent` harness builds its venv from its own `requirements.txt`, which carries `verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@<tag>`. A converted hub env needs egress to GitHub even with a complete FileSet. Do not promise an offline run.
+The converter resolves the hub environment and `verifiers_agent` together. Source-only
+releases are built into wheels on the internet-connected conversion host, and conversion
+fails if any pinned distribution is still missing from `wheels/`. The image-bundled agent
+harness uses the matching `verifiers` version pin, allowing Gym to resolve it from the
+FileSet with `UV_OFFLINE=1` instead of following a Git URL.
 
 Egress is operator config, never a job field: `NMP_RL_SANDBOX_ALLOW_INTERNET`, plus `NMP_RL_SANDBOX_PUBLIC_DNS_ALLOW` for hosts outside NeMo-RL's built-in `*.com` / `*.org` allowance (e.g. `hub.primeintellect.ai`). Check with the operator before committing a user to `native-v1` on a deny-default cluster. Details: `rl-kubernetes-runtime.md` § **Sandboxed Gym (GRPO)**.
 
@@ -351,20 +355,25 @@ Gym's in-tree rows omit `agent_ref` because the owning agent config supplies it.
 
 ## Path B — a Prime Intellect / verifiers env (`adapter-wheels-v1`)
 
-The automated path, and the only one with a converter. It downloads the hub package, vendors its full wheel closure, writes both configs and the manifest, and builds the prompt JSONL.
+The automated path, and the only one with a converter. It downloads the hub package, vendors its full wheel closure, writes both configs and the manifest, and snapshots the hub environment's Hugging Face dataset into the dataset FileSet so training does not call the Hub.
+
+That snapshot is two artifacts: `hub_environment.parquet`, with `vf_env_args.dataset_path` set to `/job/dataset/hub_environment.parquet`, and `.huggingface/`, the cache populated while converting. Loaders that honor `dataset_path` read the parquet; loaders that still call `load_dataset("org/name")` resolve from the cache, offline.
 
 **Run it on a host with internet.** Training clusters have no hub egress and consume uploaded FileSets only.
 
-`pi-to-gym-conversion` is a console script that ships with `nemo-rl-plugin`, so on an installed platform run it bare. The `uv run --package nmp-rl` prefix below is for a repo checkout.
+`pi-to-gym-conversion` is a console script that ships with `nemo-rl-plugin`, so on an installed platform run it bare. From a repo checkout, generating a dataset needs the `conversion` extra (verifiers), and it belongs in its own environment: the converter installs the untrusted hub wheel into whatever interpreter runs it, and a `uv sync` of the repo `.venv` prunes both that wheel and `verifiers` back out.
 
 ```bash
-uv run --package nmp-rl pi-to-gym-conversion \
+UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nmp-rl --extra conversion
+.venv-conversion/bin/pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree \
   --hub-version 0.1.5 \
   --out-dir ./ascii-tree-pkg \
   --dataset-dir ./ascii-tree-data \
   --validation-fraction 0.1
 ```
+
+`--validate-only` needs neither, so the plain `uv run --package nmp-rl pi-to-gym-conversion` used below for validation is fine from the repo `.venv`.
 
 | Flag | Use it for |
 |---|---|
@@ -391,6 +400,8 @@ ascii-tree-pkg/
 ascii-tree-data/
   training.jsonl
   validation.jsonl                ← only with --validation-fraction > 0
+  hub_environment.parquet         ← `vf_env_args.dataset_path` → `/job/dataset/hub_environment.parquet`
+  .huggingface/                   ← HF cache from conversion; Gym host copies to `/job/work/.huggingface`
 ```
 
 **`pi-to-gym-conversion` vendors `x86_64` wheels today.** On an `arm64` cluster, build the closure separately and pass `--wheels-dir`.
@@ -468,28 +479,69 @@ Resolve it from the **`nemo-gym` wheel plus the server's requirements**, not fro
 
 **Wheels must target the architecture of the training nodes, not the build host.** The training images are published for both `linux/amd64` and `linux/arm64`, so confirm which the cluster runs (`kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'`) and set `ARCH` to `x86_64` or `aarch64` accordingly. The interpreter is **Python 3.13** either way. A closure built for the wrong architecture passes `--validate-only` — which checks layout, never wheel tags — and then fails on the cluster with `has no wheels with a matching platform tag`.
 
-Three versions must match what the **Gym host process** reports, because that is what Gym stamps into every sub-venv install: `nemo-gym` (the sub-venv pin) and `ray[default]` / `openai` (the head-server deps, read as `ray.__version__` / `openai.__version__` in `global_config.py`). Gym runs from its own actor venv under `/opt/ray_venvs`, not the image's default interpreter, so read them from there rather than assuming the base venv agrees:
+Three versions must match what the **Gym host process** reports, because that is what Gym stamps into every sub-venv install: `nemo-gym` (the sub-venv pin) and `ray[default]` / `openai` (the head-server deps, read as `ray.__version__` / `openai.__version__` in `global_config.py`). All three come from a NeMo-RL checkout at the commit `NEMO_RL_REF` pins in `docker-bake.hcl`, which is what the training image is built from -- no access to the image itself is needed. Take `nemo-gym` from the Gym submodule and `ray`/`openai` from NeMo-RL's `uv.lock`. **Not** from Gym's own `uv.lock`: it pins different versions (`ray 2.55.1` / `openai 2.7.2` against the image's `2.56.1` / `2.6.1`), because the image resolves them with NeMo-RL, not Gym.
 
 ```bash
-IMAGE=<training-image>
-# The Gym actor venv is named after its actor FQN, e.g.
-# /opt/ray_venvs/nemo_rl.environments.nemo_gym.NemoGym/bin/python
-read GYM_VERSION RAY_VERSION OPENAI_VERSION < <(docker run --rm "$IMAGE" sh -c '
-  PY=$(ls -d /opt/ray_venvs/*NemoGym*/bin/python 2>/dev/null | head -1)
-  "${PY:-python}" -c "import importlib.metadata as m; print(m.version(\"nemo-gym\"), m.version(\"ray\"), m.version(\"openai\"))"')
+RL=<nemo-rl checkout at NEMO_RL_REF>   # git clone --recurse-submodules
+# nemo_gym.__version__ is assembled in package_info.py; exec it rather than importing the
+# package, which would pull the whole dependency set.
+GYM_VERSION=$(cd "$RL/3rdparty/Gym-workspace/Gym" && python -c \
+  "ns={}; exec(open('nemo_gym/package_info.py').read(), ns); print(ns['__version__'])")
+read RAY_VERSION OPENAI_VERSION < <(python - "$RL/uv.lock" <<'EOF'
+import sys, tomllib
+pkgs = tomllib.load(open(sys.argv[1], "rb"))["package"]
+pin = lambda n: next(p["version"] for p in pkgs if p.get("name") == n and "version" in p)
+print(pin("ray"), pin("openai"))
+EOF
+)
 
 mkdir -p my-env/wheels
-pip download --dest my-env/wheels \
-  --only-binary=:all: \
+
+# Build nemo-gym from the checkout, never from an index: the image's version is not published,
+# and a same-versioned upstream wheel would be different code.
+uv build --wheel --out-dir my-env/wheels "$RL/3rdparty/Gym-workspace/Gym"
+GYM_WHEEL=$(ls my-env/wheels/nemo_gym-"$GYM_VERSION"-*.whl)
+
+# Resolve and download are separate steps: `--platform` requires `--no-deps`, and resolving
+# on the build host would evaluate environment markers for the wrong OS.
+cat > closure.in <<EOF
+nemo-gym[dev] @ file://$GYM_WHEEL
+ray[default]==$RAY_VERSION
+openai==$OPENAI_VERSION
+pip
+setuptools>=61,<81
+setuptools-scm
+hydra-core>=1.3,<1.4
+omegaconf>=2.2,<2.4
+-r resources_servers/my_env/requirements.txt
+EOF
+uv pip compile closure.in --output-file closure.txt --no-header --no-config \
+  --python-platform "$ARCH-unknown-linux-gnu" --python-version 3.13
+
+pip download --dest my-env/wheels --no-cache-dir --no-deps \
   --python-version 3.13 \
   --platform "manylinux_2_39_$ARCH" \
   --platform "manylinux_2_28_$ARCH" \
   --platform "manylinux_2_17_$ARCH" \
   --platform "manylinux2014_$ARCH" \
-  "nemo-gym==$GYM_VERSION" "ray[default]==$RAY_VERSION" "openai==$OPENAI_VERSION" pip \
-  -r resources_servers/my_env/requirements.txt
+  -r closure.txt
+
+# omegaconf pins antlr4-python3-runtime, which publishes no wheel on PyPI. `wheels/` must hold
+# wheels only, so build whatever arrived as a source artifact. (`--only-binary=:all:` is not an
+# option here: it makes the resolve fail outright rather than fall back to the sdist.)
+for sdist in my-env/wheels/*.tar.gz; do
+  [ -e "$sdist" ] || break
+  uv run --no-project --python 3.13 --with pip python -m pip wheel --no-deps \
+    --wheel-dir my-env/wheels "$sdist" && rm "$sdist"
+done
+
 uv run --package nmp-rl pi-to-gym-conversion --validate-only ./my-env
 ```
+
+The `[dev]` extra, not the bare wheel: servers that resolve into the Gym tree install
+`nemo-gym[dev]`, so the closure has to cover that extra too. `setuptools` is capped below 81 —
+the release that removed `pkg_resources`, which Gym's pinned hydra imports at import time — and
+`setuptools-scm` is there because building Gym from source needs its `build-system.requires`.
 
 The sub-venv is created with `uv venv --seed`, so nothing carries over from the image — omit `ray[default]` / `openai` and the venv build reaches for an index even when the environment's own closure is complete. A `nemo-gym` version mismatch is worse than an omission: uv ignores your wheel and silently resolves upstream from PyPI.
 
@@ -537,7 +589,7 @@ The converter can do both FileSets in one step:
 
 ```bash
 export NMP_BASE_URL=http://127.0.0.1:8080
-uv run --package nmp-rl pi-to-gym-conversion \
+.venv-conversion/bin/pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree --hub-version 0.1.5 \
   --out-dir ./ascii-tree-pkg --upload --workspace default
 ```

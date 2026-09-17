@@ -21,6 +21,7 @@ export const ControlledJsonInput = ({
 }: Props) => {
   const {
     field: { value, onChange, onBlur, disabled: fieldDisabled },
+    fieldState,
   } = useController(useControllerProps);
 
   const [text, setText] = useState<string>(() =>
@@ -64,11 +65,15 @@ export const ControlledJsonInput = ({
     }
   };
 
+  // Unparseable text is the more immediate problem, so it wins; otherwise show whatever
+  // the resolver rejected — valid JSON of the wrong shape has no parse error to report.
+  const error = parseError ?? fieldState.error?.message;
+
   return (
     <FormField
       slotLabel={label}
-      slotError={parseError ?? ''}
-      status={parseError ? 'error' : undefined}
+      slotError={error ?? ''}
+      status={error ? 'error' : undefined}
       {...formFieldProps}
     >
       <TextArea

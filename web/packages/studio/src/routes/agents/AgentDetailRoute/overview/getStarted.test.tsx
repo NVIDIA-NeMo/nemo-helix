@@ -7,9 +7,11 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_OPTIMIZER_ENABLED', 'true');
 });
 
-import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { getInsightsListInsightsQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
+import { getGetTraceMetricsQueryKey } from '@nemo/sdk/generated/platform/traces';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
+import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import { getAgentDetailRoute } from '@studio/routes/utils';
@@ -19,8 +21,8 @@ import { http, HttpResponse } from 'msw';
 
 const agentName = 'react-agent';
 const workspace = workspace1.workspace;
-const METRICS_URL = `${PLATFORM_BASE_URL}/apis/intake/v2/workspaces/:workspace/traces/metrics`;
-const INSIGHTS_URL = `${PLATFORM_BASE_URL}/apis/insights/v2/workspaces/:workspace/insights`;
+const METRICS_URL = mockApiUrl(getGetTraceMetricsQueryKey, ':workspace');
+const INSIGHTS_URL = mockApiUrl(getInsightsListInsightsQueryKey, ':workspace');
 
 /** An agent that has never reported: no trace rollups, and therefore no insights. */
 const withoutTelemetry = () => {

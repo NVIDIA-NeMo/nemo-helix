@@ -987,11 +987,14 @@ class EvolutionaryStrategy(Agent, roles.Strategy):
 
     def _terminator(self, ctx: StrategyContext, config: EvolutionaryOptimizerConfig) -> roles.Terminator:
         """Resolve this run's terminator, with the run's own convergence window."""
+        terminator = config.terminator
+        if terminator is None:
+            raise ValueError("terminator must be configured before resolving the terminator component")
         return cast(
             "roles.Terminator",
             ctx.component(
                 "terminator",
-                config.terminator,
+                terminator,
                 config=config.terminator_config,
                 min_rounds_before_stopping=config.min_rounds_before_stopping,
                 objective_metrics=config.objective_function,
@@ -1001,11 +1004,14 @@ class EvolutionaryStrategy(Agent, roles.Strategy):
 
     def _trajectory_scorer(self, ctx: StrategyContext, config: EvolutionaryOptimizerConfig) -> roles.TrajectoryScorer:
         """Resolve this run's trajectory scorer, with the run's own per-round task cap."""
+        trajectory_scorer = config.trajectory_scorer
+        if trajectory_scorer is None:
+            raise ValueError("trajectory_scorer must be configured before resolving the trajectory scorer component")
         return cast(
             "roles.TrajectoryScorer",
             ctx.component(
                 "trajectory-scorer",
-                config.trajectory_scorer,
+                trajectory_scorer,
                 config=config.trajectory_scorer_config,
                 max_trajectory_tasks=config.max_trajectory_tasks,
                 framework_skills_dirs=self._framework_skills_dirs,

@@ -7,18 +7,16 @@ from __future__ import annotations
 
 import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import httpx
 import pytest
 
 
-def _make_runner(sdk, *, service_source: str = "unsloth", workspace: str = "default", storage_path: Path | None = None):
+def _make_job_ctx(*, workspace: str = "default", storage_path: Path | None = None):
     from nmp.customization_common.service.context import NMPJobContext
-    from nmp.customization_common.tasks.file_io.run import FileIORunner
-    from nmp.customization_common.tasks.file_io_progress_reporter import NoOpProgressReporter
 
-    job_ctx = NMPJobContext(
+    return NMPJobContext(
         workspace=workspace,
         job_id="job-1",
         attempt_id="attempt-0",
@@ -29,18 +27,31 @@ def _make_runner(sdk, *, service_source: str = "unsloth", workspace: str = "defa
         storage_path=storage_path or Path("/tmp"),
         config_path=Path("/tmp/cfg.json"),
     )
+
+
+def _make_runner(
+    files,
+    *,
+    service_source: str = "unsloth",
+    workspace: str = "default",
+    storage_path: Path | None = None,
+):
+    from nmp.customization_common.tasks.file_io.run import FileIORunner
+    from nmp.customization_common.tasks.file_io_progress_reporter import NoOpProgressReporter
+
+    job_ctx = _make_job_ctx(workspace=workspace, storage_path=storage_path)
     return FileIORunner(
-        sdk=sdk,
+        files=files,
         progress_reporter=NoOpProgressReporter(),
         job_ctx=job_ctx,
         service_source=service_source,
     )
 
 
-def _make_sdk() -> MagicMock:
-    sdk = MagicMock()
-    sdk.with_options.return_value = sdk
-    return sdk
+def _make_files_client() -> MagicMock:
+    files = MagicMock()
+    files.with_options.return_value = files
+    return files
 
 
 def _raise_runner_conflict() -> None:
@@ -59,23 +70,19 @@ def _make_dir(tmp_path: Path) -> Path:
 
 
 class TestCreateFileset:
-    @patch("nmp.customization_common.tasks.file_io.run.client_from_platform")
-    def test_creates_fileset_with_service_source_and_metadata(self, mock_cfp) -> None:
+    def test_creates_fileset_with_service_source_and_metadata(self) -> None:
         from nemo_platform_plugin.files.types import CreateFilesetRequest
         from nmp.customization_common.schemas.file_io import FileSetRef
 
-        mock_fc = MagicMock()
-        mock_fc.with_options.return_value = mock_fc
-        mock_cfp.return_value = mock_fc
-        sdk = _make_sdk()
-        runner = _make_runner(sdk, service_source="automodel")
+        files = _make_files_client()
+        runner = _make_runner(files, service_source="automodel")
         metadata = {"model": {"tool_calling": {"tool_call_parser": "llama3_json"}}}
         dest = FileSetRef(workspace="default", name="qwen-test")
 
         runner.create_fileset(dest, metadata=metadata)
 
-        mock_fc.create_fileset.assert_called_once()
-        call = mock_fc.create_fileset.call_args
+        files.create_fileset.assert_called_once()
+        call = files.create_fileset.call_args
         assert call.kwargs["workspace"] == "default"
         body = call.kwargs["body"]
         assert isinstance(body, CreateFilesetRequest)
@@ -85,24 +92,20 @@ class TestCreateFileset:
         assert body.metadata.model is not None
         assert body.metadata.model.tool_calling.tool_call_parser == "llama3_json"
 
-    @patch("nmp.customization_common.tasks.file_io.run.client_from_platform")
-    def test_conflict_patches_metadata_on_existing(self, mock_cfp) -> None:
+    def test_conflict_patches_metadata_on_existing(self) -> None:
         from nemo_platform_plugin.files.types import UpdateFilesetRequest
         from nmp.customization_common.schemas.file_io import FileSetRef
 
-        mock_fc = MagicMock()
-        mock_fc.with_options.return_value = mock_fc
-        mock_fc.create_fileset.side_effect = lambda **_: _raise_runner_conflict()
-        mock_cfp.return_value = mock_fc
-        sdk = _make_sdk()
-        runner = _make_runner(sdk, service_source="rl")
+        files = _make_files_client()
+        files.create_fileset.side_effect = lambda **_: _raise_runner_conflict()
+        runner = _make_runner(files, service_source="rl")
         dest = FileSetRef(workspace="default", name="exists")
         metadata = {"model": {"tool_calling": {"tool_call_parser": "hermes"}}}
 
         runner.create_fileset(dest, metadata=metadata)
 
-        mock_fc.update_fileset.assert_called_once()
-        update_call = mock_fc.update_fileset.call_args
+        files.update_fileset.assert_called_once()
+        update_call = files.update_fileset.call_args
         assert update_call.kwargs["workspace"] == "default"
         assert update_call.kwargs["name"] == "exists"
         body = update_call.kwargs["body"]
@@ -111,47 +114,62 @@ class TestCreateFileset:
         assert body.metadata.model is not None
         assert body.metadata.model.tool_calling.tool_call_parser == "hermes"
 
-    @patch("nmp.customization_common.tasks.file_io.run.client_from_platform")
-    def test_conflict_no_metadata_skips_update(self, mock_cfp) -> None:
+    def test_conflict_no_metadata_skips_update(self) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
 
-        mock_fc = MagicMock()
-        mock_fc.with_options.return_value = mock_fc
-        mock_fc.create_fileset.side_effect = lambda **_: _raise_runner_conflict()
-        mock_cfp.return_value = mock_fc
-        sdk = _make_sdk()
-        runner = _make_runner(sdk)
+        files = _make_files_client()
+        files.create_fileset.side_effect = lambda **_: _raise_runner_conflict()
+        runner = _make_runner(files)
         dest = FileSetRef(workspace="default", name="exists")
 
         runner.create_fileset(dest, metadata=None)
 
-        mock_fc.update_fileset.assert_not_called()
+        files.update_fileset.assert_not_called()
 
 
 class TestUploadFileset:
-    def test_directory_uploads_with_trailing_slash(self, tmp_path: Path) -> None:
+    @patch("nmp.customization_common.tasks.file_io.run.FilesetFileSystem")
+    def test_uses_files_client_for_transfer(self, mock_fs_cls, tmp_path: Path) -> None:
+        from nmp.customization_common.schemas.file_io import FileSetRef
+        from nmp.customization_common.tasks.file_io.run import UPLOAD_TIMEOUT
+
+        files = _make_files_client()
+        fs = MagicMock()
+        mock_fs_cls.return_value = fs
+        runner = _make_runner(files)
+        src = _make_dir(tmp_path)
+
+        runner.upload_fileset(FileSetRef(workspace="default", name="qwen-test"), src.resolve())
+
+        files.with_options.assert_called_once_with(timeout=UPLOAD_TIMEOUT)
+        mock_fs_cls.assert_called_once_with(client=files)
+
+    @patch("nmp.customization_common.tasks.file_io.run.FilesetFileSystem")
+    def test_directory_uploads_with_trailing_slash(self, mock_fs_cls, tmp_path: Path) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
 
-        sdk = _make_sdk()
-        runner = _make_runner(sdk)
+        fs = MagicMock()
+        mock_fs_cls.return_value = fs
+        runner = _make_runner(_make_files_client())
         src = _make_dir(tmp_path)
         dest = FileSetRef(workspace="default", name="qwen-test")
 
         runner.upload_fileset(dest, src.resolve())
 
-        sdk.files.upload.assert_called_once()
-        call = sdk.files.upload.call_args
-        assert call.kwargs["local_path"] == f"{src.resolve()}/"
-        assert call.kwargs["remote_path"] == ""
-        assert call.kwargs["fileset"] == "qwen-test"
-        assert call.kwargs["workspace"] == "default"
+        fs.put.assert_called_once()
+        put_call = fs.put.call_args
+        assert put_call.args[0] == f"{src.resolve()}/"
+        assert put_call.args[1] == "default/qwen-test"
+        assert put_call.kwargs["recursive"] is True
 
-    def test_upload_failure_propagates_as_file_upload_error(self, tmp_path: Path) -> None:
+    @patch("nmp.customization_common.tasks.file_io.run.FilesetFileSystem")
+    def test_upload_failure_propagates_as_file_upload_error(self, mock_fs_cls, tmp_path: Path) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef, FileUploadError
 
-        sdk = _make_sdk()
-        sdk.files.upload.side_effect = RuntimeError("upload broke")
-        runner = _make_runner(sdk)
+        fs = MagicMock()
+        fs.put.side_effect = RuntimeError("upload broke")
+        mock_fs_cls.return_value = fs
+        runner = _make_runner(_make_files_client())
         src = _make_dir(tmp_path)
         dest = FileSetRef(workspace="default", name="x")
 
@@ -160,36 +178,57 @@ class TestUploadFileset:
 
 
 class TestDownloadFileset:
-    def test_lists_then_downloads(self, tmp_path: Path) -> None:
+    @patch("nmp.customization_common.tasks.file_io.run.FilesetFileSystem")
+    def test_uses_files_client_for_transfer(self, mock_fs_cls, tmp_path: Path) -> None:
+        from nmp.customization_common.schemas.file_io import FileSetRef
+        from nmp.customization_common.tasks.file_io.run import DOWNLOAD_TIMEOUT, LIST_FILES_TIMEOUT
+
+        fs = MagicMock()
+        mock_fs_cls.return_value = fs
+        files = _make_files_client()
+        files.list_files.return_value.data.return_value = types.SimpleNamespace(
+            data=[types.SimpleNamespace(path="model.safetensors", size=100)]
+        )
+        runner = _make_runner(files)
+
+        runner.download_fileset(FileSetRef(workspace="default", name="qwen"), tmp_path / "downloads")
+
+        files.with_options.assert_has_calls([call(timeout=LIST_FILES_TIMEOUT), call(timeout=DOWNLOAD_TIMEOUT)])
+        mock_fs_cls.assert_called_once_with(client=files)
+
+    @patch("nmp.customization_common.tasks.file_io.run.FilesetFileSystem")
+    def test_lists_then_downloads(self, mock_fs_cls, tmp_path: Path) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
 
-        sdk = _make_sdk()
-        sdk.files.list.return_value = types.SimpleNamespace(
+        fs = MagicMock()
+        mock_fs_cls.return_value = fs
+        files = _make_files_client()
+        files.list_files.return_value.data.return_value = types.SimpleNamespace(
             data=[
                 types.SimpleNamespace(path="model.safetensors", size=100),
                 types.SimpleNamespace(path="config.json", size=20),
             ]
         )
-        runner = _make_runner(sdk)
+        runner = _make_runner(files)
         dest = tmp_path / "downloads"
         fileset = FileSetRef(workspace="default", name="qwen")
 
         runner.download_fileset(fileset, dest)
 
-        sdk.files.list.assert_called_once()
-        sdk.files.download.assert_called_once()
-        call = sdk.files.download.call_args
-        assert call.kwargs["fileset"] == "qwen"
-        assert call.kwargs["workspace"] == "default"
-        assert call.kwargs["local_path"] == str(dest.resolve())
+        files.list_files.assert_called_once()
+        fs.get.assert_called_once()
+        get_call = fs.get.call_args
+        assert get_call.args[0] == "default/qwen"
+        assert get_call.args[1] == str(dest)
+        assert get_call.kwargs["recursive"] is True
         assert dest.exists()
 
     def test_empty_fileset_returns_zero_stats_without_downloading(self, tmp_path: Path) -> None:
         from nmp.customization_common.schemas.file_io import FileSetRef
 
-        sdk = _make_sdk()
-        sdk.files.list.return_value = types.SimpleNamespace(data=[])
-        runner = _make_runner(sdk)
+        files = _make_files_client()
+        files.list_files.return_value.data.return_value = types.SimpleNamespace(data=[])
+        runner = _make_runner(files)
         dest = tmp_path / "downloads"
         fileset = FileSetRef(workspace="default", name="empty")
 
@@ -197,7 +236,89 @@ class TestDownloadFileset:
 
         assert stats.files_downloaded == 0
         assert stats.total_bytes == 0
-        sdk.files.download.assert_not_called()
+
+
+class TestRun:
+    def test_builds_sync_files_task_client_for_filesystem_transfers(self) -> None:
+        import importlib
+
+        file_io_run = importlib.import_module("nmp.customization_common.tasks.file_io.run")
+
+        sync_client = MagicMock()
+        sync_client.base_url = "http://nemo-platform.local"
+        files = MagicMock()
+        jobs = MagicMock()
+        progress_reporter = MagicMock()
+        runner = MagicMock()
+        config = types.SimpleNamespace(
+            upload=[],
+            download=[],
+            model_dump_json=lambda indent: "{}",
+        )
+        job_ctx = _make_job_ctx()
+
+        with (
+            patch.object(file_io_run, "get_config", return_value=config),
+            patch.object(file_io_run, "get_task_nemo_client", return_value=sync_client) as get_task_nemo_client,
+            patch.object(file_io_run.FilesClient, "from_client", return_value=files) as files_from_client,
+            patch.object(file_io_run.JobsClient, "from_client", return_value=jobs) as jobs_from_client,
+            patch.object(
+                file_io_run.JobsServiceProgressReporter,
+                "create_progress_reporter",
+                return_value=progress_reporter,
+            ) as create_progress_reporter,
+            patch.object(file_io_run, "FileIORunner", return_value=runner) as runner_cls,
+        ):
+            result = file_io_run.run(
+                job_ctx=job_ctx,
+                service_source="rl",
+                service_name="rl",
+            )
+
+        assert result == 0
+        get_task_nemo_client.assert_called_once_with("rl")
+        files_from_client.assert_called_once_with(sync_client)
+        jobs_from_client.assert_called_once_with(sync_client)
+        create_progress_reporter.assert_called_once_with(jobs, job_ctx)
+        runner_cls.assert_called_once_with(
+            files=files,
+            progress_reporter=progress_reporter,
+            job_ctx=job_ctx,
+            service_source="rl",
+        )
+        runner.run_upload.assert_called_once_with([])
+        runner.run_download.assert_called_once_with([])
+        sync_client.close.assert_called_once()
+
+    def test_owned_sync_client_closes(self) -> None:
+        import importlib
+
+        file_io_run = importlib.import_module("nmp.customization_common.tasks.file_io.run")
+
+        sync_client = MagicMock()
+        sync_client.base_url = "http://nemo-platform.local"
+        config = types.SimpleNamespace(
+            upload=[],
+            download=[],
+            model_dump_json=lambda indent: "{}",
+        )
+
+        with (
+            patch.object(file_io_run, "get_config", return_value=config),
+            patch.object(file_io_run, "get_task_nemo_client", return_value=sync_client),
+            patch.object(file_io_run.FilesClient, "from_client", return_value=MagicMock()),
+            patch.object(file_io_run.JobsClient, "from_client", return_value=MagicMock()),
+            patch.object(file_io_run.JobsServiceProgressReporter, "create_progress_reporter", return_value=MagicMock()),
+            patch.object(file_io_run, "FileIORunner", return_value=MagicMock()),
+        ):
+            result = file_io_run.run(
+                job_ctx=_make_job_ctx(),
+                service_source="rl",
+                service_name="rl",
+            )
+
+        assert result == 0
+        sync_client.close.assert_called_once()
 
 
 @pytest.fixture
@@ -213,36 +334,30 @@ def no_retry_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
 class TestCreateFilesetRetry:
     """Create goes through the typed client, so it must catch the typed client's errors."""
 
-    @patch("nmp.customization_common.tasks.file_io.run.client_from_platform")
-    def test_retries_transport_error_wrapped_by_the_client(self, mock_cfp, no_retry_backoff) -> None:
+    def test_retries_transport_error_wrapped_by_the_client(self, no_retry_backoff) -> None:
         from nemo_platform_plugin.client.errors import NemoTransportError
         from nmp.customization_common.schemas.file_io import FileSetRef
 
-        mock_fc = MagicMock()
-        mock_fc.with_options.return_value = mock_fc
-        mock_fc.create_fileset.side_effect = [NemoTransportError(httpx.ConnectError("refused")), MagicMock()]
-        mock_cfp.return_value = mock_fc
-        runner = _make_runner(_make_sdk())
+        files = _make_files_client()
+        files.create_fileset.side_effect = [NemoTransportError(httpx.ConnectError("refused")), MagicMock()]
+        runner = _make_runner(files)
 
         runner.create_fileset(FileSetRef(workspace="default", name="models"))
 
-        assert mock_fc.create_fileset.call_count == 2
+        assert files.create_fileset.call_count == 2
 
-    @patch("nmp.customization_common.tasks.file_io.run.client_from_platform")
-    def test_retries_rate_limit_wrapped_by_the_client(self, mock_cfp, no_retry_backoff) -> None:
+    def test_retries_rate_limit_wrapped_by_the_client(self, no_retry_backoff) -> None:
         from nemo_platform_plugin.client.errors import RateLimitError
         from nmp.customization_common.schemas.file_io import FileSetRef
 
         response = httpx.Response(429, request=httpx.Request("POST", "http://test/filesets"), json={"detail": "slow"})
-        mock_fc = MagicMock()
-        mock_fc.with_options.return_value = mock_fc
-        mock_fc.create_fileset.side_effect = [RateLimitError(response), MagicMock()]
-        mock_cfp.return_value = mock_fc
-        runner = _make_runner(_make_sdk())
+        files = _make_files_client()
+        files.create_fileset.side_effect = [RateLimitError(response), MagicMock()]
+        runner = _make_runner(files)
 
         runner.create_fileset(FileSetRef(workspace="default", name="models"))
 
-        assert mock_fc.create_fileset.call_count == 2
+        assert files.create_fileset.call_count == 2
 
 
 class TestUploadRetry:
@@ -254,58 +369,66 @@ class TestUploadRetry:
     request from the source file on every attempt, is where the retry belongs.
     """
 
-    def test_retries_transport_error_wrapped_by_the_client(self, tmp_path: Path, no_retry_backoff) -> None:
+    @patch("nmp.customization_common.tasks.file_io.run.FilesetFileSystem")
+    def test_retries_transport_error_wrapped_by_the_client(self, mock_fs_cls, tmp_path: Path, no_retry_backoff) -> None:
         from nemo_platform_plugin.client.errors import NemoTransportError
         from nmp.customization_common.schemas.file_io import FileSetRef
 
         src = _make_dir(tmp_path)
-        sdk = _make_sdk()
-        sdk.files.upload.side_effect = [NemoTransportError(httpx.ReadTimeout("timed out")), None]
-        runner = _make_runner(sdk)
+        fs = MagicMock()
+        fs.put.side_effect = [NemoTransportError(httpx.ReadTimeout("timed out")), None]
+        mock_fs_cls.return_value = fs
+        runner = _make_runner(_make_files_client())
 
         runner.upload_fileset(FileSetRef(workspace="default", name="models"), src.resolve())
 
-        assert sdk.files.upload.call_count == 2
+        assert fs.put.call_count == 2
 
-    def test_retries_server_error_wrapped_by_the_client(self, tmp_path: Path, no_retry_backoff) -> None:
+    @patch("nmp.customization_common.tasks.file_io.run.FilesetFileSystem")
+    def test_retries_server_error_wrapped_by_the_client(self, mock_fs_cls, tmp_path: Path, no_retry_backoff) -> None:
         from nemo_platform_plugin.client.errors import InternalServerError
         from nmp.customization_common.schemas.file_io import FileSetRef
 
         src = _make_dir(tmp_path)
-        sdk = _make_sdk()
         response = httpx.Response(503, request=httpx.Request("PUT", "http://test/upload"), json={"detail": "down"})
-        sdk.files.upload.side_effect = [InternalServerError(response), None]
-        runner = _make_runner(sdk)
+        fs = MagicMock()
+        fs.put.side_effect = [InternalServerError(response), None]
+        mock_fs_cls.return_value = fs
+        runner = _make_runner(_make_files_client())
 
         runner.upload_fileset(FileSetRef(workspace="default", name="models"), src.resolve())
 
-        assert sdk.files.upload.call_count == 2
+        assert fs.put.call_count == 2
 
-    def test_retries_rate_limit_wrapped_by_the_client(self, tmp_path: Path, no_retry_backoff) -> None:
+    @patch("nmp.customization_common.tasks.file_io.run.FilesetFileSystem")
+    def test_retries_rate_limit_wrapped_by_the_client(self, mock_fs_cls, tmp_path: Path, no_retry_backoff) -> None:
         """429 is in the client's retryable statuses, but it cannot act on it here."""
         from nemo_platform_plugin.client.errors import RateLimitError
         from nmp.customization_common.schemas.file_io import FileSetRef
 
         src = _make_dir(tmp_path)
-        sdk = _make_sdk()
         response = httpx.Response(429, request=httpx.Request("PUT", "http://test/upload"), json={"detail": "slow down"})
-        sdk.files.upload.side_effect = [RateLimitError(response), None]
-        runner = _make_runner(sdk)
+        fs = MagicMock()
+        fs.put.side_effect = [RateLimitError(response), None]
+        mock_fs_cls.return_value = fs
+        runner = _make_runner(_make_files_client())
 
         runner.upload_fileset(FileSetRef(workspace="default", name="models"), src.resolve())
 
-        assert sdk.files.upload.call_count == 2
+        assert fs.put.call_count == 2
 
-    def test_gives_up_as_a_file_upload_error(self, tmp_path: Path, no_retry_backoff) -> None:
+    @patch("nmp.customization_common.tasks.file_io.run.FilesetFileSystem")
+    def test_gives_up_as_a_file_upload_error(self, mock_fs_cls, tmp_path: Path, no_retry_backoff) -> None:
         from nemo_platform_plugin.client.errors import NemoTransportError
         from nmp.customization_common.schemas.file_io import FileSetRef, FileUploadError
 
         src = _make_dir(tmp_path)
-        sdk = _make_sdk()
-        sdk.files.upload.side_effect = NemoTransportError(httpx.ReadTimeout("timed out"))
-        runner = _make_runner(sdk)
+        fs = MagicMock()
+        fs.put.side_effect = NemoTransportError(httpx.ReadTimeout("timed out"))
+        mock_fs_cls.return_value = fs
+        runner = _make_runner(_make_files_client())
 
         with pytest.raises(FileUploadError):
             runner.upload_fileset(FileSetRef(workspace="default", name="models"), src.resolve())
 
-        assert sdk.files.upload.call_count == 3
+        assert fs.put.call_count == 3

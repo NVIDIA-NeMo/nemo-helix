@@ -8,13 +8,15 @@ import re
 from datetime import datetime
 
 import pytest
-from nemo_platform.types.inference.container_executor_config import ContainerExecutorConfig
-from nemo_platform.types.inference.model_deployment import ModelDeployment
-from nemo_platform.types.inference.model_deployment_config import ModelDeploymentConfig
-from nemo_platform.types.inference.model_deployment_config_model_spec import ModelDeploymentConfigModelSpec
-from nemo_platform.types.inference.model_provider import ModelProvider
-from nemo_platform.types.models.model_entity import ModelEntity
-from nemo_platform.types.shared import ModelSpec
+from nemo_platform_plugin.models.types import (
+    ContainerExecutorConfig,
+    ModelDeployment,
+    ModelDeploymentConfig,
+    ModelDeploymentConfigModelSpec,
+    ModelEntity,
+    ModelProvider,
+    ModelSpec,
+)
 from nmp.core.models.app import normalize_model_entity_name
 from nmp.core.models.app.utils import (
     ModelConfigParseError,
