@@ -457,9 +457,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--expect-nemo-gym-version",
-        help="Fail unless the checkout builds this exact version. Read the image's with: "
-        "docker run --rm <image> sh -c 'PY=$(ls -d /opt/ray_venvs/*NemoGym*/bin/python | head -1); "
-        '"${PY:-python}" -c \'import importlib.metadata as m; print(m.version("nemo-gym"))\'\'',
+        help="Fail unless the checkout builds this exact version. Read it from the Gym submodule "
+        "of a NeMo-RL checkout at the commit NEMO_RL_REF pins.",
     )
     parser.add_argument(
         "--ray-version",
@@ -504,11 +503,9 @@ def main() -> int:
                 f"wheels-v1 needs {', '.join(missing)}.\n\n"
                 "Gym pins each per-server venv to the training image's nemo-gym, ray and openai\n"
                 "versions. A closure built against different ones is ignored and resolved from an\n"
-                "index instead, which defeats the point of vendoring. Read them from the image:\n\n"
-                "    docker run --rm <training-image> sh -c '\\\n"
-                "      PY=$(ls -d /opt/ray_venvs/*NemoGym*/bin/python | head -1); \\\n"
-                '      "${PY:-python}" -c \'import importlib.metadata as m; '
-                'print(m.version("nemo-gym"), m.version("ray"), m.version("openai"))\'\'\n\n'
+                "index instead, which defeats the point of vendoring. Read them from a NeMo-RL\n"
+                "checkout at the commit NEMO_RL_REF pins: nemo-gym from the Gym submodule,\n"
+                "ray/openai from NeMo-RL's uv.lock (not Gym's, which pins different versions).\n\n"
                 "Use --format native-v1 if you do not need an offline closure.\n"
             )
 
