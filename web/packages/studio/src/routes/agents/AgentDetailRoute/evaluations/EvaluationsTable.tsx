@@ -10,6 +10,7 @@ import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { PlatformJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { formatDurationMs, formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import {
@@ -112,6 +113,7 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
   jobs,
 }) => {
   const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const queryClient = useQueryClient();
   const dataViewState = useStudioDataViewState();
   const [deleteRows, setDeleteRows] = useState<AgentEvaluationRow[]>([]);
@@ -318,9 +320,9 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
       <StudioDataView<AgentEvalTableRow>
         dataViewState={dataViewState}
         makeColumns={makeColumns}
-        onRowClick={(row) => {
+        onRowClick={(row, _index, event) => {
           const destination = destinationFor(row);
-          if (destination) navigate(destination);
+          if (destination) openRow(event, destination);
         }}
         renderBulkActions={({ selectedRows }) => (
           <Button

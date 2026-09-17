@@ -16,6 +16,7 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
@@ -47,7 +48,6 @@ import { getEvaluationDetailRoute } from '@studio/routes/utils';
 import { tooltipClassName } from '@studio/styles/common';
 import { Columns3, FolderMinus, FolderPlus, Pin, Repeat2 } from 'lucide-react';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
 
 export type { EvaluationRow };
 
@@ -165,7 +165,7 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
   trendVisible,
 }) => {
   const workspace = useWorkspaceFromPath();
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const toast = useToast();
   const experimentName = group.name;
   const experimentId = group.id;
@@ -635,8 +635,8 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
         dataViewState={dataViewState}
         makeColumns={makeColumns}
         searchField="name"
-        onRowClick={(row) =>
-          navigate(getEvaluationDetailRoute(workspace, experimentName, row.name))
+        onRowClick={(row, _index, event) =>
+          openRow(event, getEvaluationDetailRoute(workspace, experimentName, row.name))
         }
         renderBulkActions={({ selectedRows, table }) => (
           <Button
