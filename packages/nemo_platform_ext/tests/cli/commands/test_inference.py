@@ -398,15 +398,21 @@ def test_providers_list_all_pages_follows_every_page() -> None:
 
 
 def test_providers_list_table_uses_default_columns() -> None:
-    recorder = Recorder([_page([PROVIDER], 1, 1)])
+    lost = {**PROVIDER, "id": "p2", "name": "broken", "status": "LOST"}
+    recorder = Recorder([_page([PROVIDER, lost], 1, 1)])
     runner, state = make_runner(recorder)
 
     result = runner.invoke(app, ["inference", "providers", "list", "-f", "table"], obj=state)
 
     assert result.exit_code == 0, result.output
-    output = result.stdout.lower()
-    assert "name" in output and "description" in output and "created_at" in output
-    assert "host_url" not in output
+    output = result.stdout
+    lowered = output.lower()
+    assert "name" in lowered and "description" in lowered and "created_at" in lowered
+    assert "host_url" not in lowered
+    # A LOST provider must be distinguishable from a READY one in the default table,
+    # with status near the front so it is scannable.
+    assert "READY" in output and "LOST" in output
+    assert lowered.index("status") < lowered.index("description")
 
 
 def test_providers_create_code_output_sends_nothing() -> None:
