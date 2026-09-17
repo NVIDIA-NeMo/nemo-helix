@@ -13,6 +13,8 @@ description: >-
   rollout-row datasets. Use for train, fine-tune, customize, SFT, LoRA, DPO, GRPO,
   RLHF, reinforcement learning, reward environment, NeMo Gym, verifiers, Prime
   Intellect, preference optimization, learning rate, epochs, or nemo customization.
+  For domain embedding/rerank recipes (retrieval SDG, bi_encoder, retrieve-eval), use
+  `nemo-retrieval-recipes` instead of this skill as the conductor.
 triggers:
   - nemo-customizer
   - nemo customizer
@@ -53,6 +55,7 @@ not-for:
   - nemo-explore (agent design only)
   - nemo-setup (platform install; route here when CLI resolution fails)
   - safe-synthesizer (tabular synthetic data training)
+  - nemo-retrieval-recipes (domain embed/rerank SDG → train → retrieve-eval conductor)
 compatibility: >-
   Requires nemo-customizer-plugin and a customization contributor (`nemo.customization.contributors`).
   Platform must expose jobs, files, and models APIs.
@@ -173,7 +176,7 @@ For **`automodel`/`unsloth`**, training never runs inside the `nemo` CLI process
 - For submit/image/plugin errors (all backends), read `references/troubleshooting.md`. Unsloth needs the `nmp-unsloth-training` container image on the **platform host's** Docker daemon (see `docker/unsloth/README.md`); rl needs the `nmp-customizer-tasks` / `nmp-rl-training` images on the Kubernetes cluster (see **rl (DPO) gotchas** and `references/rl-kubernetes-runtime.md`).
 - **Missing training image on a remote platform** — if the user gave a non-localhost `NMP_BASE_URL` and the job errors with `Failed to pull image`, `manifest unknown`, or missing `nmp-unsloth-training` / automodel training image: **do not** run `docker build`, `docker pull`, or `docker buildx bake` on the agent machine. Report with the template in `references/reporting.md` (use **Output adapter fileset (planned):** on error), then append on-target build steps from `references/troubleshooting.md` § **Missing training images**.
 - **Gated HuggingFace models** (Llama, Gemma, …) — confirm `hf-token` + fileset `token_secret` before submit; download fails with `Failed to access upstream storage` / 502 when missing. See **HuggingFace token (gated models)** and `references/troubleshooting.md` § **Gated HuggingFace models**.
-- **Post-training eval format** — use the same CHAT `messages` JSONL as training. **Do not** flatten rows to `prompt`/`expected` for the evaluator. Send `messages[:-1]` at inference (exclude final assistant label); score against `messages[-1].content`. See `references/post-training-eval.md` and `references/eval_helpers.py`.
+- **Post-training eval format** — CHAT SFT: use the same CHAT `messages` JSONL as training. **Do not** flatten rows to `prompt`/`expected`. Send `messages[:-1]` at inference; score against `messages[-1].content`. See `references/post-training-eval.md`. **Embedding / rerank jobs** (`recipe: bi_encoder` / `cross_encoder`): do **not** use CHAT `evaluate`. Hand off to `nemo-retrieval-recipes` or submit `nemo evaluator retrieve-eval` on the frozen `eval_beir` fileset from Stage 1. Before submit, confirm `training.jsonl` `neg_doc` lists are non-empty — convert-only retrieval Stage 1 leaves `[]` and collate fails with `neg_doc must contain at least 1 document to sample N negatives`. See `references/hyperparameters-automodel.md` § Retrieval data from Stage 1.
 - **LoRA adapters load automatically for eval** — when a LoRA job completes (automodel/unsloth `save_method: lora`, or **rl GRPO with `finetuning_type: "lora"`**), the adapter is registered on the base model entity and hot-reloaded on any **READY** deployment with `lora_enabled: true`. **Do not** create or update deployments before LoRA eval. **Full SFT** (`finetuning_type: all_weights`) and **merged checkpoints** (`merged_16bit` / `merged_4bit`) register a new **model** entity at `output.name` — **deploy that entity for inference** before chat or eval; full weights are not hot-reloaded onto the base deployment. For LoRA eval, route through the **provider** gateway (`/provider/<name>/-/v1` with `model: default--<adapter>`); the model-entity path (`/model/<entity>/-/v1`) always hits the base model. See `references/post-training-eval.md` § **Request routing (base vs LoRA)**.
 
 ### rl (DPO / GRPO) gotchas

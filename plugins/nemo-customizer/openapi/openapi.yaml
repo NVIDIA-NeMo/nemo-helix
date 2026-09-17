@@ -1221,45 +1221,65 @@ components:
       required:
       - training
       title: AutomodelDatasetSpec
-    AutomodelEmbeddingSpec:
+    AutomodelExportSpec:
       properties:
-        train_n_passages:
+        primary:
+          type: string
+          enum:
+          - onnx
+          - hf
+          title: Primary
+          description: Artifact at the fileset root. Use 'hf' when the NIM loads PyTorch
+            weights.
+          default: onnx
+        opset:
           type: integer
-          minimum: 2.0
-          title: Train N Passages
-          default: 5
-        eval_negative_size:
-          title: Eval Negative Size
-          type: integer
-          minimum: 1.0
-        do_gradient_checkpointing:
+          exclusiveMinimum: 0.0
+          title: Opset
+          default: 17
+        precision:
+          type: string
+          enum:
+          - fp32
+          - fp16
+          title: Precision
+          description: ONNX graph dtype. Defaults to fp16 to match typical Hugging
+            Face checkpoints.
+          default: fp16
+        attn_implementation:
+          type: string
+          enum:
+          - eager
+          - sdpa
+          - flash_attention_2
+          title: Attn Implementation
+          description: Attention backend for tracing. The exporter cannot trace SDPA/GQA.
+          default: eager
+        pooling:
+          type: string
+          enum:
+          - avg
+          - cls
+          - last
+          title: Pooling
+          description: Embedding pooling. Ignored for cross_encoder.
+          default: avg
+        normalize:
           type: boolean
-          title: Do Gradient Checkpointing
+          title: Normalize
+          description: L2-normalize embeddings. Ignored for cross_encoder.
+          default: true
+        dimensions:
+          type: boolean
+          title: Dimensions
+          description: Add a Matryoshka 'dimensions' input that truncates and renormalizes
+            embeddings.
           default: false
-        query_max_length:
-          type: integer
-          minimum: 1.0
-          title: Query Max Length
-          default: 512
-        passage_max_length:
-          type: integer
-          minimum: 1.0
-          title: Passage Max Length
-          default: 512
-        query_prefix:
-          type: string
-          title: Query Prefix
-          description: Collator-side prefix; BiEncoderCollator adds a space.
-          default: 'query:'
-        passage_prefix:
-          type: string
-          title: Passage Prefix
-          description: Collator-side prefix; BiEncoderCollator adds a space.
-          default: 'passage:'
       additionalProperties: false
       type: object
-      title: AutomodelEmbeddingSpec
-      description: Collator and dataset knobs for bi_encoder / cross_encoder recipes.
+      title: AutomodelExportSpec
+      description: ONNX export and fileset layout. ``primary`` is the artifact at
+        the root; the other is under ``alternates/``.
     AutomodelJobInput:
       properties:
         name:
@@ -1665,6 +1685,51 @@ components:
       additionalProperties: false
       type: object
       title: AutomodelParallelismSpec
+    AutomodelRetrievalSpec:
+      properties:
+        train_n_passages:
+          type: integer
+          minimum: 2.0
+          title: Train N Passages
+          default: 5
+        eval_negative_size:
+          title: Eval Negative Size
+          type: integer
+          minimum: 1.0
+        do_gradient_checkpointing:
+          type: boolean
+          title: Do Gradient Checkpointing
+          default: false
+        query_max_length:
+          type: integer
+          minimum: 1.0
+          title: Query Max Length
+          default: 512
+        passage_max_length:
+          type: integer
+          minimum: 1.0
+          title: Passage Max Length
+          default: 512
+        query_prefix:
+          type: string
+          title: Query Prefix
+          description: Collator-side prefix; BiEncoderCollator adds a space.
+          default: 'query:'
+        passage_prefix:
+          type: string
+          title: Passage Prefix
+          description: Collator-side prefix; BiEncoderCollator adds a space.
+          default: 'passage:'
+        export:
+          allOf:
+          - $ref: '#/components/schemas/AutomodelExportSpec'
+          description: Artifact layout and ONNX export settings. Defaults are applied
+            when omitted.
+      additionalProperties: false
+      type: object
+      title: AutomodelRetrievalSpec
+      description: Dataset, collator, and export knobs for bi_encoder / cross_encoder
+        recipes.
     AutomodelScheduleSpec:
       properties:
         epochs:
@@ -1679,6 +1744,13 @@ components:
         val_check_interval:
           title: Val Check Interval
           type: number
+        validation_split:
+          title: Validation Split
+          description: Validation split to use when a validation dataset is not provided.
+          default: 0.1
+          type: number
+          exclusiveMaximum: 1.0
+          exclusiveMinimum: 0.0
         seed:
           title: Seed
           type: integer
@@ -1772,11 +1844,11 @@ components:
           type: boolean
           title: Offload Teacher
           default: false
-        embedding:
+        retrieval:
           allOf:
-          - $ref: '#/components/schemas/AutomodelEmbeddingSpec'
-          description: Retrieval collator/dataset knobs. Used when recipe is bi_encoder
-            or cross_encoder.
+          - $ref: '#/components/schemas/AutomodelRetrievalSpec'
+          description: Retrieval dataset, collator, and export knobs. Used when recipe
+            is bi_encoder or cross_encoder.
       additionalProperties: false
       type: object
       title: AutomodelTrainingSpec

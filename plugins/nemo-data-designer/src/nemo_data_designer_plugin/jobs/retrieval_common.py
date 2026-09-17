@@ -96,6 +96,7 @@ def gpu_retrieval_step(name: str, module: str, spec: BaseModel, profile: str | N
             *_persistent_storage_environment(),
             EnvironmentVariable(name="HF_HUB_OFFLINE", value="1"),
             EnvironmentVariable(name="TRANSFORMERS_OFFLINE", value="1"),
+            EnvironmentVariable(name="PYTHONUNBUFFERED", value="1"),
         ],
     )
 

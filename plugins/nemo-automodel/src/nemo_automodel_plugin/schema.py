@@ -17,12 +17,13 @@ __all__ = [
     "AutomodelJobOutput",
     "BatchSpec",
     "DatasetSpec",
-    "EmbeddingSpec",
+    "ExportSpec",
     "LoRAParams",
     "OptimizerSpec",
     "OutputRequest",
     "OutputResponse",
     "ParallelismSpec",
+    "RetrievalSpec",
     "ScheduleSpec",
     "TrainingSpec",
     "ValidationError",
@@ -60,8 +61,31 @@ class DatasetSpec(AutomodelSchema):
     prompt_template: str | None = None
 
 
-class EmbeddingSpec(AutomodelSchema):
-    """Collator and dataset knobs for bi_encoder / cross_encoder recipes."""
+class ExportSpec(AutomodelSchema):
+    """ONNX export and fileset layout. ``primary`` is the artifact at the root; the other is under ``alternates/``."""
+
+    primary: Literal["onnx", "hf"] = Field(
+        default="onnx", description="Artifact at the fileset root. Use 'hf' when the NIM loads PyTorch weights."
+    )
+    opset: int = Field(default=17, gt=0)
+    precision: Literal["fp32", "fp16"] = Field(
+        default="fp16",
+        description="ONNX graph dtype. Defaults to fp16 to match typical Hugging Face checkpoints.",
+    )
+    attn_implementation: Literal["eager", "sdpa", "flash_attention_2"] = Field(
+        default="eager", description="Attention backend for tracing. The exporter cannot trace SDPA/GQA."
+    )
+    pooling: Literal["avg", "cls", "last"] = Field(
+        default="avg", description="Embedding pooling. Ignored for cross_encoder."
+    )
+    normalize: bool = Field(default=True, description="L2-normalize embeddings. Ignored for cross_encoder.")
+    dimensions: bool = Field(
+        default=False, description="Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings."
+    )
+
+
+class RetrievalSpec(AutomodelSchema):
+    """Dataset, collator, and export knobs for bi_encoder / cross_encoder recipes."""
 
     train_n_passages: int = Field(default=5, ge=2)
     eval_negative_size: int | None = Field(default=None, ge=1)
@@ -70,9 +94,14 @@ class EmbeddingSpec(AutomodelSchema):
     passage_max_length: int = Field(default=512, ge=1)
     query_prefix: str = Field(default="query:", description="Collator-side prefix; BiEncoderCollator adds a space.")
     passage_prefix: str = Field(default="passage:", description="Collator-side prefix; BiEncoderCollator adds a space.")
+    export: ExportSpec | None = Field(
+        default=None, description="Artifact layout and ONNX export settings. Defaults are applied when omitted."
+    )
 
 
 class TrainingSpec(AutomodelSchema):
+    model_config = AutomodelSchema.model_config | {"populate_by_name": True}
+
     training_type: Literal["sft", "distillation"] = "sft"
     recipe: Literal["auto", "sft", "bi_encoder", "cross_encoder"] = Field(
         default="auto",
@@ -98,9 +127,9 @@ class TrainingSpec(AutomodelSchema):
     distillation_temperature: float = Field(default=1.0, gt=0.0)
     teacher_precision: Literal["bf16", "fp16", "fp32"] = "bf16"
     offload_teacher: bool = False
-    embedding: EmbeddingSpec | None = Field(
+    retrieval: RetrievalSpec | None = Field(
         default=None,
-        description="Retrieval collator/dataset knobs. Used when recipe is bi_encoder or cross_encoder.",
+        description="Retrieval dataset, collator, and export knobs. Used when recipe is bi_encoder or cross_encoder.",
     )
 
     @model_validator(mode="after")
@@ -118,8 +147,23 @@ class ScheduleSpec(AutomodelSchema):
     epochs: int = Field(default=1, gt=0)
     max_steps: int | None = Field(default=None, gt=0)
     val_check_interval: float | None = None
+    validation_split: float | None = Field(
+        default=0.1,
+        gt=0,
+        lt=1,
+        description="Validation split to use when a validation dataset is not provided.",
+    )
     seed: int | None = None
     progress_reporting: ProgressReportingConfig = Field(default_factory=ProgressReportingConfig)
+
+
+# (global_batch_size, micro_batch_size) per retrieval recipe. bi_encoder takes its
+# in-batch negatives from the micro batch, which accumulation does not widen, so
+# lowering micro costs retrieval quality; cross_encoder scores pairs independently.
+RETRIEVAL_BATCH_DEFAULTS: dict[str, tuple[int, int]] = {
+    "bi_encoder": (256, 8),
+    "cross_encoder": (128, 8),
+}
 
 
 class BatchSpec(AutomodelSchema):
@@ -207,16 +251,18 @@ class AutomodelJobInput(AutomodelSchema):
         training = self.training.model_copy(update={"recipe": recipe})
         if recipe == "bi_encoder":
             learning_rate, warmup_steps = 1e-5, 5
+            global_batch_size, micro_batch_size = RETRIEVAL_BATCH_DEFAULTS["bi_encoder"]
         elif recipe == "cross_encoder":
             learning_rate, warmup_steps = 3e-6, 100
+            global_batch_size, micro_batch_size = RETRIEVAL_BATCH_DEFAULTS["cross_encoder"]
         else:
             return self.model_copy(update={"training": training})
 
         batch_updates: dict[str, int] = {}
         if "global_batch_size" not in self.batch.model_fields_set:
-            batch_updates["global_batch_size"] = 128
+            batch_updates["global_batch_size"] = global_batch_size
         if "micro_batch_size" not in self.batch.model_fields_set:
-            batch_updates["micro_batch_size"] = 4
+            batch_updates["micro_batch_size"] = micro_batch_size
 
         optimizer_updates: dict[str, float | int] = {}
         if "learning_rate" not in self.optimizer.model_fields_set:

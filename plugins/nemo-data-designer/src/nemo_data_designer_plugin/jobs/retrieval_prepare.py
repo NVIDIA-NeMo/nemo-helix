@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from typing import ClassVar, cast
@@ -19,7 +20,7 @@ from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nmp.customization_common.retrieval.inline import wrapped_to_inline_jsonl
+from nmp.customization_common.retrieval.inline import move_aux_files_to_additional, wrapped_to_inline_jsonl
 from nmp.customization_common.service.platform_client import fetch_model_entity
 from pydantic import BaseModel
 
@@ -155,7 +156,7 @@ def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobConte
         )
         from nemo_data_designer_plugin.retrieval.conversion import execute_conversion
 
-        input_path = sdg_root if sdg_root.is_file() else _find_generation_input(sdg_root)
+        input_path = _resolve_generation_input(sdg_root, job.generation_file)
         conversion = execute_conversion(
             input_path=input_path,
             output_dir=output_dir,
@@ -172,11 +173,17 @@ def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobConte
             raise RuntimeError("Retrieval SDG conversion did not produce a training file")
         train_file = conversion.train_file
 
-    train_file = _stage_train_file(Path(train_file), output_dir)
+    source_train = Path(train_file)
+    train_file = _stage_train_file(source_train, output_dir)
+    _assert_nonempty_training_split(train_file)
+    if job.enable_mining:
+        _stage_corpus_for_mining(source_train, output_dir)
 
     if not job.enable_mining:
         inline_path = output_dir / "training.jsonl"
         wrapped_to_inline_jsonl(train_file, inline_path, output_dir / "corpus" / "train.parquet")
+        move_aux_files_to_additional(output_dir)
+        train_file = output_dir / "additional" / train_file.name
 
     artifacts = ctx.results.save(name="artifacts", local_path=output_dir)
     return {
@@ -185,6 +192,21 @@ def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobConte
         "train_file": str(train_file),
         "results": {"artifacts": artifacts.model_dump()},
     }
+
+
+def _assert_nonempty_training_split(train_file: Path) -> None:
+    """Fail before mining when conversion parked every query in the test split."""
+    try:
+        payload = json.loads(train_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Could not read training file {train_file}: {exc}") from exc
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if isinstance(rows, list) and not rows:
+        raise RuntimeError(
+            "Retrieval conversion produced an empty training split. Tiny corpora can "
+            "land entirely in the test split. Generate with more source files "
+            "(recommended 50+ documents) or raise train_ratio before enabling mining."
+        )
 
 
 def _stage_train_file(train_file: Path, output_dir: Path) -> Path:
@@ -197,14 +219,35 @@ def _stage_train_file(train_file: Path, output_dir: Path) -> Path:
     raise FileNotFoundError(f"Training file is not a file: {train_file}")
 
 
-def _find_generation_input(root: Path) -> Path:
-    manifest = root / "generation_result.json"
-    if manifest.exists():
-        return manifest
-    jsonl = list(root.rglob("*.jsonl"))
-    if jsonl:
-        return jsonl[0]
-    raise FileNotFoundError(f"No generation_result.json or JSONL under {root}")
+def _stage_corpus_for_mining(train_file: Path, output_dir: Path) -> None:
+    """Copy sibling ``corpus/`` so the miner can load merlin_metadata.json.
+
+    ``train_input_file`` skips conversion, which normally writes that directory.
+    Mining then fails with ``Metadata File for Corpus does not exist``.
+    """
+    src = train_file.parent / "corpus"
+    dest = output_dir / "corpus"
+    if not src.is_dir():
+        return
+    if src.resolve() == dest.resolve():
+        return
+    shutil.copytree(src, dest, dirs_exist_ok=True)
+
+
+def _resolve_generation_input(staged: Path, generation_file: str) -> Path:
+    """Use a materialized file, or the named file inside a Stage 0 directory."""
+    if staged.is_file():
+        return staged
+    candidate = (staged / generation_file).resolve()
+    if not candidate.is_relative_to(staged.resolve()):
+        raise ValueError(f"generation_file escapes Stage 0 directory: {generation_file}")
+    if candidate.is_file():
+        return candidate
+    raise FileNotFoundError(
+        f"Expected Stage 0 file {generation_file!r} under {staged}. "
+        "Live generate writes generation_result.json; skip-SDG dumps set generation_file "
+        "or pass sdg_input as fileset#path / hf://org/dataset@rev/file."
+    )
 
 
 if __name__ == "__main__":

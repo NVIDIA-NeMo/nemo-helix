@@ -139,6 +139,138 @@ def test_for_schedule_keyword_detector_discriminates() -> None:
     assert _for_schedule_keywords("x = NemoRLLogger.other(run_facts=f)\n") == set()
 
 
+def _raises_value_error_after_best_checkpoint_lookup(source: str) -> bool:
+    """Whether the `get_best_checkpoint_path() is None` branch raises ValueError."""
+
+    def tests_missing_best_checkpoint(test: ast.expr) -> bool:
+        for node in ast.walk(test):
+            if not (
+                isinstance(node, ast.Compare)
+                and len(node.ops) == 1
+                and isinstance(node.ops[0], ast.Is)
+                and len(node.comparators) == 1
+                and isinstance(node.comparators[0], ast.Constant)
+                and node.comparators[0].value is None
+                and isinstance(node.left, ast.Call)
+                and isinstance(node.left.func, ast.Attribute)
+                and node.left.func.attr == "get_best_checkpoint_path"
+            ):
+                continue
+            return True
+        return False
+
+    def raises_value_error(stmt: ast.stmt) -> bool:
+        """Whether running *stmt* raises ValueError.
+
+        A ``raise`` inside a nested function, lambda, or class body does not run
+        when the branch runs, so those scopes are not descended into.
+        """
+        if (
+            isinstance(stmt, ast.Raise)
+            and isinstance(stmt.exc, ast.Call)
+            and isinstance(stmt.exc.func, ast.Name)
+            and stmt.exc.func.id == "ValueError"
+        ):
+            return True
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            return False
+        return any(raises_value_error(child) for child in ast.iter_child_nodes(stmt) if isinstance(child, ast.stmt))
+
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.If) or not tests_missing_best_checkpoint(node.test):
+            continue
+        if any(raises_value_error(stmt) for stmt in node.body):
+            return True
+    return False
+
+
+def test_postcondition_detector_discriminates() -> None:
+    """The tripwire is only worth having if it can actually trip."""
+    assert _raises_value_error_after_best_checkpoint_lookup("raise ValueError('x')\n") is False
+    assert _raises_value_error_after_best_checkpoint_lookup("checkpointer.get_best_checkpoint_path()\n") is False
+    assert (
+        _raises_value_error_after_best_checkpoint_lookup(
+            "checkpointer.get_best_checkpoint_path()\nraise ValueError('x')\n"
+        )
+        is False
+    )
+    assert (
+        _raises_value_error_after_best_checkpoint_lookup(
+            "if checkpointer.get_best_checkpoint_path() is not None:\n    raise ValueError('x')\n"
+        )
+        is False
+    )
+    assert (
+        _raises_value_error_after_best_checkpoint_lookup(
+            "if checkpointer.get_best_checkpoint_path() is None:\n    raise RuntimeError('x')\n"
+        )
+        is False
+    )
+    assert (
+        _raises_value_error_after_best_checkpoint_lookup(
+            "if checkpointer.get_best_checkpoint_path() is None:\n    raise ValueError('x')\n"
+        )
+        is True
+    )
+    # A raise the branch only defines, never executes.
+    assert (
+        _raises_value_error_after_best_checkpoint_lookup(
+            "if checkpointer.get_best_checkpoint_path() is None:\n    def _later():\n        raise ValueError('x')\n"
+        )
+        is False
+    )
+    # A raise nested in control flow the branch does execute.
+    assert (
+        _raises_value_error_after_best_checkpoint_lookup(
+            "if checkpointer.get_best_checkpoint_path() is None:\n    if strict:\n        raise ValueError('x')\n"
+        )
+        is True
+    )
+
+
+def test_grpo_driver_fails_a_run_that_saved_no_checkpoint() -> None:
+    """Dynamic sampling can exhaust the dataloader and still let grpo_train return.
+
+    The driver is the last place that knows why, so it has to turn that into a
+    non-zero exit. Without the raise the backend sees exit 0, reports training
+    success, and the run dies later in publication with a missing checkpoint that
+    names no cause.
+    """
+    source = (DRIVERS / "grpo_driver.py").read_text()
+
+    assert _raises_value_error_after_best_checkpoint_lookup(source), (
+        "grpo_driver.py must raise when no checkpoint was saved; NeMo-RL exits 0 after "
+        "dynamic sampling finds no trainable group"
+    )
+    assert "non-zero reward standard deviation" in source
+    assert "Training finished without saving a checkpoint." in source
+
+
+@pytest.mark.parametrize(
+    "message,expected_type,expected_detail",
+    [
+        (
+            "Dynamic sampling found no prompt group with non-zero reward standard deviation, "
+            "so no training step ran and no checkpoint was saved.",
+            "TrainingConfigError",
+            "all generations for each prompt earned the same reward",
+        ),
+        (
+            "Training finished without saving a checkpoint.",
+            "CheckpointError",
+            "Training finished without saving any checkpoint",
+        ),
+    ],
+)
+def test_missing_checkpoint_messages_are_classified(message: str, expected_type: str, expected_detail: str) -> None:
+    """The driver raises these as ValueError; the rules must map them for the user."""
+    from nmp.rl.tasks.training.errors.converter import create_error_details
+
+    details = create_error_details(ValueError(message))
+    assert details["type"] == expected_type
+    assert expected_detail in details["message"]
+
+
 @pytest.mark.parametrize("driver", ["grpo_driver.py", "dpo_driver.py"])
 def test_driver_states_which_algorithm_it_is(driver: str) -> None:
     """`backend` is `nemo_rl` for both, so run_facts is the only thing telling them apart.

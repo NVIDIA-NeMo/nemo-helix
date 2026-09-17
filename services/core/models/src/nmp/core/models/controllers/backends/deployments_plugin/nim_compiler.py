@@ -10,6 +10,7 @@ mapping of ``k8s_nim_operator_config`` → plugin ``K8sDeploymentConfig``.
 from __future__ import annotations
 
 import math
+from pathlib import PurePosixPath
 from typing import Any
 
 from nemo_deployments_plugin.entities import (
@@ -34,6 +35,7 @@ from nmp.core.models.controllers.backends.common import DeploymentConfigView
 from nmp.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
 from nmp.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
 from nmp.core.models.controllers.backends.engine import ENGINE_GENERIC, ENGINE_NIM, ENGINE_VLLM
+from pydantic import TypeAdapter
 
 _WEIGHTS_MOUNT = "/model-store"
 _SCRATCH_MOUNT = "/scratch"
@@ -58,6 +60,12 @@ if [ "$plugin_file" != "{plugin_path}" ]; then
 fi
 """
 
+# Platform directive, not a NIMService Spec field. NIMs that retired
+# NIM_MODEL_NAME / NIM_MODEL_PATH reject them even alongside the
+# NIM_ENGINE_MODEL_* replacements, so only one generation can be emitted.
+_NIM_LEGACY_OVERRIDE_KEY = "nimLegacy"
+_BOOL_ADAPTER = TypeAdapter(bool)
+
 _SUPPORTED_NIM_OVERRIDE_CONFIG_KEYS = frozenset(
     {
         "image",
@@ -77,6 +85,40 @@ _SUPPORTED_NIM_OVERRIDE_CONFIG_KEYS = frozenset(
         "sidecarContainers",
     }
 )
+
+
+def nim_legacy_weight_env(view: DeploymentConfigView) -> bool:
+    """Whether the NIM image still expects the legacy weight env var names."""
+    value = (view.override_config or {}).get(_NIM_LEGACY_OVERRIDE_KEY)
+    if value is None:
+        return True
+    try:
+        return _BOOL_ADAPTER.validate_python(value)
+    except ValueError as error:
+        raise ValueError(f"{_NIM_LEGACY_OVERRIDE_KEY} must be a boolean-like value; got {value!r}") from error
+
+
+_NIM_WEIGHT_PATH_ENV_KEYS = ("NIM_ENGINE_MODEL_PATH", "NIM_MODEL_PATH")
+
+
+def normalize_nim_weights_path(raw: str) -> str:
+    """Join a fileset-relative weights path onto ``/model-store``."""
+    relative = raw.strip().lstrip("/")
+    if not relative:
+        return _WEIGHTS_MOUNT
+    if ".." in PurePosixPath(relative).parts:
+        raise ValueError(f"NIM model path {raw!r} must stay under {_WEIGHTS_MOUNT}")
+    return f"{_WEIGHTS_MOUNT}/{relative}"
+
+
+def resolve_nim_weights_path(view: DeploymentConfigView) -> str:
+    """Weights dir: additional_envs PATH (either generation) else ``/model-store``."""
+    additional = view.additional_envs or {}
+    for key in _NIM_WEIGHT_PATH_ENV_KEYS:
+        value = additional.get(key)
+        if value:
+            return normalize_nim_weights_path(value)
+    return _WEIGHTS_MOUNT
 
 
 def _plugin_fileset(view: DeploymentConfigView, model_entity: ModelEntity | None) -> str | None:
@@ -199,18 +241,31 @@ def compile_nim_server_env(
     if model_fqdn:
         env["NIM_SERVED_MODEL_NAME"] = model_fqdn
 
+    legacy = nim_legacy_weight_env(view)
     if weighted:
-        env["NIM_MODEL_NAME"] = _WEIGHTS_MOUNT
-        env["NIM_MODEL_PATH"] = _WEIGHTS_MOUNT
+        weights_path = resolve_nim_weights_path(view)
+        if legacy:
+            env["NIM_MODEL_NAME"] = weights_path
+            env["NIM_MODEL_PATH"] = weights_path
+        else:
+            env["NIM_ENGINE_MODEL_PATH"] = weights_path
         effective_image = view.image_name or config.default_nimservice_image
         if not is_multi_llm_image(effective_image):
-            env["NIM_FT_MODEL"] = _WEIGHTS_MOUNT
-            env["NIM_CUSTOM_MODEL"] = _WEIGHTS_MOUNT
+            env["NIM_FT_MODEL"] = weights_path
+            env["NIM_CUSTOM_MODEL"] = weights_path
     elif resolved.model_name:
         served = (
             f"{resolved.model_namespace}/{resolved.model_name}" if resolved.model_namespace else resolved.model_name
         )
         env.setdefault("NIM_SERVED_MODEL_NAME", served)
+
+    if not legacy:
+        # NIM 2.x advertises this as the /v1/models id, which provider discovery
+        # matches against the model entity.
+        entity = resolved.model_entity
+        engine_name = env.get("NIM_SERVED_MODEL_NAME") or (f"{entity.workspace}/{entity.name}" if entity else None)
+        if engine_name:
+            env["NIM_ENGINE_MODEL_NAME"] = engine_name
 
     model_entity = resolved.model_entity
     if model_entity:
@@ -573,7 +628,8 @@ def apply_nim_override_config(
     """
     if engine != ENGINE_NIM or runtime != Runtime.KUBERNETES:
         return
-    override = view.override_config
+    override = (view.override_config or {}).copy()
+    override.pop(_NIM_LEGACY_OVERRIDE_KEY, None)
     if not override:
         return
 

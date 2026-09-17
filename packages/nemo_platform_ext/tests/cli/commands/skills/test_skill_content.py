@@ -168,6 +168,34 @@ class TestLoadPlatformSkills:
         assert "--environment" not in no_environment
         assert '--workspace "$WORKSPACE"' in no_environment
 
+    def test_retrieval_recipes_references_are_packaged(self):
+        skill = load_skills()["nemo-retrieval-recipes"]
+        assert skill.source_dir is not None
+        for relative in (
+            "references/sdg.md",
+            "references/embed.md",
+            "references/rerank.md",
+        ):
+            assert (skill.source_dir / relative).is_file(), relative
+        assert "nemo data-designer create" in skill.content
+        assert "retrieve-eval" in skill.content
+
+    def test_retrieval_recipes_stage1_handoff_is_documented(self):
+        """Stage 1 publishes one fileset that both Automodel and retrieve-eval read."""
+        skill = load_skills()["nemo-retrieval-recipes"]
+        assert skill.source_dir is not None
+        sdg = (skill.source_dir / "references" / "sdg.md").read_text()
+
+        assert "NMP_BASE_URL" in sdg
+        assert "generation_result.json" in sdg
+        assert "generation_file" in sdg
+        assert "query_counts" in sdg
+        assert "must use their exact key sets" in sdg
+        assert "training-only" not in skill.content
+        assert "empty neg_doc" in sdg
+        assert "enable_mining: true" in sdg
+        assert "train_n_passages" in sdg
+
     def test_model_selection_benchmark_cache_is_packaged(self):
         skill = load_skills()["nemo-model-selection"]
         assert skill.source_dir is not None

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar, Self
@@ -31,12 +32,15 @@ from nemo_evaluator.jobs.metric_resolution import PlatformMetricModelResolver
 from nemo_evaluator.jobs.secret_env import build_task_environment
 from nemo_evaluator.jobs.utils import as_async_nemo_client, as_nemo_client, run_with_isolated_async_client
 from nemo_evaluator_sdk import Evaluator
+from nemo_evaluator_sdk.execution.metric_execution import run_sync as run_coro_sync
+from nemo_evaluator_sdk.metrics.protocol import Metric
 from nemo_evaluator_sdk.metrics.retrieval import (
     RetrievalMAPMetric,
     RetrievalNDCGMetric,
     RetrievalPrecisionMetric,
     RetrievalRecallMetric,
 )
+from nemo_evaluator_sdk.retrieval.beir import BeirDataset
 from nemo_evaluator_sdk.retrieval.nim_ranking import NimRankingClient, NimRankingError
 from nemo_evaluator_sdk.values.models import Model, ModelRef
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
@@ -75,6 +79,11 @@ class RetrievalInputSpec(BaseModel):
         json_schema_extra={"nullable": True},
     )
     batch_size: int = Field(default=32, ge=1, description="Embedding HTTP batch size.")
+    embedding_in_flight: int = Field(
+        default=2,
+        ge=1,
+        description="Concurrent embedding POSTs to one NIM so the GPU is not idle between batches.",
+    )
     embedding_dimensions: int | None = Field(
         default=None,
         gt=0,
@@ -238,7 +247,7 @@ class RetrieveEvalJob(NemoJob):
         ]
         evaluator = Evaluator()
         started_at = datetime.now(UTC)
-        result = evaluator.run_sync(dataset=dataset, target=spec.target, metrics=metrics)
+        result, baseline_result = _run_pipelines(evaluator, dataset, spec, metrics)
         result_files = EvaluateJob._write_result_files(
             result,
             ctx.storage.persistent,
@@ -264,12 +273,7 @@ class RetrieveEvalJob(NemoJob):
             "artifact": artifact.model_dump(),
             "eval_results": eval_results,
         }
-        if spec.baseline is not None:
-            baseline_result = evaluator.run_sync(
-                dataset=dataset,
-                target=spec.baseline,
-                metrics=metrics,
-            )
+        if baseline_result is not None:
             baseline_scores = _project_eval_results(baseline_result)
             relative = {
                 name: _relative_change(eval_results.get(name), baseline_scores.get(name))
@@ -279,6 +283,32 @@ class RetrieveEvalJob(NemoJob):
             output["baseline_eval_results"] = baseline_scores
             output["relative"] = relative
         return output
+
+
+def _run_pipelines(
+    evaluator: Evaluator,
+    dataset: BeirDataset,
+    spec: RetrieveEvalSpec,
+    metrics: Sequence[Metric],
+) -> tuple[BenchmarkEvaluationResult, BenchmarkEvaluationResult | None]:
+    """Score target and optional baseline against the same BEIR split.
+
+    Both pipelines share the downloaded fileset. When a baseline is present they
+    hit distinct NIM endpoints, so they run concurrently instead of doubling
+    wall time.
+    """
+
+    async def _score() -> tuple[BenchmarkEvaluationResult, BenchmarkEvaluationResult | None]:
+        target_coro = evaluator.run(metrics=metrics, dataset=dataset, target=spec.target)
+        if spec.baseline is None:
+            return await target_coro, None
+        target_result, baseline_eval = await asyncio.gather(
+            target_coro,
+            evaluator.run(metrics=metrics, dataset=dataset, target=spec.baseline),
+        )
+        return target_result, baseline_eval
+
+    return run_coro_sync(_score)
 
 
 async def _resolve_retrieval(
@@ -322,6 +352,7 @@ async def _resolve_retrieval(
         first_stage_k=value.first_stage_k,
         truncate_long_documents=value.truncate_long_documents,
         batch_size=value.batch_size,
+        embedding_in_flight=value.embedding_in_flight,
         embedding_dimensions=value.embedding_dimensions,
     )
 
