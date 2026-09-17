@@ -309,7 +309,7 @@ export const deriveSwarmState = (events: SwarmEvent[]): SwarmState => {
         break;
       case 'victim_control_started':
       case 'openshell_upload':
-      case 'nat_upload':
+      case 'relay_policy_upload':
         statuses.update_victim_agent_policy = 'running';
         statuses.victim_agent = 'running';
         break;

@@ -119,7 +119,7 @@ def test_default_install_is_a_plain_pypi_install(tmp_path: Path, monkeypatch: py
         "install",
         "--python",
         str(cfg.venv_path / "bin" / "python"),
-        "agent-hardener>=0.0.7",
+        "nvidia-agent-hardener>=0.0.11",
     ]
 
 
@@ -129,7 +129,7 @@ def test_provision_venv_passes_configured_index(tmp_path: Path, monkeypatch: pyt
         venv_path=tmp_path / "venv",
         garak_venv_path=tmp_path / "garak-venv",
         index_url="https://registry.example/simple",
-        agent_hardener_spec="agent-hardener==0.0.2",
+        spec="agent-hardener==0.0.2",
     )
     commands = _capture_provision(monkeypatch, cfg)
 

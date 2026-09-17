@@ -64,7 +64,7 @@ def provision_venv(config: AgentHardenerConfig, *, force: bool) -> None:
     typer.echo(f"Creating agent-hardener venv at {config.venv_path} ...")
     run_subprocess(["uv", "venv", "--python", "3.12", str(config.venv_path)], "create venv")
 
-    typer.echo(f"Installing {config.agent_hardener_spec} into the venv ...")
+    typer.echo(f"Installing {config.spec} into the venv ...")
     install_cmd = ["uv", "pip", "install", "--python", str(config.venv_path / "bin" / "python")]
     # Both flags are passed on this command only, so the platform's own environment is never resolved
     # against the extra index. Credentials are deliberately not handled here — uv picks them up from
@@ -74,11 +74,10 @@ def provision_venv(config: AgentHardenerConfig, *, force: bool) -> None:
         install_cmd += ["--index", config.index_url]
     if config.index_strategy:
         install_cmd += ["--index-strategy", config.index_strategy]
-    run_subprocess([*install_cmd, config.agent_hardener_spec], "install agent-hardener")
+    run_subprocess([*install_cmd, config.spec], "install agent-hardener")
     if not config.agent_hardener_bin.exists():
         typer.secho(
-            f"Install finished but {config.agent_hardener_bin} is missing — check the package spec "
-            f"({config.agent_hardener_spec}).",
+            f"Install finished but {config.agent_hardener_bin} is missing — check the package spec ({config.spec}).",
             fg="red",
         )
         raise typer.Exit(code=1)

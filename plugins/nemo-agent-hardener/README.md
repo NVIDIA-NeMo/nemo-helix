@@ -106,6 +106,9 @@ chmod 600 ~/.netrc
 export NEMO_AGENT_HARDENER_INDEX_URL="<index-url>"
 ```
 
+Must be `https://` — `setup` refuses a plaintext index so credentials never cross the wire unencrypted
+(`http://localhost`/`127.0.0.1` is allowed for local development).
+
 That's all you need. The index is *additional* to PyPI, so agent-hardener resolves from it and every
 dependency still comes from PyPI. (If a dependency fails to resolve, see the troubleshooting below —
 don't set `NEMO_AGENT_HARDENER_INDEX_STRATEGY` pre-emptively, it weakens dependency-confusion protection.)
@@ -410,7 +413,7 @@ CLI-only. `uv tool uninstall openshell`, then use the curl installer above.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `NEMO_AGENT_HARDENER_AGENT_HARDENER_SPEC` | `agent-hardener` | Package spec `setup` installs. Override to pin a version (`agent-hardener==0.0.2`) or to develop against a local checkout |
+| `NEMO_AGENT_HARDENER_SPEC` | `agent-hardener` | Package spec `setup` installs. Override to pin a version (`agent-hardener==0.0.2`) or to develop against a local checkout |
 | `NEMO_AGENT_HARDENER_VENV_PATH` | `~/.agent-hardener/venv` | agent-hardener venv |
 | `NEMO_AGENT_HARDENER_GARAK_VENV_PATH` | `~/.agent-hardener/garak-venv` | garak (attacker) venv |
 | `NEMO_AGENT_HARDENER_DEFAULT_WORKSPACE` | `default` | Workspace used by CLI commands |

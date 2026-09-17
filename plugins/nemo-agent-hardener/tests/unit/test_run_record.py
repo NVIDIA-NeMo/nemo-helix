@@ -9,11 +9,12 @@ workspace test environment (``make test-package PACKAGE=nemo_agent_hardener_plug
 
 from __future__ import annotations
 
-import types
+from datetime import datetime
 
 import yaml
 from nemo_agent_hardener_plugin.jobs.run import _manifest_facts, _run_data
 from nemo_agent_hardener_plugin.sdk import _run_to_dict
+from nemo_platform_plugin.entities.types import Entity
 
 
 def test_manifest_facts_reads_agent_name_and_port(tmp_path):
@@ -50,13 +51,22 @@ def test_run_data_includes_events_fileset():
 
 
 def test_run_to_dict_flattens_entity_data_name_and_created_at():
-    entity = types.SimpleNamespace(
-        data={"agent": "default/calc", "status": "completed", "returncode": 0},
+    entity = Entity(
+        entity_type="agent_hardener_run",
+        id="run-id",
+        workspace="default",
+        parent=None,
+        project=None,
         name="agent-hardener-run-abc",
-        created_at="2026-06-28T10:00:00",
+        data={"agent": "default/calc", "status": "completed", "returncode": 0},
+        created_at=datetime(2026, 6, 28, 10, 0, 0),
+        created_by=None,
+        updated_at=datetime(2026, 6, 28, 10, 0, 0),
+        updated_by=None,
+        db_version=1,
     )
     flat = _run_to_dict(entity)
     assert flat["agent"] == "default/calc"
     assert flat["status"] == "completed"
     assert flat["name"] == "agent-hardener-run-abc"
-    assert flat["created_at"] == "2026-06-28T10:00:00"
+    assert flat["created_at"] == "2026-06-28 10:00:00"

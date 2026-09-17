@@ -5,12 +5,15 @@ import { Text } from '@nvidia/foundations-react-core';
 import { FC } from 'react';
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued';
 
-interface YamlDiffProps {
+interface ConfigDiffProps {
   before: string;
   after: string;
+  //: The document's format, used only as the diff's label — the guardrail set is TOML, the sandbox
+  //: policy is YAML, and the differ itself is format-agnostic (line/word based, no parsing).
+  language: 'toml' | 'yaml';
 }
 
-// A git-style split diff of two YAML documents, themed to KUI's dark surface tokens.
+// A git-style split diff of two config documents, themed to KUI's dark surface tokens.
 const DIFF_STYLES = {
   variables: {
     dark: {
@@ -35,7 +38,7 @@ const DIFF_STYLES = {
   gutter: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '11px' },
 } as const;
 
-export const YamlDiff: FC<YamlDiffProps> = ({ before, after }) => {
+export const ConfigDiff: FC<ConfigDiffProps> = ({ before, after, language }) => {
   if (before === after) {
     return (
       <Text kind="body/regular/sm" className="text-subtle">
@@ -51,8 +54,8 @@ export const YamlDiff: FC<YamlDiffProps> = ({ before, after }) => {
         splitView
         useDarkTheme
         compareMethod={DiffMethod.WORDS}
-        leftTitle="Before"
-        rightTitle="After (hardened)"
+        leftTitle={`Before (${language})`}
+        rightTitle={`After, hardened (${language})`}
         styles={DIFF_STYLES}
       />
     </div>

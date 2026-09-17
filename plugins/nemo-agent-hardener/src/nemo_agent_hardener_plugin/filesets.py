@@ -21,7 +21,6 @@ import zipfile
 from fnmatch import fnmatch
 from pathlib import Path
 
-import fsspec.asyn
 from filesets import FilesetFileSystem
 from nemo_agents_plugin.container.template import DOCKERIGNORE_TEMPLATE
 from nemo_platform import NeMoPlatform
@@ -57,18 +56,21 @@ def download_fileset(sdk: NeMoPlatform, ref: str, dest: Path) -> Path:
     fs = FilesetFileSystem(client=client_from_platform(sdk, FilesClient))
     dest.mkdir(parents=True, exist_ok=True)
     source = ref.rstrip("/") + "/"
-    fsspec.asyn.sync(fs.loop, fs._get, source, str(dest), True)
+    fs.get(source, str(dest), recursive=True)
     return dest
 
 
-def upload_file_to_fileset(sdk: NeMoPlatform, local_path: Path, *, workspace: str) -> str:
+def upload_file_to_fileset(sdk: NeMoPlatform, local_path: Path, *, workspace: str, prefix: str = "hitlog") -> str:
     """Upload a single file into a freshly-created fileset and return its ``workspace/name`` ref.
 
     Used to persist a war-game's produced garak hitlog so a later run can replay it: platform
     persistent job storage is per-job, so the hitlog must live in a fileset to survive across runs.
+
+    ``prefix`` names the fileset for what it holds. The ref is all a later reader sees, so a project
+    bundle or a benign suite carrying a ``hitlog-`` name reads as the wrong artifact entirely.
     """
     files = client_from_platform(sdk, FilesClient)
-    fileset_name = f"hitlog-{uuid.uuid4().hex[:8]}"
+    fileset_name = f"{prefix}-{uuid.uuid4().hex[:8]}"
     files.create_fileset(workspace=workspace, body=CreateFilesetRequest(name=fileset_name))
     files.upload_file(
         name=fileset_name,
@@ -160,7 +162,7 @@ def upload_project_dir(sdk: NeMoPlatform, project_dir: Path, *, workspace: str) 
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
             for path in files:
                 bundle.write(path, path.relative_to(root))
-        return upload_file_to_fileset(sdk, archive, workspace=workspace)
+        return upload_file_to_fileset(sdk, archive, workspace=workspace, prefix="project")
 
 
 def extract_zip_safely(zip_path: Path, dest: Path) -> Path:

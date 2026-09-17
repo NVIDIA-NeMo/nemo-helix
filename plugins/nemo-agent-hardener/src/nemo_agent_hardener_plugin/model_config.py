@@ -29,59 +29,26 @@ so it can be depended on from anywhere without cycles.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from nemo_platform_plugin.agent_hardener.types import (
+    ANALYSIS_DEFAULT_BASE_URL,
+    ANALYSIS_DEFAULT_MODEL,
+    ATTACK_DEFAULT_BASE_URL,
+    ATTACK_DEFAULT_MODEL,
+    ModelChoice,
+    ModelConfigDefaults,
+    ModelGroupDefault,
+    WarGameModels,
+    model_config_defaults,
+)
 
-# Built-in defaults, mirrored from agent-hardener's own literals so the UI can present them pre-filled.
-# attack → agent_hardener.agents.attackers.agent_breaker.config; analysis → agent_hardener.llm.
-ATTACK_DEFAULT_MODEL = "aws/anthropic/claude-opus-4-5"
-ATTACK_DEFAULT_BASE_URL = "https://inference-api.nvidia.com/v1/"
-ANALYSIS_DEFAULT_MODEL = "nvidia/nvidia/Nemotron-3-Nano-30B-A3B"
-ANALYSIS_DEFAULT_BASE_URL = "https://inference-api.nvidia.com/v1"
-
-
-class ModelChoice(BaseModel):
-    """One group's model selection. Every field is optional; ``None`` → the group's built-in default."""
-
-    model: str | None = Field(default=None, description="Model name/URN; null uses the group default.")
-    base_url: str | None = Field(default=None, description="Custom OpenAI-compatible endpoint; null uses the default.")
-    api_key_secret: str | None = Field(
-        default=None,
-        description="Name of a NeMo Secret holding the provider API key for a custom endpoint; null uses the "
-        "platform's provisioned agent-hardener inference key.",
-    )
-
-
-class WarGameModels(BaseModel):
-    """The three model groups for a war-game. An unset group uses agent-hardener's built-in default."""
-
-    attack: ModelChoice | None = Field(default=None, description="garak red-team + detector model.")
-    analysis: ModelChoice | None = Field(
-        default=None, description="Defenders + benign validator (synth suite-generation + judge) model."
-    )
-    safety: ModelChoice | None = Field(
-        default=None,
-        description="Guardrail middleware LLM (agent-hardener's `safety_llm`); unset copies the victim's own LLM. "
-        "Only `model` applies — agent-hardener pins this LLM's endpoint and key when it writes the guardrail.",
-    )
-
-
-class ModelGroupDefault(BaseModel):
-    """The default model + endpoint the UI shows for one group."""
-
-    model: str
-    base_url: str
-
-
-class ModelConfigDefaults(BaseModel):
-    """Defaults surfaced to the UI so pickers pre-fill without hardcoding agent-hardener's literals."""
-
-    attack: ModelGroupDefault
-    analysis: ModelGroupDefault
-
-
-def model_config_defaults() -> ModelConfigDefaults:
-    """Return the built-in per-group model defaults (the values shown pre-filled in the UI)."""
-    return ModelConfigDefaults(
-        attack=ModelGroupDefault(model=ATTACK_DEFAULT_MODEL, base_url=ATTACK_DEFAULT_BASE_URL),
-        analysis=ModelGroupDefault(model=ANALYSIS_DEFAULT_MODEL, base_url=ANALYSIS_DEFAULT_BASE_URL),
-    )
+__all__ = [
+    "ANALYSIS_DEFAULT_BASE_URL",
+    "ANALYSIS_DEFAULT_MODEL",
+    "ATTACK_DEFAULT_BASE_URL",
+    "ATTACK_DEFAULT_MODEL",
+    "ModelChoice",
+    "ModelConfigDefaults",
+    "ModelGroupDefault",
+    "WarGameModels",
+    "model_config_defaults",
+]

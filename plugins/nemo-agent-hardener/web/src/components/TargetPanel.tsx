@@ -8,7 +8,7 @@ import type { FC, ReactNode } from 'react';
 
 interface TargetPanelProps {
   manifest: AgentHardenerManifest;
-  /** Re-resolve against the agent as it is now. Omitted for project sources, which have no agent. */
+  /** Re-resolve against the agent as it is now. Omitted when the manifest names no agent. */
   onRefresh?: () => void;
   refreshing?: boolean;
   /** Open the environment-variable editor. */
@@ -46,14 +46,13 @@ export const TargetPanel: FC<TargetPanelProps> = ({
   const egress = manifest.egress ?? [];
   const secrets = manifest.secrets ?? [];
   const env = Object.entries(manifest.env ?? {});
-  const isAgentSource = manifest.source_type === 'agent';
 
   return (
     <Panel>
       <Stack gap="density-lg" padding="density-lg">
         <Flex className="items-center justify-between">
           <Text kind="body/semibold/md">Target</Text>
-          {isAgentSource && onRefresh ? (
+          {onRefresh ? (
             <Button kind="secondary" size="small" disabled={refreshing} onClick={onRefresh}>
               {refreshing ? 'Refreshing' : 'Refresh Target'}
             </Button>
@@ -61,14 +60,13 @@ export const TargetPanel: FC<TargetPanelProps> = ({
         </Flex>
 
         <Text kind="body/regular/sm" className="text-fg-secondary">
-          {isAgentSource
-            ? 'Resolved from the agent when this manifest was created. Editing the agent afterwards does not change it — refresh to take those changes.'
-            : 'Built from the uploaded project bundle. Re-upload the project to change it.'}
+          Resolved from the agent when this manifest was created. Editing the agent afterwards does
+          not change it — refresh to take those changes.
         </Text>
 
         <Stack gap="density-sm">
-          <Row label="Source">
-            {(isAgentSource ? manifest.agent : manifest.project_fileset) || <Empty>unknown</Empty>}
+          <Row label="Agent">
+            {manifest.agent || <Empty>unknown</Empty>}
           </Row>
           <Row label="Victim Port">{manifest.port || <Empty>not set</Empty>}</Row>
           <Row label="Egress">

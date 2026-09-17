@@ -13,6 +13,4 @@
 export interface ManifestFilter {
   /** Filter to manifests for this agent reference. */
   agent?: string;
-  /** Filter by source ('agent' or 'project'). */
-  source_type?: string;
 }

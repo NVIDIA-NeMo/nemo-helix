@@ -69,14 +69,24 @@ def _save_mitigations(ctx: JobContext) -> None:
     agent-hardener writes it under ``.agent-hardener/run-logs/<run_id>/`` at the end of a hardening run; the Studio
     Mitigations view fetches it via the results API. Best-effort — never fail the run over it.
     """
+    run_logs = ctx.storage.persistent / ".agent-hardener" / "run-logs"
     try:
         candidates = sorted(
-            (ctx.storage.persistent / ".agent-hardener" / "run-logs").glob("*/mitigations.json"),
+            run_logs.glob("*/mitigations.json"),
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
         if candidates:
             ctx.results.save("mitigations", candidates[0])
+            logger.info("saved mitigations result from %s", candidates[0])
+        else:
+            # Not saving is indistinguishable from having nothing to save once the job's temp storage is
+            # reclaimed, and the Harden tab simply never appears — so say which directory came up empty.
+            logger.warning(
+                "no mitigations.json under %s; the Harden tab will be hidden for this run (run-logs present: %s)",
+                run_logs,
+                sorted(p.name for p in run_logs.glob("*")) if run_logs.is_dir() else "<missing>",
+            )
     except Exception:  # capturing the artifact is best-effort, not part of the war-game
         logger.warning("failed to save mitigations result", exc_info=True)
 
@@ -87,33 +97,37 @@ def _save_validation(ctx: JobContext) -> None:
     agent-hardener writes it under ``.agent-hardener/run-logs/<run_id>/`` for any run that ran validators — including
     the frozen validate-only sanity check. Drives the Studio scorecard. Best-effort — never fail the run.
     """
+    run_logs = ctx.storage.persistent / ".agent-hardener" / "run-logs"
     try:
         candidates = sorted(
-            (ctx.storage.persistent / ".agent-hardener" / "run-logs").glob("*/validation.json"),
+            run_logs.glob("*/validation.json"),
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
         if candidates:
             ctx.results.save("validation", candidates[0])
+            logger.info("saved validation result from %s", candidates[0])
+        else:
+            logger.warning("no validation.json under %s; the run's scorecard will be unavailable", run_logs)
     except Exception:  # capturing the artifact is best-effort, not part of the war-game
         logger.warning("failed to save validation result", exc_info=True)
 
 
-def _save_composed_workflow(ctx: JobContext, defense_workflow: str | None) -> None:
-    """Persist the validated composed workflow YAML as a ``composed-workflow`` job result (best-effort).
+def _save_composed_guardrails(ctx: JobContext, defense_guardrails: str | None) -> None:
+    """Persist the validated composed plugins.toml as a ``composed-guardrails`` job result (best-effort).
 
-    Lets the Harden tab recover the exact workflow a sanity check validated after a page reload, so
+    Lets the Harden tab recover the exact guardrail set a sanity check validated after a page reload, so
     "Apply to Agent" stays available without re-running the check.
     """
-    if not defense_workflow:
+    if not defense_guardrails:
         return
     try:
-        path = ctx.storage.persistent / ".agent-hardener" / "composed-workflow.yaml"
+        path = ctx.storage.persistent / ".agent-hardener" / "composed-plugins.toml"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(defense_workflow, encoding="utf-8")
-        ctx.results.save("composed-workflow", path)
+        path.write_text(defense_guardrails, encoding="utf-8")
+        ctx.results.save("composed-guardrails", path)
     except Exception:  # capturing the artifact is best-effort, not part of the war-game
-        logger.warning("failed to save composed workflow result", exc_info=True)
+        logger.warning("failed to save composed guardrails result", exc_info=True)
 
 
 def _save_events_fileset(sdk: Any, *, workspace: str, run_name: str) -> str:

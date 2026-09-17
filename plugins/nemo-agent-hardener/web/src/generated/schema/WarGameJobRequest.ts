@@ -7,6 +7,7 @@
  * agent-hardener (plugin)
  */
 import type { WarGameJobRequestCustomFields } from './WarGameJobRequestCustomFields.ts';
+import type { WarGameJobRequestOptions } from './WarGameJobRequestOptions.ts';
 import type { WarGameJobRequestOwnership } from './WarGameJobRequestOwnership.ts';
 import type { WarGameSpec } from './WarGameSpec.ts';
 
@@ -15,6 +16,8 @@ export interface WarGameJobRequest {
   description?: string;
   project?: string;
   spec: WarGameSpec;
+  profile?: string;
+  options?: WarGameJobRequestOptions;
   ownership?: WarGameJobRequestOwnership;
   custom_fields?: WarGameJobRequestCustomFields;
   output_location?: string;

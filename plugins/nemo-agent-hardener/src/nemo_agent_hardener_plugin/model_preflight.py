@@ -16,10 +16,14 @@ The same helper backs both the interactive Studio "Test connection" and the laun
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 import httpx
 
 _PROBE_TIMEOUT_S = 10.0
+#: Hosts where plaintext http:// carries the credential no further than this machine, so sending it
+#: is safe. Anything else over http:// would put the key on the wire in the clear.
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 @dataclass(frozen=True)
@@ -51,7 +55,11 @@ class Validation:
 def probe_models(base_url: str, api_key: str | None, *, client: httpx.Client | None = None) -> ProbeResult:
     """List the models reachable at ``{base_url}/models`` with *api_key* (best-effort, never raises)."""
     url = base_url.rstrip("/") + "/models"
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    parsed = urlsplit(base_url)
+    # A plaintext endpoint would put the key on the wire in the clear, so the header is withheld
+    # rather than the probe refused: an endpoint that needs no credential still validates cleanly.
+    withheld_credential = bool(api_key) and parsed.scheme != "https" and parsed.hostname not in _LOOPBACK_HOSTS
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key and not withheld_credential else {}
     owns = client is None
     client = client or httpx.Client(timeout=_PROBE_TIMEOUT_S)
     try:
@@ -62,7 +70,15 @@ def probe_models(base_url: str, api_key: str | None, *, client: httpx.Client | N
         if owns:
             client.close()
     if resp.status_code in (401, 403):
-        return ProbeResult(reachable=True, auth_ok=False, detail=f"HTTP {resp.status_code}")
+        # Naming the withheld credential matters: otherwise this reads as "your key is bad" and
+        # sends the user off to rotate a perfectly good one, when the fix is the http:// URL.
+        detail = (
+            f"HTTP {resp.status_code} — the credential was withheld because {base_url} is plaintext "
+            "http://; use https:// (or localhost) to send it"
+            if withheld_credential
+            else f"HTTP {resp.status_code}"
+        )
+        return ProbeResult(reachable=True, auth_ok=False, detail=detail)
     if resp.status_code == 404:
         # No OpenAI-compatible model list — reachable, but we can't enumerate. Soft pass.
         return ProbeResult(reachable=True, auth_ok=True, list_supported=False, detail="endpoint has no /models")

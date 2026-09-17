@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar
 
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.jobs import _common
@@ -29,6 +29,7 @@ from nemo_agent_hardener_plugin.jobs.execution import RunOutcome, _run_service_d
 from nemo_agent_hardener_plugin.jobs.manifest import _manifest_facts, _materialize_manifest
 from nemo_agent_hardener_plugin.jobs.records import _create_run, _run_data, _update_run, read_and_persist_suite
 from nemo_agent_hardener_plugin.jobs.run import _effective_models
+from nemo_platform_plugin.agent_hardener.types import SynthBenignSpec
 from nemo_platform_plugin.job import NemoJob
 from nemo_platform_plugin.job_context import JobContext
 from nemo_platform_plugin.jobs.api_factory import (
@@ -41,19 +42,6 @@ from nemo_platform_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSIS
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
-
-
-class SynthBenignSpec(BaseModel):
-    """Inputs for the benign-suite synthesis phase (the shape ``run()``/``compile()`` see)."""
-
-    manifest_id: str
-    driver: str = "native"  # "native" (CLI TTY) | "service" (Studio serve HITL over status_details)
-    env_file: str | None = None
-    # Interview mode for the native driver: "interactive" (TTY prompts), "auto" (--yes), "skip" (--no-interactive).
-    interview: str = "interactive"
-    # Reused pre-created run record name (service driver); unused for native.
-    run_name: str | None = None
-    source_run: str | None = None
 
 
 class AgentHardenerSynthBenignJob(NemoJob):
@@ -83,7 +71,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
         (as the war-game ``stop_after_synth`` path does), so no pre-creation is needed here.
         """
         del workspace, entity_client, job_name, async_sdk, profile, options
-        synth = cast(SynthBenignSpec, spec)
+        synth = SynthBenignSpec.model_validate(spec)
         environment = [EnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=DEFAULT_JOB_STORAGE_PATH)]
         # The subprocess executor forwards only PATH/VIRTUAL_ENV; the sandbox reads its gateway registration
         # from $HOME/.config/openshell and reaches Docker via $DOCKER_HOST (same as the war-game step).
@@ -105,7 +93,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
             ],
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: Any = None, **_: Any) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: Any = None) -> dict:
         """Run synthesis, classifying any failure into an operator-facing error result."""
         try:
             return self._execute(config, ctx=ctx, sdk=sdk)

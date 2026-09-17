@@ -27,7 +27,7 @@ export interface WarGameSpec {
   attack_intensity?: string;
   rounds?: number;
   validate_only?: boolean;
-  defense_workflow?: string;
+  defense_guardrails?: string;
   defense_policy?: string;
   models?: WarGameModels;
   source_run?: string;

@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 import yaml
 from _doubles import make_job_context, make_sdk
-from nemo_agent_hardener_plugin.cli import _shared, lifecycle, war_game
+from nemo_agent_hardener_plugin.cli import _shared, war_game
 from nemo_platform_plugin.job_context import JobContext
 from typer.testing import CliRunner
 
@@ -40,7 +40,6 @@ def test_from_agent_resolution_builds_agent_source_entity() -> None:
     )
 
     assert manifest.name == "my-target"
-    assert manifest.source_type == "agent"
     assert manifest.agent == "ws1/chatbot"
     assert manifest.port == 8000
     assert manifest.secrets == ["OPENAI_API_KEY"]
@@ -321,44 +320,51 @@ def test_synth_benign_job_compile_builds_synth_task_step(monkeypatch: pytest.Mon
     assert step["config"]["driver"] == "service"
 
 
-# ── SDK routing ──────────────────────────────────────────────────────────────
-
-
-class _CaptureScheduler:
-    captured: dict[str, Any] = {}
-
-    def run_local(self, job: Any, spec: dict, **kwargs: Any) -> dict:
-        _CaptureScheduler.captured = {"job": job, "spec": spec, "kwargs": kwargs}
-        return {"status": "completed", "suite_size": 3}
-
-
 def test_sdk_synth_benign_routes_to_job(monkeypatch: pytest.MonkeyPatch) -> None:
     from nemo_agent_hardener_plugin import sdk as sdk_module
 
-    monkeypatch.setattr(sdk_module, "NemoJobScheduler", _CaptureScheduler)
+    captured: dict[str, Any] = {}
+
+    class _Job:
+        name = "synth-benign"
+
+        def run(self, spec: dict, **kwargs: Any) -> dict:
+            captured.update({"spec": spec, "kwargs": kwargs})
+            return {"status": "completed", "suite_size": 3}
+
+    monkeypatch.setattr(sdk_module, "AgentHardenerSynthBenignJob", _Job)
     platform = make_sdk()
     resource = sdk_module.AgentHardenerPluginResource(platform)
 
     resource.synth_benign(manifest_id="m1", interview="auto", workspace="ws1")
 
-    cap = _CaptureScheduler.captured
-    assert cap["job"] is sdk_module.AgentHardenerSynthBenignJob
-    assert cap["spec"] == {"manifest_id": "m1", "env_file": None, "interview": "auto"}
-    assert cap["kwargs"]["workspace"] == "ws1"
-    assert cap["kwargs"]["sdk"] is platform
+    assert captured["spec"] == {"manifest_id": "m1", "env_file": None, "interview": "auto"}
+    assert captured["kwargs"]["ctx"].workspace == "ws1"
+    assert captured["kwargs"]["sdk"] is platform
 
 
 def test_sdk_run_puts_manifest_id_in_spec(monkeypatch: pytest.MonkeyPatch) -> None:
     from nemo_agent_hardener_plugin import sdk as sdk_module
 
-    monkeypatch.setattr(sdk_module, "NemoJobScheduler", _CaptureScheduler)
-    resource = sdk_module.AgentHardenerPluginResource(make_sdk())
+    captured: dict[str, Any] = {}
+
+    class _Job:
+        name = "war-game"
+
+        def run(self, spec: dict, **kwargs: Any) -> dict:
+            captured.update({"spec": spec, "kwargs": kwargs})
+            return {"status": "completed"}
+
+    monkeypatch.setattr(sdk_module, "AgentHardenerRunJob", _Job)
+    platform = make_sdk()
+    resource = sdk_module.AgentHardenerPluginResource(platform)
 
     resource.run(manifest_id="m1", workspace="ws1")
 
-    cap = _CaptureScheduler.captured
-    assert cap["spec"]["manifest_id"] == "m1"
-    assert cap["spec"]["config"] is None
+    assert captured["spec"]["manifest_id"] == "m1"
+    assert captured["spec"]["config"] is None
+    assert captured["kwargs"]["ctx"].workspace == "ws1"
+    assert captured["kwargs"]["sdk"] is platform
 
 
 def test_run_war_game_requires_config_or_manifest_id() -> None:
@@ -366,7 +372,7 @@ def test_run_war_game_requires_config_or_manifest_id() -> None:
 
     with pytest.raises(ValueError, match="config.*manifest_id"):
         sdk_module._run_war_game(
-            SimpleNamespace(), config=None, manifest_id=None, env_file=None, workspace="d", benign_suite=None
+            make_sdk(), config=None, manifest_id=None, env_file=None, workspace="d", benign_suite=None
         )
 
 
@@ -502,94 +508,9 @@ def test_cli_init_agent_delegates_to_the_api(tmp_path: Path, monkeypatch: pytest
 
     assert result.exit_code == 0, result.output
     assert posted["name"] == "my-target"
-    assert posted["source_type"] == "agent"
     assert posted["agent"] == "chatbot"
     assert posted["egress"] == ["en.wikipedia.org"]
     assert (tmp_path / "agent-hardener.yaml").exists()  # a rendering for reading, not an input
-
-
-def test_cli_init_project_dir_runs_agent_hardener_then_uploads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Project source delegates to agent-hardener's own init and ships the manifest it produced."""
-    from nemo_agent_hardener_plugin.cli import main as cli_main
-
-    project = tmp_path / "my-agent"
-    project.mkdir()
-    (project / "workflow.yaml").write_text("workflow: {}\n", encoding="utf-8")
-
-    calls: dict[str, Any] = {}
-
-    def _fake_subprocess(cmd: list[str], _action: str, env: Any = None, *, cwd: str, timeout: Any) -> None:
-        calls.update(cmd=cmd, cwd=cwd, timeout=timeout)
-        Path(cmd[cmd.index("-o") + 1]).write_text("agent:\n  workflow: workflow.yaml\n", encoding="utf-8")
-
-    posted: dict[str, Any] = {}
-
-    def _create(*, workspace: str, **body: Any) -> dict[str, Any]:
-        posted.update(workspace=workspace, **body)
-        return {"name": body["name"], "project_fileset": body["project_fileset"], "port": 8000}
-
-    sdk = SimpleNamespace(agent_hardener=SimpleNamespace(manifests=SimpleNamespace(create=_create)))
-    _patch_cli_context(monkeypatch, cli_main, sdk, bin_path=tmp_path / "agent-hardener")
-    monkeypatch.setattr(lifecycle.provisioning, "run_subprocess", _fake_subprocess)
-    monkeypatch.setattr(lifecycle, "upload_project_dir", lambda _sdk, _dir, *, workspace: f"{workspace}/fs-1")
-
-    app = cli_main.AgentHardenerCLI().get_cli()
-    result = CliRunner().invoke(app, ["init", "--project-dir", str(project), "--egress", "example.com"])
-
-    assert result.exit_code == 0, result.output
-    # Interactive: no --yes, no timeout, and cwd set so the manifest is path-independent.
-    assert "--yes" not in calls["cmd"]
-    assert calls["timeout"] is None
-    assert calls["cwd"] == str(project)
-    assert calls["cmd"][calls["cmd"].index("--project-dir") + 1] == "."
-    assert calls["cmd"][calls["cmd"].index("--egress") + 1] == "example.com"
-    assert posted["source_type"] == "project"
-    assert posted["project_fileset"] == "default/fs-1"
-    assert posted["manifest_yaml"] == "agent:\n  workflow: workflow.yaml\n"
-
-
-def test_cli_init_yes_forwards_to_agent_hardener(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`--yes` must reach agent-hardener, or a CI run blocks forever on its prompts."""
-    from nemo_agent_hardener_plugin.cli import main as cli_main
-
-    project = tmp_path / "my-agent"
-    project.mkdir()
-    calls: dict[str, Any] = {}
-
-    def _fake_subprocess(cmd: list[str], _action: str, env: Any = None, *, cwd: str, timeout: Any) -> None:
-        calls["cmd"] = cmd
-        Path(cmd[cmd.index("-o") + 1]).write_text("agent: {}\n", encoding="utf-8")
-
-    sdk = SimpleNamespace(
-        agent_hardener=SimpleNamespace(manifests=SimpleNamespace(create=lambda **_k: {"name": "my-agent"}))
-    )
-    _patch_cli_context(monkeypatch, cli_main, sdk, bin_path=tmp_path / "agent-hardener")
-    monkeypatch.setattr(lifecycle.provisioning, "run_subprocess", _fake_subprocess)
-    monkeypatch.setattr(lifecycle, "upload_project_dir", lambda _sdk, _dir, *, workspace: f"{workspace}/fs-1")
-
-    app = cli_main.AgentHardenerCLI().get_cli()
-    result = CliRunner().invoke(app, ["init", "--project-dir", str(project), "--yes"])
-
-    assert result.exit_code == 0, result.output
-    assert "--yes" in calls["cmd"]
-
-
-@pytest.mark.parametrize(
-    "args",
-    [
-        pytest.param([], id="neither"),
-        pytest.param(["--agent", "chatbot", "--project-dir", "."], id="both"),
-    ],
-)
-def test_cli_init_requires_exactly_one_source(args: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    from nemo_agent_hardener_plugin.cli import main as cli_main
-
-    _patch_cli_context(monkeypatch, cli_main, SimpleNamespace())
-
-    result = CliRunner().invoke(cli_main.AgentHardenerCLI().get_cli(), ["init", *args])
-
-    assert result.exit_code == 1
-    assert "exactly one of --agent or --project-dir" in result.output
 
 
 def test_from_agent_resolution_persists_egress() -> None:

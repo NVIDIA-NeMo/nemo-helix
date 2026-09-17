@@ -24,7 +24,7 @@ from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.jobs import _common, benign_suite
 from nemo_agent_hardener_plugin.jobs.artifacts import (
     _replay_args,
-    _save_composed_workflow,
+    _save_composed_guardrails,
     _save_events_fileset,
     _save_hitlog_fileset,
     _save_mitigations,
@@ -191,7 +191,7 @@ class AgentHardenerRunJob(NemoJob):
         launches the Docker victim sandbox, all of which live on the provisioned host today. A Docker-capable
         container image (`CPUExecutionProviderSpec(container=...)`) is the Phase-2 swap — `run()` is unchanged.
         """
-        war_game = cast(WarGameSpec, spec)
+        war_game = WarGameSpec.model_validate(spec)
 
         # Pre-create the run record now (a Studio war-game submits a manifest_id + service driver) so the UI
         # can open its live view immediately; the worker reuses this record via `run_name` in the step config.
@@ -229,7 +229,7 @@ class AgentHardenerRunJob(NemoJob):
             ],
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: Any = None, **_: Any) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: Any = None) -> dict:
         """Run the war-game, classifying and surfacing any failure that affects the run's results.
 
         The whole run is wrapped in one error boundary: a classified :class:`AgentHardenerRunError` (or any
@@ -333,7 +333,7 @@ class AgentHardenerRunJob(NemoJob):
         # defenders, so the replay measures the fixed defense without generating new mitigations. Always a
         # single round (validation, not iterative hardening).
         if validate_only:
-            _seed_validation_manifest(manifest, config.get("defense_workflow"), config.get("defense_policy"), ctx)
+            _seed_validation_manifest(manifest, config.get("defense_guardrails"), config.get("defense_policy"), ctx)
             rounds = 1
         # Studio submits no env_file; agent-hardener reads victim creds from a project dotenv, so synthesize
         # one from the operator env (which carries the provisioned INFERENCE_API_KEY) for the manifest's secrets.
@@ -398,7 +398,7 @@ class AgentHardenerRunJob(NemoJob):
             _save_validation(ctx)
             # Also persist the exact composed workflow that was validated, so the Harden tab can recover it
             # after a reload and keep "Apply to Agent" enabled without re-running the check.
-            _save_composed_workflow(ctx, config.get("defense_workflow"))
+            _save_composed_guardrails(ctx, config.get("defense_guardrails"))
         elif not config.get("stop_after_synth"):
             _save_mitigations(ctx)
 

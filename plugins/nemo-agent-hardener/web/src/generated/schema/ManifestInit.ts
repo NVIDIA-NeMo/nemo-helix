@@ -13,35 +13,39 @@ import type { WarGameModels } from './WarGameModels.ts';
 /**
  * Body for ``POST /v2/workspaces/{workspace}/manifests`` — scaffold a named manifest.
  *
- * ``agent`` resolves a deployed agent; ``project`` builds the manifest from an uploaded NAT project
- * (``project_fileset`` + the confirmed detection answers) by shelling ``agent-hardener init --yes``.
+ * Two sources. ``agent`` is a registered platform agent, which the resolver reads and renders.
+ * ``project`` is an uploaded project bundle — an image whose author owns the Dockerfile, which a
+ * Fabric ``agent.yaml`` cannot express. The user never writes ``agent-hardener.yaml`` either way: the
+ * project source derives it and asks only for the fields a project cannot state about itself.
  */
 export interface ManifestInit {
   /** User-defined manifest id (unique within the workspace). */
   name: string;
-  /** Scaffold source ('agent' or 'project'). */
+  /** Where the victim comes from: a registered platform agent, or an uploaded project bundle. */
   source_type?: ManifestInitSourceType;
-  /** Agent reference (required when source_type='agent'). */
+  /** Agent reference (``name`` or ``workspace/name``) to war-game. Required when ``source_type`` is 'agent'. */
   agent?: string;
-  /** Fileset ref of the uploaded NAT project bundle. */
+  /** Fileset ref (``workspace/name``) of the uploaded project bundle. Required when ``source_type`` is 'project'. */
   project_fileset?: string;
-  /** Pre-built agent-hardener manifest (project source). The CLI runs agent-hardener's own interactive `init` at the operator's terminal and sends the result; omit it and the server builds one with `init --yes`, which is what Studio does since it has no TTY. */
-  manifest_yaml?: string;
-  /** Chosen workflow path within the project (project-relative). */
-  workflow?: string;
-  /** Victim launch mode ('workflow'; BYO is Phase 2). */
-  launch_mode?: string;
+  /** Dockerfile path relative to the project root. Derived when the project holds exactly one. */
+  dockerfile?: string;
+  /** Command that serves the agent. Derived from the Dockerfile's ENTRYPOINT/CMD when it is an exec form we can resolve. */
+  start_command?: string;
+  /** Glob(s) matching the victim's interpreter, for the sandbox's egress policy. A glob that matches no process grants nothing while looking like it grants something, so this is confirmed rather than silently guessed. */
+  binaries?: string[];
+  /** Which harness the agent runs, so the run can say up front whether a guardrail can refuse a tool call. Not knowable from the project. */
+  harness?: string;
+  /** The author confirms NeMo Relay is attached (middleware + plugin.initialize()). Not knowable from the project; without Relay the victim emits no telemetry and cannot be scored. */
+  relay_integration_confirmed?: boolean;
   /** Victim port (defaults to 8000). */
   port?: number;
-  /** Secret names the victim requires. */
+  /** Env-var names the victim requires. Derived from the agent's own declarations (``models.*.api_key_env``, MCP server env) when omitted. */
   secrets?: string[];
-  /** Dotenv path within the project holding the secrets. */
-  secrets_file?: string;
-  /** Allow-listed egress host[:port] entries the victim may reach (external hosts the agent calls, e.g. inference-api.nvidia.com); baked into the manifest by `init --egress`. */
+  /** Allow-listed egress host[:port] entries the victim may reach (external hosts the agent calls, e.g. inference-api.nvidia.com). The sandbox is default-deny, so a host missing here has its traffic dropped mid-run. */
   egress?: string[];
   /** Non-secret environment variables for the victim (agent-hardener's `agent.env`). Stored in plaintext on the manifest — credentials belong in `secrets`, which names them and resolves the values from the Secrets store at run time. */
   env?: ManifestInitEnv;
-  /** Route-only host backends the agent's tools call, each 'NAME:PORT[,PORT2]' (e.g. 'finance:8086'). Rewrites the agent's localhost:PORT to host.docker.internal:PORT and opens the sandbox->host route; passed to `init --backend`. */
+  /** Route-only host backends the agent's tools call, each 'NAME:PORT[,PORT2]' (e.g. 'finance:8086'). Rewrites the agent's localhost:PORT to host.docker.internal:PORT and opens the sandbox->host route. */
   backends?: string[];
   /** Stored default model selection (attack/analysis/agent groups); omit to use agent-hardener's built-in defaults. */
   models?: WarGameModels;

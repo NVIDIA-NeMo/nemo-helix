@@ -14,13 +14,12 @@ import type { AgentHardenerManifestSourceType } from './AgentHardenerManifestSou
 import type { WarGameModels } from './WarGameModels.ts';
 
 /**
- * A named, reusable war-game target scaffolded via `init` (its ``name`` is the user-defined id).
+ * A named, reusable war-game target (``name`` is its id), from a registered agent or an uploaded project.
  *
- * Both sources persist their victim project as a fileset the run re-downloads, so a manifest is a
- * frozen target rather than a query re-evaluated each run: ``agent`` stores the scaffold resolved
- * from a deployed agent ref, ``project`` stores an uploaded NAT project (which is also how
- * custom-tool agents, unregistrable as config-only agents, are targeted). Editing the agent does
- * not change an existing manifest until it is refreshed.
+ * Either way the package is persisted as a fileset the run re-downloads, so a manifest is a frozen
+ * target rather than a query re-evaluated each run: editing the agent does not change an existing
+ * manifest until it is refreshed. A project manifest has nothing to refresh *from* — its bundle is the
+ * upload — which is why the two sources are distinguished rather than merged.
  */
 export interface AgentHardenerManifest {
   /** Entity name within the workspace */
@@ -32,18 +31,18 @@ export interface AgentHardenerManifest {
   workspace: string;
   /** The name of the project associated with this entity. */
   project?: string;
-  /** Deployed agent reference (workspace/name) this manifest targets. */
-  agent?: string;
-  /** How the manifest was built ('agent'|'project'). */
+  /** Where the victim came from. The run reads this to decide which bundle field to expand. */
   source_type?: AgentHardenerManifestSourceType;
-  /** Fileset ref holding the uploaded NAT project bundle (source_type 'project'); the run re-downloads it to a project_dir before launching the victim. */
+  /** Registered agent reference (workspace/name) this manifest targets. */
+  agent?: string;
+  /** Fileset ref holding the uploaded project bundle, for a 'project' manifest. The run expands this instead of ``agent_fileset``. */
   project_fileset?: string;
-  /** Fileset ref holding the scaffold resolved from the agent (source_type 'agent'). Empty on manifests created before targets were frozen; those re-resolve once, then store a ref. */
+  /** Fileset ref holding the agent package resolved from the agent — its config plus the Dockerfile that serves it. Empty on manifests created before targets were frozen; those re-resolve once, then store a ref. */
   agent_fileset?: string;
-  /** Chosen workflow path within the project (project source, display). */
-  workflow?: string;
-  /** Victim launch mode ('workflow'|'byo'; project source). */
-  launch_mode?: string;
+  /** Path within the package to the Dockerfile the victim image is built from, so a manifest records which image it ran rather than only that it had one. */
+  dockerfile?: string;
+  /** In-container glob patterns scoping which processes may egress; agent-hardener requires them because the layout of an image it did not write cannot be inferred. */
+  binaries?: string[];
   /** The resolved agent-hardener.yaml content (for display). */
   manifest_yaml?: string;
   /** Victim port the war-game will target. */

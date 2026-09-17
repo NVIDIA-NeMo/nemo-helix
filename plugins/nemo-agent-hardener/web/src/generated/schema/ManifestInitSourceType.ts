@@ -8,7 +8,7 @@
  */
 
 /**
- * Scaffold source ('agent' or 'project').
+ * Where the victim comes from: a registered platform agent, or an uploaded project bundle.
  */
 export type ManifestInitSourceType = typeof ManifestInitSourceType[keyof typeof ManifestInitSourceType];
 

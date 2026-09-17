@@ -100,7 +100,7 @@ def _bundle_names(tmp_path: Path, project: Path) -> list[str]:
     """Run upload_project_dir against a stub uploader and return the zip's member names."""
     captured: dict[str, Path] = {}
 
-    def _fake_upload(_sdk: object, local_path: Path, *, workspace: str) -> str:
+    def _fake_upload(_sdk: object, local_path: Path, *, workspace: str, prefix: str = "hitlog") -> str:
         # The archive lives in a TemporaryDirectory that closes on return; copy it out first.
         kept = tmp_path / "bundle.zip"
         kept.write_bytes(local_path.read_bytes())
@@ -155,3 +155,20 @@ def test_upload_project_dir_rejects_an_empty_selection(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="no files to upload"):
         upload_project_dir(make_sdk(), empty, workspace="default")
+
+
+def test_upload_project_dir_names_the_fileset_for_a_project(tmp_path: Path) -> None:
+    """A project bundle must not land in a ``hitlog-`` fileset — the ref is all a later reader sees."""
+    captured: dict[str, str] = {}
+
+    def _fake_upload(_sdk: object, _local_path: Path, *, workspace: str, prefix: str = "hitlog") -> str:
+        captured["prefix"] = prefix
+        return f"{workspace}/{prefix}-abc123"
+
+    project = _make_project(tmp_path / "project")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(filesets, "upload_file_to_fileset", _fake_upload)
+        ref = upload_project_dir(make_sdk(), project, workspace="default")
+
+    assert captured["prefix"] == "project"
+    assert ref == "default/project-abc123"

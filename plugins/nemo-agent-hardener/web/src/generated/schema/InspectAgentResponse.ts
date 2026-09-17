@@ -17,6 +17,8 @@ export interface InspectAgentResponse {
   port: number;
   /** Secret names derived from the agent config. */
   secrets?: string[];
+  /** Hosts the agent's own config names (model endpoints, network MCP servers). Shown so the form does not read as 'no egress' for an agent that has some. */
+  egress?: string[];
   /** Non-fatal notes (e.g. no running deployment). */
   warnings?: string[];
 }

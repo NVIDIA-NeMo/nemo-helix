@@ -11,8 +11,8 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 
 // The validate-only run writes a `validation` job result: per-item attack/benign verdicts for the scorecard.
 const VALIDATION_RESULT = 'validation';
-// …and a `composed-workflow` result: the exact workflow YAML it validated, so "Apply to Agent" survives a reload.
-const COMPOSED_WORKFLOW_RESULT = 'composed-workflow';
+// …and a `composed-guardrails` result: the exact plugins.toml it validated, so "Apply to Agent" survives a reload.
+const COMPOSED_GUARDRAILS_RESULT = 'composed-guardrails';
 
 export interface ValidationAttackRow {
   attack_id?: string;
@@ -47,11 +47,11 @@ export interface ValidationReport {
 }
 
 interface ComposeDefenseResponse {
-  workflow_yaml?: string | null;
+  guardrails_toml?: string | null;
   policy_yaml?: string | null;
 }
 
-// Compose the chosen subset of a run's defenses into deployable workflow + policy YAML (server-side, so the
+// Compose the chosen subset of a run's defenses into a deployable plugins.toml + policy YAML (server-side, so the
 // same composition feeds the live preview and the sanity-check run). Sends the mitigations the client already
 // holds plus the selected ids.
 export const useComposeDefense = (workspace: string, runName: string) =>
@@ -73,7 +73,7 @@ interface SanityCheckSpec {
   driver: 'service';
   validate_only: true;
   replay_hitlog_fileset: string;
-  defense_workflow?: string;
+  defense_guardrails?: string;
   defense_policy?: string;
   // The harden run this check was launched from — recorded on the sanity run so the report re-attaches on reload.
   source_run: string;
@@ -114,14 +114,14 @@ export const useSanityCheckResult = (
   };
 };
 
-// Recover the composed workflow a sanity check validated (its `composed-workflow` result), so "Apply to Agent"
+// Recover the guardrail set a sanity check validated (its `composed-guardrails` result), so "Apply to Agent"
 // stays enabled after a reload when the in-memory copy is gone.
-export const useSanityCheckComposedWorkflow = (
+export const useSanityCheckComposedGuardrails = (
   workspace: string,
   jobName: string | undefined,
   status?: PlatformJobStatus
 ): string | undefined =>
-  useJobArtifact(workspace, jobName, COMPOSED_WORKFLOW_RESULT, parseText, status).data;
+  useJobArtifact(workspace, jobName, COMPOSED_GUARDRAILS_RESULT, parseText, status).data;
 
 // The run entity carries `source_run` (set on validate-only sanity checks); the generated type predates it.
 type RunWithSource = AgentHardenerRun & { source_run?: string; job_id?: string; name?: string };

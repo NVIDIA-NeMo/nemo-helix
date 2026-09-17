@@ -84,11 +84,6 @@ export const AgentHardenerManifestsDataView: FC = () => {
         </Text>
       ),
     }),
-    accessor('source_type', {
-      header: 'Source',
-      size: 120,
-      cell: ({ row }) => row.original.source_type ?? 'agent',
-    }),
     accessor('created_at', {
       id: 'created_at',
       header: 'Created',
@@ -134,7 +129,7 @@ export const AgentHardenerManifestsDataView: FC = () => {
             renderEmptyState: () => (
               <TableEmptyState
                 header="No manifests yet"
-                emptyMessage="Create a manifest from a deployed agent, then run the war-game against it."
+                emptyMessage="Create a manifest from a registered agent, then run the war-game against it. An agent that is not on the platform — bespoke orchestration, its own image — is war-gamed with the agent-hardener CLI instead."
                 actions={
                   <Button asChild color="brand">
                     <Link to={getNewAgentHardenerManifestRoute(workspace)}>New Manifest</Link>

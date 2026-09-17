@@ -29,6 +29,17 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AgentHardenerGetEventsParams,
+  AgentHardenerGetJobLogsParams,
+  AgentHardenerGetSynthBenignJobLogsParams,
+  AgentHardenerListJobsParams,
+  AgentHardenerListManifests200,
+  AgentHardenerListManifestsParams,
+  AgentHardenerListRuns200,
+  AgentHardenerListRunsParams,
+  AgentHardenerListSynthBenignJobsParams,
+  AgentHardenerManifest,
+  AgentHardenerRun,
   ApplyMitigationRequest,
   ApplyMitigationResponse,
   ComposeDefenseRequest,
@@ -41,17 +52,6 @@ import type {
   InspectAgentResponse,
   InspectProjectRequest,
   InspectProjectResponse,
-  AgentHardenerGetEventsParams,
-  AgentHardenerGetJobLogsParams,
-  AgentHardenerGetSynthBenignJobLogsParams,
-  AgentHardenerListJobsParams,
-  AgentHardenerListManifests200,
-  AgentHardenerListManifestsParams,
-  AgentHardenerListRuns200,
-  AgentHardenerListRunsParams,
-  AgentHardenerListSynthBenignJobsParams,
-  AgentHardenerManifest,
-  AgentHardenerRun,
   ManifestInit,
   ManifestUpdate,
   ModelConfigDefaults,
@@ -1588,7 +1588,7 @@ export function useAgentHardenerGetJobStatusSuspense<TData = Awaited<ReturnType<
 
 
 /**
- * List saved manifests in the workspace, with pagination and an ``agent``/``source_type`` filter.
+ * List saved manifests in the workspace, with pagination and an ``agent`` filter.
  * @summary List Manifests
  */
 export const agentHardenerListManifests = (
@@ -1750,7 +1750,7 @@ export function useAgentHardenerListManifestsSuspense<TData = Awaited<ReturnType
 
 
 /**
- * `init`: build a manifest (from a deployed agent or an uploaded project) and persist it by ``name``.
+ * `init`: resolve the named source into a manifest and persist it by ``name``.
  * @summary Create Manifest
  */
 export const agentHardenerCreateManifest = (
@@ -1814,76 +1814,6 @@ export const useAgentHardenerCreateManifest = <TError = ErrorType<HTTPValidation
         TContext
       > => {
       return useMutation(getAgentHardenerCreateManifestMutationOptions(options), queryClient);
-    }
-
-/**
- * Detect an uploaded NAT project's layout (`agent-hardener inspect`) to pre-fill the create wizard.
- *
- * Downloads the project bundle, expands it, and runs the read-only, offline detector — no code is
- * executed. Returns the discovered workflows, launch mode, name, secrets, and egress as defaults.
- * @summary Inspect Project
- */
-export const agentHardenerInspectProject = (
-    workspace: string,
-    inspectProjectRequest: InspectProjectRequest,
- signal?: AbortSignal
-) => {
-
-
-      return customFetch<InspectProjectResponse>(
-      {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/manifests/inspect`, method: 'POST',
-      headers: {'Content-Type': 'application/json', },
-      data: inspectProjectRequest, signal
-    },
-      );
-    }
-
-
-
-
-export const getAgentHardenerInspectProjectMutationOptions = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectProject>>, TError,{workspace: string;data: InspectProjectRequest}, TContext>, }
-): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectProject>>, TError,{workspace: string;data: InspectProjectRequest}, TContext> => {
-
-const mutationKey = ['agentHardenerInspectProject'];
-const {mutation: mutationOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerInspectProject>>, {workspace: string;data: InspectProjectRequest}> = (props) => {
-          const {workspace,data} = props ?? {};
-
-          return  agentHardenerInspectProject(workspace,data,)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type AgentHardenerInspectProjectMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerInspectProject>>>
-    export type AgentHardenerInspectProjectMutationBody = InspectProjectRequest
-    export type AgentHardenerInspectProjectMutationError = ErrorType<HTTPValidationError>
-
-    /**
- * @summary Inspect Project
- */
-export const useAgentHardenerInspectProject = <TError = ErrorType<HTTPValidationError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectProject>>, TError,{workspace: string;data: InspectProjectRequest}, TContext>, }
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof agentHardenerInspectProject>>,
-        TError,
-        {workspace: string;data: InspectProjectRequest},
-        TContext
-      > => {
-      return useMutation(getAgentHardenerInspectProjectMutationOptions(options), queryClient);
     }
 
 /**
@@ -1953,6 +1883,77 @@ export const useAgentHardenerInspectManifestsInspectAgentEndpoint = <TError = Er
         TContext
       > => {
       return useMutation(getAgentHardenerInspectManifestsInspectAgentEndpointMutationOptions(options), queryClient);
+    }
+
+/**
+ * Read an uploaded project bundle and report what it states about itself, and what it cannot.
+ *
+ * Read-only: the bundle is expanded into a temp dir and thrown away. Its purpose is to let the caller
+ * pre-fill everything derivable and prompt for only the rest, so bringing your own image is a short
+ * form rather than authoring a manifest.
+ * @summary Inspect Project Endpoint
+ */
+export const agentHardenerInspectManifestsInspectProjectEndpoint = (
+    workspace: string,
+    inspectProjectRequest: InspectProjectRequest,
+ signal?: AbortSignal
+) => {
+
+
+      return customFetch<InspectProjectResponse>(
+      {url: `/apis/agent-hardener/v2/workspaces/${encodeURIComponent(String(workspace))}/manifests/inspect-project`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: inspectProjectRequest, signal
+    },
+      );
+    }
+
+
+
+
+export const getAgentHardenerInspectManifestsInspectProjectEndpointMutationOptions = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectProjectEndpoint>>, TError,{workspace: string;data: InspectProjectRequest}, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectProjectEndpoint>>, TError,{workspace: string;data: InspectProjectRequest}, TContext> => {
+
+const mutationKey = ['agentHardenerInspectManifestsInspectProjectEndpoint'];
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectProjectEndpoint>>, {workspace: string;data: InspectProjectRequest}> = (props) => {
+          const {workspace,data} = props ?? {};
+
+          return  agentHardenerInspectManifestsInspectProjectEndpoint(workspace,data,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AgentHardenerInspectManifestsInspectProjectEndpointMutationResult = NonNullable<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectProjectEndpoint>>>
+    export type AgentHardenerInspectManifestsInspectProjectEndpointMutationBody = InspectProjectRequest
+    export type AgentHardenerInspectManifestsInspectProjectEndpointMutationError = ErrorType<HTTPValidationError>
+
+    /**
+ * @summary Inspect Project Endpoint
+ */
+export const useAgentHardenerInspectManifestsInspectProjectEndpoint = <TError = ErrorType<HTTPValidationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectProjectEndpoint>>, TError,{workspace: string;data: InspectProjectRequest}, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof agentHardenerInspectManifestsInspectProjectEndpoint>>,
+        TError,
+        {workspace: string;data: InspectProjectRequest},
+        TContext
+      > => {
+      return useMutation(getAgentHardenerInspectManifestsInspectProjectEndpointMutationOptions(options), queryClient);
     }
 
 /**
@@ -2932,10 +2933,14 @@ export const useAgentHardenerDeleteRun = <TError = ErrorType<HTTPValidationError
     }
 
 /**
- * Adopt a run's hardened workflow: write it onto the run's target agent config (no redeploy).
+ * Adopt a run's hardened guardrails onto the run's target agent config (no redeploy).
  *
- * Reverses the Inference-Gateway injection so the stored config stays deployment-neutral, then updates
- * the ``Agent`` entity in place. The user must redeploy the agent for the guardrails to take effect.
+ * This is the *only* place ``relay.components[]`` is produced. The guardrail runs from a plugins.toml
+ * inside the victim; the agent registry stores agent config, so adoption re-homes the same component
+ * onto the entity. Near-identity, not a translation: the ``config`` object is the one Relay loaded.
+ *
+ * Reverses the Inference-Gateway injection so the stored config stays deployment-neutral. The user
+ * must redeploy the agent for the guardrails to take effect.
  * @summary Apply Mitigation
  */
 export const agentHardenerApplyMitigation = (

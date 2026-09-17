@@ -755,3 +755,31 @@ include = [
 [tool.ty.overrides.rules]
 missing-argument = "ignore"
 unknown-argument = "ignore"
+
+# ty cannot see that a TypedDict satisfies langgraph 1.2's `StateT` bound
+# (`TypedDictLikeV1 | DataclassLike`), so any real `StateGraph(SomeTypedDict)` construction —
+# and the `CompiledStateGraph` it returns — fails these two rules. Every other StateGraph in
+# the repo lives inside a docstring, so this example victim is the only live construction.
+# Scoped to the one file and the two rules the limitation produces.
+[[tool.ty.overrides]]
+include = [
+  "plugins/nemo-agent-hardener/examples/langgraph-victim/agent.py",
+]
+
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+invalid-return-type = "ignore"
+
+# The platform venv pins nemo-relay 0.7.3 (the Fabric adapters cap it at <0.8), but this BYO
+# example image installs nemo-relay >= 0.8, whose typed API is incompatible with 0.7.3's
+# (`ToolExecutionResult` wrapper, `tool_call_id`). ty type-checks the example against the venv's
+# 0.7.3 and reports the 0.8 surface as missing. Scoped to the one file and the two rules the
+# version skew produces; expires when the Fabric cap lifts and the venv moves to >= 0.8.
+[[tool.ty.overrides]]
+include = [
+  "plugins/nemo-agent-hardener/examples/other-victim/agent.py",
+]
+
+[tool.ty.overrides.rules]
+unresolved-attribute = "ignore"
+no-matching-overload = "ignore"

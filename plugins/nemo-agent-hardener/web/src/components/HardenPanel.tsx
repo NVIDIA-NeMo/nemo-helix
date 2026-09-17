@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { usePlatformSdk } from '@agent-hardener/api/platform';
+import { ConfigDiff } from '@agent-hardener/components/ConfigDiff';
 import { SanityCheckReport } from '@agent-hardener/components/SanityCheckReport';
 import {
   cleanAttackPrompt,
@@ -12,12 +13,11 @@ import {
 import {
   useComposeDefense,
   useLatestSanityCheckJob,
-  useSanityCheckComposedWorkflow,
+  useSanityCheckComposedGuardrails,
   useSanityCheckResult,
   useSubmitSanityCheck,
 } from '@agent-hardener/components/useSanityCheck';
-import { YamlDiff } from '@agent-hardener/components/YamlDiff';
-import { useAgentHardenerApplyMitigation } from '@agent-hardener/generated/api';
+import { useAgentHardenerApplyMitigation, useAgentHardenerGetManifest } from '@agent-hardener/generated/api';
 import { useNotify, useToast } from '@agent-hardener/host';
 import { ACCENT, tint } from '@agent-hardener/theme';
 import { AccordionSection, ConfirmationModal, getJobRefetchInterval } from '@nemo/common';
@@ -48,8 +48,8 @@ interface HardenPanelProps {
   // switching away from and back to the Harden tab — the tab content unmounts on switch.
   sanityJob?: string;
   onSanityJobChange: (job: string | undefined) => void;
-  composedWorkflow?: string;
-  onComposedWorkflowChange: (workflow: string | undefined) => void;
+  composedGuardrails?: string;
+  onComposedGuardrailsChange: (guardrails: string | undefined) => void;
 }
 
 interface DefenseGroup {
@@ -71,6 +71,30 @@ const groupDefenses = (defenses: DefensePair[]): DefenseGroup[] => {
     byTool.get(tool)?.push(defense);
   }
   return order.map((tool) => ({ tool, items: byTool.get(tool) ?? [] }));
+};
+
+/**
+ * Whether "Apply to Agent" may be clicked.
+ *
+ * A project-source manifest has no registered agent to adopt onto; its run carries the *manifest*
+ * name in `agent`, so an apply targets whatever agent happens to share that name. Until the
+ * manifest query has actually succeeded, `isProjectSource` reads `false` by default — enabling on
+ * that default would open a window, while the query is loading or failed, to apply a mitigation to
+ * an unrelated same-named agent.
+ *
+ * Mirrors the API's own rule (`_reject_project_source`): a run with no manifest behind it — one
+ * launched from `run --config` — has no project-source claim to verify, and the API allows it.
+ * Gating those on a query that never runs would grey the button out permanently.
+ */
+export const canApplyMitigation = (params: {
+  hasComposedGuardrails: boolean;
+  hasManifestId: boolean;
+  manifestQuerySucceeded: boolean;
+  isProjectSource: boolean;
+}): boolean => {
+  if (!params.hasComposedGuardrails) return false;
+  if (!params.hasManifestId) return true;
+  return params.manifestQuerySucceeded && !params.isProjectSource;
 };
 
 // One defense: a scannable row (toggle · shield · rule · the attack it counters) that expands to the full
@@ -138,9 +162,9 @@ const DefenseRow: FC<{ defense: DefensePair; checked: boolean; onToggle: () => v
               MITIGATION{defense.target_tool ? ` · ${defense.target_tool}` : ''}
             </Text>
             <Text kind="body/regular/sm">{defense.summary}</Text>
-            {defense.yaml_fragment ? (
+            {defense.config_fragment ? (
               <pre className="max-h-56 overflow-auto rounded bg-surface-overlay p-2 text-xs text-primary">
-                {defense.yaml_fragment}
+                {defense.config_fragment}
               </pre>
             ) : null}
           </Stack>
@@ -163,8 +187,8 @@ export const HardenPanel: FC<HardenPanelProps> = ({
   hitlogFileset,
   sanityJob,
   onSanityJobChange,
-  composedWorkflow,
-  onComposedWorkflowChange,
+  composedGuardrails,
+  onComposedGuardrailsChange,
 }) => {
   const toast = useToast();
   const notify = useNotify();
@@ -194,16 +218,22 @@ export const HardenPanel: FC<HardenPanelProps> = ({
     isLoading: reportLoading,
     missingReport,
   } = useSanityCheckResult(workspace, effectiveSanityJob, sanityStatus);
-  // After a reload the in-memory composed workflow is gone; recover it from the sanity run so Apply still works.
-  const recoveredComposedWorkflow = useSanityCheckComposedWorkflow(
+  // After a reload the in-memory composed guardrail set is gone; recover it from the sanity run so Apply still works.
+  const recoveredComposedGuardrails = useSanityCheckComposedGuardrails(
     workspace,
     effectiveSanityJob,
     sanityStatus
   );
-  const effectiveComposedWorkflow = composedWorkflow ?? recoveredComposedWorkflow;
-  const [preview, setPreview] = useState<{ workflow?: string }>();
+  const effectiveComposedGuardrails = composedGuardrails ?? recoveredComposedGuardrails;
+  const [preview, setPreview] = useState<{ guardrails?: string }>();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const applyMitigation = useAgentHardenerApplyMitigation();
+  // A bring-your-own manifest has no registry entity to adopt onto: its run carries the *manifest*
+  // name in `agent`, so an apply would target whatever agent happens to share that name.
+  const manifestQuery = useAgentHardenerGetManifest(workspace, manifestId ?? '', {
+    query: { enabled: Boolean(manifestId) },
+  });
+  const isProjectSource = manifestQuery.data?.source_type === 'project';
 
   if (isLoading) {
     return (
@@ -216,7 +246,7 @@ export const HardenPanel: FC<HardenPanelProps> = ({
     );
   }
 
-  if (defenses.length === 0 && !mitigations?.workflow && !mitigations?.policy) {
+  if (defenses.length === 0 && !mitigations?.guardrails && !mitigations?.policy) {
     return (
       <Card className="p-6">
         <Text kind="body/regular/md" className="text-subtle">
@@ -250,7 +280,7 @@ export const HardenPanel: FC<HardenPanelProps> = ({
     });
 
   const composeSelection = async (): Promise<{
-    workflow_yaml?: string | null;
+    guardrails_toml?: string | null;
     policy_yaml?: string | null;
   } | null> => {
     if (!mitigations) return null;
@@ -264,7 +294,7 @@ export const HardenPanel: FC<HardenPanelProps> = ({
 
   const previewComposed = async () => {
     const composed = await composeSelection();
-    if (composed) setPreview({ workflow: composed.workflow_yaml ?? undefined });
+    if (composed) setPreview({ guardrails: composed.guardrails_toml ?? undefined });
   };
 
   const runSanityCheck = async () => {
@@ -272,7 +302,7 @@ export const HardenPanel: FC<HardenPanelProps> = ({
     if (!manifestId) return toast.error('This run has no manifest to validate against.');
     const composed = await composeSelection();
     if (!composed) return;
-    onComposedWorkflowChange(composed.workflow_yaml ?? undefined);
+    onComposedGuardrailsChange(composed.guardrails_toml ?? undefined);
     try {
       const job = await submit({
         manifest_id: manifestId,
@@ -280,7 +310,7 @@ export const HardenPanel: FC<HardenPanelProps> = ({
         validate_only: true,
         replay_hitlog_fileset: hitlogFileset,
         source_run: runName,
-        ...(composed.workflow_yaml ? { defense_workflow: composed.workflow_yaml } : {}),
+        ...(composed.guardrails_toml ? { defense_guardrails: composed.guardrails_toml } : {}),
         ...(composed.policy_yaml ? { defense_policy: composed.policy_yaml } : {}),
       });
       onSanityJobChange(job);
@@ -290,13 +320,13 @@ export const HardenPanel: FC<HardenPanelProps> = ({
     }
   };
 
-  const applyWorkflow = async (): Promise<boolean> => {
-    if (!effectiveComposedWorkflow) return false;
+  const applyGuardrails = async (): Promise<boolean> => {
+    if (!effectiveComposedGuardrails) return false;
     try {
       await applyMitigation.mutateAsync({
         workspace,
         name: runName,
-        data: { workflow_yaml: effectiveComposedWorkflow },
+        data: { guardrails_toml: effectiveComposedGuardrails },
       });
       return true;
     } catch {
@@ -319,10 +349,7 @@ export const HardenPanel: FC<HardenPanelProps> = ({
             sanity-check the selection, then apply to the agent.
           </Text>
           {/* Segmented coverage meter: one cell per defense, filled for the selected count. */}
-          <div
-            className="flex h-2 w-full gap-0.5"
-            aria-label={`${coverage}% of defenses selected`}
-          >
+          <div className="flex h-2 w-full gap-0.5" aria-label={`${coverage}% of defenses selected`}>
             {defenses.map((d, i) => (
               <div
                 key={d.id}
@@ -409,10 +436,14 @@ export const HardenPanel: FC<HardenPanelProps> = ({
         </Flex>
       </Flex>
 
-      {preview?.workflow && mitigations?.workflow ? (
+      {preview?.guardrails && mitigations?.guardrails ? (
         <AccordionRoot multiple defaultValue={['preview']}>
-          <AccordionSection value="preview" title="Composed workflow (your selection)">
-            <YamlDiff before={mitigations.workflow.before} after={preview.workflow} />
+          <AccordionSection value="preview" title="Composed guardrails (your selection)">
+            <ConfigDiff
+              before={mitigations.guardrails.before}
+              after={preview.guardrails}
+              language="toml"
+            />
           </AccordionSection>
         </AccordionRoot>
       ) : null}
@@ -423,12 +454,25 @@ export const HardenPanel: FC<HardenPanelProps> = ({
           {report ? (
             <>
               <SanityCheckReport report={report} />
-              <Flex justify="end">
+              <Flex justify="end" align="center" gap="density-sm" className="min-w-0">
+                {isProjectSource ? (
+                  <Text kind="body/regular/sm" className="text-subtle">
+                    This manifest brings its own image, so there is no registered agent to update —
+                    copy the guardrails into your project instead.
+                  </Text>
+                ) : null}
                 <Button
                   kind="primary"
                   size="small"
                   onClick={() => setConfirmOpen(true)}
-                  disabled={!effectiveComposedWorkflow}
+                  disabled={
+                    !canApplyMitigation({
+                      hasComposedGuardrails: Boolean(effectiveComposedGuardrails),
+                      hasManifestId: Boolean(manifestId),
+                      manifestQuerySucceeded: manifestQuery.isSuccess,
+                      isProjectSource,
+                    })
+                  }
                 >
                   Apply to Agent
                 </Button>
@@ -458,9 +502,9 @@ export const HardenPanel: FC<HardenPanelProps> = ({
         onNotify={notify}
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
-        onConfirm={applyWorkflow}
+        onConfirm={applyGuardrails}
         title={agentName ? `Apply selected defenses to ${agentName}?` : 'Apply selected defenses?'}
-        description="This overwrites the agent's stored workflow config with your selected guardrails. Redeploy the agent afterward to activate them."
+        description="This records your selected guardrails on the agent as Relay components. Redeploy the agent afterward to activate them."
         submitButtonText="Apply"
         successText="Applied. Redeploy the agent to activate the guardrails."
         errorText="Could not apply the selected defenses to the agent."

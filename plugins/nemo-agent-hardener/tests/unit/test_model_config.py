@@ -31,13 +31,13 @@ class _FakeSecrets:
 def _route_secrets_client(monkeypatch: Any) -> None:
     """``build_model_env`` resolves keys through ``client_from_platform(sdk, SecretsClient)``.
 
-    The sdk doubles here carry their client on ``.secrets``, so hand that back directly.
+    The sdk doubles here carry their typed client on ``.mock_secrets``, so hand that back directly.
     """
-    monkeypatch.setattr(_common, "client_from_platform", lambda sdk, _cls: sdk.secrets)
+    monkeypatch.setattr(_common, "client_from_platform", lambda sdk, _cls: sdk.mock_secrets)
 
 
 def _sdk(secrets: dict[str, str]) -> Any:
-    return SimpleNamespace(secrets=_FakeSecrets(secrets))
+    return SimpleNamespace(mock_secrets=_FakeSecrets(secrets))
 
 
 def test_build_model_env_maps_attack_and_analysis_groups() -> None:
@@ -88,13 +88,14 @@ def test_effective_models_none_when_nothing_selected(tmp_path: Path) -> None:
 
 def test_inject_gateway_url_never_rewrites_the_victims_model() -> None:
     """The victim's LLM is the target under test; the war-game binds its endpoint, never its model."""
-    config = {"llms": {"main": {"_type": "openai", "model": "orig"}, "other": {"_type": "nim", "model": "orig2"}}}
+    config = {"models": {"main": {"provider": "nvidia", "model": "orig"}, "other": {"model": "orig2"}}}
     injected = inject_gateway_url(config, "default", "https://gw")
-    assert injected["llms"]["main"]["model"] == "orig"
-    assert injected["llms"]["other"]["model"] == "orig2"
-    # base_url/api_key are still gateway-bound.
-    assert "/apis/inference-gateway/" in injected["llms"]["main"]["base_url"]
-    assert injected["llms"]["main"]["api_key"] == "not-used"
+    assert injected["models"]["main"]["model"] == "orig"
+    assert injected["models"]["other"]["model"] == "orig2"
+    # The endpoint is bound; the credential is not written into the config at all (the NAT path
+    # used to leave a literal "not-used" api_key here — Fabric binds it separately).
+    assert "/apis/inference-gateway/" in injected["models"]["main"]["base_url"]
+    assert "api_key" not in injected["models"]["main"]
 
 
 def test_preflight_probes_the_safety_group(monkeypatch: Any) -> None:
@@ -134,9 +135,9 @@ class _Secrets:
 
 
 def _sdk_with(secrets: _Secrets, monkeypatch: Any) -> Any:
-    """An sdk double carrying its typed client on ``.secrets``, per ``_route_secrets_client``."""
+    """An sdk double carrying its typed client on ``.mock_secrets``, per ``_route_secrets_client``."""
     del monkeypatch  # routing is handled by the autouse fixture
-    return SimpleNamespace(secrets=secrets)
+    return SimpleNamespace(mock_secrets=secrets)
 
 
 def _config_double(monkeypatch: Any, dotenv_key: str | None) -> None:

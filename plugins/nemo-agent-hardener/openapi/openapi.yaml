@@ -409,7 +409,7 @@ paths:
       tags:
       - Agent Hardener Manifests
       summary: List Manifests
-      description: List saved manifests in the workspace, with pagination and an ``agent``/``source_type``
+      description: List saved manifests in the workspace, with pagination and an ``agent``
         filter.
       operationId: list_manifests_apis_agent_hardener_v2_workspaces__workspace__manifests_get
       parameters:
@@ -475,8 +475,8 @@ paths:
       tags:
       - Agent Hardener Manifests
       summary: Create Manifest
-      description: '`init`: build a manifest (from a deployed agent or an uploaded
-        project) and persist it by ``name``.'
+      description: '`init`: resolve the named source into a manifest and persist it
+        by ``name``.'
       operationId: create_manifest_apis_agent_hardener_v2_workspaces__workspace__manifests_post
       parameters:
       - name: workspace
@@ -498,43 +498,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AgentHardenerManifest'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agent-hardener/v2/workspaces/{workspace}/manifests/inspect:
-    post:
-      tags:
-      - Agent Hardener Manifests
-      summary: Inspect Project
-      description: "Detect an uploaded NAT project's layout (`agent-hardener inspect`)\
-        \ to pre-fill the create wizard.\n\nDownloads the project bundle, expands\
-        \ it, and runs the read-only, offline detector \u2014 no code is\nexecuted.\
-        \ Returns the discovered workflows, launch mode, name, secrets, and egress\
-        \ as defaults."
-      operationId: inspect_project_apis_agent_hardener_v2_workspaces__workspace__manifests_inspect_post
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/InspectProjectRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/InspectProjectResponse'
         '422':
           description: Validation Error
           content:
@@ -573,6 +536,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InspectAgentResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agent-hardener/v2/workspaces/{workspace}/manifests/inspect-project:
+    post:
+      tags:
+      - Agent Hardener Manifests
+      summary: Inspect Project Endpoint
+      description: 'Read an uploaded project bundle and report what it states about
+        itself, and what it cannot.
+
+
+        Read-only: the bundle is expanded into a temp dir and thrown away. Its purpose
+        is to let the caller
+
+        pre-fill everything derivable and prompt for only the rest, so bringing your
+        own image is a short
+
+        form rather than authoring a manifest.'
+      operationId: inspect_project_endpoint_apis_agent_hardener_v2_workspaces__workspace__manifests_inspect_project_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InspectProjectRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InspectProjectResponse'
         '422':
           description: Validation Error
           content:
@@ -921,15 +927,24 @@ paths:
       tags:
       - Agent Hardener Runs
       summary: Apply Mitigation
-      description: 'Adopt a run''s hardened workflow: write it onto the run''s target
-        agent config (no redeploy).
+      description: 'Adopt a run''s hardened guardrails onto the run''s target agent
+        config (no redeploy).
 
 
-        Reverses the Inference-Gateway injection so the stored config stays deployment-neutral,
-        then updates
+        This is the *only* place ``relay.components[]`` is produced. The guardrail
+        runs from a plugins.toml
 
-        the ``Agent`` entity in place. The user must redeploy the agent for the guardrails
-        to take effect.'
+        inside the victim; the agent registry stores agent config, so adoption re-homes
+        the same component
+
+        onto the entity. Near-identity, not a translation: the ``config`` object is
+        the one Relay loaded.
+
+
+        Reverses the Inference-Gateway injection so the stored config stays deployment-neutral.
+        The user
+
+        must redeploy the agent for the guardrails to take effect.'
       operationId: apply_mitigation_apis_agent_hardener_v2_workspaces__workspace__runs__name__apply_mitigation_post
       parameters:
       - name: workspace
@@ -1494,58 +1509,49 @@ components:
           title: Project
           description: The name of the project associated with this entity.
           type: string
-        agent:
-          type: string
-          title: Agent
-          description: Deployed agent reference (workspace/name) this manifest targets.
-          default: ''
         source_type:
           type: string
           enum:
           - agent
           - project
           title: Source Type
-          description: How the manifest was built ('agent'|'project').
+          description: Where the victim came from. The run reads this to decide which
+            bundle field to expand.
           default: agent
+        agent:
+          type: string
+          title: Agent
+          description: Registered agent reference (workspace/name) this manifest targets.
+          default: ''
         project_fileset:
           type: string
           title: Project Fileset
-          description: Fileset ref holding the uploaded NAT project bundle (source_type
-            'project'); the run re-downloads it to a project_dir before launching
-            the victim.
+          description: Fileset ref holding the uploaded project bundle, for a 'project'
+            manifest. The run expands this instead of ``agent_fileset``.
           default: ''
         agent_fileset:
           type: string
           title: Agent Fileset
-          description: Fileset ref holding the scaffold resolved from the agent (source_type
-            'agent'). Empty on manifests created before targets were frozen; those
-            re-resolve once, then store a ref.
-          default: ''
-        workflow:
-          type: string
-          title: Workflow
-          description: Chosen workflow path within the project (project source, display).
-          default: ''
-        launch_mode:
-          type: string
-          title: Launch Mode
-          description: Victim launch mode ('workflow'|'byo'; project source).
+          description: "Fileset ref holding the agent package resolved from the agent\
+            \ \u2014 its config plus the Dockerfile that serves it. Empty on manifests\
+            \ created before targets were frozen; those re-resolve once, then store\
+            \ a ref."
           default: ''
         dockerfile:
           type: string
           title: Dockerfile
-          description: Project-relative Dockerfile the victim image is built from
-            ('byo' launch mode). Stored alongside launch_mode so a manifest says which
-            image it uses, not merely that it brings one.
+          description: Path within the package to the Dockerfile the victim image
+            is built from, so a manifest records which image it ran rather than only
+            that it had one.
           default: ''
         binaries:
           items:
             type: string
           type: array
           title: Binaries
-          description: In-container glob patterns scoping which processes may egress
-            ('byo' launch mode); agent-hardener requires them because a BYO image's
-            layout cannot be inferred.
+          description: In-container glob patterns scoping which processes may egress;
+            agent-hardener requires them because the layout of an image it did not
+            write cannot be inferred.
         manifest_yaml:
           type: string
           title: Manifest Yaml
@@ -1687,23 +1693,13 @@ components:
       - parent
       - db_version
       title: AgentHardenerManifest
-      description: 'A named, reusable war-game target scaffolded via `init` (its ``name``
-        is the user-defined id).
-
-
-        Both sources persist their victim project as a fileset the run re-downloads,
-        so a manifest is a
-
-        frozen target rather than a query re-evaluated each run: ``agent`` stores
-        the scaffold resolved
-
-        from a deployed agent ref, ``project`` stores an uploaded NAT project (which
-        is also how
-
-        custom-tool agents, unregistrable as config-only agents, are targeted). Editing
-        the agent does
-
-        not change an existing manifest until it is refreshed.'
+      description: "A named, reusable war-game target (``name`` is its id), from a\
+        \ registered agent or an uploaded project.\n\nEither way the package is persisted\
+        \ as a fileset the run re-downloads, so a manifest is a frozen\ntarget rather\
+        \ than a query re-evaluated each run: editing the agent does not change an\
+        \ existing\nmanifest until it is refreshed. A project manifest has nothing\
+        \ to refresh *from* \u2014 its bundle is the\nupload \u2014 which is why the\
+        \ two sources are distinguished rather than merged."
     AgentHardenerRun:
       properties:
         name:
@@ -1854,13 +1850,13 @@ components:
       description: A record of one Agent Hardener war-game run.
     ApplyMitigationRequest:
       properties:
-        workflow_yaml:
+        guardrails_toml:
           type: string
-          title: Workflow Yaml
-          description: Hardened NAT workflow YAML (the mitigations 'after' document).
+          title: Guardrails Toml
+          description: Hardened Relay guardrail set (the mitigations 'after' document).
       type: object
       required:
-      - workflow_yaml
+      - guardrails_toml
       title: ApplyMitigationRequest
       description: "Body for ``POST /v2/workspaces/{workspace}/runs/{name}/apply-mitigation``\
         \ \u2014 adopt the hardened workflow.\n\nThe client passes the hardened workflow\
@@ -1912,9 +1908,9 @@ components:
         \ live preview and to feed a sanity-check run."
     ComposeDefenseResponse:
       properties:
-        workflow_yaml:
-          title: Workflow Yaml
-          description: Workflow with only the selected guardrails, or null.
+        guardrails_toml:
+          title: Guardrails Toml
+          description: Plugin config with only the selected guardrails, or null.
           type: string
         policy_yaml:
           title: Policy Yaml
@@ -2010,6 +2006,14 @@ components:
           type: array
           title: Secrets
           description: Secret names derived from the agent config.
+        egress:
+          items:
+            type: string
+          type: array
+          title: Egress
+          description: Hosts the agent's own config names (model endpoints, network
+            MCP servers). Shown so the form does not read as 'no egress' for an agent
+            that has some.
         warnings:
           items:
             type: string
@@ -2028,75 +2032,90 @@ components:
         project_fileset:
           type: string
           title: Project Fileset
-          description: Fileset ref of the uploaded NAT project bundle to inspect.
+          description: Fileset ref of the uploaded project bundle to inspect.
+        dockerfile:
+          title: Dockerfile
+          description: Which Dockerfile builds the agent, when the bundle holds more
+            than one.
+          type: string
       type: object
       required:
       - project_fileset
       title: InspectProjectRequest
-      description: "Body for ``POST /v2/workspaces/{workspace}/manifests/inspect``\
-        \ \u2014 detect an uploaded project."
+      description: "Body for ``POST /v2/workspaces/{workspace}/manifests/inspect-project``\
+        \ \u2014 read an uploaded project."
     InspectProjectResponse:
       properties:
-        project_dir:
+        dockerfile:
           type: string
-          title: Project Dir
-          description: Detected installable project root (relative to the bundle).
+          title: Dockerfile
+          description: Dockerfile path relative to the project root.
           default: ''
-        workflows:
-          items:
-            type: string
-          type: array
-          title: Workflows
-          description: Discovered workflow paths (project-relative).
         dockerfiles:
           items:
             type: string
           type: array
           title: Dockerfiles
-          description: Discovered Dockerfile paths (project-relative).
-        suggested_launch_mode:
+          description: Every Dockerfile found, when the choice is ambiguous.
+        start_command:
           type: string
-          title: Suggested Launch Mode
-          description: '''workflow'' or ''byo''.'
-          default: workflow
-        default_agent_name:
-          type: string
-          title: Default Agent Name
-          description: Suggested agent name.
+          title: Start Command
+          description: Derived from the Dockerfile's ENTRYPOINT/CMD.
           default: ''
-        default_port:
-          type: integer
-          title: Default Port
-          description: Suggested victim port.
-          default: 8000
-        secrets_file:
-          type: string
-          title: Secrets File
-          description: Detected dotenv path (project-relative), or empty.
-          default: ''
-        secret_names:
+        binaries:
           items:
             type: string
           type: array
-          title: Secret Names
-          description: Secret names found in the dotenv file.
+          title: Binaries
+          description: Proposed interpreter globs, for confirmation.
+        port:
+          type: integer
+          title: Port
+          description: Derived from EXPOSE / ENV PORT.
+          default: 8000
+        secrets:
+          items:
+            type: string
+          type: array
+          title: Secrets
+          description: Secret names derived from .env and ENV.
         egress:
           items:
             type: string
           type: array
           title: Egress
-          description: External hosts the agent reaches (allow-list).
-        backend_ports:
+          description: Hosts the project's own files name.
+        env:
+          additionalProperties:
+            type: string
+          type: object
+          title: Env
+          description: Non-secret environment from the Dockerfile.
+        unresolved:
           items:
-            type: integer
+            type: string
           type: array
-          title: Backend Ports
-          description: Local host-backend ports detected in the workflow (localhost:PORT
-            the tools call).
+          title: Unresolved
+          description: Fields the project cannot state about itself; the caller must
+            supply these.
+        warnings:
+          items:
+            type: string
+          type: array
+          title: Warnings
+          description: Non-fatal notes about the derivation.
       type: object
       title: InspectProjectResponse
-      description: Detection facts + defaults for the upload wizard (the parsed ``agent-hardener
-        inspect --json`` output).
+      description: 'What the project states about itself, plus what it cannot.
+
+
+        ``unresolved`` is the contract with the caller: everything else on this model
+        is a usable value, and
+
+        these are the only fields a human still has to supply. It is the difference
+        between a form that asks
+
+        for everything and one that asks for what is genuinely unknowable.'
     ManifestFilter:
       additionalProperties: false
       description: Query filter for ``GET /v2/workspaces/{workspace}/manifests``.
@@ -2104,10 +2123,6 @@ components:
         agent:
           description: Filter to manifests for this agent reference.
           title: Agent
-          type: string
-        source_type:
-          description: Filter by source ('agent' or 'project').
-          title: Source Type
           type: string
       title: ManifestFilter
       type: object
@@ -2123,70 +2138,65 @@ components:
           - agent
           - project
           title: Source Type
-          description: Scaffold source ('agent' or 'project').
+          description: 'Where the victim comes from: a registered platform agent,
+            or an uploaded project bundle.'
           default: agent
         agent:
           title: Agent
-          description: Agent reference (required when source_type='agent').
+          description: Agent reference (``name`` or ``workspace/name``) to war-game.
+            Required when ``source_type`` is 'agent'.
           type: string
         project_fileset:
           title: Project Fileset
-          description: Fileset ref of the uploaded NAT project bundle.
-          type: string
-        manifest_yaml:
-          title: Manifest Yaml
-          description: Pre-built agent-hardener manifest (project source). The CLI
-            runs agent-hardener's own interactive `init` at the operator's terminal
-            and sends the result; omit it and the server builds one with `init --yes`,
-            which is what Studio does since it has no TTY.
-          type: string
-        workflow:
-          title: Workflow
-          description: Chosen workflow path within the project (project-relative).
-          type: string
-        launch_mode:
-          title: Launch Mode
-          description: 'Victim launch mode: ''workflow'' (a generic image built from
-            the project) or ''byo'' (built from the project''s own Dockerfile). ''byo''
-            needs either a `dockerfile` here or a `manifest_yaml` that already carries
-            one. Derived from the manifest when omitted.'
+          description: Fileset ref (``workspace/name``) of the uploaded project bundle.
+            Required when ``source_type`` is 'project'.
           type: string
         dockerfile:
           title: Dockerfile
-          description: "Project-relative Dockerfile to build the victim image from,\
-            \ instead of a generic one \u2014 for agents needing system packages or\
-            \ a custom base image. Requires `binaries`, and a `workflow` (given or\
-            \ detected): the image is how the environment is built, the workflow is\
-            \ what gets served and hardened. The image must carry a 'sandbox' user/group,\
-            \ iproute2, and `nat` on the default PATH."
+          description: Dockerfile path relative to the project root. Derived when
+            the project holds exactly one.
+          type: string
+        start_command:
+          title: Start Command
+          description: Command that serves the agent. Derived from the Dockerfile's
+            ENTRYPOINT/CMD when it is an exec form we can resolve.
           type: string
         binaries:
           title: Binaries
-          description: 'In-container glob patterns scoping which processes may egress,
-            e.g. ''/app/.venv/bin/**''. Required with `dockerfile`: a BYO image''s
-            layout is unknown, so the sandbox policy cannot infer it.'
+          description: Glob(s) matching the victim's interpreter, for the sandbox's
+            egress policy. A glob that matches no process grants nothing while looking
+            like it grants something, so this is confirmed rather than silently guessed.
           items:
             type: string
           type: array
+        harness:
+          title: Harness
+          description: Which harness the agent runs, so the run can say up front whether
+            a guardrail can refuse a tool call. Not knowable from the project.
+          type: string
+        relay_integration_confirmed:
+          type: boolean
+          title: Relay Integration Confirmed
+          description: The author confirms NeMo Relay is attached (middleware + plugin.initialize()).
+            Not knowable from the project; without Relay the victim emits no telemetry
+            and cannot be scored.
+          default: false
         port:
           title: Port
           description: Victim port (defaults to 8000).
           type: integer
         secrets:
           title: Secrets
-          description: Secret names the victim requires.
+          description: Env-var names the victim requires. Derived from the agent's
+            own declarations (``models.*.api_key_env``, MCP server env) when omitted.
           items:
             type: string
           type: array
-        secrets_file:
-          title: Secrets File
-          description: Dotenv path within the project holding the secrets.
-          type: string
         egress:
           title: Egress
           description: Allow-listed egress host[:port] entries the victim may reach
-            (external hosts the agent calls, e.g. inference-api.nvidia.com); baked
-            into the manifest by `init --egress`.
+            (external hosts the agent calls, e.g. inference-api.nvidia.com). The sandbox
+            is default-deny, so a host missing here has its traffic dropped mid-run.
           items:
             type: string
           type: array
@@ -2203,7 +2213,7 @@ components:
           title: Backends
           description: Route-only host backends the agent's tools call, each 'NAME:PORT[,PORT2]'
             (e.g. 'finance:8086'). Rewrites the agent's localhost:PORT to host.docker.internal:PORT
-            and opens the sandbox->host route; passed to `init --backend`.
+            and opens the sandbox->host route.
           items:
             type: string
           type: array
@@ -2217,9 +2227,12 @@ components:
       - name
       title: ManifestInit
       description: "Body for ``POST /v2/workspaces/{workspace}/manifests`` \u2014\
-        \ scaffold a named manifest.\n\n``agent`` resolves a deployed agent; ``project``\
-        \ builds the manifest from an uploaded NAT project\n(``project_fileset`` +\
-        \ the confirmed detection answers) by shelling ``agent-hardener init --yes``."
+        \ scaffold a named manifest.\n\nTwo sources. ``agent`` is a registered platform\
+        \ agent, which the resolver reads and renders.\n``project`` is an uploaded\
+        \ project bundle \u2014 an image whose author owns the Dockerfile, which a\n\
+        Fabric ``agent.yaml`` cannot express. The user never writes ``agent-hardener.yaml``\
+        \ either way: the\nproject source derives it and asks only for the fields\
+        \ a project cannot state about itself."
     ManifestUpdate:
       properties:
         benign_suite:
@@ -3109,8 +3122,8 @@ components:
           type: boolean
           title: Validate Only
           default: false
-        defense_workflow:
-          title: Defense Workflow
+        defense_guardrails:
+          title: Defense Guardrails
           type: string
         defense_policy:
           title: Defense Policy

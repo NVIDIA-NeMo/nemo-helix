@@ -22,7 +22,6 @@ AGENT_HARDENER_RUN_TYPE = "agent_hardener_run"
 AGENT_HARDENER_MANIFEST_TYPE = "agent_hardener_manifest"
 
 RunStatus = Literal["running", "completed", "failed"]
-ManifestSource = Literal["agent", "project"]
 
 
 class AgentHardenerRun(NemoEntity, entity_type=AGENT_HARDENER_RUN_TYPE):
@@ -61,38 +60,39 @@ class AgentHardenerRun(NemoEntity, entity_type=AGENT_HARDENER_RUN_TYPE):
 
 
 class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE):
-    """A named, reusable war-game target scaffolded via `init` (its ``name`` is the user-defined id).
+    """A named, reusable war-game target (``name`` is its id), from a registered agent or an uploaded project.
 
-    Both sources persist their victim project as a fileset the run re-downloads, so a manifest is a
-    frozen target rather than a query re-evaluated each run: ``agent`` stores the scaffold resolved
-    from a deployed agent ref, ``project`` stores an uploaded NAT project (which is also how
-    custom-tool agents, unregistrable as config-only agents, are targeted). Editing the agent does
-    not change an existing manifest until it is refreshed.
+    Either way the package is persisted as a fileset the run re-downloads, so a manifest is a frozen
+    target rather than a query re-evaluated each run: editing the agent does not change an existing
+    manifest until it is refreshed. A project manifest has nothing to refresh *from* — its bundle is the
+    upload — which is why the two sources are distinguished rather than merged.
     """
 
-    agent: str = Field(default="", description="Deployed agent reference (workspace/name) this manifest targets.")
-    source_type: ManifestSource = Field(default="agent", description="How the manifest was built ('agent'|'project').")
+    source_type: Literal["agent", "project"] = Field(
+        default="agent",
+        description="Where the victim came from. The run reads this to decide which bundle field to expand.",
+    )
+    agent: str = Field(default="", description="Registered agent reference (workspace/name) this manifest targets.")
     project_fileset: str = Field(
         default="",
-        description="Fileset ref holding the uploaded NAT project bundle (source_type 'project'); the run "
-        "re-downloads it to a project_dir before launching the victim.",
+        description="Fileset ref holding the uploaded project bundle, for a 'project' manifest. The run "
+        "expands this instead of ``agent_fileset``.",
     )
     agent_fileset: str = Field(
         default="",
-        description="Fileset ref holding the scaffold resolved from the agent (source_type 'agent'). Empty "
-        "on manifests created before targets were frozen; those re-resolve once, then store a ref.",
+        description="Fileset ref holding the agent package resolved from the agent — its config plus the "
+        "Dockerfile that serves it. Empty on manifests created before targets were frozen; those "
+        "re-resolve once, then store a ref.",
     )
-    workflow: str = Field(default="", description="Chosen workflow path within the project (project source, display).")
-    launch_mode: str = Field(default="", description="Victim launch mode ('workflow'|'byo'; project source).")
     dockerfile: str = Field(
         default="",
-        description="Project-relative Dockerfile the victim image is built from ('byo' launch mode). Stored "
-        "alongside launch_mode so a manifest says which image it uses, not merely that it brings one.",
+        description="Path within the package to the Dockerfile the victim image is built from, so a manifest "
+        "records which image it ran rather than only that it had one.",
     )
     binaries: list[str] = Field(
         default_factory=list,
-        description="In-container glob patterns scoping which processes may egress ('byo' launch mode); "
-        "agent-hardener requires them because a BYO image's layout cannot be inferred.",
+        description="In-container glob patterns scoping which processes may egress; agent-hardener requires them "
+        "because the layout of an image it did not write cannot be inferred.",
     )
     manifest_yaml: str = Field(default="", description="The resolved agent-hardener.yaml content (for display).")
     port: int = Field(default=0, description="Victim port the war-game will target.")
@@ -168,9 +168,46 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
             name=name,
             workspace=workspace,
             agent=agent_ref,
-            source_type="agent",
             manifest_yaml=manifest_yaml,
             agent_fileset=agent_fileset,
+            port=port,
+            secrets=secrets,
+            egress=egress or [],
+            env=env or {},
+            warnings=warnings,
+            models=models or WarGameModels(),
+        )
+
+    @classmethod
+    def from_project_upload(
+        cls,
+        *,
+        name: str,
+        workspace: str,
+        project_fileset: str,
+        manifest_yaml: str,
+        dockerfile: str,
+        binaries: list[str],
+        port: int,
+        secrets: list[str],
+        warnings: list[str],
+        egress: list[str] | None = None,
+        env: dict[str, str] | None = None,
+        models: WarGameModels | None = None,
+    ) -> AgentHardenerManifest:
+        """Build a ``project``-source manifest entity from an uploaded bundle and its derivation.
+
+        ``agent`` stays empty: there is no registered agent behind a project manifest, and inventing a
+        reference for one would make it look refreshable when nothing exists to refresh against.
+        """
+        return cls(
+            name=name,
+            workspace=workspace,
+            source_type="project",
+            project_fileset=project_fileset,
+            manifest_yaml=manifest_yaml,
+            dockerfile=dockerfile,
+            binaries=binaries,
             port=port,
             secrets=secrets,
             egress=egress or [],

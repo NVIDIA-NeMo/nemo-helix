@@ -14,6 +14,6 @@
  * the Inference-Gateway injection and writes it onto the run's target agent config (no redeploy).
  */
 export interface ApplyMitigationRequest {
-  /** Hardened NAT workflow YAML (the mitigations 'after' document). */
-  workflow_yaml: string;
+  /** Hardened Relay guardrail set (the mitigations 'after' document). */
+  guardrails_toml: string;
 }

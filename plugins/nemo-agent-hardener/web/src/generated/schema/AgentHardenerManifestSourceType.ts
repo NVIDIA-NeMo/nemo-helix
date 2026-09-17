@@ -8,7 +8,7 @@
  */
 
 /**
- * How the manifest was built ('agent'|'project').
+ * Where the victim came from. The run reads this to decide which bundle field to expand.
  */
 export type AgentHardenerManifestSourceType = typeof AgentHardenerManifestSourceType[keyof typeof AgentHardenerManifestSourceType];
 

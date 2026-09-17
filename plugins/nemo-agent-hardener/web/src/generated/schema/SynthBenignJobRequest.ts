@@ -7,6 +7,7 @@
  * agent-hardener (plugin)
  */
 import type { SynthBenignJobRequestCustomFields } from './SynthBenignJobRequestCustomFields.ts';
+import type { SynthBenignJobRequestOptions } from './SynthBenignJobRequestOptions.ts';
 import type { SynthBenignJobRequestOwnership } from './SynthBenignJobRequestOwnership.ts';
 import type { SynthBenignSpec } from './SynthBenignSpec.ts';
 
@@ -15,6 +16,8 @@ export interface SynthBenignJobRequest {
   description?: string;
   project?: string;
   spec: SynthBenignSpec;
+  profile?: string;
+  options?: SynthBenignJobRequestOptions;
   ownership?: SynthBenignJobRequestOwnership;
   custom_fields?: SynthBenignJobRequestCustomFields;
   output_location?: string;

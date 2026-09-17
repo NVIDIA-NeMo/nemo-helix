@@ -34,6 +34,65 @@ def test_probe_auth_failure() -> None:
     assert result.reachable and not result.auth_ok
 
 
+def test_probe_sends_the_credential_over_https() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["authorization"] = req.headers.get("authorization")
+        return httpx.Response(200, json={"data": []})
+
+    probe_models("https://x/v1", "secret-key", client=_client(handler))
+    assert captured["authorization"] == "Bearer secret-key"
+
+
+def test_probe_never_sends_the_credential_over_plain_http() -> None:
+    """An http:// endpoint would carry the key in the clear; withhold it instead."""
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["authorization"] = req.headers.get("authorization")
+        return httpx.Response(200, json={"data": []})
+
+    result = probe_models("http://attacker.example/v1", "secret-key", client=_client(handler))
+    assert captured["authorization"] is None
+    # Still probed for reachability — withholding the credential isn't the same as refusing to try.
+    assert result.reachable
+
+
+def test_a_withheld_credential_explains_itself_instead_of_blaming_the_key() -> None:
+    """A bare 'HTTP 401' here would send the user off to rotate a perfectly good credential."""
+    result = probe_models("http://x/v1", "secret-key", client=_client(lambda _r: httpx.Response(401)))
+
+    assert not result.auth_ok
+    assert "withheld" in result.detail and "http://" in result.detail
+
+    verdict = validate_choice("a/model", "http://x/v1", "secret-key", client=_client(lambda _r: httpx.Response(401)))
+    assert not verdict.ok and verdict.reason == "auth"
+    assert "withheld" in verdict.detail
+
+
+def test_a_plain_http_endpoint_needing_no_credential_still_validates() -> None:
+    """Withholding the header must not break an open endpoint — the probe still runs."""
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"id": "real/model"}]})
+
+    verdict = validate_choice("real/model", "http://x/v1", "secret-key", client=_client(handler))
+    assert verdict.ok
+
+
+def test_probe_allows_the_credential_over_plain_http_localhost() -> None:
+    """A local dev inference server has no network hop to leak the credential over."""
+    captured: dict[str, Any] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["authorization"] = req.headers.get("authorization")
+        return httpx.Response(200, json={"data": []})
+
+    probe_models("http://localhost:8000/v1", "secret-key", client=_client(handler))
+    assert captured["authorization"] == "Bearer secret-key"
+
+
 def test_probe_no_model_list_is_soft_pass() -> None:
     result = probe_models("https://x/v1", "key", client=_client(lambda _r: httpx.Response(404)))
     assert result.reachable and result.auth_ok and not result.list_supported

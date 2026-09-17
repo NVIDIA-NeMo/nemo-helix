@@ -6,12 +6,12 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-import yaml
 from _doubles import make_sdk
 from nemo_agent_hardener_plugin.cli import _shared
 from nemo_agent_hardener_plugin.jobs.defenses import defense_ids, select_defense_ids
@@ -19,16 +19,17 @@ from typer.testing import CliRunner
 
 
 def _mitigations() -> dict:
-    workflow = yaml.safe_dump(
-        {
-            "middleware": {
-                "custom_guardrail_1": {"_type": "pre_tool_verifier"},
-                "custom_guardrail_2": {"_type": "pre_tool_verifier"},
-            }
-        }
+    guardrails = (
+        "version = 1\n"
+        "[[components]]\n"
+        'kind = "agent_hardener.pre_tool_verifier"\n'
+        "[[components.config.guardrails]]\n"
+        'name = "custom_guardrail_1"\n'
+        "[[components.config.guardrails]]\n"
+        'name = "custom_guardrail_2"\n'
     )
     return {
-        "workflow": {"before": "{}\n", "after": workflow},
+        "guardrails": {"before": "version = 1\n", "after": guardrails},
         "policy": {"before": "v: 1\n", "after": "v: 1\nhardened: true\n"},
         "defenses": [
             {"id": "custom_guardrail_1", "kind": "guardrail"},
@@ -78,9 +79,10 @@ def test_sdk_sanity_check_composes_and_builds_validate_only_spec(monkeypatch: py
     assert spec["validate_only"] is True
     assert spec["driver"] == "service"
     assert spec["replay_hitlog_fileset"] == "default/hits"
-    # Composed workflow keeps only guardrail_1; policy not selected → baseline policy.
-    workflow = yaml.safe_load(spec["defense_workflow"])
-    assert set(workflow["middleware"]) == {"custom_guardrail_1"}
+    # The composed guardrail set keeps only guardrail_1; policy not selected → baseline policy.
+    composed = tomllib.loads(spec["defense_guardrails"])
+    rails = [rail["name"] for entry in composed["components"] for rail in entry["config"]["guardrails"]]
+    assert rails == ["custom_guardrail_1"]
     assert spec["defense_policy"] == "v: 1\n"
 
 

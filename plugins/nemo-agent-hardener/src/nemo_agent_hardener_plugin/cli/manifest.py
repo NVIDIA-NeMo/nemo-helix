@@ -15,6 +15,7 @@ import typer
 from nemo_agent_hardener_plugin.cli._shared import (
     ATTACK_INTENSITIES,
     command_context,
+    json_mapping,
     merge_models,
     models_from_flags,
     parse_env_pairs,
@@ -40,7 +41,7 @@ def build_app() -> typer.Typer:
         # No preflight: reading a manifest record doesn't need Docker/OpenShell/the venvs.
         ctx = command_context(workspace, preflight=False)
         try:
-            record = ctx.sdk.agent_hardener.manifests.get(name, workspace=ctx.workspace)
+            record = ctx.agent_hardener.manifests.get(name, workspace=ctx.workspace)
         except Exception as exc:
             typer.secho(f"Error: could not read manifest {name!r} — {exc}", fg="red")
             raise typer.Exit(code=1) from exc
@@ -134,9 +135,9 @@ def build_app() -> typer.Typer:
             if chosen_models:
                 # PATCH replaces `models` wholesale, so merge over the stored selection first — otherwise
                 # setting one group would silently clear the others.
-                stored = ctx.sdk.agent_hardener.manifests.get(name, workspace=ctx.workspace).get("models") or {}
+                stored = json_mapping(ctx.agent_hardener.manifests.get(name, workspace=ctx.workspace).get("models"))
                 body["models"] = merge_models(stored, chosen_models)
-            ctx.sdk.agent_hardener.manifests.update(name, workspace=ctx.workspace, **body)
+            ctx.agent_hardener.manifests.update(name, workspace=ctx.workspace, **body)
         except Exception as exc:
             typer.secho(f"Error: could not update manifest {name!r} — {exc}", fg="red")
             raise typer.Exit(code=1) from exc

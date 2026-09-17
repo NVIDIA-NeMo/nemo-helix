@@ -15,7 +15,6 @@ manifest only via ``POST /manifests/{name}/refresh`` — which ``apply-mitigatio
 
 from __future__ import annotations
 
-import json
 import logging
 import subprocess
 import tempfile
@@ -45,12 +44,12 @@ from nemo_agent_hardener_plugin.api.v2.schemas import (
 )
 from nemo_agent_hardener_plugin.authz import scope
 from nemo_agent_hardener_plugin.cli.client import base_url
-from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
 from nemo_agent_hardener_plugin.filesets import delete_fileset, download_and_extract_project, upload_project_dir
 from nemo_agent_hardener_plugin.jobs._common import resolve_model_key
 from nemo_agent_hardener_plugin.model_config import ModelConfigDefaults, WarGameModels, model_config_defaults
 from nemo_agent_hardener_plugin.model_preflight import validate_choice
+from nemo_agent_hardener_plugin.project_resolver import build_project_manifest_dict, inspect_project
 from nemo_platform_plugin.authz import CallerKind, path_rule
 from nemo_platform_plugin.entity_client import (
     NemoEntitiesClient,
@@ -112,7 +111,7 @@ async def list_manifests(
     filter: ManifestFilter = Depends(_manifest_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> dict:
-    """List saved manifests in the workspace, with pagination and an ``agent``/``source_type`` filter."""
+    """List saved manifests in the workspace, with pagination and an ``agent`` filter."""
     filter_dict = filter if isinstance(filter, dict) else filter.model_dump(exclude_none=True)
     try:
         result = await entity_client.list(
@@ -186,42 +185,6 @@ async def validate_model_config(workspace: str, body: ValidateModelRequest) -> V
     return await run_in_threadpool(_validate)
 
 
-@router.post("/manifests/inspect", response_model=InspectProjectResponse, tags=["Agent Hardener Manifests"])
-@scope.read
-@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AgentHardenerManifestPerms.INSPECT])
-async def inspect_project(
-    workspace: str,
-    body: InspectProjectRequest,
-) -> InspectProjectResponse:
-    """Detect an uploaded NAT project's layout (`agent-hardener inspect`) to pre-fill the create wizard.
-
-    Downloads the project bundle, expands it, and runs the read-only, offline detector — no code is
-    executed. Returns the discovered workflows, launch mode, name, secrets, and egress as defaults.
-    """
-    sdk = get_platform_sdk(as_service="agent-hardener", internal=True)
-    bin_path = AgentHardenerConfig.get().agent_hardener_bin
-
-    def _inspect() -> dict:
-        with tempfile.TemporaryDirectory() as tmp:
-            project_dir = download_and_extract_project(sdk, body.project_fileset, Path(tmp))
-            result = _run_agent_hardener(
-                [str(bin_path), "inspect", "--project-dir", str(project_dir), "--json"],
-                cwd=str(project_dir),
-                action="inspect",
-            )
-            return json.loads(result.stdout)
-
-    try:
-        detected = await run_in_threadpool(_inspect)
-    except _SubprocessTimeout as exc:
-        raise HTTPException(status_code=504, detail=f"Failed to inspect project: {exc}") from exc
-    except _SubprocessError as exc:
-        raise HTTPException(status_code=400, detail=f"Failed to inspect project: {exc}") from exc
-    except (ValueError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=400, detail=f"Could not read the uploaded project: {exc}") from exc
-    return InspectProjectResponse(**detected)
-
-
 @router.post("/manifests/inspect-agent", response_model=InspectAgentResponse, tags=["Agent Hardener Manifests"])
 @scope.read
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AgentHardenerManifestPerms.INSPECT])
@@ -232,14 +195,66 @@ async def inspect_agent_endpoint(workspace: str, body: InspectAgentRequest) -> I
     """
     sdk = get_platform_sdk(as_service="agent-hardener", internal=True)
 
-    def _inspect() -> tuple[str, int, list[str], list[str]]:
+    def _inspect() -> tuple[str, int, list[str], list[str], list[str]]:
         return inspect_agent(body.agent, sdk=sdk, default_workspace=workspace)
 
     try:
-        ref, port, secrets, warnings = await run_in_threadpool(_inspect)
+        ref, port, secrets, egress, warnings = await run_in_threadpool(_inspect)
     except AgentResolutionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return InspectAgentResponse(agent=ref, port=port, secrets=secrets, warnings=warnings)
+    return InspectAgentResponse(agent=ref, port=port, secrets=secrets, egress=egress, warnings=warnings)
+
+
+@router.post("/manifests/inspect-project", response_model=InspectProjectResponse, tags=["Agent Hardener Manifests"])
+@scope.read
+@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AgentHardenerManifestPerms.INSPECT])
+async def inspect_project_endpoint(workspace: str, body: InspectProjectRequest) -> InspectProjectResponse:
+    """Read an uploaded project bundle and report what it states about itself, and what it cannot.
+
+    Read-only: the bundle is expanded into a temp dir and thrown away. Its purpose is to let the caller
+    pre-fill everything derivable and prompt for only the rest, so bringing your own image is a short
+    form rather than authoring a manifest.
+    """
+    sdk = get_platform_sdk(as_service="agent-hardener", internal=True)
+
+    def _inspect() -> dict[str, Any]:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = download_and_extract_project(sdk, body.project_fileset, Path(tmp))
+            return inspect_project(project_dir, dockerfile=body.dockerfile or None)
+
+    try:
+        derived = await run_in_threadpool(_inspect)
+    except ValueError as exc:  # unsafe/absent archive from extract_zip_safely
+        raise HTTPException(status_code=400, detail=f"Could not read the project bundle: {exc}") from exc
+    return InspectProjectResponse(**derived)
+
+
+def _yaml_with_agent_settings(manifest_yaml: str, manifest: AgentHardenerManifest) -> str:
+    """Return *manifest_yaml* with the manifest's stored agent settings written into it.
+
+    The run layers these on at materialization anyway, so this is not what makes them take effect —
+    it is what makes the stored YAML *honest*. Without it the manifest we show (and that `init -o`
+    writes) is the frozen base rather than what will actually run, so an operator who sets `env` sees
+    no trace of it and reasonably concludes it was lost.
+
+    Unparseable YAML is returned untouched: a display concern must never cost someone their manifest.
+    """
+    try:
+        data = yaml.safe_load(manifest_yaml) or {}
+    except yaml.YAMLError:
+        return manifest_yaml
+    if not (isinstance(data, dict) and isinstance(data.get("agent"), dict)):
+        return manifest_yaml
+    agent = data["agent"]
+    if manifest.port:
+        agent["port"] = manifest.port
+    if manifest.egress:
+        agent["egress"] = list(manifest.egress)
+    if manifest.secrets:
+        agent["secrets"] = list(manifest.secrets)
+    if manifest.env:
+        agent["env"] = dict(manifest.env)
+    return yaml.safe_dump(data, sort_keys=False)
 
 
 @router.post("/manifests", response_model=AgentHardenerManifest, status_code=201, tags=["Agent Hardener Manifests"])
@@ -250,11 +265,12 @@ async def create_manifest(
     body: ManifestInit,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AgentHardenerManifest:
-    """`init`: build a manifest (from a deployed agent or an uploaded project) and persist it by ``name``."""
-    if body.source_type == "project":
-        manifest = await _build_project_manifest(workspace, body)
-    else:
-        manifest = await _build_agent_manifest(workspace, body)
+    """`init`: resolve the named source into a manifest and persist it by ``name``."""
+    manifest = (
+        await _build_project_manifest(workspace, body)
+        if body.source_type == "project"
+        else await _build_agent_manifest(workspace, body)
+    )
     try:
         return await entity_client.create(manifest)
     except NemoEntityConflictError as exc:
@@ -286,7 +302,7 @@ async def _resolve_and_store_scaffold(
 ) -> tuple[ResolvedManifest, str]:
     """Resolve *agent_ref* and persist its scaffold as a fileset; return the resolution and the ref.
 
-    Resolution *writes* an installable project (``scaffold_project`` + ``materialize_workflow``), so
+    Resolution *writes* a runnable agent package (``materialize_agent_package``), so
     the scaffold is an artifact, not a by-product. Storing it is what makes a manifest a frozen
     target: the run downloads this instead of re-resolving, so nothing it depends on can be silently
     re-derived. Shared by create and refresh — the only two ways a scaffold is produced.
@@ -319,11 +335,12 @@ async def _resolve_and_store_scaffold(
 
 async def _build_agent_manifest(workspace: str, body: ManifestInit) -> AgentHardenerManifest:
     """Resolve a deployed agent into a manifest and freeze its scaffold as a fileset."""
-    if not body.agent:
-        raise HTTPException(status_code=422, detail="source_type 'agent' requires an 'agent' reference.")
 
+    # ManifestInit's validator guarantees this for the agent source; the annotation is Optional
+    # because the project source has no agent, and the type system cannot see the validator.
+    agent_ref = body.agent or ""
     resolved, fileset = await _resolve_and_store_scaffold(
-        workspace, body.agent, egress=body.egress, port=body.port, secrets=body.secrets
+        workspace, agent_ref, egress=body.egress, port=body.port, secrets=body.secrets
     )
 
     manifest = AgentHardenerManifest.from_agent_resolution(
@@ -334,7 +351,7 @@ async def _build_agent_manifest(workspace: str, body: ManifestInit) -> AgentHard
         agent_fileset=fileset,
         port=resolved.port,
         secrets=resolved.secrets,
-        egress=body.egress or [],  # persisted, not just used for the resolve above
+        egress=resolved.egress,  # what was actually written, including hosts derived from the config
         env=body.env or {},
         warnings=resolved.warnings,
         models=body.models or WarGameModels(),
@@ -344,191 +361,76 @@ async def _build_agent_manifest(workspace: str, body: ManifestInit) -> AgentHard
     return manifest
 
 
-def _validate_launch_mode(body: ManifestInit) -> None:
-    """Reject a launch mode we can't build, before the bundle is downloaded."""
-    if body.launch_mode and body.launch_mode not in ("workflow", "byo"):
-        raise HTTPException(
-            status_code=422, detail=f"launch_mode must be 'workflow' or 'byo'; got {body.launch_mode!r}."
-        )
-    if body.launch_mode == "byo" and not body.dockerfile and not body.manifest_yaml:
-        raise HTTPException(
-            status_code=422,
-            detail="launch_mode 'byo' requires a 'dockerfile' (or a 'manifest_yaml' that already sets one).",
-        )
-    if body.dockerfile and not body.binaries:
-        # agent-hardener's NatVictimSpec rejects BYO without them.
-        raise HTTPException(
-            status_code=422,
-            detail="'dockerfile' requires 'binaries' — glob patterns scoping which processes may egress, "
-            "e.g. ['/app/.venv/bin/**'].",
-        )
-
-
 async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHardenerManifest:
-    """Build a manifest from an uploaded NAT project by shelling ``agent-hardener init --yes``.
+    """Build a manifest from an uploaded project bundle, deriving everything the project states.
 
-    The bundle is expanded to a temp dir and ``init`` runs there (so ``project_dir`` resolves to ``.``);
-    the war-game re-downloads the bundle and repoints ``project_dir`` at the restored copy.
+    The bundle is already a fileset, so unlike the agent path there is nothing to materialize and
+    nothing to freeze — the upload *is* the frozen target. Caller-supplied values win over derived
+    ones: they were asked for precisely because the project could not state them.
     """
-    fileset = body.project_fileset
-    if not fileset:
-        raise HTTPException(status_code=422, detail="source_type 'project' requires a 'project_fileset'.")
-    _validate_launch_mode(body)
-
     sdk = get_platform_sdk(as_service="agent-hardener", internal=True)
-    bin_path = AgentHardenerConfig.get().agent_hardener_bin
-    port = body.port or 8000
 
-    def _init() -> str:
+    def _inspect() -> dict[str, Any]:
         with tempfile.TemporaryDirectory() as tmp:
-            project_dir = download_and_extract_project(sdk, fileset, Path(tmp))
-            output = Path(tmp) / "agent-hardener.yaml"
-            cmd = [
-                str(bin_path),
-                "init",
-                "--yes",
-                "--force",
-                "--project-dir",
-                ".",
-                "--name",
-                body.name,
-                "--port",
-                str(port),
-                "-o",
-                str(output),
-            ]
-            if body.workflow:
-                cmd += ["--workflow", body.workflow]
-            if body.dockerfile:
-                # Same containment check as `secrets_file` below. The flag keeps the relative path:
-                # the run re-materializes the manifest against a different directory.
-                candidate = (project_dir / body.dockerfile).resolve()
-                if not candidate.is_relative_to(project_dir.resolve()):
-                    raise ValueError("'dockerfile' must be inside the uploaded project.")
-                if not candidate.is_file():
-                    raise ValueError(f"'dockerfile' not found in the uploaded project: {body.dockerfile}")
-                cmd += ["--dockerfile", body.dockerfile]
-                for glob in body.binaries or []:
-                    cmd += ["--binary", glob]
-            if body.secrets:
-                cmd += ["--secrets", ",".join(body.secrets)]
-            if body.secrets_file:
-                # Client-supplied, and `init` reads it on the platform host: without this it could
-                # name any readable file (e.g. /proc/self/environ) and fold it into the manifest.
-                candidate = (project_dir / body.secrets_file).resolve()
-                if not candidate.is_relative_to(project_dir.resolve()):
-                    raise ValueError("'secrets_file' must be inside the uploaded project.")
-                cmd += ["--secrets-file", str(candidate)]
-            for host in body.egress or []:
-                cmd += ["--egress", host]
-            for spec in body.backends or []:
-                cmd += ["--backend", spec]
-            _run_agent_hardener(cmd, cwd=str(project_dir), action="init")
-            return output.read_text(encoding="utf-8")
+            return inspect_project(
+                download_and_extract_project(sdk, body.project_fileset or "", Path(tmp)),
+                dockerfile=body.dockerfile or None,
+            )
 
-    if body.manifest_yaml:
-        # The CLI already ran agent-hardener's interactive `init` at the operator's terminal; rebuilding
-        # it here with `--yes` would silently discard the answers they gave.
-        manifest_yaml = body.manifest_yaml
-    else:
-        try:
-            manifest_yaml = await run_in_threadpool(_init)
-        except _SubprocessTimeout as exc:
-            raise HTTPException(status_code=504, detail=f"Failed to build manifest from project: {exc}") from exc
-        except _SubprocessError as exc:
-            raise HTTPException(status_code=400, detail=f"Failed to build manifest from project: {exc}") from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"Could not read the uploaded project: {exc}") from exc
+    try:
+        derived = await run_in_threadpool(_inspect)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read the project bundle: {exc}") from exc
 
-    # The persisted manifest can't hold the temp project path; the run repoints it. Force project_dir='.'.
-    manifest_yaml = _with_project_dir_dot(manifest_yaml)
-    agent_section = _agent_section(manifest_yaml)
-    if not agent_section:
+    start_command = body.start_command or derived.get("start_command", "")
+    binaries = body.binaries or derived.get("binaries") or []
+    missing = [
+        field
+        for field, value in (
+            ("start_command", start_command),
+            ("binaries", binaries),
+            ("dockerfile", derived.get("dockerfile")),
+        )
+        if not value
+    ]
+    if missing:
+        # Refuse rather than default. Each of these fails minutes into a run, in an error that names a
+        # symptom and not this field.
         raise HTTPException(
-            status_code=422, detail="manifest_yaml has no 'agent' section; not an agent-hardener manifest."
+            status_code=400,
+            detail=f"The project does not state {', '.join(missing)}; supply {'it' if len(missing) == 1 else 'them'} "
+            f"explicitly. {' '.join(derived.get('warnings', []))}".strip(),
         )
 
-    # The manifest itself is what the run executes, so the entity's fields describe it rather than
-    # the request — otherwise the two disagree whenever a client omits a field agent-hardener detected.
-    manifest = AgentHardenerManifest(
+    manifest_dict = build_project_manifest_dict(
+        agent_name=body.name,
+        project_dir=".",
+        dockerfile=derived["dockerfile"],
+        start_command=start_command,
+        binaries=list(binaries),
+        port=body.port or derived.get("port", 8000),
+        secrets=body.secrets if body.secrets is not None else derived.get("secrets", []),
+        egress=body.egress if body.egress is not None else derived.get("egress", []),
+        harness=body.harness,
+        relay_integration_confirmed=body.relay_integration_confirmed,
+        env=body.env or derived.get("env", {}),
+    )
+    manifest = AgentHardenerManifest.from_project_upload(
         name=body.name,
         workspace=workspace,
-        source_type="project",
-        project_fileset=fileset,
-        workflow=body.workflow or str(agent_section.get("workflow") or ""),
-        # Derived, not defaulted: the CLI sends a pre-built manifest_yaml with no launch_mode, so
-        # defaulting to "workflow" mislabels every BYO manifest it creates.
-        launch_mode=body.launch_mode or ("byo" if agent_section.get("dockerfile") else "workflow"),
-        dockerfile=body.dockerfile or str(agent_section.get("dockerfile") or ""),
-        binaries=body.binaries or list(agent_section.get("binaries") or []),
-        manifest_yaml=manifest_yaml,
-        port=body.port or int(agent_section.get("port") or port),
-        secrets=body.secrets or list(agent_section.get("secrets") or []),
-        egress=body.egress or list(agent_section.get("egress") or []),
-        env=body.env or dict(agent_section.get("env") or {}),
+        project_fileset=body.project_fileset or "",
+        manifest_yaml=yaml.safe_dump(manifest_dict, sort_keys=False),
+        dockerfile=derived["dockerfile"],
+        binaries=list(binaries),
+        port=manifest_dict["agent"]["port"],
+        secrets=manifest_dict["agent"]["secrets"],
+        egress=manifest_dict["agent"].get("egress", []),
+        env=body.env or {},
+        warnings=derived.get("warnings", []),
         models=body.models or WarGameModels(),
     )
-    if manifest.launch_mode == "byo" and not manifest.workflow:
-        # agent-hardener needs `workflow` or `start_command` to launch a BYO victim, and the platform
-        # never sets start_command — so this manifest would raise at run time, not merely degrade.
-        raise HTTPException(
-            status_code=422,
-            detail="A BYO image needs a workflow to serve: none was given or detected in the project. "
-            "Pass 'workflow' (the image is how the environment is built; the workflow is what gets "
-            "served and hardened).",
-        )
     manifest.manifest_yaml = _yaml_with_agent_settings(manifest.manifest_yaml, manifest)
     return manifest
-
-
-def _agent_section(manifest_yaml: str) -> dict[str, Any]:
-    """Return the manifest's ``agent`` mapping, or ``{}`` if it is absent or the YAML is unparseable."""
-    try:
-        data = yaml.safe_load(manifest_yaml) or {}
-    except yaml.YAMLError:
-        return {}
-    agent = data.get("agent") if isinstance(data, dict) else None
-    return agent if isinstance(agent, dict) else {}
-
-
-def _with_project_dir_dot(manifest_yaml: str) -> str:
-    """Return *manifest_yaml* with ``agent.project_dir`` normalized to ``.`` (unchanged if unparseable)."""
-    try:
-        data = yaml.safe_load(manifest_yaml) or {}
-    except yaml.YAMLError:
-        return manifest_yaml
-    if isinstance(data, dict) and isinstance(data.get("agent"), dict):
-        data["agent"]["project_dir"] = "."
-        return yaml.safe_dump(data, sort_keys=False)
-    return manifest_yaml
-
-
-def _yaml_with_agent_settings(manifest_yaml: str, manifest: AgentHardenerManifest) -> str:
-    """Return *manifest_yaml* with the manifest's stored agent settings written into it.
-
-    The run layers these on at materialization anyway, so this is not what makes them take effect —
-    it is what makes the stored YAML *honest*. Without it the manifest we show (and that `init -o`
-    writes) is the frozen base rather than what will actually run, so an operator who sets `env` sees
-    no trace of it and reasonably concludes it was lost.
-
-    Unparseable YAML is returned untouched: a display concern must never cost someone their manifest.
-    """
-    try:
-        data = yaml.safe_load(manifest_yaml) or {}
-    except yaml.YAMLError:
-        return manifest_yaml
-    if not (isinstance(data, dict) and isinstance(data.get("agent"), dict)):
-        return manifest_yaml
-    agent = data["agent"]
-    if manifest.port:
-        agent["port"] = manifest.port
-    if manifest.egress:
-        agent["egress"] = list(manifest.egress)
-    if manifest.secrets:
-        agent["secrets"] = list(manifest.secrets)
-    if manifest.env:
-        agent["env"] = dict(manifest.env)
-    return yaml.safe_dump(data, sort_keys=False)
 
 
 @router.patch("/manifests/{name}", response_model=AgentHardenerManifest, tags=["Agent Hardener Manifests"])
@@ -591,10 +493,10 @@ async def refresh_manifest(
     the cached benign suite. Only the scaffold and its rendered manifest are rebuilt.
     """
     existing = await _get_manifest_or_404(entity_client, workspace, name)
-    if existing.source_type != "agent" or not existing.agent:
+    if not existing.agent:
         raise HTTPException(
             status_code=422,
-            detail=f"manifest '{name}' has no agent source to refresh from; re-upload the project instead.",
+            detail=f"manifest '{name}' names no agent to refresh from; recreate it against a registered agent.",
         )
 
     resolved, fileset = await _resolve_and_store_scaffold(
@@ -637,9 +539,7 @@ async def delete_manifest(
     # Only after the entity is gone: a bundle with no manifest is garbage, but a manifest whose
     # bundle we deleted early would be unrunnable if the delete above had failed.
     #
-    # `agent_fileset` only — the service uploads that one itself. `project_fileset` is supplied by
-    # the caller and nothing stops two manifests naming the same bundle, so deleting it here would
-    # break the other one. The uploader owns it and removes it.
+    # The service uploads `agent_fileset` itself, so it owns it and is safe to remove it here.
     sdk = get_platform_sdk(as_service="agent-hardener", internal=True)
     if existing.agent_fileset:
         await run_in_threadpool(delete_fileset, sdk, existing.agent_fileset)

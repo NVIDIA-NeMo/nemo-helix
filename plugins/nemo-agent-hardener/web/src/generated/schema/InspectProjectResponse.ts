@@ -6,29 +6,34 @@
  * Do not edit manually.
  * agent-hardener (plugin)
  */
+import type { InspectProjectResponseEnv } from './InspectProjectResponseEnv.ts';
 
 /**
- * Detection facts + defaults for the upload wizard (the parsed ``agent-hardener inspect --json`` output).
+ * What the project states about itself, plus what it cannot.
+ *
+ * ``unresolved`` is the contract with the caller: everything else on this model is a usable value, and
+ * these are the only fields a human still has to supply. It is the difference between a form that asks
+ * for everything and one that asks for what is genuinely unknowable.
  */
 export interface InspectProjectResponse {
-  /** Detected installable project root (relative to the bundle). */
-  project_dir?: string;
-  /** Discovered workflow paths (project-relative). */
-  workflows?: string[];
-  /** Discovered Dockerfile paths (project-relative). */
+  /** Dockerfile path relative to the project root. */
+  dockerfile?: string;
+  /** Every Dockerfile found, when the choice is ambiguous. */
   dockerfiles?: string[];
-  /** 'workflow' or 'byo'. */
-  suggested_launch_mode?: string;
-  /** Suggested agent name. */
-  default_agent_name?: string;
-  /** Suggested victim port. */
-  default_port?: number;
-  /** Detected dotenv path (project-relative), or empty. */
-  secrets_file?: string;
-  /** Secret names found in the dotenv file. */
-  secret_names?: string[];
-  /** External hosts the agent reaches (allow-list). */
+  /** Derived from the Dockerfile's ENTRYPOINT/CMD. */
+  start_command?: string;
+  /** Proposed interpreter globs, for confirmation. */
+  binaries?: string[];
+  /** Derived from EXPOSE / ENV PORT. */
+  port?: number;
+  /** Secret names derived from .env and ENV. */
+  secrets?: string[];
+  /** Hosts the project's own files name. */
   egress?: string[];
-  /** Local host-backend ports detected in the workflow (localhost:PORT the tools call). */
-  backend_ports?: number[];
+  /** Non-secret environment from the Dockerfile. */
+  env?: InspectProjectResponseEnv;
+  /** Fields the project cannot state about itself; the caller must supply these. */
+  unresolved?: string[];
+  /** Non-fatal notes about the derivation. */
+  warnings?: string[];
 }

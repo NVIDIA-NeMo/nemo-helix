@@ -98,7 +98,7 @@ export const AgentHardenerRunDetailsRoute: FC = () => {
   const interview = pendingInterview(details);
   const review = pendingReview(details);
 
-  // Hardening output (before/after policy + workflow + selectable defenses), fetched from the job results
+  // Hardening output (before/after policy + guardrails + selectable defenses), fetched from the job results
   // API once the run ends.
   const {
     mitigations,
@@ -131,7 +131,7 @@ export const AgentHardenerRunDetailsRoute: FC = () => {
   // Owned here (not in HardenPanel) so an in-flight sanity check survives tab switches — the Harden
   // tab's content unmounts when another tab is active.
   const [sanityJob, setSanityJob] = useState<string>();
-  const [composedWorkflow, setComposedWorkflow] = useState<string>();
+  const [composedGuardrails, setComposedGuardrails] = useState<string>();
   useEffect(() => {
     if (hitlPending) setTab('interview');
   }, [hitlPending]);
@@ -281,8 +281,8 @@ export const AgentHardenerRunDetailsRoute: FC = () => {
                   hitlogFileset={run?.hitlog_fileset}
                   sanityJob={sanityJob}
                   onSanityJobChange={setSanityJob}
-                  composedWorkflow={composedWorkflow}
-                  onComposedWorkflowChange={setComposedWorkflow}
+                  composedGuardrails={composedGuardrails}
+                  onComposedGuardrailsChange={setComposedGuardrails}
                 />
               </TabsContent>
             ) : null}

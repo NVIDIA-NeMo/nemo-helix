@@ -10,6 +10,7 @@ which is why leaving ``config`` absent (rather than writing a null) is part of t
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -85,11 +86,14 @@ def test_warns_when_it_cannot_apply(caplog: pytest.LogCaptureFixture, data: dict
     assert reason in caplog.text
 
 
-def test_warns_when_the_agent_has_no_workflow(caplog: pytest.LogCaptureFixture) -> None:
-    """Guardrails is gated on a workflow, so the entry is filtered out and the model has no home."""
+def test_safety_model_reaches_guardrails_without_a_workflow(caplog: pytest.LogCaptureFixture) -> None:
+    """A workflow-less victim keeps the guardrails defender, so the safety model has a home."""
     manifest = {"agent": {"name": "finance"}}
 
     with caplog.at_level(logging.WARNING):
         _apply_manifest_overrides(manifest, {"defenders": ["guardrails"], "models": {"safety": {"model": "guard-1"}}})
 
-    assert "no workflow" in caplog.text
+    entry = manifest["overrides"]["defenders"][0]
+    assert entry["name"] == "defender-guardrails"
+    assert "guard-1" in json.dumps(entry["config"])
+    assert "not applied" not in caplog.text

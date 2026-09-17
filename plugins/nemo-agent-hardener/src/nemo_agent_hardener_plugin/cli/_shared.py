@@ -10,7 +10,7 @@ are each one decision rather than one per command module.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, get_args
+from typing import get_args
 
 import typer
 from nemo_agent_hardener_plugin.cli import checks
@@ -19,6 +19,9 @@ from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
 from nemo_agent_hardener_plugin.jobs.manifest import DEFENDER_ENTRIES
 from nemo_agent_hardener_plugin.model_config import ANALYSIS_DEFAULT_BASE_URL, ATTACK_DEFAULT_BASE_URL
+from nemo_agent_hardener_plugin.sdk import AgentHardenerPluginResource
+from nemo_platform import NeMoPlatform
+from nemo_platform_plugin.agent_hardener.types import JsonMap, JsonValue
 
 # The entity's own Literal is the single source of truth for the valid presets.
 ATTACK_INTENSITIES: tuple[str, ...] = get_args(AgentHardenerManifest.model_fields["attack_intensity"].annotation)
@@ -29,7 +32,8 @@ class CommandContext:
     """Resolved preamble every SDK-backed command needs."""
 
     config: AgentHardenerConfig
-    sdk: Any
+    sdk: NeMoPlatform
+    agent_hardener: AgentHardenerPluginResource
     base_url: str
     workspace: str
 
@@ -44,9 +48,11 @@ def command_context(workspace: str | None, *, preflight: bool = True) -> Command
     if preflight:
         checks.require_preflight(config)
     url = base_url()
+    sdk = make_sdk(url)
     return CommandContext(
         config=config,
-        sdk=make_sdk(url),
+        sdk=sdk,
+        agent_hardener=AgentHardenerPluginResource(sdk),
         base_url=url,
         workspace=workspace or config.default_workspace,
     )
@@ -62,6 +68,20 @@ def parse_env_pairs(pairs: list[str]) -> dict[str, str]:
             raise typer.Exit(code=1)
         env[key] = value
     return env
+
+
+def json_string_list(value: JsonValue | None) -> list[str]:
+    """Return only string entries from a JSON value that is expected to be a list."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def json_mapping(value: JsonValue | None) -> JsonMap:
+    """Return a JSON object value, or an empty mapping for any other JSON value."""
+    if isinstance(value, dict):
+        return value
+    return {}
 
 
 def validated_intensity(value: str | None) -> str | None:
@@ -131,7 +151,7 @@ def preflight_models(ctx: CommandContext, chosen: dict[str, dict[str, str]]) -> 
             continue
         base_url = fields.get("base_url") or endpoints[group]
         try:
-            verdict = ctx.sdk.agent_hardener.manifests.validate_model(
+            verdict = ctx.agent_hardener.manifests.validate_model(
                 workspace=ctx.workspace,
                 model=fields.get("model"),
                 base_url=base_url,
@@ -142,7 +162,7 @@ def preflight_models(ctx: CommandContext, chosen: dict[str, dict[str, str]]) -> 
             continue
         if verdict.get("ok"):
             continue
-        available = ", ".join((verdict.get("available") or [])[:10]) or "none"
+        available = ", ".join(json_string_list(verdict.get("available"))[:10]) or "none"
         typer.secho(
             f"Error: the {group} model {fields.get('model')!r} is not usable at {base_url} "
             f"({verdict.get('reason') or 'unknown'}: {verdict.get('detail') or 'no detail'}).\n"
@@ -152,14 +172,17 @@ def preflight_models(ctx: CommandContext, chosen: dict[str, dict[str, str]]) -> 
         raise typer.Exit(code=1)
 
 
-def merge_models(stored: Any, chosen: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
+def merge_models(stored: JsonMap | None, chosen: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
     """Overlay *chosen* onto the manifest's stored models, field by field within each group.
 
     ``PATCH /manifests`` replaces ``models`` wholesale, so setting one group without merging first would
     silently clear the others. Studio never hits this (its "save as default" always sends every group);
     a CLI flag naturally sets one thing at a time, so the merge happens here.
     """
-    merged = {group: dict(fields) for group, fields in (stored or {}).items() if isinstance(fields, dict)}
+    merged: dict[str, dict[str, str]] = {}
+    for group, fields in (stored or {}).items():
+        if isinstance(fields, dict):
+            merged[group] = {str(field): value for field, value in fields.items() if isinstance(value, str)}
     for group, fields in chosen.items():
         merged[group] = {**merged.get(group, {}), **fields}
     return merged

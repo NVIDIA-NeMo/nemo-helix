@@ -14,9 +14,10 @@ entry + a name in the attacked tool's ``middleware`` list), so dropping one is a
 from __future__ import annotations
 
 import re
+import tomllib
 from typing import Any
 
-import yaml
+import tomli_w
 
 _CUSTOM_GUARDRAIL_RE = re.compile(r"^custom_guardrail_\d+$")
 _POLICY_DEFENSE_ID = "openshell_policy"
@@ -44,72 +45,45 @@ def select_defense_ids(
 
 
 def compose_defense(mitigations: dict[str, Any], selected_ids: list[str]) -> tuple[str | None, str | None]:
-    """Build ``(workflow_yaml, policy_yaml)`` from the hardened mitigations keeping only *selected_ids*.
+    """Build ``(guardrails_toml, policy_yaml)`` from the hardened mitigations keeping only *selected_ids*.
 
-    - Workflow: the hardened workflow with every unselected ``custom_guardrail_N`` removed. ``None`` when the
-      run produced no workflow change.
-    - Policy: the hardened policy when ``"openshell_policy"`` is selected, else the baseline. ``None`` when the
-      run produced no policy change.
+    - Guardrails: the hardened Relay plugin config with every unselected ``custom_guardrail_N`` entry
+      removed. ``None`` when the run produced no guardrail change.
+    - Policy: the hardened policy when ``"openshell_policy"`` is selected, else the baseline. ``None``
+      when the run produced no policy change.
     """
     selected = set(selected_ids)
-    workflow = mitigations.get("workflow") or {}
-    workflow_after = workflow.get("after")
-    workflow_yaml = _compose_workflow(workflow_after, selected) if isinstance(workflow_after, str) else None
+    guardrails = mitigations.get("guardrails") or {}
+    after = guardrails.get("after")
+    guardrails_toml = _compose_guardrails(after, selected) if isinstance(after, str) else None
 
     policy = mitigations.get("policy") or {}
     policy_yaml: str | None = None
     if policy:
         policy_yaml = policy.get("after") if _POLICY_DEFENSE_ID in selected else policy.get("before")
 
-    return workflow_yaml, policy_yaml
+    return guardrails_toml, policy_yaml
 
 
-def _compose_workflow(after_text: str, selected: set[str]) -> str:
-    """Return the hardened workflow with unselected ``custom_guardrail_N`` middleware removed."""
-    config = yaml.safe_load(after_text) or {}
-    middleware = config.get("middleware")
-    if not isinstance(middleware, dict):
-        return after_text  # no guardrail middleware to prune
+def _compose_guardrails(after_text: str, selected: set[str]) -> str:
+    """Return the hardened plugin config with unselected ``custom_guardrail_N`` entries removed.
 
-    removed = [
-        name
-        for name in list(middleware)
-        if isinstance(name, str) and _CUSTOM_GUARDRAIL_RE.match(name) and name not in selected
-    ]
-    for name in removed:
-        middleware.pop(name, None)
-    _drop_middleware_refs(config, set(removed))
-
-    # The guardrails' shared safety_llm is only needed while some custom guardrail remains.
-    if not any(isinstance(k, str) and _CUSTOM_GUARDRAIL_RE.match(k) for k in middleware):
-        llms = config.get("llms")
-        if isinstance(llms, dict):
-            llms.pop("safety_llm", None)
-
-    return yaml.safe_dump(config, sort_keys=False)
-
-
-def _drop_middleware_refs(config: dict[str, Any], removed: set[str]) -> None:
-    """Remove references to *removed* guardrails from every middleware-bearing component.
-
-    ``workflow`` is a single component dict alongside the ``functions``/``function_groups`` mappings and
-    can carry its own ``middleware`` list. Missing it leaves a name pointing at a middleware we just
-    deleted, and the victim then fails config validation ("middleware type not found") and never serves.
+    Simpler than the NAT version it replaces: a guardrail is one self-contained table, so pruning is a
+    list filter. There is no second place referencing it, which is what ``_drop_middleware_refs`` had
+    to clean up — and getting that wrong left a dangling name that stopped the victim serving.
     """
-    components: list[Any] = []
-    for block_key in ("functions", "function_groups"):
-        block = config.get(block_key)
-        if isinstance(block, dict):
-            components.extend(block.values())
-    workflow = config.get("workflow")
-    if isinstance(workflow, dict):
-        components.append(workflow)
-
-    for component in components:
-        if not isinstance(component, dict):
+    try:
+        document = tomllib.loads(after_text)
+    except tomllib.TOMLDecodeError:
+        return after_text
+    for entry in document.get("components", []):
+        config = entry.get("config") if isinstance(entry, dict) else None
+        if not isinstance(config, dict):
             continue
-        refs = component.get("middleware")
-        if isinstance(refs, str):
-            refs = [refs]
-        if isinstance(refs, list):
-            component["middleware"] = [ref for ref in refs if ref not in removed]
+        config["guardrails"] = [
+            rail
+            for rail in config.get("guardrails", [])
+            if not (isinstance(rail, dict) and _CUSTOM_GUARDRAIL_RE.match(str(rail.get("name", ""))))
+            or str(rail.get("name")) in selected
+        ]
+    return tomli_w.dumps(document)

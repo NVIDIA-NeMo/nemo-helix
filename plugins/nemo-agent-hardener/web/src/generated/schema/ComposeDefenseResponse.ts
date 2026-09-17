@@ -11,8 +11,8 @@
  * The composed workflow + policy for the selected defenses.
  */
 export interface ComposeDefenseResponse {
-  /** Workflow with only the selected guardrails, or null. */
-  workflow_yaml?: string;
+  /** Plugin config with only the selected guardrails, or null. */
+  guardrails_toml?: string;
   /** Hardened policy if selected, else the baseline, or null. */
   policy_yaml?: string;
 }

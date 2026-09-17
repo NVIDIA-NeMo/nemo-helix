@@ -11,7 +11,6 @@ from typing import Any
 
 import pytest
 from nemo_agent_hardener_plugin.cli import _shared, lifecycle
-from typer.testing import CliRunner
 
 
 def _project(tmp_path: Path) -> Path:
@@ -21,14 +20,25 @@ def _project(tmp_path: Path) -> Path:
     return project
 
 
-def _patch_cli(cli_main: Any, monkeypatch: pytest.MonkeyPatch, captured: list[list[str]], created: dict) -> Any:
+def _patch_cli(
+    cli_main: Any, monkeypatch: pytest.MonkeyPatch, captured: list[list[str]], created: dict, project: Path
+) -> Any:
     """Neutralize preflight/SDK/upload and capture both the init argv and the create body."""
 
     def fake_create(*, workspace: str, **body):
         created.update(body)
         return {"name": body["name"], "launch_mode": body.get("launch_mode"), "dockerfile": "deploy/Dockerfile"}
 
-    fake_sdk = SimpleNamespace(agent_hardener=SimpleNamespace(manifests=SimpleNamespace(create=fake_create)))
+    def fake_inspect_project(project_fileset: str, *, dockerfile: str | None = None, workspace: str = "default"):
+        from nemo_agent_hardener_plugin.project_resolver import inspect_project
+
+        return inspect_project(project, dockerfile=dockerfile)
+
+    fake_sdk = SimpleNamespace(
+        agent_hardener=SimpleNamespace(
+            manifests=SimpleNamespace(create=fake_create, inspect_project=fake_inspect_project)
+        )
+    )
     monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c: None)
     monkeypatch.setattr(_shared, "make_sdk", lambda _u: fake_sdk)
     monkeypatch.setattr(_shared, "base_url", lambda: "http://localhost:8080")
@@ -53,74 +63,15 @@ def _patch_cli(cli_main: Any, monkeypatch: pytest.MonkeyPatch, captured: list[li
     return cli_main.AgentHardenerCLI().get_cli()
 
 
-def test_init_forwards_dockerfile_and_binary_to_agent_hardener(tmp_path, monkeypatch) -> None:
+def test_init_project_dir_creates_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`init --project-dir` uploads the project, derives what it can, and creates the manifest."""
     from nemo_agent_hardener_plugin.cli import main as cli_main
-
-    captured: list[list[str]] = []
-    created: dict = {}
-    app = _patch_cli(cli_main, monkeypatch, captured, created)
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "init",
-            "--project-dir",
-            str(_project(tmp_path)),
-            "--name",
-            "byo",
-            "--yes",
-            "--dockerfile",
-            "deploy/Dockerfile",
-            "--binary",
-            "/app/.venv/bin/**",
-            "--workflow",
-            "agents/lab/workflow.yaml",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    argv = captured[0]
-    assert argv[argv.index("--dockerfile") + 1] == "deploy/Dockerfile"
-    assert [argv[i + 1] for i, tok in enumerate(argv) if tok == "--binary"] == ["/app/.venv/bin/**"]
-    # --workflow is kept: the image is how the environment is built, not what gets served.
-    assert argv[argv.index("--workflow") + 1] == "agents/lab/workflow.yaml"
-    assert created["launch_mode"] == "byo"
-
-
-def test_init_without_a_dockerfile_stays_workflow_mode(tmp_path, monkeypatch) -> None:
-    from nemo_agent_hardener_plugin.cli import main as cli_main
-
-    captured: list[list[str]] = []
-    created: dict = {}
-    app = _patch_cli(cli_main, monkeypatch, captured, created)
-
-    result = CliRunner().invoke(app, ["init", "--project-dir", str(_project(tmp_path)), "--name", "plain", "--yes"])
-
-    assert result.exit_code == 0, result.output
-    assert "--dockerfile" not in captured[0]
-    assert created["launch_mode"] == "workflow"
-
-
-def test_init_rejects_a_dockerfile_without_a_binary(tmp_path, monkeypatch) -> None:
-    from nemo_agent_hardener_plugin.cli import main as cli_main
-
-    app = _patch_cli(cli_main, monkeypatch, [], {})
-
-    result = CliRunner().invoke(
-        app,
-        ["init", "--project-dir", str(_project(tmp_path)), "--yes", "--dockerfile", "deploy/Dockerfile"],
-    )
-
-    assert result.exit_code == 1
-    assert "--binary" in result.output
-
-
-def test_init_rejects_an_absolute_dockerfile(tmp_path, monkeypatch) -> None:
-    """An absolute path resolves here but not on the host that re-materializes the manifest."""
-    from nemo_agent_hardener_plugin.cli import main as cli_main
+    from typer.testing import CliRunner
 
     project = _project(tmp_path)
-    app = _patch_cli(cli_main, monkeypatch, [], {})
+    captured: list[list[str]] = []
+    created: dict[str, Any] = {}
+    app = _patch_cli(cli_main, monkeypatch, captured, created, project)
 
     result = CliRunner().invoke(
         app,
@@ -128,49 +79,19 @@ def test_init_rejects_an_absolute_dockerfile(tmp_path, monkeypatch) -> None:
             "init",
             "--project-dir",
             str(project),
-            "--yes",
-            "--dockerfile",
-            str(project / "deploy" / "Dockerfile"),
-            "--binary",
-            "/app/**",
+            "--start-command",
+            "/app/run.sh",
+            "--harness",
+            "langgraph",
+            "--relay-confirmed",
+            "--output",
+            str(tmp_path / "agent-hardener.yaml"),
         ],
     )
 
-    assert result.exit_code == 1
-    assert "relative" in result.output
-
-
-def test_init_rejects_a_missing_dockerfile(tmp_path, monkeypatch) -> None:
-    from nemo_agent_hardener_plugin.cli import main as cli_main
-
-    app = _patch_cli(cli_main, monkeypatch, [], {})
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "init",
-            "--project-dir",
-            str(_project(tmp_path)),
-            "--yes",
-            "--dockerfile",
-            "deploy/Nope",
-            "--binary",
-            "/app/**",
-        ],
-    )
-
-    assert result.exit_code == 1
-    assert "not found" in result.output
-
-
-def test_init_rejects_dockerfile_with_an_agent_source(monkeypatch) -> None:
-    from nemo_agent_hardener_plugin.cli import main as cli_main
-
-    app = _patch_cli(cli_main, monkeypatch, [], {})
-
-    result = CliRunner().invoke(
-        app, ["init", "--agent", "clockbot", "--dockerfile", "deploy/Dockerfile", "--binary", "/app/**"]
-    )
-
-    assert result.exit_code == 1
-    assert "--project-dir" in result.output
+    assert result.exit_code == 0, result.output
+    assert created["source_type"] == "project"
+    assert created["project_fileset"] == "default/proj-bundle"
+    assert created["start_command"] == "/app/run.sh"
+    assert created["harness"] == "langgraph"
+    assert created["relay_integration_confirmed"] is True

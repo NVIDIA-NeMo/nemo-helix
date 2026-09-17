@@ -116,7 +116,7 @@ export const ModelGroupFields: FC<ModelGroupFieldsProps> = ({
       divider
     />
     {/* Safety (guardrail) model: name only — agent-hardener pins the endpoint + key when it writes the
-        guardrail into the victim's workflow, so a base URL or secret here would never be read. */}
+        guardrail into the victim's plugins.toml, so a base URL or secret here would never be read. */}
     <GroupSection label={GROUP_LABEL.safety} help={GROUP_HELP.safety} divider>
       <FormField name="safety-model" slotLabel="Model">
         <TextInput

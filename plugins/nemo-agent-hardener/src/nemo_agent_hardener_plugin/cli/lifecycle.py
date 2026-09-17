@@ -8,14 +8,14 @@ agent-hardener is never imported: it runs in its own venv, invoked by subprocess
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
+from typing import Any
 
 import typer
 from nemo_agent_hardener_plugin.cli import checks, credentials, provisioning
 from nemo_agent_hardener_plugin.cli._shared import (
-    CommandContext,
     command_context,
+    json_string_list,
     models_from_flags,
     parse_env_pairs,
     preflight_models,
@@ -24,100 +24,89 @@ from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.filesets import upload_project_dir
 
 
-def _check_byo(project_dir: Path, dockerfile: str, binaries: list[str]) -> None:
-    """Reject a BYO request that would only fail later, on a different machine."""
-    if not binaries:
-        typer.secho(
-            "Error: --dockerfile requires at least one --binary glob, e.g. --binary '/app/.venv/bin/**'.", fg="red"
-        )
-        raise typer.Exit(code=1)
-    if Path(dockerfile).is_absolute():
-        # The run re-downloads the bundle elsewhere, so only a project-relative path resolves there.
-        typer.secho(f"Error: --dockerfile must be relative to {project_dir}, not an absolute path.", fg="red")
-        raise typer.Exit(code=1)
-    candidate = (project_dir / dockerfile).resolve()
-    if not candidate.is_relative_to(project_dir.resolve()) or not candidate.is_file():
-        typer.secho(f"Error: --dockerfile not found inside the project: {dockerfile}", fg="red")
-        raise typer.Exit(code=1)
-
-
 def _project_init_body(
-    ctx: CommandContext,
-    project_dir: Path,
+    ctx: Any,
     *,
+    project_dir: str,
     name: str | None,
-    workflow: str | None,
     dockerfile: str | None,
+    start_command: str | None,
     binaries: list[str],
-    port: int | None,
-    egress: list[str],
-    secrets: list[str],
-    assume_yes: bool,
-) -> dict[str, object]:
-    """Run agent-hardener's own ``init`` on a local project, then upload it and return the create body.
+    harness: str | None,
+    relay_confirmed: bool,
+) -> dict[str, Any]:
+    """Upload a project bundle, derive what it states, and fail naming whatever is still missing.
 
-    Delegating to the local binary keeps agent-hardener the single owner of both the detection and the
-    questions it asks — the operator answers them at their terminal, which the server-side path
-    (``init --yes`` behind an HTTP request) structurally cannot offer. The platform then stores the
-    manifest agent-hardener produced instead of rebuilding it.
+    The derivation runs server-side — the same endpoint Studio calls — so a CLI user and a Studio user
+    get a manifest from one code path rather than two that drift.
     """
-    if not project_dir.is_dir():
-        typer.secho(f"Error: {project_dir} is not a directory.", fg="red")
+    root = Path(project_dir).expanduser().resolve()
+    if not root.is_dir():
+        typer.secho(f"Error: --project-dir {project_dir!r} is not a directory.", fg="red")
         raise typer.Exit(code=1)
-    if dockerfile:
-        _check_byo(project_dir, dockerfile, binaries)
-
-    manifest_name = name or project_dir.resolve().name
-    with tempfile.TemporaryDirectory() as tmp:
-        rendered = Path(tmp) / "agent-hardener.yaml"
-        # `--project-dir .` with cwd set mirrors the server, so the stored manifest is path-independent.
-        cmd = [
-            str(ctx.config.agent_hardener_bin),
-            "init",
-            "--force",
-            "--project-dir",
-            ".",
-            "--name",
-            manifest_name,
-            "-o",
-            str(rendered),
-        ]
-        if assume_yes:
-            cmd.append("--yes")
-        if workflow:
-            cmd += ["--workflow", workflow]
-        if dockerfile:
-            cmd += ["--dockerfile", dockerfile]
-            for glob in binaries:
-                cmd += ["--binary", glob]
-        if port:
-            cmd += ["--port", str(port)]
-        if secrets:
-            cmd += ["--secrets", ",".join(secrets)]
-        for host in egress:
-            cmd += ["--egress", host]
-        provisioning.run_subprocess(
-            cmd, "build the manifest with `agent-hardener init`", cwd=str(project_dir), timeout=None
-        )
-        if not rendered.is_file():
-            typer.secho("Error: `agent-hardener init` produced no manifest.", fg="red")
-            raise typer.Exit(code=1)
-        manifest_yaml = rendered.read_text(encoding="utf-8")
 
     try:
-        fileset = upload_project_dir(ctx.sdk, project_dir, workspace=ctx.workspace)
+        fileset = upload_project_dir(ctx.sdk, root, workspace=ctx.workspace)
     except Exception as exc:
-        typer.secho(f"Error: could not upload {project_dir} — {exc}", fg="red")
+        typer.secho(f"Error: could not upload the project — {exc}", fg="red")
         raise typer.Exit(code=1) from exc
-    typer.echo(f"Uploaded {project_dir} as {fileset}")
+    typer.echo(f"  uploaded  {root.name} -> {fileset}")
 
-    return {
-        "name": manifest_name,
+    try:
+        derived = ctx.sdk.agent_hardener.manifests.inspect_project(
+            fileset, dockerfile=dockerfile, workspace=ctx.workspace
+        )
+    except Exception as exc:
+        typer.secho(f"Error: could not read the project — {exc}", fg="red")
+        raise typer.Exit(code=1) from exc
+
+    for warning in derived.get("warnings", []):
+        typer.secho(f"  ! {warning}", fg="yellow")
+
+    supplied = {
+        "dockerfile": dockerfile,
+        "start_command": start_command,
+        "binaries": binaries,
+        "harness": harness,
+        "relay_integration_confirmed": relay_confirmed or None,
+    }
+    # Report every gap at once. Discovering them one flag per run is the slowest possible way to learn
+    # what a project could not say about itself.
+    missing = [field for field in derived.get("unresolved", []) if not supplied.get(field)]
+    if missing:
+        flags = {
+            "dockerfile": "--dockerfile",
+            "start_command": "--start-command",
+            "binaries": "--binary",
+            "harness": "--harness",
+            "relay_integration_confirmed": "--relay-confirmed",
+        }
+        typer.secho(
+            f"Error: the project does not state {', '.join(missing)}. "
+            f"Pass {', '.join(flags[field] for field in missing)}.",
+            fg="red",
+        )
+        raise typer.Exit(code=1)
+
+    for field, value in (("dockerfile", derived.get("dockerfile")), ("start_command", derived.get("start_command"))):
+        if not supplied.get(field) and value:
+            typer.echo(f"  derived   {field}: {value}")
+
+    body: dict[str, Any] = {
+        "name": name or root.name,
         "source_type": "project",
         "project_fileset": fileset,
-        "manifest_yaml": manifest_yaml,
-        "launch_mode": "byo" if dockerfile else "workflow",
+        "relay_integration_confirmed": relay_confirmed,
     }
+    for key, value in (
+        ("dockerfile", dockerfile),
+        ("start_command", start_command),
+        ("binaries", binaries or None),
+        ("harness", harness),
+    ):
+        if value:
+            body[key] = value
+    return body
 
 
 def register(app: typer.Typer) -> None:
@@ -166,7 +155,40 @@ def register(app: typer.Typer) -> None:
     @app.command()
     def init(
         agent: str | None = typer.Option(
-            None, "--agent", help="Deployed NeMo Platform agent to target (name or workspace/name)."
+            None, "--agent", help="Registered NeMo Platform agent to war-game (name or workspace/name)."
+        ),
+        project_dir: str | None = typer.Option(
+            None,
+            "--project-dir",
+            help="Bring your own: a directory holding the Dockerfile that builds your agent. Uploaded and "
+            "read server-side; everything the project states is derived, and you are asked only for the rest.",
+        ),
+        dockerfile: str | None = typer.Option(
+            None, "--dockerfile", help="Which Dockerfile builds the agent, when the project holds more than one."
+        ),
+        start_command: str | None = typer.Option(
+            None,
+            "--start-command",
+            help="Command that serves the agent inside the sandbox. Derived from an exec-form ENTRYPOINT/CMD; "
+            "required when the Dockerfile uses a shell form. Must be absolute — OpenShell replaces PATH.",
+        ),
+        binary: list[str] = typer.Option(
+            None,
+            "--binary",
+            help="Glob matching the victim's interpreter, repeatable. Derived from the image's venv; override "
+            "when the image puts it elsewhere.",
+        ),
+        harness: str | None = typer.Option(
+            None,
+            "--harness",
+            help="Which harness the agent runs (deepagents, hermes, langchain, langgraph, other). Decides "
+            "whether a guardrail can refuse a tool call, and cannot be read from the project.",
+        ),
+        relay_confirmed: bool = typer.Option(
+            False,
+            "--relay-confirmed",
+            help="Confirm NeMo Relay is attached to the agent. Without it the victim emits no telemetry and "
+            "the run cannot be scored.",
         ),
         name: str | None = typer.Option(
             None, "--name", help="Saved-manifest name (the id later phases reference). Defaults to the agent name."
@@ -186,27 +208,7 @@ def register(app: typer.Typer) -> None:
             help="Non-secret env var for the victim as KEY=VALUE, repeatable. Credentials belong in "
             "--secrets, which names them and resolves values from the platform Secrets store.",
         ),
-        project_dir: str | None = typer.Option(
-            None, "--project-dir", help="Local NAT project to upload and war-game (alternative to --agent)."
-        ),
-        workflow: str | None = typer.Option(
-            None, "--workflow", help="Workflow path within the project (project source; default: detected)."
-        ),
-        dockerfile: str | None = typer.Option(
-            None,
-            "--dockerfile",
-            help="Project-relative Dockerfile to build the victim from instead of a generic image (project "
-            "source) — for agents needing system packages or a custom base image. Composes with --workflow; "
-            "requires --binary. The image must carry a 'sandbox' user/group, iproute2, and `nat` on the "
-            "default PATH.",
-        ),
-        binary: list[str] = typer.Option(
-            None,
-            "--binary",
-            help="In-container glob scoping which processes may egress, repeatable (e.g. '/app/.venv/bin/**'). "
-            "Required with --dockerfile.",
-        ),
-        port: int | None = typer.Option(None, "--port", help="Victim port (project source; default: detected)."),
+        port: int | None = typer.Option(None, "--port", help="Victim port (default: the agent's deployment port)."),
         attack_model: str | None = typer.Option(
             None, "--attack-model", help="Default model for garak's red-team + detector."
         ),
@@ -234,38 +236,32 @@ def register(app: typer.Typer) -> None:
             False, "--yes", "-y", help="Accept agent-hardener's detected answers instead of being prompted."
         ),
     ) -> None:
-        """Save a reusable war-game target: a deployed agent (--agent) or a NAT project (--project-dir).
+        """Save a reusable war-game target from a registered agent.
 
-        --agent resolves server-side, the path Studio also takes. --project-dir runs agent-hardener's
-        own interactive init here, so you answer its questions, then uploads the project and
-        stores the manifest it produced.
+        Resolution happens server-side — the same path Studio takes — so the manifest a CLI user
+        gets and the one Studio gets are produced by one code path.
         """
         if bool(agent) == bool(project_dir):
             typer.secho("Error: pass exactly one of --agent or --project-dir.", fg="red")
             raise typer.Exit(code=1)
-        if dockerfile and agent:
-            typer.secho("Error: --dockerfile applies to --project-dir only; a deployed agent has no image.", fg="red")
-            raise typer.Exit(code=1)
 
         ctx = command_context(workspace)
-        body: dict[str, object]
+        body: dict[str, Any]
         if project_dir:
             body = _project_init_body(
                 ctx,
-                Path(project_dir),
+                project_dir=project_dir,
                 name=name,
-                workflow=workflow,
                 dockerfile=dockerfile,
+                start_command=start_command,
                 binaries=list(binary or []),
-                port=port,
-                egress=list(egress or []),
-                secrets=list(secrets or []),
-                assume_yes=assume_yes,
+                harness=harness,
+                relay_confirmed=relay_confirmed,
             )
         else:
-            body = {"name": name or str(agent).split("/")[-1], "source_type": "agent", "agent": agent}
-            if port:
-                body["port"] = port
+            body = {"name": name or str(agent).split("/")[-1], "agent": agent}
+        if port:
+            body["port"] = port
         if egress:
             body["egress"] = list(egress)
         if secrets:
@@ -286,14 +282,19 @@ def register(app: typer.Typer) -> None:
             preflight_models(ctx, models)
             body["models"] = models
         try:
-            manifest = ctx.sdk.agent_hardener.manifests.create(workspace=ctx.workspace, **body)
+            manifest = ctx.agent_hardener.manifests.create(workspace=ctx.workspace, **body)
         except Exception as exc:
             typer.secho(f"Error: could not create manifest — {exc}", fg="red")
             raise typer.Exit(code=1) from exc
 
-        for warning in manifest.get("warnings") or []:
-            typer.secho(f"  ! {warning}", fg="yellow")
+        # A project manifest already printed these while deriving; repeating them here reads as two
+        # separate problems rather than one.
+        if manifest.get("source_type") != "project":
+            for warning in json_string_list(manifest.get("warnings")):
+                typer.secho(f"  ! {warning}", fg="yellow")
         manifest_name = str(manifest.get("name") or body["name"])
+        secrets = json_string_list(manifest.get("secrets"))
+        egress = json_string_list(manifest.get("egress"))
         typer.secho(f"Saved manifest '{manifest_name}'", fg="green")
         source = manifest.get("agent") or manifest.get("project_fileset") or "?"
         image = manifest.get("dockerfile") or "(generic, built from the project)"
@@ -302,8 +303,8 @@ def register(app: typer.Typer) -> None:
             f"  image     {image}\n"
             f"  workflow  {manifest.get('workflow') or '(none)'}\n"
             f"  victim    port {manifest.get('port', '?')}\n"
-            f"  secrets   {', '.join(manifest.get('secrets') or [])}\n"
-            f"  egress    {', '.join(manifest.get('egress') or []) or '(none — outbound calls are blocked)'}"
+            f"  secrets   {', '.join(secrets)}\n"
+            f"  egress    {', '.join(egress) or '(none — outbound calls are blocked)'}"
         )
 
         # Runnable, not just readable: `run --config` takes this file. Prefer
@@ -333,18 +334,20 @@ def register(app: typer.Typer) -> None:
         """
         ctx = command_context(workspace, preflight=False)
         try:
-            manifest = ctx.sdk.agent_hardener.manifests.refresh(manifest_id, workspace=ctx.workspace)
+            manifest = ctx.agent_hardener.manifests.refresh(manifest_id, workspace=ctx.workspace)
         except Exception as exc:
             typer.secho(f"Error: could not refresh manifest '{manifest_id}' — {exc}", fg="red")
             raise typer.Exit(code=1) from exc
 
-        for warning in manifest.get("warnings") or []:
+        for warning in json_string_list(manifest.get("warnings")):
             typer.secho(f"  ! {warning}", fg="yellow")
+        secrets = json_string_list(manifest.get("secrets"))
+        egress = json_string_list(manifest.get("egress"))
         typer.secho(f"Refreshed manifest '{manifest_id}' from {manifest.get('agent', '?')}", fg="green")
         typer.echo(
             f"  victim    port {manifest.get('port', '?')}\n"
-            f"  secrets   {', '.join(manifest.get('secrets') or [])}\n"
-            f"  egress    {', '.join(manifest.get('egress') or []) or '(none — outbound calls are blocked)'}"
+            f"  secrets   {', '.join(secrets)}\n"
+            f"  egress    {', '.join(egress) or '(none — outbound calls are blocked)'}"
         )
 
     @app.command()
@@ -356,7 +359,7 @@ def register(app: typer.Typer) -> None:
         # No preflight: reading run records doesn't need Docker/OpenShell/the venvs.
         ctx = command_context(workspace, preflight=False)
         ws = ctx.workspace
-        runs = ctx.sdk.agent_hardener.runs.list(workspace=ws, limit=limit)
+        runs = ctx.agent_hardener.runs.list(workspace=ws, limit=limit)
         if not runs:
             typer.echo(f"No Agent Hardener runs in workspace '{ws}'.")
             return

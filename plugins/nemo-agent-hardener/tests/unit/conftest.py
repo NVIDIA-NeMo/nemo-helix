@@ -23,8 +23,11 @@ from typing import Any
 import pytest
 from nemo_agent_hardener_plugin import sdk as sdk_module
 from nemo_agent_hardener_plugin.api.v2 import events as events_module
+from nemo_agent_hardener_plugin.cli import _shared as shared_module
 from nemo_agent_hardener_plugin.jobs import manifest as manifest_module
 from nemo_agent_hardener_plugin.jobs import records as records_module
+
+_REAL_AGENT_HARDENER_RESOURCE = sdk_module.AgentHardenerPluginResource
 
 
 def _data(body: Any) -> Any:
@@ -66,9 +69,18 @@ def _fake_entities_client(platform: Any, _client_cls: Any) -> Any:
     )
 
 
+def _fake_agent_hardener_resource(platform: Any) -> Any:
+    """Use a test SDK's mounted ``agent_hardener`` double when it has one."""
+    resource = getattr(platform, "agent_hardener", None)
+    if resource is not None:
+        return resource
+    return _REAL_AGENT_HARDENER_RESOURCE(platform)
+
+
 @pytest.fixture(autouse=True)
 def _fake_entities_client_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     """Route typed-client entity calls onto the fake ``entities`` namespace in every consuming module."""
     for mod in (records_module, manifest_module, events_module):
         monkeypatch.setattr(mod, "client_from_platform", _fake_entities_client)
     monkeypatch.setattr(sdk_module, "client_from_platform", _fake_entities_client)
+    monkeypatch.setattr(shared_module, "AgentHardenerPluginResource", _fake_agent_hardener_resource)

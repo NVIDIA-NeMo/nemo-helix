@@ -8,9 +8,11 @@
  */
 
 /**
- * Body for ``POST /v2/workspaces/{workspace}/manifests/inspect`` — detect an uploaded project.
+ * Body for ``POST /v2/workspaces/{workspace}/manifests/inspect-project`` — read an uploaded project.
  */
 export interface InspectProjectRequest {
-  /** Fileset ref of the uploaded NAT project bundle to inspect. */
+  /** Fileset ref of the uploaded project bundle to inspect. */
   project_fileset: string;
+  /** Which Dockerfile builds the agent, when the bundle holds more than one. */
+  dockerfile?: string;
 }

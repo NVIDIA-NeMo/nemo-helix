@@ -5,7 +5,7 @@ import { parseJson, useJobArtifact } from '@agent-hardener/components/useJobArti
 import type { PlatformJobStatus } from '@agent-hardener/generated/schema';
 import { parse } from 'yaml';
 
-// The war-game writes a `mitigations` job result bundling the defenders' before/after policy + workflow.
+// The war-game writes a `mitigations` job result bundling the defenders' before/after policy + guardrails.
 const MITIGATIONS_RESULT = 'mitigations';
 
 export interface DiffPair {
@@ -34,13 +34,13 @@ export interface DefensePair {
   kind: 'guardrail' | 'policy';
   target_tool?: string | null;
   summary: string;
-  yaml_fragment?: string;
+  config_fragment?: string;
   attack?: DefenseAttack | null;
 }
 
 export interface Mitigations {
   policy?: DiffPair;
-  workflow?: DiffPair;
+  guardrails?: DiffPair;
   defenses?: DefensePair[];
 }
 
@@ -67,13 +67,13 @@ export const cleanAttackPrompt = (text?: string): string => {
 export const shortProbe = (probe?: string): string =>
   probe ? (probe.split('.').pop() ?? probe) : '';
 
-// Agent Hardener injects one `pre_tool_verifier` middleware per hardened tool, keyed `custom_guardrail_<n>`
-// (see the guardrails defender's yaml_writer). We read the shape defensively — the YAML is machine-written
-// but a downstream consumer should never crash on a surprise.
-interface GuardrailMiddleware {
-  _type?: string;
+// Agent Hardener writes one guardrail per hardened tool into the victim's NeMo Relay plugin config,
+// keyed `custom_guardrail_<n>` (see the guardrails defender's component_writer). Read defensively:
+// the file is machine-written, but a downstream consumer should never crash on a surprise.
+interface Guardrail {
+  name?: string;
   system_instructions?: string;
-  target_function_or_group?: string;
+  target_tool?: string;
 }
 
 const asRecord = (value: unknown): Record<string, unknown> =>
@@ -81,12 +81,22 @@ const asRecord = (value: unknown): Record<string, unknown> =>
     ? (value as Record<string, unknown>)
     : {};
 
-const middlewareOf = (yamlText: string): Record<string, GuardrailMiddleware> => {
-  try {
-    return asRecord(asRecord(parse(yamlText)).middleware) as Record<string, GuardrailMiddleware>;
-  } catch {
-    return {};
+// Guardrails live under `components[].config.guardrails[]`. Parsed with a narrow regex rather
+// than a TOML parser: this is a display path, and adding a dependency to render a diff summary is a
+// poor trade when the file's shape is ours and fixed.
+const guardrailsOf = (tomlText: string): Record<string, Guardrail> => {
+  const out: Record<string, Guardrail> = {};
+  if (!tomlText) return out;
+  const blocks = tomlText.split(/\[\[components\.config\.guardrails\]\]/).slice(1);
+  for (const block of blocks) {
+    const field = (key: string): string | undefined => {
+      const match = block.match(new RegExp(`^${key}\\s*=\\s*(?:"""([\\s\\S]*?)"""|"((?:[^"\\\\]|\\\\.)*)")`, 'm'));
+      return match ? (match[1] ?? match[2]) : undefined;
+    };
+    const name = field('name');
+    if (name) out[name] = { name, target_tool: field('target_tool'), system_instructions: field('system_instructions') };
   }
+  return out;
 };
 
 // First sentence (or first line) of the guardrail instruction, trimmed for a card body.
@@ -97,29 +107,29 @@ const firstSentence = (text: string): string => {
   return sentence.length > 220 ? `${sentence.slice(0, 217)}…` : sentence;
 };
 
-// A guardrail added to the hardened workflow becomes a recommendation card; the policy diff becomes a
+// A guardrail added to the hardened guardrail set becomes a recommendation card; the policy diff becomes a
 // single "tightened" summary. Everything is inferred from the diff — no defender reasoning is transported.
 export const deriveRecommendations = (mitigations?: Mitigations): Recommendation[] => {
   if (!mitigations) return [];
   const recommendations: Recommendation[] = [];
 
-  if (mitigations.workflow) {
-    const before = middlewareOf(mitigations.workflow.before);
-    const after = middlewareOf(mitigations.workflow.after);
-    for (const [name, mw] of Object.entries(after)) {
+  if (mitigations.guardrails) {
+    const before = guardrailsOf(mitigations.guardrails.before);
+    const after = guardrailsOf(mitigations.guardrails.after);
+    for (const [name, rail] of Object.entries(after)) {
       if (name in before) continue;
-      const tool = mw.target_function_or_group;
+      const tool = rail.target_tool;
       recommendations.push({
         title: tool ? `Added a guardrail on ${tool}` : 'Added a tool-call guardrail',
-        detail: mw.system_instructions
-          ? firstSentence(mw.system_instructions)
+        detail: rail.system_instructions
+          ? firstSentence(rail.system_instructions)
           : 'Verifies tool calls before execution.',
       });
     }
   }
 
   if (mitigations.policy) {
-    // Inferred straight from the policy before/after diff (like the workflow) — a factual, non-judgmental
+    // Inferred straight from the policy before/after diff (like the guardrails) — a factual, non-judgmental
     // summary of what actually changed. No defender-side data needed.
     const summary = summarizePolicyDiff(mitigations.policy.before, mitigations.policy.after);
     if (summary) recommendations.push({ title: 'OpenShell policy changes', detail: summary });

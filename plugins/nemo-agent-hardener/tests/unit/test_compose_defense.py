@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_agent_hardener_plugin.api.v2 import runs as runs_module
@@ -14,72 +13,70 @@ from nemo_agent_hardener_plugin.jobs.defenses import compose_defense
 PREFIX = "/apis/agent-hardener/v2/workspaces/{workspace}"
 
 
-def _hardened_workflow() -> str:
-    return yaml.safe_dump(
-        {
-            "llms": {"llm": {"_type": "openai"}, "safety_llm": {"_type": "openai"}},
-            "functions": {
-                "send_email": {"_type": "email", "middleware": ["custom_guardrail_1"]},
-                "read_file": {"_type": "fs", "middleware": ["custom_guardrail_2"]},
-            },
-            "middleware": {
-                "custom_guardrail_1": {"_type": "pre_tool_verifier", "target_function_or_group": "send_email"},
-                "custom_guardrail_2": {"_type": "pre_tool_verifier", "target_function_or_group": "read_file"},
-            },
-            # The workflow entry is a middleware-bearing component too, not just a marker.
-            "workflow": {"_type": "react_agent", "middleware": ["custom_guardrail_1", "custom_guardrail_2"]},
-        },
-        sort_keys=False,
+def _hardened_guardrails() -> str:
+    return (
+        "version = 1\n"
+        "[[components]]\n"
+        'kind = "agent_hardener.pre_tool_verifier"\n'
+        "[components.config.model]\n"
+        'model = "m"\n'
+        "[[components.config.guardrails]]\n"
+        'name = "custom_guardrail_1"\n'
+        'target_tool = "send_email"\n'
+        'system_instructions = "Refuse exfiltration."\n'
+        "[[components.config.guardrails]]\n"
+        'name = "custom_guardrail_2"\n'
+        'target_tool = "read_file"\n'
+        'system_instructions = "Refuse credential paths."\n'
     )
 
 
 def _mitigations() -> dict:
     return {
-        "workflow": {"before": "workflow: {}\n", "after": _hardened_workflow()},
+        "guardrails": {"before": "version = 1\n", "after": _hardened_guardrails()},
         "policy": {"before": "version: 1\n", "after": "version: 1\nhardened: true\n"},
     }
 
 
-def test_compose_keeps_only_selected_guardrail() -> None:
-    workflow_yaml, policy_yaml = compose_defense(_mitigations(), ["custom_guardrail_1", "openshell_policy"])
-    assert workflow_yaml is not None and policy_yaml is not None
-    config = yaml.safe_load(workflow_yaml)
+def _rails(toml_text: str) -> list[dict]:
+    import tomllib  # noqa: PLC0415
 
-    # Only the selected guardrail survives, in the global middleware and on its tool.
-    assert set(config["middleware"]) == {"custom_guardrail_1"}
-    assert config["functions"]["send_email"]["middleware"] == ["custom_guardrail_1"]
-    assert config["functions"]["read_file"]["middleware"] == []  # custom_guardrail_2 reference dropped
-    # The workflow component's refs are pruned too — a name left pointing at a deleted middleware makes
-    # the victim fail config validation ("middleware type not found") and never serve.
-    assert config["workflow"]["middleware"] == ["custom_guardrail_1"]
-    # safety_llm kept while a guardrail remains; hardened policy selected.
-    assert "safety_llm" in config["llms"]
+    document = tomllib.loads(toml_text)
+    return [rail for entry in document["components"] for rail in entry["config"]["guardrails"]]
+
+
+def test_compose_keeps_only_selected_guardrail() -> None:
+    guardrails_toml, policy_yaml = compose_defense(_mitigations(), ["custom_guardrail_1", "openshell_policy"])
+    assert guardrails_toml is not None and policy_yaml is not None
+
+    rails = _rails(guardrails_toml)
+    assert [rail["name"] for rail in rails] == ["custom_guardrail_1"]
+    assert rails[0]["target_tool"] == "send_email"
     assert "hardened: true" in policy_yaml
 
 
-def test_compose_leaves_no_dangling_middleware_reference() -> None:
-    """Every surviving reference must name a middleware that still exists."""
-    for selection in ([], ["custom_guardrail_1"], ["custom_guardrail_2"], ["custom_guardrail_1", "custom_guardrail_2"]):
-        workflow_yaml, _ = compose_defense(_mitigations(), selection)
-        assert workflow_yaml is not None
-        config = yaml.safe_load(workflow_yaml)
-        defined = set(config.get("middleware") or {})
-        referenced = set(config["workflow"].get("middleware") or [])
-        for tool in config.get("functions", {}).values():
-            referenced |= set(tool.get("middleware") or [])
-        assert referenced <= defined, f"dangling refs {referenced - defined} for selection {selection}"
+def test_pruning_needs_no_reference_cleanup() -> None:
+    """Each guardrail is one self-contained table, so removing it cannot dangle a reference.
+
+    The NAT version had to strip the name from every middleware-bearing component as well; missing
+    one left the victim failing config validation and never serving.
+    """
+    guardrails_toml, _ = compose_defense(_mitigations(), ["custom_guardrail_2"])
+    assert guardrails_toml is not None
+    assert [rail["name"] for rail in _rails(guardrails_toml)] == ["custom_guardrail_2"]
+    assert "custom_guardrail_1" not in guardrails_toml
 
 
-def test_compose_drops_all_guardrails_and_safety_llm() -> None:
-    workflow_yaml, policy_yaml = compose_defense(_mitigations(), [])
-    assert workflow_yaml is not None
-    config = yaml.safe_load(workflow_yaml)
+def test_compose_drops_every_guardrail_when_none_selected() -> None:
+    guardrails_toml, _ = compose_defense(_mitigations(), [])
+    assert guardrails_toml is not None
+    assert _rails(guardrails_toml) == []
 
-    assert config["middleware"] == {}
-    assert "safety_llm" not in config["llms"]  # no guardrails left → safety_llm removed
-    assert config["functions"]["send_email"]["middleware"] == []
-    # openshell_policy not selected → baseline policy.
-    assert policy_yaml == "version: 1\n"
+
+def test_compose_tolerates_a_malformed_guardrail_file() -> None:
+    """A display/selection path must not fail the run on a surprise."""
+    bad = {"guardrails": {"before": "", "after": "::: not toml"}}
+    assert compose_defense(bad, ["custom_guardrail_1"])[0] == "::: not toml"
 
 
 def test_compose_handles_missing_sections() -> None:
@@ -101,6 +98,5 @@ def test_compose_defense_endpoint_composes_selection() -> None:
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    config = yaml.safe_load(body["workflow_yaml"])
-    assert set(config["middleware"]) == {"custom_guardrail_2"}
+    assert [rail["name"] for rail in _rails(body["guardrails_toml"])] == ["custom_guardrail_2"]
     assert body["policy_yaml"] == "version: 1\n"  # policy not selected → baseline

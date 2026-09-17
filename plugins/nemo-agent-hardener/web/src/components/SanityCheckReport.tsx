@@ -107,7 +107,7 @@ const Stat: FC<{ label: string; value: string; good: boolean }> = ({ label, valu
 );
 
 const AttackRow: FC<{ row: ValidationAttackRow }> = ({ row }) => (
-  <Flex justify="between" align="start" gap="density-md" className="py-2">
+  <Flex justify="between" align="start" gap="density-md" className="min-w-0 py-2">
     <Stack gap="density-xxs" className="min-w-0">
       <Text kind="body/semibold/sm">{row.probe ?? row.attack_id ?? 'attack'}</Text>
       {row.goal ? (
@@ -126,7 +126,7 @@ const AttackRow: FC<{ row: ValidationAttackRow }> = ({ row }) => (
 );
 
 const BenignRow: FC<{ row: ValidationBenignRow }> = ({ row }) => (
-  <Flex justify="between" align="start" gap="density-md" className="py-2">
+  <Flex justify="between" align="start" gap="density-md" className="min-w-0 py-2">
     <Stack gap="density-xxs" className="min-w-0">
       <Text kind="body/semibold/sm">{row.tool ?? row.label ?? `request ${row.index ?? ''}`}</Text>
       {row.payload_excerpt ? (
