@@ -45,6 +45,12 @@ inputs:
       be exactly 14 digits in `YYYYMMDDHHMMSS` form.
     required: false
     default: "19700101000000"
+  wheel-version:
+    description: >
+      Optional exact nightly version, such as 0.6.0.dev20260916032117.
+      Must match nightly-timestamp. When omitted, resolve from source tags.
+    required: false
+    default: ""
   python-version:
     description: Python version for setup-uv. Must be within the wheel's supported range.
     required: false
@@ -95,6 +101,7 @@ runs:
         CADENCE: ${{ inputs.cadence }}
         RELEASE_LABEL: ${{ inputs.release-label }}
         NIGHTLY_TIMESTAMP: ${{ inputs.nightly-timestamp }}
+        WHEEL_VERSION: ${{ inputs.wheel-version }}
         # Run the stamp script from the action's own checkout (the workflow
         # ref), not from inputs.source-root. For ci.yaml these are the same;
         # for release-bundle.yaml the source checkout can be at an older
@@ -108,6 +115,7 @@ runs:
           --sdk-id "${PACKAGE}"
           --cadence "${CADENCE}"
           --nightly-timestamp "${NIGHTLY_TIMESTAMP}"
+          --wheel-version "${WHEEL_VERSION}"
           --print-version
         )
         if [[ -n "${RELEASE_LABEL}" ]]; then

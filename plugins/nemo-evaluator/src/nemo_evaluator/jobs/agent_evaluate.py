@@ -18,6 +18,7 @@ is written via :func:`~nemo_evaluator.jobs.result_persistence.persist_agent_eval
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
@@ -261,6 +262,17 @@ def _to_runtime_task(task: AgentEvalTaskSpec) -> AgentEvalTask:
         views=task.views,
         metadata={item.key: item.value for item in task.metadata},
     )
+
+
+def _harbor_agent_env_from_host(target: HarborRunnerTarget) -> list[str]:
+    """The ``env_secrets`` names to forward to the Harbor agent, after checking the service resolved them."""
+    missing = sorted(name for name in target.env_secrets if name not in os.environ)
+    if missing:
+        raise ValueError(
+            f"`env_secrets` entries {missing} were not resolved into this job's environment, so the Harbor "
+            "agent cannot be given them."
+        )
+    return list(target.env_secrets)
 
 
 class AgentEvalJob(NemoJob):
@@ -586,6 +598,7 @@ class AgentEvalJob(NemoJob):
                     agent_import_path=target.agent_import_path,
                     agent_model_name=target.agent_model_name,
                     agent_kwargs=target.agent_kwargs,
+                    agent_env_from_host=_harbor_agent_env_from_host(target),
                     n_attempts=target.n_attempts,
                     n_concurrent_trials=target.n_concurrent_trials,
                     max_retries=target.max_retries,

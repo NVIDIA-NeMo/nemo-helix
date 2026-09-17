@@ -20,12 +20,15 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import datetime
+from enum import Enum
 from typing import Any
 
-from nemo_platform import APIConnectionError, APIStatusError, APITimeoutError, NotFoundError
+from nemo_platform_plugin.client.adapter import PlatformClient, client_from_platform
+from nemo_platform_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
 from nemo_platform_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_platform_plugin.client.types import CursorPagination
+from nemo_platform_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_platform_plugin.jobs.client import JobsWatchClient
 from nemo_platform_plugin.jobs.schemas import PlatformJobLog, PlatformJobStatusResponse
 from nemo_platform_plugin.jobs.types import JobLogsQueryParams
@@ -35,6 +38,7 @@ from nemo_platform_plugin.jobs.watch_types import (
     JobWatchEvent,
     JobWatchTimeoutError,
 )
+from nemo_platform_plugin.models.client import ModelsClient
 from rich.console import Console
 from rich.live import Live
 from rich.text import Text
@@ -43,20 +47,6 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 _TRANSIENT_GATEWAY_STATUS_CODES = {429, 502, 503, 504}
-_SAFE_JOB_TYPE_BUCKETS = frozenset(
-    {
-        "agent",
-        "agents",
-        "anonymizer",
-        "audit",
-        "customization",
-        "data-designer",
-        "evaluation",
-        "evaluator",
-        "insights",
-        "job",
-    }
-)
 
 
 def _pause(seconds: float) -> None:
@@ -137,91 +127,10 @@ def _seconds_since_creation(entry_timestamp: datetime | str | None, created_at: 
 
 
 def _status_text(status: Any) -> str:
+    """Normalize a status to its wire string; typed models carry ``str`` enums."""
+    if isinstance(status, Enum):
+        status = status.value
     return str(status or "")
-
-
-def _datetime_timestamp(value: datetime | str | None) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        try:
-            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-    if not isinstance(value, datetime):
-        return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    try:
-        return value.timestamp()
-    except (TypeError, OSError):
-        return None
-
-
-def _job_duration_sec(job_status: Any, fallback_start_time: float) -> float:
-    now = time.time()
-    for attr in ("started_at", "start_time", "created_at"):
-        timestamp = _datetime_timestamp(getattr(job_status, attr, None))
-        if timestamp is not None:
-            return max(0.0, now - timestamp)
-    return max(0.0, now - fallback_start_time)
-
-
-def _model_data_bucket(raw_model: object) -> str:
-    model = str(raw_model).strip() if raw_model is not None else ""
-    return "defined" if model else "undefined"
-
-
-def _job_type_bucket(resource_label: str) -> str:
-    label = str(resource_label or "").strip().lower().replace("_", "-").replace(" ", "-")
-    return label if label in _SAFE_JOB_TYPE_BUCKETS else "custom"
-
-
-def _emit_job_run_event(job_status: Any, *, resource_label: str, status: str, start_time: float) -> None:
-    """Emit a ``job_run`` telemetry event for a terminal platform job.
-
-    Best effort: never raises and never affects the waiter's return value.
-    """
-    try:
-        from nemo_platform_ext.cli.telemetry.emit import emit_event
-        from nemo_platform_ext.cli.telemetry.events import JobRunEvent, TaskStatusEnum
-
-        status_map = {
-            "completed": TaskStatusEnum.COMPLETED,
-            "error": TaskStatusEnum.ERROR,
-            "cancelled": TaskStatusEnum.CANCELED,
-        }
-        task_status = status_map.get(status, TaskStatusEnum.UNDEFINED)
-
-        details = getattr(job_status, "status_details", None)
-        if not isinstance(details, dict):
-            details = {}
-
-        # Step names are user-controlled by PlatformJobStepSpec, even though our
-        # built-in compilers use static names like "audit-job" or "evaluate-suite".
-        # Emit only a low-cardinality bucket from command metadata.
-        job_type = _job_type_bucket(resource_label)
-
-        # Model names may be user-authored; emit only a coarse present/absent bucket.
-        model = _model_data_bucket(details.get("model"))
-        raw_input_tokens = details.get("input_tokens")
-        input_tokens = int(raw_input_tokens) if raw_input_tokens is not None else -1
-        raw_output_tokens = details.get("output_tokens")
-        output_tokens = int(raw_output_tokens) if raw_output_tokens is not None else -1
-
-        emit_event(
-            JobRunEvent(
-                task_status=task_status,
-                job_type=job_type,
-                duration_sec=_job_duration_sec(job_status, start_time),
-                plugins=[],
-                model=model,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-            )
-        )
-    except Exception:
-        logger.debug("Failed to emit job_run telemetry event", exc_info=True)
 
 
 def _make_history_line(
@@ -263,7 +172,7 @@ class _PlatformJobWaitLiveDisplay:
         self.poll_interval = poll_interval
 
     def snapshot(self) -> tuple[str, int]:
-        return datetime.now().strftime("%H:%M:%S"), int(time.time() - self.start_time)
+        return datetime.now().strftime("%H:%M:%S"), int(time.monotonic() - self.start_time)
 
     def __rich__(self) -> Text:
         polling_time, wait_elapsed = self.snapshot()
@@ -273,7 +182,7 @@ class _PlatformJobWaitLiveDisplay:
 def _sleep_until_next_poll(start_time: float, timeout: float, poll_interval: int) -> bool:
     if poll_interval <= 0:
         raise ValueError(f"_sleep_until_next_poll poll_interval must be greater than 0, got {poll_interval}")
-    remaining = timeout - (time.time() - start_time)
+    remaining = timeout - (time.monotonic() - start_time)
     if remaining <= 0:
         return False
     _pause(min(poll_interval, remaining))
@@ -296,7 +205,7 @@ def _print_transient_wait_error(live: Live, resource_label: str, error: Exceptio
 
 
 def wait_for_inference_deployment(
-    client: Any,
+    client: PlatformClient,
     name: str,
     *,
     workspace: str | None = None,
@@ -307,10 +216,10 @@ def wait_for_inference_deployment(
     verbose: bool = True,
 ) -> bool:
     """Wait for an inference deployment to reach the requested status."""
-    if workspace is None:
-        workspace = client._get_workspace_path_param()
+    models_client = client_from_platform(client, ModelsClient)
+    workspace = models_client.require_workspace(workspace)
 
-    start_time = time.time()
+    start_time = time.monotonic()
     last_history_len = 0
     last_status = ""
     last_message = ""
@@ -319,14 +228,14 @@ def wait_for_inference_deployment(
         console.print(f"[bold]Waiting for deployment '{name}' to reach status: {status}[/bold]\n")
 
     with Live(console=console, refresh_per_second=4, transient=True) as live:
-        while time.time() - start_time < timeout:
-            wait_elapsed = int(time.time() - start_time)
+        while time.monotonic() - start_time < timeout:
+            wait_elapsed = int(time.monotonic() - start_time)
             polling_time = datetime.now().strftime("%H:%M:%S")
             if verbose:
                 live.update(_make_live_display(polling_time, timeout, poll_interval, wait_elapsed))
 
             try:
-                deployment = client.inference.deployments.retrieve(name, workspace=workspace)
+                deployment = models_client.get_deployment(name=name, workspace=workspace).data()
                 history = getattr(deployment, "status_history", None)
                 created_at = getattr(deployment, "created_at", None)
                 if history and len(history) > 0:
@@ -363,7 +272,7 @@ def wait_for_inference_deployment(
                     if verbose:
                         console.print(f"\n[green]✓ Deployment reached {status} status![/green]")
                     if status == "READY" and check_gateway:
-                        remaining_timeout = timeout - (time.time() - start_time)
+                        remaining_timeout = timeout - (time.monotonic() - start_time)
                         if remaining_timeout <= 0:
                             console.print("\n[red]✗ Timeout before gateway readiness check could complete[/red]")
                             return False
@@ -391,10 +300,10 @@ def wait_for_inference_deployment(
                 live.stop()
                 console.print("\n[red]✗ Deployment not found[/red]")
                 return False
-            except (APIConnectionError, APITimeoutError) as exc:
+            except NemoTransportError as exc:
                 if verbose:
                     _print_transient_wait_error(live, "deployment status", exc)
-            except APIStatusError as exc:
+            except NemoHTTPError as exc:
                 if exc.status_code not in _TRANSIENT_GATEWAY_STATUS_CODES:
                     raise
                 if verbose:
@@ -403,7 +312,7 @@ def wait_for_inference_deployment(
             if not _sleep_until_next_poll(start_time, timeout, poll_interval):
                 break
 
-    wait_elapsed = int(time.time() - start_time)
+    wait_elapsed = int(time.monotonic() - start_time)
     detail = f"Last status: {last_status}"
     if last_message:
         detail += f" - {last_message}"
@@ -421,7 +330,7 @@ def wait_for_platform_job(
     poll_interval: int = 3,
 ) -> bool:
     """Wait for a platform job resource to complete."""
-    start_time = time.time()
+    start_time = time.monotonic()
     last_status = ""
     jobs = _WatchedJobsClient(jobs_client)
 
@@ -459,9 +368,6 @@ def wait_for_platform_job(
 
                 if event.terminal:
                     live.stop()
-                    _emit_job_run_event(
-                        jobs.last_status, resource_label=resource_label, status=current_status, start_time=start_time
-                    )
                     if event.successful:
                         console.print(f"\n[green]✓ {resource_label.title()} completed![/green]")
                         return True
@@ -474,14 +380,14 @@ def wait_for_platform_job(
         except JobWatchTimeoutError:
             pass
 
-    wait_elapsed = int(time.time() - start_time)
+    wait_elapsed = int(time.monotonic() - start_time)
     detail = f"Last status: {last_status}" if last_status else "No status returned"
     console.print(f"\n[red]✗ Timeout after {wait_elapsed}s. {detail}[/red]")
     return False
 
 
 def wait_for_gateway(
-    client: Any,
+    client: PlatformClient,
     provider_name: str,
     workspace: str,
     timeout: float = 60,
@@ -489,8 +395,9 @@ def wait_for_gateway(
     verbose: bool = True,
 ) -> bool:
     """Wait for the inference gateway to be able to route to a provider."""
-    start_time = time.time()
+    start_time = time.monotonic()
     start_timestamp = datetime.now().strftime("%H:%M:%S")
+    gateway_client = client_from_platform(client, InferenceGatewayClient)
 
     if verbose:
         console.print(f"[bold]Waiting for gateway to be ready for provider '{provider_name}'[/bold]\n")
@@ -504,23 +411,23 @@ def wait_for_gateway(
         return text
 
     with Live(console=console, refresh_per_second=4, transient=True) as live:
-        while time.time() - start_time < timeout:
-            elapsed = int(time.time() - start_time)
+        while time.monotonic() - start_time < timeout:
+            elapsed = int(time.monotonic() - start_time)
             polling_time = datetime.now().strftime("%H:%M:%S")
             if verbose:
                 live.update(_make_gateway_display(polling_time, elapsed, "Checking gateway..."))
 
             try:
-                client.inference.gateway.provider.ready(provider_name, workspace=workspace)
+                gateway_client.provider_ready(name=provider_name, workspace=workspace)
                 live.stop()
                 if verbose:
                     console.print(f"  [{polling_time}] ({elapsed}s) [green]Gateway is ready![/green]")
                 return True
             except NotFoundError:
                 pass
-            except (APIConnectionError, APITimeoutError):
+            except NemoTransportError:
                 pass
-            except APIStatusError as exc:
+            except NemoHTTPError as exc:
                 if exc.status_code in _TRANSIENT_GATEWAY_STATUS_CODES:
                     pass
                 else:
@@ -531,6 +438,6 @@ def wait_for_gateway(
             if not _sleep_until_next_poll(start_time, timeout, poll_interval):
                 break
 
-    elapsed = int(time.time() - start_time)
+    elapsed = int(time.monotonic() - start_time)
     console.print(f"\n[red]✗ Gateway timeout after {elapsed}s[/red]")
     return False

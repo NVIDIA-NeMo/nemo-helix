@@ -1525,8 +1525,8 @@ contents cannot shift under a deployment. This re-resolves that same ref and
 repoints the fileset at whatever it names now. Everything else about the storage
 config, including the repository and directory, is left alone.
 
-Deployments stage the fileset when they are created, so existing deployments
-keep serving the revision they were staged from.
+A running deployment keeps serving the revision it staged. It moves to this one
+when the runner next stages the fileset, and records the revision it staged.
 
 **Usage:**
 
@@ -6894,6 +6894,7 @@ nemo agents execute [OPTIONS]
 * `--workdir.base-workdir`: Optional Files reference for the initial working directory.
 * `--timeout-seconds <FLOAT>`: Maximum time to wait for Fabric to return an execution result.
 * `--auto-telemetry`: Let the server fill in the agent's telemetry export -- an Intake destination for a config that asks for one and does not say where. False submits the agent config as written, which still exports if the config says to; an agent config is the place to say a run should not be traced.
+* `--image`: Container image to execute the agent in. Mirrors CreateDeploymentRequest.image. Typically the output of `nemo agents package`, which contains both the agent's Fabric adapter and the execute task module. Empty falls back to agents.jobs.default_image, then to the jobs substrate's chain (the execution profile's default_task_image, then the platform CPU tasks image).
 * `--extension.kind`: Trusted extension kind registered by an installed NeMo plugin.
 
 **Spec Source:**

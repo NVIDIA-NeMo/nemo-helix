@@ -34,8 +34,9 @@ def autocomplete_model_entity(ctx: Context, incomplete: str) -> list[tuple[str, 
         # Suppress logging during autocomplete
         logging.getLogger().setLevel(logging.CRITICAL)
 
-        client = state.get_client()
-        models = client.inference.gateway.openai.v1.models.list(workspace=workspace)
+        from nemo_platform_plugin.inference_gateway.client import InferenceGatewayClient
+
+        models = state.typed_client(InferenceGatewayClient).list_openai_models(workspace=workspace).data()
 
         if models.data:
             results: list[tuple[str, str]] = []

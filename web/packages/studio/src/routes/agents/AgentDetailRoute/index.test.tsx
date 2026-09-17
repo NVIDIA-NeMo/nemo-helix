@@ -20,10 +20,7 @@ const workspace = workspace1.workspace;
 const renderDetail = () =>
   renderRoute(undefined, {
     history: getAgentDetailRoute(workspace, agentName),
-    routes: [
-      { path: ROUTES.workspace.agentDetail, element: <AgentDetailRoute /> },
-      { path: ROUTES.workspace.intakeTraces, element: <div>intake-traces-page</div> },
-    ],
+    routes: [{ path: ROUTES.workspace.agentDetail, element: <AgentDetailRoute /> }],
   });
 
 describe('AgentDetailRoute', () => {
@@ -38,7 +35,6 @@ describe('AgentDetailRoute', () => {
     expect(screen.getByRole('tab', { name: 'Chat' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Details' })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Configuration' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open traces' })).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getAllByRole('button', { name: 'Run evaluation' })).toHaveLength(2);
     });
@@ -52,15 +48,6 @@ describe('AgentDetailRoute', () => {
     expect(await screen.findByText('Trace statistics')).toBeInTheDocument();
     expect(screen.getByText('Agent ID')).toBeInTheDocument();
     expect(screen.getByText('Created')).toBeInTheDocument();
-  });
-
-  it('navigates to intake traces when Open traces is clicked', async () => {
-    const user = userEvent.setup();
-    renderDetail();
-
-    await user.click(await screen.findByRole('button', { name: 'Open traces' }));
-
-    expect(await screen.findByText('intake-traces-page')).toBeInTheDocument();
   });
 
   it('narrows the header to a single primary action off the overview tab', async () => {

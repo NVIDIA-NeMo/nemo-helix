@@ -30,6 +30,8 @@ def _load_docs_generator():
 _docs_generator = _load_docs_generator()
 generate_docs = _docs_generator.generate_docs
 generate_index_snippet = _docs_generator.generate_index_snippet
+write_docs_files = _docs_generator.write_docs_files
+with_trailing_newline = _docs_generator._with_trailing_newline
 enable_plugin_cli_docs = _docs_generator._enable_plugin_cli_docs
 documented_plugin_clis = _docs_generator._DOCUMENTED_PLUGIN_CLIS
 plugin_docs_discovery_env = _docs_generator._PLUGIN_DOCS_DISCOVERY_ENV
@@ -143,3 +145,25 @@ def test_index_snippet_skips_hidden_lazy_commands_without_loading():
     assert "hidden-command" not in snippet
     assert "Hidden command." not in snippet
     assert "* `--help, -h`: Show this message and exit." in reference
+
+
+def test_write_docs_files_matches_individual_generators(tmp_path):
+    docs_app = typer.Typer()
+
+    @docs_app.callback()
+    def main() -> None:
+        """Test CLI."""
+
+    @docs_app.command(rich_help_panel="Setup")
+    def visible() -> None:
+        """Visible command."""
+
+    reference_path = tmp_path / "docs/cli/reference.mdx"
+    summary_path = tmp_path / "docs/fern/snippets/_snippets/cli-summary.mdx"
+
+    write_docs_files(docs_app, reference_path, summary_path, name="nemo")
+
+    assert reference_path.read_text(encoding="utf-8") == generate_docs(docs_app, name="nemo")
+    assert summary_path.read_text(encoding="utf-8") == with_trailing_newline(
+        generate_index_snippet(docs_app, name="nemo")
+    )

@@ -10,6 +10,7 @@ import shutil
 import stat
 import subprocess
 import sys
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,11 @@ _SCRIPT = _PLUGIN / "skills" / "eval-author-trace-environment" / "scripts" / "tr
 _SUMMARY_SCHEMA = "nemo.eval_author.trace_environment_summary.v2"
 _CANDIDATE_SCHEMA = "nemo.eval_author.trace_environment_candidate.v2"
 _VALIDATION_SCHEMA = "nemo.eval_author.trace_environment_validation.v5"
+_TOOL_ACCESS_DECISIONS_SCHEMA = "nemo.eval_author.trace_environment_tool_access_decisions.v1"
+_SPEC = spec_from_file_location("trace_environment_for_tests", _SCRIPT)
+assert _SPEC is not None and _SPEC.loader is not None
+_TRACE_ENVIRONMENT = module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_TRACE_ENVIRONMENT)
 
 
 def _run(*args: str) -> tuple[int, dict[str, Any]]:
@@ -84,12 +90,429 @@ def _workspace(tmp_path: Path, *, image_only: bool = False) -> tuple[Path, Path]
     return task_dir, source
 
 
+def _fixture_atif() -> dict[str, Any]:
+    return {
+        "schema_version": "ATIF-v1.7",
+        "session_id": "session-fixture",
+        "trajectory_id": "trace-fixture",
+        "agent": {
+            "name": "coding-agent",
+            "version": "1.0",
+            "tool_definitions": [
+                {
+                    "name": "account.lookup",
+                    "description": "Look up a synthetic account.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"account_id": {"type": "string"}},
+                        "required": ["account_id"],
+                    },
+                    "annotations": {"readOnlyHint": True},
+                },
+                {
+                    "name": "account.update",
+                    "inputSchema": {"type": "object"},
+                    "annotations": {"readOnlyHint": False},
+                },
+                {
+                    "name": "account.inspect",
+                    "inputSchema": {"type": "object"},
+                },
+            ],
+        },
+        "steps": [
+            {"step_id": 1, "source": "user", "message": "Inspect the synthetic account."},
+            {
+                "step_id": 2,
+                "source": "agent",
+                "message": "",
+                "tool_calls": [
+                    {
+                        "tool_call_id": "lookup-1",
+                        "function_name": "account.lookup",
+                        "arguments": {"account_id": "synthetic-001"},
+                    },
+                    {
+                        "tool_call_id": "update-1",
+                        "function_name": "account.update",
+                        "arguments": {"account_id": "synthetic-001", "status": "active"},
+                    },
+                    {
+                        "tool_call_id": "inspect-1",
+                        "function_name": "account.inspect",
+                        "arguments": {"account_id": "synthetic-001"},
+                    },
+                ],
+                "observation": {
+                    "results": [
+                        {"source_call_id": "lookup-1", "content": '{"status":"active"}'},
+                        {"source_call_id": "update-1", "content": "updated"},
+                        {"source_call_id": "inspect-1", "content": "active"},
+                    ]
+                },
+            },
+        ],
+    }
+
+
+def _fixture_workspace(tmp_path: Path, *, trace: dict[str, Any] | None = None) -> Path:
+    root = tmp_path / ".eval-author" / "trace-environments"
+    code, result = _run("init", "--root", str(root), "--task-id", "fixture-tools")
+    assert code == 0, result
+    task_dir = Path(result["task_dir"])
+    source = tmp_path / "fixture.atif.json"
+    _write_json(source, trace if trace is not None else _fixture_atif())
+    code, result = _run(
+        "prepare",
+        "--task-dir",
+        str(task_dir),
+        "--atif",
+        str(source),
+        "--source-kind",
+        "atif",
+    )
+    assert code == 0, result
+    return task_dir
+
+
+def _plan_tool_calls(task_dir: Path) -> None:
+    code, result = _run("inventory-tool-calls", "--task-dir", str(task_dir))
+    assert code == 0, result
+    code, result = _run("plan-tool-call-access", "--task-dir", str(task_dir))
+    assert code == 0, result
+
+
+def _resolve_tool_access(task_dir: Path, states: dict[str, str]) -> tuple[int, dict[str, Any]]:
+    decisions = {
+        "schema": _TOOL_ACCESS_DECISIONS_SCHEMA,
+        "decisions": [
+            {
+                "name": name,
+                "access": access,
+                "adapter": "mcp" if access == "mock" else None,
+                "note": f"Test selected {access} access.",
+            }
+            for name, access in states.items()
+        ],
+    }
+    path = task_dir / "private/requested-tool-access.json"
+    _write_json(path, decisions)
+    return _run(
+        "resolve-tool-call-access",
+        "--task-dir",
+        str(task_dir),
+        "--decisions",
+        str(path),
+        "--reviewer-kind",
+        "agent",
+    )
+
+
+def test_tool_call_inventory_records_inputs_outputs_and_is_immutable(tmp_path: Path) -> None:
+    task_dir = _fixture_workspace(tmp_path)
+
+    code, result = _run("inventory-tool-calls", "--task-dir", str(task_dir))
+
+    assert code == 0, result
+    assert result["tool_count"] == 3
+    assert result["call_count"] == 3
+    inventory_path = task_dir / "private/tool-call-inventory.json"
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    lookup = inventory["tools"][0]
+    assert lookup["name"] == "account.lookup"
+    assert lookup["definition_status"] == "complete"
+    assert lookup["read_only"] is True
+    assert lookup["read_only_evidence"] == "mcp_annotation"
+    assert lookup["calls"][0]["arguments"] == {"account_id": "synthetic-001"}
+    assert lookup["calls"][0]["matching_observations"] == [
+        {
+            "source_call_id": lookup["calls"][0]["tool_call_id"],
+            "content": '{"status":"active"}',
+        }
+    ]
+    if os.name == "posix":
+        assert stat.S_IMODE(inventory_path.stat().st_mode) == 0o600
+
+    code, result = _run("inventory-tool-calls", "--task-dir", str(task_dir))
+    assert code == 1
+    assert "refusing to replace" in result["error"]
+
+
+def test_tool_call_inventory_includes_embedded_subagent_calls(tmp_path: Path) -> None:
+    payload = _fixture_atif()
+    definition = payload["agent"]["tool_definitions"][0]
+    payload["steps"] = [{"step_id": 1, "source": "user", "message": "Delegate the synthetic lookup."}]
+    payload["agent"]["tool_definitions"] = [definition]
+    payload["subagent_trajectories"] = [
+        {
+            "schema_version": "ATIF-v1.7",
+            "agent": {"name": "subagent", "tool_definitions": [definition]},
+            "steps": [
+                {
+                    "step_id": 1,
+                    "source": "agent",
+                    "message": "",
+                    "tool_calls": [
+                        {
+                            "tool_call_id": "child-call",
+                            "function_name": "account.lookup",
+                            "arguments": {"account_id": "synthetic-child"},
+                        }
+                    ],
+                    "observation": {"results": [{"source_call_id": "child-call", "content": "child-result"}]},
+                }
+            ],
+        }
+    ]
+    root = tmp_path / ".eval-author" / "trace-environments"
+    code, result = _run("init", "--root", str(root), "--task-id", "subagent-fixture")
+    assert code == 0, result
+    task_dir = Path(result["task_dir"])
+    source = tmp_path / "subagent.atif.json"
+    _write_json(source, payload)
+    code, result = _run("prepare", "--task-dir", str(task_dir), "--atif", str(source), "--source-kind", "atif")
+    assert code == 0, result
+
+    code, result = _run("inventory-tool-calls", "--task-dir", str(task_dir))
+
+    assert code == 0, result
+    inventory = json.loads((task_dir / "private/tool-call-inventory.json").read_text(encoding="utf-8"))
+    assert inventory["call_count"] == 1
+    assert inventory["tools"][0]["definition_status"] == "complete"
+    assert inventory["tools"][0]["calls"][0]["trajectory_path"] == "$.subagent_trajectories[0]"
+
+
+def test_tool_call_inventory_deduplicates_equivalent_definition_shapes() -> None:
+    payload = _fixture_atif()
+    mcp_definition = payload["agent"]["tool_definitions"][0]
+    payload["subagent_trajectories"] = [
+        {
+            "schema_version": "ATIF-v1.7",
+            "agent": {
+                "name": "subagent",
+                "tool_definitions": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": mcp_definition["name"],
+                            "description": mcp_definition["description"],
+                            "parameters": mcp_definition["inputSchema"],
+                            "annotations": mcp_definition["annotations"],
+                        },
+                    }
+                ],
+            },
+            "steps": [],
+        }
+    ]
+
+    inventory = _TRACE_ENVIRONMENT.derive_tool_call_inventory(payload, safe_atif_sha256="sha256:safe")
+
+    lookup = next(tool for tool in inventory["tools"] if tool["name"] == "account.lookup")
+    assert lookup["definition_status"] == "complete"
+    assert lookup["definition"] == mcp_definition
+    assert lookup["normalized_definition"] == {
+        "name": "account.lookup",
+        "description": "Look up a synthetic account.",
+        "inputSchema": mcp_definition["inputSchema"],
+        "annotations": {"readOnlyHint": True},
+    }
+
+
+def test_tool_call_plan_reports_replay_support_and_side_effect_warnings(tmp_path: Path) -> None:
+    task_dir = _fixture_workspace(tmp_path)
+    code, result = _run("inventory-tool-calls", "--task-dir", str(task_dir))
+    assert code == 0, result
+
+    code, result = _run("plan-tool-call-access", "--task-dir", str(task_dir))
+
+    assert code == 0, result
+    assert result["mock_support_counts"] == {"exact_replay": 3}
+    plan = json.loads((task_dir / "private/tool-call-plan.json").read_text(encoding="utf-8"))
+    tools = {tool["name"]: tool for tool in plan["tools"]}
+    assert tools["account.lookup"]["mock_support"] == "exact_replay"
+    assert tools["account.lookup"]["warnings"] == []
+    assert tools["account.update"]["mock_support"] == "exact_replay"
+    assert tools["account.update"]["warnings"] == ["tool_declared_mutating"]
+    assert tools["account.inspect"]["mock_support"] == "exact_replay"
+    assert tools["account.inspect"]["warnings"] == ["side_effects_unproven"]
+
+
+def test_tool_access_requires_complete_explicit_real_mock_or_none_decisions(tmp_path: Path) -> None:
+    task_dir = _fixture_workspace(tmp_path)
+    _plan_tool_calls(task_dir)
+
+    code, result = _resolve_tool_access(task_dir, {"account.lookup": "mock"})
+    assert code == 1
+    assert "decisions are missing" in result["error"]
+
+    code, result = _resolve_tool_access(
+        task_dir,
+        {
+            "account.lookup": "real",
+            "account.update": "mock",
+            "account.inspect": "none",
+        },
+    )
+
+    assert code == 0, result
+    assert result["access_counts"] == {"mock": 1, "none": 1, "real": 1}
+    access = json.loads((task_dir / "private/tool-access.json").read_text(encoding="utf-8"))
+    decisions = {decision["name"]: decision for decision in access["decisions"]}
+    assert decisions["account.lookup"]["adapter"] is None
+    assert decisions["account.update"]["adapter"] == "mcp"
+    assert decisions["account.update"]["warnings"] == ["tool_declared_mutating"]
+    assert decisions["account.inspect"]["access"] == "none"
+
+
+def test_generate_mock_tool_calls_requires_privacy_review_and_serves_strict_mcp(tmp_path: Path) -> None:
+    task_dir = _fixture_workspace(tmp_path)
+    _plan_tool_calls(task_dir)
+    code, result = _resolve_tool_access(
+        task_dir,
+        {
+            "account.lookup": "mock",
+            "account.update": "real",
+            "account.inspect": "none",
+        },
+    )
+    assert code == 0, result
+
+    code, result = _run("check", "--task-dir", str(task_dir))
+    assert code == 1
+    assert any("requires generated mock tool-call artifacts" in error for error in result["errors"])
+
+    code, result = _run("generate-mock-tool-calls", "--task-dir", str(task_dir))
+    assert code == 1
+    assert "review-privacy" in result["error"]
+
+    _review_privacy(task_dir)
+    code, result = _run("generate-mock-tool-calls", "--task-dir", str(task_dir))
+    assert code == 0, result
+    assert result["generated_mock_tool_count"] == 1
+    fixture_dir = task_dir / "task/environment/tool-call-fixtures"
+    call_fixtures = json.loads((fixture_dir / "call-fixtures.json").read_text(encoding="utf-8"))
+    assert [tool["name"] for tool in call_fixtures["tools"]] == ["account.lookup"]
+    assert call_fixtures["tools"][0]["cases"][0]["input"] == {"account_id": "synthetic-001"}
+    assert call_fixtures["tools"][0]["cases"][0]["output"] == '{"status":"active"}'
+    scenario = json.loads((fixture_dir / "mcp-scenario.json").read_text(encoding="utf-8"))
+    assert [tool["definition"]["name"] for tool in scenario["tools"]] == ["account.lookup"]
+    assert "account.update" not in (fixture_dir / "mcp-scenario.json").read_text(encoding="utf-8")
+    assert "[[environment.mcp_servers]]" in (fixture_dir / "integration.toml").read_text(encoding="utf-8")
+    if os.name == "posix":
+        assert stat.S_IMODE((fixture_dir / "mcp_replay.py").stat().st_mode) == 0o755
+
+    with pytest.raises(_TRACE_ENVIRONMENT.ContractError, match=r"requires \[\[environment.mcp_servers\]\]"):
+        _TRACE_ENVIRONMENT._validate_mock_tool_call_integration(
+            task_dir,
+            {"environment": {"network_mode": "no-network"}},
+        )
+    _TRACE_ENVIRONMENT._validate_mock_tool_call_integration(
+        task_dir,
+        {
+            "environment": {
+                "network_mode": "no-network",
+                "mcp_servers": [
+                    {
+                        "name": "trace-tool-call-replay",
+                        "transport": "stdio",
+                        "command": "/opt/tool-call-fixtures/launch-replay.sh",
+                        "args": [],
+                    }
+                ],
+            }
+        },
+    )
+
+    audit = tmp_path / "fixture-audit.jsonl"
+    requests = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "account.lookup", "arguments": {"account_id": "synthetic-001"}},
+        },
+        {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {"name": "account.lookup", "arguments": {"account_id": "unexpected"}},
+        },
+    ]
+    server = subprocess.run(
+        [
+            sys.executable,
+            str(fixture_dir / "mcp_replay.py"),
+            "--scenario",
+            str(fixture_dir / "mcp-scenario.json"),
+            "--audit-log",
+            str(audit),
+        ],
+        input="".join(json.dumps(request) + "\n" for request in requests),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert server.returncode == 0, server.stderr
+    responses = [json.loads(line) for line in server.stdout.splitlines()]
+    assert responses[1]["result"]["tools"][0]["name"] == "account.lookup"
+    assert responses[2]["result"] == {
+        "content": [{"type": "text", "text": '{"status":"active"}'}],
+        "isError": False,
+    }
+    assert responses[3]["result"]["isError"] is True
+    assert "synthetic-001" not in responses[3]["result"]["content"][0]["text"]
+    audit_events = [json.loads(line) for line in audit.read_text(encoding="utf-8").splitlines()]
+    call_events = [event for event in audit_events if event.get("method") == "tools/call" and "matched" in event]
+    assert [event["matched"] for event in call_events] == [True, False]
+
+    code, result = _run("check", "--task-dir", str(task_dir))
+    assert code == 0, result
+    (fixture_dir / "mcp-scenario.json").write_text("{}\n", encoding="utf-8")
+    code, result = _run("check", "--task-dir", str(task_dir))
+    assert code == 1
+    assert any("scenario" in error for error in result["errors"])
+
+
+def test_redacted_values_are_not_materialized_as_replay_cases(tmp_path: Path) -> None:
+    payload = _atif()
+    payload["agent"]["tool_definitions"] = [
+        {
+            "name": "fixture.read",
+            "inputSchema": {"type": "object"},
+            "annotations": {"readOnlyHint": True},
+        }
+    ]
+    root = tmp_path / ".eval-author" / "trace-environments"
+    code, result = _run("init", "--root", str(root), "--task-id", "redacted-fixture")
+    assert code == 0, result
+    task_dir = Path(result["task_dir"])
+    source = tmp_path / "redacted.atif.json"
+    _write_json(source, payload)
+    code, result = _run("prepare", "--task-dir", str(task_dir), "--atif", str(source), "--source-kind", "atif")
+    assert code == 0, result
+    code, result = _run("inventory-tool-calls", "--task-dir", str(task_dir))
+    assert code == 0, result
+    code, result = _run("plan-tool-call-access", "--task-dir", str(task_dir))
+    assert code == 0, result
+    plan = json.loads((task_dir / "private/tool-call-plan.json").read_text(encoding="utf-8"))
+    assert plan["tools"][0]["mock_support"] == "unsupported"
+    assert "redacted_value_required" in plan["tools"][0]["reason_codes"]
+
+    code, result = _resolve_tool_access(task_dir, {"fixture.read": "mock"})
+    assert code == 1
+    assert "mock access for fixture.read is unsupported" in result["error"]
+
+
 def _candidate(
     task_dir: Path,
     *,
     status: str = "candidate",
     ground_truth: dict[str, Any] | None = None,
     software_requirements: list[dict[str, Any]] | None = None,
+    state_basis: str | None = None,
 ) -> None:
     if ground_truth is None:
         ground_truth = {
@@ -101,6 +524,11 @@ def _candidate(
     if software_requirements is None:
         software_requirements = []
     if status == "candidate":
+        if (task_dir / "safe/trace.atif.json").exists() and not (task_dir / "private/tool-access.json").exists():
+            _plan_tool_calls(task_dir)
+            inventory = json.loads((task_dir / "private/tool-call-inventory.json").read_text())
+            code, result = _resolve_tool_access(task_dir, {tool["name"]: "none" for tool in inventory["tools"]})
+            assert code == 0, result
         payload = {
             "schema": _CANDIDATE_SCHEMA,
             "status": "candidate",
@@ -128,6 +556,8 @@ def _candidate(
             "ground_truth": ground_truth,
             "software_requirements": software_requirements,
         }
+    if state_basis is not None:
+        payload["state_basis"] = state_basis
     _write_json(task_dir / "candidate.json", payload)
 
 
@@ -331,11 +761,14 @@ def _ready_environment(
     oracle_reward: float = 1.0,
     oracle_exception: object | None = None,
     record_validation: bool = True,
+    run_suffix: str = "",
+    check_rows: bool = True,
+    allow_aggregate: bool = False,
 ) -> None:
     task = task_dir / "task"
-    (task / "environment").mkdir(parents=True)
-    (task / "tests").mkdir()
-    (task / "solution").mkdir()
+    (task / "environment").mkdir(parents=True, exist_ok=True)
+    (task / "tests").mkdir(exist_ok=True)
+    (task / "solution").mkdir(exist_ok=True)
     verifier = f'\n[verifier]\nenvironment_mode = "{mode}"\n'
     if mode == "separate":
         verifier += 'network_mode = "no-network"\n\n[verifier.environment]\nnetwork_mode = "no-network"\n'
@@ -374,7 +807,15 @@ The human reviewer confirmed that this fixture accurately represents the recorde
 """,
         encoding="utf-8",
     )
-    (task / "tests" / "test.sh").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    (task / "tests" / "test.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "# Fixture check: in the task container this asserts /workspace/repaired exists.\n"
+        "status=FAIL\n"
+        "if test -f /workspace/repaired || test ! -e /logs; then status=PASS; fi\n"
+        "printf 'fixture-repaired\\t%s\\n' \"$status\">> /logs/verifier/results 2>/dev/null || true\n"
+        'test "$status" = PASS\n',
+        encoding="utf-8",
+    )
     if mode == "separate":
         (task / "tests" / "Dockerfile").write_text(
             "FROM scratch\nCOPY test.sh /tests/test.sh\n",
@@ -387,11 +828,11 @@ The human reviewer confirmed that this fixture accurately represents the recorde
     control_source = task_dir / "private" / "negative_agent.py"
     control_source.write_text("# Synthetic incomplete repair implementation.\n", encoding="utf-8")
     for job_number, arm, reward, exception in (
-        (1, "nop-1", nop_reward, None),
-        (2, "nop-2", nop_reward, None),
-        (3, "oracle-1", oracle_reward, oracle_exception),
-        (4, "oracle-2", oracle_reward, oracle_exception),
-        (5, "negative-1", 0.0, None),
+        (1, f"nop-1{run_suffix}", nop_reward, None),
+        (2, f"nop-2{run_suffix}", nop_reward, None),
+        (3, f"oracle-1{run_suffix}", oracle_reward, oracle_exception),
+        (4, f"oracle-2{run_suffix}", oracle_reward, oracle_exception),
+        (5, f"negative-1{run_suffix}", 0.0, None),
     ):
         proof_arm = arm.rsplit("-", 1)[0]
         if mode == "separate":
@@ -420,6 +861,10 @@ The human reviewer confirmed that this fixture accurately represents the recorde
             assert code == 0, result
         trial = task_dir / "private" / "jobs" / arm / "task__trial"
         trial.mkdir(parents=True)
+        check_status = "PASS" if reward == 1.0 and proof_arm == "oracle" else "FAIL"
+        if check_rows:
+            (trial / "verifier").mkdir()
+            (trial / "verifier" / "results").write_text(f"fixture-repaired\t{check_status}\n", encoding="utf-8")
         _write_json(
             trial / "result.json",
             {
@@ -428,7 +873,7 @@ The human reviewer confirmed that this fixture accurately represents the recorde
                 "verifier_result": {"rewards": {"reward": reward}},
                 "exception_info": exception,
                 "config": {
-                    "job_id": f"job-{job_number}",
+                    "job_id": f"job-{job_number}{run_suffix}",
                     "agent": {"name": proof_arm if proof_arm != "negative" else "negative_agent:IncompleteRepair"},
                 },
             },
@@ -439,17 +884,18 @@ The human reviewer confirmed that this fixture accurately represents the recorde
             "--task-dir",
             str(task_dir),
             "--nop-job-dir",
-            "private/jobs/nop-1",
+            f"private/jobs/nop-1{run_suffix}",
             "--nop-job-dir",
-            "private/jobs/nop-2",
+            f"private/jobs/nop-2{run_suffix}",
             "--oracle-job-dir",
-            "private/jobs/oracle-1",
+            f"private/jobs/oracle-1{run_suffix}",
             "--oracle-job-dir",
-            "private/jobs/oracle-2",
+            f"private/jobs/oracle-2{run_suffix}",
             "--negative-job-dir",
-            "private/jobs/negative-1",
+            f"private/jobs/negative-1{run_suffix}",
             "--harbor-version",
             "0.21.0",
+            *(["--allow-aggregate-only"] if allow_aggregate else []),
         )
         assert code == 0, result
 
@@ -1403,7 +1849,7 @@ def test_export_uses_a_strict_publication_whitelist(tmp_path: Path) -> None:
     assert not (output / "safe").exists()
     assert not (output / "private").exists()
     product = json.loads((output / "result.json").read_text(encoding="utf-8"))
-    assert product["schema"] == "nemo.eval_author.trace_environment_product.v3"
+    assert product["schema"] == "nemo.eval_author.trace_environment_product.v4"
     assert product["reproducibility"]["contamination_passed"] is True
     assert product["technical_validation"]["minimum_runs"] == {"negative": 1, "nop": 2, "oracle": 2}
     assert product["technical_validation"]["distinct_jobs"] is True
@@ -2047,3 +2493,446 @@ def test_init_rejects_unsafe_task_ids(tmp_path: Path, task_id: str) -> None:
         check=False,
     )
     assert result.returncode != 0
+
+
+def _adopt_probe_job(task_dir: Path, name: str, arm: str, reward: float) -> str:
+    job = task_dir / "private" / "adopted" / name / "task__trial"
+    job.mkdir(parents=True)
+    (job / "verifier").mkdir()
+    (job / "verifier" / "results").write_text(
+        f"fixture-repaired\t{'PASS' if reward == 1.0 else 'FAIL'}\n", encoding="utf-8"
+    )
+    _write_json(
+        job / "result.json",
+        {
+            "task_checksum": "0" * 64,
+            "verifier_environment_mode": "separate",
+            "verifier_result": {"rewards": {"reward": reward}},
+            "exception_info": None,
+            "config": {"job_id": f"probe-{name}", "agent": {"name": arm}},
+        },
+    )
+    return str((task_dir / "private" / "adopted" / name).relative_to(task_dir))
+
+
+def test_validate_task_reports_ok_for_a_compliant_task(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir)
+
+    code, result = _run("validate-task", "--task-dir", str(task_dir))
+
+    assert code == 0, result
+    assert result["ok"] is True
+    assert result["issues"] == []
+
+
+def test_validate_task_collects_contract_issues_with_hints(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    task = task_dir / "task"
+    (task / "environment").mkdir(parents=True)
+    (task / "tests").mkdir()
+    (task / "solution").mkdir()
+    (task / "task.toml").write_text('[verifier]\nenvironment_mode = "shared"\n', encoding="utf-8")
+    (task / "instruction.md").write_text("Repair the fixture.\n", encoding="utf-8")
+    (task / "tests" / "test.sh").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    (task / "solution" / "solve.sh").write_text("#!/usr/bin/env bash\ntrue\n", encoding="utf-8")
+
+    code, result = _run("validate-task", "--task-dir", str(task_dir))
+
+    assert code == 1
+    assert result["ok"] is False
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "missing_required_file" in codes  # README.md
+    assert "task_contract" in codes  # shared verifier fails fast; fixed files surface verifier_contract next pass
+    assert "missing_check_rows" in codes
+    assert all(issue["hint"] for issue in result["issues"])
+
+
+def test_validate_task_flags_copyable_literals_and_syntax_only_checks(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir)
+    instruction = "Repair the widget calibration fixture exactly as specified.\n"
+    (task_dir / "task" / "instruction.md").write_text(instruction, encoding="utf-8")
+    (task_dir / "task" / "tests" / "test.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "status=FAIL\n"
+        'if grep -q "Repair the widget calibration fixture exactly as specified." /workspace/out.txt; then status=PASS; fi\n'
+        "printf 'fixture-repaired\\t%s\\n' \"$status\" >> /logs/verifier/results\n"
+        'if sh -n /workspace/run.sh; then printf "parses-ok\\tPASS\\n" >> /logs/verifier/results; fi\n'
+        'test "$status" = PASS\n',
+        encoding="utf-8",
+    )
+
+    code, result = _run("validate-task", "--task-dir", str(task_dir))
+
+    assert code == 1
+    codes = [issue["code"] for issue in result["issues"]]
+    assert "copyable_literal" in codes
+    assert "syntax_only_check" in codes
+
+
+def test_probe_adopts_diagnostic_jobs_and_caches_by_task_digest(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir)
+    evidence = _adopt_probe_job(task_dir, "nop-a", "nop", 0.0)
+
+    code, result = _run("probe", "--task-dir", str(task_dir), "--arm", "nop", "--results-from", evidence)
+
+    assert code == 0, result
+    assert result["diagnostic_only"] is True
+    nop = result["results"][0]
+    assert nop["status"] == "recorded"
+    assert nop["reward"] == 0.0
+    assert nop["checks"] == [{"check_id": "fixture-repaired", "status": "FAIL"}]
+    assert nop["probes_remaining"] == 1
+
+    code, cached = _run("probe", "--task-dir", str(task_dir), "--arm", "nop")
+    assert code == 0, cached
+    assert cached["results"][0]["cached"] is True
+    ledger = json.loads((task_dir / "private" / "probes" / "probes.json").read_text(encoding="utf-8"))
+    assert len(ledger["entries"]) == 1
+
+
+def test_probe_budget_is_two_per_arm_revision(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir)
+    first = _adopt_probe_job(task_dir, "nop-a", "nop", 0.0)
+    second = _adopt_probe_job(task_dir, "nop-b", "nop", 0.0)
+    third = _adopt_probe_job(task_dir, "nop-c", "nop", 0.0)
+
+    for evidence in (first, second):
+        code, result = _run("probe", "--task-dir", str(task_dir), "--arm", "nop", "--results-from", evidence)
+        assert code == 0, result
+    code, result = _run("probe", "--task-dir", str(task_dir), "--arm", "nop", "--results-from", third)
+
+    assert code == 1
+    assert "probe budget exhausted" in result["error"]
+
+
+def test_probe_rejects_wrong_agent_and_stays_outside_proof(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir)
+    evidence = _adopt_probe_job(task_dir, "oracle-a", "oracle", 1.0)
+
+    code, result = _run("probe", "--task-dir", str(task_dir), "--arm", "nop", "--results-from", evidence)
+    assert code == 1
+    assert "must identify the nop agent" in result["error"]
+
+    code, result = _run(
+        "record-run-inputs",
+        "--task-dir",
+        str(task_dir),
+        "--job-dir",
+        "private/probes/jobs/sneaky-1",
+        "--arm",
+        "nop",
+    )
+    assert code == 1
+    assert "private/probes" in result["error"]
+
+
+def test_record_validation_requires_per_check_rows_by_default(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir, check_rows=False, record_validation=False)
+
+    code, result = _run(
+        "record-validation",
+        "--task-dir",
+        str(task_dir),
+        "--nop-job-dir",
+        "private/jobs/nop-1",
+        "--nop-job-dir",
+        "private/jobs/nop-2",
+        "--oracle-job-dir",
+        "private/jobs/oracle-1",
+        "--oracle-job-dir",
+        "private/jobs/oracle-2",
+        "--negative-job-dir",
+        "private/jobs/negative-1",
+        "--harbor-version",
+        "0.21.0",
+    )
+
+    assert code == 1
+    assert "missing_check_evidence" in result["error"]
+
+
+def test_record_validation_allows_historical_aggregate_only_proof(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir, check_rows=False, allow_aggregate=True)
+    _review_privacy(task_dir, reviewer_kind="human")
+
+    code, result = _run("finalize", "--task-dir", str(task_dir), "--status", "candidate", "--human-reviewed")
+
+    assert code == 0, result
+    validation = json.loads((task_dir / "validation.json").read_text(encoding="utf-8"))
+    assert validation["check_evidence"] == "aggregate_only"
+    code, check = _run("check", "--task-dir", str(task_dir))
+    assert code == 0, check
+
+
+def test_record_validation_rejects_mixed_check_evidence(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir, record_validation=False)
+    (task_dir / "private" / "jobs" / "oracle-1" / "task__trial" / "verifier" / "results").unlink()
+
+    code, result = _run(
+        "record-validation",
+        "--task-dir",
+        str(task_dir),
+        "--nop-job-dir",
+        "private/jobs/nop-1",
+        "--nop-job-dir",
+        "private/jobs/nop-2",
+        "--oracle-job-dir",
+        "private/jobs/oracle-1",
+        "--oracle-job-dir",
+        "private/jobs/oracle-2",
+        "--negative-job-dir",
+        "private/jobs/negative-1",
+        "--harbor-version",
+        "0.21.0",
+    )
+
+    assert code == 1
+    assert "every proof job or none" in result["error"]
+
+
+def test_record_validation_rejects_nop_passing_a_scored_check(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir, record_validation=False)
+    (task_dir / "private" / "jobs" / "nop-1" / "task__trial" / "verifier" / "results").write_text(
+        "fixture-repaired\tPASS\n", encoding="utf-8"
+    )
+
+    code, result = _run(
+        "record-validation",
+        "--task-dir",
+        str(task_dir),
+        "--nop-job-dir",
+        "private/jobs/nop-1",
+        "--nop-job-dir",
+        "private/jobs/nop-2",
+        "--oracle-job-dir",
+        "private/jobs/oracle-1",
+        "--oracle-job-dir",
+        "private/jobs/oracle-2",
+        "--negative-job-dir",
+        "private/jobs/negative-1",
+        "--harbor-version",
+        "0.21.0",
+    )
+
+    assert code == 1
+    assert "untouched environment passes scored checks" in result["error"]
+
+
+def test_record_validation_records_per_check_evidence(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir)
+
+    validation = json.loads((task_dir / "validation.json").read_text(encoding="utf-8"))
+
+    assert validation["check_evidence"] == "per_check"
+    assert validation["runs"]["oracle"][0]["checks"] == [{"check_id": "fixture-repaired", "status": "PASS"}]
+    assert validation["runs"]["nop"][0]["checks"] == [{"check_id": "fixture-repaired", "status": "FAIL"}]
+    code, check = _run("check", "--task-dir", str(task_dir))
+    assert code == 0, check
+
+
+def test_repair_archives_failed_proof_and_allows_fresh_proof(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir, oracle_reward=0.0, oracle_exception={"type": "RuntimeError"})
+    failed_validation = (task_dir / "validation.json").read_bytes()
+
+    code, result = _run(
+        "record-repair",
+        "--task-dir",
+        str(task_dir),
+        "--reason-code",
+        "oracle_failure",
+        "--note",
+        "The reference solution installed the wrong fixture variant.",
+    )
+
+    assert code == 0, result
+    assert result["repairs_remaining"] == 2
+    assert not (task_dir / "validation.json").exists()
+    assert not (task_dir / "reproducibility.json").exists()
+    archived = task_dir / "private" / "repairs" / "repair-1" / "validation.json"
+    assert archived.is_file() and archived.read_bytes() == failed_validation
+
+    # Fix the task, then re-prove with a fresh, distinct job set.
+    (task_dir / "task" / "solution" / "solve.sh").write_text(
+        "#!/usr/bin/env bash\ntouch repaired\n# fixed variant\n", encoding="utf-8"
+    )
+    _ready_environment(task_dir, run_suffix="b")
+    _review_privacy(task_dir, reviewer_kind="human")
+    code, result = _run("finalize", "--task-dir", str(task_dir), "--status", "candidate", "--human-reviewed")
+    assert code == 0, result
+    summary = json.loads((task_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["environment"]["status"] == "ready"
+    code, check = _run("check", "--task-dir", str(task_dir))
+    assert code == 0, check
+    assert check["repairs"] == 1
+
+
+def test_repair_requires_recorded_proof_and_refuses_after_finalize(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+
+    code, result = _run(
+        "record-repair",
+        "--task-dir",
+        str(task_dir),
+        "--reason-code",
+        "verifier_defect",
+        "--note",
+        "Nothing to repair yet.",
+    )
+    assert code == 1
+    assert "proof attempt" in result["error"]
+
+    _ready_environment(task_dir)
+    _review_privacy(task_dir)
+    code, result = _run("finalize", "--task-dir", str(task_dir), "--status", "candidate")
+    assert code == 0, result
+    code, result = _run(
+        "record-repair",
+        "--task-dir",
+        str(task_dir),
+        "--reason-code",
+        "verifier_defect",
+        "--note",
+        "Post-finalize repairs are not allowed.",
+    )
+    assert code == 1
+    assert "before finalize" in result["error"]
+
+
+def test_repair_budget_is_bounded(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir, oracle_reward=0.0)
+    for index, suffix in enumerate(("b", "c", "d"), start=1):
+        code, result = _run(
+            "record-repair",
+            "--task-dir",
+            str(task_dir),
+            "--reason-code",
+            "oracle_failure",
+            "--note",
+            f"Repair attempt {index}: adjust the reference fixture setup.",
+        )
+        assert code == 0, result
+        _ready_environment(task_dir, oracle_reward=0.0, run_suffix=suffix)
+
+    code, result = _run(
+        "record-repair",
+        "--task-dir",
+        str(task_dir),
+        "--reason-code",
+        "oracle_failure",
+        "--note",
+        "A fourth repair must be refused.",
+    )
+
+    assert code == 1
+    assert "repair budget exhausted" in result["error"]
+
+
+def test_repair_ledger_detects_tampered_archive(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir, oracle_reward=0.0)
+    code, result = _run(
+        "record-repair",
+        "--task-dir",
+        str(task_dir),
+        "--reason-code",
+        "oracle_failure",
+        "--note",
+        "The reference solution installed the wrong fixture variant.",
+    )
+    assert code == 0, result
+    archived = task_dir / "private" / "repairs" / "repair-1" / "validation.json"
+    archived.write_text("{}", encoding="utf-8")
+
+    code, check = _run("check", "--task-dir", str(task_dir))
+
+    assert code == 1
+    assert any("repair 1 archive" in error for error in check["errors"])
+
+
+def test_reconstructed_state_basis_flows_to_the_public_product(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir, state_basis="reconstructed")
+    _ready_environment(task_dir)
+    _review_privacy(task_dir, reviewer_kind="human")
+    code, result = _run("finalize", "--task-dir", str(task_dir), "--status", "candidate", "--human-reviewed")
+    assert code == 0, result
+    output = tmp_path / "product"
+    _review_publication(task_dir)
+    code, result = _run("export", "--task-dir", str(task_dir), "--output-dir", str(output))
+    assert code == 0, result
+
+    product = json.loads((output / "result.json").read_text(encoding="utf-8"))
+    assert product["schema"] == "nemo.eval_author.trace_environment_product.v4"
+    assert product["state_basis"] == "reconstructed"
+    assert product["repairs"] == 0
+    assert product["technical_validation"]["check_evidence"] == "per_check"
+    markdown = (task_dir / "summary.md").read_text(encoding="utf-8")
+    assert "State basis: `reconstructed`" in markdown
+
+
+def test_state_basis_rejects_unknown_values(tmp_path: Path) -> None:
+    task_dir, _ = _workspace(tmp_path)
+    _candidate(task_dir, state_basis="imagined")
+    _ready_environment(task_dir)
+    _review_privacy(task_dir)
+
+    code, result = _run("finalize", "--task-dir", str(task_dir), "--status", "candidate")
+
+    assert code == 1
+    assert "state_basis" in result["error"]
+
+
+def test_batch_status_surfaces_repair_counts(tmp_path: Path) -> None:
+    task_dir, source = _workspace(tmp_path)
+    _candidate(task_dir)
+    _ready_environment(task_dir, oracle_reward=0.0)
+    code, result = _run(
+        "record-repair",
+        "--task-dir",
+        str(task_dir),
+        "--reason-code",
+        "oracle_failure",
+        "--note",
+        "The reference solution installed the wrong fixture variant.",
+    )
+    assert code == 0, result
+    manifest = tmp_path / "manifest.json"
+    _write_json(
+        manifest,
+        {
+            "schema": "nemo.eval_author.trace_environment_batch.v1",
+            "members": [{"task_id": task_dir.name, "atif": str(source), "source_kind": "atif"}],
+        },
+    )
+
+    code, result = _run("batch-status", "--root", str(task_dir.parent), "--manifest", str(manifest))
+
+    assert code == 0, result
+    assert result["members"][0]["repairs"] == 1

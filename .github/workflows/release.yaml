@@ -182,7 +182,7 @@ jobs:
         with:
           github-token: ${{ github.token }}
           script: |
-            const { resolveReleasePlan } = require("./.github/scripts/release-plan.cjs");
+            const { resolveReleasePlan, resolveNightlyBaseVersion } = require("./.github/scripts/release-plan.cjs");
             const plan = await resolveReleasePlan({
               env: process.env,
               context,
@@ -194,6 +194,14 @@ jobs:
                 },
               ),
             });
+            let nightlyBaseVersion = "";
+            if (plan.releaseType === "nightly" && plan.sourceBranch) {
+              const tags = await github.paginate(github.rest.repos.listTags, {
+                ...context.repo,
+                per_page: 100,
+              });
+              nightlyBaseVersion = resolveNightlyBaseVersion(plan.sourceBranch, tags);
+            }
             const outputs = {
               release_type: plan.releaseType,
               release_scope: plan.releaseScope,
@@ -202,6 +210,7 @@ jobs:
               version: plan.version,
               release_label: plan.releaseLabel,
               nightly_timestamp: plan.nightlyTimestamp,
+              nightly_base_version: nightlyBaseVersion,
               wheel_ids: JSON.stringify(plan.wheelIds),
               container_ids: JSON.stringify(plan.containerIds),
               wheel_artifacts: JSON.stringify(plan.wheels),
@@ -268,8 +277,14 @@ jobs:
           RELEASE_TYPE: ${{ steps.plan.outputs.release_type }}
           RELEASE_VERSION: ${{ steps.plan.outputs.version }}
           NIGHTLY_TIMESTAMP: ${{ steps.plan.outputs.nightly_timestamp }}
+          NIGHTLY_BASE_VERSION: ${{ steps.plan.outputs.nightly_base_version }}
         run: |
           set -euo pipefail
+
+          if [[ -n "${NIGHTLY_BASE_VERSION}" ]]; then
+            echo "wheel_version=${NIGHTLY_BASE_VERSION}.dev${NIGHTLY_TIMESTAMP}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
 
           if [[ "${RELEASE_TYPE}" == "nightly" ]]; then
             cadence="nightly"
@@ -300,11 +315,14 @@ jobs:
           RELEASE_VERSION: ${{ steps.plan.outputs.version }}
           NIGHTLY_TIMESTAMP: ${{ steps.plan.outputs.nightly_timestamp }}
           HELM_VERSION_OVERRIDE: ${{ steps.plan.outputs.helm_version_override }}
+          NIGHTLY_BASE_VERSION: ${{ steps.plan.outputs.nightly_base_version }}
         run: |
           set -euo pipefail
 
           if [[ -n "${HELM_VERSION_OVERRIDE}" ]]; then
             helm_version="${HELM_VERSION_OVERRIDE}"
+          elif [[ -n "${NIGHTLY_BASE_VERSION}" ]]; then
+            helm_version="${NIGHTLY_BASE_VERSION}-nightly-${NIGHTLY_TIMESTAMP}"
           elif [[ "${RELEASE_TYPE}" == "nightly" ]]; then
             # Nightlies align to the release core from the latest release or
             # RC tag. Build-metadata chart fixes use helm-version instead.

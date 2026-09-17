@@ -41,4 +41,4 @@ Chaining generate then prepare is a jobs-service multi-step job (`retrieval-run`
 ## Next Steps
 
 Use the emitted `training.jsonl` in an embedding or reranking customization job.
-See [platform validation guidance](nemo-platform-plugin-additions.md) for fileset and platform validation guidance.
+See [platform execution guidance](platform-execution.md) for fileset and platform validation guidance.

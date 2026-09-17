@@ -178,7 +178,9 @@ class AsyncCustomization:
         return _coerce_health_payload(response.data().model_dump(mode="json"))
 
 
-customization_sdk_resources = NemoPluginSDKResources[Customization, AsyncCustomization](
+customization_sdk_resources = NemoPluginSDKResources[
+    NeMoPlatform, Customization, AsyncNeMoPlatform, AsyncCustomization
+](
     sync_resource=Customization.from_platform,
     async_resource=AsyncCustomization.from_platform,
 )

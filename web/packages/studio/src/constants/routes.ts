@@ -35,6 +35,7 @@ export const ROUTE_PARAMS = {
   agentName: 'agentName',
   agentDeploymentName: 'agentDeploymentName',
   agentEvalJobName: 'agentEvalJobName',
+  optimizeJobName: 'optimizeJobName',
   jobName: 'jobName',
   /** Benchmark entity name segment under evaluation/benchmarks/:name */
   benchmarkName: 'benchmarkName',
@@ -145,6 +146,7 @@ export const ROUTES = {
     agentDeploymentDetail: `/workspaces/:${P.workspace}/agent-deployments/:${P.agentDeploymentName}`,
     /** Detail view for a single agent-evaluation job. */
     agentEvaluationDetail: `/workspaces/:${P.workspace}/agents/evaluations/:${P.agentEvalJobName}`,
+    agentOptimizationDetail: `/workspaces/:${P.workspace}/agents/optimizations/:${P.optimizeJobName}`,
     modelCompare: `/workspaces/:${P.workspace}/playground`,
     agentMonitor: `/workspaces/:${P.workspace}/agents/monitor`,
     /** Plugin-owned page; the plugin's internal router owns sub-paths via a `/*` suffix. */

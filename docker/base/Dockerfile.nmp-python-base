@@ -37,7 +37,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     && rm -rf /var/lib/apt/lists/* \
     && pip uninstall --yes setuptools wheel
 
-COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.10.10 /uv /bin/uv
 
 WORKDIR /app
 

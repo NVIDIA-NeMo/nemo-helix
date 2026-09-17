@@ -2,18 +2,25 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from __future__ import annotations
+
 import argparse
 import contextlib
+import copy
 import importlib.metadata
 import inspect
 import json
+import multiprocessing
 import os
+import queue
 import shutil
 import sys
+import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import Enum
+from io import StringIO
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -54,6 +61,7 @@ NC = "\033[0m"  # No Color
 
 # Global verbose flag
 VERBOSE = False
+PLUGIN_WORKER_TIMEOUT_SECONDS = 300
 
 
 def print_green(message: str, verbose_only: bool = False):
@@ -72,6 +80,60 @@ def print_verbose(message: str):
     """Print message only if verbose mode is enabled."""
     if VERBOSE:
         print(message)
+
+
+def _emit_worker_output(output: str, force: bool = False) -> None:
+    """Print captured subprocess output for verbose runs and failures."""
+    if output and (VERBOSE or force):
+        print(output, end="" if output.endswith("\n") else "\n")
+
+
+def _capture_generation_output(fn, item, verbose: bool) -> tuple[str, bool, str, str]:
+    """Run an OpenAPI extraction worker while capturing noisy import-time output."""
+    global VERBOSE
+    VERBOSE = verbose
+    set_verbose(verbose)
+
+    output = StringIO()
+    with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+        name, success, error = fn(item)
+    return name, success, error, output.getvalue()
+
+
+def extract_openapi_spec_captured(service: ServiceConfig, verbose: bool) -> tuple[str, bool, str, str]:
+    return _capture_generation_output(extract_openapi_spec, service, verbose)
+
+
+def extract_plugin_openapi_spec_captured(plugin: PluginConfig, verbose: bool) -> tuple[str, bool, str, str]:
+    return _capture_generation_output(extract_plugin_openapi_spec, plugin, verbose)
+
+
+def bounded_worker_count(
+    item_count: int,
+    requested_workers: int | None = None,
+    default_limit: int = 4,
+    *,
+    cap_by_cpu: bool = True,
+) -> int:
+    """Return a conservative process count for isolated OpenAPI worker pools."""
+    if item_count <= 0:
+        return 0
+    if requested_workers is not None:
+        if requested_workers < 1:
+            msg = "--plugin-workers must be at least 1"
+            raise ValueError(msg)
+        return min(item_count, requested_workers)
+
+    cpu_count = os.cpu_count() or 1
+    if cap_by_cpu:
+        return min(item_count, default_limit, cpu_count)
+    return min(item_count, default_limit)
+
+
+def plugin_multiprocessing_context():
+    """Use the cheapest process start method that preserves plugin isolation."""
+    start_method = "fork" if "fork" in multiprocessing.get_all_start_methods() else "spawn"
+    return multiprocessing.get_context(start_method)
 
 
 class SpecType(Enum):
@@ -238,9 +300,10 @@ def extract_openapi_specs_sequential(services: List[ServiceConfig]) -> None:
     for service in services:
         # Create a new executor for each service - this ensures a fresh process
         with ProcessPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(extract_openapi_spec, service)
+            future = executor.submit(extract_openapi_spec_captured, service, VERBOSE)
             try:
-                name, success, error = future.result()
+                name, success, error, output = future.result()
+                _emit_worker_output(output, force=not success)
                 if success:
                     print_green(f"Completed: {name}")
                 else:
@@ -278,14 +341,17 @@ def extract_openapi_specs_with_process_pool(services: List[ServiceConfig]) -> No
     # ProcessPoolExecutor isolates imports in separate processes
     with ProcessPoolExecutor() as executor:
         # Submit all tasks
-        future_to_service = {executor.submit(extract_openapi_spec, service): service for service in services}
+        future_to_service = {
+            executor.submit(extract_openapi_spec_captured, service, VERBOSE): service for service in services
+        }
 
         # Collect results
         failed_services = []
         for future in as_completed(future_to_service):
             service = future_to_service[future]
             try:
-                name, success, error = future.result()
+                name, success, error, output = future.result()
+                _emit_worker_output(output, force=not success)
                 if success:
                     print_green(f"Completed: {name}")
                 else:
@@ -428,35 +494,117 @@ def _extract_plugin_openapi_spec(plugin: PluginConfig) -> tuple[str, bool, str]:
     return plugin.dir, True, ""
 
 
-def extract_plugin_specs_with_process_pool(plugins: List[PluginConfig]) -> None:
+def extract_plugin_openapi_spec_to_queue(plugin: PluginConfig, verbose: bool, result_queue) -> None:
+    """Extract one plugin spec in a child process and return a captured result."""
+    try:
+        result_queue.put(extract_plugin_openapi_spec_captured(plugin, verbose))
+    except BaseException as exc:
+        error_msg = f"Plugin worker for {plugin.dir} crashed: {exc}\n{traceback.format_exc()}"
+        result_queue.put((plugin.dir, False, error_msg, ""))
+
+
+def extract_plugin_spec_batch(plugin_batch: list[PluginConfig]) -> list[tuple[str, bool, str, str]]:
+    """Extract a batch with exactly one child process per plugin."""
+    context = plugin_multiprocessing_context()
+    processes = []
+    for plugin in plugin_batch:
+        result_queue = context.Queue(maxsize=1)
+        process = context.Process(
+            target=extract_plugin_openapi_spec_to_queue,
+            args=(plugin, VERBOSE, result_queue),
+        )
+        process.start()
+        deadline = time.monotonic() + PLUGIN_WORKER_TIMEOUT_SECONDS
+        processes.append((plugin, process, result_queue, deadline))
+
+    results = []
+    for plugin, process, result_queue, deadline in processes:
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    if process.is_alive():
+                        process.kill()
+                        process.join()
+                        name = plugin.dir
+                        success = False
+                        output = ""
+                        error = f"Plugin worker for {plugin.dir} timed out after {PLUGIN_WORKER_TIMEOUT_SECONDS}s"
+                    else:
+                        process.join()
+                        try:
+                            name, success, error, output = result_queue.get(timeout=1.0)
+                        except queue.Empty:
+                            name = plugin.dir
+                            success = False
+                            output = ""
+                            error = (
+                                f"Plugin worker for {plugin.dir} exited with code {process.exitcode} "
+                                "without returning a result"
+                            )
+                    break
+
+                try:
+                    name, success, error, output = result_queue.get(timeout=min(0.1, remaining))
+                    break
+                except queue.Empty:
+                    if not process.is_alive():
+                        process.join()
+                        try:
+                            name, success, error, output = result_queue.get(timeout=1.0)
+                        except queue.Empty:
+                            name = plugin.dir
+                            success = False
+                            output = ""
+                            error = (
+                                f"Plugin worker for {plugin.dir} exited with code {process.exitcode} "
+                                "without returning a result"
+                            )
+                        break
+            process.join()
+        except Exception as e:
+            error = f"Plugin worker failed during collection {e}"
+        finally:
+            result_queue.close()
+            result_queue.join_thread()
+
+        if process.exitcode not in (0, None) and success:
+            success = False
+            error = f"Plugin worker for {plugin.dir} exited with code {process.exitcode}"
+        results.append((name, success, error, output))
+
+    return results
+
+
+def extract_plugin_specs_with_process_pool(plugins: List[PluginConfig], max_workers: int | None = None) -> None:
     """Extract OpenAPI specs for plugins via isolated subprocesses.
 
-    Each plugin gets a fresh ProcessPoolExecutor(max_workers=1) so a worker never
-    processes two plugins in one process. That matters on Linux (fork): discovering
-    services for plugin A imports route modules for plugin B, which registers
-    query-param filter schemas at import time; plugin B's extraction then calls
-    clear_query_param_schemas() and openapi() without re-importing those routes,
-    leaving dangling ``#/components/schemas/*Filter`` refs (e.g. MetricFilter).
+    Each plugin runs in a process that handles at most one plugin. That matters
+    on Linux: discovering services for plugin A can import route modules for
+    plugin B, which registers query-param filter schemas at import time; plugin
+    B's extraction then calls clear_query_param_schemas() and openapi() without
+    re-importing those routes, leaving dangling ``#/components/schemas/*Filter``
+    refs (e.g. MetricFilter). ``max_tasks_per_child=1`` preserves that isolation
+    while still allowing multiple plugins to generate concurrently.
     """
-    print_green(f"=== Generating OpenAPI specs for {len(plugins)} plugin(s) using process pool ===")
-
     if not plugins:
         return
 
+    worker_count = bounded_worker_count(len(plugins), max_workers, default_limit=12, cap_by_cpu=False)
+    print_green(
+        f"=== Generating OpenAPI specs for {len(plugins)} plugin(s) using {worker_count} isolated worker(s) ==="
+    )
+
     failed_plugins = []
-    for plugin in plugins:
-        with ProcessPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(extract_plugin_openapi_spec, plugin)
-            try:
-                name, success, error = future.result()
-                if success:
-                    print_green(f"Completed: {name}")
-                else:
-                    failed_plugins.append((name, error))
-                    print_red(f"Failed: {name}")
-            except Exception as e:
-                failed_plugins.append((plugin.dir, str(e)))
-                print_red(f"Exception in {plugin.dir}: {str(e)}")
+    for start in range(0, len(plugins), worker_count):
+        plugin_batch = plugins[start : start + worker_count]
+        for name, success, error, output in extract_plugin_spec_batch(plugin_batch):
+            _emit_worker_output(output, force=not success)
+            if success:
+                print_green(f"Completed: {name}")
+            else:
+                failed_plugins.append((name, error))
+                print_red(f"Failed: {name}")
 
     if failed_plugins:
         print_red(f"\n{len(failed_plugins)} plugins failed:")
@@ -467,9 +615,26 @@ def extract_plugin_specs_with_process_pool(plugins: List[PluginConfig]) -> None:
     print_green(f"All {len(plugins)} plugin(s) completed successfully!")
 
 
-def apply_schema_fixes(spec_files: List[str], apply_reorder: bool = True) -> None:
-    """Apply schema fixes to a list of OpenAPI spec files."""
-    print_green("=== Applying fixes to OpenAPI schemas ===")
+def apply_standard_schema_fixes(spec: dict, apply_reorder: bool = True) -> dict:
+    """Apply common schema normalization after path-specific edits."""
+    spec = tweak_spec(spec)
+    spec = hoist_nested_defs(spec)
+    spec = remove_unused_schemas(spec)
+    spec = remove_invalid_components(spec)
+    spec = fix_recursive_schemas(spec)
+    spec = update_object_type(spec)
+    spec = mark_direct_span_json_value_for_stainless(spec)
+    spec["openapi"] = "3.1.0"
+    spec["info"]["version"] = platform_api_version
+
+    if apply_reorder:
+        spec = reorder_spec(spec)
+
+    return spec
+
+
+def apply_schema_fixes_to_spec(spec: dict, spec_file: str, apply_reorder: bool = True) -> dict:
+    """Apply schema fixes to one OpenAPI spec."""
     # Endpoints stripped from the public OpenAPI spec (not exposed in SDK).
     # Includes health/status and internal endpoints.
     health_endpoints = [
@@ -480,57 +645,51 @@ def apply_schema_fixes(spec_files: List[str], apply_reorder: bool = True) -> Non
         "/health/ready",
     ]
 
+    # Hoist nested `$defs` up front so every downstream pass (including
+    # remove_endpoint → remove_unused_schemas → build_schema_tree) can resolve
+    # refs like ``#/components/schemas/DatetimeFilter`` against top-level
+    # components instead of hunting through inline ``$defs``.
+    spec = hoist_nested_defs(spec)
+    for endpoint in health_endpoints:
+        remove_endpoint(spec, endpoint, prune_unused=False)
+
+    # Special handling for deployment management
+    if "platform" in spec_file:
+        print_verbose(f"Applying deployment management specific fixes to {spec_file}")
+        # Rename schema
+        if "components" in spec and "schemas" in spec["components"]:
+            schemas = spec["components"]["schemas"]
+            if "PageResponse" in schemas:
+                schemas["DeploymentsPage"] = schemas.pop("PageResponse")
+                rename_schema_references(spec, "PageResponse", "DeploymentsPage")
+
+        # Remove endpoints
+        remove_endpoint(spec, "/v1/deployments", prune_unused=False)
+        remove_endpoint(spec, "/v1/deployments/{deploymentId}", prune_unused=False)
+
+    if "platform" in spec_file:
+        # Remove internal endpoints (not part of public API)
+        internal_endpoints = [p for p in spec.get("paths", {}).keys() if p.startswith("/internal/")]
+        for endpoint in internal_endpoints:
+            remove_endpoint(spec, endpoint, prune_unused=False)
+
+    # Apply streaming fixes for specific files
+    if any(name in spec_file for name in ["platform"]):
+        print_verbose(f"Applying streaming fixes to {spec_file}")
+        spec = fix_openai_streaming_endpoints(spec)
+
+    return apply_standard_schema_fixes(spec, apply_reorder=apply_reorder)
+
+
+def apply_schema_fixes(spec_files: List[str], apply_reorder: bool = True) -> None:
+    """Apply schema fixes to a list of OpenAPI spec files."""
+    print_green("=== Applying fixes to OpenAPI schemas ===")
+
     for spec_file in spec_files:
         if os.path.exists(spec_file):
             print_verbose(f"Fixing schema for {spec_file}")
             spec = load_openapi_spec(spec_file)
-            # Hoist nested `$defs` up front so every downstream pass (including
-            # remove_endpoint → remove_unused_schemas → build_schema_tree) can
-            # resolve refs like ``#/components/schemas/DatetimeFilter`` against
-            # top-level components instead of hunting through inline ``$defs``.
-            spec = hoist_nested_defs(spec)
-            for endpoint in health_endpoints:
-                remove_endpoint(spec, endpoint)
-
-            # Special handling for deployment management
-            if "platform" in spec_file:
-                print_verbose(f"Applying deployment management specific fixes to {spec_file}")
-                # Rename schema
-                if "components" in spec and "schemas" in spec["components"]:
-                    schemas = spec["components"]["schemas"]
-                    if "PageResponse" in schemas:
-                        schemas["DeploymentsPage"] = schemas.pop("PageResponse")
-                        rename_schema_references(spec, "PageResponse", "DeploymentsPage")
-
-                # Remove endpoints
-                remove_endpoint(spec, "/v1/deployments")
-                remove_endpoint(spec, "/v1/deployments/{deploymentId}")
-
-            if "platform" in spec_file:
-                # Remove internal endpoints (not part of public API)
-                internal_endpoints = [p for p in spec.get("paths", {}).keys() if p.startswith("/internal/")]
-                for endpoint in internal_endpoints:
-                    remove_endpoint(spec, endpoint)
-
-            # Apply streaming fixes for specific files
-            if any(name in spec_file for name in ["platform"]):
-                print_verbose(f"Applying streaming fixes to {spec_file}")
-                spec = fix_openai_streaming_endpoints(spec)
-
-            # Apply the standard fix-schema logic
-            spec = tweak_spec(spec)
-            spec = hoist_nested_defs(spec)
-            spec = remove_unused_schemas(spec)
-            spec = remove_invalid_components(spec)
-            spec = fix_recursive_schemas(spec)
-            spec = update_object_type(spec)
-            spec = mark_direct_span_json_value_for_stainless(spec)
-            spec["openapi"] = "3.1.0"
-            spec["info"]["version"] = platform_api_version
-
-            if apply_reorder:
-                spec = reorder_spec(spec)
-
+            spec = apply_schema_fixes_to_spec(spec, spec_file, apply_reorder=apply_reorder)
             save_openapi_spec(spec, spec_file)
 
 
@@ -569,28 +728,33 @@ def merge_and_process_specs() -> None:
         save_openapi_spec(merged_ea, "openapi/ea/openapi.yaml")
 
 
+def apply_schema_removals_to_spec(spec: dict) -> dict:
+    """Apply schema removals to fix inconsistencies."""
+    # Remove schemas and update references
+    schema_removals = [
+        # ("DeploymentConfigOutput", "DeploymentConfig"),
+        # ("GuardrailConfigOutput", "GuardrailConfig"),
+        # ("EvaluationConfig", "EvaluationConfigOutput"),
+        # ("EvaluationTarget", "EvaluationTargetOutput"),
+        # ("CustomizationTarget", "CustomizationTargetOutput"),
+    ]
+
+    for old_name, new_name in schema_removals:
+        if "components" in spec and "schemas" in spec["components"]:
+            schemas = spec["components"]["schemas"]
+            if old_name in schemas:
+                del schemas[old_name]
+                rename_schema_references(spec, old_name, new_name)
+
+    return spec
+
+
 def apply_schema_removals() -> None:
     """Apply schema removals to fix inconsistencies."""
     ga_spec_file = "openapi/ga/openapi.yaml"
     if os.path.exists(ga_spec_file):
         spec = load_openapi_spec(ga_spec_file)
-
-        # Remove schemas and update references
-        schema_removals = [
-            # ("DeploymentConfigOutput", "DeploymentConfig"),
-            # ("GuardrailConfigOutput", "GuardrailConfig"),
-            # ("EvaluationConfig", "EvaluationConfigOutput"),
-            # ("EvaluationTarget", "EvaluationTargetOutput"),
-            # ("CustomizationTarget", "CustomizationTargetOutput"),
-        ]
-
-        for old_name, new_name in schema_removals:
-            if "components" in spec and "schemas" in spec["components"]:
-                schemas = spec["components"]["schemas"]
-                if old_name in schemas:
-                    del schemas[old_name]
-                    rename_schema_references(spec, old_name, new_name)
-
+        spec = apply_schema_removals_to_spec(spec)
         save_openapi_spec(spec, ga_spec_file)
 
 
@@ -615,7 +779,7 @@ def apply_final_fixes() -> None:
     apply_schema_fixes(FINAL_SPEC_FILES)
 
 
-def remove_guardrail_endpoints() -> None:
+def remove_guardrail_endpoints_from_spec(spec: dict) -> dict:
     """Remove guardrail models endpoints from all final specs."""
 
     guardrail_endpoints = [
@@ -623,26 +787,21 @@ def remove_guardrail_endpoints() -> None:
         ("/v2/guardrail/models/{model_id}", None),
     ]
 
+    # Remove guardrail endpoints
+    for endpoint, method in guardrail_endpoints:
+        remove_endpoint(spec, endpoint, method, prune_unused=False)
+
+    # Apply schema fixes after removals, but do not reorder to preserve tag ordering.
+    return apply_standard_schema_fixes(spec, apply_reorder=False)
+
+
+def remove_guardrail_endpoints() -> None:
+    """Remove guardrail models endpoints from all final specs."""
+
     for spec_file in FINAL_SPEC_FILES:
         if os.path.exists(spec_file):
             spec = load_openapi_spec(spec_file)
-
-            # Remove guardrail endpoints
-            for endpoint, method in guardrail_endpoints:
-                remove_endpoint(spec, endpoint, method)
-
-            # Apply schema fixes after removals (but don't reorder to preserve tag ordering)
-            spec = tweak_spec(spec)
-            spec = hoist_nested_defs(spec)
-            spec = remove_unused_schemas(spec)
-            spec = remove_invalid_components(spec)
-            spec = fix_recursive_schemas(spec)
-            spec = update_object_type(spec)
-            spec = mark_direct_span_json_value_for_stainless(spec)
-            spec["openapi"] = "3.1.0"
-            spec["info"]["version"] = platform_api_version
-            # Note: Don't call reorder_spec() here to preserve tag-based ordering
-
+            spec = remove_guardrail_endpoints_from_spec(spec)
             save_openapi_spec(spec, spec_file)
 
 
@@ -732,7 +891,66 @@ def validate_final_specs(spec_files: List[str]) -> None:
         raise RuntimeError(f"{sum(len(d) for _, d in all_dangling)} dangling $refs detected")
 
 
-def process_plugin_specs() -> None:
+def can_process_single_platform_spec_in_memory(services: list[ServiceConfig]) -> bool:
+    """Return true when platform outputs are known to be identical."""
+    if len(services) != 1:
+        return False
+
+    service = services[0]
+    if not service.is_ga() or service.final_output_path() is None or service.copy_from:
+        return False
+
+    # Tags/examples are final-spec-only transformations in the generic path.
+    # Keep that path if those inputs exist so individual and aggregate outputs
+    # retain their existing semantics.
+    return (
+        not Path("openapi/ea/openapi.yaml").exists()
+        and not Path("openapi/nmp-common.openapi.yaml").exists()
+        and not any(Path("openapi/api-examples").glob("*.json"))
+    )
+
+
+def process_single_platform_spec_in_memory(services: list[ServiceConfig]) -> bool:
+    """Process the current single-platform OpenAPI layout without repeated file passes."""
+    if not can_process_single_platform_spec_in_memory(services):
+        return False
+
+    service = services[0]
+    temp_path = service.temp_output_path()
+    final_path = service.final_output_path()
+    if final_path is None or not os.path.exists(temp_path):
+        return False
+
+    print_green("=== Processing single platform OpenAPI spec in memory ===")
+    spec = load_openapi_spec(temp_path)
+    spec = apply_schema_fixes_to_spec(spec, temp_path)
+    individual_spec = fix_ref_with_additional_props(copy.deepcopy(spec))
+
+    final_spec = apply_schema_removals_to_spec(spec)
+    final_spec = apply_schema_fixes_to_spec(final_spec, "openapi/openapi.yaml")
+    final_spec = remove_guardrail_endpoints_from_spec(final_spec)
+    final_spec = fix_ref_with_additional_props(final_spec)
+
+    dangling_specs = [
+        ("platform individual OpenAPI spec", validate_refs(individual_spec)),
+        ("platform OpenAPI spec", validate_refs(final_spec)),
+    ]
+    for spec_name, dangling in dangling_specs:
+        if dangling:
+            print_red(f"Found dangling $refs in the {spec_name}:")
+            for ref in dangling:
+                print_red(f"  - {ref}")
+            raise RuntimeError(f"{len(dangling)} dangling $refs detected")
+
+    for output_path in ["openapi/openapi.yaml", "openapi/ga/openapi.yaml"]:
+        save_openapi_spec(final_spec, output_path)
+    save_openapi_spec(individual_spec, final_path)
+
+    os.remove(temp_path)
+    return True
+
+
+def process_plugin_specs(plugin_workers: int | None = None) -> None:
     """Generate, fix, and validate OpenAPI specs for all opted-in plugins.
 
     Plugin specs land in ``plugins/<dir>/openapi/`` and are never merged into
@@ -743,7 +961,7 @@ def process_plugin_specs() -> None:
         return
 
     print_green(f"=== STEP 5: Generating OpenAPI specs for {len(plugins)} plugin(s) ===")
-    extract_plugin_specs_with_process_pool(plugins)
+    extract_plugin_specs_with_process_pool(plugins, max_workers=plugin_workers)
 
     plugin_spec_files = [p.output_path() for p in plugins]
 
@@ -778,6 +996,12 @@ def main():
     )
     parser.add_argument(
         "--only-gen-schema", action="store_true", help="Only generate the schema, then exist, for debugging purposes"
+    )
+    parser.add_argument(
+        "--plugin-workers",
+        type=int,
+        default=None,
+        help="Maximum isolated worker processes for plugin OpenAPI generation (default: min(12, plugins))",
     )
     args = parser.parse_args()
 
@@ -823,32 +1047,33 @@ def main():
         if args.only_gen_schema:
             return
 
-        apply_schema_fixes(all_spec_files)
+        if not process_single_platform_spec_in_memory(services_to_generate):
+            apply_schema_fixes(all_spec_files)
 
-        # Merge and process specs - use same logic for both modes
-        merge_and_process_specs()
+            # Merge and process specs - use same logic for both modes
+            merge_and_process_specs()
 
-        apply_schema_removals()
+            apply_schema_removals()
 
-        merge_final_specs()
+            merge_final_specs()
 
-        # Apply final fixes - use same logic for consistency
-        apply_final_fixes()
+            # Apply final fixes - use same logic for consistency
+            apply_final_fixes()
 
-        add_examples_and_finalize()
+            add_examples_and_finalize()
 
-        # Remove health endpoints and apply final processing (after tag ordering)
-        remove_guardrail_endpoints()
+            # Remove health endpoints and apply final processing (after tag ordering)
+            remove_guardrail_endpoints()
 
-        move_individual_specs()
+            move_individual_specs()
 
-        platform_spec_files = [
-            path for path in (service.final_output_path() for service in SERVICES) if path is not None
-        ] + FINAL_SPEC_FILES
-        fix_ref_not_allowed_errors(platform_spec_files)
-        validate_final_specs(platform_spec_files)
+            platform_spec_files = [
+                path for path in (service.final_output_path() for service in SERVICES) if path is not None
+            ] + FINAL_SPEC_FILES
+            fix_ref_not_allowed_errors(platform_spec_files)
+            validate_final_specs(platform_spec_files)
 
-        process_plugin_specs()
+        process_plugin_specs(plugin_workers=args.plugin_workers)
 
         print_green("=== OpenAPI spec generation completed successfully! ===")
 

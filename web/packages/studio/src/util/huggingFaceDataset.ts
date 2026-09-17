@@ -1,33 +1,59 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getRowsPageRanges, rowsPageQueryOptions } from '@studio/api/datasets/huggingFaceRows';
+import { filesetRowsQueryOptions } from '@studio/api/datasets/filesetParquetRows';
 import type { CustomizationTemplateDataset } from '@studio/constants/customizationTemplates';
 import type { QueryClient } from '@tanstack/react-query';
 
+/** Parquet INT64 (and similar) columns decode as BigInt; JSON.stringify rejects those by default. */
+function jsonReplacer(_key: string, value: unknown): unknown {
+  return typeof value === 'bigint' ? value.toString() : value;
+}
+
 const toJsonlBlob = (rows: Record<string, unknown>[]): Blob =>
-  new Blob([rows.map((row) => JSON.stringify(row)).join('\n')], {
+  new Blob([rows.map((row) => JSON.stringify(row, jsonReplacer)).join('\n')], {
     type: 'application/x-ndjson',
   });
 
+/** Which stage of the fetch is running, so the caller can word its own status copy. */
+export type FetchDatasetPhase = 'locating' | 'downloading' | 'converting';
+
+export type FetchDatasetProgress = (
+  phase: FetchDatasetPhase,
+  loadedBytes?: number,
+  totalBytes?: number
+) => void;
+
+/**
+ * Pulls a template's dataset rows through the files service and converts them to the JSONL
+ * Customizer takes.
+ *
+ * Rows come from an external fileset the caller has already registered against the
+ * HuggingFace repo, so the bytes are proxied server-side. That is deliberate: the browser
+ * is not assumed to reach huggingface.co at all.
+ */
 export const fetchAndConvertDataset = async (
   queryClient: QueryClient,
+  workspace: string,
   dataset: CustomizationTemplateDataset,
-  onProgress: (fetched: number, total: number) => void
+  onProgress: FetchDatasetProgress
 ): Promise<{ training: Blob; validation: Blob }> => {
   const total = dataset.trainingRowCount + dataset.validationRowCount;
-  let fetched = 0;
 
-  const pages = await Promise.all(
-    getRowsPageRanges(total).map(async ({ offset, length }) => {
-      const page = await queryClient.ensureQueryData(rowsPageQueryOptions(dataset, offset, length));
-      fetched += page.rows.length;
-      onProgress(Math.min(fetched, total), total);
-      return page;
+  onProgress('locating');
+
+  const rawRows = await queryClient.ensureQueryData(
+    filesetRowsQueryOptions({
+      workspace,
+      filesetName: dataset.sourceFilesetName,
+      pattern: dataset.filePattern,
+      rowCount: total,
+      onDownloadProgress: (loadedBytes, totalBytes) =>
+        onProgress('downloading', loadedBytes, totalBytes),
     })
   );
 
-  const rawRows = pages.flatMap((p) => p.rows).map((entry) => entry.row);
+  onProgress('converting');
 
   const convert = (raw: Record<string, unknown>[]): Record<string, unknown>[] =>
     raw

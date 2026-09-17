@@ -9,6 +9,7 @@ export const BreadcrumbsContext = createContext<BreadcrumbsContextValue | null>(
 export type BreadcrumbsItemProps = {
   href?: string;
   slotLabel: ReactNode;
+  preserveQuery?: boolean;
 };
 
 export type BreadCrumbItemsProps = {

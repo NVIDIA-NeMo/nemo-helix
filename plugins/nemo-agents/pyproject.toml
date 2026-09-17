@@ -39,15 +39,14 @@ dependencies = [
     # improvement/ subpackage — agent-improvement workflow (POC).
     "anthropic>=0.88.0",
     "rich>=13.7.1",
-    "nemo-fabric[claude,codex,relay]==0.3.0b1",
-    "nemo-fabric-adapters-deepagents==0.3.0b1",
+    "nemo-fabric[claude,codex,relay]>=0.3.0,<0.4.0",
+    "nemo-fabric-adapters-deepagents>=0.3.0,<0.4.0",
     # Platform owns the security-required DeepAgents harness version instead of
     # inheriting Fabric's optional harness extra, which is capped below 0.7.
     "deepagents>=0.7.8,<0.8",
-    # TODO(AIRCORE-952): Switch to the metapackage's `hermes-agent` extra once hermes-agent
-    # relaxes its vulnerable exact dependency pins — that extra applies [harness], which
-    # pins requests==2.33.0.
-    "nemo-fabric-adapters-hermes==0.3.0b1; python_version < '3.14'",
+    # Fabric 0.3's Hermes adapter intentionally excludes the harness. Platform manages
+    # the compatible Hermes Agent installation separately.
+    "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0; python_version < '3.14'",
 ]
 version = "0.0.0"
 
@@ -80,14 +79,6 @@ agents = "nemo_agents_plugin.skills:skills_dir"
 [project.entry-points."nat.plugins"]
 nemo_agents_files_telemetry = "nemo_agents_plugin.telemetry.files_service_exporter"
 
-# NeMo Agent Toolkit — register vendored workflow adapters (see nat.components)
-[project.entry-points."nat.components"]
-nat_claude_code_agent_adapter = "nat_claude_code_agent_adapter.register"
-nat_codex_agent_adapter = "nat_codex_agent_adapter.register"
-nat_cursor_agent_adapter = "nat_cursor_agent_adapter.register"
-nat_hermes_agent_adapter = "nat_hermes_agent_adapter.register"
-nat_openclaw_agent_adapter = "nat_openclaw_agent_adapter.register"
-
 [project.optional-dependencies]
 # Moved to [project] dependencies; kept so older install instructions resolve.
 container = []
@@ -106,11 +97,6 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = [
     "src/nemo_agents_plugin",
-    "vendor/claude_code_agent_adapter/src/nat_claude_code_agent_adapter",
-    "vendor/codex_agent_adapter/src/nat_codex_agent_adapter",
-    "vendor/cursor_agent_adapter/src/nat_cursor_agent_adapter",
-    "vendor/hermes_agent_adapter/src/nat_hermes_agent_adapter",
-    "vendor/openclaw_agent_adapter/src/nat_openclaw_agent_adapter",
 ]
 
 

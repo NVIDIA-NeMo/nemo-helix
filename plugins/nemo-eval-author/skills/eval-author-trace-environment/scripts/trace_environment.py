@@ -16,6 +16,7 @@ import re
 import shlex
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -23,15 +24,33 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
+from fixture_compiler import (  # noqa: E402
+    DECISIONS_SCHEMA,
+    build_call_fixtures,
+    build_mcp_scenario,
+    derive_tool_call_inventory,
+    derive_tool_call_plan,
+    resolve_tool_access,
+)
+from mock_registration import probe_registration  # noqa: E402
+
 SCHEMA = "nemo.eval_author.trace_environment_summary.v2"
 CANDIDATE_SCHEMA = "nemo.eval_author.trace_environment_candidate.v2"
 VALIDATION_SCHEMA = "nemo.eval_author.trace_environment_validation.v5"
 RUN_INPUT_SCHEMA = "nemo.eval_author.trace_environment_run_input.v1"
+PROBE_SCHEMA = "nemo.eval_author.trace_environment_probes.v1"
+REPAIR_SCHEMA = "nemo.eval_author.trace_environment_repair.v1"
 PRIVACY_AUDIT_SCHEMA = "nemo.eval_author.trace_environment_privacy_audit.v1"
 PUBLICATION_REVIEW_SCHEMA = "nemo.eval_author.trace_environment_publication_review.v1"
+TOOL_CALL_GENERATION_SCHEMA = "nemo.eval_author.trace_environment_tool_call_generation.v1"
 REPRODUCIBILITY_SCHEMA = "nemo.eval_author.trace_environment_reproducibility.v3"
-EXPORT_SCHEMA = "nemo.eval_author.trace_environment_product.v3"
+EXPORT_SCHEMA = "nemo.eval_author.trace_environment_product.v4"
 BATCH_SCHEMA = "nemo.eval_author.trace_environment_batch.v1"
+TOOL_CALL_AUDIT_LOG = "/tmp/tool-call-fixture-audit.jsonl"  # nosec B108 - isolated task-container scratch data
 MAX_RAW_SOURCE_BYTES = 128 * 1024 * 1024
 MAX_CANONICAL_BYTES = 25 * 1024 * 1024
 TASK_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -59,6 +78,27 @@ _ORGANIZATION = re.compile(
     r"(?:Corporation|Corp|Company|Inc|LLC|Ltd|University|Laboratories|Labs)\b"
 )
 _PERSON = re.compile(r"\b[A-Z][a-z]{2,20}\s+[A-Z][a-z]{2,20}\b")
+_CHECK_ROW = re.compile(r"([a-z0-9]+(?:-[a-z0-9]+)*)\t(PASS|FAIL)")
+_CHECK_WRITER = re.compile(r">>?\s*[\"']?/logs/verifier/results[\"']?")
+_CHECK_ID_IN_FORMAT = re.compile(r"\b([a-z0-9]+(?:-[a-z0-9]+)*)\\t")
+_SYNTAX_ONLY = re.compile(r"^(?:(?:ba)?sh\s+-n|node\s+--check|php\s+-l)\s+[^;|&]+$")
+_QUOTED_LITERAL = re.compile(r"'([^'\\]{16,})'" + '|"([^"\\\\]{16,})"')
+_RESULTS_PATH = "/logs/verifier/results"
+_REPAIR_REASON_CODES = frozenset(
+    {
+        "verifier_defect",
+        "environment_build_failure",
+        "instruction_ambiguity",
+        "oracle_failure",
+        "nop_contamination",
+        "negative_control_failure",
+        "probe_mismatch",
+        "runtime_incompatible",
+        "other",
+    }
+)
+_MAX_REPAIRS = 3
+_MAX_PROBES_PER_REVISION = 2
 _REDACTION_QUOTE = '<redacted>"'
 _IMAGE_OBJECT_START = re.compile(r'\{\s*"type"\s*:\s*"image"')
 _IDENTIFIER_KEYS = frozenset(
@@ -912,6 +952,363 @@ def _review_privacy(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _tool_call_source(task_dir: Path) -> tuple[dict[str, Any], dict[str, Any], str]:
+    summary = _load_summary(task_dir)
+    source = summary.get("source")
+    if not isinstance(source, dict):
+        raise ContractError("prepare safe ATIF evidence before inventorying interactions")
+    safe_path = task_dir / source["safe_path"]
+    if safe_path.is_symlink() or not safe_path.is_file():
+        raise ContractError("safe ATIF must be a retained regular file")
+    if safe_path.stat().st_size > MAX_CANONICAL_BYTES:
+        raise ContractError(f"safe ATIF exceeds the {MAX_CANONICAL_BYTES}-byte limit")
+    with safe_path.open("rb") as stream:
+        safe_bytes = stream.read(MAX_CANONICAL_BYTES + 1)
+    if len(safe_bytes) > MAX_CANONICAL_BYTES:
+        raise ContractError(f"safe ATIF exceeds the {MAX_CANONICAL_BYTES}-byte limit")
+    safe_sha256 = _sha256(safe_bytes)
+    if safe_sha256 != source["safe_sha256"]:
+        raise ContractError("safe ATIF digest does not match the task summary")
+    try:
+        safe = json.loads(safe_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ContractError("could not read safe ATIF as UTF-8 JSON") from error
+    if not isinstance(safe, dict):
+        raise ContractError("safe ATIF must contain one JSON object")
+    _validate_trajectory(safe)
+    return summary, safe, safe_sha256
+
+
+def _current_tool_call_inventory(task_dir: Path) -> dict[str, Any]:
+    _, safe, safe_sha256 = _tool_call_source(task_dir)
+    return derive_tool_call_inventory(safe, safe_atif_sha256=safe_sha256)
+
+
+def _inventory_tool_calls(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    output = task_dir / "private/tool-call-inventory.json"
+    if output.exists():
+        raise ContractError("refusing to replace existing tool-call-inventory.json")
+    inventory = _current_tool_call_inventory(task_dir)
+    _write_bytes_once(output, (json.dumps(inventory, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode())
+    return {
+        "task_dir": str(task_dir),
+        "tool_count": inventory["tool_count"],
+        "call_count": inventory["call_count"],
+        "inventory": str(output),
+    }
+
+
+def _current_tool_call_inventory_file(task_dir: Path) -> dict[str, Any]:
+    inventory = _load_object(task_dir / "private/tool-call-inventory.json", label="tool-call inventory")
+    if inventory != _current_tool_call_inventory(task_dir):
+        raise ContractError("tool-call-inventory.json differs from the current safe ATIF")
+    return inventory
+
+
+def _plan_tool_call_access(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    output = task_dir / "private/tool-call-plan.json"
+    if output.exists():
+        raise ContractError("refusing to replace existing tool-call-plan.json")
+    inventory = _current_tool_call_inventory_file(task_dir)
+    overrides_path = task_dir / "private/tool-schema-overrides.json"
+    if overrides_path.exists():
+        raise ContractError("refusing to replace existing tool-schema-overrides.json")
+    overrides = (
+        _load_object(args.schema_overrides, label="reviewed schema overrides") if args.schema_overrides else None
+    )
+    try:
+        plan = derive_tool_call_plan(inventory, overrides)
+    except ValueError as error:
+        raise ContractError(str(error)) from error
+    if overrides is not None:
+        _write_bytes_once(
+            overrides_path, (json.dumps(overrides, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
+        )
+    _write_bytes_once(output, (json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode())
+    return {
+        "task_dir": str(task_dir),
+        "tool_count": len(plan["tools"]),
+        "mock_support_counts": plan["mock_support_counts"],
+        "plan": str(output),
+    }
+
+
+def _current_tool_call_plan(task_dir: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    inventory = _current_tool_call_inventory_file(task_dir)
+    plan = _load_object(task_dir / "private/tool-call-plan.json", label="tool-call plan")
+    overrides_path = task_dir / "private/tool-schema-overrides.json"
+    overrides = _load_object(overrides_path, label="reviewed schema overrides") if overrides_path.exists() else None
+    try:
+        expected = derive_tool_call_plan(inventory, overrides)
+    except ValueError as error:
+        raise ContractError(str(error)) from error
+    if plan != expected:
+        raise ContractError("tool-call-plan.json differs from the current tool-call inventory")
+    return inventory, plan
+
+
+def _resolve_tool_call_access(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    output = task_dir / "private/tool-access.json"
+    if output.exists():
+        raise ContractError("refusing to replace existing tool-access.json")
+    inventory, plan = _current_tool_call_plan(task_dir)
+    requested = _load_object(args.decisions, label="tool access decisions")
+    try:
+        access = resolve_tool_access(inventory, plan, requested, reviewer_kind=args.reviewer_kind)
+    except ValueError as error:
+        raise ContractError(str(error)) from error
+    _write_bytes_once(output, (json.dumps(access, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode())
+    return {
+        "task_dir": str(task_dir),
+        "access_counts": access["access_counts"],
+        "access": str(output),
+    }
+
+
+def _current_tool_access(task_dir: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    inventory, plan = _current_tool_call_plan(task_dir)
+    access = _load_object(task_dir / "private/tool-access.json", label="tool access")
+    decisions = [
+        {key: decision.get(key) for key in ("tool_id", "name", "access", "adapter", "note")}
+        for decision in access.get("decisions", [])
+        if isinstance(decision, dict)
+    ]
+    requested = {"schema": DECISIONS_SCHEMA, "decisions": decisions}
+    reviewer_kind = access.get("reviewer_kind")
+    if not isinstance(reviewer_kind, str):
+        raise ContractError("tool-access.json reviewer_kind must be agent or human")
+    try:
+        expected = resolve_tool_access(
+            inventory,
+            plan,
+            requested,
+            reviewer_kind=reviewer_kind,
+        )
+    except ValueError as error:
+        raise ContractError(f"tool-access.json is invalid: {error}") from error
+    if access != expected:
+        raise ContractError("tool-access.json differs from the current tool-call plan")
+    return inventory, plan, access
+
+
+def _fixture_readme() -> str:
+    return (
+        "# Trace-derived tool-call mock\n\n"
+        "`call-fixtures.json` is the transport-neutral set of tool-call inputs and outputs selected for mock "
+        "access by the evaluation author. The included MCP adapter exposes those functions to Harbor agents, "
+        "matches tool names and canonical JSON arguments exactly, and returns an error for every unmatched call.\n\n"
+        "Copy this directory to `/opt/tool-call-fixtures` in the agent image, ensure Python 3 is present, and merge "
+        "`integration.toml` into the task's `[environment]` config. The optional audit log is written to "
+        f"`{TOOL_CALL_AUDIT_LOG}`. Finalization rejects a candidate task that selected mock access but "
+        "did not configure this MCP adapter.\n\n"
+        "The stdio process and fixture files are inspectable by a shell-capable agent. Do not use them to hold "
+        "hidden verifier truth. Prefer a filesystem-isolated sidecar when fixture contents must remain hidden.\n"
+    )
+
+
+def _fixture_integration() -> str:
+    return (
+        "# Merge this array entry into the real task.toml after copying this directory\n"
+        "# to /opt/tool-call-fixtures in the agent image.\n"
+        "[[environment.mcp_servers]]\n"
+        'name = "trace-tool-call-replay"\n'
+        'transport = "stdio"\n'
+        'command = "/opt/tool-call-fixtures/launch-replay.sh"\n'
+        "args = []\n"
+    )
+
+
+def _fixture_launcher() -> str:
+    # An argument-free executable also works with Harbor adapters that serialize
+    # command + args as one executable name (notably Codex in Harbor 0.20.0).
+    return (
+        "#!/bin/sh\n"
+        'exec python3 "$(dirname "$0")/mcp_replay.py" '
+        '--scenario "$(dirname "$0")/mcp-scenario.json" '
+        f'--audit-log "${{TRACE_TOOL_CALL_AUDIT_LOG:-{TOOL_CALL_AUDIT_LOG}}}"\n'
+    )
+
+
+def _generated_fixture_files(fixture_dir: Path, task_dir: Path) -> list[dict[str, Any]]:
+    files: list[dict[str, Any]] = []
+    for path in sorted(fixture_dir.rglob("*")):
+        if path.is_symlink():
+            raise ContractError("generated trace fixtures must not contain symlinks")
+        if not path.is_file():
+            continue
+        files.append(
+            {
+                "path": str(path.relative_to(task_dir)),
+                "sha256": _sha256_file(path),
+                "mode": stat.S_IMODE(path.stat().st_mode),
+            }
+        )
+    return files
+
+
+def _generate_mock_tool_calls(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    summary, _, _ = _tool_call_source(task_dir)
+    privacy = summary.get("privacy")
+    if not isinstance(privacy, dict) or not privacy.get("contextual_review_complete"):
+        raise ContractError("mock tool-call generation requires the review-privacy command")
+    if privacy.get("blocking_reasons"):
+        raise ContractError("mock tool-call generation is blocked by unresolved privacy evidence")
+    inventory, _, access = _current_tool_access(task_dir)
+    call_fixtures = build_call_fixtures(inventory, access)
+    scenario = build_mcp_scenario(call_fixtures)
+    if not call_fixtures["tools"]:
+        raise ContractError("tool access decisions select no mock tool calls to generate")
+
+    fixture_dir = task_dir / "task/environment/tool-call-fixtures"
+    receipt_path = task_dir / "private/tool-call-generation.json"
+    if fixture_dir.exists() or receipt_path.exists():
+        raise ContractError("refusing to replace existing generated mock tool calls")
+    fixture_dir.parent.mkdir(parents=True, exist_ok=True)
+    runtime_source = Path(__file__).with_name("replay_mcp_server.py")
+    with tempfile.TemporaryDirectory(prefix="tool-call-fixtures-", dir=task_dir / "private") as temporary:
+        staged = Path(temporary) / "tool-call-fixtures"
+        _mkdir_private(staged)
+        _write_bytes_once(
+            staged / "call-fixtures.json",
+            (json.dumps(call_fixtures, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(),
+        )
+        _write_bytes_once(
+            staged / "mcp-scenario.json",
+            (json.dumps(scenario, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(),
+        )
+        _write_bytes_once(staged / "mcp_replay.py", runtime_source.read_bytes())
+        _write_bytes_once(staged / "launch-replay.sh", _fixture_launcher().encode())
+        _write_bytes_once(staged / "integration.toml", _fixture_integration().encode())
+        _write_bytes_once(staged / "README.md", _fixture_readme().encode())
+        if os.name == "posix":
+            (staged / "mcp_replay.py").chmod(0o755)
+            (staged / "launch-replay.sh").chmod(0o755)
+            for name in ("call-fixtures.json", "mcp-scenario.json", "integration.toml", "README.md"):
+                (staged / name).chmod(0o644)
+        staged.rename(fixture_dir)
+
+    files = _generated_fixture_files(fixture_dir, task_dir)
+    receipt = {
+        "schema": TOOL_CALL_GENERATION_SCHEMA,
+        "safe_atif_sha256": inventory["safe_atif_sha256"],
+        "inventory_sha256": _sha256_file(task_dir / "private/tool-call-inventory.json"),
+        "plan_sha256": _sha256_file(task_dir / "private/tool-call-plan.json"),
+        "access_sha256": _sha256_file(task_dir / "private/tool-access.json"),
+        "call_fixtures_sha256": _sha256_file(fixture_dir / "call-fixtures.json"),
+        "files": files,
+    }
+    _write_bytes_once(
+        receipt_path,
+        (json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(),
+    )
+    return {
+        "task_dir": str(task_dir),
+        "generated_mock_tool_count": len(scenario["tools"]),
+        "fixture_dir": str(fixture_dir),
+        "receipt": str(receipt_path),
+    }
+
+
+def _validate_tool_call_pipeline(task_dir: Path, *, require_decisions: bool = False) -> None:
+    inventory_path = task_dir / "private/tool-call-inventory.json"
+    plan_path = task_dir / "private/tool-call-plan.json"
+    access_path = task_dir / "private/tool-access.json"
+    receipt_path = task_dir / "private/tool-call-generation.json"
+    fixture_dir = task_dir / "task/environment/tool-call-fixtures"
+    overrides_path = task_dir / "private/tool-schema-overrides.json"
+    if require_decisions:
+        current = _current_tool_call_inventory(task_dir)
+        if current["unresolved_call_count"]:
+            raise ContractError("candidate contains unresolved tool calls; correct source evidence or use no_candidate")
+        if current["call_count"] and not all(path.is_file() for path in (inventory_path, plan_path, access_path)):
+            raise ContractError("candidate tool calls require complete reviewed real/mock/none access decisions")
+    if not any(
+        path.exists() for path in (inventory_path, plan_path, access_path, receipt_path, fixture_dir, overrides_path)
+    ):
+        return
+    if not inventory_path.is_file():
+        raise ContractError("tool-call artifacts require private/tool-call-inventory.json")
+    inventory = _current_tool_call_inventory_file(task_dir)
+    if not plan_path.exists():
+        if access_path.exists() or receipt_path.exists() or fixture_dir.exists() or overrides_path.exists():
+            raise ContractError("tool access artifacts require private/tool-call-plan.json")
+        return
+    _current_tool_call_plan(task_dir)
+    if not access_path.exists():
+        if receipt_path.exists() or fixture_dir.exists():
+            raise ContractError("generated mock tool calls require private/tool-access.json")
+        return
+    _, _, access = _current_tool_access(task_dir)
+    has_mock_access = any(decision["access"] == "mock" for decision in access["decisions"])
+    if not has_mock_access:
+        if receipt_path.exists() or fixture_dir.exists():
+            raise ContractError("generated mock tool calls require at least one mock access decision")
+        return
+    if receipt_path.exists() != fixture_dir.exists():
+        raise ContractError("generated mock tool-call directory and receipt must exist together")
+    if not receipt_path.exists():
+        raise ContractError("mock tool-call access requires generated mock tool-call artifacts")
+    receipt = _load_object(receipt_path, label="fixture generation receipt")
+    expected_keys = {
+        "schema",
+        "safe_atif_sha256",
+        "inventory_sha256",
+        "plan_sha256",
+        "access_sha256",
+        "call_fixtures_sha256",
+        "files",
+    }
+    if set(receipt) != expected_keys or receipt.get("schema") != TOOL_CALL_GENERATION_SCHEMA:
+        raise ContractError("tool-call generation receipt fields do not match the versioned contract")
+    call_fixtures = _load_object(fixture_dir / "call-fixtures.json", label="generated call fixtures")
+    if call_fixtures != build_call_fixtures(inventory, access):
+        raise ContractError("generated call fixtures differ from the current tool access decisions")
+    scenario = _load_object(fixture_dir / "mcp-scenario.json", label="generated MCP scenario")
+    if scenario != build_mcp_scenario(call_fixtures):
+        raise ContractError("generated MCP scenario differs from the current fixture plan")
+    expected = {
+        "schema": TOOL_CALL_GENERATION_SCHEMA,
+        "safe_atif_sha256": inventory["safe_atif_sha256"],
+        "inventory_sha256": _sha256_file(inventory_path),
+        "plan_sha256": _sha256_file(plan_path),
+        "access_sha256": _sha256_file(access_path),
+        "call_fixtures_sha256": _sha256_file(fixture_dir / "call-fixtures.json"),
+        "files": _generated_fixture_files(fixture_dir, task_dir),
+    }
+    if receipt != expected:
+        raise ContractError("tool-call generation receipt differs from the generated task files")
+
+
+def _validate_mock_tool_call_integration(task_dir: Path, config: dict[str, Any]) -> None:
+    access_path = task_dir / "private/tool-access.json"
+    if not access_path.exists():
+        return
+    _, _, access = _current_tool_access(task_dir)
+    mocked = [decision for decision in access["decisions"] if decision["access"] == "mock"]
+    if not mocked:
+        return
+    environment = config.get("environment")
+    servers = environment.get("mcp_servers") if isinstance(environment, dict) else None
+    if not isinstance(servers, list):
+        raise ContractError("mock tool-call access requires [[environment.mcp_servers]] in task/task.toml")
+    matching = [
+        server for server in servers if isinstance(server, dict) and server.get("name") == "trace-tool-call-replay"
+    ]
+    if len(matching) != 1:
+        raise ContractError("mock tool-call access requires exactly one trace-tool-call-replay MCP server")
+    server = matching[0]
+    if (
+        server.get("transport") != "stdio"
+        or server.get("command") != "/opt/tool-call-fixtures/launch-replay.sh"
+        or server.get("args") != []
+    ):
+        raise ContractError("trace-tool-call-replay MCP server differs from the generated integration contract")
+
+
 def _evidence_steps(value: Any, step_ids: set[int], *, label: str) -> list[int]:
     if (
         not isinstance(value, list)
@@ -1004,7 +1401,8 @@ def _validate_ground_truth(task_dir: Path, value: Any, step_ids: set[int]) -> di
         label = f"candidate.ground_truth.artifacts[{index}]"
         if not isinstance(artifact, dict) or set(artifact) != _GROUND_TRUTH_ARTIFACT_KEYS:
             raise ContractError(f"{label} fields do not match the versioned contract")
-        if not isinstance(artifact.get("kind"), str) or artifact["kind"] not in allowed_kinds:
+        kind = artifact.get("kind")
+        if not isinstance(kind, str) or kind not in allowed_kinds:
             raise ContractError(f"{label}.kind is not recognized")
         relative_path = artifact.get("path")
         if not isinstance(relative_path, str) or not relative_path.startswith("private/ground-truth/"):
@@ -1044,19 +1442,19 @@ def _validate_software_requirements(value: Any, step_ids: set[int]) -> list[dict
         if not isinstance(name, str) or not name.strip() or name.casefold() in names:
             raise ContractError(f"{label}.name must be nonempty and unique")
         names.add(name.casefold())
-        if not isinstance(requirement.get("category"), str) or requirement["category"] not in allowed_categories:
+        category = requirement.get("category")
+        if not isinstance(category, str) or category not in allowed_categories:
             raise ContractError(f"{label}.category is not recognized")
         if type(requirement.get("required")) is not bool:
             raise ContractError(f"{label}.required must be a boolean")
         version = requirement.get("version")
         if version is not None and (not isinstance(version, str) or not version.strip()):
             raise ContractError(f"{label}.version must be null or nonempty text")
-        if not isinstance(requirement.get("license"), str) or requirement["license"] not in allowed_licenses:
+        license_class = requirement.get("license")
+        if not isinstance(license_class, str) or license_class not in allowed_licenses:
             raise ContractError(f"{label}.license is not recognized")
-        if (
-            not isinstance(requirement.get("availability"), str)
-            or requirement["availability"] not in allowed_availability
-        ):
+        availability = requirement.get("availability")
+        if not isinstance(availability, str) or availability not in allowed_availability:
             raise ContractError(f"{label}.availability is not recognized")
         redistributable = requirement.get("redistributable")
         if redistributable is not None and type(redistributable) is not bool:
@@ -1070,10 +1468,13 @@ def _validate_software_requirements(value: Any, step_ids: set[int]) -> list[dict
 
 def _validate_candidate(task_dir: Path, status: str, step_ids: set[int]) -> dict[str, Any]:
     candidate = _load_object(task_dir / "candidate.json", label="candidate")
-    if set(candidate) != _CANDIDATE_KEYS:
+    if set(candidate) not in (_CANDIDATE_KEYS, _CANDIDATE_KEYS | {"state_basis"}):
         raise ContractError("candidate fields do not match the versioned contract")
     if candidate.get("schema") != CANDIDATE_SCHEMA:
         raise ContractError(f"candidate.schema must be {CANDIDATE_SCHEMA!r}")
+    state_basis = candidate.get("state_basis", "recorded")
+    if state_basis not in ("recorded", "reconstructed"):
+        raise ContractError("candidate.state_basis must be 'recorded' or 'reconstructed'")
     if candidate.get("status") != status:
         raise ContractError("candidate status does not match the requested summary status")
     if candidate.get("decision_basis") != "safe_atif_only":
@@ -1521,11 +1922,437 @@ def _validate_task(task_dir: Path) -> dict[str, Any]:
             not isinstance(step_environment, dict) or step_environment.get("network_mode") != "no-network"
         ):
             raise ContractError(f"[steps.verifier.environment] for step {index} must set network_mode to no-network")
+    _validate_mock_tool_call_integration(task_dir, config)
     return {
         "verifier_environment_mode": mode,
         "isolation_status": "isolated",
         "agent_network_mode": "no-network",
         "config": config,
+    }
+
+
+def _check_grammar_issues(task_dir: Path) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Static per-check grammar and triviality lint for task/tests/test.sh."""
+
+    issues: list[dict[str, str]] = []
+    advisories: list[dict[str, str]] = []
+    test_path = task_dir / "task" / "tests" / "test.sh"
+    if test_path.is_symlink() or not test_path.is_file():
+        return issues, advisories  # reported by the required-file lint
+    try:
+        text = test_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        issues.append(
+            {
+                "code": "test_not_utf8",
+                "path": "task/tests/test.sh",
+                "hint": "Write tests/test.sh as UTF-8 text.",
+            }
+        )
+        return issues, advisories
+    writer_lines = [line for line in text.splitlines() if _RESULTS_PATH in line]
+    if not any(_CHECK_WRITER.search(line) for line in writer_lines):
+        issues.append(
+            {
+                "code": "missing_check_rows",
+                "path": "task/tests/test.sh",
+                "hint": "Emit one '<check-id>\\tPASS|FAIL' row per scored check to /logs/verifier/results; see references/check-grammar.md.",
+            }
+        )
+    check_ids: list[str] = []
+    any_quoted = re.compile(r"'([^']*)'|\"([^\"]*)\"")
+    for line in writer_lines:
+        if not _CHECK_WRITER.search(line):
+            continue
+        for pair in any_quoted.findall(line):
+            value = next(group for group in pair if group)
+            check_ids.extend(_CHECK_ID_IN_FORMAT.findall(value))
+    duplicates = sorted({check_id for check_id in check_ids if check_ids.count(check_id) > 1})
+    if duplicates:
+        issues.append(
+            {
+                "code": "duplicate_check_id",
+                "path": "task/tests/test.sh",
+                "hint": f"Check IDs must be unique and stable; duplicates: {', '.join(duplicates)}.",
+            }
+        )
+    for match in re.finditer(r"(?m)^\s*if\s+([^;]+);\s*then", text):
+        if _SYNTAX_ONLY.fullmatch(match.group(1).strip()):
+            issues.append(
+                {
+                    "code": "syntax_only_check",
+                    "path": "task/tests/test.sh",
+                    "hint": "A syntax parse (sh -n, node --check, php -l) proves nothing about behavior; assert an observable outcome instead.",
+                }
+            )
+    # Triviality: a long expected literal the agent can copy verbatim from its
+    # own inputs is not evidence of work (the deterministic copy baseline).
+    # Only assertion-context lines are scanned; a runnable command the
+    # instruction names is a legitimate test target, not a leak.
+    assertion_line = re.compile(r"\b(?:grep|cmp|diff|sha256sum|assert|jq|test)\b|==|=~")
+    expected_literals: set[str] = set()
+    for line in text.splitlines():
+        if not assertion_line.search(line):
+            continue
+        for literal_pair in _QUOTED_LITERAL.findall(line):
+            value = next(group for group in literal_pair if group)
+            if value.startswith(("/", "task", "tests")) or value in check_ids or "\\t" in value:
+                continue
+            expected_literals.add(value)
+    searchable: list[tuple[str, str]] = []
+    for relative in ("task/instruction.md",):
+        path = task_dir / relative
+        if path.is_file() and not path.is_symlink():
+            searchable.append((relative, path.read_text(encoding="utf-8", errors="replace")))
+    environment = task_dir / "task" / "environment"
+    if environment.is_dir():
+        for path in sorted(environment.rglob("*")):
+            if path.is_file() and not path.is_symlink() and path.stat().st_size <= 1024 * 1024:
+                relative = f"task/environment/{path.relative_to(environment).as_posix()}"
+                searchable.append((relative, path.read_text(encoding="utf-8", errors="replace")))
+    for value in sorted(expected_literals):
+        for relative, content in searchable:
+            if value in content:
+                target = issues if len(value) >= 24 else advisories
+                target.append(
+                    {
+                        "code": "copyable_literal",
+                        "path": "task/tests/test.sh",
+                        "hint": (
+                            "An expected literal also appears verbatim in "
+                            f"{relative}; derive the expectation or keep it verifier-private so copying cannot pass."
+                        ),
+                    }
+                )
+                break
+    return issues, advisories
+
+
+def _validate_task_issues(task_dir: Path) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Collect authoring-stage issues without failing fast (validate-task)."""
+
+    issues: list[dict[str, str]] = []
+    root = task_dir / "task"
+    if root.is_symlink() or not root.is_dir():
+        return (
+            [
+                {
+                    "code": "missing_task_tree",
+                    "path": "task",
+                    "hint": "Create the Harbor task tree under <task-dir>/task before validating.",
+                }
+            ],
+            [],
+        )
+    for relative in ("task.toml", "instruction.md", "tests/test.sh", "solution/solve.sh", "README.md"):
+        path = root / relative
+        if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
+            issues.append(
+                {
+                    "code": "missing_required_file",
+                    "path": f"task/{relative}",
+                    "hint": f"Author a nonempty task/{relative}; see SKILL.md step 6.",
+                }
+            )
+    if not (root / "environment").is_dir() or (root / "environment").is_symlink():
+        issues.append(
+            {
+                "code": "missing_required_directory",
+                "path": "task/environment",
+                "hint": "Create task/environment/ (empty is allowed) holding task prerequisites.",
+            }
+        )
+    try:
+        _validate_task(task_dir)
+    except ContractError as error:
+        message = str(error)
+        code = "verifier_contract" if "network" in message or "verifier" in message else "task_contract"
+        hint = (
+            "Set [verifier].environment_mode='separate', both no-network tables, and [environment].network_mode "
+            "='no-network'; see SKILL.md step 6."
+            if code == "verifier_contract"
+            else "Fix the reported contract error; see SKILL.md step 6 and references/environment-integrity.md."
+        )
+        issues.append({"code": code, "path": "task", "hint": f"{message} — {hint}"})
+    grammar_issues, advisories = _check_grammar_issues(task_dir)
+    return issues + grammar_issues, advisories
+
+
+def _validate_task_cmd(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    issues, advisories = _validate_task_issues(task_dir)
+    return {
+        "task_dir": str(task_dir),
+        "ok": not issues,
+        "valid": not issues,
+        "issues": issues,
+        "advisories": advisories,
+    }
+
+
+def _job_check_rows(job_dir: Path) -> list[dict[str, str]] | None:
+    """Parse retained per-check rows from a Harbor job, when the verifier emitted them."""
+
+    paths = sorted(
+        path for path in job_dir.glob("task__*/verifier/results") if path.is_file() and not path.is_symlink()
+    )
+    if not paths:
+        return None
+    if len(paths) != 1:
+        raise ContractError(f"{job_dir.name} has ambiguous verifier results files")
+    try:
+        text = paths[0].read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise ContractError(f"{paths[0]} must be UTF-8 text") from error
+    rows: list[dict[str, str]] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        match = _CHECK_ROW.fullmatch(line.strip())
+        if match is None:
+            raise ContractError(f"malformed check row in {paths[0].name}: expected '<check-id>\\tPASS|FAIL'")
+        rows.append({"check_id": match.group(1), "status": match.group(2)})
+    if not rows:
+        raise ContractError(f"{paths[0].name} contains no check rows")
+    check_ids = [row["check_id"] for row in rows]
+    if len(check_ids) != len(set(check_ids)):
+        raise ContractError(f"{paths[0].name} repeats a check ID")
+    return rows
+
+
+def _probes_path(task_dir: Path) -> Path:
+    return task_dir / "private" / "probes" / "probes.json"
+
+
+def _load_probes(task_dir: Path) -> list[dict[str, Any]]:
+    path = _probes_path(task_dir)
+    if not path.is_file():
+        return []
+    payload = _load_object(path, label="probe ledger")
+    if set(payload) != {"schema", "entries"} or payload.get("schema") != PROBE_SCHEMA:
+        raise ContractError("probe ledger fields do not match the versioned contract")
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        raise ContractError("probe ledger entries must be a list")
+    return entries
+
+
+def _record_probe(
+    task_dir: Path,
+    arm: str,
+    task_digest: str,
+    job_dir: Path,
+    reward: Any,
+    checks: list[dict[str, str]] | None,
+) -> dict[str, Any]:
+    entries = _load_probes(task_dir)
+    revision = [entry for entry in entries if entry["arm"] == arm and entry["task_tree_sha256"] == task_digest]
+    if len(revision) >= _MAX_PROBES_PER_REVISION:
+        raise ContractError(
+            f"probe budget exhausted for this {arm} revision ({_MAX_PROBES_PER_REVISION}); "
+            "change the task or run the formal proof"
+        )
+    entry = {
+        "arm": arm,
+        "task_tree_sha256": task_digest,
+        "job_dir": job_dir.relative_to(task_dir).as_posix(),
+        "reward": reward,
+        "checks": checks,
+    }
+    entries.append(entry)
+    path = _probes_path(task_dir)
+    _mkdir_private(path.parent)
+    _write_json(path, {"schema": PROBE_SCHEMA, "entries": entries})
+    return {
+        "status": "recorded",
+        "entry": entry,
+        "probes_used": len(revision) + 1,
+        "probes_remaining": _MAX_PROBES_PER_REVISION - len(revision) - 1,
+        "cached": False,
+    }
+
+
+def _probe(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    try:
+        _validate_task(task_dir)
+    except ContractError as error:
+        raise ContractError(f"fix validate-task issues before probing: {error}") from error
+    digest = _task_tree_info(task_dir / "task")["task_tree_sha256"]
+    arms = ("nop", "oracle") if args.arm == "both" else (args.arm,)
+    results: list[dict[str, Any]] = []
+    for arm in arms:
+        existing = [
+            entry for entry in _load_probes(task_dir) if entry["arm"] == arm and entry["task_tree_sha256"] == digest
+        ]
+        if existing and args.results_from is None:
+            results.append({"arm": arm, "cached": True, **existing[-1]})
+            continue
+        if len(existing) >= _MAX_PROBES_PER_REVISION:
+            raise ContractError(
+                f"probe budget exhausted for this {arm} revision ({_MAX_PROBES_PER_REVISION}); "
+                "change the task or run the formal proof"
+            )
+        if args.results_from is not None:
+            job_dir, _result_path, result = _job_result(task_dir, args.results_from, arm=f"{arm} probe")
+            identity = _agent_identity((result.get("config") or {}).get("agent"))
+            if identity != arm:
+                raise ContractError(f"probe {arm} job must identify the {arm} agent")
+        else:
+            harbor = shutil.which("harbor")
+            if harbor is None:
+                results.append(
+                    {
+                        "arm": arm,
+                        "status": "not_run",
+                        "hint": "Install/use the existing Harbor environment to run diagnostic probes.",
+                    }
+                )
+                continue
+            total = len([entry for entry in _load_probes(task_dir) if entry["arm"] == arm])
+            job_name = f"probe-{arm}-{total + 1}"
+            jobs_root = task_dir / "private" / "probes" / "jobs"
+            _mkdir_private(jobs_root)
+            completed = subprocess.run(
+                [
+                    harbor,
+                    "run",
+                    "-p",
+                    str(task_dir / "task"),
+                    "-a",
+                    arm,
+                    "--jobs-dir",
+                    str(jobs_root),
+                    "--job-name",
+                    job_name,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            job_dir = jobs_root / job_name
+            if completed.returncode != 0 and not job_dir.is_dir():
+                raise ContractError(
+                    f"harbor probe run failed ({completed.returncode}): {completed.stderr.strip()[:500]}"
+                )
+            job_dir, _result_path, result = _job_result(task_dir, job_dir, arm=f"{arm} probe")
+        verifier_result = result.get("verifier_result")
+        rewards = verifier_result.get("rewards") if isinstance(verifier_result, dict) else None
+        reward = rewards.get("reward") if isinstance(rewards, dict) else None
+        recorded = _record_probe(
+            task_dir,
+            arm,
+            digest,
+            job_dir,
+            reward,
+            _job_check_rows(job_dir),
+        )
+        results.append(
+            {
+                "arm": arm,
+                **recorded["entry"],
+                "status": recorded["status"],
+                "probes_used": recorded["probes_used"],
+                "probes_remaining": recorded["probes_remaining"],
+            }
+        )
+    return {
+        "task_dir": str(task_dir),
+        "status": "not_run" if all(item.get("status") == "not_run" for item in results) else "recorded",
+        "diagnostic_only": True,
+        "proof_authority": "probes are never accepted as proof; use record-run-inputs + record-validation",
+        "results": results,
+    }
+
+
+_REPAIR_RECEIPT = re.compile(r"repair-(\d+)\.json")
+
+
+def _repairs(task_dir: Path) -> list[dict[str, Any]]:
+    root = task_dir / "private" / "repairs"
+    if not root.is_dir():
+        return []
+    receipts: list[tuple[int, dict[str, Any]]] = []
+    for path in sorted(root.glob("repair-*.json")):
+        match = _REPAIR_RECEIPT.fullmatch(path.name)
+        if match is None:
+            raise ContractError(f"unexpected file in repair ledger: {path.name}")
+        receipt = _load_object(path, label="repair receipt")
+        if (
+            set(receipt) != {"schema", "index", "reason_code", "note", "superseded"}
+            or receipt.get("schema") != REPAIR_SCHEMA
+        ):
+            raise ContractError("repair receipt fields do not match the versioned contract")
+        receipts.append((int(match.group(1)), receipt))
+    indexes = [index for index, _ in receipts]
+    if indexes != list(range(1, len(receipts) + 1)):
+        raise ContractError("repair ledger indexes must be contiguous from 1")
+    for index, receipt in receipts:
+        if receipt["index"] != index:
+            raise ContractError("repair receipt index does not match its file name")
+        superseded = receipt["superseded"]
+        for name in ("validation.json", "reproducibility.json"):
+            record = superseded.get(name)
+            archived = root / f"repair-{index}" / name
+            if record is None:
+                if archived.exists():
+                    raise ContractError(f"repair {index} archives an undeclared {name}")
+                continue
+            if not archived.is_file() or _sha256_file(archived) != record.get("sha256"):
+                raise ContractError(f"repair {index} archive of {name} is missing or changed")
+    return [receipt for _, receipt in receipts]
+
+
+def _record_repair(args: argparse.Namespace) -> dict[str, Any]:
+    task_dir = _ensure_task_dir(args.task_dir)
+    if args.reason_code not in _REPAIR_REASON_CODES:
+        raise ContractError(f"repair reason code must be one of: {', '.join(sorted(_REPAIR_REASON_CODES))}")
+    if args.reason_code == "other" and len(args.note.strip()) < 20:
+        raise ContractError("reason code 'other' requires a concrete note")
+    if not args.note.strip():
+        raise ContractError("repair note must be nonempty")
+    summary = _load_summary(task_dir)
+    if summary["status"] != "pending":
+        raise ContractError(
+            "repairs apply before finalize; a finalized failed environment stays failed as technical evidence"
+        )
+    validation_path = task_dir / "validation.json"
+    reproducibility_path = task_dir / "reproducibility.json"
+    if not validation_path.is_file() and not reproducibility_path.is_file():
+        raise ContractError("record a repair only in response to a recorded proof attempt or failed probe evidence")
+    receipts = _repairs(task_dir)
+    index = len(receipts) + 1
+    if index > _MAX_REPAIRS:
+        raise ContractError(
+            f"repair budget exhausted ({_MAX_REPAIRS}); finalize as failed instead of repairing further"
+        )
+    superseded: dict[str, Any] = {}
+    archive = task_dir / "private" / "repairs" / f"repair-{index}"
+    _mkdir_private(archive)
+    for name, path in (("validation.json", validation_path), ("reproducibility.json", reproducibility_path)):
+        if not path.is_file():
+            superseded[name] = None
+            continue
+        digest = _sha256_file(path)
+        shutil.move(str(path), archive / name)
+        superseded[name] = {"sha256": digest}
+    receipt = {
+        "schema": REPAIR_SCHEMA,
+        "index": index,
+        "reason_code": args.reason_code,
+        "note": args.note.strip(),
+        "superseded": superseded,
+    }
+    _write_bytes_once(
+        task_dir / "private" / "repairs" / f"repair-{index}.json",
+        (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode(),
+    )
+    return {
+        "task_dir": str(task_dir),
+        "repair": index,
+        "repairs_remaining": _MAX_REPAIRS - index,
+        "reason_code": args.reason_code,
+        "next": "record-reproducibility, then a fresh proof set; the archived reports remain private evidence",
     }
 
 
@@ -1583,7 +2410,7 @@ def _check_runtime(args: argparse.Namespace) -> dict[str, Any]:
     """Read-only capability preflight; version labels are informational only."""
     checks: list[dict[str, Any]] = []
     report: dict[str, Any] = {
-        "schema": "nemo.eval_author.trace_environment_runtime_check.v1",
+        "schema": "nemo.eval_author.trace_environment_runtime_check.v2",
         "valid": False,
         "scope": "single_step_proof",
         "harbor_version": None,
@@ -1655,6 +2482,30 @@ def _check_runtime(args: argparse.Namespace) -> dict[str, Any]:
         task_dir = _ensure_task_dir(args.task_dir)
         try:
             task = task_model(task_dir / "task")
+            access_path = task_dir / "private/tool-access.json"
+            if access_path.exists():
+                _, _, access = _current_tool_access(task_dir)
+                if any(item["access"] == "mock" for item in access["decisions"]):
+                    _validate_mock_tool_call_integration(task_dir, task.config.model_dump(mode="json"))
+                    agent = getattr(args, "mock_agent", None)
+                    servers = [
+                        server
+                        for server in task.config.environment.mcp_servers
+                        if server.name == "trace-tool-call-replay"
+                    ]
+                    registration = probe_registration(agent, servers)
+                    report["mock_integration"] = {
+                        "adapter": "mcp",
+                        "registration": registration,
+                        "execution": {"status": "unverified", "reason": "native_agent_run_required"},
+                    }
+                    check(
+                        "mock_agent_registration",
+                        registration["status"] != "unsupported",
+                        f"Registration: {registration['status']} ({registration['reason']}). "
+                        "Only a demonstrated mismatch blocks this preflight. Unverified registration needs "
+                        "harness-specific evidence; valid does not prove native-agent mock access.",
+                    )
             single_step = not task.config.steps
             check(
                 "task_proof_shape",
@@ -1667,6 +2518,8 @@ def _check_runtime(args: argparse.Namespace) -> dict[str, Any]:
             )
         except Exception as error:
             check("task_validation", False, f"Harbor could not validate this proof task ({type(error).__name__}).")
+    if getattr(args, "mock_agent", None) and "mock_integration" not in report:
+        check("mock_agent_scope", False, "--mock-agent requires --task-dir with resolved mock tool-call access.")
     report["valid"] = all(item["passed"] for item in checks)
     return report
 
@@ -1722,6 +2575,8 @@ def _record_run_inputs(args: argparse.Namespace) -> dict[str, Any]:
     job_dir = job_dir.resolve()
     if not job_dir.is_relative_to(task_dir / "private") or job_dir == task_dir / "private":
         raise ContractError("future Harbor job directory must stay under private/")
+    if job_dir.is_relative_to(task_dir / "private" / "probes"):
+        raise ContractError("diagnostic probes can never serve as proof; choose a job directory outside private/probes")
     if job_dir.exists():
         raise ContractError("record run inputs before Harbor creates the job directory; use a fresh job name")
     output = _run_input_path(task_dir, job_dir)
@@ -1817,6 +2672,8 @@ def _validation_from_jobs(
     oracle_job_dirs: list[str | Path],
     negative_job_dirs: list[str | Path],
     harbor_version: str,
+    *,
+    allow_aggregate_only: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(harbor_version, str) or not harbor_version.strip():
         raise ContractError("Harbor version must be nonempty text")
@@ -1829,6 +2686,7 @@ def _validation_from_jobs(
             raise ContractError(f"validation requires at least {minimum} independent {arm} Harbor jobs")
     runs: dict[str, list[dict[str, Any]]] = {arm: [] for arm in inputs}
     trials: list[dict[str, Any]] = []
+    check_rows: list[list[dict[str, str]] | None] = []
     for arm, values in inputs.items():
         for index, value in enumerate(values, start=1):
             label = f"{arm} run {index}"
@@ -1837,7 +2695,37 @@ def _validation_from_jobs(
             run_inputs = _validate_run_inputs(
                 task_dir, job_dir, arm, result, reproducibility["task_tree_sha256"], checksum
             )
-            runs[arm].append({**_arm_from_result(task_dir, job_dir, result_path, result), **run_inputs})
+            checks = _job_check_rows(job_dir)
+            check_rows.append(checks)
+            run = {**_arm_from_result(task_dir, job_dir, result_path, result), **run_inputs}
+            if checks is not None:
+                run["checks"] = checks
+            runs[arm].append(run)
+    if any(rows is None for rows in check_rows):
+        if any(rows is not None for rows in check_rows):
+            raise ContractError("either every proof job or none must retain /logs/verifier/results check rows")
+        if not allow_aggregate_only:
+            raise ContractError(
+                "missing_check_evidence: proof jobs retain no per-check rows; author the per-check grammar "
+                "(references/check-grammar.md) and rerun, or record historical proof with --allow-aggregate-only"
+            )
+        check_evidence = "aggregate_only"
+    else:
+        check_evidence = "per_check"
+        expected_ids = [{row["check_id"] for row in rows} for rows in check_rows if rows is not None]
+        if any(ids != expected_ids[0] for ids in expected_ids):
+            raise ContractError("all proof jobs must report the same per-check ID set")
+        for run in runs["nop"]:
+            passed_checks = [row["check_id"] for row in run["checks"] if row["status"] == "PASS"]
+            if passed_checks:
+                raise ContractError(f"untouched environment passes scored checks: {', '.join(passed_checks)}")
+        for run in runs["oracle"]:
+            failed_checks = [row["check_id"] for row in run["checks"] if row["status"] != "PASS"]
+            if failed_checks and run["reward"] == 1:
+                raise ContractError(f"oracle reward 1 conflicts with failing checks: {', '.join(failed_checks)}")
+        for run in runs["negative"]:
+            if run["reward"] == 0 and all(row["status"] == "PASS" for row in run["checks"]):
+                raise ContractError("negative control reward 0 conflicts with all-passing checks")
     job_dirs = [run["job_dir"] for arm_runs in runs.values() for run in arm_runs]
     job_ids = [run["job_id"] for arm_runs in runs.values() for run in arm_runs]
     if len(job_dirs) != len(set(job_dirs)):
@@ -1873,6 +2761,7 @@ def _validation_from_jobs(
         "distinct_jobs": True,
         "container_freshness": "unverified",
         "minimum_runs": _MIN_VALIDATION_RUNS,
+        "check_evidence": check_evidence,
         "passed": passed,
         "runs": runs,
     }
@@ -1889,6 +2778,7 @@ def _record_validation(args: argparse.Namespace) -> dict[str, Any]:
         args.oracle_job_dir,
         args.negative_job_dir,
         args.harbor_version,
+        allow_aggregate_only=args.allow_aggregate_only,
     )
     _write_json(validation_path, validation)
     return {
@@ -1912,6 +2802,7 @@ def _validate_validation(task_dir: Path) -> dict[str, Any]:
         "distinct_jobs",
         "container_freshness",
         "minimum_runs",
+        "check_evidence",
         "passed",
         "runs",
     }
@@ -1923,6 +2814,7 @@ def _validate_validation(task_dir: Path) -> dict[str, Any]:
         recorded.get("minimum_runs") != _MIN_VALIDATION_RUNS
         or recorded.get("distinct_jobs") is not True
         or recorded.get("container_freshness") != "unverified"
+        or recorded.get("check_evidence") not in ("per_check", "aggregate_only")
     ):
         raise ContractError("validation repeat and job-evidence policy does not match the versioned contract")
     runs = recorded.get("runs")
@@ -1932,25 +2824,29 @@ def _validate_validation(task_dir: Path) -> dict[str, Any]:
         values = runs.get(arm)
         if not isinstance(values, list) or len(values) < minimum:
             raise ContractError(f"validation.runs.{arm} does not meet the minimum run count")
+        required_run_keys = {
+            "job_id",
+            "job_dir",
+            "result_path",
+            "result_sha256",
+            "reward",
+            "exception_present",
+            "agent",
+            "run_inputs_path",
+            "run_inputs_sha256",
+        }
         for value in values:
-            if not isinstance(value, dict) or set(value) != {
-                "job_id",
-                "job_dir",
-                "result_path",
-                "result_sha256",
-                "reward",
-                "exception_present",
-                "agent",
-                "run_inputs_path",
-                "run_inputs_sha256",
-            }:
+            if not isinstance(value, dict) or not required_run_keys.issubset(set(value)):
                 raise ContractError(f"validation.runs.{arm} fields do not match the versioned contract")
+            if not set(value).issubset(required_run_keys | {"checks"}):
+                raise ContractError(f"validation.runs.{arm} carries fields outside the versioned contract")
     derived = _validation_from_jobs(
         task_dir,
         [run["job_dir"] for run in runs["nop"]],
         [run["job_dir"] for run in runs["oracle"]],
         [run["job_dir"] for run in runs["negative"]],
         recorded["harbor_version"],
+        allow_aggregate_only=recorded["check_evidence"] == "aggregate_only",
     )
     if recorded != derived:
         raise ContractError("validation.json differs from the retained Harbor result evidence")
@@ -1978,6 +2874,7 @@ def _summary_markdown(summary: dict[str, Any]) -> str:
         f"## Status\n\n`{summary['status']}`\n\n"
         f"## Evidence\n\n"
         f"- Safe ATIF: `{summary['source']['safe_path']}`\n"
+        f"- State basis: `{candidate.get('state_basis', 'recorded')}`\n"
         f"- Evidence steps: {candidate.get('evidence_steps', [])}\n"
         f"- Environment: `{summary['environment']['status']}`\n"
         f"- Technical proof: `{summary['environment']['technical_status']}`\n"
@@ -2024,6 +2921,7 @@ def _finalize(args: argparse.Namespace) -> dict[str, Any]:
     safe_path = task_dir / summary["source"]["safe_path"]
     safe_payload = _load_object(safe_path, label="safe ATIF")
     _validate_trajectory(safe_payload)
+    _validate_tool_call_pipeline(task_dir, require_decisions=args.status == "candidate")
     step_ids = {step["step_id"] for step in safe_payload["steps"]}
     candidate = _validate_candidate(task_dir, args.status, step_ids)
 
@@ -2090,6 +2988,18 @@ def _check(args: argparse.Namespace) -> dict[str, Any]:
     task_dir = _ensure_task_dir(args.task_dir)
     summary = _load_summary(task_dir)
     errors: list[str] = []
+    try:
+        repairs = _repairs(task_dir)
+        if len(repairs) > _MAX_REPAIRS:
+            errors.append(f"repair ledger exceeds the {_MAX_REPAIRS}-repair budget")
+    except ContractError as error:
+        repairs = []
+        errors.append(str(error))
+    if repairs and summary.get("status") == "pending":
+        validation_path = task_dir / "validation.json"
+        reproducibility_path = task_dir / "reproducibility.json"
+        if validation_path.is_file() and not reproducibility_path.is_file():
+            errors.append("a post-repair proof set requires a fresh record-reproducibility first")
     source = summary.get("source")
     if isinstance(source, dict):
         for path_key, digest_key, size_key in (
@@ -2183,7 +3093,11 @@ def _check(args: argparse.Namespace) -> dict[str, Any]:
                 errors.append("summary.md is missing or does not match summary.json")
         except ContractError as error:
             errors.append(str(error))
-    return {"task_dir": str(task_dir), "valid": not errors, "errors": errors}
+    try:
+        _validate_tool_call_pipeline(task_dir, require_decisions=summary["status"] == "candidate")
+    except ContractError as error:
+        errors.append(str(error))
+    return {"task_dir": str(task_dir), "valid": not errors, "errors": errors, "repairs": len(repairs)}
 
 
 def _load_batch_manifest(path: Path) -> list[dict[str, Any]]:
@@ -2279,7 +3193,16 @@ def _batch_status(args: argparse.Namespace) -> dict[str, Any]:
                 counts[status] = counts.get(status, 0) + 1
                 continue
         counts[status] = counts.get(status, 0) + 1
-        results.append({"task_id": member["task_id"], "status": status})
+        row: dict[str, Any] = {"task_id": member["task_id"], "status": status}
+        try:
+            repair_count = len(_repairs(task_dir))
+        except ContractError:
+            repair_count = 0
+        if repair_count:
+            row["repairs"] = repair_count
+            if repair_count >= _MAX_REPAIRS and status != "candidate_failed":
+                row["repair_budget"] = "exhausted"
+        results.append(row)
     return {
         "schema": BATCH_SCHEMA,
         "denominator": len(members),
@@ -2360,6 +3283,7 @@ def _write_publication(task_dir: Path, output_dir: Path) -> None:
             "distinct_jobs": validation["distinct_jobs"],
             "container_freshness": validation["container_freshness"],
             "minimum_runs": validation["minimum_runs"],
+            "check_evidence": validation["check_evidence"],
             "passed": validation["passed"],
             "runs": {
                 arm: [
@@ -2375,6 +3299,8 @@ def _write_publication(task_dir: Path, output_dir: Path) -> None:
         "status": summary["status"],
         "reason_codes": candidate["reason_codes"],
         "candidate_evidence_steps": candidate["evidence_steps"],
+        "state_basis": candidate.get("state_basis", "recorded"),
+        "repairs": len(_repairs(task_dir)),
         "ground_truth": {
             "availability": candidate["ground_truth"]["availability"],
             "use": candidate["ground_truth"]["use"],
@@ -2515,6 +3441,9 @@ def _parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     runtime = subparsers.add_parser("check-runtime", help="probe the installed Harbor proof APIs without running jobs")
+    runtime.add_argument(
+        "--mock-agent", help="Harbor agent name or trusted module:Class to probe for mock registration"
+    )
     runtime.add_argument("--task-dir", type=Path, help="also validate an authored task and its proof shape")
     runtime.set_defaults(run=_check_runtime)
 
@@ -2534,6 +3463,35 @@ def _parser() -> argparse.ArgumentParser:
     review.add_argument("--reviewer-kind", choices=("agent", "human"), required=True)
     review.add_argument("--note", required=True)
     review.set_defaults(run=_review_privacy)
+
+    inventory = subparsers.add_parser(
+        "inventory-tool-calls", help="derive a private tool-call input and output inventory from safe ATIF"
+    )
+    inventory.add_argument("--task-dir", required=True, type=Path)
+    inventory.set_defaults(run=_inventory_tool_calls)
+
+    access_plan = subparsers.add_parser(
+        "plan-tool-call-access", help="report which observed tool calls support deterministic mock replay"
+    )
+    access_plan.add_argument("--task-dir", required=True, type=Path)
+    access_plan.add_argument(
+        "--schema-overrides", type=Path, help="reviewed, inventory-bound input schemas; source ATIF stays unchanged"
+    )
+    access_plan.set_defaults(run=_plan_tool_call_access)
+
+    access = subparsers.add_parser(
+        "resolve-tool-call-access", help="record real, mock, or no access for every observed tool-call surface"
+    )
+    access.add_argument("--task-dir", required=True, type=Path)
+    access.add_argument("--decisions", required=True, type=Path)
+    access.add_argument("--reviewer-kind", choices=("agent", "human"), required=True)
+    access.set_defaults(run=_resolve_tool_call_access)
+
+    mock_generation = subparsers.add_parser(
+        "generate-mock-tool-calls", help="materialize deterministic mocks selected by the tool access decision"
+    )
+    mock_generation.add_argument("--task-dir", required=True, type=Path)
+    mock_generation.set_defaults(run=_generate_mock_tool_calls)
 
     candidate_check = subparsers.add_parser(
         "check-candidate",
@@ -2565,7 +3523,38 @@ def _parser() -> argparse.ArgumentParser:
     record.add_argument("--oracle-job-dir", required=True, action="append", type=Path)
     record.add_argument("--negative-job-dir", required=True, action="append", type=Path)
     record.add_argument("--harbor-version", required=True)
+    record.add_argument(
+        "--allow-aggregate-only",
+        action="store_true",
+        help="accept retained proof without per-check rows (historical tasks; labeled in the report)",
+    )
     record.set_defaults(run=_record_validation)
+
+    validate_task = subparsers.add_parser(
+        "validate-task", help="lint the authored task tree during authoring; exits 1 until every issue resolves"
+    )
+    validate_task.add_argument("--task-dir", required=True, type=Path)
+    validate_task.set_defaults(run=_validate_task_cmd)
+
+    probe = subparsers.add_parser(
+        "probe", help="run or adopt one diagnostic NOP/Oracle pair; probes are never accepted as proof"
+    )
+    probe.add_argument("--task-dir", required=True, type=Path)
+    probe.add_argument("--arm", choices=("nop", "oracle", "both"), default="both")
+    probe.add_argument(
+        "--results-from",
+        type=Path,
+        help="adopt an existing Harbor job directory as diagnostic evidence instead of executing",
+    )
+    probe.set_defaults(run=_probe)
+
+    repair = subparsers.add_parser(
+        "record-repair", help="record one bounded repair, archiving the superseded proof it responds to"
+    )
+    repair.add_argument("--task-dir", required=True, type=Path)
+    repair.add_argument("--reason-code", required=True, choices=sorted(_REPAIR_REASON_CODES))
+    repair.add_argument("--note", required=True)
+    repair.set_defaults(run=_record_repair)
 
     finalize = subparsers.add_parser("finalize", help="write the candidate decision and task summary")
     finalize.add_argument("--task-dir", required=True, type=Path)

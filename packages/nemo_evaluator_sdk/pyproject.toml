@@ -43,7 +43,7 @@ dependencies = [
   # agent-eval runtimes compose against. The metapackage includes nemo-fabric-runtime; the harness
   # adapters are the weight (codex ~299 MB, claude ~231 MB) and stay in the `fabric` extra below, so
   # only *resolving and running* a harness pulls them.
-  "nemo-fabric==0.3.0b1",
+  "nemo-fabric>=0.3.0,<0.4.0",
   "opentelemetry-proto>=1.27.0",
   "pytrec-eval-terrier==0.5.10",
 ]
@@ -85,17 +85,15 @@ nemo-platform = [
 #     ephemeral overlay env (`uv run --with ...`) hides them; install into the venv instead.
 #   * claude/codex go through the metapackage extras, which keep the adapters and the Fabric SDK on
 #     compatible versions.
-#   * hermes stays direct because it must omit `[harness]`, and the metapackage's `hermes-agent`
-#     extra applies it. `[harness]` pulls `hermes-agent`, which pins `requests==2.33.0` exactly and
-#     conflicts with the workspace's `requests>=2.33.1` floor; the adapter alone is what the runtime
-#     needs. It cannot drift from the others regardless: every adapter pins
+#   * hermes stays direct because Fabric 0.3's adapter does not install Hermes Agent; the adapter
+#     alone is what the runtime needs. It cannot drift from the others regardless: every adapter pins
 #     `nemo-fabric-adapters-common==<its own version>`, so one shared common forces compatible versions.
 #     Python<3.14-gated upstream, which the lock's own <3.14 ceiling already satisfies.
 #   * deepagents is omitted to match plugins/nemo-agents (AIRCORE-952: its adapter does not support
 #     the Relay observability v2 config Fabric streaming generates). Nothing here exercises it.
 fabric = [
-  "nemo-fabric[claude,codex]==0.3.0b1",
-  "nemo-fabric-adapters-hermes==0.3.0b1; python_version < '3.14'",
+  "nemo-fabric[claude,codex]>=0.3.0,<0.4.0",
+  "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0; python_version < '3.14'",
 ]
 
 [project.entry-points."nemo.fabric.task_hooks"]

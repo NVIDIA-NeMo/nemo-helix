@@ -281,27 +281,26 @@ def test_entities_api_command_is_not_registered():
 
 def test_members_api_command_is_nested_under_workspaces():
     runner = CliRunner()
-    sys.modules.pop("nemo_platform_ext.cli.commands.api.members", None)
-    sys.modules.pop("nemo_platform_ext.cli.commands.api.workspaces", None)
-    sys.modules.pop("nemo_platform_ext.cli.commands.api.workspaces.members", None)
+    sys.modules.pop("nemo_platform_ext.cli.commands.members", None)
+    sys.modules.pop("nemo_platform_ext.cli.commands.workspaces", None)
 
     result = runner.invoke(app, ["workspaces", "members", "--help"])
 
     assert result.exit_code == 0
     assert "Manage members" in result.stdout
-    assert "nemo_platform_ext.cli.commands.api.workspaces.members" in sys.modules
-    assert "nemo_platform_ext.cli.commands.api.members" not in sys.modules
+    assert "nemo_platform_ext.cli.commands.workspaces" in sys.modules
+    assert "nemo_platform_ext.cli.commands.members" not in sys.modules
 
 
 def test_members_api_command_is_not_registered_at_top_level():
     runner = CliRunner()
-    sys.modules.pop("nemo_platform_ext.cli.commands.api.members", None)
+    sys.modules.pop("nemo_platform_ext.cli.commands.members", None)
 
     result = runner.invoke(app, ["members", "--help"])
 
     assert result.exit_code != 0
     assert "No such command 'members'" in result.stderr
-    assert "nemo_platform_ext.cli.commands.api.members" not in sys.modules
+    assert "nemo_platform_ext.cli.commands.members" not in sys.modules
 
 
 def test_jobs_watch_command_is_registered():

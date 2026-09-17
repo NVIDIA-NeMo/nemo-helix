@@ -18,6 +18,7 @@ import {
   isIgnoredPath,
   parseAgentConfig,
   pickedFromDataTransfer,
+  selectionRootName,
   tooManyPickedFiles,
   validateAgentEntries,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
@@ -61,6 +62,35 @@ describe('collectAgentEntries', () => {
 
     expect(entries.map((item) => item.path)).toEqual(['agent.yaml']);
   });
+
+  it('keeps individually picked files at the top level', () => {
+    const entries = collectAgentEntries([
+      { file: new File(['x'], 'agent.yaml'), relativePath: 'agent.yaml' },
+      { file: new File(['x'], 'calculator.py'), relativePath: 'calculator.py' },
+    ]);
+
+    expect(entries.map((item) => item.path)).toEqual(['agent.yaml', 'calculator.py']);
+  });
+
+  it('keeps a directory dropped alongside loose files where it is', () => {
+    const entries = collectAgentEntries([
+      { file: new File(['x'], 'agent.yaml'), relativePath: 'agent.yaml' },
+      makeFile('mcps/calculator.py'),
+    ]);
+
+    expect(entries.map((item) => item.path)).toEqual(['agent.yaml', 'mcps/calculator.py']);
+  });
+});
+
+describe('selectionRootName', () => {
+  it('names the directory a selection came from', () => {
+    expect(selectionRootName([makeFile('calc-agent/agent.yaml')])).toBe('calc-agent');
+  });
+
+  it('is empty for individually picked files', () => {
+    expect(selectionRootName([makeFile('agent.yaml')])).toBe('');
+    expect(selectionRootName([])).toBe('');
+  });
 });
 
 describe('isIgnoredPath', () => {
@@ -85,13 +115,19 @@ describe('validateAgentEntries', () => {
     expect(validateAgentEntries([])).toMatch(/no uploadable files/);
   });
 
-  it('rejects two roots that contribute the same path', () => {
+  it('rejects two agent directories dropped at once', () => {
     const entries = collectAgentEntries([
       makeFile('calc-agent/agent.yaml'),
       makeFile('other-agent/agent.yaml'),
     ]);
 
-    expect(validateAgentEntries(entries)).toMatch(/more than one agent\.yaml/);
+    expect(validateAgentEntries(entries)).toMatch(/No agent\.yaml/);
+  });
+
+  it('rejects a selection that contributes the same path twice', () => {
+    expect(validateAgentEntries([entry('agent.yaml'), entry('agent.yaml')])).toMatch(
+      /more than one agent\.yaml/
+    );
   });
 
   it('rejects a directory over the file-count limit', () => {

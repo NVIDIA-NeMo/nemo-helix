@@ -28,7 +28,7 @@ from nmp.rl.tasks.environment.package import (
     write_adapter_wheels_package,
     write_dataset_jsonl,
 )
-from nmp.rl.tasks.environment.validate import validate_dataset_rows
+from nmp.rl.tasks.environment.validate import VENV_SEED_PACKAGES, validate_dataset_rows
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name, parse_wheel_filename
 from packaging.version import InvalidVersion, Version
@@ -211,6 +211,19 @@ def assert_wheels_target_platform(wheels_dir: Path) -> None:
         )
 
 
+def _vendor_missing_seed_wheels(wheels_dir: Path, *, work_dir: Path) -> None:
+    """Add any ``uv venv --seed`` package a pre-vendored closure does not already carry."""
+    provided = {canonicalize_name(str(parse_wheel_filename(whl.name)[0])) for whl in wheels_dir.glob("*.whl")}
+    missing = [name for name in VENV_SEED_PACKAGES if canonicalize_name(name) not in provided]
+    if not missing:
+        return
+    logger.info("--wheels-dir omits venv seed package(s); vendoring: %s", ", ".join(missing))
+    # No extra index: these come from PyPI, and uv gives --extra-index-url priority for
+    # every package it resolves.
+    pinned = _compile_pinned_requirements(work_dir / "seed", list(missing))
+    _run_pip_download(wheels_dir, requirements_file=pinned)
+
+
 def download_hub_wheels(
     spec: ConvertEnvironmentSpec,
     *,
@@ -227,12 +240,15 @@ def download_hub_wheels(
         wheels_dir.mkdir(parents=True, exist_ok=True)
         for whl in src_wheels:
             shutil.copy2(whl, wheels_dir / whl.name)
+        _vendor_missing_seed_wheels(wheels_dir, work_dir=work_dir)
         assert_wheels_target_platform(wheels_dir)
         return wheels_dir
 
     package_name = hub_id_to_package_name(spec.hub_id)
     hub_requirement = f"{package_name}=={spec.hub_version}" if spec.hub_version else package_name
-    packages = [spec.verifiers_spec, hub_requirement, *spec.extra_wheels]
+    # The seed packages resolve alongside the environment so the closure stays internally
+    # consistent; vendoring them afterwards could pin a version the rest of it contradicts.
+    packages = [spec.verifiers_spec, hub_requirement, *spec.extra_wheels, *VENV_SEED_PACKAGES]
     pinned = _compile_pinned_requirements(work_dir, packages, extra_index_url=PRIME_HUB_SIMPLE_INDEX)
     _run_pip_download(wheels_dir, requirements_file=pinned, extra_index_url=PRIME_HUB_SIMPLE_INDEX)
     _build_downloaded_sdists(wheels_dir)

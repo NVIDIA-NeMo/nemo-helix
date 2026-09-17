@@ -229,3 +229,45 @@ describe('template dataset converters', () => {
     });
   });
 });
+
+describe('template dataset sources', () => {
+  /**
+   * Two filesets per template: the read-only external one pointing at HuggingFace, and the
+   * local one holding the converted JSONL. A name collision between them would make the
+   * converted upload target the read-only fileset, which rejects writes.
+   */
+  it('never names a source fileset after a converted one', () => {
+    const convertedNames = new Set(CUSTOMIZATION_TEMPLATES.map((t) => t.dataset.name));
+    for (const { dataset } of CUSTOMIZATION_TEMPLATES) {
+      expect(dataset.sourceFilesetName).not.toBe(dataset.name);
+      expect(convertedNames.has(dataset.sourceFilesetName)).toBe(false);
+    }
+  });
+
+  /** Sharing the name lets the second template's create collapse into a no-op 409. */
+  it('reuses one source fileset per HuggingFace repo', () => {
+    const byRepo = new Map<string, Set<string>>();
+    for (const { dataset } of CUSTOMIZATION_TEMPLATES) {
+      const names = byRepo.get(dataset.hfRepoId) ?? new Set<string>();
+      names.add(dataset.sourceFilesetName);
+      byRepo.set(dataset.hfRepoId, names);
+    }
+    for (const names of byRepo.values()) {
+      expect(names.size).toBe(1);
+    }
+  });
+
+  it.each([
+    ['the current BIRD-SQL shard', 'data/train-00000-of-00001-fe8894d41b7815be.parquet', true],
+    ['a re-sharded train split', 'data/train-00002-of-00004-abc123.parquet', true],
+    ['an unsuffixed shard', 'train-00000-of-00001.parquet', true],
+    ['the validation split', 'data/validation-00000-of-00001-abc.parquet', false],
+    ['a non-Parquet file', 'data/train-00000-of-00001-abc.json', false],
+    ['the readme', 'README.md', false],
+    ['a differently-prefixed split', 'data/pretrain-00000-of-00001-abc.parquet', false],
+  ])('matches %s: %s', (_label, path, expected) => {
+    for (const { dataset } of CUSTOMIZATION_TEMPLATES) {
+      expect(dataset.filePattern.test(path)).toBe(expected);
+    }
+  });
+});

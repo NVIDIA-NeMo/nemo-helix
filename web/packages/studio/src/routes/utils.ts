@@ -650,6 +650,17 @@ export const getAgentEvaluationsTabRoute = (workspace: string, agentName: string
   return `${getAgentDetailRoute(workspace, agentName)}?tab=evaluations`;
 };
 
+export const getAgentOptimizationsTabRoute = (workspace: string, agentName: string) => {
+  return `${getAgentDetailRoute(workspace, agentName)}?tab=optimizations`;
+};
+
+export const getAgentOptimizationDetailRoute = (workspace: string, optimizeJobName: string) => {
+  return generatePath(ROUTES.workspace.agentOptimizationDetail, {
+    workspace,
+    optimizeJobName,
+  });
+};
+
 export const getAgentDeploymentsListRoute = (workspace: string) => {
   return generatePath(ROUTES.workspace.agentDeploymentsList, { workspace });
 };

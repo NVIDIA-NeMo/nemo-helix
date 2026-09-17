@@ -22,6 +22,8 @@ from nemo_platform_plugin.virtual_models.types import (
     VirtualModelInferenceConfig,
 )
 
+PATH = "/apis/inference-gateway/v2/workspaces/{workspace}/virtual-models"
+
 
 def _json_body(prepared: PreparedRequest) -> dict[str, object]:
     assert isinstance(prepared.content, bytes)
@@ -44,6 +46,34 @@ def test_create_omits_unset_fields_and_nested_nones() -> None:
         "default_model_entity": "default/llama",
         "models": [{"model": "default/llama"}],
     }
+
+
+def test_create_prebuilds_conflict_retrieve_for_exist_ok() -> None:
+    """``exist_ok`` replays the GET for the same name on a 409; off by default."""
+    prepared = endpoints.create_virtual_model(workspace="default", body=CreateVirtualModelRequest(name="router"))
+
+    assert prepared.client_options == {"exist_ok": False}
+    assert prepared.on_conflict_get is not None
+    assert prepared.on_conflict_get.method == "GET"
+    assert prepared.on_conflict_get.path_template == PATH + "/{name}"
+    assert prepared.on_conflict_get.path_params == {"workspace": "default", "name": "router"}
+
+    prepared = endpoints.create_virtual_model(body=CreateVirtualModelRequest(name="router"), exist_ok=True)
+    assert prepared.client_options == {"exist_ok": True}
+    assert prepared.on_conflict_get is not None
+    assert prepared.on_conflict_get.path_params == {"name": "router"}
+
+
+def test_delete_sends_expected_db_version_as_query_param() -> None:
+    prepared = endpoints.delete_virtual_model(workspace="default", name="router")
+    assert prepared.method == "DELETE"
+    assert prepared.path_template == PATH + "/{name}"
+    assert prepared.query_params is None
+
+    prepared = endpoints.delete_virtual_model(
+        workspace="default", name="router", query_params={"expected_db_version": 4}
+    )
+    assert prepared.query_params == {"expected_db_version": 4}
 
 
 def test_update_distinguishes_explicit_null_and_empty_list_from_unset() -> None:

@@ -397,8 +397,10 @@ target = HarborRunnerTarget(
 Use `agent_import_path` for a custom Harbor agent and `agent_model_name` when
 the agent requires a model. Pass the agent's constructor arguments as
 `agent_kwargs` (a JSON mapping, Harbor's `--ak key=value`). Do not put secrets
-in `agent_kwargs`: Harbor persists them unredacted in the job directory's
-`config.json`, and run provenance redacts only credential-looking keys. Inject
-secrets into the job environment instead. The module must be importable in the
-execution environment. Durable execution additionally requires an execution image and
+in `agent_kwargs`: Harbor persists them unredacted across the job directory and
+needs the real value to run. Credential-shaped plaintext is rejected at submit
+time, but that check recognizes common key names and token formats, not every
+secret. Put them in `env_secrets` (`{ENV_NAME: secret-ref}`) instead; the service resolves
+the reference into the job environment and Harbor hands the agent a `${ENV_NAME}`
+template. The module must be importable in the execution environment. Durable execution additionally requires an execution image and
 runtime that provide Harbor and Docker access.

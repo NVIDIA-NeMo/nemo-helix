@@ -23,7 +23,7 @@ PYTEST_EXTRA ?=
 # Default development toolchain versions. Keep these aligned with Flox; the
 # version-consistency checks validate them in pre-commit and CI.
 PYTHON_VERSION ?= 3.12
-UV_VERSION := 0.9.14
+UV_VERSION := 0.10.10
 NODE_VERSION := 22.23.2
 PNPM_VERSION := 10.34.5
 GO_VERSION := 1.26.7
@@ -106,8 +106,7 @@ generate-cli-commands: ## Run generation of the CLI commands
 
 .PHONY: generate-cli-reference-docs
 generate-cli-reference-docs: ## Generate the CLI reference documentation
-	$(UV) run --frozen packages/nemo_platform_ext/scripts/docs_generator.py reference > docs/cli/reference.mdx
-	$(UV) run --frozen packages/nemo_platform_ext/scripts/docs_generator.py summary > docs/fern/snippets/_snippets/cli-summary.mdx
+	NMP_CONFIG_FILE_PATH="$(NMP_CONFIG_FILE_PATH)" $(UV) run --frozen packages/nemo_platform_ext/scripts/docs_generator.py all
 
 .PHONY: generate-config-reference-docs
 generate-config-reference-docs: ## Generate the platform config reference documentation

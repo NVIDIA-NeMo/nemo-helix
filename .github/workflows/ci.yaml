@@ -34,7 +34,7 @@ concurrency:
 
 env:
   # Keep the CI uv binary aligned with the Flox development environment.
-  UV_VERSION: "0.9.14"
+  UV_VERSION: "0.10.10"
   # Jobs here provision their own toolchain, so Make bypasses Flox activation.
   TOOLCHAIN: system
 

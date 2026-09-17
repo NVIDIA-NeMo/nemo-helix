@@ -12,6 +12,7 @@ import typing
 import click
 import httpx
 import typer
+from pydantic import ValidationError
 
 REMOTE_ERROR_EXIT_CODE = 3
 
@@ -31,6 +32,16 @@ class MissingRequiredFieldsError(Exception):
 
         missing_str = ", ".join(f"--{f.replace('_', '-')}" for f in missing_fields)
         super().__init__(f"Missing required fields: {missing_str}")
+
+
+class UnknownInputFieldsError(Exception):
+    """Raised when ``--input-data`` / ``--input-file`` carries keys the request does not define."""
+
+    def __init__(self, unknown_fields: list[str], command_name: str, known_fields: list[str]):
+        self.unknown_fields = unknown_fields
+        self.command_name = command_name
+        self.known_fields = known_fields
+        super().__init__(f"Unknown fields: {', '.join(unknown_fields)}")
 
 
 class InvalidSearchPatternError(Exception):
@@ -58,6 +69,19 @@ def _build_list_cmd(ctx: click.Context | None, prog: str) -> str | None:
     return " ".join([prog, *parts, "list"])
 
 
+_MISSING_WORKSPACE_MARKERS = (
+    "Missing workspace argument",
+    "Missing path parameter 'workspace'",
+    "workspace must be provided",
+)
+
+
+def _is_missing_workspace_error(error: ValueError) -> bool:
+    """Return whether *error* is a client reporting an unresolved workspace."""
+    message = str(error)
+    return any(marker in message for marker in _MISSING_WORKSPACE_MARKERS)
+
+
 def _format_api_error(error: object) -> str:
     """Extract a clean error message from an API error."""
     if hasattr(error, "body") and error.body is not None:
@@ -69,6 +93,9 @@ def _format_api_error(error: object) -> str:
             message = body.get("message")
             if message:
                 return str(message)
+    detail = getattr(error, "detail", None)
+    if isinstance(detail, str) and detail:
+        return detail
     message = getattr(error, "message", None)
     if isinstance(message, str) and message:
         return message
@@ -309,13 +336,18 @@ def handle_exception(error: Exception, ctx: click.Context | None = None) -> None
         console.print(f"[bold red]API response error:[/] {_format_api_error(error)}")
         _print_api_request_context(console, error)
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
-    elif isinstance(error, APIError):
+    elif isinstance(error, (APIError, plugin_errors.NemoClientError)):
         console.print(f"[bold red]API error:[/] {_format_api_error(error)}")
         _print_api_request_context(console, error)
         raise typer.Exit(code=REMOTE_ERROR_EXIT_CODE)
-    elif isinstance(error, ValueError) and (
-        "Missing workspace argument" in str(error) or "Missing path parameter 'workspace'" in str(error)
-    ):
+    elif isinstance(error, ValidationError):
+        console.print("[bold red]Invalid input:[/]")
+        for detail in error.errors():
+            location = ".".join(str(part) for part in detail.get("loc", ())) or "input"
+            console.print(f"  [yellow]{location}[/]  {detail.get('msg', 'invalid value')}")
+        console.print("[yellow]Hint:[/] Check your input values. Run with [cyan]--help[/] to see required options.")
+        raise typer.Exit(code=2)
+    elif isinstance(error, ValueError) and _is_missing_workspace_error(error):
         console.print("[bold red]Missing workspace:[/] No workspace configured for this command.")
         console.print(
             f"[yellow]Hint:[/] Run [cyan]{prog} config set --workspace <name>[/] or use the [cyan]--workspace[/] option."
@@ -339,6 +371,13 @@ def handle_exception(error: Exception, ctx: click.Context | None = None) -> None
                 console.print(f"  [cyan]{opt_name}[/] [yellow]<{metavar}>[/]")
         console.print()
         console.print("[yellow]Hint:[/] Provide via CLI flags or [cyan]--input-file[/]/[cyan]--input-data[/].")
+        raise typer.Exit(code=2)
+    elif isinstance(error, UnknownInputFieldsError):
+        console.print(f"[bold bright_green]Usage:[/] {prog} [GLOBAL OPTIONS] {error.command_name} [OPTIONS]")
+        console.print(f"Try [cyan]{prog} {error.command_name} --help[/] for help.")
+        console.print()
+        console.print(f"[bold red]Error:[/] Unknown input fields: {', '.join(error.unknown_fields)}")
+        console.print(f"[yellow]Hint:[/] Accepted fields: {', '.join(error.known_fields)}.")
         raise typer.Exit(code=2)
     elif isinstance(error, InvalidSearchPatternError):
         if error.parse_error:
