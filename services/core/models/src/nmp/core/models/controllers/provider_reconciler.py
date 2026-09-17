@@ -565,6 +565,63 @@ class ModelProviderReconciler:
             await self._ensure_passthrough_virtual_model(ref.workspace, ref.name, existing_vm_names)
             self._emit_heartbeat()
 
+        # Unlink this provider from any Model Entity it served last cycle but no
+        # longer serves this cycle. Without this, a model dropped from a still-alive
+        # provider's discovered set (e.g. removed upstream) keeps a stale provider
+        # back-reference on its entity, so every Studio surface gating on
+        # hasModelProvider goes on advertising a model that is no longer served.
+        #
+        # The served_models mapping and the autoprovisioned passthrough VirtualModel
+        # already prune on removal (the mapping is regenerated fresh each cycle and
+        # overwritten; orphaned VMs are reaped by _cleanup_orphaned_virtual_models).
+        # The entity's model_providers list was the one piece never pruned per-model —
+        # stage_provider_unlink was only ever called on full provider/deployment
+        # teardown (deployment_reconciler._cleanup_model_entities_for_provider).
+        self._unlink_dropped_model_entities(provider, provider_id, served_models)
+
+    def _unlink_dropped_model_entities(
+        self,
+        provider: ModelProvider,
+        provider_id: str,
+        served_models: list[ServedModelMapping],
+    ) -> None:
+        """Stage an unlink of ``provider_id`` from entities it served before but not now.
+
+        Diffs the provider's previously-persisted ``served_models`` against the set
+        resolved this cycle and stages ``stage_provider_unlink`` for every entity that
+        fell out. Only this provider's own id is removed from each entity's
+        ``model_providers`` — an entity still served by another provider keeps that
+        other link (``stage_provider_unlink`` removes a single id, never clears the
+        list), so a model served by two providers is unaffected when just one drops it.
+
+        LoRA composite ids (``...&adapters/...``) are skipped for the same reason the
+        link loop skips them: they have no standalone Model Entity, so there is no
+        ``model_providers`` back-reference to unlink.
+        """
+        current_ids = {m.model_entity_id for m in served_models if "&adapters/" not in m.model_entity_id}
+        for previous in provider.served_models or ():
+            model_entity_id = previous.model_entity_id
+            if not model_entity_id or "&adapters/" in model_entity_id:
+                continue
+            if model_entity_id in current_ids:
+                continue
+            try:
+                ref = parse_entity_ref(model_entity_id)
+            except ValueError:
+                logger.warning(
+                    "Skipping unlink for provider %s: unparsable dropped model_entity_id %r",
+                    provider_id,
+                    model_entity_id,
+                )
+                continue
+            self._entity_cache.stage_provider_unlink(ref.workspace, ref.name, provider_id)
+            logger.info(
+                "Unlinking provider %s from Model Entity %s (no longer served)",
+                provider_id,
+                model_entity_id,
+            )
+            self._emit_heartbeat()
+
     # -------------------------------------------------------------------------
     # Status machine
     # -------------------------------------------------------------------------

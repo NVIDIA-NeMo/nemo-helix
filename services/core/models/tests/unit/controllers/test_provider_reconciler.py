@@ -3297,3 +3297,131 @@ async def test_provider_pass_emits_heartbeats(reconciler, mock_models_sdk, heart
 
     # One per entity ensured, one per VirtualModel ensured, one per provider.
     assert len(heartbeat_calls) >= 7
+
+
+@pytest.mark.asyncio
+async def test_dropped_model_unlinks_provider_from_entity(reconciler, mock_models_sdk, entity_cache):
+    """A model removed from a still-alive provider's discovered set is unlinked from its entity.
+
+    Regression for the reconciler leaving a stale ``model_providers`` back-reference
+    on a Model Entity after the model disappeared from its provider — the entity kept
+    advertising a provider that no longer served it (NMP-177: ``gliner`` lingered).
+    """
+    # ``dropped`` was served last cycle (entity links this provider); ``kept`` stays.
+    await seed_entity_cache(
+        mock_models_sdk,
+        entity_cache,
+        [
+            _existing_entity(
+                "test-ns",
+                "kept",
+                model_providers=["test-ns/test-provider"],
+                backend_format="OPENAI_CHAT",
+                api_endpoint={"url": "https://api.com", "model_id": "kept", "format": "openai"},
+            ),
+            _existing_entity(
+                "test-ns",
+                "dropped",
+                model_providers=["test-ns/test-provider"],
+                backend_format="OPENAI_CHAT",
+                api_endpoint={"url": "https://api.com", "model_id": "dropped", "format": "openai"},
+            ),
+        ],
+    )
+    mock_models_sdk.models_client.update_model = AsyncMock(return_value=_ModelResponse())
+
+    provider = MagicMock()
+    provider.workspace = "test-ns"
+    provider.name = "test-provider"
+    provider.model_deployment_id = None
+    provider.enabled_models = None
+    provider.served_models = [
+        ServedModelMapping(model_entity_id="test-ns/kept", served_model_name="kept"),
+        ServedModelMapping(model_entity_id="test-ns/dropped", served_model_name="dropped"),
+    ]
+    ctx = ModelContext(
+        model_provider=provider,
+        model_deployment=None,
+        model_deployment_config=None,
+        model_entity=None,
+    )
+
+    # This cycle only ``kept`` is discovered — ``dropped`` is gone from the provider.
+    with patch.object(
+        reconciler,
+        "_discover_models",
+        return_value=DiscoverySuccess(_discovery_models_from_ids(["kept"])),
+    ):
+        await reconcile_and_flush(reconciler, entity_cache, [ctx])
+
+    # The only entity write is ``dropped`` losing its provider link; ``kept`` is unchanged.
+    update = mock_models_sdk.models_client.update_model
+    update.assert_awaited_once()
+    call = update.await_args
+    assert call is not None
+    assert call.kwargs["workspace"] == "test-ns"
+    assert call.kwargs["name"] == "dropped"
+    assert call.kwargs["body"].model_providers == []
+
+
+@pytest.mark.asyncio
+async def test_dropped_model_still_served_by_other_provider_keeps_that_link(reconciler, mock_models_sdk, entity_cache):
+    """When one provider drops a model another still serves, only the dropping provider is unlinked.
+
+    ``stage_provider_unlink`` removes a single provider id, never clears the list, so a
+    model served by two providers keeps the surviving link when just one provider drops it.
+    """
+    await seed_entity_cache(
+        mock_models_sdk,
+        entity_cache,
+        [
+            _existing_entity(
+                "test-ns",
+                "shared",
+                model_providers=["test-ns/provider-a", "test-ns/provider-b"],
+                backend_format="OPENAI_CHAT",
+                api_endpoint={"url": "https://api.com", "model_id": "shared", "format": "openai"},
+            )
+        ],
+    )
+    mock_models_sdk.models_client.update_model = AsyncMock(return_value=_ModelResponse())
+
+    # provider-a served ``shared`` last cycle but drops it this cycle (serves nothing).
+    provider_a = MagicMock()
+    provider_a.workspace = "test-ns"
+    provider_a.name = "provider-a"
+    provider_a.model_deployment_id = None
+    provider_a.enabled_models = None
+    provider_a.served_models = [ServedModelMapping(model_entity_id="test-ns/shared", served_model_name="shared")]
+
+    # provider-b keeps serving ``shared``.
+    provider_b = MagicMock()
+    provider_b.workspace = "test-ns"
+    provider_b.name = "provider-b"
+    provider_b.model_deployment_id = None
+    provider_b.enabled_models = None
+    provider_b.served_models = [ServedModelMapping(model_entity_id="test-ns/shared", served_model_name="shared")]
+
+    ctx_a = ModelContext(
+        model_provider=provider_a, model_deployment=None, model_deployment_config=None, model_entity=None
+    )
+    ctx_b = ModelContext(
+        model_provider=provider_b, model_deployment=None, model_deployment_config=None, model_entity=None
+    )
+
+    def _discover(provider):
+        # provider-a discovers nothing; provider-b still discovers ``shared``.
+        if provider.name == "provider-b":
+            return DiscoverySuccess(_discovery_models_from_ids(["shared"]))
+        return DiscoverySuccess(_discovery_models_from_ids([]))
+
+    with patch.object(reconciler, "_discover_models", side_effect=_discover):
+        await reconcile_and_flush(reconciler, entity_cache, [ctx_a, ctx_b])
+
+    # ``shared`` is written once with provider-a removed and provider-b retained.
+    update = mock_models_sdk.models_client.update_model
+    update.assert_awaited_once()
+    call = update.await_args
+    assert call is not None
+    assert call.kwargs["name"] == "shared"
+    assert call.kwargs["body"].model_providers == ["test-ns/provider-b"]
