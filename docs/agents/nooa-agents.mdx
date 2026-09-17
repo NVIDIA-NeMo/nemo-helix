@@ -41,7 +41,7 @@ async def run(invocation: NooaInvocation) -> contract.AgentRunResult:
 `NooaInvocation` carries everything the platform knows about one invocation:
 
 | Field | What it is |
-|---|---|
+| --- | --- |
 | `request` | The invocation's input, as Fabric received it. `request.input` is the prompt; `request.context` carries job metadata such as `job_workspace`. |
 | `context` | Fabric's per-invocation runtime context: correlation ids and the telemetry handle. |
 | `settings` | Your agent's `harness.settings` bag, verbatim — your configuration, whatever shape you gave it. |
@@ -131,8 +131,11 @@ means packaging your project into the image:
 nemo agents package --agent agent.yaml --pyproject pyproject.toml
 ```
 
-Without `--pyproject` the build refuses, because the resulting image could not
-import your entrypoint.
+Without `--pyproject` the build produces a config-only image that installs the
+runtime but not your project. That image builds successfully, but if your
+entrypoint lives in your own project (the usual case) the runtime will fail to
+import it on first invoke — so pass `--pyproject` to install your project into
+the image.
 
 Then run it as a job, pointing at the image you just built:
 
@@ -147,8 +150,8 @@ job = client.agents.jobs.execute.create(
 ```
 
 See [Execute Agents as Jobs](/documentation/agents/execute-agent-jobs) for the
-full job lifecycle, and [Deploy Agents](/documentation/agents/deploy-agents) to
-run the same agent as a long-lived service instead.
+full job lifecycle. Deploying a NOOA agent as a long-lived service is not
+supported yet; see [Limitations](#limitations) below.
 
 ## Telemetry
 
@@ -164,6 +167,9 @@ the scope needs the agent object, which only you have.
 - **Streaming is not supported.** The adapter declares `streaming: false`: the
   convention is one callable returning one result. The execute-job path is
   one-shot regardless.
+- **Deployed (long-lived) sessions are not supported yet.** Run NOOA agents as
+  execute jobs. The long-lived session path is not wired up for this adapter, so
+  the `streaming: false` declaration above is the only supported mode.
 - **There is no cancellation.** Fabric's lifecycle protocol has no cancel
   operation. An execute job bounds itself with `timeout_seconds`, but your
   callable may be killed without warning — do not rely on graceful shutdown to
