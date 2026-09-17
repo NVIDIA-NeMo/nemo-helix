@@ -284,4 +284,13 @@ describe('Assistant stream utilities', () => {
 
     expect(parts).toEqual([]);
   });
+
+  it('drops a whitespace-only reasoning part', () => {
+    const parts = getAssistantPartsFromAssistantEvent({
+      type: 'assistant',
+      message: { id: 'msg-whitespace', content: [{ type: 'reasoning', text: '   \n  ' }] },
+    });
+
+    expect(parts).toEqual([]);
+  });
 });

@@ -88,7 +88,7 @@ export const getAssistantPartsFromAssistantEvent = (
         return part.text ? { type: 'text', text: part.text } : undefined;
       }
       if (part.type === 'reasoning' && typeof part.text === 'string') {
-        return part.text
+        return part.text.trim()
           ? createAssistantThinkingPart(part.text, `assistant-thinking-${messageId}-${index}`)
           : undefined;
       }
