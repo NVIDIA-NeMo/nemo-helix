@@ -156,6 +156,12 @@ class ModelSpec(BaseModel):
     context_size: Optional[int] = Field(None, description="Context window size")
     num_virtual_tokens: Optional[int] = Field(None, description="Number of virtual tokens for prompt tuning")
     is_chat: Optional[bool] = Field(None, description="Whether this is a chat model")
+    supports_reasoning_toggle: Optional[bool] = Field(
+        None,
+        description="Whether the model's chat template accepts an 'enable_thinking' kwarg, meaning a caller can "
+        "turn reasoning off per request via chat_template_kwargs. None when the checkpoint has not been analyzed, "
+        "which is not the same as False.",
+    )
     head_type: Literal["causal_lm", "embedding", "cross_encoder", "unknown"] = Field(
         default="unknown",
         description="Task-specific head persisted in the checkpoint.",

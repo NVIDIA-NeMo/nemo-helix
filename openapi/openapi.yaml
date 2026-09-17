@@ -16267,6 +16267,13 @@ components:
           title: Is Chat
           description: Whether this is a chat model
           type: boolean
+        supports_reasoning_toggle:
+          title: Supports Reasoning Toggle
+          description: Whether the model's chat template accepts an 'enable_thinking'
+            kwarg, meaning a caller can turn reasoning off per request via chat_template_kwargs.
+            None when the checkpoint has not been analyzed, which is not the same
+            as False.
+          type: boolean
         head_type:
           type: string
           enum:

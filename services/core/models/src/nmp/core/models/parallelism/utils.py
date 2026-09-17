@@ -207,3 +207,25 @@ def is_huggingface_model_directory(
         logger.info(f"No model weight files found for {model_path} in file listing: {file_listing} or on disk")
 
     return has_weights
+
+
+REASONING_TOGGLE_KWARG = "enable_thinking"
+
+
+def detect_reasoning_toggle(chat_template: object) -> bool:
+    """Detect whether a chat template lets a caller turn reasoning off.
+
+    Qwen3- and Nemotron-style templates branch on an ``enable_thinking`` variable
+    that callers set through ``chat_template_kwargs``. A template that never
+    mentions it ignores the kwarg, so such a request would silently keep reasoning.
+
+    Transformers exposes ``chat_template`` as a string, or as a list of
+    ``{"name": ..., "template": ...}`` entries when a model ships several.
+    """
+    if isinstance(chat_template, str):
+        return REASONING_TOGGLE_KWARG in chat_template
+    if isinstance(chat_template, dict):
+        return any(detect_reasoning_toggle(value) for value in chat_template.values())
+    if isinstance(chat_template, list):
+        return any(detect_reasoning_toggle(entry) for entry in chat_template)
+    return False

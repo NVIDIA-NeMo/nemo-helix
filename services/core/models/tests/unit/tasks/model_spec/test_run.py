@@ -225,3 +225,37 @@ def test_analyze_checkpoint_updates_model_with_plugin_model_spec(tmp_path: Path)
         fileset="qwen3-fileset",
         workspace="default",
     )
+
+
+def _spec_with(**overrides: Any) -> ModelSpec:
+    return _core_model_spec().model_copy(update=overrides)
+
+
+def test_merge_existing_spec_preserves_a_determined_reasoning_toggle() -> None:
+    entity = _model_entity("qwen3")
+    entity.spec = PluginModelSpec.model_validate(_spec_with(supports_reasoning_toggle=True).model_dump())
+    fresh = _spec_with(supports_reasoning_toggle=None)
+
+    ModelSpecRunner._merge_existing_spec(entity, fresh)
+
+    assert fresh.supports_reasoning_toggle is True
+
+
+def test_merge_existing_spec_preserves_a_determined_false() -> None:
+    entity = _model_entity("qwen3")
+    entity.spec = PluginModelSpec.model_validate(_spec_with(supports_reasoning_toggle=False).model_dump())
+    fresh = _spec_with(supports_reasoning_toggle=None)
+
+    ModelSpecRunner._merge_existing_spec(entity, fresh)
+
+    assert fresh.supports_reasoning_toggle is False
+
+
+def test_merge_existing_spec_does_not_override_a_fresh_analysis() -> None:
+    entity = _model_entity("qwen3")
+    entity.spec = PluginModelSpec.model_validate(_spec_with(supports_reasoning_toggle=False).model_dump())
+    fresh = _spec_with(supports_reasoning_toggle=True)
+
+    ModelSpecRunner._merge_existing_spec(entity, fresh)
+
+    assert fresh.supports_reasoning_toggle is True

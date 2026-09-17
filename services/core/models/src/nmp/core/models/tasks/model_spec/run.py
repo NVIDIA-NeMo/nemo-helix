@@ -164,6 +164,12 @@ class ModelSpecRunner:
             model_spec.chat_template = me.spec.chat_template
             logger.info("Preserved chat_template from existing model spec")
 
+        # Tri-state: a determined False must survive a re-analysis that could not
+        # reach the tokenizer, so this checks for None rather than falsiness.
+        if model_spec.supports_reasoning_toggle is None and me.spec.supports_reasoning_toggle is not None:
+            model_spec.supports_reasoning_toggle = me.spec.supports_reasoning_toggle
+            logger.info("Preserved supports_reasoning_toggle from existing model spec")
+
         if model_spec.tool_call_config is None and me.spec.tool_call_config:
             model_spec.tool_call_config = ToolCallConfig.model_validate(me.spec.tool_call_config.model_dump())
             logger.info("Preserved tool_call_config from existing model spec")

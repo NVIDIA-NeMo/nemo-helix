@@ -38,7 +38,7 @@ from nmp.core.models.parallelism.models import (
     extract_basic_config,
     try_load_nemo_yaml_config,
 )
-from nmp.core.models.parallelism.utils import is_huggingface_model_directory
+from nmp.core.models.parallelism.utils import detect_reasoning_toggle, is_huggingface_model_directory
 from nmp.core.models.schemas import LinearLayerSpec
 from transformers import AutoConfig, AutoModel, AutoModelForCausalLM, AutoTokenizer
 
@@ -181,9 +181,13 @@ def infer_model_cfg_from_hf(
         cfg = yaml_cfg
 
     is_chat = False
+    supports_reasoning_toggle = None
     if os.path.exists(cfg.name_or_path):
         tokenizer = AutoTokenizer.from_pretrained(cfg.name_or_path, trust_remote_code=is_trusted)
-        is_chat = getattr(tokenizer, "chat_template", None) is not None
+        chat_template = getattr(tokenizer, "chat_template", None)
+        is_chat = chat_template is not None
+        if is_chat:
+            supports_reasoning_toggle = detect_reasoning_toggle(chat_template)
 
     if getattr(cfg, "text_config", None):
         cfg = getattr(cfg, "text_config")
@@ -222,6 +226,7 @@ def infer_model_cfg_from_hf(
     result = ModelSpec(
         **basic_config,
         is_chat=is_chat,
+        supports_reasoning_toggle=supports_reasoning_toggle,
         gated_mlp=bool(gated_mlp),
         base_num_parameters=total_params,
         precision=precision,
