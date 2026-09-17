@@ -380,8 +380,15 @@ def _validate_host_url(v: str) -> str:
     A scheme-less URL like ``"inference-api.nvidia.com"`` is accepted as an entity
     but fails downstream at model discovery with an opaque 502 backend networking
     error (the discovery HTTP client cannot build a request from a bare host). We
-    reject it here at the API boundary so the user gets a clear, actionable 4xx
-    naming the missing scheme instead of a late, confusing failure.
+    reject it here at the **write boundary** (the create/upsert request schemas)
+    so the user gets a clear, actionable 4xx naming the missing scheme instead of
+    a late, confusing failure.
+
+    Deliberately NOT wired onto the response/domain ``ModelProvider`` schema: that
+    model is rebuilt from persisted rows on every read (``_entity_to_schema``), so
+    validating it there would turn any provider stored before this check (exactly
+    the NMP-186 rows) into an unreadable/un-listable 500. Enforcing only on
+    create/upsert protects new writes without breaking reads of legacy data.
     """
     if urlparse(v).scheme not in ("http", "https"):
         raise ValueError(f"Model provider host_url must include a scheme (http:// or https://); got '{v}'")
@@ -492,11 +499,6 @@ class ModelProvider(ModelEntityBaseModel):
     @classmethod
     def validate_auth_header_format(cls, v: str | None) -> str | None:
         return _validate_auth_header_format(v)
-
-    @field_validator("host_url")
-    @classmethod
-    def validate_host_url(cls, v: str) -> str:
-        return _validate_host_url(v)
 
 
 class ModelProviderSort(StrEnum):
