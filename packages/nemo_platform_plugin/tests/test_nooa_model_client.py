@@ -58,8 +58,11 @@ def _mock_models_client(models, providers=None):
 
 def _patch_models_client(models, providers=None):
     client = _mock_models_client(models, providers=providers)
+    # resolve_model_clients adapts whatever handle it is given onto an
+    # AsyncModelsClient via client_from_platform; patch that adapter so the
+    # tests don't need a real (or generated) platform SDK to drive resolution.
     ctx = patch(
-        "nemo_platform_plugin.nooa_model_client.AsyncModelsClient.from_client",
+        "nemo_platform_plugin.nooa_model_client.client_from_platform",
         return_value=client,
     )
     return ctx, client
@@ -366,6 +369,24 @@ async def test_model_clients_close_fast_after_default_close_fails():
 
     default.aclose.assert_awaited_once()
     fast.aclose.assert_awaited_once()
+
+
+async def test_resolve_model_clients_adapts_a_generated_platform_sdk(monkeypatch):
+    """A generated AsyncNeMoPlatform (from get_async_task_sdk) is adapted onto a
+    typed AsyncModelsClient, not handed to from_client directly -- which reads
+    private transport attrs the generated SDK does not expose."""
+    models_client = _mock_models_client({("default", "gpt-4-1"): _model_entity(name="gpt-4-1")})
+    models_client.get_model_entity_route_openai_url.return_value = "http://platform/model/gpt-4-1/-/v1"
+    adapter = MagicMock(return_value=models_client)
+    generated_sdk = MagicMock()  # stand-in for an AsyncNeMoPlatform
+    with patch("nemo_platform_plugin.nooa_model_client.client_from_platform", adapter):
+        monkeypatch.setattr(nooa_model_client, "CompletionClient", MagicMock(return_value=MagicMock()))
+        await resolve_model_clients(
+            generated_sdk,
+            ConfiguredModelRefs(default="default/gpt-4-1", fast="default/gpt-4-1"),
+        )
+
+    adapter.assert_called_once_with(generated_sdk, nooa_model_client.AsyncModelsClient)
 
 
 async def test_resolve_model_clients_closes_constructed_client_after_failure(monkeypatch):

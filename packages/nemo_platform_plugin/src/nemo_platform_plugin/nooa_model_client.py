@@ -15,8 +15,8 @@ from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
+from nemo_platform_plugin.client.adapter import AsyncPlatformClient, client_from_platform
 from nemo_platform_plugin.client.auth import AsyncTokenProvider, TokenProvider, resolve_token_async
-from nemo_platform_plugin.client.client import AsyncNemoClient
 from nemo_platform_plugin.client.config.config import get_context
 from nemo_platform_plugin.models.client import AsyncModelsClient
 from nemo_platform_plugin.models.refs import parse_workspace_name_ref
@@ -269,11 +269,17 @@ async def _served_model_name(
 
 
 async def resolve_model_clients(
-    client: AsyncNemoClient | AsyncModelsClient,
+    client: AsyncPlatformClient,
     refs: ConfiguredModelRefs | None = None,
 ) -> ConfiguredModelClients:
-    """Resolve configured Model Entities and construct each distinct client once."""
-    models_client = client if isinstance(client, AsyncModelsClient) else AsyncModelsClient.from_client(client)
+    """Resolve configured Model Entities and construct each distinct client once.
+
+    Accepts any async platform handle -- a typed ``AsyncNemoClient`` /
+    ``AsyncModelsClient`` or a generated ``AsyncNeMoPlatform`` from
+    :func:`~nemo_platform_plugin.sdk_provider.get_async_task_sdk` -- and adapts
+    it onto a typed ``AsyncModelsClient`` sharing its transport.
+    """
+    models_client = client_from_platform(client, AsyncModelsClient)
     selected = refs or configured_model_refs()
     resolved: dict[str, UnifiedLLM] = {}
     provider_cache: dict[str, ModelProvider] = {}
@@ -346,7 +352,7 @@ def model_clients_active() -> bool:
 
 @asynccontextmanager
 async def platform_model_clients(
-    client: AsyncNemoClient | AsyncModelsClient,
+    client: AsyncPlatformClient,
     refs: ConfiguredModelRefs | None = None,
 ) -> AsyncIterator[ConfiguredModelClients]:
     """Resolve, activate, and close a default/fast model pair for one run.
