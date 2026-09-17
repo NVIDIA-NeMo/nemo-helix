@@ -1456,16 +1456,28 @@ def _register_platform_commands(app: typer.Typer) -> None:
         def _detect(field: str, explicit: Any, *, default: Any) -> Any:
             if explicit is not None:
                 return explicit
-            values = {dep.get(field) for dep in existing if dep.get(field) not in (None, "")}
-            if len(values) > 1:
+            # De-dupe existing deployments' values for this field. Values are not
+            # necessarily hashable — ``environment`` can be an inline dict — so key
+            # the de-dupe on a stable JSON serialization rather than putting raw
+            # values in a set. Treat an unset value (None / "") as a distinct
+            # "absent" state so an absent-vs-named disagreement is not silently
+            # collapsed onto the named value.
+            by_key: dict[str, Any] = {}
+            for dep in existing:
+                raw = dep.get(field)
+                key = "\0absent" if raw in (None, "") else json.dumps(raw, sort_keys=True, default=str)
+                by_key.setdefault(key, raw)
+            if len(by_key) > 1:
                 typer.echo(
                     f"Error: agent {agent!r} has multiple deployments that disagree on "
                     f"{field!r}; pass the corresponding flag explicitly to disambiguate.",
                     err=True,
                 )
                 raise typer.Exit(code=2)
-            if values:
-                return next(iter(values))
+            if by_key:
+                only = next(iter(by_key.values()))
+                if only not in (None, ""):
+                    return only
             return default
 
         resolved_mode = _detect("deployment_mode", mode, default="subprocess")
@@ -1496,6 +1508,10 @@ def _register_platform_commands(app: typer.Typer) -> None:
             typer.confirm(f"{summary}.", abort=True)
 
         # 4. Undeploy every live deployment (idempotent: skip if none).
+        #    ``delete_deployment`` synchronously marks each deployment ``deleting``
+        #    before returning, and the entity delete in step 5 does not treat
+        #    ``deleting`` as a blocking status — so the immediately-following
+        #    delete is not rejected. ``.data()`` forces that to complete here.
         if live:
             for dep in live:
                 dep_name = dep["name"]
@@ -1508,14 +1524,15 @@ def _register_platform_commands(app: typer.Typer) -> None:
             typer.echo(f"No live deployments to undeploy for agent '{agent}'.")
 
         # 5. Delete the agent entity (idempotent: skip if already gone).
-        #    Preserves the {agent}-ethos fileset.
+        #    Preserves the {agent}-ethos fileset. Existence is pre-checked, so a
+        #    failure inside the delete is a real error (permissions/500/conflict),
+        #    not "already absent" — let it surface rather than masking it and
+        #    marching on to a misleading recreate.
         if existing or _agent_entity_exists(client, workspace=workspace, name=agent):
-            try:
-                _delete_agent_entity(agent_name=agent, workspace=workspace, base_url=base_url)
-                typer.echo(f"Deleted agent entity '{agent}'.")
-            except typer.Exit:
-                # A 404 here means it was already gone — idempotent, keep going.
-                typer.echo(f"Agent entity '{agent}' already absent; skipping delete.")
+            _delete_agent_entity(agent_name=agent, workspace=workspace, base_url=base_url)
+            typer.echo(f"Deleted agent entity '{agent}'.")
+        else:
+            typer.echo(f"Agent entity '{agent}' already absent; skipping delete.")
 
         # 6. Recreate the agent from the new config (re-uploads the ethos fileset).
         try:
@@ -1530,7 +1547,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             )
             typer.echo(f"Recreated agent '{agent}'.")
         except typer.Exit:
-            _redeploy_recovery_hint(agent, agent_config, stage="recreate")
+            _redeploy_recovery_hint(agent, agent_config, stage="recreate", workspace=workspace)
             raise
 
         # 7. Deploy the recreated agent.
@@ -1551,7 +1568,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
                 ),
             )
         except typer.Exit:
-            _redeploy_recovery_hint(agent, agent_config, stage="deploy")
+            _redeploy_recovery_hint(agent, agent_config, stage="deploy", workspace=workspace)
             raise
 
         if not wait:
@@ -3052,18 +3069,20 @@ def _agent_entity_exists(client: AgentsClient, *, workspace: str, name: str) -> 
     return True
 
 
-def _redeploy_recovery_hint(agent: str, agent_config: Path, *, stage: str) -> None:
+def _redeploy_recovery_hint(agent: str, agent_config: Path, *, stage: str, workspace: str) -> None:
     """Print an actionable recovery hint when redeploy fails after teardown.
 
     Once the old agent has been deleted, a failed recreate/deploy leaves the
     agent torn down. The config file is untouched, so the operation is safe to
-    re-run — tell the user exactly how.
+    re-run — tell the user exactly how, preserving the non-default workspace so
+    the printed command targets the same place the failed run did.
     """
+    workspace_flag = "" if workspace == _DEFAULT_WORKSPACE else f" --workspace {workspace}"
     typer.echo(
         f"Error: redeploy failed during {stage} for agent {agent!r} after the old "
         f"agent was torn down; it may currently be undeployed. Your config at "
         f"'{agent_config}' is unchanged — re-run to finish:\n"
-        f"  nemo agents redeploy --agent {agent} --agent-config {agent_config}",
+        f"  nemo agents redeploy --agent {agent} --agent-config {agent_config}{workspace_flag}",
         err=True,
     )
 

@@ -507,3 +507,100 @@ def test_redeploy_recovery_hint_on_recreate_failure(tmp_path: Path) -> None:
     assert "nemo agents redeploy --agent my-agent" in result.output
     # It got as far as delete but recreate failed (no deploy).
     assert rec.ordered_ops() == ["undeploy", "delete", "create"]
+
+
+# ---------------------------------------------------------------------------
+# Review-hardening: inline (dict) environment auto-detect must not crash
+# ---------------------------------------------------------------------------
+
+
+def test_redeploy_autodetects_inline_dict_environment(tmp_path: Path) -> None:
+    """An existing deployment with an inline (dict) environment auto-detects
+    without a TypeError (the value is unhashable; dedupe must not use a set)."""
+    posted: dict[str, Any] = {}
+
+    class _CapturingRecorder(_Recorder):
+        def __call__(self, req: httpx.Request) -> httpx.Response:
+            if req.method == "POST" and req.url.path.endswith("/deployments"):
+                import json as _json
+
+                posted.update(_json.loads(req.content))
+            return super().__call__(req)
+
+    inline_env = {"spec": {"image": "img:1"}}
+    rec = _CapturingRecorder(
+        deployments=[
+            {
+                "name": "dep-1",
+                "agent": "my-agent",
+                "status": "running",
+                "deployment_mode": "docker",
+                "image": "img:1",
+                "environment": inline_env,
+            }
+        ]
+    )
+    app = AgentsCLI().get_cli()
+    with _install_mock_transport(rec), patch(f"{_PATCH_PREFIX}.time.sleep"):
+        result = runner.invoke(
+            app,
+            [
+                "redeploy",
+                "--agent",
+                "my-agent",
+                "--agent-config",
+                str(_write_config(tmp_path)),
+                "--yes",
+                "--base-url",
+                "http://test",
+                "--timeout",
+                "10",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert rec.ordered_ops() == ["undeploy", "delete", "create", "deploy"]
+    # The key regression this guards: an inline (dict) environment is unhashable,
+    # so the old set-based dedupe crashed with TypeError before ever deploying.
+    # Reaching the deploy POST with a non-null environment proves the fix.
+    assert "environment" in posted and posted["environment"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Review-hardening: a real (non-404) delete failure must surface, not be
+# silently swallowed as "already absent"
+# ---------------------------------------------------------------------------
+
+
+def test_redeploy_surfaces_real_delete_failure(tmp_path: Path) -> None:
+    """A 500 on the agent-entity delete must fail the command (not be masked
+    as 'already absent' and then march on to a misleading recreate)."""
+
+    class _DeleteFailsRecorder(_Recorder):
+        def __call__(self, req: httpx.Request) -> httpx.Response:
+            if req.method == "DELETE" and re.search(r"/agents/[^/]+$", req.url.path):
+                self.calls.append((req.method, req.url.path))
+                return httpx.Response(500, json={"detail": "boom"})
+            return super().__call__(req)
+
+    rec = _DeleteFailsRecorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}])
+    app = AgentsCLI().get_cli()
+    with _install_mock_transport(rec), patch(f"{_PATCH_PREFIX}.time.sleep"):
+        result = runner.invoke(
+            app,
+            [
+                "redeploy",
+                "--agent",
+                "my-agent",
+                "--agent-config",
+                str(_write_config(tmp_path)),
+                "--yes",
+                "--base-url",
+                "http://test",
+                "--timeout",
+                "10",
+            ],
+        )
+    assert result.exit_code != 0
+    # It undeployed and attempted the delete, but did NOT proceed to recreate.
+    assert rec.ordered_ops() == ["undeploy", "delete"]
+    assert "already absent" not in result.output
