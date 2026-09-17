@@ -185,6 +185,19 @@ async def test_a_missing_agent_setting_is_rejected() -> None:
     assert "harness.settings.agent is required" in str(excinfo.value)
 
 
+async def test_a_non_boolean_enable_observability_is_rejected() -> None:
+    """A string `"false"` is truthy under bool(); validate the type instead."""
+    with pytest.raises(fabric_adapter.AnalystAdapterConfigError) as excinfo:
+        await fabric_adapter.run(
+            _invocation(
+                {"agent": "research-agent", "enable_observability": "false"},
+                request_context={"job_workspace": "workspace"},
+            )
+        )
+
+    assert "harness.settings.enable_observability must be a boolean" in str(excinfo.value)
+
+
 async def test_the_fast_model_falls_back_to_the_default(monkeypatch) -> None:
     seen: dict[str, Any] = {}
 

@@ -69,7 +69,7 @@ async def _run_analysis(invocation: NooaInvocation):
     ethos = _string_setting(settings, "ethos")
     since = _datetime_setting(settings, "since")
     evaluation_id = _string_setting(settings, "evaluation_id")
-    enable_observability = bool(settings.get("enable_observability", True))
+    enable_observability = _bool_setting(settings, "enable_observability", True)
     model_refs = ConfiguredModelRefs(
         default=_default_model_ref(settings, invocation.models),
         fast=_fast_model_ref(settings, invocation.models),
@@ -121,6 +121,15 @@ def _datetime_setting(settings: dict[str, Any], key: str) -> datetime | None:
     if not isinstance(value, str) or not value.strip():
         raise AnalystAdapterConfigError(f"harness.settings.{key} must be an ISO-8601 datetime string")
     return datetime.fromisoformat(value)
+
+
+def _bool_setting(settings: dict[str, Any], key: str, default: bool) -> bool:
+    value = settings.get(key, default)
+    if not isinstance(value, bool):
+        raise AnalystAdapterConfigError(
+            f"harness.settings.{key} must be a boolean, got {type(value).__name__}"
+        )
+    return value
 
 
 def _default_model_ref(
