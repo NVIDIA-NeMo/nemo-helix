@@ -98,6 +98,31 @@ async def test_deleting_volume_waits_for_executor(
 
 
 @pytest.mark.asyncio
+async def test_deleting_volume_backend_failure_preserves_entity_for_retry(
+    volume_reconciler: VolumeReconciler,
+    mock_backend: MockDeploymentBackend,
+    mock_entities: AsyncMock,
+) -> None:
+    """A backend delete that reports FAILED must NOT delete the entity row.
+
+    Backends signal a failed delete by returning a FAILED VolumeStatusUpdate
+    rather than raising. Deleting the entity anyway orphans the underlying PVC
+    while the model reports DELETED (AIRCORE-1211). The entity must survive so
+    the next reconcile cycle retries the backend delete.
+    """
+    vol = make_volume()
+    vol.status = "DELETING"
+    mock_backend.volume_delete_status = VolumeStatusUpdate(status="FAILED", status_message="Failed to delete PVC: boom")
+
+    await volume_reconciler.reconcile_one(vol)
+
+    # Backend was asked to delete (so a retry occurs next cycle) ...
+    assert mock_backend.volume_delete_calls == [("default", "vol1")]
+    # ... but the entity row survives rather than orphaning the PVC.
+    mock_entities.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_volume_update_conflict_is_handled_for_retry(
     volume_reconciler: VolumeReconciler,
     mock_entities: AsyncMock,
