@@ -213,3 +213,28 @@ def test_cli_serialization_still_carries_explicit_fields(tmp_path) -> None:
 
     assert resolved.batch.micro_batch_size == 2
     assert resolved.batch.global_batch_size == 256
+
+
+def test_cli_serialization_carries_distributed_inbatch_negative(tmp_path) -> None:
+    job = tmp_path / "job.json"
+    job.write_text(
+        json.dumps(
+            {
+                "model": "embed",
+                "dataset": {"training": "default/train"},
+                "training": {
+                    "training_type": "sft",
+                    "recipe": "bi_encoder",
+                    "finetuning_type": "all_weights",
+                    "retrieval": {"do_distributed_inbatch_negative": True},
+                },
+            }
+        )
+    )
+
+    dumped = json.loads(load_job_json(job))
+    assert dumped["training"]["retrieval"]["do_distributed_inbatch_negative"] is True
+
+    spec = AutomodelJobInput.model_validate(dumped)
+    assert spec.training.retrieval is not None
+    assert spec.training.retrieval.do_distributed_inbatch_negative is True

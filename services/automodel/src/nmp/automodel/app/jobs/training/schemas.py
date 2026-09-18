@@ -10,7 +10,13 @@ from nmp.automodel.app.constants import (
     DEFAULT_SEED,
     DEFAULT_TRAINING_OUTPUT_PATH,
 )
-from nmp.automodel.entities.values import CheckpointFormat, FinetuningType, Precision, TrainingType
+from nmp.automodel.entities.values import (
+    CheckpointFormat,
+    CheckpointSelection,
+    FinetuningType,
+    Precision,
+    TrainingType,
+)
 from nmp.customization_common.training.reporting import ProgressReportingConfig
 from pydantic import BaseModel, Field
 
@@ -179,6 +185,12 @@ class RetrievalConfig(BaseModel):
         ),
     )
 
+    # Contrastive objective
+    do_distributed_inbatch_negative: bool = Field(
+        default=False,
+        description=("Use other queries' passages in the global batch as extra negatives. Ignored for cross_encoder."),
+    )
+
     # Tokenization configuration
     query_max_length: int = Field(default=512, description="Maximum token length for query tokenization")
     passage_max_length: int = Field(default=512, description="Maximum token length for passage tokenization")
@@ -213,6 +225,10 @@ class TrainingStepConfig(BaseModel):
         max_steps: Optional[int] = None
         val_check_interval: Optional[float] = None
         validation_split: Optional[float] = Field(default=0.1, gt=0, lt=1)
+        checkpoint_selection: CheckpointSelection = Field(
+            default=CheckpointSelection.BEST,
+            description="Checkpoint(s) published after training: lowest validation loss, last, or both.",
+        )
         progress_reporting: ProgressReportingConfig = Field(default_factory=ProgressReportingConfig)
 
     class BatchConfig(BaseModel):
