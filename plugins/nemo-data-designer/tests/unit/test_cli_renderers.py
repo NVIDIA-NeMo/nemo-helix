@@ -87,6 +87,43 @@ def test_prints_job_name_and_follow_up_commands() -> None:
     assert "nemo jobs results list nemo-data-designer-p-cdrb2nfx" in out
 
 
+def test_workspace_flag_is_spelled_out_even_for_default() -> None:
+    """A bare command resolves --workspace through the active context, which
+    is not necessarily "default" — so omitting the flag for a job that landed
+    in "default" points the user at the wrong workspace."""
+    out = _render(_job_response(workspace="default"))
+
+    assert "nemo jobs get nemo-data-designer-p-cdrb2nfx --workspace default" in out
+    assert "nemo jobs watch nemo-data-designer-p-cdrb2nfx --workspace default" in out
+    assert "nemo jobs results list nemo-data-designer-p-cdrb2nfx --workspace default" in out
+
+
+def test_workspace_flag_uses_the_workspace_the_job_landed_in() -> None:
+    out = _render(_job_response(workspace="research"), cli_kwargs={"workspace": "research"})
+
+    assert "nemo jobs get nemo-data-designer-p-cdrb2nfx --workspace research" in out
+
+
+def test_workspace_flag_falls_back_to_cli_kwargs() -> None:
+    frame = _job_response()
+    del frame["workspace"]
+
+    out = _render(frame, cli_kwargs={"workspace": "research"})
+
+    assert "--workspace research" in out
+
+
+def test_workspace_flag_omitted_when_undeterminable() -> None:
+    """A guessed workspace would be worse than none."""
+    frame = _job_response()
+    del frame["workspace"]
+
+    out = _render(frame, cli_kwargs={})
+
+    assert "--workspace" not in out
+    assert "nemo jobs get nemo-data-designer-p-cdrb2nfx" in out
+
+
 def test_omits_the_bulky_fields() -> None:
     out = _render(_job_response())
 

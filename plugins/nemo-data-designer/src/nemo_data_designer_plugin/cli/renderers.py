@@ -306,16 +306,15 @@ class CreateRenderer(CLIRenderer):
         if num_records is not None:
             rows.append(("Records", str(num_records)))
 
-        # Bare commands only. The user may have a non-standard CLI context
-        # active and/or may have supplied flags like --workspace, --base-url,
-        # --cluster, etc. Rather than try to identify these and get it wrong,
-        # we only show the basic commands and expect the user to fill in any
-        # optional customization flags.
+        # --workspace is always spelled out; other overrides (--base-url,
+        # --cluster) are left to the user. Workspace is the one where omitting
+        # the flag actively misleads: see _workspace_flag.
+        ws = _workspace_flag(frame, ctx)
         rows.extend(
             [
-                ("Track", f"nemo jobs get {job_name}"),
-                ("Watch", f"nemo jobs watch {job_name}"),
-                ("Results", f"nemo jobs results list {job_name}"),
+                ("Track", f"nemo jobs get {job_name}{ws}"),
+                ("Watch", f"nemo jobs watch {job_name}{ws}"),
+                ("Results", f"nemo jobs results list {job_name}{ws}"),
             ]
         )
 
@@ -390,6 +389,33 @@ def _num_records(frame: dict, ctx: RendererContext) -> int | None:
             if isinstance(value, int):
                 return value
     return None
+
+
+def _workspace_flag(frame: dict, ctx: RendererContext) -> str:
+    """Return ``" --workspace <ws>"`` for the workspace the job landed in.
+
+    Always emitted, even for ``"default"``, because omitting it does not mean
+    "default" to the command being copied: ``create`` pins the job to the
+    literal ``"default"`` (``cli/inputs.py``), while ``nemo jobs *`` resolves an
+    omitted ``--workspace`` through the *active CLI context*
+    (``_get_workspace_path_param`` -> ``client.workspace``). For anyone whose
+    context is not ``default``, a bare command looks in the wrong workspace and
+    misses the job this summary just reported.
+
+    Spelling it out is redundant only when the two happen to agree, and correct
+    in every other case -- including after ``create`` learns to honor the
+    context, when the flag simply becomes redundant rather than wrong.
+
+    Returns ``""`` when the workspace can't be determined; a guessed flag would
+    be worse than none.
+    """
+    workspace = frame.get("workspace")
+    if not isinstance(workspace, str) or not workspace:
+        candidate = ctx.cli_kwargs.get("workspace")
+        workspace = candidate if isinstance(candidate, str) and candidate else None
+    if not workspace:
+        return ""
+    return f" --workspace {workspace}"
 
 
 def _print_log(frame: LogFrame) -> None:
