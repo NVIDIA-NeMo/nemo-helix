@@ -106,7 +106,7 @@ def test_nat_k8s_agent_deploys_and_invokes_through_gateway(
 def test_fabric_k8s_agent_deploys_and_invokes_through_gateway(
     sdk: NeMoPlatform, workspace: str, agent_deployment_image: str
 ) -> None:
-    """Deploy a Fabric/DeepAgents agent as a k8s Deployment+Service and invoke it through the gateway."""
+    """Exercise non-streaming, streaming, and session calls against a Kubernetes Fabric agent."""
     run_container_agent_deploy_and_invoke(
         sdk,
         workspace=workspace,
@@ -116,4 +116,5 @@ def test_fabric_k8s_agent_deploys_and_invokes_through_gateway(
         # Pod scheduling + (node-local) image resolution can take longer than the
         # docker path's local container start.
         running_timeout_seconds=420,
+        invocation_modes=("non_streaming", "streaming", "session"),
     )
