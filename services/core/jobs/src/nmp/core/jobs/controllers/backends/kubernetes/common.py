@@ -325,12 +325,12 @@ def map_pod_status_to_platform_status(pod_status: PodStatus) -> PlatformJobStatu
         return PlatformJobStatus.ERROR
     elif pod_status.phase == "Succeeded":
         return PlatformJobStatus.COMPLETED
+    elif len(pod_status.errors) > 0:
+        return PlatformJobStatus.ERROR
     elif len(pod_status.active) > 0:
         return PlatformJobStatus.ACTIVE
     elif len(pod_status.waiting) > 0:
         return PlatformJobStatus.PENDING
-    elif len(pod_status.errors) > 0:
-        return PlatformJobStatus.ERROR
     elif len(pod_status.completed) > 0:
         return PlatformJobStatus.COMPLETED
     else:

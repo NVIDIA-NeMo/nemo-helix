@@ -257,6 +257,28 @@ def test_update_all_tasks_reports_error_when_a_sibling_container_failed(
 @patch("nmp.core.jobs.controllers.backends.kubernetes.common.client_from_platform")
 @patch("nmp.core.jobs.controllers.backends.kubernetes.common.get_pod_details")
 @patch("nmp.core.jobs.controllers.backends.kubernetes.common.list_pod_status")
+def test_update_all_tasks_reports_error_when_an_active_sibling_container_failed(
+    mock_list_pod_status: MagicMock,
+    mock_get_pod_details: MagicMock,
+    mock_client_from_platform: MagicMock,
+    test_step_active: PlatformJobStepWithContext,
+) -> None:
+    mock_list_pod_status.return_value = [_pod(phase="Running", errors={"sidecar": 1}, active={"nemo-job-task"})]
+    mock_get_pod_details.return_value = ({"phase": "Running"}, {"failed": "sidecar exited 1"}, "")
+    jobs_client = MagicMock()
+    mock_client_from_platform.return_value = jobs_client
+
+    has_errors = update_all_tasks(MagicMock(), MagicMock(), "ns", test_step_active)
+
+    assert has_errors is True
+    body = jobs_client.update_job_step_task.call_args.kwargs["body"]
+    assert body.status == PlatformJobStatus.ERROR
+    assert body.error_details["failed"] == "sidecar exited 1"
+
+
+@patch("nmp.core.jobs.controllers.backends.kubernetes.common.client_from_platform")
+@patch("nmp.core.jobs.controllers.backends.kubernetes.common.get_pod_details")
+@patch("nmp.core.jobs.controllers.backends.kubernetes.common.list_pod_status")
 def test_update_all_tasks_reports_error_for_a_pending_pod_that_is_not_retrying(
     mock_list_pod_status: MagicMock,
     mock_get_pod_details: MagicMock,
