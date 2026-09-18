@@ -4,7 +4,7 @@
 """Runtime context handed to ``NemoJob.run()``.
 
 Carries the non-client bits a job needs to execute: workspace, job id
-(when one exists), filesystem paths, and a results sink. Each field
+(when one exists), filesystem paths, a results sink, and a usage reporter. Each field
 maps onto an existing ``NEMO_JOB_*`` environment variable that the
 in-container runtime sets:
 
@@ -38,10 +38,11 @@ Example::
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from nemo_platform_plugin.job_results import JobResults
+from nemo_platform_plugin.job_usage import JobUsageReporter, LocalJobUsageReporter
 
 
 class StoragePaths:
@@ -85,12 +86,16 @@ class JobContext:
         storage: Scratch and persistent filesystem paths.
         results: Sink for publishing results (local directory for
             laptop runs, NeMo Platform fileset on the platform).
+        usage: Reporter for cumulative model-token totals. Local execution
+            retains the latest report in memory; platform execution publishes
+            it to the current job attempt.
         job_id: Platform job UUID, or ``None`` for a local run.
     """
 
     workspace: str
     storage: StoragePaths
     results: JobResults
+    usage: JobUsageReporter = field(default_factory=LocalJobUsageReporter)
     job_id: str | None = None
 
 
