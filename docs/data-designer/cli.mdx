@@ -53,6 +53,8 @@ nemo data-designer validate product_reviews.py
 
 Validation covers both the configuration itself and the NeMo Platform resources it depends on: Inference Gateway provider references, Files service seed sources, Nemotron Personas filesets, and the seed source types the service supports.
 
+It does **not** check whether the models you reference actually respond. A provider can resolve while still refusing to serve the model named alongside it, so a green `validate` is not a promise that a preview will run. Use [`check-models`](#check-models) for that.
+
 A single run reports every problem it detects rather than stopping at the first one:
 
 ```text
@@ -83,6 +85,66 @@ nemo data-designer validate product_reviews.py --output json
   "errors": [
     {
       "message": "Errors in model configs: [\"Cannot access provider 'default/does-not-exist'. Check that it exists and you have access to it.\"]"
+    }
+  ],
+  "ok": false
+}
+```
+
+## Check Models
+
+The `check-models` command probes every model your configuration references, without running a workload. It sends a tiny generation request to each model alias, routed through the Inference Gateway, and reports whether it came back.
+
+```bash
+nemo data-designer check-models product_reviews.py
+```
+
+```text
+  ──────────────────────── Data Designer Check Models ────────────────────────
+
+  Config: product_reviews.py
+
+  🩺 Running health checks for models...
+  👀 Checking 'nvidia/nemotron-3.5-lightning-30b-a3b' in provider named 'default/nvidia-build' for model alias 'text'...
+  ✅ Passed!
+
+  ✅    ✔ All models responded successfully
+```
+
+This is the companion to `validate`, and the two answer different questions:
+
+| Command | Question | Cost |
+|---------|----------|------|
+| `validate` | Is my configuration well-formed, and do the resources it names resolve? | No inference |
+| `check-models` | Do the models it names actually respond? | One small generation per model alias |
+
+Because only a live request can tell you a model works, `check-models` is what catches a model name that a provider advertises but cannot serve. Run it once before your first `preview`, and again after changing a model or provider — not on every edit, since each run bills a real generation.
+
+Models configured with `skip_health_check=True` are skipped. A failing probe stops at the first bad model rather than reporting every problem at once, so fix and re-run. The per-model log lines above tell you which alias failed.
+
+```text
+  ❌    ✘ Model health check failed (ModelNotFoundError): Model
+'nvidia/nemotron-3-nano-30b-a3b' not found
+```
+
+The command exits `0` only when every probe succeeds, so you can gate a pipeline on it.
+
+| Option | Description |
+|--------|-------------|
+| `--workspace <WORKSPACE>` | Workspace used to resolve provider references and seed sources. Defaults to the workspace of the active CLI context, or `default`. |
+| `--output <text\|json>` | Output format. Defaults to `text`. `json` suppresses the per-model log lines. |
+
+```bash
+nemo data-designer check-models product_reviews.py --output json
+```
+
+```json
+{
+  "config_source": "product_reviews.py",
+  "errors": [
+    {
+      "error_type": "ModelNotFoundError",
+      "message": "Model 'nvidia/nemotron-3-nano-30b-a3b' not found"
     }
   ],
   "ok": false

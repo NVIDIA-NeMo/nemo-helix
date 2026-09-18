@@ -33,6 +33,8 @@ nemo inference providers list
 
 A common default created during `nemo setup` is `default/nvidia-build`, but it's optional — confirm before relying on it. If the user names a provider (e.g., "use my-vllm"), trust the name; `validate` will surface a clear error if it isn't reachable.
 
+A provider resolving does **not** mean the `model` you paired with it is servable. `validate` checks the provider, not the model name. Use `check-models` (below) to confirm the model itself.
+
 Set `model` to the `served_model_name` as understood by Inference Gateway, not the `model_entity_id`.
 
 The **Model Aliases** table in `nemo data-designer agent context` output reflects a local library registry that platform execution ignores. Whatever it shows — including an empty list — is not a signal about what your config can use. Do not stop on it, and do not copy aliases out of it.
@@ -53,10 +55,43 @@ nemo data-designer validate <path>
 
 A single invocation surfaces **every** problem it can detect (it doesn't short-circuit on the first failure). Exit code is 0 only when no errors are reported.
 
+**What validate does not cover:** whether the models the config references actually respond. It resolves the provider and confirms the model is enabled on it, but never contacts the model. A green `validate` is therefore not a promise that `preview` will run — see Model health checks below.
+
 Flags:
 
 - `--workspace <name>` — workspace used to resolve Inference Gateway providers and Files-service seed sources. Defaults to the workspace of the active CLI context (`nemo config current-context`), or `default`.
 - `--output {text,json}` — `json` emits a structured `ValidationReport` for CI / scripting use.
+
+## Model health checks
+
+`nemo data-designer check-models <path>` probes every model the config references, without running a workload. It sends a tiny generation request to each model alias through Inference Gateway and reports whether it came back.
+
+```bash
+nemo data-designer check-models <path>
+```
+
+```text
+  👀 Checking 'nvidia/nemotron-3.5-lightning-30b-a3b' in provider named 'default/nvidia-build' for model alias 'text'...
+  ✅ Passed!
+
+  ✔ All models responded successfully
+```
+
+This is the companion to `validate`, and the split mirrors the upstream library:
+
+- `validate` — is the config well-formed, and do the resources it names resolve? No inference.
+- `check-models` — do those models actually respond? One small generation per model alias.
+
+Only a live request can tell you a model works. A provider's advertised model list is not reliable — providers commonly expose models in `/v1/models` that fail in practice — so this is the only way to catch a bad model name before a preview does.
+
+Run it once after `validate` passes and before the first `preview`, then again only when a model or provider changes. Each run costs real inference, so it is not part of the edit loop the way `validate` is.
+
+Unlike `validate`, it stops at the first model that fails rather than listing every problem. The per-model log lines identify which alias failed. Models configured with `skip_health_check=True` are skipped.
+
+Flags:
+
+- `--workspace <name>` — same meaning as for `validate`.
+- `--output {text,json}` — `json` emits a structured `CheckModelsReport` (each error carries an `error_type` such as `ModelNotFoundError`) and suppresses the per-model log lines.
 
 ## Seed data
 

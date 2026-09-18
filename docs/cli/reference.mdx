@@ -7664,6 +7664,7 @@ nemo data-designer [OPTIONS] COMMAND [ARGS]...
 **Commands:**
 
 * `validate`: Validate a Data Designer configuration.
+* `check-models`: Check that every model referenced by the configuration is...
 * `preview`
 * `personas`: Manage Nemotron Personas datasets
 * `retrieval`: Build specs for Nemotron retrieval SDG commands.
@@ -7684,6 +7685,14 @@ nemo data-designer [OPTIONS] COMMAND [ARGS]...
 
 Validate a Data Designer configuration.
 
+Checks that the configuration is well-formed and that the platform
+resources it names resolve: Inference Gateway providers, Files service seed
+sources, and Nemotron Personas filesets.
+
+Does not check whether those models actually respond — a provider can
+resolve while still refusing to serve the model named alongside it. Run
+`nemo data-designer check-models` for that.
+
 **Usage:**
 
 ```shell
@@ -7697,6 +7706,42 @@ nemo data-designer validate [OPTIONS] CONFIG_SOURCE
 **Options:**
 
 * `--workspace`: Workspace used to resolve provider references and seed sources (remote pass). Defaults to the SDK's configured workspace, or 'default'.
+* `--output <CHOICE>`: Output format. 'json' suppresses the human-formatted blocks. [possible values: text, json; default: text]
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo data-designer check-models
+
+Check that every model referenced by the configuration is reachable.
+
+Sends a tiny generation request to each referenced model alias, routed
+through the Inference Gateway. Models with skip_health_check=True are
+skipped.
+
+Complements `validate`: `validate` checks the configuration is well-formed
+and that the platform resources it names resolve; `check-models` checks
+that those models actually respond. A provider can resolve while still
+refusing to serve the model named alongside it, so a green `validate` is
+not a promise that a preview will run.
+
+Unlike `validate`, this stops at the first model that fails rather than
+reporting every problem at once.
+
+**Usage:**
+
+```shell
+nemo data-designer check-models [OPTIONS] CONFIG_SOURCE
+```
+
+**Arguments:**
+
+* `<CONFIG_SOURCE>`: Path or URL to a config file (.yaml/.yml/.json), or a local Python module (.py) that defines a load_config_builder() function.
+
+**Options:**
+
+* `--workspace`: Workspace used to resolve provider references and seed sources. Defaults to the SDK's configured workspace, or 'default'.
 * `--output <CHOICE>`: Output format. 'json' suppresses the human-formatted blocks. [possible values: text, json; default: text]
 
 **Help:**

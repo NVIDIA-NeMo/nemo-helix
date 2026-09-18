@@ -29,6 +29,8 @@ PROVIDER_NAME = "test-provider"
 
 MODEL_A = "model-a"
 MODEL_B = "model-b"
+# A model the provider accepts in config but refuses to serve — the NMP-194 shape.
+MODEL_UNSERVABLE = "model-unservable"
 
 MODEL_A_RESPONSE = "hello world"
 MODEL_B_RESPONSE = "foo bar baz"
@@ -305,3 +307,106 @@ def _download_artifacts_when_ready(job: Any, tmpdir: str) -> Any:
             time.sleep(2)
 
     raise DataDesignerJobError(f"Timed out waiting for Data Designer artifacts: {last_error}") from last_error
+
+
+def _make_unservable_model_provider(sdk: NeMoPlatform, workspace: str) -> ModelProvider:
+    """A provider that resolves cleanly but 404s the model itself."""
+    return add_mock_provider(
+        sdk,
+        workspace=workspace,
+        name="unservable-provider",
+        mock_response_body_by_model={
+            MODEL_UNSERVABLE: [
+                MockProviderResponse(
+                    response_code=404,
+                    response_body={"error": {"message": f"model {MODEL_UNSERVABLE!r} not found", "type": "not_found"}},
+                ),
+            ],
+        },
+    )
+
+
+def _single_model_config(provider: ModelProvider, model: str) -> dd.DataDesignerConfigBuilder:
+    builder = dd.DataDesignerConfigBuilder(
+        model_configs=[
+            dd.ModelConfig(
+                alias="a",
+                model=model,
+                provider=provider.name,
+                inference_parameters=dd.ChatCompletionInferenceParams(top_p=1),
+            )
+        ]
+    )
+    builder.add_column(
+        column_config=dd.LLMTextColumnConfig(
+            name="response_from_a",
+            model_alias="a",
+            prompt="Tell me something.",
+        )
+    )
+    return builder
+
+
+def test_check_models_passes_for_servable_models(sdk: NeMoPlatform, workspace: str) -> None:
+    """The only place a real model probe runs: integration tests cannot, because
+    the engine's HTTP client does not carry their ASGI transport."""
+    provider = _make_mock_provider(sdk, workspace)
+    config_builder = _setup_dd_config(provider)
+
+    report = sdk.data_designer.check_models(config_builder, workspace=workspace)
+
+    assert report.ok, [(e.error_type, e.message) for e in report.errors]
+
+
+def test_check_models_catches_model_the_provider_cannot_serve(sdk: NeMoPlatform, workspace: str) -> None:
+    """NMP-194: `validate` passes for a model the provider will not serve.
+
+    That is the documented split, not a bug — validate resolves the provider
+    and never contacts the model. This asserts both halves: validate stays
+    green, and check-models is what actually catches it.
+    """
+    provider = _make_unservable_model_provider(sdk, workspace)
+    config_builder = _single_model_config(provider, MODEL_UNSERVABLE)
+
+    validation_report = sdk.data_designer.validate(config_builder, workspace=workspace)
+    assert validation_report.ok, [e.message for e in validation_report.errors]
+
+    report = sdk.data_designer.check_models(config_builder, workspace=workspace)
+
+    assert not report.ok
+    assert report.errors
+    assert report.errors[0].error_type
+
+
+def test_check_models_cli_exits_nonzero_for_unservable_model(_services: str, sdk: NeMoPlatform, workspace: str) -> None:
+    provider = _make_unservable_model_provider(sdk, workspace)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config_path = Path(tmpdir) / "config.py"
+        config_path.write_text(
+            "import data_designer.config as dd\n"
+            "\n"
+            "\n"
+            "def load_config_builder() -> dd.DataDesignerConfigBuilder:\n"
+            "    builder = dd.DataDesignerConfigBuilder(\n"
+            "        model_configs=[\n"
+            f"            dd.ModelConfig(alias='a', model={MODEL_UNSERVABLE!r}, provider={provider.name!r})\n"
+            "        ]\n"
+            "    )\n"
+            "    builder.add_column(\n"
+            "        dd.LLMTextColumnConfig(name='x', model_alias='a', prompt='Tell me something.')\n"
+            "    )\n"
+            "    return builder\n",
+            encoding="utf-8",
+        )
+
+        result = run_nemo_local(
+            "data-designer",
+            "check-models",
+            str(config_path),
+            base_url=_services,
+            workspace=workspace,
+        )
+
+    assert result.returncode != 0, result.stdout
+    assert "Model health check failed" in result.stdout

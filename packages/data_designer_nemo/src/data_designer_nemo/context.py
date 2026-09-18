@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from typing import Protocol
+
 import data_designer.config as dd
 from data_designer.engine.resources.person_reader import PersonReader
 from data_designer.engine.resources.seed_reader import (
@@ -26,6 +28,21 @@ from data_designer_nemo.secret_resolver import NMPSecretResolver
 from data_designer_nemo.seed import validate_seed
 from data_designer_nemo.tool_configs import validate_no_tool_configs
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+
+
+class DataDesignerEngineContext(Protocol):
+    """What ``create_data_designer`` needs from a context.
+
+    Implemented by :class:`DataDesignerExecutionContext` for real workloads and
+    by :class:`~data_designer_nemo.check_models_context.DataDesignerCheckModelsContext`
+    for model probes, which need none of these components to do real work.
+    """
+
+    def get_secret_resolver(self) -> SecretResolver: ...
+
+    def get_seed_readers(self) -> list[SeedReader]: ...
+
+    def get_person_reader(self) -> PersonReader | None: ...
 
 
 class DataDesignerValidationContext:
