@@ -25,6 +25,14 @@ from nmp.core.models.schemas import (
 )
 from pydantic import ValidationError
 
+# Builders for the two write-boundary request schemas. Create requires a name;
+# upsert does not — otherwise host_url validation is identical, so the boundary
+# tests below run against both.
+_WRITE_REQUEST_BUILDERS = [
+    pytest.param(lambda url: CreateModelProviderRequest(name="my-provider", host_url=url), id="create"),
+    pytest.param(lambda url: UpsertModelProviderRequest(host_url=url), id="upsert"),
+]
+
 
 class TestHostUrlValidationHelper:
     @pytest.mark.parametrize(
@@ -68,20 +76,14 @@ class TestHostUrlValidationAtWriteBoundary:
     scheme-less URL is rejected when a write is attempted — before the entity is
     ever persisted."""
 
-    def test_create_request_rejects_schemeless_url(self) -> None:
+    @pytest.mark.parametrize("build", _WRITE_REQUEST_BUILDERS)
+    def test_request_rejects_schemeless_url(self, build) -> None:
         with pytest.raises(ValidationError, match="must include a scheme"):
-            CreateModelProviderRequest(name="my-provider", host_url="inference-api.nvidia.com")
+            build("inference-api.nvidia.com")
 
-    def test_create_request_accepts_https_url(self) -> None:
-        request = CreateModelProviderRequest(name="my-provider", host_url="https://inference-api.nvidia.com")
-        assert request.host_url == "https://inference-api.nvidia.com"
-
-    def test_upsert_request_rejects_schemeless_url(self) -> None:
-        with pytest.raises(ValidationError, match="must include a scheme"):
-            UpsertModelProviderRequest(host_url="inference-api.nvidia.com")
-
-    def test_upsert_request_accepts_https_url(self) -> None:
-        request = UpsertModelProviderRequest(host_url="https://inference-api.nvidia.com")
+    @pytest.mark.parametrize("build", _WRITE_REQUEST_BUILDERS)
+    def test_request_accepts_https_url(self, build) -> None:
+        request = build("https://inference-api.nvidia.com")
         assert request.host_url == "https://inference-api.nvidia.com"
 
 

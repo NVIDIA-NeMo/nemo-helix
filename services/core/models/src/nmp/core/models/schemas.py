@@ -375,25 +375,14 @@ def _validate_auth_header_format(v: str | None) -> str | None:
 
 
 def _validate_host_url(v: str) -> str:
-    """Validate that a provider ``host_url`` includes an ``http://`` or ``https://`` scheme.
+    """Require a provider ``host_url`` to have an ``http(s)://`` scheme AND a hostname.
 
-    A scheme-less URL like ``"inference-api.nvidia.com"`` is accepted as an entity
-    but fails downstream at model discovery with an opaque 502 backend networking
-    error (the discovery HTTP client cannot build a request from a bare host). We
-    reject it here at the **write boundary** (the create/upsert request schemas)
-    so the user gets a clear, actionable 4xx naming the missing scheme instead of
-    a late, confusing failure.
-
-    Both a scheme AND a hostname are required: ``"https:inference-api.nvidia.com"``
-    (or ``"https://"``) parses with scheme ``https`` but no authority, which the
-    downstream client turns into the same hostless-request 502. Requiring
-    ``parsed.hostname`` rejects those too.
-
-    Deliberately NOT wired onto the response/domain ``ModelProvider`` schema: that
-    model is rebuilt from persisted rows on every read (``_entity_to_schema``), so
-    validating it there would turn any provider stored before this check (exactly
-    the NMP-186 rows) into an unreadable/un-listable 500. Enforcing only on
-    create/upsert protects new writes without breaking reads of legacy data.
+    A bare host like ``"inference-api.nvidia.com"`` (or a hostless
+    ``"https:inference-api.nvidia.com"`` / ``"https://"``) fails later at model
+    discovery with an opaque 502, so we reject it up front with a clear 4xx.
+    Wired onto the create/upsert request schemas only — NOT the response
+    ``ModelProvider`` schema, which is rebuilt from stored rows on every read, so
+    validating there would 500 reads of providers persisted before this check.
     """
     parsed = urlparse(v)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
