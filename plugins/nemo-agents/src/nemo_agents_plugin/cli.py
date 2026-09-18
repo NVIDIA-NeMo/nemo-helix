@@ -1149,7 +1149,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         """Register an agent on the platform."""
         base_url = _resolve_base_url(base_url)
         config_dict, config_format = _validate_agent_config_for_create(agent_config, name=name)
-        resp = _create_agent_from_validated(
+        resp = _create_agent_from_validated_config(
             name=name,
             description=description,
             config_dict=config_dict,
@@ -1417,22 +1417,12 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
         Wraps the four steps you would otherwise run by hand to push a changed
         agent config to a running agent: ``undeploy`` → ``delete`` → ``create``
-        → ``deploy``. The agent entity is immutable by name (``create`` returns
-        409 on a duplicate), so redeploy tears the old agent down and rebuilds it
-        from ``--agent-config``. The durable ``{agent}-ethos`` fileset is
-        preserved across the delete and re-uploaded from the new config.
-
-        Safety contract: the new config is validated **client-side before any
-        teardown**, so a bad config is a safe no-op (nothing is torn down). Once
-        teardown begins the operation is **not atomic** — if a later step fails
-        the agent may be left undeployed; each step is check-first, so it is
-        **safe to re-run** ``redeploy`` to finish.
-
-        Runtime flags (``--mode``/``--image``/``--use-image-entrypoint``/
-        ``--environment``) are auto-detected from the agent's existing
-        deployment when omitted; pass them explicitly to override. If the agent
-        has multiple deployments that disagree on an omitted field, redeploy
-        errors and asks you to specify it.
+        → ``deploy`` (the agent entity is immutable by name, so it must be torn
+        down and rebuilt). The new config is validated before any teardown, so a
+        bad config is a safe no-op; once teardown starts the operation is not
+        atomic but each step is check-first, so it is safe to re-run. Omitted
+        runtime flags are auto-detected from the existing deployment. See the
+        Deploy Agents docs for the full contract.
         """
         base_url = _resolve_base_url(base_url)
 
@@ -1535,7 +1525,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
         # 6. Recreate the agent from the new config (re-uploads the ethos fileset).
         try:
-            _create_agent_from_validated(
+            _create_agent_from_validated_config(
                 name=agent,
                 description=description,
                 config_dict=config_dict,
@@ -3045,10 +3035,7 @@ def _clear_existing_ethos_artifacts(
 
 
 _LIVE_DEPLOYMENT_STATUSES = frozenset({"pending", "starting", "running"})
-"""Deployment statuses that represent a live deployment worth undeploying.
-
-Excludes ``failed`` (already terminal) and ``deleting`` (already being removed).
-"""
+"""Deployment statuses that represent a live deployment worth undeploying."""
 
 
 def _redeploy_recovery_hint(agent: str, agent_config: Path, *, stage: str, workspace: str) -> None:
@@ -3062,8 +3049,6 @@ def _redeploy_recovery_hint(agent: str, agent_config: Path, *, stage: str, works
     args = ["nemo", "agents", "redeploy", "--agent", agent, "--agent-config", str(agent_config)]
     if workspace != _DEFAULT_WORKSPACE:
         args += ["--workspace", workspace]
-    # shlex.join quotes any arg containing spaces/specials (e.g. a config path
-    # like '/tmp/my agent/agent.yaml'), so the printed command is copy-pasteable.
     rerun = shlex.join(args)
     typer.echo(
         f"Error: redeploy failed during {stage} for agent {agent!r} after the old "
@@ -3107,7 +3092,7 @@ def _validate_agent_config_for_create(agent_config: Path, *, name: str) -> tuple
     return config_dict, config_format
 
 
-def _create_agent_from_validated(
+def _create_agent_from_validated_config(
     *,
     name: str,
     description: str,

@@ -697,9 +697,7 @@ agent from `--agent-config`, and deploys it again.
 
 Runtime flags (`--mode`, `--image`, `--use-image-entrypoint`, `--environment`)
 are auto-detected from the agent's existing deployment when omitted; pass them
-explicitly to override. Like `deploy`, `redeploy` waits for the new deployment
-to reach `running` (exit 0) or `failed`/timeout (exit 1) by default; pass
-`--no-wait` for fire-and-forget.
+explicitly to override. `--wait`/`--timeout` behave as they do for `deploy`.
 
 **Safety contract.** The new config is validated client-side *before* any
 teardown, so a bad config is a safe no-op — nothing is torn down. Once teardown

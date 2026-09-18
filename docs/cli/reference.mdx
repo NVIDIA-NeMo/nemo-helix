@@ -6093,22 +6093,12 @@ Redeploy an agent from a new config, in one command.
 
 Wraps the four steps you would otherwise run by hand to push a changed
 agent config to a running agent: ``undeploy`` → ``delete`` → ``create``
-→ ``deploy``. The agent entity is immutable by name (``create`` returns
-409 on a duplicate), so redeploy tears the old agent down and rebuilds it
-from ``--agent-config``. The durable ``\{agent}-ethos`` fileset is
-preserved across the delete and re-uploaded from the new config.
-
-Safety contract: the new config is validated **client-side before any
-teardown**, so a bad config is a safe no-op (nothing is torn down). Once
-teardown begins the operation is **not atomic** — if a later step fails
-the agent may be left undeployed; each step is check-first, so it is
-**safe to re-run** ``redeploy`` to finish.
-
-Runtime flags (``--mode``/``--image``/``--use-image-entrypoint``/
-``--environment``) are auto-detected from the agent's existing
-deployment when omitted; pass them explicitly to override. If the agent
-has multiple deployments that disagree on an omitted field, redeploy
-errors and asks you to specify it.
+→ ``deploy`` (the agent entity is immutable by name, so it must be torn
+down and rebuilt). The new config is validated before any teardown, so a
+bad config is a safe no-op; once teardown starts the operation is not
+atomic but each step is check-first, so it is safe to re-run. Omitted
+runtime flags are auto-detected from the existing deployment. See the
+Deploy Agents docs for the full contract.
 
 **Usage:**
 
