@@ -383,6 +383,8 @@ A full-weight GRPO job instead registers a new model entity, which does need its
 
 Set `deployment_config` on the job spec and the platform deploys once training completes, instead of leaving you to create the deployment by hand. Omit it and nothing is deployed.
 
+Setting it always creates a deployment. If the base model is already serving and you only want the adapter to hot-reload onto it, omit the field rather than passing one.
+
 Pass a string to reuse an existing `ModelDeploymentConfig`:
 
 ```json

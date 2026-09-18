@@ -14,7 +14,6 @@ Covers:
 
 from __future__ import annotations
 
-import json
 import types
 from datetime import datetime
 from pathlib import Path
@@ -459,7 +458,8 @@ class TestLaunchModel:
         assert deployment_call.kwargs["workspace"] == "shared"
         assert deployment_call.kwargs["body"].config == "existing-cfg"
 
-    def test_lora_with_active_deployment_skips(self) -> None:
+    def test_lora_deploys_even_when_the_base_already_has_a_deployment(self) -> None:
+        """deployment_config is an explicit request: it deploys regardless of prior state."""
         from nemo_platform_plugin.deployment import DeploymentParams
         from nmp.customization_common.schemas.file_io import FileSetRef
         from nmp.customization_common.schemas.model_entity import (
@@ -469,10 +469,15 @@ class TestLaunchModel:
         from nmp.unsloth.entities.values import FinetuningType
 
         models, files = _make_clients()
-        existing_config = types.SimpleNamespace(workspace="other", name="cfg-1")
-        active_deployment = types.SimpleNamespace(status=ModelDeploymentStatus.READY)
-        models.list_deployment_configs.return_value = _page([existing_config])
-        models.list_deployments.return_value = _page([active_deployment])
+        models.create_deployment_config.return_value = _response(
+            types.SimpleNamespace(workspace="other", name="sft-cfg-base")
+        )
+        models.create_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="other", name="sft-deploy-base")
+        )
+        models.get_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="other", name="sft-deploy-base", status=ModelDeploymentStatus.CREATED)
+        )
 
         runner = _make_runner(models, files)
         me = _model_entity(workspace="other", name="base")
@@ -487,17 +492,45 @@ class TestLaunchModel:
 
         runner.launch_model(config, me)
 
-        config_call = models.list_deployment_configs.call_args
-        assert config_call.kwargs["workspace"] == "other"
-        assert json.loads(config_call.kwargs["query_params"]["filter"]) == {"model_entity_id": "other/base"}
-        deployment_call = models.list_deployments.call_args
-        assert deployment_call.kwargs["workspace"] == "other"
-        assert json.loads(deployment_call.kwargs["query_params"]["filter"]) == {
-            "config": "cfg-1",
-            "workspace": "other",
-        }
-        models.create_deployment_config.assert_not_called()
-        models.create_deployment.assert_not_called()
+        # The old skip path probed for existing deployments first; it no longer does.
+        models.list_deployment_configs.assert_not_called()
+        models.list_deployments.assert_not_called()
+        models.create_deployment.assert_called_once()
+        assert models.create_deployment.call_args.kwargs["body"].config == "sft-cfg-base"
+
+    def test_lora_deployment_name_collision_reuses_the_existing_deployment(self) -> None:
+        """Re-running a job must not duplicate the deployment it already created."""
+        from nemo_platform_plugin.deployment import DeploymentParams
+        from nmp.customization_common.schemas.file_io import FileSetRef
+        from nmp.customization_common.schemas.model_entity import (
+            ModelEntityTaskConfig,
+            PEFTConfig,
+        )
+        from nmp.unsloth.entities.values import FinetuningType
+
+        models, files = _make_clients()
+        models.create_deployment_config.return_value = _response(
+            types.SimpleNamespace(workspace="other", name="sft-cfg-base")
+        )
+        models.create_deployment.side_effect = lambda **_: _raise_runner_conflict()
+        models.get_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="other", name="sft-deploy-base", status=ModelDeploymentStatus.READY)
+        )
+
+        runner = _make_runner(models, files)
+        me = _model_entity(workspace="other", name="base")
+        config = ModelEntityTaskConfig(
+            name="adapter",
+            workspace="other",
+            fileset=FileSetRef(workspace="other", name="adapter"),
+            model_entity="other/base",
+            peft=PEFTConfig(type=FinetuningType.LORA, rank=8, alpha=16),
+            deployment_config=DeploymentParams(),
+        )
+
+        runner.launch_model(config, me)
+
+        models.get_deployment.assert_called()
 
     def test_lora_with_lora_enabled_false_warns_and_skips(
         self,
