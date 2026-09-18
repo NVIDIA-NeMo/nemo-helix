@@ -4,8 +4,8 @@
 """Audit job — runs garak against a target using inline config + target.
 
 ``nemo auditor audit run --spec-file spec.yaml`` shells out to a pre-installed
-garak interpreter (default ``/app/.garak_venv/bin/python``, overridable via
-``NEMO_AUDITOR_GARAK_PYTHON``).
+garak interpreter (by default tries ``~/.auditor/.venv/bin/python``
+and ``/app/.garak_venv/bin/python``, overridable via ``NEMO_AUDITOR_GARAK_PYTHON``).
 
 The probe spec is expanded into individual per-probe YAML configs tracked
 through ``todo/``, ``running/``, ``complete/``, and ``failed/`` directories
@@ -48,7 +48,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_GARAK_PYTHON = "/app/.garak_venv/bin/python"
+DEFAULT_GARAK_PYTHON_APP = "/app/.garak_venv/bin/python"
+DEFAULT_GARAK_PYTHON_LOCAL = "~/.auditor/.venv/bin/python"
 GARAK_PYTHON_ENVVAR = "NEMO_AUDITOR_GARAK_PYTHON"
 
 # garak writes reports to <XDG_DATA_HOME>/garak/<reporting.report_dir>/
@@ -137,8 +138,12 @@ def _collect_report_artifacts(
     return artifacts
 
 
-def _resolve_garak_python() -> str:
-    return os.environ.get(GARAK_PYTHON_ENVVAR) or os.path.expanduser(DEFAULT_GARAK_PYTHON)
+def _resolve_garak_python() -> list[str]:
+    from_env = os.environ.get(GARAK_PYTHON_ENVVAR)
+    if from_env:
+        return [from_env]
+    else:
+        return [os.path.expanduser(DEFAULT_GARAK_PYTHON_LOCAL), os.path.expanduser(DEFAULT_GARAK_PYTHON_APP)]
 
 
 _EntityT = TypeVar("_EntityT", AuditConfig, AuditTarget)
@@ -475,10 +480,14 @@ class AuditJob(NemoJob):
         run_log_path = persistent / "run.log"
         target_opts_path = persistent / "target_options.json"
 
-        garak_python = _resolve_garak_python()
-        if not Path(garak_python).exists():
+        garak_pythons = _resolve_garak_python()
+        for garak_python in garak_pythons:
+            if Path(garak_python).exists():
+                break
+        else:
+            garak_pythons_str = " or ".join(garak_pythons)
             raise FileNotFoundError(
-                f"garak interpreter not found at {garak_python}. "
+                f"garak interpreter not found at {garak_pythons_str}. "
                 f"Install garak in a venv there, or set ${GARAK_PYTHON_ENVVAR} "
                 "to point at an existing one."
             )
