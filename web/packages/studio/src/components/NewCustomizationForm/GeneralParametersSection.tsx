@@ -257,7 +257,7 @@ export const GeneralParametersSection = () => {
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'rl.training.keep_top_k', control }}
                     formFieldProps={{
-                      slotLabel: 'Keep Top-K Checkpoints',
+                      slotLabel: 'Top-K Checkpoints',
                       slotInfo: 'Number of best checkpoints to retain, ranked by validation loss.',
                     }}
                     {...specSliderProps(DPO_SPEC_DEFAULTS, 'keep_top_k')}
@@ -559,7 +559,7 @@ export const GeneralParametersSection = () => {
                       control,
                     }}
                     formFieldProps={{
-                      slotLabel: 'Sequence Packing Max Samples',
+                      slotLabel: 'Packing Max Samples',
                       slotInfo:
                         'Samples analyzed to estimate the optimal pack size when packing is enabled.',
                     }}
@@ -646,7 +646,7 @@ export const GeneralParametersSection = () => {
                     control,
                   }}
                   formFieldProps={{
-                    slotLabel: 'Gradient Accumulation Steps',
+                    slotLabel: 'Accumulation Steps',
                     slotInfo:
                       'Steps accumulated before an optimizer update. Raises the effective batch size without using more memory.',
                   }}
@@ -824,7 +824,7 @@ export const GeneralParametersSection = () => {
                 <ControlledSliderWithTextInput
                   useControllerProps={{ name: 'unsloth.optimizer.label_smoothing_factor', control }}
                   formFieldProps={{
-                    slotLabel: 'Label Smoothing Factor',
+                    slotLabel: 'Label Smoothing',
                     slotInfo: 'Label smoothing for the cross-entropy loss. 0.0 disables.',
                   }}
                   {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'optimizer_label_smoothing_factor')}

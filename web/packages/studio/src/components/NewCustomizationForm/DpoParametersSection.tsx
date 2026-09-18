@@ -39,7 +39,7 @@ export const DpoParametersSection = () => {
         <ControlledSliderWithTextInput
           useControllerProps={{ name: 'rl.training.preference_loss_weight', control }}
           formFieldProps={{
-            slotLabel: 'Preference Loss Weight',
+            slotLabel: 'Pref Loss Weight',
             slotInfo: 'Scaling factor for the DPO preference (chosen vs rejected) loss term.',
           }}
           {...specSliderProps(DPO_SPEC_DEFAULTS, 'preference_loss_weight')}
@@ -51,7 +51,7 @@ export const DpoParametersSection = () => {
         <ControlledSliderWithTextInput
           useControllerProps={{ name: 'rl.training.sft_loss_weight', control }}
           formFieldProps={{
-            slotLabel: 'SFT Regularization Loss Weight',
+            slotLabel: 'SFT Loss Weight',
             slotInfo:
               'Weight for the SFT (imitation) regularization loss on the chosen response. Set to 0 to disable.',
           }}

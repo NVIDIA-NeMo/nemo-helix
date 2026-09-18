@@ -176,7 +176,7 @@ export const GrpoParametersSection = () => {
               <ControlledSliderWithTextInput
                 useControllerProps={{ name: 'grpo.dynamic_sampling_max_gen_batches', control }}
                 formFieldProps={{
-                  slotLabel: 'Max Generation Batches',
+                  slotLabel: 'Max Gen Batches',
                   slotInfo:
                     'How many generation batches one step may consume trying to fill itself before the run fails.',
                 }}
@@ -273,7 +273,7 @@ export const GrpoParametersSection = () => {
                       control,
                     }}
                     formFieldProps={{
-                      slotLabel: 'Overlong Buffer Length',
+                      slotLabel: 'Overlong Buffer',
                       slotInfo:
                         'Tokens before max_response_length over which the penalty ramps to full.',
                     }}
@@ -289,7 +289,7 @@ export const GrpoParametersSection = () => {
                       control,
                     }}
                     formFieldProps={{
-                      slotLabel: 'Overlong Buffer Penalty',
+                      slotLabel: 'Overlong Penalty',
                       slotInfo: 'Penalty applied at the end of the buffer.',
                     }}
                     unsetPlaceholder="Off"
@@ -603,7 +603,7 @@ export const GrpoParametersSection = () => {
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'rl.training.keep_top_k', control }}
                     formFieldProps={{
-                      slotLabel: 'Keep Top-K Checkpoints',
+                      slotLabel: 'Top-K Checkpoints',
                       slotInfo:
                         'Number of best checkpoints to retain, ranked by mean validation reward — higher is better. Falls back to the latest checkpoint when the dataset ships no validation split.',
                     }}
