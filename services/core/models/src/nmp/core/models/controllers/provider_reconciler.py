@@ -29,7 +29,7 @@ from nemo_platform_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nemo_platform_plugin.virtual_models.types import CreateVirtualModelRequest, VirtualModel
 from nmp.common.datetime_utils import ensure_utc
 from nmp.common.entities.constants import NAME_PATTERN
-from nmp.common.entities.utils import parse_entity_ref
+from nmp.common.entities.utils import ADAPTERS_INFIX, parse_adapters_suffix, parse_entity_ref
 from nmp.core.models.app import (
     ModelWeightsType,
     get_model_weights_type,
@@ -201,13 +201,15 @@ def _is_valid_served_model_entity_id(model_entity_id: str) -> bool:
     workspace, remainder = model_entity_id.split("/", 1)
     if not _is_valid_model_entity_name(workspace):
         return False
+    # A LoRA composite's remainder is ``base&adapters/adapter_workspace/adapter_name``.
+    # parse_adapters_suffix owns that grammar split (shared with IGW validation);
+    # here we only NAME_PATTERN-check each recovered segment. A remainder that
+    # contains ``&adapters/`` but is malformed yields None and is rejected.
     if "&adapters/" in remainder:
-        base, _, adapter_part = remainder.partition("&adapters/")
-        if not base or not adapter_part or "/" not in adapter_part:
+        adapter_parts = parse_adapters_suffix(remainder)
+        if adapter_parts is None:
             return False
-        adapter_ws, _, adapter_name = adapter_part.partition("/")
-        if not adapter_ws or not adapter_name:
-            return False
+        base, adapter_ws, adapter_name = adapter_parts
         return all(_is_valid_model_entity_name(s) for s in (base, adapter_ws, adapter_name))
     return _is_valid_model_entity_name(remainder)
 
@@ -1059,7 +1061,13 @@ class ModelProviderReconciler:
                     )
                     continue
 
-                model_entity_id = f"{base_id}&adapters/{adapter_ws}/{adapter_name}"
+                # Build the LoRA composite id from the base id + recovered adapter
+                # segments using the shared ADAPTERS_INFIX (single home for the grammar).
+                # base_id is used verbatim as the prefix (as the prior f-string did) - we
+                # do NOT parse it, because _resolve_base_backend_model_id may return an
+                # unqualified id and parsing would raise here, aborting the whole mapping
+                # loop where the old code produced an id later dropped by validation.
+                model_entity_id = f"{base_id}{ADAPTERS_INFIX}{adapter_ws}/{adapter_name}"
                 served.append(ServedModelMapping(model_entity_id=model_entity_id, served_model_name=mid))
                 continue
 
