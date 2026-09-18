@@ -5,7 +5,9 @@
 name: nooa
 description: Build, modify, debug, or optimize agents using NVIDIA-labs OO Agents (NOOA). Use for nooa.Agent subclasses, ellipsis generation methods, CodeAct or Predict strategies, ShellTools, Skill/TextSkill, context and persistence, MCP, tracing, middleware, channels, or trace analysis.
 compatibility: Python >= 3.12,<3.14; uv; nooa at the version floor declared by this plugin
+allowed-tools: Read
 metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
   upstream: https://github.com/NVIDIA-NeMo/labs-OO-Agents
   version: ">=0.0.9"
 ---

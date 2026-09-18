@@ -32,6 +32,9 @@ compatibility: nemo-platform >= 0.1.0; selection plus a host scan on macOS or Li
 maturity: active
 license: Apache-2.0
 user-invocable: true
+allowed-tools: Bash
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # NeMo Platform skill selection

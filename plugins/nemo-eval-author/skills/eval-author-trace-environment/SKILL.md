@@ -26,7 +26,7 @@ metadata:
 maturity: alpha
 license: Apache-2.0
 user-invocable: true
-allowed-tools: Bash Read Write Grep Glob
+allowed-tools: Bash, Read, Write, Grep, Glob
 ---
 
 # Eval Author: trace to environment

@@ -129,6 +129,11 @@ repos:
         language: system
         stages: [commit-msg]
         always_run: true
+      - id: skill-frontmatter-lint
+        name: Check skill frontmatter
+        entry: uv run --no-cache .github/scripts/check_skill_frontmatter.py --format human
+        language: system
+        files: (^|/)SKILL\.md$
 
   # Studio
   - repo: local
