@@ -305,11 +305,6 @@ class CreateRenderer(CLIRenderer):
         if num_records is not None:
             rows.append(("Records", str(num_records)))
 
-        output_location = frame.get("output_location")
-        if isinstance(output_location, str) and output_location:
-            # Only set when the caller supplied a fileset; None when auto-created.
-            rows.append(("Output", output_location))
-
         suffix = _workspace_suffix(frame, ctx)
         rows.extend(
             [
