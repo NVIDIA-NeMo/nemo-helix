@@ -14,6 +14,7 @@ DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
 AUTHENTIK_DEFAULT_AUTHENTICATION_FLOW_SLUG = "default-authentication-flow"
 DEVICE_TOKEN_POLL_ATTEMPTS = 3
 DEVICE_TOKEN_POLL_INTERVAL_SECONDS = 1.0
+ZITADEL_API_TIMEOUT_SECONDS = 30.0
 
 
 def url_origin(url: str) -> str:
@@ -135,6 +136,65 @@ def solve_authentik_device_flow(
     raise AssertionError(f"Authentik device flow did not complete after 10 stages: {challenge}")
 
 
+def _zitadel_api_headers(admin_token: str) -> dict[str, str]:
+    return {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+
+def solve_zitadel_device_flow(
+    *,
+    gateway_base_url: str,
+    user_code: str,
+    login_name: str,
+    password: str,
+    admin_token: str,
+    tls_config: HttpxTLSConfig,
+) -> None:
+    headers = _zitadel_api_headers(admin_token)
+    session_response = httpx.post(
+        f"{gateway_base_url.rstrip('/')}/v2/sessions",
+        json={
+            "checks": {
+                "user": {"loginName": login_name},
+                "password": {"password": password},
+            },
+        },
+        headers=headers,
+        timeout=ZITADEL_API_TIMEOUT_SECONDS,
+        **tls_config,
+    )
+    session_response.raise_for_status()
+    session = session_response.json()
+    session_id = session["sessionId"]
+    session_token = session["sessionToken"]
+
+    device_request_response = httpx.get(
+        f"{gateway_base_url.rstrip('/')}/v2/oidc/device_authorization/{user_code}",
+        headers=headers,
+        timeout=ZITADEL_API_TIMEOUT_SECONDS,
+        **tls_config,
+    )
+    device_request_response.raise_for_status()
+    device_request = device_request_response.json()["deviceAuthorizationRequest"]
+
+    authorization_response = httpx.post(
+        f"{gateway_base_url.rstrip('/')}/v2/oidc/device_authorization/{device_request['id']}",
+        json={
+            "session": {
+                "sessionId": session_id,
+                "sessionToken": session_token,
+            },
+        },
+        headers=headers,
+        timeout=ZITADEL_API_TIMEOUT_SECONDS,
+        **tls_config,
+    )
+    authorization_response.raise_for_status()
+
+
 def poll_device_token(
     *,
     token_endpoint: str,
@@ -203,6 +263,48 @@ def authenticate_authentik_device_flow(
         user_code=device_body["user_code"],
         username=username,
         password=password,
+        tls_config=tls_config,
+    )
+
+    return poll_device_token(
+        token_endpoint=token_endpoint,
+        client_id=client_id,
+        device_code=device_body["device_code"],
+        scope=scope,
+        tls_config=tls_config,
+    )
+
+
+def authenticate_zitadel_device_flow(
+    *,
+    gateway_base_url: str,
+    device_authorization_endpoint: str,
+    token_endpoint: str,
+    client_id: str,
+    scope: str,
+    login_name: str,
+    password: str,
+    admin_token: str,
+    tls_config: HttpxTLSConfig,
+) -> JsonObject:
+    device_response = httpx.post(
+        device_authorization_endpoint,
+        data={
+            "client_id": client_id,
+            "scope": scope,
+        },
+        timeout=30.0,
+        **tls_config,
+    )
+    device_response.raise_for_status()
+    device_body = device_response.json()
+
+    solve_zitadel_device_flow(
+        gateway_base_url=gateway_base_url,
+        user_code=device_body["user_code"],
+        login_name=login_name,
+        password=password,
+        admin_token=admin_token,
         tls_config=tls_config,
     )
 

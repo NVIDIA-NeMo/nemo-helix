@@ -1,0 +1,37 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- if .Values.workloadTokenTls.create }}
+{{- $secretName := required "workloadTokenTls.secretName is required" .Values.workloadTokenTls.secretName -}}
+{{- $durationDays := .Values.workloadTokenTls.durationDays | int -}}
+{{- $nemoPlatformValues := index .Values "nemo-platform" -}}
+{{- $serviceName := .Values.integration.nemoPlatform.envoyServiceName -}}
+{{- $serviceNamespace := $nemoPlatformValues.envoyProxy.serviceNamespace | default .Release.Namespace -}}
+{{- $serviceDnsNames := (include "nemo-platform-zitadel.serviceDnsNames" (dict "root" . "serviceName" $serviceName "namespace" $serviceNamespace) | fromYaml).names -}}
+{{- $dnsNames := concat $serviceDnsNames (.Values.workloadTokenTls.dnsNames | default (list)) | uniq -}}
+{{- $existingData := include "nemo-platform-zitadel.existingSecretData" (dict "root" . "secretName" $secretName) | fromJson -}}
+{{- $hasExistingTls := and (hasKey $existingData "tls.crt") (hasKey $existingData "tls.key") (hasKey $existingData "ca.crt") -}}
+{{- $ca := genCA (printf "%s-ca" $secretName) $durationDays -}}
+{{- $cert := genSignedCert $secretName .Values.workloadTokenTls.ipAddresses $dnsNames $durationDays $ca -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ include "nemo-platform-zitadel.namespace" . }}
+  labels:
+    app.kubernetes.io/component: workload-token-tls
+    {{- include "nemo-platform-zitadel.labels" . | nindent 4 }}
+type: kubernetes.io/tls
+data:
+{{- if $hasExistingTls }}
+  tls.crt: {{ index $existingData "tls.crt" | quote }}
+  tls.key: {{ index $existingData "tls.key" | quote }}
+  ca.crt: {{ index $existingData "ca.crt" | quote }}
+{{- else }}
+  tls.crt: {{ $cert.Cert | b64enc | quote }}
+  tls.key: {{ $cert.Key | b64enc | quote }}
+  ca.crt: {{ $ca.Cert | b64enc | quote }}
+{{- end }}
+{{- end }}

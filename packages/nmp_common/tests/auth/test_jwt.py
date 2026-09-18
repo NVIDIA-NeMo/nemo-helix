@@ -4,6 +4,7 @@
 """Unit tests for JWT validation."""
 
 import json
+import os
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -113,6 +114,7 @@ class TestTokenClaims:
     [
         (" admins, developers ,, ", ["admins", "developers"]),
         ([" admins ", "", 42, "developers"], ["admins", "developers"]),
+        ({" admins ": {"project": "NeMo"}, "developers": {}, 42: "ignored"}, ["admins", "developers"]),
         (None, []),
     ],
 )
@@ -831,3 +833,577 @@ class TestJWTValidator:
         assert first_claims.subject == "user123"
         assert second_claims.subject == "user123"
         assert fake_client.calls == 1
+
+
+class TestOpaqueTokenIntrospection:
+    """Tests for RFC 7662 introspection fallback on non-JWT (opaque) access tokens."""
+
+    @staticmethod
+    def _validator(**oidc_overrides) -> JWTValidator:
+        config = OIDCConfig(
+            enabled=True,
+            issuer="https://sso.example.com",
+            client_id="test-client",
+            **oidc_overrides,
+        )
+        auth_cfg = AuthConfig(
+            enabled=True,
+            policy_decision_point_base_url="http://localhost:8181",
+            oidc=config,
+        )
+        return JWTValidator(auth_cfg)
+
+    def test_oidc_config_rejects_inline_introspection_secret(self):
+        """The config schema accepts an env var name, not the introspection secret value."""
+        with pytest.raises(ValueError, match="introspection_client_secret is not supported"):
+            self._validator(introspection_client_secret="s3cret")
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_without_introspection_enabled_returns_none(self):
+        """Default behavior is unchanged: an opaque token is rejected, no introspection call is made."""
+        validator = self._validator()
+
+        with patch.object(http_clients, "shared_async_http_client") as mock_shared_client:
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is None
+        mock_shared_client.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_introspects_and_extracts_claims_when_enabled(self):
+        """An opaque token is resolved via introspection when introspect_opaque_tokens is set."""
+        validator = self._validator(
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+        )
+        introspection_response = {
+            "active": True,
+            "sub": "user123",
+            "email": "user@example.com",
+            "groups": ["admin"],
+            "scope": "openid profile",
+        }
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps(introspection_response).encode("utf-8")
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+
+        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is not None
+        assert result.subject == "user123"
+        assert result.email == "user@example.com"
+        assert result.groups == ["admin"]
+        assert result.scopes == ["openid", "profile"]
+        mock_client.post.assert_called_once()
+        call_args = mock_client.post.call_args
+        assert call_args[0][0] == "https://sso.example.com/introspect"
+        assert call_args[1]["data"] == {
+            "token": "opaque-access-token",
+            "token_type_hint": "access_token",
+        }
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_introspection_reports_inactive_token(self):
+        """An introspection response with active=False is treated as invalid."""
+        validator = self._validator(
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+        )
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps({"active": False}).encode("utf-8")
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+
+        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
+            result = await validator.validate_token("revoked-token")
+
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_invalid_audience_does_not_fall_back_to_introspection(self):
+        """Signed JWT audience failures stay invalid even when opaque introspection is enabled."""
+        validator = self._validator(
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+            audience="expected-audience",
+        )
+
+        with patch.object(validator, "_get_jwks_client") as mock_get_jwks:
+            mock_jwks = MagicMock()
+            mock_signing_key = MagicMock()
+            mock_signing_key.key = "test-key"
+            mock_jwks.get_signing_key_from_jwt = AsyncMock(return_value=mock_signing_key)
+            mock_get_jwks.return_value = mock_jwks
+
+            with (
+                patch("jwt.get_unverified_header", return_value={"alg": "RS256"}),
+                patch("jwt.decode", side_effect=jwt.InvalidAudienceError("Invalid audience")),
+                patch.object(http_clients, "shared_async_http_client") as mock_shared_client,
+            ):
+                result = await validator.validate_token("invalid.audience.token")
+
+        assert result is None
+        mock_shared_client.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_jwt_shaped_opaque_token_introspects_after_jwks_failure(self):
+        """Opaque tokens that parse as JWT-like strings still fall back to introspection."""
+        validator = self._validator(
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+        )
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps({"active": True, "sub": "user123"}).encode("utf-8")
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+
+        with (
+            patch.object(validator, "_get_jwks_client", side_effect=httpx.HTTPError("Connection failed")),
+            patch.object(http_clients, "shared_async_http_client", return_value=mock_client),
+        ):
+            result = await validator.validate_token("opaque.token.value")
+
+        assert result is not None
+        assert result.subject == "user123"
+        mock_client.post.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_introspection_can_use_separate_client_id(self):
+        """A dedicated introspection client id takes precedence over the public OIDC client id."""
+        validator = self._validator(
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+            introspection_client_id="api-client",
+            introspection_client_secret_env_var="OIDC_INTROSPECTION_SECRET",
+        )
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps({"active": True, "sub": "user123"}).encode("utf-8")
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+
+        with (
+            patch.dict(os.environ, {"OIDC_INTROSPECTION_SECRET": "s3cret"}),
+            patch.object(http_clients, "shared_async_http_client", return_value=mock_client),
+        ):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is not None
+        call_args = mock_client.post.call_args
+        assert call_args[1]["auth"] == ("api-client", "s3cret")
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_introspection_rejects_mismatched_audience(self):
+        """An introspected token for a different audience must not be accepted."""
+        validator = self._validator(
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+            audience="nemo-api",
+        )
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps({"active": True, "sub": "user123", "aud": "different-api"}).encode("utf-8")
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+
+        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_introspection_rejects_missing_audience_when_configured(self):
+        """An introspection response with no aud claim must not be accepted when audience is required."""
+        validator = self._validator(
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+            audience="nemo-api",
+        )
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps({"active": True, "sub": "user123"}).encode("utf-8")
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+
+        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_introspection_accepts_matching_string_audience(self):
+        """An introspected token whose aud claim matches the configured audience is accepted."""
+        validator = self._validator(
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+            audience="nemo-api",
+        )
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps({"active": True, "sub": "user123", "aud": "nemo-api"}).encode("utf-8")
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+
+        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is not None
+        assert result.subject == "user123"
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_introspection_accepts_matching_list_audience(self):
+        """An introspected token whose aud claim list contains the configured audience is accepted."""
+        validator = self._validator(
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+            audience="nemo-api",
+        )
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps({"active": True, "sub": "user123", "aud": ["other-api", "nemo-api"]}).encode(
+            "utf-8"
+        )
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+
+        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is not None
+        assert result.subject == "user123"
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_introspection_sends_env_secret_as_basic_auth(self):
+        """A configured introspection secret env var authenticates the request as client_id."""
+        validator = self._validator(
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+            introspection_client_secret_env_var="OIDC_INTROSPECTION_SECRET",
+        )
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps({"active": True, "sub": "user123"}).encode("utf-8")
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+
+        with (
+            patch.dict(os.environ, {"OIDC_INTROSPECTION_SECRET": "s3cret"}),
+            patch.object(http_clients, "shared_async_http_client", return_value=mock_client),
+        ):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is not None
+        call_args = mock_client.post.call_args
+        assert call_args[1]["auth"] == ("test-client", "s3cret")
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_introspection_missing_secret_env_var_fails_closed(self, caplog):
+        """A configured introspection secret env var must exist before introspection runs."""
+        validator = self._validator(
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+            introspection_client_secret_env_var="OIDC_INTROSPECTION_SECRET",
+        )
+
+        mock_client = AsyncMock()
+
+        with (
+            caplog.at_level("WARNING"),
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(http_clients, "shared_async_http_client", return_value=mock_client) as mock_shared_client,
+        ):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is None
+        mock_shared_client.assert_not_called()
+        mock_client.post.assert_not_called()
+        assert any(
+            "configured introspection client secret env var is not set or empty" in r.message for r in caplog.records
+        )
+        assert all("OIDC_INTROSPECTION_SECRET" not in r.message for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_introspection_falls_back_to_discovery(self):
+        """When no introspection_endpoint override is set, it is discovered like jwks_uri."""
+        validator = self._validator(introspect_opaque_tokens=True)
+
+        discovery_doc = {
+            "issuer": "https://sso.example.com",
+            "introspection_endpoint": "https://sso.example.com/discovered-introspect",
+        }
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps({"active": True, "sub": "user123"}).encode("utf-8")
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+
+        with patch.object(
+            validator,
+            "_discover_oidc_config",
+            new=AsyncMock(return_value=discovery_doc),
+        ):
+            with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
+                result = await validator.validate_token("opaque-access-token")
+
+        assert result is not None
+        call_args = mock_client.post.call_args
+        assert call_args[0][0] == "https://sso.example.com/discovered-introspect"
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_introspection_without_endpoint_returns_none(self):
+        """introspect_opaque_tokens without a resolvable endpoint fails closed."""
+        validator = self._validator(introspect_opaque_tokens=True)
+
+        with patch.object(
+            validator,
+            "_discover_oidc_config",
+            new=AsyncMock(return_value={"issuer": "https://sso.example.com"}),
+        ):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is None
+
+
+class TestOpaqueTokenUserInfoResolution:
+    """Tests for OIDC UserInfo fallback on non-JWT (opaque) access tokens."""
+
+    @staticmethod
+    def _validator(**oidc_overrides) -> JWTValidator:
+        config = OIDCConfig(
+            enabled=True,
+            issuer="https://sso.example.com",
+            client_id="test-client",
+            **oidc_overrides,
+        )
+        auth_cfg = AuthConfig(
+            enabled=True,
+            policy_decision_point_base_url="http://localhost:8181",
+            oidc=config,
+        )
+        return JWTValidator(auth_cfg)
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_without_userinfo_enabled_returns_none(self):
+        """Default behavior is unchanged: an opaque token is rejected, no UserInfo call is made."""
+        validator = self._validator()
+
+        with patch.object(http_clients, "shared_async_http_client") as mock_shared_client:
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is None
+        mock_shared_client.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_resolves_via_userinfo_when_enabled(self):
+        """An opaque token is resolved via UserInfo when resolve_opaque_tokens_via_userinfo is set."""
+        validator = self._validator(
+            resolve_opaque_tokens_via_userinfo=True,
+            userinfo_endpoint="https://sso.example.com/userinfo",
+        )
+        userinfo_response = {
+            "sub": "user123",
+            "email": "user@example.com",
+            "groups": ["admin"],
+        }
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps(userinfo_response).encode("utf-8")
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is not None
+        assert result.subject == "user123"
+        assert result.email == "user@example.com"
+        assert result.groups == ["admin"]
+        mock_client.get.assert_called_once()
+        call_args = mock_client.get.call_args
+        assert call_args[0][0] == "https://sso.example.com/userinfo"
+        assert call_args[1]["headers"] == {"Authorization": "Bearer opaque-access-token"}
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_resolved_via_userinfo_has_no_scopes(self, caplog):
+        """UserInfo responses carry no scope claim (per OIDC Core 5.3 and Starfleet's docs), so
+        resolved claims have empty scopes and a warning is logged flagging that OAuth-scope
+        enforcement is skipped for the request (RBAC/permissions still apply separately)."""
+        validator = self._validator(
+            resolve_opaque_tokens_via_userinfo=True,
+            userinfo_endpoint="https://sso.example.com/userinfo",
+        )
+        userinfo_response = {"sub": "user123", "email": "user@example.com"}
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps(userinfo_response).encode("utf-8")
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        with (
+            caplog.at_level("WARNING"),
+            patch.object(http_clients, "shared_async_http_client", return_value=mock_client),
+        ):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is not None
+        assert result.scopes == []
+        assert any("scope enforcement is skipped" in record.message for record in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_userinfo_rejects_401(self):
+        """A 401 from the UserInfo endpoint (invalid/expired/revoked token) is treated as invalid."""
+        validator = self._validator(
+            resolve_opaque_tokens_via_userinfo=True,
+            userinfo_endpoint="https://sso.example.com/userinfo",
+        )
+
+        mock_request = httpx.Request("GET", "https://sso.example.com/userinfo")
+        mock_response = httpx.Response(401, request=mock_request)
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
+            result = await validator.validate_token("revoked-token")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_userinfo_propagates_non_401_errors(self):
+        """A non-401 error status from the UserInfo endpoint is not swallowed as an invalid token."""
+        validator = self._validator(
+            resolve_opaque_tokens_via_userinfo=True,
+            userinfo_endpoint="https://sso.example.com/userinfo",
+        )
+
+        mock_request = httpx.Request("GET", "https://sso.example.com/userinfo")
+        mock_response = httpx.Response(500, request=mock_request)
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_userinfo_falls_back_to_discovery(self):
+        """When no userinfo_endpoint override is set, it is discovered like jwks_uri."""
+        validator = self._validator(resolve_opaque_tokens_via_userinfo=True)
+
+        discovery_doc = {
+            "issuer": "https://sso.example.com",
+            "userinfo_endpoint": "https://sso.example.com/discovered-userinfo",
+        }
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps({"sub": "user123"}).encode("utf-8")
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        with patch.object(
+            validator,
+            "_discover_oidc_config",
+            new=AsyncMock(return_value=discovery_doc),
+        ):
+            with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
+                result = await validator.validate_token("opaque-access-token")
+
+        assert result is not None
+        call_args = mock_client.get.call_args
+        assert call_args[0][0] == "https://sso.example.com/discovered-userinfo"
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_userinfo_without_endpoint_returns_none(self):
+        """resolve_opaque_tokens_via_userinfo without a resolvable endpoint fails closed."""
+        validator = self._validator(resolve_opaque_tokens_via_userinfo=True)
+
+        with patch.object(
+            validator,
+            "_discover_oidc_config",
+            new=AsyncMock(return_value={"issuer": "https://sso.example.com"}),
+        ):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_userinfo_takes_priority_over_introspection_when_both_enabled(self):
+        """When both fallbacks are enabled, UserInfo is tried and introspection is not."""
+        validator = self._validator(
+            resolve_opaque_tokens_via_userinfo=True,
+            userinfo_endpoint="https://sso.example.com/userinfo",
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+        )
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps({"sub": "user123"}).encode("utf-8")
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_response
+
+        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is not None
+        assert result.subject == "user123"
+        mock_client.get.assert_called_once()
+        mock_client.post.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_userinfo_skipped_in_favor_of_introspection_when_audience_configured(self):
+        """UserInfo can't be checked against oidc.audience, so a configured audience routes
+        opaque-token validation through introspection even when UserInfo is also enabled."""
+        validator = self._validator(
+            resolve_opaque_tokens_via_userinfo=True,
+            userinfo_endpoint="https://sso.example.com/userinfo",
+            introspect_opaque_tokens=True,
+            introspection_endpoint="https://sso.example.com/introspect",
+            audience="nemo-api",
+        )
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.content = json.dumps({"active": True, "sub": "user123", "aud": "nemo-api"}).encode("utf-8")
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+
+        with patch.object(http_clients, "shared_async_http_client", return_value=mock_client):
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is not None
+        assert result.subject == "user123"
+        mock_client.post.assert_called_once()
+        mock_client.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_opaque_token_rejected_when_only_userinfo_enabled_and_audience_configured(self):
+        """With only UserInfo enabled and an audience configured, an opaque token is rejected
+        rather than validated without audience enforcement."""
+        validator = self._validator(
+            resolve_opaque_tokens_via_userinfo=True,
+            userinfo_endpoint="https://sso.example.com/userinfo",
+            audience="nemo-api",
+        )
+
+        with patch.object(http_clients, "shared_async_http_client") as mock_shared_client:
+            result = await validator.validate_token("opaque-access-token")
+
+        assert result is None
+        mock_shared_client.assert_not_called()

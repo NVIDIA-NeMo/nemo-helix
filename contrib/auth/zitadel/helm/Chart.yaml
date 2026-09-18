@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: v2
+name: nemo-platform-zitadel
+description: Single-chart ZITADEL Kubernetes reference deployment for NeMo Platform auth-idp tests
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+dependencies:
+  - name: zitadel
+    version: 10.0.6
+    repository: https://charts.zitadel.com
+  - name: nemo-platform
+    version: 0.0.0
+    repository: file://../../../../k8s/helm

@@ -1,6 +1,76 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+$defs:
+  generic_token_grant:
+    type: object
+    required:
+      - grant_type
+      - client_id
+      - scope
+    anyOf:
+      - required:
+          - password
+      - required:
+          - password_env_var
+      - required:
+          - client_secret
+      - required:
+          - client_secret_env_var
+    properties:
+      grant_type:
+        type: string
+      client_id:
+        type: string
+      client_secret:
+        type: string
+      client_secret_env_var:
+        type: string
+      client_auth_method:
+        type: string
+        enum:
+          - client_secret_basic
+          - client_secret_post
+      username:
+        type: string
+      expected_subject:
+        type: string
+      password:
+        type: string
+      password_env_var:
+        type: string
+      scope:
+        type: string
+  password_token_grant:
+    type: object
+    required:
+      - grant_type
+      - client_id
+      - username
+      - scope
+    oneOf:
+      - required:
+          - password
+      - required:
+          - password_env_var
+    properties:
+      grant_type:
+        type: string
+      client_id:
+        type: string
+      client_secret:
+        type: string
+      username:
+        type: string
+      expected_subject:
+        type: string
+      password:
+        type: string
+      password_env_var:
+        type: string
+      scope:
+        type: string
+
 type: object
 required:
   - provider
@@ -47,12 +117,18 @@ properties:
     type: object
     required:
       - username
-      - password
       - expected_email
+    oneOf:
+      - required:
+          - password
+      - required:
+          - password_env_var
     properties:
       username:
         type: string
       password:
+        type: string
+      password_env_var:
         type: string
       expected_email:
         type: string
@@ -74,94 +150,29 @@ properties:
     type: object
     required:
       - token_endpoint
-      - workload_provider_password_grant
     properties:
       token_endpoint:
         type: string
-      e2e_setup_password_grant:
-        type: object
+      e2e_setup_grant:
+        allOf:
+          - $ref: "#/$defs/generic_token_grant"
         description: >-
           E2E test harness only. Do not use this grant as a production user,
           CLI, or workload authentication pattern.
-        required:
-          - grant_type
-          - client_id
-          - username
-          - scope
-        oneOf:
-          - required:
-              - password
-          - required:
-              - password_env_var
-        properties:
-          grant_type:
-            type: string
-          client_id:
-            type: string
-          client_secret:
-            type: string
-          username:
-            type: string
-          password:
-            type: string
-          password_env_var:
-            type: string
-          scope:
-            type: string
+      e2e_setup_password_grant:
+        allOf:
+          - $ref: "#/$defs/password_token_grant"
+        description: >-
+          E2E test harness only. Do not use this grant as a production user,
+          CLI, or workload authentication pattern.
+      interactive_user_grant:
+        $ref: "#/$defs/generic_token_grant"
       interactive_user_password_grant:
-        type: object
-        required:
-          - grant_type
-          - client_id
-          - username
-          - scope
-        oneOf:
-          - required:
-              - password
-          - required:
-              - password_env_var
-        properties:
-          grant_type:
-            type: string
-          client_id:
-            type: string
-          client_secret:
-            type: string
-          username:
-            type: string
-          password:
-            type: string
-          password_env_var:
-            type: string
-          scope:
-            type: string
+        $ref: "#/$defs/password_token_grant"
+      workload_provider_grant:
+        $ref: "#/$defs/generic_token_grant"
       workload_provider_password_grant:
-        type: object
-        required:
-          - grant_type
-          - client_id
-          - username
-          - scope
-        oneOf:
-          - required:
-              - password
-          - required:
-              - password_env_var
-        properties:
-          grant_type:
-            type: string
-          client_id:
-            type: string
-          client_secret:
-            type: string
-          username:
-            type: string
-          password:
-            type: string
-          password_env_var:
-            type: string
-          scope:
-            type: string
+        $ref: "#/$defs/password_token_grant"
   healthchecks:
     type: array
   startup_timeouts:

@@ -148,7 +148,7 @@ async def get_auth_discovery(request: Request | None = None) -> AuthDiscoveryRes
             device_authorization_endpoint=(
                 config.oidc.device_authorization_endpoint or discovery.get("device_authorization_endpoint")
             ),
-            userinfo_endpoint=discovery.get("userinfo_endpoint"),
+            userinfo_endpoint=config.oidc.userinfo_endpoint or discovery.get("userinfo_endpoint"),
             client_id=config.oidc.client_id,
             default_scopes=config.oidc.default_scopes,
             scope_prefix=config.oidc.scope_prefix,
