@@ -248,7 +248,7 @@ class Configuration:
     @staticmethod
     def get_global_settings_from_file(yaml_file_path: str) -> dict:
         if not Path(yaml_file_path).is_file():
-            logger.warning("Configuration file not found, using defaults", extra={"path": yaml_file_path})
+            logger.debug("Configuration file not found, using defaults", extra={"path": yaml_file_path})
             return {}
         with open(yaml_file_path, "r") as file:
             try:
