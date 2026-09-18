@@ -141,9 +141,10 @@ def _collect_report_artifacts(
 def _resolve_garak_python() -> list[str]:
     from_env = os.environ.get(GARAK_PYTHON_ENVVAR)
     if from_env:
-        return [from_env]
+        retval = [from_env]
     else:
-        return [os.path.expanduser(DEFAULT_GARAK_PYTHON_LOCAL), os.path.expanduser(DEFAULT_GARAK_PYTHON_APP)]
+        retval = [DEFAULT_GARAK_PYTHON_LOCAL, DEFAULT_GARAK_PYTHON_APP]
+    return [os.path.expanduser(path) for path in retval]
 
 
 _EntityT = TypeVar("_EntityT", AuditConfig, AuditTarget)
