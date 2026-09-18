@@ -105,7 +105,7 @@ export const LoraParametersSection = () => {
           <ControlledSwitch
             useControllerProps={{ name: 'automodel.training.lora.merge', control }}
             formFieldProps={{
-              slotLabel: 'Merge weights after training',
+              slotLabel: 'Merge Weights',
               slotInfo:
                 'Merges the adapter into the base model, producing a full-weight checkpoint instead of an adapter.',
               labelPosition: 'left',
@@ -250,7 +250,7 @@ export const LoraParametersSection = () => {
                 <ControlledSwitch
                   useControllerProps={{ name: 'unsloth.training.lora.use_rslora', control }}
                   formFieldProps={{
-                    slotLabel: 'Use rsLoRA (rank-stabilized)',
+                    slotLabel: 'Use rsLoRA',
                     slotInfo:
                       'Rank-stabilized LoRA. Scales by alpha over the square root of rank, which helps at higher ranks.',
                     labelPosition: 'left',
