@@ -27,7 +27,7 @@ export const UserPopover = () => {
   const auth = useAuth();
 
   if (!profile && !TELEMETRY_ENABLED) {
-    return <Avatar fallback="N" />;
+    return null;
   }
 
   return (
