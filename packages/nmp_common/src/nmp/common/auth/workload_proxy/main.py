@@ -38,6 +38,7 @@ import httpx
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
+from nmp.common.auth import Principal
 from nmp.common.controller import Controller, ControllerManager, Loop, TimedLoopWaiter
 
 logger = logging.getLogger(__name__)
@@ -57,8 +58,10 @@ DEFAULT_AUTH_PROXY_PORT = 8090
 
 _READ_TIMEOUT_ENVVAR = "NMP_AUTH_PROXY_READ_TIMEOUT"
 _PRINCIPAL_ID_HEADER = "x-nmp-principal-id"
+_PRINCIPAL_ACCOUNT_ID_HEADER = "x-nmp-actor-account-id"
 _PRINCIPAL_EMAIL_HEADER = "x-nmp-principal-email"
 _PRINCIPAL_GROUPS_HEADER = "x-nmp-principal-groups"
+_PRINCIPAL_ALIASES_HEADER = "x-nmp-actor-aliases"
 _ON_BEHALF_OF_HEADER = "x-nmp-principal-on-behalf-of"
 # Companion metadata for the on-behalf-of principal. The platform derives the
 # delegated user's groups/email from these (Principal.from_headers -> effective_*),
@@ -68,6 +71,8 @@ _ON_BEHALF_OF_HEADER = "x-nmp-principal-on-behalf-of"
 # attacker-chosen groups/email and be evaluated with those, defeating the scoping.
 _ON_BEHALF_OF_EMAIL_HEADER = "x-nmp-principal-on-behalf-of-email"
 _ON_BEHALF_OF_GROUPS_HEADER = "x-nmp-principal-on-behalf-of-groups"
+_ON_BEHALF_OF_ACCOUNT_ID_HEADER = "x-nmp-subject-account-id"
+_ON_BEHALF_OF_ALIASES_HEADER = "x-nmp-subject-aliases"
 
 # Request-header sanitization drops identity, framing, and hop-by-hop metadata:
 # - the workload's own credential / principal / on-behalf-of headers (we set the
@@ -92,11 +97,15 @@ _STRIP_REQUEST_HEADERS = _HOP_BY_HOP_HEADERS | frozenset(
         "content-length",
         "authorization",
         _PRINCIPAL_ID_HEADER,
+        _PRINCIPAL_ACCOUNT_ID_HEADER,
         _PRINCIPAL_EMAIL_HEADER,
         _PRINCIPAL_GROUPS_HEADER,
+        _PRINCIPAL_ALIASES_HEADER,
         _ON_BEHALF_OF_HEADER,
         _ON_BEHALF_OF_EMAIL_HEADER,
         _ON_BEHALF_OF_GROUPS_HEADER,
+        _ON_BEHALF_OF_ACCOUNT_ID_HEADER,
+        _ON_BEHALF_OF_ALIASES_HEADER,
     }
 )
 # We stream the response, so the upstream's framing headers no longer apply.
@@ -135,6 +144,12 @@ def build_app(*, base_url: str, principal: str, on_behalf_of: str | None = None)
     principal's full ServiceSystem reach.
     """
     principal_id = principal if principal.startswith("service:") else f"service:{principal}"
+    principal_context = Principal(
+        id=principal_id,
+        authz_aliases=[principal_id],
+        on_behalf_of=on_behalf_of,
+        on_behalf_of_authz_aliases=[on_behalf_of] if on_behalf_of else [],
+    )
     read_timeout = float(os.environ.get(_READ_TIMEOUT_ENVVAR, "300"))
     timeout = httpx.Timeout(connect=10.0, read=read_timeout, write=60.0, pool=10.0)
     client = httpx.AsyncClient(base_url=base_url, timeout=timeout, follow_redirects=False)
@@ -158,9 +173,7 @@ def build_app(*, base_url: str, principal: str, on_behalf_of: str | None = None)
     )
     async def forward(request: Request, path: str) -> StreamingResponse:
         headers = _sanitized_headers(request.headers, strip=_STRIP_REQUEST_HEADERS)
-        headers[_PRINCIPAL_ID_HEADER] = principal_id
-        if on_behalf_of:
-            headers[_ON_BEHALF_OF_HEADER] = on_behalf_of
+        headers.update({name.lower(): value for name, value in principal_context.get_headers().items()})
         url = httpx.URL(path="/" + path, query=request.url.query.encode("utf-8"))
         # Stream request bodies to keep a co-located caller from forcing the
         # privileged proxy to buffer an unbounded payload in memory.

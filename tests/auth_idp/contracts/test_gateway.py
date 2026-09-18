@@ -55,6 +55,30 @@ def _gateway_get_with_transient_retries(
         time.sleep(min(GATEWAY_TRANSIENT_RETRY_SLEEP_SECONDS, remaining))
 
 
+def _expected_aliases_from_token_claims(claims: dict) -> list[str]:
+    subject = claims.get("sub")
+    assert isinstance(subject, str)
+    expected_aliases = [subject]
+    email = claims.get("email")
+    if isinstance(email, str) and email:
+        expected_aliases.append(email)
+    return expected_aliases
+
+
+def _assert_trusted_identity_headers(
+    response: httpx.Response,
+    *,
+    claims: dict,
+    required_scopes: set[str] | None = None,
+) -> None:
+    expected_aliases = _expected_aliases_from_token_claims(claims)
+    assert response.headers["x-nmp-principal-id"] == expected_aliases[0]
+    assert response.headers["x-nmp-actor-aliases"] == ",".join(expected_aliases)
+    scopes = response.headers.get("x-nmp-scopes", "").split()
+    if required_scopes is not None:
+        assert required_scopes.issubset(scopes)
+
+
 def test_provider_gateway_rejects_unauthenticated_requests(auth_idp_case, auth_idp_runtime):
     require_capability(auth_idp_case, "gateway_authn")
 
@@ -84,6 +108,45 @@ def test_provider_gateway_accepts_e2e_setup_token(auth_idp_case, auth_idp_runtim
     assert response.json()["name"] == auth_idp_workspace
 
 
+def test_provider_gateway_auth_callout_returns_trusted_identity_headers(auth_idp_case, auth_idp_runtime):
+    require_capability(auth_idp_case, "gateway_authn")
+    require_capability(auth_idp_case, "workload_provider_token")
+
+    workload_token = auth_idp_runtime.workload_provider_token()
+
+    tls_config = runtime_tls_config(auth_idp_runtime)
+    response = _gateway_get_with_transient_retries(
+        f"{auth_idp_runtime.gateway_base_url}/apis/auth/ext-authz/apis/entities/v2/workspaces",
+        headers={"Authorization": f"Bearer {workload_token.access_token}"},
+        tls_config=tls_config,
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_trusted_identity_headers(response, claims=workload_token.claims)
+
+
+def test_provider_gateway_auth_callout_returns_exchanged_workload_headers(auth_idp_case, auth_idp_runtime):
+    require_capability(auth_idp_case, "gateway_authn")
+    require_capability(auth_idp_case, "workload_subject_token")
+    require_capability(auth_idp_case, "workload_token_exchange")
+
+    workload_token = auth_idp_runtime.exchange_workload_token(auth_idp_runtime.workload_subject_token())
+
+    tls_config = runtime_tls_config(auth_idp_runtime)
+    response = _gateway_get_with_transient_retries(
+        f"{auth_idp_runtime.gateway_base_url}/apis/auth/ext-authz/apis/entities/v2/workspaces",
+        headers={"Authorization": f"Bearer {workload_token.access_token}"},
+        tls_config=tls_config,
+    )
+
+    assert response.status_code == 200, response.text
+    _assert_trusted_identity_headers(
+        response,
+        claims=workload_token.claims,
+        required_scopes={"openid", "groups"},
+    )
+
+
 def test_provider_gateway_rejects_spoofed_principal_headers(auth_idp_case, auth_idp_runtime):
     require_capability(auth_idp_case, "spoofed_header_rejection")
     require_capability(auth_idp_case, "workload_provider_token")
@@ -94,7 +157,16 @@ def test_provider_gateway_rejects_spoofed_principal_headers(auth_idp_case, auth_
     headers = {
         "Authorization": f"Bearer {workload_provider_token.access_token}",
         "X-NMP-Principal-Id": "service:bootstrap",
+        "X-NMP-Actor-Account-Id": "account-attacker",
+        "X-NMP-Actor-Aliases": "service:bootstrap,attacker@example.com",
         "X-NMP-Principal-Email": "attacker@example.com",
+        "X-NMP-Principal-Groups": "platform-admins",
+        "X-NMP-Principal-On-Behalf-Of": "user:attacker",
+        "X-NMP-Principal-On-Behalf-Of-Email": "attacker@example.com",
+        "X-NMP-Principal-On-Behalf-Of-Groups": "platform-admins",
+        "X-NMP-Subject-Account-Id": "account-attacker-subject",
+        "X-NMP-Subject-Aliases": "user:attacker,attacker@example.com",
+        "X-NMP-Scopes": "platform:write",
     }
     tls_config = runtime_tls_config(auth_idp_runtime)
 

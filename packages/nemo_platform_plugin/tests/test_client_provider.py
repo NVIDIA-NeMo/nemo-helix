@@ -146,6 +146,7 @@ class TestDefaultNemoClientProvider:
         assert client.base_url == "http://test:9090"
         assert client._default_headers["X-NMP-Principal-Id"] == "service:evaluator"
         assert client._default_headers["X-NMP-Internal"] == "true"
+        assert client._default_headers["X-NMP-Actor-Aliases"] == "service:evaluator"
 
     def test_sync_workspace_passthrough(self, monkeypatch):
         monkeypatch.delenv("NMP_PRINCIPAL", raising=False)
@@ -169,6 +170,7 @@ class TestDefaultNemoClientProvider:
         assert client.base_url == "http://test:9090"
         assert client._default_headers["X-NMP-Principal-Id"] == "service:evaluator"
         assert client._default_headers["X-NMP-Internal"] == "true"
+        assert client._default_headers["X-NMP-Actor-Aliases"] == "service:evaluator"
 
     def test_async_workspace_passthrough(self, monkeypatch):
         monkeypatch.delenv("NMP_PRINCIPAL", raising=False)

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -22,7 +23,7 @@ def test_render_e2e_config_for_docker_preserves_container_paths(tmp_path) -> Non
         "files": {"default_storage_config": {"type": "local", "path": "/data/files"}},
     }
 
-    rendered = services_pool._render_e2e_config_for_backend(config, tmp_path, {"backend": "docker"})
+    rendered = services_pool._render_e2e_config_for_backend(config, tmp_path, {"backend": "docker"}, "abc123")
 
     assert rendered["jobs"]["executors"][0]["config"]["working_directory"] == "/data/subprocess-jobs"
     assert rendered["files"]["default_storage_config"]["path"] == "/data/files"
@@ -41,7 +42,7 @@ def test_render_e2e_config_for_subprocess_rewrites_instance_paths(tmp_path) -> N
         "files": {"default_storage_config": {"type": "local", "path": ".tmp/e2e/files"}},
     }
 
-    rendered = services_pool._render_e2e_config_for_backend(config, tmp_path, {"backend": "subprocess"})
+    rendered = services_pool._render_e2e_config_for_backend(config, tmp_path, {"backend": "subprocess"}, "abc123")
 
     assert rendered["jobs"]["executors"][0]["config"]["working_directory"] == str(tmp_path / "subprocess-jobs")
     assert rendered["files"]["default_storage_config"]["path"] == str(tmp_path / "files")
@@ -88,7 +89,7 @@ def test_render_e2e_config_for_docker_compose_preserves_container_paths(tmp_path
         "files": {"default_storage_config": {"type": "local", "path": "/data/files"}},
     }
 
-    rendered = services_pool._render_e2e_config_for_backend(config, tmp_path, {"backend": "docker_compose"})
+    rendered = services_pool._render_e2e_config_for_backend(config, tmp_path, {"backend": "docker_compose"}, "abc123")
 
     assert rendered["jobs"]["executors"][0]["config"]["working_directory"] == "/data/subprocess-jobs"
     assert rendered["files"]["default_storage_config"]["path"] == "/data/files"
@@ -403,11 +404,40 @@ def test_start_services_docker_compose_allows_fixed_dynamic_ports_with_reuse(tmp
     assert services.compose_project_name == "authentik-e2e-reuse"
 
 
+def test_docker_compose_generated_config_uses_repo_cache(tmp_path, tmp_path_factory, monkeypatch) -> None:
+    monkeypatch.setattr(services_pool, "_E2E_REPO_ROOT", tmp_path)
+    pool = services_pool.E2EServicesPool()
+    pool.bind_tmp_path_factory(tmp_path_factory)
+    state = services_pool.ModuleConfigState(
+        module_id="tests/test_compose.py",
+        key=services_pool.ServicesPoolKey(config_hash="composehash"),
+        config_path=None,
+        config_data={"auth": {"enabled": True}},
+        harness_config={
+            "backend": "docker_compose",
+            "compose_file": "compose.yaml",
+            "service_url": "http://127.0.0.1:38080",
+            "lifecycle": "fresh",
+        },
+        config_layers=(),
+        auth_enabled=True,
+    )
+
+    materialized = pool._materialize_config_path(state)
+
+    assert materialized.config_path is not None
+    assert materialized.config_path.is_file()
+    assert materialized.config_path.is_relative_to(tmp_path / ".pytest_cache" / "e2e-services")
+    assert services_pool.yaml.safe_load(materialized.config_path.read_text(encoding="utf-8")) == {
+        "auth": {"enabled": True}
+    }
+
+
 def test_release_for_module_clears_active_binding_while_shared_service_remains(tmp_path) -> None:
     pool = services_pool.E2EServicesPool()
     key = services_pool.ServicesPoolKey(config_hash="shared")
-    module_a = SimpleNamespace(nodeid="tests/test_a.py")
-    module_b = SimpleNamespace(nodeid="tests/test_b.py")
+    module_a = cast(pytest.Module, SimpleNamespace(nodeid="tests/test_a.py"))
+    module_b = cast(pytest.Module, SimpleNamespace(nodeid="tests/test_b.py"))
 
     for module in (module_a, module_b):
         pool._module_states[module.nodeid] = services_pool.ModuleConfigState(
@@ -433,14 +463,16 @@ def test_release_for_module_clears_active_binding_while_shared_service_remains(t
     pool.release_for_module(module_a)
 
     assert pool.describe_active_module_binding(module_a.nodeid) is None
-    assert pool.describe_active_module_binding(module_b.nodeid)["service_url"] == "http://127.0.0.1:8080"
+    module_b_binding = pool.describe_active_module_binding(module_b.nodeid)
+    assert module_b_binding is not None
+    assert module_b_binding["service_url"] == "http://127.0.0.1:8080"
 
 
 def test_acquire_for_module_reregisters_released_owner_before_next_release(tmp_path, monkeypatch) -> None:
     pool = services_pool.E2EServicesPool()
     key = services_pool.ServicesPoolKey(config_hash="shared")
-    module_a = SimpleNamespace(nodeid="tests/test_a.py")
-    module_b = SimpleNamespace(nodeid="tests/test_b.py")
+    module_a = cast(pytest.Module, SimpleNamespace(nodeid="tests/test_a.py"))
+    module_b = cast(pytest.Module, SimpleNamespace(nodeid="tests/test_b.py"))
     terminated = []
 
     for module in (module_a, module_b):
@@ -471,7 +503,9 @@ def test_acquire_for_module_reregisters_released_owner_before_next_release(tmp_p
 
     assert reacquired is running_services
     assert terminated == []
-    assert pool.describe_active_module_binding(module_a.nodeid)["service_url"] == "http://127.0.0.1:8080"
+    module_a_binding = pool.describe_active_module_binding(module_a.nodeid)
+    assert module_a_binding is not None
+    assert module_a_binding["service_url"] == "http://127.0.0.1:8080"
 
 
 def test_describe_active_module_binding_ignores_stale_active_key() -> None:

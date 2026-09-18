@@ -576,17 +576,27 @@ def _async_platform() -> AsyncNeMoPlatform:
 
 _SDK_IDENTITY_HEADERS = {
     "X-NMP-Principal-Id": "service:evaluator",
+    "X-NMP-Actor-Account-Id": "account-service",
+    "X-NMP-Actor-Aliases": "service:evaluator",
     "X-NMP-Principal-On-Behalf-Of": "user-1",
     "X-NMP-Principal-On-Behalf-Of-Email": "user@corp.test",  # PII - must stay in-platform
     "X-NMP-Internal": "true",
+    "X-NMP-Subject-Account-Id": "account-user",
+    "X-NMP-Subject-Aliases": "user-1,user@corp.test",
+    "X-NMP-Scopes": "platform:read evaluator:write",
     "X-NMP-Trace-Id": "must-not-forward",  # non-identity X-NMP-* must be dropped
     "Authorization": "Bearer super-secret",  # bearer must never reach any endpoint
 }
 _FORWARDED_IDENTITY_HEADERS = {
     "X-NMP-Principal-Id": "service:evaluator",
+    "X-NMP-Actor-Account-Id": "account-service",
+    "X-NMP-Actor-Aliases": "service:evaluator",
     "X-NMP-Principal-On-Behalf-Of": "user-1",
     "X-NMP-Principal-On-Behalf-Of-Email": "user@corp.test",
     "X-NMP-Internal": "true",
+    "X-NMP-Subject-Account-Id": "account-user",
+    "X-NMP-Subject-Aliases": "user-1,user@corp.test",
+    "X-NMP-Scopes": "platform:read evaluator:write",
 }
 
 

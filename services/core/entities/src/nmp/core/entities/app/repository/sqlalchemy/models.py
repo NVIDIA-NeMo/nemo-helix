@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from nmp.core.entities.entities import Entity, Workspace, WorkspaceDeletionStage
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.engine.default import DefaultExecutionContext
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -178,3 +178,75 @@ class DBEntity(Base):
             updated_by=self.updated_by,
             db_version=self.db_version,
         )
+
+
+class DBAccount(Base):
+    """Stable account row for authorization identity resolution."""
+
+    __tablename__ = "accounts"
+
+    id: Mapped[str] = mapped_column(
+        String(255),
+        primary_key=True,
+        comment="Stable account identifier",
+    )
+    type: Mapped[str] = mapped_column(String(32), nullable=False, comment="Account type: user or service")
+    link_key: Mapped[Optional[str]] = mapped_column(
+        String(512),
+        nullable=True,
+        comment="Optional explicit account-linking key; not used for automatic email linking",
+    )
+    display_name: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    primary_email: Mapped[Optional[str]] = mapped_column(String(320), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", server_default="active")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, server_default=func.now(), onupdate=_utcnow, nullable=False
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_accounts_active_link_key",
+            "link_key",
+            unique=True,
+            sqlite_where=(link_key.isnot(None) & (status == "active")),
+            postgresql_where=(link_key.isnot(None) & (status == "active")),
+        ),
+        Index("idx_accounts_status", "status"),
+        Index("idx_accounts_type", "type"),
+    )
+
+
+class DBAccountIdentity(Base):
+    """Issuer/subject identity linked to a stable account."""
+
+    __tablename__ = "account_identities"
+
+    id: Mapped[str] = mapped_column(
+        String(255),
+        primary_key=True,
+        comment="Stable account identity row identifier",
+    )
+    account_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    issuer: Mapped[str] = mapped_column(String(512), nullable=False)
+    subject: Mapped[str] = mapped_column(String(512), nullable=False)
+    subject_claim: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", server_default="active")
+    linked_via: Mapped[str] = mapped_column(String(64), nullable=False)
+    linked_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    linked_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, server_default=func.now(), nullable=False)
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    link_key_claim_at_link_time: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    link_key_value_at_link_time: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    claims_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    __table_args__ = (
+        UniqueConstraint("issuer", "subject", name="uq_account_identities_issuer_subject"),
+        Index("idx_account_identities_account_id", "account_id"),
+        Index("idx_account_identities_status", "status"),
+    )

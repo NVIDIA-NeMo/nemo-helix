@@ -498,8 +498,10 @@ class TestGetSdkOnBehalfOf:
             base_sdk,
             Principal(
                 id="user@example.com",
+                account_id="account-user",
                 email="user@example.com",
                 groups=["workspace-editors", "ml-team"],
+                authz_aliases=["legacy-user", "user@example.com"],
             ),
         )
 
@@ -507,6 +509,8 @@ class TestGetSdkOnBehalfOf:
         assert delegated_sdk.default_headers["X-NMP-Principal-On-Behalf-Of"] == "user@example.com"
         assert delegated_sdk.default_headers["X-NMP-Principal-On-Behalf-Of-Email"] == "user@example.com"
         assert delegated_sdk.default_headers["X-NMP-Principal-On-Behalf-Of-Groups"] == "workspace-editors,ml-team"
+        assert delegated_sdk.default_headers["X-NMP-Subject-Account-Id"] == "account-user"
+        assert delegated_sdk.default_headers["X-NMP-Subject-Aliases"] == "legacy-user,user@example.com"
 
     def test_preserves_original_sdk(self):
         """Test that get_sdk_on_behalf_of doesn't modify the original SDK."""

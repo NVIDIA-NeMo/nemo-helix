@@ -148,16 +148,24 @@ def _on_behalf_of_headers(principal: dict[str, Any]) -> dict[str, str]:
         effective_id = principal["on_behalf_of"]
         effective_email = principal.get("on_behalf_of_email")
         effective_groups = principal.get("on_behalf_of_groups") or []
+        effective_account_id = principal.get("on_behalf_of_account_id")
+        effective_aliases = principal.get("on_behalf_of_authz_aliases") or []
     else:
         effective_id = principal["id"]
         effective_email = principal.get("email")
         effective_groups = principal.get("groups") or []
+        effective_account_id = principal.get("account_id")
+        effective_aliases = principal.get("authz_aliases") or []
 
     headers: dict[str, str] = {"X-NMP-Principal-On-Behalf-Of": effective_id}
     if effective_email:
         headers["X-NMP-Principal-On-Behalf-Of-Email"] = effective_email
     if effective_groups:
         headers["X-NMP-Principal-On-Behalf-Of-Groups"] = ",".join(effective_groups)
+    if effective_account_id:
+        headers["X-NMP-Subject-Account-Id"] = effective_account_id
+    if effective_aliases:
+        headers["X-NMP-Subject-Aliases"] = ",".join(effective_aliases)
     return headers
 
 
@@ -183,6 +191,7 @@ class DefaultSDKProvider:
         headers: dict[str, str] = {
             "X-NMP-Principal-Id": f"service:{service_name}",
             _INTERNAL_REQUEST_HEADER: "true",
+            "X-NMP-Actor-Aliases": f"service:{service_name}",
         }
 
         principal = _read_principal_from_env()
@@ -212,6 +221,7 @@ class DefaultSDKProvider:
         headers: dict[str, str] = {
             "X-NMP-Principal-Id": f"service:{service_name}",
             _INTERNAL_REQUEST_HEADER: "true",
+            "X-NMP-Actor-Aliases": f"service:{service_name}",
         }
 
         principal = _read_principal_from_env()
@@ -276,10 +286,15 @@ class DefaultSDKProvider:
 
         if as_service is not None:
             headers["X-NMP-Principal-Id"] = f"service:{as_service}"
+            headers["X-NMP-Actor-Aliases"] = f"service:{as_service}"
         else:
             principal = _read_principal_from_env()
             if principal is not None:
                 headers["X-NMP-Principal-Id"] = principal["id"]
+                if principal.get("account_id"):
+                    headers["X-NMP-Actor-Account-Id"] = principal["account_id"]
+                if principal.get("authz_aliases"):
+                    headers["X-NMP-Actor-Aliases"] = ",".join(principal["authz_aliases"])
                 if principal.get("email"):
                     headers["X-NMP-Principal-Email"] = principal["email"]
                 if principal.get("groups"):
@@ -290,6 +305,8 @@ class DefaultSDKProvider:
         if on_behalf_of is not None:
             headers.pop("X-NMP-Principal-On-Behalf-Of-Email", None)
             headers.pop("X-NMP-Principal-On-Behalf-Of-Groups", None)
+            headers.pop("X-NMP-Subject-Account-Id", None)
+            headers.pop("X-NMP-Subject-Aliases", None)
             headers["X-NMP-Principal-On-Behalf-Of"] = on_behalf_of
 
         return headers
