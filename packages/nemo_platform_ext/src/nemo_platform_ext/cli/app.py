@@ -11,7 +11,11 @@ from typing import TYPE_CHECKING, Annotated, cast
 
 import typer
 
-from nemo_platform_ext.cli.commands.api import API_TOP_LEVEL_ENTRIES
+try:
+    from nemo_platform_ext.cli.commands.api import API_TOP_LEVEL_ENTRIES
+except ImportError:
+    # All former API groups are now plugin-hosted; no generated api module remains.
+    API_TOP_LEVEL_ENTRIES = ()
 from nemo_platform_ext.cli.commands.manifest_registry import TOP_LEVEL_ENTRIES
 from nemo_platform_ext.cli.core.help_formatter import HELP_OPTION_NAMES
 from nemo_platform_ext.cli.core.lazy_load import (

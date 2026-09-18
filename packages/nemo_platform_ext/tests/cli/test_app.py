@@ -10,8 +10,7 @@ import nemo_platform
 import pytest
 import typer
 from click.testing import CliRunner as ClickCliRunner
-from nemo_platform_ext.cli.app import app
-from nemo_platform_ext.cli.commands.api import API_TOP_LEVEL_ENTRIES
+from nemo_platform_ext.cli.app import API_TOP_LEVEL_ENTRIES, app
 from nemo_platform_ext.cli.commands.manifest_registry import TOP_LEVEL_ENTRIES
 from nemo_platform_ext.cli.core.lazy_load import (
     ManifestBackedNmpGroup,
