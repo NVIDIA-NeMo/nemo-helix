@@ -21,13 +21,23 @@ import base64
 import json
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
 from nemo_helix_ext.client.tls import httpx_tls_config_from_env
 
 DEFAULT_OAUTH_SCOPES = "openid profile email offline_access"
+BearerTokenSource = Literal["access_token", "id_token"]
+
+
+def parse_bearer_token_source(value: object) -> BearerTokenSource:
+    """Validate a bearer-token response field received from discovery."""
+    if value == "access_token":
+        return "access_token"
+    if value == "id_token":
+        return "id_token"
+    raise ValueError("OIDC bearer_token_source must be 'access_token' or 'id_token'")
 
 
 class AuthError(Exception):
@@ -150,6 +160,11 @@ class NHXOIDCConfig:
     workload_token_endpoint: str | None = None
     workload_audience: str | None = None
     workload_scope: str | None = None
+    cli_client_id: str | None = None
+    bearer_token_source: BearerTokenSource = "access_token"
+    device_authorization_requires_device_id: bool = False
+    device_authorization_display_name: str | None = None
+    device_token_request_includes_scope: bool = True
 
 
 def discover_nhx_config(
@@ -172,8 +187,13 @@ def discover_nhx_config(
         auth_enabled=data.get("auth_enabled", False),
         issuer=oidc.get("issuer"),
         client_id=oidc.get("client_id"),
+        cli_client_id=oidc.get("cli_client_id"),
+        bearer_token_source=parse_bearer_token_source(oidc.get("bearer_token_source", "access_token")),
         token_endpoint=oidc.get("token_endpoint"),
         device_authorization_endpoint=oidc.get("device_authorization_endpoint"),
+        device_authorization_requires_device_id=oidc.get("device_authorization_requires_device_id", False),
+        device_authorization_display_name=oidc.get("device_authorization_display_name"),
+        device_token_request_includes_scope=oidc.get("device_token_request_includes_scope", True),
         default_scopes=oidc.get("default_scopes", DEFAULT_OAUTH_SCOPES),
         scope_prefix=oidc.get("scope_prefix"),
         workload_token_exchange_enabled=oidc.get("workload_token_exchange_enabled", False),

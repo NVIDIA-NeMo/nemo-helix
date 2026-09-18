@@ -117,6 +117,7 @@ class _ProviderCacheKey:
     token_endpoint: str
     client_id: str
     refresh_scope: str | None
+    bearer_token_source: str
     certificate_authority: str | None
 
 
@@ -537,7 +538,7 @@ def resolve_bootstrap(
             # discovery response — not on discovery failures, where the stored
             # token may still be valid and should be used as-is.
             return ResolvedBootstrap(base_url, resolved.workspace, headers, None, client_verify, certificate_authority)
-    except Exception:
+    except httpx.HTTPError:
         logger.debug("Could not discover OIDC settings from %s", base_url, exc_info=True)
         oidc_config = _OIDC_DISCOVERY_FALLBACK
 
@@ -547,7 +548,7 @@ def resolve_bootstrap(
     )
 
     token_endpoint = oidc_config.token_endpoint or ""
-    client_id = oidc_config.client_id or ""
+    client_id = oidc_config.cli_client_id or oidc_config.client_id or ""
     refresh_scope = build_effective_scope(oidc_config.default_scopes, oidc_config.scope_prefix)
 
     # Only share the provider (and enable persistence/locking) when reading
@@ -563,6 +564,7 @@ def resolve_bootstrap(
             token_endpoint=token_endpoint,
             client_id=client_id,
             refresh_scope=refresh_scope,
+            bearer_token_source=oidc_config.bearer_token_source,
             certificate_authority=certificate_authority,
         )
         on_refreshed = _make_config_persister(resolved.context_name, resolved_config_path)
@@ -577,6 +579,7 @@ def resolve_bootstrap(
                 tokens=tokens,
                 refresh_margin_seconds=_TOKEN_REFRESH_MARGIN_SECONDS,
                 refresh_scope=refresh_scope,
+                bearer_token_source=oidc_config.bearer_token_source,
                 certificate_authority=certificate_authority,
                 load_tokens=load_tokens,
                 refresh_lock=refresh_lock,
@@ -591,6 +594,7 @@ def resolve_bootstrap(
             tokens=tokens,
             refresh_margin_seconds=_TOKEN_REFRESH_MARGIN_SECONDS,
             refresh_scope=refresh_scope,
+            bearer_token_source=oidc_config.bearer_token_source,
             certificate_authority=certificate_authority,
         )
 

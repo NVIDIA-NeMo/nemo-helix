@@ -32,6 +32,7 @@ from rich.console import Console
 
 from nemo_helix_ext.auth.helpers import (
     AuthError,
+    BearerTokenSource,
     build_effective_scope,
     decode_jwt_claims,
     discover_nhx_config,
@@ -40,7 +41,7 @@ from nemo_helix_ext.auth.helpers import (
     normalize_scope_prefix,
     validate_requested_scopes_granted,
 )
-from nemo_helix_ext.auth.token_provider import OIDCTokenProvider, TokenSet
+from nemo_helix_ext.auth.token_provider import OIDCTokenProvider, TokenPersistenceError, TokenSet
 from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_ext.cli.core.errors import handle_errors
 from nemo_helix_ext.cli.core.formatters import Column, format_output
@@ -161,6 +162,40 @@ def _runtime_token_source_label() -> str | None:
         return None
 
 
+def _config_backed_token_provider(
+    *,
+    context_name: str,
+    token_endpoint: str,
+    client_id: str,
+    access_token: str,
+    refresh_token: str,
+    refresh_scope: str | None,
+    bearer_token_source: BearerTokenSource,
+    certificate_authority: str | None,
+    refresh_margin_seconds: float = 60,
+) -> OIDCTokenProvider:
+    """Build a provider whose refresh transaction is serialized and persisted."""
+    from nemo_helix_ext.client.bootstrap import (
+        _make_config_persister,
+        _make_config_token_loader,
+        _make_refresh_lock,
+    )
+
+    config_path = Config.get_default_config_path()
+    return OIDCTokenProvider(
+        token_endpoint=token_endpoint,
+        client_id=client_id,
+        tokens=TokenSet.from_access_token(access_token, refresh_token),
+        refresh_scope=refresh_scope,
+        bearer_token_source=bearer_token_source,
+        refresh_margin_seconds=refresh_margin_seconds,
+        certificate_authority=certificate_authority,
+        load_tokens=_make_config_token_loader(context_name, config_path),
+        refresh_lock=_make_refresh_lock(config_path, context_name),
+        on_tokens_refreshed=_make_config_persister(context_name, config_path),
+    )
+
+
 def ensure_valid_token(context: Context, refresh_buffer_seconds: int = 300) -> bool:
     """
     Check if the current token is valid and refresh if needed.
@@ -179,7 +214,6 @@ def ensure_valid_token(context: Context, refresh_buffer_seconds: int = 300) -> b
     """
     from datetime import datetime, timezone
 
-    from nemo_helix_ext.config.config import Config
     from nemo_helix_ext.config.models import OAuthUser
 
     # Only OAuthUser supports token refresh
@@ -214,35 +248,30 @@ def ensure_valid_token(context: Context, refresh_buffer_seconds: int = 300) -> b
     except httpx.HTTPError:
         return exp_dt > now
 
-    if not nhx_config.client_id or not nhx_config.token_endpoint:
+    client_id = nhx_config.cli_client_id or nhx_config.client_id
+    if not client_id or not nhx_config.token_endpoint:
         return exp_dt > now
 
     effective_scope = build_effective_scope(nhx_config.default_scopes, nhx_config.scope_prefix)
 
     try:
-        provider = OIDCTokenProvider(
+        provider = _config_backed_token_provider(
+            context_name=context.context_name,
             token_endpoint=nhx_config.token_endpoint,
-            client_id=nhx_config.client_id,
-            tokens=TokenSet.from_access_token(
-                context.user.token.get_secret_value(),
-                context.user.refresh_token.get_secret_value(),
-            ),
+            client_id=client_id,
+            access_token=context.user.token.get_secret_value(),
+            refresh_token=context.user.refresh_token.get_secret_value(),
             refresh_scope=effective_scope,
+            bearer_token_source=nhx_config.bearer_token_source,
             refresh_margin_seconds=float(refresh_buffer_seconds),
             certificate_authority=context.cluster.certificate_authority,
         )
-        provider.force_refresh()
-
-        config_params: ConfigParams = {
-            "access_token": provider.tokens.access_token,
-        }
-        if provider.tokens.refresh_token:
-            config_params["refresh_token"] = provider.tokens.refresh_token
-
-        Config.write(config_params, context_name=context.context_name)
+        provider.get_access_token()
         typer.echo("[Auto-refreshed expired token]", err=True)
 
         return True
+    except TokenPersistenceError as exc:
+        raise AuthError(str(exc)) from exc
     except Exception:
         return exp_dt > now
 
@@ -300,16 +329,21 @@ def _login_with_oidc(
     login_username = username or os.environ.get("NHX_OIDC_USERNAME")
     login_password = password or os.environ.get("NHX_OIDC_PASSWORD")
     use_password_grant = bool(login_username and login_password)
+    client_id = oidc_config.cli_client_id or oidc_config.client_id
+    bearer_token_source = oidc_config.bearer_token_source
 
     if use_password_grant:
-        if not oidc_config.client_id:
+        if not client_id:
             raise AuthError("OIDC client_id is required for password grant.")
-    elif not oidc_config.device_authorization_endpoint:
-        raise AuthError(
-            "This cluster does not support device flow authentication.\n"
-            "For non-interactive login use: nemo auth login --username <user> --password <pass>\n"
-            "Or set NHX_OIDC_USERNAME and NHX_OIDC_PASSWORD (e.g. in CI)."
-        )
+    else:
+        if not client_id:
+            raise AuthError("OIDC client_id is required for device flow.")
+        if not oidc_config.device_authorization_endpoint:
+            raise AuthError(
+                "This cluster does not support device flow authentication.\n"
+                "For non-interactive login use: nemo auth login --username <user> --password <pass>\n"
+                "Or set NHX_OIDC_USERNAME and NHX_OIDC_PASSWORD (e.g. in CI)."
+            )
 
     console.print(f"[green]Found OIDC configuration[/] (issuer: {oidc_config.issuer})")
 
@@ -344,14 +378,14 @@ def _login_with_oidc(
     if use_password_grant:
         if login_username is None or login_password is None:
             raise AuthError("Username and password are required for password grant.")
-        client_id = cast(str, oidc_config.client_id)
         try:
             token_response = authenticate_with_password_grant(
                 token_endpoint=oidc_config.token_endpoint,
-                client_id=client_id,
+                client_id=cast(str, client_id),
                 username=login_username,
                 password=login_password,
                 scope=effective_scope,
+                bearer_token_source=bearer_token_source,
                 certificate_authority=certificate_authority,
             )
         except DeviceFlowError as exc:
@@ -359,22 +393,33 @@ def _login_with_oidc(
     else:
         if oidc_config.device_authorization_endpoint is None:
             raise AuthError("This cluster does not support device flow authentication.")
-        client_id = cast(str, oidc_config.client_id)
+        include_device_id = oidc_config.device_authorization_requires_device_id
+        device_display_name = oidc_config.device_authorization_display_name
+        include_scope_in_token_request = oidc_config.device_token_request_includes_scope
+        if include_device_id and device_display_name is None:
+            device_display_name = "NeMo Helix CLI"
         try:
             token_response = asyncio.run(
                 authenticate_with_device_flow(
                     device_authorization_endpoint=oidc_config.device_authorization_endpoint,
                     token_endpoint=oidc_config.token_endpoint,
-                    client_id=client_id,
+                    client_id=cast(str, client_id),
                     scope=effective_scope,
                     open_browser=not no_browser,
+                    bearer_token_source=bearer_token_source,
+                    include_device_id=include_device_id,
+                    device_display_name=device_display_name,
+                    include_scope_in_token_request=include_scope_in_token_request,
                     certificate_authority=certificate_authority,
                 )
             )
         except DeviceFlowError as exc:
             raise AuthError(f"Authentication failed: {exc}") from exc
 
-    token = token_response.token_for_nhx
+    try:
+        token = token_response.token_for_nhx
+    except DeviceFlowError as exc:
+        raise AuthError(f"Authentication failed: {exc}") from exc
     claims = decode_jwt_claims(token)
     user_email = claims.get("upn") or claims.get("email") or claims.get("preferred_username")
     raw_granted_scopes = claims.get("scp") or claims.get("scope")
@@ -592,7 +637,8 @@ def login(
 
         try:
             oidc_config = discover_nhx_config(base_url, certificate_authority=context.cluster.certificate_authority)
-            oidc_login_configured = bool(oidc_config.token_endpoint and oidc_config.client_id)
+            oidc_client_id = oidc_config.cli_client_id or oidc_config.client_id
+            oidc_login_configured = bool(oidc_config.token_endpoint and oidc_client_id)
             if oidc_login_configured:
                 raise AuthError(
                     "Cluster has OIDC authentication configured. Use 'nemo auth login' instead of '--unsigned-token'."
@@ -797,21 +843,22 @@ def refresh(ctx: typer.Context) -> None:
     except httpx.HTTPError as e:
         raise AuthError(f"Failed to discover auth configuration: {e}") from e
 
-    if not oidc_config.client_id or not oidc_config.token_endpoint:
+    client_id = oidc_config.cli_client_id or oidc_config.client_id
+    if not client_id or not oidc_config.token_endpoint:
         raise AuthError("OIDC not configured on cluster.")
 
     effective_scope = build_effective_scope(oidc_config.default_scopes, oidc_config.scope_prefix)
 
     console.print("Refreshing access token...")
 
-    provider = OIDCTokenProvider(
+    provider = _config_backed_token_provider(
+        context_name=context.context_name,
         token_endpoint=oidc_config.token_endpoint,
-        client_id=oidc_config.client_id,
-        tokens=TokenSet.from_access_token(
-            context.user.token.get_secret_value(),
-            context.user.refresh_token.get_secret_value(),
-        ),
+        client_id=client_id,
+        access_token=context.user.token.get_secret_value(),
+        refresh_token=context.user.refresh_token.get_secret_value(),
         refresh_scope=effective_scope,
+        bearer_token_source=oidc_config.bearer_token_source,
         certificate_authority=context.cluster.certificate_authority,
     )
 
@@ -819,12 +866,6 @@ def refresh(ctx: typer.Context) -> None:
         provider.force_refresh()
     except RuntimeError as e:
         raise AuthError(f"Token refresh failed: {e}") from e
-
-    # Save new tokens (refresh token may be rotated)
-    config_params: ConfigParams = {"access_token": provider.tokens.access_token}
-    if provider.tokens.refresh_token:
-        config_params["refresh_token"] = provider.tokens.refresh_token
-    Config.write(config_params, context_name=context.context_name)
 
     # Show new token info
     claims = decode_jwt_claims(provider.tokens.access_token)

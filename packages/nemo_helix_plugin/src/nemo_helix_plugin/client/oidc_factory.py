@@ -44,6 +44,7 @@ class _ProviderCacheKey:
     token_endpoint: str
     client_id: str
     refresh_scope: str | None
+    bearer_token_source: str
 
 
 # Process-wide cache: (config_path, context) → shared OIDCTokenProvider.
@@ -163,7 +164,7 @@ def resolve_oidc_provider(
     tokens = TokenSet.from_access_token(access_token, refresh_token)
 
     token_endpoint = oidc_config.token_endpoint or ""
-    client_id = oidc_config.client_id or ""
+    client_id = oidc_config.cli_client_id or oidc_config.client_id or ""
     refresh_scope = build_effective_scope(oidc_config.default_scopes, oidc_config.scope_prefix)
 
     if refresh_token and (not token_endpoint or not client_id):
@@ -185,6 +186,7 @@ def resolve_oidc_provider(
             token_endpoint=token_endpoint,
             client_id=client_id,
             refresh_scope=refresh_scope,
+            bearer_token_source=oidc_config.bearer_token_source,
         )
         on_refreshed = _make_config_persister(context_name, config_path)
         load_tokens_cb = _make_config_token_loader(context_name, config_path)
@@ -198,6 +200,7 @@ def resolve_oidc_provider(
                 tokens=tokens,
                 refresh_margin_seconds=DEFAULT_REFRESH_MARGIN_SECONDS,
                 refresh_scope=refresh_scope,
+                bearer_token_source=oidc_config.bearer_token_source,
                 load_tokens=load_tokens_cb,
                 refresh_lock=refresh_lock,
                 on_tokens_refreshed=on_refreshed,
@@ -211,6 +214,7 @@ def resolve_oidc_provider(
         tokens=tokens,
         refresh_margin_seconds=DEFAULT_REFRESH_MARGIN_SECONDS,
         refresh_scope=refresh_scope,
+        bearer_token_source=oidc_config.bearer_token_source,
     )
 
 

@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from nemo_helix_ext.auth.token_provider import (
     OIDCTokenProvider,
+    TokenPersistenceError,
     TokenSet,
     refresh_token_grant,
 )
@@ -173,6 +174,47 @@ class TestOIDCTokenProvider:
         assert call_kwargs[1]["data"]["grant_type"] == "refresh_token"
         assert call_kwargs[1]["data"]["client_id"] == "client"
         assert call_kwargs[1]["data"]["refresh_token"] == "old_refresh"
+
+    @patch("nemo_helix_ext.auth.token_provider.httpx.post")
+    def test_refresh_selects_configured_id_token(self, mock_post):
+        old_token = _make_jwt({"exp": int(time.time()) - 100})
+        new_id_token = _make_jwt({"exp": int(time.time()) + 3600})
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "access_token": "opaque-access-token",
+            "id_token": new_id_token,
+            "refresh_token": "rotated-refresh",
+        }
+        mock_post.return_value = mock_response
+        provider = OIDCTokenProvider(
+            token_endpoint="https://idp/token",
+            client_id="client",
+            tokens=TokenSet.from_access_token(old_token, refresh_token="old-refresh"),
+            refresh_margin_seconds=0,
+            bearer_token_source="id_token",
+        )
+
+        assert provider.get_access_token() == new_id_token
+        assert provider.tokens.refresh_token == "rotated-refresh"
+
+    @patch("nemo_helix_ext.auth.token_provider.httpx.post")
+    def test_refresh_requires_configured_id_token(self, mock_post):
+        old_token = _make_jwt({"exp": int(time.time()) - 100})
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"access_token": "opaque-access-token"}
+        mock_post.return_value = mock_response
+        provider = OIDCTokenProvider(
+            token_endpoint="https://idp/token",
+            client_id="client",
+            tokens=TokenSet.from_access_token(old_token, refresh_token="old-refresh"),
+            refresh_margin_seconds=0,
+            bearer_token_source="id_token",
+        )
+
+        with pytest.raises(RuntimeError, match="configured id_token"):
+            provider.get_access_token()
 
     @patch("nemo_helix_ext.auth.token_provider.httpx.post")
     def test_get_access_token_refreshes_opaque_token_with_expires_in(self, mock_post):
@@ -426,6 +468,30 @@ class TestOIDCTokenProvider:
         # Should not raise despite callback failure
         result = provider.get_access_token()
         assert result == new_token
+
+    @patch("nemo_helix_ext.auth.token_provider.httpx.post")
+    def test_rotated_refresh_token_persistence_error_propagates(self, mock_post):
+        old_token = _make_jwt({"exp": int(time.time()) - 100})
+        new_token = _make_jwt({"exp": int(time.time()) + 3600})
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "access_token": new_token,
+            "refresh_token": "rotated-refresh",
+        }
+        mock_post.return_value = mock_response
+        provider = OIDCTokenProvider(
+            token_endpoint="https://idp/token",
+            client_id="client",
+            tokens=TokenSet.from_access_token(old_token, refresh_token="old-refresh"),
+            refresh_margin_seconds=0,
+            on_tokens_refreshed=MagicMock(side_effect=OSError("disk full")),
+        )
+
+        with pytest.raises(TokenPersistenceError, match="rotated the refresh token") as exc_info:
+            provider.get_access_token()
+
+        assert isinstance(exc_info.value.__cause__, OSError)
 
     @patch("nemo_helix_ext.auth.token_provider.httpx.post")
     def test_refresh_keeps_old_refresh_token_if_not_rotated(self, mock_post):

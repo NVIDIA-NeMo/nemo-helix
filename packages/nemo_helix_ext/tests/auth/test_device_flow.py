@@ -17,6 +17,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from nemo_helix_ext.auth.device_flow import (
     DeviceCodeResponse,
@@ -85,6 +86,47 @@ class TestTokenResponse:
         assert response.access_token == "access_token_123"
         assert response.refresh_token is None
 
+    def test_token_for_nhx_selects_configured_id_token(self):
+        response = TokenResponse(
+            access_token="opaque-access-token",
+            id_token="signed-id-token",
+            refresh_token="refresh-token",
+            token_type="Bearer",
+            expires_in=3600,
+            scope="openid",
+            bearer_token_source="id_token",
+        )
+
+        assert response.token_for_nhx == "signed-id-token"
+
+    def test_token_for_nhx_requires_configured_id_token(self):
+        response = TokenResponse(
+            access_token="opaque-access-token",
+            id_token=None,
+            refresh_token=None,
+            token_type="Bearer",
+            expires_in=3600,
+            scope="openid",
+            bearer_token_source="id_token",
+        )
+
+        with pytest.raises(DeviceFlowError, match="did not return one"):
+            _ = response.token_for_nhx
+
+    def test_token_for_nhx_rejects_unknown_source(self):
+        response = TokenResponse(
+            access_token="opaque-access-token",
+            id_token="signed-id-token",
+            refresh_token=None,
+            token_type="Bearer",
+            expires_in=3600,
+            scope="openid",
+            bearer_token_source="refresh_token",  # type: ignore[arg-type]
+        )
+
+        with pytest.raises(ValueError, match="bearer_token_source"):
+            _ = response.token_for_nhx
+
 
 class TestDeviceFlow:
     """Tests for DeviceFlow class."""
@@ -138,6 +180,54 @@ class TestDeviceFlow:
                 timeout=30.0,
             )
             mock_client_class.assert_called_once_with()
+
+    @pytest.mark.asyncio
+    async def test_start_device_authorization_includes_stable_device_metadata(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+        flow = DeviceFlow(
+            device_authorization_endpoint="https://sso.example.com/device/code",
+            token_endpoint="https://sso.example.com/oauth/token",
+            client_id="test-client",
+            scope="openid email profile",
+            include_device_id=True,
+            device_display_name="NeMo Helix CLI",
+        )
+        mock_response_data = {
+            "device_code": "device_code_123",
+            "user_code": "ABC-123",
+            "verification_uri": "https://sso.example.com/device",
+            "expires_in": 1800,
+        }
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_response.json.return_value = mock_response_data
+            mock_client.post.return_value = mock_response
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client_class.return_value = mock_client
+
+            await flow.start_device_authorization()
+
+            request_data = mock_client.post.call_args.kwargs["data"]
+            assert request_data["client_id"] == "test-client"
+            assert request_data["scope"] == "openid email profile"
+            assert request_data["device_id"] == flow.device_id
+            assert request_data["display_name"] == "NeMo Helix CLI"
+            assert flow.device_id is not None
+
+        second_flow = DeviceFlow(
+            device_authorization_endpoint="https://sso.example.com/device/code",
+            token_endpoint="https://sso.example.com/oauth/token",
+            client_id="test-client",
+            include_device_id=True,
+        )
+        device_id_path = tmp_path / "nhx" / "oidc-device-id"
+        assert second_flow.device_id == flow.device_id
+        assert device_id_path.read_text(encoding="utf-8").strip() == flow.device_id
+        assert device_id_path.stat().st_mode & 0o777 == 0o600
 
     @pytest.mark.asyncio
     async def test_start_device_authorization_uses_context_certificate_authority(self, monkeypatch):
@@ -219,6 +309,25 @@ class TestDeviceFlow:
             assert result.interval == 5  # Default interval
 
     @pytest.mark.asyncio
+    async def test_start_device_authorization_wraps_http_error(self, device_flow):
+        request = httpx.Request("POST", "https://sso.example.com/device/code")
+        response = httpx.Response(
+            400,
+            request=request,
+            json={"error": "invalid_client", "error_description": "Device flow is disabled"},
+        )
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post.return_value = response
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client_class.return_value = mock_client
+
+            with pytest.raises(DeviceFlowError, match="HTTP 400: Device flow is disabled"):
+                await device_flow.start_device_authorization()
+
+    @pytest.mark.asyncio
     async def test_poll_for_token_success(self, device_flow):
         """Test successful token polling."""
         mock_token_response = {
@@ -248,6 +357,54 @@ class TestDeviceFlow:
 
             assert result.access_token == "access_123"
             assert result.refresh_token == "refresh_456"
+            assert mock_client.post.call_args.kwargs["data"]["scope"] == "openid email profile"
+
+    @pytest.mark.asyncio
+    async def test_poll_for_token_can_omit_scope(self):
+        flow = DeviceFlow(
+            device_authorization_endpoint="https://sso.example.com/device/code",
+            token_endpoint="https://sso.example.com/oauth/token",
+            client_id="test-client",
+            scope="openid email profile",
+            include_scope_in_token_request=False,
+        )
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {"access_token": "access_123"}
+            mock_client.post.return_value = mock_response
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client_class.return_value = mock_client
+
+            with patch("nemo_helix_ext.auth.device_flow._async_pause", new_callable=AsyncMock):
+                await flow.poll_for_token(device_code="device_123", interval=1, expires_in=60)
+
+        assert mock_client.post.call_args.kwargs["data"] == {
+            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            "client_id": "test-client",
+            "device_code": "device_123",
+        }
+
+    @pytest.mark.asyncio
+    async def test_poll_for_token_handles_bodyless_unauthorized_response(self, device_flow):
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 401
+            mock_response.json.side_effect = ValueError("empty response")
+            mock_client.post.return_value = mock_response
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client_class.return_value = mock_client
+
+            with (
+                patch("nemo_helix_ext.auth.device_flow._async_pause", new_callable=AsyncMock),
+                pytest.raises(DeviceFlowError, match="invalid or expired"),
+            ):
+                await device_flow.poll_for_token(device_code="device_123", interval=1, expires_in=60)
 
     @pytest.mark.asyncio
     async def test_poll_for_token_authorization_pending(self, device_flow):

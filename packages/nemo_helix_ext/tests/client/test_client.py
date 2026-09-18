@@ -314,7 +314,7 @@ class TestCreateClientOAuthUserAuthDisabledCluster:
 
     @patch(
         "nemo_helix_ext.client.bootstrap.discover_nhx_config",
-        side_effect=Exception("network error"),
+        side_effect=httpx.ConnectError("network error"),
     )
     def test_discovery_failure_preserves_stored_token(self, _mock_discover, tmp_path):
         # A discovery failure must not strip auth — the stored token may still
@@ -327,6 +327,17 @@ class TestCreateClientOAuthUserAuthDisabledCluster:
         request = client._client.build_request("GET", "http://localhost:8080/test")
         client._client._event_hooks["request"][0](request)
         assert request.headers["Authorization"] == f"Bearer {token}"
+
+    @patch(
+        "nemo_helix_ext.client.bootstrap.discover_nhx_config",
+        side_effect=ValueError("OIDC bearer_token_source must be 'access_token' or 'id_token'"),
+    )
+    def test_discovery_validation_failure_is_not_downgraded_to_fallback(self, _mock_discover, tmp_path):
+        token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
+        config_path = _write_config(tmp_path, token=token, refresh_token="refresh_abc")
+
+        with pytest.raises(ValueError, match="bearer_token_source"):
+            create_client(config_path=config_path)
 
 
 class TestCreateClientWorkloadIdentity:

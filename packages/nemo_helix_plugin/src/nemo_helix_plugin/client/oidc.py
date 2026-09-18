@@ -6,7 +6,7 @@
 Provides:
 
 - :class:`OIDCTokenProvider` — thread-safe OIDC token refresh.
-- :class:`TokenSet` — access + refresh token pair with expiry.
+- :class:`TokenSet` — API bearer + refresh token pair with expiry.
 - :class:`NHXOIDCConfig` — OIDC discovery response model.
 - JWT decode helpers (no verification — for expiry extraction only).
 - OIDC discovery and scope helpers.
@@ -26,7 +26,7 @@ from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from ipaddress import ip_address
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx
@@ -42,6 +42,17 @@ from nemo_helix_plugin.client.tls import client_verify_from_env
 
 logger = logging.getLogger(__name__)
 
+BearerTokenSource = Literal["access_token", "id_token"]
+
+
+def _parse_bearer_token_source(value: object) -> BearerTokenSource:
+    """Validate a bearer-token response field received from discovery."""
+    if value == "access_token":
+        return "access_token"
+    if value == "id_token":
+        return "id_token"
+    raise ValueError("OIDC bearer_token_source must be 'access_token' or 'id_token'")
+
 
 class TokenRefreshError(RuntimeError):
     """Structured error raised for OAuth refresh_token grant failures."""
@@ -50,6 +61,14 @@ class TokenRefreshError(RuntimeError):
         self.error = error
         self.error_description = error_description
         super().__init__(f"Token refresh failed: {error} - {error_description}")
+
+
+def _select_bearer_token(token_data: dict, source: BearerTokenSource) -> str:
+    source = _parse_bearer_token_source(source)
+    token = token_data.get(source)
+    if not isinstance(token, str) or not token:
+        raise RuntimeError(f"OIDC refresh response did not include the configured {source}")
+    return token
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +171,11 @@ class NHXOIDCConfig:
     workload_token_endpoint: str | None = None
     workload_audience: str | None = None
     workload_scope: str | None = None
+    cli_client_id: str | None = None
+    bearer_token_source: BearerTokenSource = "access_token"
+    device_authorization_requires_device_id: bool = False
+    device_authorization_display_name: str | None = None
+    device_token_request_includes_scope: bool = True
 
 
 def discover_nhx_config(base_url: str, timeout: float = 10.0) -> NHXOIDCConfig:
@@ -169,8 +193,13 @@ def discover_nhx_config(base_url: str, timeout: float = 10.0) -> NHXOIDCConfig:
         auth_enabled=data.get("auth_enabled", False),
         issuer=oidc.get("issuer"),
         client_id=oidc.get("client_id"),
+        cli_client_id=oidc.get("cli_client_id"),
+        bearer_token_source=_parse_bearer_token_source(oidc.get("bearer_token_source", "access_token")),
         token_endpoint=oidc.get("token_endpoint"),
         device_authorization_endpoint=oidc.get("device_authorization_endpoint"),
+        device_authorization_requires_device_id=oidc.get("device_authorization_requires_device_id", False),
+        device_authorization_display_name=oidc.get("device_authorization_display_name"),
+        device_token_request_includes_scope=oidc.get("device_token_request_includes_scope", True),
         default_scopes=oidc.get("default_scopes", DEFAULT_OAUTH_SCOPES),
         scope_prefix=oidc.get("scope_prefix"),
         workload_token_exchange_enabled=oidc.get("workload_token_exchange_enabled", False),
@@ -185,7 +214,7 @@ def _discover_oidc_client_settings(base_url: str) -> NHXOIDCConfig:
     """Fetch OIDC config with a safe fallback if unreachable."""
     try:
         return discover_nhx_config(base_url)
-    except Exception:
+    except httpx.HTTPError:
         logger.debug("Could not discover OIDC settings from %s", base_url, exc_info=True)
         return NHXOIDCConfig(
             auth_enabled=False,
@@ -384,7 +413,11 @@ def _expires_in_from_response(token_data: dict[str, object]) -> int | float | No
 
 @dataclass
 class TokenSet:
-    """A pair of access + refresh tokens with expiry metadata."""
+    """An API bearer + refresh token pair with expiry metadata.
+
+    ``access_token`` keeps its historical name but may contain the configured
+    ID token when that is the bearer accepted by the platform.
+    """
 
     access_token: str = field(repr=False)
     refresh_token: str | None = field(default=None, repr=False)
@@ -428,7 +461,7 @@ class TokenSet:
 
 @dataclass
 class OIDCTokenProvider:
-    """Provides access tokens with automatic refresh via the OAuth2 refresh_token grant.
+    """Provides API bearer tokens with automatic refresh via the OAuth2 refresh_token grant.
 
     This is the core component for SDK-level token management. It:
     - Holds the current access + refresh tokens
@@ -445,6 +478,7 @@ class OIDCTokenProvider:
     load_tokens: Callable[[], TokenSet | None] | None = None
     refresh_lock: Callable[[], AbstractContextManager[None]] | None = None
     on_tokens_refreshed: Callable[[TokenSet], None] | None = None
+    bearer_token_source: BearerTokenSource = "access_token"
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def get_access_token(self) -> str:
@@ -532,7 +566,7 @@ class OIDCTokenProvider:
                     scope=self.refresh_scope,
                 )
 
-            new_access_token = token_data["access_token"]
+            new_access_token = _select_bearer_token(token_data, self.bearer_token_source)
             # The IdP may rotate the refresh token.
             old_refresh_token = self.tokens.refresh_token
             new_refresh_token = token_data.get("refresh_token", old_refresh_token)
