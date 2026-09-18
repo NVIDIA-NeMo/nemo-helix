@@ -159,9 +159,6 @@ describe('StudioAppliedFilters', () => {
     render(<StudioAppliedFilters />);
 
     expect(screen.getByText('Created At:')).toBeInTheDocument();
-    // Matched by the days the UTC bounds name rather than a locale's punctuation. The
-    // absent 2023 is the point: formatting these bounds locally renders the start as
-    // 2023-12-31 for anyone behind UTC.
     const tag = screen.getByRole('button', { name: /Created At:/ });
     const [start, end] = (tag.textContent ?? '').split('—');
     expect(start).toMatch(/\b0?1\b/);

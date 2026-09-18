@@ -44,8 +44,6 @@ describe('formatElapsedTime', () => {
   });
 });
 
-// The rendered punctuation follows the environment's locale (en-US "10/6/2023",
-// en-CA "2023-10-06"), so these assert the day each bound names, not its format.
 const day = (year: number, month: number, date: number) =>
   new Date(Date.UTC(year, month - 1, date)).toLocaleDateString(undefined, { timeZone: 'UTC' });
 

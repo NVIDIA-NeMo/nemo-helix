@@ -83,8 +83,6 @@ describe('formatDateRange timezone stability', () => {
     vi.unstubAllEnvs();
   });
 
-  // Asserted by year rather than an exact string: the rendered format follows the
-  // environment's locale, but the *day* it names must not drift with the timezone.
   it('names the UTC day for a boundary instant, not the local one', () => {
     const result = formatDateRange('2024-01-01T00:00:00.000Z');
 

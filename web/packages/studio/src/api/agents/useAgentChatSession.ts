@@ -14,16 +14,10 @@ const SESSION_ID_HEADER = 'X-Nemo-Session-Id';
 const FABRIC_CONFIG_FORMAT = 'nemo-agents-spec-v1';
 
 export interface AgentChatSession {
-  /** Spread onto chat completion requests so every turn shares one Fabric runtime. */
   extraHeaders?: Record<string, string>;
-  /** True while a session is being created — the chat has no session to send yet. */
   isPending: boolean;
-  /** Abandons the current session and creates a new one; use when the gateway rejects it. */
   resetSession: () => void;
-  /**
-   * Recreates the session when `error` is the gateway rejecting it (expired, closed,
-   * or swept), and reports whether it did. Other failures are left to the caller.
-   */
+  /** Recreates the session when `error` is the gateway rejecting it; reports whether it did. */
   recoverFromError: (error: Error) => boolean;
 }
 
@@ -35,18 +29,11 @@ const closeQuietly = async (workspace: string, session: AgentSession): Promise<v
   try {
     await agentsCloseSession(workspace, session.name);
   } catch {
-    // The idle sweep reclaims it; a failed close must not surface in the chat.
+    // The idle sweep reclaims it.
   }
 };
 
-/**
- * Own one Platform session for a deployment's chat.
- *
- * Without a session id Fabric mints its own per request, so each turn opens a new
- * runtime and lands in Intake under a different conversation. The session is created
- * eagerly rather than on the first message because a message sent before one exists
- * is exactly the case this prevents.
- */
+/** Created eagerly: a message sent before a session exists is the case this prevents. */
 export function useAgentChatSession(
   workspace: string,
   deployment?: AgentDeployment
@@ -77,7 +64,7 @@ export function useAgentChatSession(
         }
         setSessionId(session.id);
       } catch (error) {
-        // Chat still works unsessioned, so this degrades rather than blocks.
+        // Chat still works unsessioned.
         handleGenericError(error instanceof Error ? error : new Error(String(error)));
       } finally {
         if (!cancelled) setIsPending(false);
@@ -97,9 +84,7 @@ export function useAgentChatSession(
 
   const resetSession = useCallback(() => setGeneration((value) => value + 1), []);
 
-  // The gateway names the session in every rejection it raises for one (404 unknown,
-  // 409 closed or expired), so matching our own id keeps an unrelated agent failure
-  // from silently discarding a healthy conversation.
+  // Matching our own id keeps an unrelated agent failure from discarding a healthy session.
   const recoverFromError = useCallback(
     (error: Error) => {
       if (!sessionId || !error.message.includes(`Session ID '${sessionId}'`)) return false;
