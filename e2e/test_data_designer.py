@@ -29,7 +29,6 @@ PROVIDER_NAME = "test-provider"
 
 MODEL_A = "model-a"
 MODEL_B = "model-b"
-# A model the provider accepts in config but refuses to serve — the NMP-194 shape.
 MODEL_UNSERVABLE = "model-unservable"
 
 MODEL_A_RESPONSE = "hello world"
@@ -359,11 +358,8 @@ def test_check_models_passes_for_servable_models(sdk: NeMoPlatform, workspace: s
 
 
 def test_check_models_catches_model_the_provider_cannot_serve(sdk: NeMoPlatform, workspace: str) -> None:
-    """NMP-194: `validate` passes for a model the provider will not serve.
-
-    That is the documented split, not a bug — validate resolves the provider
-    and never contacts the model. This asserts both halves: validate stays
-    green, and check-models is what actually catches it.
+    """validate can be green while check_models is red;
+    only the latter makes a live inference call.
     """
     provider = _make_unservable_model_provider(sdk, workspace)
     config_builder = _single_model_config(provider, MODEL_UNSERVABLE)

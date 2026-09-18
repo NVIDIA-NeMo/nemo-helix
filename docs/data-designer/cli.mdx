@@ -124,7 +124,7 @@ Models configured with `skip_health_check=True` are skipped. A failing probe sto
 
 ```text
   ❌    ✘ Model health check failed (ModelNotFoundError): Model
-'nvidia/nemotron-3-nano-30b-a3b' not found
+'nvidia/this-does-not-exist' not found
 ```
 
 The command exits `0` only when every probe succeeds, so you can gate a pipeline on it.
@@ -144,7 +144,7 @@ nemo data-designer check-models product_reviews.py --output json
   "errors": [
     {
       "error_type": "ModelNotFoundError",
-      "message": "Model 'nvidia/nemotron-3-nano-30b-a3b' not found"
+      "message": "Model 'nvidia/this-does-not-exist' not found"
     }
   ],
   "ok": false
