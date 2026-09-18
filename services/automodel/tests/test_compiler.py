@@ -10,7 +10,9 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
+import httpx
 import pytest
+from nemo_platform_plugin.client.errors import NotFoundError
 from nemo_platform_plugin.deployment import DeploymentParams, ToolCallParams
 from nemo_platform_plugin.models.types import ModelEntity
 from nmp.automodel.adapter import automodel_spec_to_compiler_output
@@ -655,6 +657,10 @@ def _deployment_config(
     )
 
 
+def _not_found() -> NotFoundError:
+    return NotFoundError(httpx.Response(status_code=404, request=httpx.Request("GET", "http://test")))
+
+
 @pytest.mark.asyncio
 async def test_lora_job_rejects_a_config_for_a_different_base_model(
     platform_clients: AsyncCustomizationPlatformClients,
@@ -708,3 +714,47 @@ async def test_inline_lora_enabled_false_is_rejected_at_compile(
 
     with pytest.raises(PlatformJobCompilationError, match="lora_enabled must be true"):
         await platform_job_config_compiler(_lora_job(DeploymentParams(lora_enabled=False)), "default", platform_clients)
+
+
+@pytest.mark.asyncio
+async def test_string_deployment_config_may_point_at_the_unborn_output_model(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A config created before the run, pointing forward at the model it produces."""
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    monkeypatch.setattr("nmp.automodel.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(data=lambda: _deployment_config(model_entity_id="default/out", model_name="out"))
+    )
+    platform_clients.models.get_model = AsyncMock(side_effect=_not_found())
+
+    spec = await platform_job_config_compiler(_deployable_job("default/existing-cfg"), "default", platform_clients)
+
+    steps = spec.steps if hasattr(spec, "steps") else spec["steps"]
+    me_step = next(s for s in steps if s["name"] == "model-entity-creation")
+    assert me_step["config"]["deployment_config"] == "default/existing-cfg"
+
+
+@pytest.mark.asyncio
+async def test_string_deployment_config_for_a_different_model_is_rejected(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    monkeypatch.setattr("nmp.automodel.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: _deployment_config(model_entity_id="default/other", model_name="other")
+        )
+    )
+    platform_clients.models.get_model = AsyncMock(side_effect=_not_found())
+
+    with pytest.raises(PlatformJobCompilationError, match="targets a different model entity"):
+        await platform_job_config_compiler(_deployable_job("default/existing-cfg"), "default", platform_clients)

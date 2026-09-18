@@ -370,28 +370,19 @@ async def _validate_deployment_config(
                 "so the config must target that base model, or use inline deployment parameters instead."
             )
 
-    # SFT or lora_merged referencing a string config
+    # SFT or lora_merged referencing a string config: the config must target the
+    # model entity this run produces. That entity usually does not exist yet -- a
+    # config created up front (as Studio does, so the job can deploy the moment
+    # training ends) points forward at it. So validate the target ref rather than
+    # the entity's existence; the same check covers a retrain, where the entity is
+    # already there.
     if produces_new_model:
         output_name = transformed_spec.output.name
-        try:
-            response = await platform.models.get_model(name=output_name, workspace=workspace)
-            existing_me = response.data()
-        except NotFoundError:
-            # Output model entity doesn't exist yet, so a string
-            # ref is inherently invalid -- it was created for a different model.
-            raise PlatformJobCompilationError(
-                f"deployment_config cannot be a string reference ('{dc}') for {ft_type.value} training "
-                "that creates a new model entity. The referenced config was created for a different model. "
-                "Use inline deployment parameters (e.g., DeploymentParams(gpu=1, lora_enabled=True)) instead."
-            )
-
-        # Output model entity already exists (retraining to create a new FileSet).
-        # Verify the config actually targets this model entity.
-        if not _config_targets_model(resolved_config, existing_me.workspace, existing_me.name):
+        if not _config_targets_model(resolved_config, workspace, output_name):
             raise PlatformJobCompilationError(
                 f"deployment_config references '{dc}' which targets a different model entity "
-                f"than the output model '{existing_me.workspace}/{existing_me.name}'. "
-                "The deployment config must target the same model entity being retrained, "
+                f"than the output model '{workspace}/{output_name}'. "
+                "The deployment config must target the model this run produces, "
                 "or use inline deployment parameters instead."
             )
 

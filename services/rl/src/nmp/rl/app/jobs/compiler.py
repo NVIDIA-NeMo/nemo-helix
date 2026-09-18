@@ -280,23 +280,18 @@ async def _validate_deployment_config(
             )
         return
 
-    # Full-weight training creates its own model entity, so a pre-existing config can
-    # only be correct if it already targets that entity (i.e. this is a retrain).
+    # Full-weight training creates its own model entity, so a referenced config is
+    # only correct if it targets that entity. The entity usually does not exist yet
+    # -- a config created up front (as Studio does, so the job can deploy the moment
+    # training ends) points forward at the model this run will produce. So validate
+    # the target ref, not the entity's existence; the same check covers a retrain,
+    # where the entity is already there.
     output_name = job_spec.output.name
-    try:
-        existing_me = (await platform.models.get_model(name=output_name, workspace=workspace)).data()
-    except NotFoundError as e:
-        raise PlatformJobCompilationError(
-            f"deployment_config cannot be a string reference ('{dc}') for full-weight training "
-            "that creates a new model entity. The referenced config was created for a different model. "
-            'Use inline deployment parameters (e.g. {"gpu": 1, "lora_enabled": true}) instead.'
-        ) from e
-
-    if not _config_targets_model(resolved_config, existing_me.workspace, existing_me.name):
+    if not _config_targets_model(resolved_config, workspace, output_name):
         raise PlatformJobCompilationError(
             f"deployment_config references '{dc}' which targets a different model entity "
-            f"than the output model '{existing_me.workspace}/{existing_me.name}'. "
-            "The deployment config must target the same model entity being retrained, "
+            f"than the output model '{workspace}/{output_name}'. "
+            "The deployment config must target the model this run produces, "
             "or use inline deployment parameters instead."
         )
 

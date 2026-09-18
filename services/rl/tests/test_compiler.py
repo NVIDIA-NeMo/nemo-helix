@@ -666,11 +666,12 @@ async def test_lora_job_accepts_string_ref_with_lora_enabled(
 
 
 @pytest.mark.asyncio
-async def test_full_weight_job_rejects_string_ref_for_a_new_model_entity(
+async def test_full_weight_job_accepts_a_config_pointing_at_the_unborn_output_model(
     monkeypatch: pytest.MonkeyPatch,
     platform_clients: AsyncCustomizationPlatformClients,
     authorized: AsyncMock,
 ) -> None:
+    """A config created before the run, pointing forward at the model it produces."""
     monkeypatch.setattr(
         "nmp.rl.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_model_entity()),
@@ -681,7 +682,32 @@ async def test_full_weight_job_rejects_string_ref_for_a_new_model_entity(
     platform_clients.models.get_model = AsyncMock(side_effect=_not_found())
     job = _make_job_output().model_copy(update={"deployment_config": "shared/some-cfg"})
 
-    with pytest.raises(PlatformJobCompilationError, match="cannot be a string reference"):
+    spec = await platform_job_config_compiler("default", job, platform_clients)
+
+    assert _steps(spec)[3]["config"]["deployment_config"] == "shared/some-cfg"
+
+
+@pytest.mark.asyncio
+async def test_full_weight_job_rejects_a_config_for_a_different_model_entity(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+    authorized: AsyncMock,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: _make_deployment_config(
+                model_entity_id="default/other", model_name="other", model_namespace="default"
+            )
+        )
+    )
+    platform_clients.models.get_model = AsyncMock(side_effect=_not_found())
+    job = _make_job_output().model_copy(update={"deployment_config": "shared/some-cfg"})
+
+    with pytest.raises(PlatformJobCompilationError, match="targets a different model entity"):
         await platform_job_config_compiler("default", job, platform_clients)
 
 
