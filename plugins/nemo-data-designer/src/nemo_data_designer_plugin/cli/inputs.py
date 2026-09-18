@@ -90,9 +90,28 @@ def _build_spec_from_builder(builder: DataDesignerConfigBuilder, num_records: in
 
 
 def _pluck_callback(group: typer.Typer, verb: str) -> Callable[..., None]:
-    callback = next(c for c in group.registered_commands if c.name == verb).callback
-    assert callback is not None, f"missing {verb!r} callback to override"
+    for command in group.registered_commands:
+        if command.name == verb:
+            callback = command.callback
+            assert callback is not None, f"missing {verb!r} callback to override"
+            return callback
+    raise RuntimeError(f"missing {verb!r} callback to override")
+
+
+def _pluck_root_callback(group: typer.Typer, verb: str) -> Callable[..., None]:
+    registered_callback = group.registered_callback
+    assert registered_callback is not None, f"missing root callback for {verb!r} override"
+    callback = registered_callback.callback
+    assert callback is not None, f"missing root callback for {verb!r} override"
     return callback
+
+
+def _allow_interspersed_root_args(group: typer.Typer) -> None:
+    context_settings = group.info.context_settings
+    if isinstance(context_settings, dict):
+        group.info.context_settings = {**context_settings, "allow_interspersed_args": True}
+        return
+    group.info.context_settings = {"allow_interspersed_args": True}
 
 
 def _replace_function_submit(group: typer.Typer) -> None:
@@ -127,9 +146,18 @@ def _replace_function_submit(group: typer.Typer) -> None:
 
 
 def _replace_job_submit(group: typer.Typer) -> None:
-    original = _pluck_callback(group, "create")
+    explain: Callable[..., None] | None = None
+    try:
+        original = _pluck_callback(group, "create")
+        register = group.command("create")
+    except RuntimeError:
+        original = _pluck_root_callback(group, "create")
+        with contextlib.suppress(RuntimeError):
+            explain = _pluck_callback(group, "explain")
+        _allow_interspersed_root_args(group)
+        register = group.callback(invoke_without_command=True)
 
-    @group.command("create")
+    @register
     def create(
         typer_ctx: typer.Context,
         config_source: str = typer.Argument(..., metavar="[CONFIG_SOURCE]", help=_CONFIG_SOURCE_HELP),
@@ -145,6 +173,10 @@ def _replace_job_submit(group: typer.Typer) -> None:
         ),
         options_file: Path | None = typer.Option(None, "--options-file"),
     ) -> None:
+        if explain is not None and config_source == "explain":
+            explain(profile=profile, cluster=cluster)
+            return
+
         with _spec_from_builder(config_source, num_records) as spec:
             original(
                 typer_ctx,

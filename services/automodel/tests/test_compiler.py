@@ -6,18 +6,21 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from nemo_platform_plugin.deployment import DeploymentParams, ToolCallParams
 from nemo_platform_plugin.models.types import ModelEntity
 from nmp.automodel.adapter import automodel_spec_to_compiler_output
 from nmp.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
     DistillationTraining,
-    EmbeddingParams,
+    ExportParams,
     LoRAParams,
     OutputResponse,
+    RetrievalParams,
     SFTTraining,
 )
 from nmp.automodel.app.jobs.compiler import _build_file_download_config
@@ -140,7 +143,7 @@ def test_compile_training_step_carries_explicit_cross_encoder_recipe() -> None:
     assert cfg["training"]["recipe"] == "cross_encoder"
 
 
-def test_compile_training_step_carries_embedding_config() -> None:
+def test_compile_training_step_carries_retrieval_config() -> None:
     from nmp.automodel.app.jobs.training.compiler import compile_training_step
 
     job_output = CustomizationJobOutput(
@@ -151,11 +154,12 @@ def test_compile_training_step_carries_embedding_config() -> None:
             peft=None,
             batch_size=4,
             micro_batch_size=1,
-            embedding=EmbeddingParams(
+            retrieval=RetrievalParams(
                 train_n_passages=7,
                 query_prefix="query: ",
                 passage_prefix="passage: ",
                 query_max_length=256,
+                export=ExportParams(primary="hf", opset=18),
             ),
         ),
         output=_output(output_type=OutputNameType.MODEL),
@@ -164,10 +168,12 @@ def test_compile_training_step_carries_embedding_config() -> None:
     step = compile_training_step(job_output, base_env=[], me=_make_mock_model_entity())
     cfg = step.config if hasattr(step, "config") else step["config"]
 
-    assert cfg["embedding"]["train_n_passages"] == 7
-    assert cfg["embedding"]["query_prefix"] == "query: "
-    assert cfg["embedding"]["passage_prefix"] == "passage: "
-    assert cfg["embedding"]["query_max_length"] == 256
+    assert cfg["retrieval"]["train_n_passages"] == 7
+    assert cfg["retrieval"]["query_prefix"] == "query: "
+    assert cfg["retrieval"]["passage_prefix"] == "passage: "
+    assert cfg["retrieval"]["query_max_length"] == 256
+    assert cfg["retrieval"]["export"]["primary"] == "hf"
+    assert cfg["retrieval"]["export"]["opset"] == 18
 
 
 def test_sft_training_applies_nemotron_defaults_for_encoder_recipes() -> None:
@@ -175,10 +181,12 @@ def test_sft_training_applies_nemotron_defaults_for_encoder_recipes() -> None:
     rerank = SFTTraining.model_validate({"recipe": "cross_encoder"}).with_resolved_recipe("cross_encoder")
     sft = SFTTraining.model_validate({"recipe": "sft"}).with_resolved_recipe("sft")
 
-    assert embed.batch_size == 128
-    assert embed.micro_batch_size == 4
+    assert embed.batch_size == 256
+    assert embed.micro_batch_size == 8
     assert embed.learning_rate == 1e-5
     assert embed.warmup_steps == 5
+    assert rerank.batch_size == 128
+    assert rerank.micro_batch_size == 8
     assert rerank.learning_rate == 3e-6
     assert rerank.warmup_steps == 100
     assert sft.batch_size == 32
@@ -235,7 +243,7 @@ def test_compile_training_step_applies_retrieval_defaults_after_auto_resolution(
     step = compile_training_step(job_output, base_env=[], me=me)
     cfg = step.config if hasattr(step, "config") else step["config"]
     assert cfg["training"]["recipe"] == "bi_encoder"
-    assert cfg["batch"]["global_batch_size"] == 128
+    assert cfg["batch"]["global_batch_size"] == 256
     assert cfg["optimizer"]["learning_rate"] == 1e-5
     assert cfg["optimizer"]["warmup_steps"] == 5
 
@@ -262,7 +270,7 @@ def test_compile_training_step_auto_defaults_keep_explicit_lr() -> None:
     step = compile_training_step(job_output, base_env=[], me=me)
     cfg = step.config if hasattr(step, "config") else step["config"]
     assert cfg["optimizer"]["learning_rate"] == 2e-5
-    assert cfg["batch"]["global_batch_size"] == 128
+    assert cfg["batch"]["global_batch_size"] == 256
 
 
 @pytest.mark.asyncio
@@ -466,3 +474,233 @@ async def test_platform_job_config_compiler_applies_profile_to_task_steps(
     spec = await platform_job_config_compiler(_make_job_output(), "default", platform_clients, profile="custom-gpu")
 
     assert [step.executor.profile for step in spec.steps] == ["custom-gpu"] * 4
+
+
+def test_build_model_entity_config_forwards_inline_deployment_config() -> None:
+    """The plugin-supplied deployment_config must reach the model_entity step config."""
+    from nmp.automodel.app.jobs.compiler import _build_model_entity_config
+
+    job_spec = _make_job_output().model_copy(
+        update={"deployment_config": DeploymentParams(gpu=2, image_name="img", lora_enabled=True)}
+    )
+    config = _build_model_entity_config("default", job_spec)
+
+    assert isinstance(config.deployment_config, DeploymentParams)
+    assert config.deployment_config.gpu == 2
+    assert config.deployment_config.image_name == "img"
+    assert config.deployment_config.lora_enabled is True
+
+
+def test_build_model_entity_config_forwards_deployment_config_string_ref() -> None:
+    from nmp.automodel.app.jobs.compiler import _build_model_entity_config
+
+    job_spec = _make_job_output().model_copy(update={"deployment_config": "shared/existing-cfg"})
+    config = _build_model_entity_config("default", job_spec)
+
+    assert config.deployment_config == "shared/existing-cfg"
+
+
+def test_build_model_entity_config_omits_deployment_config_by_default() -> None:
+    from nmp.automodel.app.jobs.compiler import _build_model_entity_config
+
+    config = _build_model_entity_config("default", _make_job_output())
+
+    assert config.deployment_config is None
+
+
+def test_deployment_config_survives_the_plugin_adapter() -> None:
+    """End-to-end: plugin JSON -> adapter -> compiler -> model_entity step config."""
+    from nmp.automodel.app.jobs.compiler import _build_model_entity_config
+
+    spec = automodel_spec_to_compiler_output(
+        {
+            "model": "default/test-target",
+            "dataset": {"training": "default/my-dataset"},
+            "training": {"training_type": "sft", "finetuning_type": "lora"},
+            "output": {"name": "out", "type": "adapter", "fileset": "out-fs"},
+            "deployment_config": {"gpu": 3, "lora_enabled": True},
+        },
+    )
+    config = _build_model_entity_config("default", spec)
+
+    assert isinstance(config.deployment_config, DeploymentParams)
+    assert config.deployment_config.gpu == 3
+
+
+# --------------------------------------------------------------------------- #
+# deployment_config: auth is only required by the branch that consults it
+# --------------------------------------------------------------------------- #
+
+
+def _deployable_job(deployment_config: str | DeploymentParams) -> CustomizationJobOutput:
+    return CustomizationJobOutput(
+        model="default/test-target",
+        dataset="default/my-dataset",
+        training=SFTTraining(peft=None, batch_size=4, micro_batch_size=1),
+        output=_output(output_type=OutputNameType.MODEL),
+        deployment_config=deployment_config,
+    )
+
+
+@pytest.mark.asyncio
+async def test_inline_deployment_config_compiles_without_an_auth_context(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only tool_call_plugin is permission-gated; plain params must not demand auth."""
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    monkeypatch.setattr("nmp.automodel.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
+
+    spec = await platform_job_config_compiler(_deployable_job(DeploymentParams(gpu=2)), "default", platform_clients)
+
+    steps = spec.steps if hasattr(spec, "steps") else spec["steps"]
+    me_step = next(s for s in steps if s["name"] == "model-entity-creation")
+    assert me_step["config"]["deployment_config"]["gpu"] == 2
+
+
+@pytest.mark.asyncio
+async def test_string_deployment_config_compiles_without_an_auth_context(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    monkeypatch.setattr("nmp.automodel.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: SimpleNamespace(
+                workspace="default",
+                name="existing-cfg",
+                model_entity_id="default/out",
+                model_spec=SimpleNamespace(lora_enabled=True, model_name="out", model_namespace="default"),
+            )
+        )
+    )
+    platform_clients.models.get_model = AsyncMock(
+        return_value=SimpleNamespace(data=lambda: SimpleNamespace(workspace="default", name="out"))
+    )
+
+    spec = await platform_job_config_compiler(_deployable_job("default/existing-cfg"), "default", platform_clients)
+
+    steps = spec.steps if hasattr(spec, "steps") else spec["steps"]
+    me_step = next(s for s in steps if s["name"] == "model-entity-creation")
+    assert me_step["config"]["deployment_config"] == "default/existing-cfg"
+
+
+@pytest.mark.asyncio
+async def test_tool_call_plugin_without_an_auth_context_is_rejected(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    monkeypatch.setattr("nmp.automodel.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: None))
+    job = _deployable_job(DeploymentParams(tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin")))
+
+    with pytest.raises(PlatformJobCompilationError, match="No auth context available"):
+        await platform_job_config_compiler(job, "default", platform_clients)
+
+
+@pytest.mark.asyncio
+async def test_tool_call_plugin_without_the_permission_is_rejected(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    auth_client = AsyncMock()
+    auth_client.has_permissions = AsyncMock(return_value=False)
+    monkeypatch.setattr("nmp.automodel.app.jobs.compiler.auth_client_context", SimpleNamespace(get=lambda: auth_client))
+    job = _deployable_job(DeploymentParams(tool_call_config=ToolCallParams(tool_call_plugin="default/my-plugin")))
+
+    with pytest.raises(PlatformJobCompilationError, match="models.tool-call-plugin.set"):
+        await platform_job_config_compiler(job, "default", platform_clients)
+
+
+def _lora_job(deployment_config: str | DeploymentParams) -> CustomizationJobOutput:
+    return CustomizationJobOutput(
+        model="default/test-target",
+        dataset="default/my-dataset",
+        training=SFTTraining(peft=LoRAParams(rank=8, alpha=32, merge=False), batch_size=4, micro_batch_size=1),
+        output=_output(),
+        deployment_config=deployment_config,
+    )
+
+
+def _deployment_config(
+    *,
+    lora_enabled: bool = True,
+    model_entity_id: str = "default/test-target",
+    model_name: str = "test-target",
+    model_namespace: str = "default",
+) -> Any:
+    return SimpleNamespace(
+        workspace="default",
+        name="existing-cfg",
+        model_entity_id=model_entity_id,
+        model_spec=SimpleNamespace(lora_enabled=lora_enabled, model_name=model_name, model_namespace=model_namespace),
+    )
+
+
+@pytest.mark.asyncio
+async def test_lora_job_rejects_a_config_for_a_different_base_model(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The adapter is served from its base model's deployment, so the config must target it."""
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: _deployment_config(model_entity_id="default/unrelated", model_name="unrelated")
+        )
+    )
+
+    with pytest.raises(PlatformJobCompilationError, match="different model entity than the base model"):
+        await platform_job_config_compiler(_lora_job("default/other-cfg"), "default", platform_clients)
+
+
+@pytest.mark.asyncio
+async def test_lora_job_accepts_a_config_targeting_its_base_model(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(data=lambda: _deployment_config())
+    )
+
+    spec = await platform_job_config_compiler(_lora_job("default/existing-cfg"), "default", platform_clients)
+
+    steps = spec.steps if hasattr(spec, "steps") else spec["steps"]
+    me_step = next(s for s in steps if s["name"] == "model-entity-creation")
+    assert me_step["config"]["deployment_config"] == "default/existing-cfg"
+
+
+@pytest.mark.asyncio
+async def test_inline_lora_enabled_false_is_rejected_at_compile(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AutomodelJobInput rejects this at submit; the compiler takes the output spec."""
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+
+    with pytest.raises(PlatformJobCompilationError, match="lora_enabled must be true"):
+        await platform_job_config_compiler(_lora_job(DeploymentParams(lora_enabled=False)), "default", platform_clients)

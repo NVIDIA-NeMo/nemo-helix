@@ -5,6 +5,7 @@
 
 from typing import Annotated, Any, Dict, Literal, Optional, Self, Union
 
+from nemo_platform_plugin.deployment import DeploymentParams
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nmp.automodel.entities.validators import validate_fileset_uri
 from nmp.automodel.entities.values import FinetuningType, OutputNameType, Precision
@@ -13,7 +14,14 @@ from nmp.common.entities.constants import (
     REGEX_WORD_CHARACTER_DOT_DASH,
 )
 from nmp.customization_common.training.reporting import ProgressReportingConfig
-from pydantic import AfterValidator, BaseModel, ConfigDict, Discriminator, Field, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    model_validator,
+)
 
 # Important!!! Do not import Pydantic models from this file into tasks.
 # Instead, duplicate models from this file into corresponding task module schemas.py.
@@ -123,8 +131,34 @@ class LoRAParams(_PEFTParams):
 PeftMethod = LoRAParams
 
 
-class EmbeddingParams(BaseModel):
-    """Retrieval dataset and collator settings for bi_encoder / cross_encoder recipes."""
+class ExportParams(BaseModel):
+    """ONNX export and fileset layout. ``primary`` is the artifact at the root; the other is under ``alternates/``."""
+
+    primary: Literal["onnx", "hf"] = Field(
+        default="onnx",
+        description="Artifact at the fileset root. Use 'hf' when the NIM loads the PyTorch checkpoint.",
+    )
+    opset: int = Field(default=17, gt=0, description="ONNX opset version.")
+    precision: Literal["fp32", "fp16"] = Field(
+        default="fp16",
+        description="ONNX graph dtype. Defaults to fp16 to match typical Hugging Face checkpoints.",
+    )
+    attn_implementation: Literal["eager", "sdpa", "flash_attention_2"] = Field(
+        default="eager",
+        description="Attention backend for the traced model. The exporter cannot trace SDPA/GQA.",
+    )
+    pooling: Literal["avg", "cls", "last"] = Field(
+        default="avg", description="Embedding pooling over hidden states. Ignored for cross_encoder."
+    )
+    normalize: bool = Field(default=True, description="L2-normalize pooled embeddings. Ignored for cross_encoder.")
+    dimensions: bool = Field(
+        default=False,
+        description="Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.",
+    )
+
+
+class RetrievalParams(BaseModel):
+    """Collator, dataset, and export knobs for ``bi_encoder`` / ``cross_encoder``."""
 
     train_n_passages: int = Field(default=5, ge=2, description="Passages per query: 1 positive + (n-1) negatives.")
     eval_negative_size: Optional[int] = Field(
@@ -139,6 +173,19 @@ class EmbeddingParams(BaseModel):
     passage_prefix: str = Field(
         default="passage:", description="Collator-side prefix; do not include a trailing space."
     )
+    export: Optional[ExportParams] = Field(
+        default=None,
+        description="Output artifact layout and ONNX export settings. Defaults are applied when omitted.",
+    )
+
+
+# (batch_size, micro_batch_size) per retrieval recipe. bi_encoder takes its
+# in-batch negatives from the micro batch, which accumulation does not widen, so
+# lowering micro costs retrieval quality; cross_encoder scores pairs independently.
+RETRIEVAL_BATCH_DEFAULTS: dict[str, tuple[int, int]] = {
+    "bi_encoder": (256, 8),
+    "cross_encoder": (128, 8),
+}
 
 
 class ParallelismParams(BaseModel):
@@ -244,6 +291,12 @@ class _TrainingBase(BaseModel):
         default=None,
         description="Validation interval. Float <= 1.0 is fraction of epoch; > 1.0 is step count.",
     )
+    validation_split: Optional[float] = Field(
+        default=0.1,
+        gt=0,
+        lt=1,
+        description="Validation split to use when a validation dataset is not provided.",
+    )
     # `log_every_n_steps` used to sit here, described as "Logging frequency in steps.
     # Controls how often training metrics are logged." It controlled nothing: no
     # code read it, it never reached the recipe config, and it was absent from the
@@ -292,9 +345,9 @@ class _TrainingBase(BaseModel):
         default=None,
         description="Random seed for reproducibility. Optional.",
     )
-    embedding: Optional[EmbeddingParams] = Field(
+    retrieval: Optional[RetrievalParams] = Field(
         default=None,
-        description="Retrieval collator/dataset knobs. Used when recipe is bi_encoder or cross_encoder.",
+        description="Retrieval dataset, collator, and export knobs. Used when recipe is bi_encoder or cross_encoder.",
     )
 
     # --- Enterprise Infrastucture ---
@@ -306,23 +359,25 @@ class _TrainingBase(BaseModel):
         "(e.g., 'a100', 'high_priority'). If omitted, uses the service-level default.",
     )
 
-    model_config = {"protected_namespaces": ()}
+    model_config = {"protected_namespaces": (), "populate_by_name": True}
 
     def with_resolved_recipe(self, recipe: str) -> Self:
         """Return this training config with its resolved recipe defaults."""
         if recipe == "bi_encoder":
             lr, warmup = 1e-5, 5
+            batch, micro_batch = RETRIEVAL_BATCH_DEFAULTS["bi_encoder"]
         elif recipe == "cross_encoder":
             lr, warmup = 3e-6, 100
+            batch, micro_batch = RETRIEVAL_BATCH_DEFAULTS["cross_encoder"]
         else:
             return self.model_copy(update={"recipe": recipe})
         if getattr(self, "type", None) == "distillation":
             raise ValueError("Knowledge distillation only supports the sft recipe.")
         updates: dict[str, object] = {"recipe": recipe}
         if "batch_size" not in self.model_fields_set:
-            updates["batch_size"] = 128
+            updates["batch_size"] = batch
         if "micro_batch_size" not in self.model_fields_set:
-            updates["micro_batch_size"] = 4
+            updates["micro_batch_size"] = micro_batch
         if "learning_rate" not in self.model_fields_set:
             updates["learning_rate"] = lr
         if "warmup_steps" not in self.model_fields_set:
@@ -405,69 +460,6 @@ class DPOTraining(_TrainingBase):
 
 AnyTraining = Union[SFTTraining, DistillationTraining, DPOTraining]
 TrainingMethod = Annotated[AnyTraining, Discriminator("type")]
-
-
-# ============================================================
-# Deployment Config
-# ============================================================
-
-
-class ToolCallParams(BaseModel):
-    """Tool calling configuration for NIM deployments."""
-
-    tool_call_parser: Optional[str] = Field(
-        default=None,
-        description="Name of the tool call parser to use (e.g., 'openai', 'hermes', 'pythonic', 'llama3_json', 'mistral').",
-    )
-    tool_call_plugin: Optional[str] = Field(
-        default=None,
-        pattern=r"^[\w\-.]+/[\w\-.]+$",
-        description="Reference to a fileset containing the custom tool call plugin Python file. "
-        "Expected format: '{workspace}/{fileset_name}'.",
-    )
-    auto_tool_choice: Optional[bool] = Field(
-        default=None,
-        description="Whether to enable automatic tool choice.",
-    )
-
-
-class DeploymentParams(BaseModel):
-    """Inline deployment parameters for creating a new ModelDeploymentConfig."""
-
-    gpu: int = Field(
-        default=1,
-        description="Number of GPUs required for the deployment",
-    )
-
-    additional_envs: Optional[dict[str, str]] = Field(
-        default=None,
-        description="Additional environment variables for the deployment",
-    )
-
-    disk_size: Optional[str] = Field(
-        default=None,
-        description="Disk size for the deployment",
-    )
-
-    image_name: Optional[str] = Field(
-        default=None,
-        description="Container image name from NGC. If not specified, defaults to multi-llm",
-    )
-
-    image_tag: Optional[str] = Field(
-        default=None,
-        description="Container image tag from NGC",
-    )
-
-    lora_enabled: bool = Field(
-        default=True,
-        description="When automatically deploying a full SFT training, this parameter being set to true will allow subsequent LoRA adapters to be trained and deployed against it.",
-    )
-
-    tool_call_config: Optional[ToolCallParams] = Field(
-        default=None,
-        description="Tool calling configuration override for the NIM deployment.",
-    )
 
 
 # ============================================================

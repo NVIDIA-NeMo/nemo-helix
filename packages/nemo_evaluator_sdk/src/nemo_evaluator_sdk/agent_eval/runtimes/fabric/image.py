@@ -3,7 +3,7 @@
 
 """Build-if-missing provisioning for the Fabric sandbox image.
 
-``FabricContainerRuntime`` needs a container image with Fabric + its harness adapters. Rather than
+``FabricAgentRuntime``'s sandbox mode needs a container image with Fabric + its harness adapters. Rather than
 make callers hand-write a Dockerfile, the SDK owns the recipe (:mod:`sandbox.Dockerfile`) and
 provisions the image opaquely: :func:`ensure_fabric_image` returns a usable image tag, building it
 only when it isn't already present locally. This mirrors the ``ensure_task_image`` build-if-missing

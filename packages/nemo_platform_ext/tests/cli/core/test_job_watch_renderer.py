@@ -12,7 +12,6 @@ from unittest.mock import patch
 import httpx
 import pytest
 from nemo_platform_ext.cli.core.job_watch_renderer import JobWatchRenderResult, render_job_watch_events
-from nemo_platform_ext.cli.telemetry.events import TaskStatusEnum
 from nemo_platform_plugin.client.errors import NotFoundError
 from nemo_platform_plugin.jobs.watch_types import JobLogEvent, JobStatusEvent, JobWatchEvent, JobWatchTimeoutError
 from rich.console import Console
@@ -66,7 +65,7 @@ def test_render_job_watch_events_returns_true_for_completed_status() -> None:
     assert error_output.getvalue() == ""
 
 
-def test_render_job_watch_events_emits_job_run_event_for_terminal_status() -> None:
+def test_render_job_watch_events_does_not_emit_client_job_run_event() -> None:
     console, _ = _console_pair()
     event = JobStatusEvent(
         kind="status",
@@ -83,11 +82,7 @@ def test_render_job_watch_events_emits_job_run_event_for_terminal_status() -> No
             is JobWatchRenderResult.SUCCEEDED
         )
 
-    emit_event.assert_called_once()
-    telemetry_event = emit_event.call_args.args[0]
-    assert telemetry_event.job_type == "job"
-    assert telemetry_event.task_status is TaskStatusEnum.COMPLETED
-    assert telemetry_event.model == "defined"
+    emit_event.assert_not_called()
 
 
 def test_render_job_watch_events_returns_false_for_failed_terminal_status() -> None:

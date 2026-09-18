@@ -115,6 +115,62 @@ class OIDCConfig(BaseSettings):
         description="Override JWKS URI for token validation (defaults to discovery).",
     )
 
+    introspect_opaque_tokens: bool = Field(
+        default=False,
+        description="Fall back to RFC 7662 token introspection when a bearer token is not a JWT "
+        "(some IdPs issue opaque access tokens). Requires introspection_endpoint to be set or "
+        "discoverable, and typically introspection_client_secret_env_var pointing at a secret-backed "
+        "environment variable.",
+    )
+
+    introspection_endpoint: str | None = Field(
+        default=None,
+        description="Override RFC 7662 token introspection endpoint (defaults to discovery). "
+        "Only used when introspect_opaque_tokens is enabled.",
+    )
+
+    introspection_client_id: str | None = Field(
+        default=None,
+        description="Client ID used to authenticate RFC 7662 introspection requests. Defaults to client_id when unset.",
+    )
+
+    introspection_client_secret_env_var: str | None = Field(
+        default=None,
+        description="Environment variable containing the client secret used to authenticate "
+        "RFC 7662 introspection requests. Required by most IdPs when introspect_opaque_tokens "
+        "is enabled. Store only the environment variable name here; the secret value must come "
+        "from the process environment.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_inline_introspection_client_secret(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "introspection_client_secret" in data:
+            raise ValueError(
+                "auth.oidc.introspection_client_secret is not supported; set "
+                "auth.oidc.introspection_client_secret_env_var to the name of an environment variable instead"
+            )
+        return data
+
+    resolve_opaque_tokens_via_userinfo: bool = Field(
+        default=False,
+        description="Fall back to the OIDC UserInfo endpoint when a bearer token is not a JWT "
+        "(some IdPs issue opaque access tokens and don't support introspecting them via RFC 7662). "
+        "Requires userinfo_endpoint to be set or discoverable. Takes priority over "
+        "introspect_opaque_tokens when both are enabled, except when oidc.audience is also "
+        "configured: UserInfo responses can't be checked against an audience, so validation "
+        "falls back to introspect_opaque_tokens (if enabled) instead. The token's original OAuth "
+        "scope grant also can't be recovered from UserInfo responses, so it goes unenforced for "
+        "tokens resolved this way (RBAC/permissions still apply). Enable only for IdPs that don't "
+        "issue narrower per-token scopes in practice.",
+    )
+
+    userinfo_endpoint: str | None = Field(
+        default=None,
+        description="Override OIDC UserInfo endpoint (defaults to discovery). "
+        "Only used when resolve_opaque_tokens_via_userinfo is enabled.",
+    )
+
     # Token validation settings
     audience: str | None = Field(
         default=None,

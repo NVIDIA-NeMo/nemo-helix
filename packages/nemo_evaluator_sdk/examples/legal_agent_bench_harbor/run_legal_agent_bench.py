@@ -153,7 +153,7 @@ async def _main(args: argparse.Namespace) -> None:
     print(f"run_id: {result.run_id}  tasks: {result.summary.task_count}  trials: {result.summary.trial_count}")
     print("Aggregate scores:")
     for aggregate in result.summary.scores.scores:
-        print(f"  {aggregate.name}: mean={aggregate.mean}")
+        print(f"  {aggregate.name}: {aggregate.headline_value}")
     print(f"\nRun bundle (run.json, trials.jsonl, scores.jsonl, summary.json, report.html): {args.output_dir}")
 
 

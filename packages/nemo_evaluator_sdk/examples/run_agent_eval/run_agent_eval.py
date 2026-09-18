@@ -155,8 +155,8 @@ def _print_result(result: AgentEvalResult) -> None:
     for metric_type, true_count, total in _boolean_true_rates(result):
         print(f"  {metric_type}: {true_count}/{total} true")
     for score in result.summary.scores.scores:
-        if score.mean is not None:
-            print(f"  {score.name}: mean={score.mean:.3f}")
+        if score.headline_value is not None:
+            print(f"  {score.name}: {score.headline_value:.3f}")
     _print_measurements(result)
     if result.work_dir is not None:
         print(f"work_dir: {result.work_dir}")

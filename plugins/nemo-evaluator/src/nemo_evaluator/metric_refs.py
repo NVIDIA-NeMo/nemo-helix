@@ -48,7 +48,7 @@ async def resolve_metric_ref(
     if entity_client is None or files_client is None:
         raise ValueError(
             "MetricRef metrics require a platform connection (entity store and Files service) to resolve; "
-            "they cannot be used in local execution. Pass an inline metric instead."
+            "pass an inline metric instead."
         )
     ref_workspace, name = parse_metric_ref(ref.root, workspace)
     try:

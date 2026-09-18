@@ -449,29 +449,44 @@ authz:
       post:
         permissions: []
         scopes: []
+    # These scopes gate the caller's own access-key token, not RBAC.
+    # `permissions: []` is intentional: these routes are self-service, ownership-checked
+    # in the handler, not RBAC-gated.
     /apis/auth/v2/access-keys:
       get:
         permissions: []
-        scopes: []
+        scopes:
+        - auth:read
+        - platform:read
       post:
         permissions: []
-        scopes: []
+        scopes:
+        - auth:write
+        - platform:write
     /apis/auth/v2/access-keys/{jti}:
       delete:
         permissions: []
-        scopes: []
+        scopes:
+        - auth:write
+        - platform:write
     /apis/auth/v2/access-keys/{jti}/suspend:
       post:
         permissions: []
-        scopes: []
+        scopes:
+        - auth:write
+        - platform:write
     /apis/auth/v2/access-keys/{jti}/unsuspend:
       post:
         permissions: []
-        scopes: []
+        scopes:
+        - auth:write
+        - platform:write
     /apis/auth/v2/access-keys/{jti}/rotate:
       post:
         permissions: []
-        scopes: []
+        scopes:
+        - auth:write
+        - platform:write
     /apis/auth/v2/iam/opa-bundle.tar.gz:
       get:
         permissions:

@@ -188,9 +188,9 @@ are also *much* faster than reasoning models on LAB's huge redline prompts — s
 
 - **Agent environment** (host, or the container `--image`): the document toolchain (pandoc,
   libreoffice/`soffice`, node, python-docx/docxtpl/python-redlines/python-pptx/openpyxl) so the seeded
-  skill scripts run. For `--runtime container`, pass a prebuilt `--image` (the SDK now accepts an `image`
-  param on `FabricContainerRuntime`); the container runner has no skill injection, but we deliver skills
-  as workspace seeds, so it's fine.
+  skill scripts run. For `--runtime container`, pass a prebuilt `--image` (the `image` param of
+  `FabricAgentRuntime` in sandbox mode); we deliver skills as workspace seeds, so no skill injection is
+  needed.
 - **Eval process** (LAB's `score_rubric`): the scoring stack from step 3 above.
 
 ## Fidelity & scope

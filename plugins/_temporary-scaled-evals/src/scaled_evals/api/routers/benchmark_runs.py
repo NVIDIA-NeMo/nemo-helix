@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from scaled_evals.api import s3
 from scaled_evals.api.agent_bundle_registry import accessible_bundle_for_run
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
-from scaled_evals.api.db import Database, get_db
+from scaled_evals.api.db import Database, get_db, get_stream_database_factory
 from scaled_evals.api.repositories.base_repository import Conflict, NotFound
 from scaled_evals.api.repositories.benchmark_run_repository import derive_run_view
 from scaled_evals.api.routers.evaluations import teardown_cancelled_evaluation
@@ -32,6 +33,7 @@ from scaled_evals.api.utils import make_id
 router = APIRouter(prefix="/benchmark-runs", tags=["benchmark-runs"])
 
 Db = Annotated[Database, Depends(get_db)]
+StreamDatabaseFactory = Annotated[Callable[[], AbstractContextManager[Database]], Depends(get_stream_database_factory)]
 Principal = Annotated[CurrentPrincipal, Depends(current_principal)]
 
 
@@ -413,8 +415,11 @@ def request_benchmark_archive(run_id: str, body: BenchmarkArchiveRequest, db: Db
 
 
 @router.get("/{run_id}/archive/download")
-def download_benchmark_archive(run_id: str, db: Db) -> StreamingResponse:
-    row = db.benchmark_archives.get(run_id)
+def download_benchmark_archive(run_id: str, database_factory: StreamDatabaseFactory) -> StreamingResponse:
+    # Short-lived checkout: a request-scoped Db dependency would hold the pooled
+    # connection for the entire archive stream and can exhaust the pool.
+    with database_factory() as db:
+        row = db.benchmark_archives.get(run_id)
     if row is None or row["status"] != "ready" or not row["object_key"]:
         raise _http_error(404, "not_found", "benchmark archive not ready")
     return StreamingResponse(

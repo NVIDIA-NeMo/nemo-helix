@@ -17,6 +17,7 @@ import shutil
 import sys
 import time
 import traceback
+from collections.abc import Collection
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import Enum
@@ -130,9 +131,24 @@ def bounded_worker_count(
     return min(item_count, default_limit)
 
 
+def plugin_multiprocessing_start_method(platform: str, available_methods: Collection[str]) -> str:
+    """Use the cheapest process start method that preserves plugin isolation.
+
+    macOS is excluded from ``fork``: the plugin imports pull in libraries that
+    start threads and touch Objective-C frameworks, and the ObjC runtime aborts
+    (SIGABRT) in a forked child when a framework initializer may have been
+    running on another thread at fork time. Workers die with exit code -6 after
+    printing ``+[NSCharacterSet initialize] may have been in progress in another
+    thread when fork() was called``.
+    """
+    if platform == "darwin":
+        return "spawn"
+    return "fork" if "fork" in available_methods else "spawn"
+
+
 def plugin_multiprocessing_context():
-    """Use the cheapest process start method that preserves plugin isolation."""
-    start_method = "fork" if "fork" in multiprocessing.get_all_start_methods() else "spawn"
+    """Create a multiprocessing context for isolated plugin workers."""
+    start_method = plugin_multiprocessing_start_method(sys.platform, multiprocessing.get_all_start_methods())
     return multiprocessing.get_context(start_method)
 
 

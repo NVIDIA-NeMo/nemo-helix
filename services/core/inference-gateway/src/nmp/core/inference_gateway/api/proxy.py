@@ -9,6 +9,7 @@ import uuid
 from collections.abc import AsyncIterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncIterator, Union
+from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 from aiohttp import ClientSession
@@ -358,26 +359,152 @@ async def _read_error_body(response: aiohttp.ClientResponse) -> str:
         return ""
 
 
-async def proxy_request(http_client: ClientSession, next_request_info: NextRequestInfo) -> StreamingResponse:
+# Upstream statuses that mean "the model provider connected fine and answered
+# 'no'" — a credential/route rejection from the backend, not the gateway. These
+# are wrapped as 424 Failed Dependency rather than passed through raw: a raw
+# 401/403 would make callers think their *nemo-platform* auth was wrong, and a
+# raw 404 that the entity doesn't exist here. 424 preserves the 4xx-class,
+# non-retryable nuance while signalling the failure came from a *dependency*.
+#
+# It is deliberately NOT 502 Bad Gateway: a 401/403/404 is a perfectly valid
+# HTTP response (the upstream connected and answered), not an invalid one, and
+# rewriting a non-retryable 4xx as a 5xx breaks clients that retry 5xx with
+# backoff but not 4xx.
+_DEPENDENCY_FAILURE_STATUSES = (401, 403, 404)
+_DEPENDENCY_FAILURE_STATUS = http_status.HTTP_424_FAILED_DEPENDENCY  # 424 Failed Dependency
+
+# Stable machine-matchable marker embedded in every wrapped-upstream-rejection 424
+# detail (both the provider-named and the generic branch of
+# ``_dependency_failure_detail`` contain this phrase). It is the CROSS-SERVICE
+# contract token: the models provider-reconciler keys its "backend is non-compliant
+# (no GET /v1/models)" classification on a 424 whose detail contains this marker, to
+# distinguish an upstream *rejection* 424 from the platform-side unresolved-secret
+# 424 (``raise_unresolved_provider_secret`` in api/errors.py), which is transient.
+# If you change the wording of the message below, update the reconciler's matching
+# token in services/core/models/.../controllers/provider_reconciler.py in lockstep.
+_UPSTREAM_REJECTED_DETAIL_MARKER = "rejected the request"
+
+
+@dataclass(frozen=True)
+class UpstreamProviderContext:
+    """Identifying context for the upstream model provider a request was routed to.
+
+    Used only to build a human-readable message when an upstream credential/route
+    rejection (401/403/404) is wrapped as 424. Every field is optional so callers
+    that lack full context (e.g. the mock path) still get a sensible message.
+    """
+
+    model_provider_name: str | None = None
+    provider_host_url: str | None = None
+    model_name: str | None = None
+    purpose: str | None = None
+
+
+def _redact_url_userinfo(url: str) -> str | None:
+    """Return *url* reduced to scheme+host(+port)+path, with any secret-bearing components stripped.
+
+    A provider ``host_url`` is a free-form, unvalidated string, so it can carry secrets in
+    multiple places: userinfo (a ``username:password`` pair before an ``@``), the query
+    string (``?api_key=...``), or the fragment (``#token=...``). None of those may reach a
+    client-visible error, so we keep ONLY scheme, host, port, and path and drop userinfo,
+    query, and fragment. Returns ``None`` when the URL can't be parsed into something safe
+    to show (no hostname) so the caller can fall back to a non-sensitive identifier rather
+    than risk emitting raw credentials.
+    """
+    try:
+        parts = urlsplit(url)
+        # urlsplit is lazy: an out-of-range/malformed port only raises when .port is
+        # accessed, so read it INSIDE the try or a bad port escapes as a 500 instead of
+        # the intended 424.
+        port = parts.port
+    except ValueError:
+        return None
+    if not parts.hostname:
+        # Unparseable / schemeless / no host — don't risk leaking; signal fallback.
+        return None
+    netloc = parts.hostname
+    if port is not None:
+        netloc = f"{netloc}:{port}"
+    # Keep only scheme + host(+port) + path; drop userinfo, query, and fragment — any of
+    # which can carry a secret in an unvalidated host_url.
+    return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
+
+
+def _dependency_failure_detail(
+    status_code: int,
+    error_body: str,
+    context: UpstreamProviderContext | None,
+) -> str:
+    """Build the 424 Failed Dependency detail for a wrapped upstream 401/403/404.
+
+    Names the upstream provider and its host URL so it is unambiguous *where* the
+    rejection came from (the backend model provider, not nemo-platform), then adds
+    client-side guidance that retrying will not help.
+    """
+    context = context or UpstreamProviderContext()
+    provider = context.model_provider_name
+    model = context.model_name
+    # Redact any embedded credentials from the host URL before it reaches the client.
+    # If it can't be safely parsed, fall back to naming the provider only (no host).
+    host = _redact_url_userinfo(context.provider_host_url) if context.provider_host_url else None
+
+    if provider and host and model:
+        first = (
+            f"Model provider {provider!r} at upstream {host!r} {_UPSTREAM_REJECTED_DETAIL_MARKER} "
+            f"for model {model!r} with HTTP status {status_code}"
+        )
+    elif provider and model:
+        # Host URL unavailable or unsafe to show — name the provider + model without a host.
+        first = (
+            f"Model provider {provider!r} {_UPSTREAM_REJECTED_DETAIL_MARKER} "
+            f"for model {model!r} with HTTP status {status_code}"
+        )
+    else:
+        # Degrade gracefully when full provider context is unavailable.
+        first = f"The upstream model provider {_UPSTREAM_REJECTED_DETAIL_MARKER} with HTTP status {status_code}"
+    if context.purpose:
+        first += f" while {context.purpose}"
+    first += "."
+
+    guidance = (
+        "This is a client-side error and will not resolve by retrying. Verify the model name, that your "
+        "credentials have access to it, and your request parameters. If this provider sits behind a gateway "
+        "or proxy, check its logs for the originating upstream status and message."
+    )
+    if error_body:
+        return f"{first} {guidance} Upstream response: {error_body}"
+    return f"{first} {guidance}"
+
+
+async def proxy_request(
+    http_client: ClientSession,
+    next_request_info: NextRequestInfo,
+    upstream_context: UpstreamProviderContext | None = None,
+) -> StreamingResponse:
     """Execute a proxied HTTP request and stream the response back to the client.
 
     This function forwards the request to an upstream service and streams the response
     back without buffering. It handles both regular and server-sent event responses.
 
-    Certain backend errors (401/403/404) are wrapped in 502 Bad Gateway with a clear
-    error message indicating the error came from the backend, not the gateway. Other
-    backend errors (429, 422, 5xx, etc.) are passed through with their original status.
-    In both cases the backend's error body is included in the detail for diagnostics.
+    Certain backend rejections (401/403/404) are wrapped in 424 Failed Dependency with
+    a clear message naming the upstream provider, so the caller can tell the backend
+    model provider rejected the request rather than nemo-platform itself. 424 keeps the
+    failure in the non-retryable 4xx class (unlike the old 502, which invited clients to
+    retry a request that will never succeed). Other backend errors (429, 422, 5xx, etc.)
+    are passed through with their original status. In all cases the backend's error body
+    is included in the detail for diagnostics.
 
     Args:
         http_client: The HTTP client session to use for the request
         next_request_info: Information about the request to proxy
+        upstream_context: Optional identifying context for the upstream provider, used
+            to enrich the 424 message when a 401/403/404 is wrapped.
 
     Returns:
         StreamingResponse containing the proxied response
 
     Raises:
-        HTTPException: 502 for certain backend errors (401/403/404) or network errors,
+        HTTPException: 424 for backend rejections (401/403/404), 502 for network errors,
             original status for other backend errors, 500 for internal errors
     """
     response: aiohttp.ClientResponse | None = None
@@ -401,13 +528,9 @@ async def proxy_request(http_client: ClientSession, next_request_info: NextReque
                 next_request_info.url,
                 error_body,
             )
-            if response.status in (401, 403, 404):
-                detail = (
-                    f"Backend returned {response.status}: {error_body}"
-                    if error_body
-                    else f"Backend returned {response.status}"
-                )
-                raise HTTPException(status_code=502, detail=detail, headers=error_headers)
+            if response.status in _DEPENDENCY_FAILURE_STATUSES:
+                detail = _dependency_failure_detail(response.status, error_body, upstream_context)
+                raise HTTPException(status_code=_DEPENDENCY_FAILURE_STATUS, detail=detail, headers=error_headers)
             else:
                 detail = error_body if error_body else str(response.status)
                 raise HTTPException(status_code=response.status, detail=detail, headers=error_headers)
@@ -502,6 +625,7 @@ async def fetch_proxy_response(
     next_request_info: NextRequestInfo,
     served_model_name: str | None = None,
     restored_model_id: str | None = None,
+    upstream_context: UpstreamProviderContext | None = None,
 ) -> tuple[ResponseResult, CIMultiDict[str], int]:
     """Execute a proxied HTTP request and return the response as a ``ResponseResult``.
 
@@ -560,13 +684,9 @@ async def fetch_proxy_response(
             # an HTTP-200 SSE stream does not reach here; see the docstring.)
             if served_model_name is not None and restored_model_id is not None:
                 error_body = _rewrite_model_field_in_error_body(error_body, served_model_name, restored_model_id)
-            if response.status in (401, 403, 404):
-                detail = (
-                    f"Backend returned {response.status}: {error_body}"
-                    if error_body
-                    else f"Backend returned {response.status}"
-                )
-                raise HTTPException(status_code=502, detail=detail, headers=error_headers)
+            if response.status in _DEPENDENCY_FAILURE_STATUSES:
+                detail = _dependency_failure_detail(response.status, error_body, upstream_context)
+                raise HTTPException(status_code=_DEPENDENCY_FAILURE_STATUS, detail=detail, headers=error_headers)
             else:
                 detail = error_body if error_body else str(response.status)
                 raise HTTPException(status_code=response.status, detail=detail, headers=error_headers)
@@ -896,8 +1016,22 @@ async def virtual_model_proxy(
     )
 
     # Seed body["model"] if a default is set on the virtual model.
+    #
+    # For a LoRA adapter, the request model is a composite
+    # ``{base}&adapters/{adapter_ws}/{adapter_name}`` routed through the *base* model's
+    # VM (see resolve_vm_for_model). In that case, splice the VM's default_model_entity
+    # into ONLY the base segment and preserve the ``&adapters/...`` suffix, so the request
+    # inherits the base VM's middleware while still resolving to the adapter's served model
+    # entity. Example: body ``myvm-ws/myvm&adapters/a-ws/a-name`` + default ``base-ws/base``
+    # → ``base-ws/base&adapters/a-ws/a-name``. A non-composite body is replaced wholesale
+    # (the existing behavior); if default_model_entity is unset, body["model"] is left as-is.
     if virtual_model.default_model_entity:
-        json_body["model"] = virtual_model.default_model_entity
+        body_model = json_body.get("model")
+        if isinstance(body_model, str) and "&adapters/" in body_model:
+            adapter_suffix = body_model.split("&adapters/", 1)[1]
+            json_body["model"] = f"{virtual_model.default_model_entity}&adapters/{adapter_suffix}"
+        else:
+            json_body["model"] = virtual_model.default_model_entity
 
     # Build per-request context.  original_request captures the state after model
     # seeding but before any plugin runs; plugins receive a separate InferenceRequest
@@ -972,6 +1106,17 @@ async def virtual_model_proxy(
         ctx.backend_format = backend_format
         resolved_served_model_name, resolved_model_provider_info = resolved_model_entity.model_providers[0]
 
+        # Context used only to enrich the 424 message when the upstream provider
+        # rejects the request (401/403/404). The model name we surface is the
+        # entity ref the caller asked for, never the upstream served_model_name.
+        restored_model_id = f"{modified_model_ref.workspace}/{modified_model_ref.name}"
+        upstream_context = UpstreamProviderContext(
+            model_provider_name=resolved_model_provider_info.model_provider.name,
+            provider_host_url=resolved_model_provider_info.model_provider.host_url,
+            model_name=restored_model_id,
+            purpose=f"proxying {proxy_path!r}",
+        )
+
         if (
             resolved_model_provider_info.model_provider.api_key_secret_name
             and not resolved_model_provider_info.secret_value
@@ -998,12 +1143,13 @@ async def virtual_model_proxy(
                 default_extra_headers=resolved_model_provider_info.model_provider.default_extra_headers,
                 request_body=json_body,
             )
-            # Match fetch_proxy_response error semantics: 401/403/404 → 502, else passthrough.
+            # Match fetch_proxy_response error semantics: 401/403/404 → 424 (Failed
+            # Dependency, non-retryable), else passthrough.
             if mock_response.status_code >= 400:
-                if mock_response.status_code in (401, 403, 404):
+                if mock_response.status_code in _DEPENDENCY_FAILURE_STATUSES:
                     raise HTTPException(
-                        status_code=502,
-                        detail=f"Backend returned {mock_response.status_code}",
+                        status_code=_DEPENDENCY_FAILURE_STATUS,
+                        detail=_dependency_failure_detail(mock_response.status_code, "", upstream_context),
                     )
                 raise HTTPException(
                     status_code=mock_response.status_code,
@@ -1073,9 +1219,10 @@ async def virtual_model_proxy(
                 http_client,
                 next_request_info,
                 served_model_name=resolved_served_model_name,
-                restored_model_id=f"{modified_model_ref.workspace}/{modified_model_ref.name}",
+                restored_model_id=restored_model_id,
+                upstream_context=upstream_context,
             )
-            json_body["model"] = f"{modified_model_ref.workspace}/{modified_model_ref.name}"
+            json_body["model"] = restored_model_id
 
         # Rewrite the served-model name back to the post-middleware model entity reference
         # in the response body so the user never sees the upstream's served_model_name. This

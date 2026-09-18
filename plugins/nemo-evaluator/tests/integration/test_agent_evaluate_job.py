@@ -10,8 +10,8 @@ matter for this work:
   (canned response, so no real model or key);
 * metric form — an inline metric bundle, plus a stored ``MetricRef`` resolved against
   the live entity store;
-* execution mode — in-process ``run_local`` and service-side ``submit`` on both the
-  subprocess and docker backends, against the session ``subprocess_platform`` /
+* execution mode — in-process sync job execution and service-side ``submit`` on both
+  the subprocess and docker backends, against the session ``subprocess_platform`` /
   ``docker_platform`` fixtures in ``conftest.py``. (Docker submit is xfail today — the
   cpu-tasks image predates this work; tracked in AALGO-301.)
 
@@ -46,6 +46,7 @@ from nemo_evaluator.api.schemas import (
 from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
+    AgentEvalSpec,
     AgentEvalTaskInput,
     AgentTarget,
     HarborRunnerTarget,
@@ -62,6 +63,9 @@ from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nemo_evaluator_sdk.values import GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel
 from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.client import NemoClient
+from nemo_platform_plugin.job_context import JobContext, StoragePaths
+from nemo_platform_plugin.job_results import LocalJobResults
 from nemo_platform_plugin.scheduler import NemoJobScheduler
 from nemo_platform_plugin.sdk import NeMoPlatform
 from nemo_platform_plugin.workspaces.client import WorkspacesClient
@@ -148,8 +152,19 @@ class _OutputScoreMetric:
 
 
 def _bundle_dir(run_result: dict) -> Path:
-    """The persisted run bundle directory (trials/scores/summary) from a run_local result."""
+    """The persisted run bundle directory (trials/scores/summary) from an in-process result."""
     return Path(run_result["artifact"]["artifact_url"].removeprefix("file://"))
+
+
+def _job_context(tmp_path: Path) -> JobContext:
+    storage = StoragePaths(ephemeral=tmp_path / "ephemeral", persistent=tmp_path / "persistent")
+    storage.ephemeral.mkdir()
+    storage.persistent.mkdir()
+    return JobContext(
+        workspace=WORKSPACE,
+        storage=storage,
+        results=LocalJobResults(root=storage.persistent / "results"),
+    )
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -177,7 +192,7 @@ def _unique(prefix: str) -> str:
 
 
 @pytest.mark.timeout(300)
-def test_run_local_model_target_scores_a_real_trial(subprocess_platform: str) -> None:
+def test_sync_job_model_target_scores_a_real_trial(subprocess_platform: str, tmp_path: Path) -> None:
     # dim 1 (Model endpoint target): generate a trial against an IGW mock provider that returns
     # "DONE" (no real model/key), then score the trial output with the inline metric.
     sdk = NeMoPlatform(base_url=subprocess_platform, max_retries=2)
@@ -205,7 +220,12 @@ def test_run_local_model_target_scores_a_real_trial(subprocess_platform: str) ->
         ),
     )
 
-    result = NemoJobScheduler().run_local(AgentEvalJob, input_spec.model_dump(mode="json"))
+    canonical = AgentEvalSpec.model_validate(input_spec.model_dump(mode="json"))
+    result = AgentEvalJob().run(
+        canonical.model_dump(mode="json"),
+        ctx=_job_context(tmp_path),
+        client=NemoClient(base_url=subprocess_platform, workspace=WORKSPACE),
+    )
 
     assert result["status"] == "completed"
     bundle = _bundle_dir(result)
@@ -216,7 +236,7 @@ def test_run_local_model_target_scores_a_real_trial(subprocess_platform: str) ->
 
 
 @pytest.mark.timeout(300)
-def test_run_local_agent_target_scores_a_real_trial(subprocess_platform: str) -> None:
+def test_sync_job_agent_target_scores_a_real_trial(subprocess_platform: str, tmp_path: Path) -> None:
     # dim 1 (Agent endpoint target): a generic-HTTP agent posts to an IGW mock provider returning
     # "DONE"; response_path extracts the assistant content, then the inline metric scores it.
     sdk = NeMoPlatform(base_url=subprocess_platform, max_retries=2)
@@ -245,7 +265,12 @@ def test_run_local_agent_target_scores_a_real_trial(subprocess_platform: str) ->
         target=AgentTarget(agent=agent, params=RunConfigOnline()),
     )
 
-    result = NemoJobScheduler().run_local(AgentEvalJob, input_spec.model_dump(mode="json"))
+    canonical = AgentEvalSpec.model_validate(input_spec.model_dump(mode="json"))
+    result = AgentEvalJob().run(
+        canonical.model_dump(mode="json"),
+        ctx=_job_context(tmp_path),
+        client=NemoClient(base_url=subprocess_platform, workspace=WORKSPACE),
+    )
 
     assert result["status"] == "completed"
     bundle = _bundle_dir(result)
@@ -554,7 +579,7 @@ def test_submit_harbor_target_to_docker_backend_fails_fast(docker_platform: str)
     detail = response.json()["detail"]
     assert "profile 'default'" in detail
     assert "backend 'docker'" in detail
-    assert "Harbor targets currently require local execution or the subprocess backend" in detail
+    assert "Harbor targets currently require the subprocess backend" in detail
 
     jobs = httpx.get(
         f"{docker_platform}/apis/evaluator/v2/workspaces/{workspace}/agent-evaluate/jobs",

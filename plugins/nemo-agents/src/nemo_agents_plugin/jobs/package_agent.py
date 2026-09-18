@@ -172,8 +172,8 @@ class PackageAgentSpec(PackageAgentInput):
     @model_validator(mode="after")
     def _push_tag_stays_in_the_workspace_namespace(self) -> PackageAgentSpec:
         # 'workspace' isn't known on PackageAgentInput (it comes from the URL / --workspace,
-        # not the request body), so this check can only run here, once to_spec()/run_local()
-        # has stamped it onto the spec.
+        # not the request body), so this check can only run here, once to_spec()
+        # has stamped it onto the canonical spec.
         if self.push_tag and self.registry and self.workspace:
             # Anchored on 'registry' too, not just the 'nemo-agents/{workspace}/' segment —
             # otherwise push_tag could silently redirect to a registry other than the one

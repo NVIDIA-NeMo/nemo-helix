@@ -10,51 +10,10 @@ from __future__ import annotations
 
 from typing import Optional
 
+from nemo_platform_plugin.deployment import DeploymentParams
 from nmp.customization_common.schemas.file_io import FileSetRef
 from nmp.customization_common.schemas.values import FinetuningType
 from pydantic import BaseModel, Field
-
-
-class ToolCallConfig(BaseModel):
-    """Tool calling configuration for NIM deployments."""
-
-    tool_call_parser: Optional[str] = Field(default=None, description="Name of the tool call parser to use.")
-    tool_call_plugin: Optional[str] = Field(
-        default=None,
-        pattern=r"^[\w\-.]+/[\w\-.]+$",
-        description=(
-            "Reference to a fileset containing the custom tool call plugin Python file. "
-            "Expected format: '{workspace}/{fileset_name}'."
-        ),
-    )
-    auto_tool_choice: Optional[bool] = Field(default=None, description="Whether to enable automatic tool choice.")
-
-
-class DeploymentParameters(BaseModel):
-    """Inline deployment parameters for creating a new ModelDeploymentConfig."""
-
-    gpu: int = Field(default=1, gt=0, description="Number of GPUs required for deployment")
-    additional_envs: Optional[dict[str, str]] = Field(
-        default=None,
-        description="Additional environment variables for deployment",
-    )
-    disk_size: Optional[str] = Field(default=None, description="Disk size for deployment")
-    image_name: Optional[str] = Field(
-        default=None,
-        description="Container image name from NGC. Defaults to multi-llm when unset",
-    )
-    image_tag: Optional[str] = Field(default=None, description="Container image tag from NGC")
-    lora_enabled: bool = Field(
-        default=True,
-        description=(
-            "When auto-deploying full SFT training, setting this true allows "
-            "subsequent LoRA adapters to be deployed against the model."
-        ),
-    )
-    tool_call_config: Optional[ToolCallConfig] = Field(
-        default=None,
-        description="Tool calling configuration override for the NIM deployment.",
-    )
 
 
 class PEFTConfig(BaseModel):
@@ -85,7 +44,7 @@ class ModelEntityTaskConfig(BaseModel):
         default=False,
         description="Whether to trust remote code for the checkpoint.",
     )
-    deployment_config: Optional[str | DeploymentParameters] = Field(
+    deployment_config: Optional[str | DeploymentParams] = Field(
         default=None,
         description=(
             "Deployment configuration. A string references an existing ModelDeploymentConfig "

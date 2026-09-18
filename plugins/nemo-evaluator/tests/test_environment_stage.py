@@ -9,7 +9,6 @@ from nemo_evaluator.jobs.environment_stage import EnvironmentStageJob
 from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_platform_plugin.sdk import NeMoPlatform
 from pytest_mock import MockerFixture
 
 
@@ -36,8 +35,8 @@ def test_stages_environment_at_fixed_persistent_path(tmp_path: Path, mocker: Moc
     ctx = _context(tmp_path)
     task_client = _task_client(mocker)
 
-    def download_contents(*, sdk: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
-        assert sdk is task_client
+    def download_contents(*, client: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
+        assert client is task_client
         assert workspace == "shared"
         assert fileset == "custom-gym"
         Path(destination, "nemo-environment.yaml").write_text("format: wheels-v1\n")
@@ -50,11 +49,11 @@ def test_stages_environment_at_fixed_persistent_path(tmp_path: Path, mocker: Moc
     result = EnvironmentStageJob().run(
         {"environment": "shared/custom-gym"},
         ctx=ctx,
-        sdk=task_client,
+        client=task_client,
     )
 
     download_fileset_contents.assert_called_once_with(
-        sdk=task_client,
+        client=task_client,
         fileset="custom-gym",
         workspace="shared",
         destination=ctx.storage.persistent / ".environment-staging",
@@ -71,8 +70,8 @@ def test_staged_fileset_preserves_wheels_tree(tmp_path: Path, mocker: MockerFixt
     wheel_name = "xmltodict-1.0.4-py3-none-any.whl"
     config_rel = Path("resources_servers") / "structeval" / "configs" / "structeval_nonrenderable.yaml"
 
-    def download_contents(*, sdk: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
-        assert sdk is task_client
+    def download_contents(*, client: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
+        assert client is task_client
         assert workspace == "dev"
         assert fileset == "structeval-wheels"
         root = destination
@@ -89,7 +88,7 @@ def test_staged_fileset_preserves_wheels_tree(tmp_path: Path, mocker: MockerFixt
         side_effect=download_contents,
     )
 
-    EnvironmentStageJob().run({"environment": "dev/structeval-wheels"}, ctx=ctx, sdk=task_client)
+    EnvironmentStageJob().run({"environment": "dev/structeval-wheels"}, ctx=ctx, client=task_client)
 
     environment = ctx.storage.persistent / "environment"
     assert (environment / "nemo-environment.yaml").is_file()
@@ -107,8 +106,8 @@ def test_failed_download_removes_partial_staging_without_replacing_environment(
     (environment / "existing.txt").write_text("complete")
     task_client = _task_client(mocker)
 
-    def fail_download(*, sdk: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
-        assert sdk is task_client
+    def fail_download(*, client: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
+        assert client is task_client
         assert workspace == "dev"
         assert fileset == "custom-gym"
         Path(destination, "partial.txt").write_text("partial")
@@ -123,7 +122,7 @@ def test_failed_download_removes_partial_staging_without_replacing_environment(
         EnvironmentStageJob().run(
             {"environment": "custom-gym"},
             ctx=ctx,
-            sdk=task_client,
+            client=task_client,
         )
 
     assert (environment / "existing.txt").read_text() == "complete"
@@ -131,23 +130,26 @@ def test_failed_download_removes_partial_staging_without_replacing_environment(
     assert (ctx.storage.persistent / "workspace").is_dir()
 
 
-def test_run_adapts_the_generated_sdk_the_local_cli_injects(tmp_path: Path, mocker: MockerFixture) -> None:
-    """``nemo evaluator stage-environment run`` injects a generated ``NeMoPlatform``, but staging
-    reaches the Files service through ``FilesClient.from_client``, which only accepts a typed
-    client."""
+def test_run_passes_the_declared_typed_client(tmp_path: Path, mocker: MockerFixture) -> None:
+    """The sync job entrypoint uses the typed client declared by the job."""
     received: dict[str, object] = {}
 
-    def download_contents(*, sdk: object, workspace: str, fileset: str, destination: Path) -> None:
-        received["sdk"] = sdk
+    def download_contents(*, client: object, workspace: str, fileset: str, destination: Path) -> None:
+        received["client"] = client
         Path(destination, "nemo-environment.yaml").write_text("format: wheels-v1\n")
 
     mocker.patch(
         "nemo_evaluator.jobs.environment_stage._download_fileset_contents",
         side_effect=download_contents,
     )
-    platform = NeMoPlatform(base_url="http://platform.test", workspace="dev", http_client=httpx.Client())
+    client = _task_client(mocker)
+    ctx = _context(tmp_path)
 
-    result = EnvironmentStageJob().run({"environment": "shared/custom-gym"}, ctx=_context(tmp_path), sdk=platform)
+    result = EnvironmentStageJob().run(
+        {"environment": "shared/custom-gym"},
+        ctx=ctx,
+        client=client,
+    )
 
     assert result["status"] == "completed"
-    assert isinstance(received["sdk"], NemoClient)
+    assert received["client"] is client

@@ -15,7 +15,7 @@ PVC, or egress policy.
 
 ## Prerequisites
 
-- Complete the shared [OpenSandbox platform setup](/documentation/kubernetes-deployment/setup/helm/opensandbox).
+- Complete the shared [OpenSandbox platform setup](/documentation/kubernetes-deployment/setup/helm/open-sandbox).
   It configures the server connection, credentials, and top-level platform sandbox capability.
 - A Kubernetes or Volcano Jobs execution profile with a shared job-storage PVC. The claim should
   support `ReadWriteMany` when Jobs and OpenSandbox pods can run on different nodes.
@@ -172,7 +172,7 @@ Before accepting custom environment jobs, verify:
 ## Related
 
 <Cards>
-  <Card title="Install OpenSandbox" href="/documentation/kubernetes-deployment/setup/helm/opensandbox" />
+  <Card title="Install OpenSandbox" href="/documentation/kubernetes-deployment/setup/helm/open-sandbox" />
   <Card title="Run a Custom Gym Environment" href="/documentation/evaluate-models/agent-eval/gym-custom-environment" />
   <Card title="Evaluate a NeMo Gym Environment" href="/documentation/evaluate-models/agent-eval/gym-runner" />
 </Cards>

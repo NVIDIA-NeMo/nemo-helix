@@ -97,6 +97,19 @@ def _exec_identity(user: str | int | None) -> dict[str, int]:
     raise UnsupportedEpisodeOperationError(f"this backend can only exec as a numeric uid, not the name {user!r}")
 
 
+def _resource_limits(create_options: Mapping[str, Any]) -> dict[str, str] | None:
+    """Operator-configured resource *limits*, distinct from the per-episode requests.
+
+    ``resource_requests`` is what the episode asks to be scheduled with; ``resource`` is the hard
+    cap the sandbox runs under. They are separate arguments on the SDK, and omitting the second is
+    not neutral: ``Sandbox.create`` substitutes ``{"cpu": "1", "memory": "2Gi"}``. A host given
+    larger requests but the default cap is killed or throttled partway through an episode, which
+    surfaces as an unexplained episode failure rather than as a resource error.
+    """
+    limits = create_options.get("resource")
+    return {str(k): str(v) for k, v in limits.items()} if limits else None
+
+
 def _network_policy(create_options: Mapping[str, Any]) -> Any:
     """Lift the egress policy dict `create_options_with_policy` produced into the SDK's model."""
     from opensandbox.models.sandboxes import NetworkPolicy
@@ -196,6 +209,7 @@ class OpenSandboxDriver:
                 ready_timeout=timedelta(seconds=spec.ready_timeout_s or 30.0),
                 env=dict(spec.env) or None,
                 metadata=metadata,
+                resource=_resource_limits(self._create_options),
                 resource_requests=_resource_requests(spec) or None,
                 network_policy=_network_policy(self._create_options),
                 entrypoint=list(spec.entrypoint) if spec.entrypoint else None,

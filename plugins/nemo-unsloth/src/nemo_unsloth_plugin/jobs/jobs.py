@@ -22,7 +22,10 @@ from nemo_platform_plugin.jobs.docker import validate_gpu_available_for_docker
 from nemo_unsloth_plugin.schema import UnslothJobInput
 from nemo_unsloth_plugin.transform import transform_input_to_output
 from nmp.customization_common.contributor.jobs import BaseSubmitJob, require_container_runtime
-from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
+from nmp.customization_common.service.platform_client import (
+    AsyncCustomizationPlatformClients,
+    async_customization_platform_clients_from_platform,
+)
 from nmp.unsloth.compile import platform_job_config_compiler
 from nmp.unsloth.config import config as unsloth_config
 from nmp.unsloth.schemas import UnslothJobOutput
@@ -70,6 +73,7 @@ class UnslothJob(BaseSubmitJob[UnslothJobInput, UnslothJobOutput]):
         ``unsloth_config.default_training_execution_profile``.
         """
         del entity_client, options
+        platform = async_customization_platform_clients_from_platform(async_sdk)
         # Probe is sync (≤5s); keep it off the event loop.
         await asyncio.to_thread(require_container_runtime, cls.runtime_label)
         canonical = spec if isinstance(spec, UnslothJobOutput) else UnslothJobOutput.model_validate(spec.model_dump())
@@ -79,7 +83,7 @@ class UnslothJob(BaseSubmitJob[UnslothJobInput, UnslothJobOutput]):
         platform_spec = await platform_job_config_compiler(
             workspace=workspace,
             spec=canonical,
-            sdk=async_sdk,
+            platform=platform,
             job_name=job_name,
             profile=execution_profile,
         )

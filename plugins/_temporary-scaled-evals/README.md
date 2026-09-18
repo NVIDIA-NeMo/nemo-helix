@@ -12,7 +12,10 @@ Portable behavior is reconciled through standalone scaled-evals `1.13.0`
 fork: hosted deployment, identity-provider, and private corpus surfaces are not
 vendored. Benchmark-wide Harbor archive exports are additionally ported from
 standalone `1.22.0` (`cffd0af2d7aa3e9cc323cc4c32204faf785688fe`); this does not
-imply reconciliation of the other changes after `1.13.0`.
+imply reconciliation of the other changes after `1.13.0`. Selected portable
+operational fixes are ported through standalone `1.23.1`: threadpool-independent
+liveness (`a5ab1eb3`), short-lived database checkouts for streaming downloads
+(`03efad39`), and JSON-aware artifact redaction (`880ba9d5`).
 
 ## Install (ephemeral — not in `enabled-plugins` yet)
 
@@ -338,14 +341,17 @@ lsof -ti tcp:8080 | xargs kill
 docker rm -f scaled-evals-pg
 ```
 
-## Workers (separate processes)
+## Background execution
 
-```bash
-scaled-evals-build-worker
-scaled-evals-dispatch-worker
-```
+With `SCALED_EVALS_PLATFORM_BUILD_JOBS_ENABLED=true` and
+`SCALED_EVALS_PLATFORM_EVALUATION_JOBS_ENABLED=true`, the
+`scaled-evals-jobs` controller submits task builds and evaluation executions to
+Platform Jobs. Postgres remains the admission queue and metadata source of
+truth during this migration.
 
-Workers read the same `SCALED_EVALS_DATABASE_URL` and S3 env as the plugin.
+`scaled-evals-dispatch-worker` remains deployed for cleanup, provenance, and
+SBOM queues. The legacy `scaled-evals-build-worker` command remains available
+only for deployments that leave Platform Jobs disabled.
 
 ## Licensing
 

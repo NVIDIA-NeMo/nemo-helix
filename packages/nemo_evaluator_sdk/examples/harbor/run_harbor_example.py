@@ -53,7 +53,7 @@ async def _main(jobs_dir: Path, *, n_attempts: int, job_name: str | None) -> Non
 
     print(f"run_id: {result.run_id}  tasks: {result.summary.task_count}  trials: {result.summary.trial_count}")
     for aggregate in result.summary.scores.scores:
-        print(f"  {aggregate.name}: mean={aggregate.mean}")
+        print(f"  {aggregate.name}: {aggregate.headline_value}")
     for score in result.scores:
         reward = score.outputs[0].value if score.outputs else None
         print(f"  {score.task_id}: reward={reward} status={score.status.value}")

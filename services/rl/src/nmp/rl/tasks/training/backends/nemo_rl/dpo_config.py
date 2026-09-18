@@ -513,10 +513,8 @@ def _build_scheduler_config(
 
     # Check if using flat LR scheduler
     if optimizer_type in (OptimizerType.ADAM_WITH_FLAT_LR, OptimizerType.ADAMW_WITH_FLAT_LR):
-        # Flat LR: Use ConstantLR scheduler. Wrapped in a list because NeMo-RL types
-        # policy.scheduler as list[SinglePytorchSchedulerConfig | SinglePytorchMilestonesConfig]
-        # | SchedulerMilestones (dict[str, list[int]]) -- a bare {"name", "kwargs"} dict matches
-        # neither, and MasterConfig rejects the job before the model is even loaded.
+        # Flat LR. List form is required by NeMo-RL; empty milestones because
+        # SequentialLR needs one fewer milestone than schedulers.
         return [
             {
                 "name": "torch.optim.lr_scheduler.ConstantLR",
@@ -524,7 +522,10 @@ def _build_scheduler_config(
                     "factor": 1.0,
                     "total_iters": num_steps,
                 },
-            }
+            },
+            {
+                "milestones": [],
+            },
         ]
 
     if optimizer_type in (OptimizerType.ADAM_WITH_COSINE_ANNEALING, OptimizerType.ADAMW_WITH_COSINE_ANNEALING):

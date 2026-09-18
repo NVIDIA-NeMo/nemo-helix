@@ -5,6 +5,11 @@
 
 This directory contains NeMo Platform identity-provider reference bundles.
 
+Available references:
+
+- `authentik`: Docker Compose and Kubernetes.
+- `zitadel`: Kubernetes only.
+
 Each provider bundle defines one contract for local validation and production
 adaptation:
 
@@ -14,6 +19,11 @@ adaptation:
 - treat external machine identities as ordinary OIDC principals authorized by
   group binding, not as internal `service:*` principals
 - document provider-specific setup in a local `README.md`
+
+Kubernetes-only references can seed generated IdP clients at install time. When
+that is required, the provider chart should store generated test credentials in
+a namespace-local Secret and patch only the demo ConfigMap values that cannot be
+known before the IdP is initialized.
 
 Managed job OBO tests use the provider for user and controller authentication,
 but the workload-to-submitter binding is NeMo Platform auth state. Jobs receive

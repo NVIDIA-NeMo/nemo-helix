@@ -18,7 +18,7 @@ interface ModelCompareChatProps extends PanelChatControls {
   workspace: string;
   models: SharedModelEntry[];
   onRemoveModel: (id: number) => void;
-  onSetModel: (id: number, modelURN: string | null) => void;
+  onSetModel: (id: number, modelURN: string | null, adapter?: string | null) => void;
   /** Incremented to remount all chat panels (clears messages) without losing model selections. */
   chatResetCount?: number;
   /** Called when the user clicks the Add Model button. Omit to hide the button (gutter stays). */
@@ -66,6 +66,7 @@ export const ModelCompareChat: FC<ModelCompareChatProps> = ({
       id: m.id,
       collapsed: collapsedIds.has(m.id),
       modelURN: m.modelURN,
+      adapter: m.adapter,
       roleColor,
       roleLabel: PANEL_ROLE_LABELS[roleColor],
       isSinglePanel,

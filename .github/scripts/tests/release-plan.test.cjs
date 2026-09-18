@@ -5,7 +5,10 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { resolveReleasePlan } = require("../release-plan.cjs");
+const {
+  resolveReleasePlan,
+  resolveNightlyBaseVersion,
+} = require("../release-plan.cjs");
 
 const WHEELS = [
   {
@@ -35,6 +38,31 @@ function manualContext(inputs) {
     sha: "b".repeat(40),
     payload: { inputs, repository: { default_branch: "main" } },
   };
+}
+
+for (const [branch, tags, expected] of [
+  ["release/0.6", [], "0.6.0"],
+  ["release/0.6", ["0.5.0", "0.5.1", "0.7.9", "1.6.9"], "0.6.0"],
+  ["release/0.6", ["0.6.0"], "0.6.1"],
+  ["release/0.6", ["0.6.2", "0.6.0"], "0.6.3"],
+  ["release/0.6", ["0.6.9", "0.6.10", "0.6.2"], "0.6.11"],
+  [
+    "release/0.6",
+    ["0.6.0-rc0", "0.6.0-rc.1", "v0.6.5", "0.6.5+fix", "0.6.01"],
+    "0.6.0",
+  ],
+  ["release/0.6", ["0.6.0", "0.6.1-rc0"], "0.6.1"],
+  ["release/2.10", ["2.9.99", "2.10.3"], "2.10.4"],
+]) {
+  test(`${branch} with tags ${JSON.stringify(tags)} plans ${expected} nightlies`, () => {
+    assert.equal(
+      resolveNightlyBaseVersion(
+        branch,
+        tags.map((name) => ({ name })),
+      ),
+      expected,
+    );
+  });
 }
 
 test("resolves a stable Helm-only release", async () => {

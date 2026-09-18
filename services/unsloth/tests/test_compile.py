@@ -14,6 +14,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
 from nmp.unsloth.compile import platform_job_config_compiler
 from nmp.unsloth.schemas import (
     DatasetSpec,
@@ -43,7 +44,7 @@ def _canonical_spec() -> UnslothJobOutput:
 @pytest.mark.asyncio
 async def test_compile_delegates_to_app_jobs_compiler() -> None:
     spec = _canonical_spec()
-    sdk = object()
+    platform = AsyncCustomizationPlatformClients(files=AsyncMock(), models=AsyncMock())
 
     sentinel = object()
     target = "nmp.unsloth.compile._compile_canonical"
@@ -51,7 +52,7 @@ async def test_compile_delegates_to_app_jobs_compiler() -> None:
         result = await platform_job_config_compiler(
             workspace="default",
             spec=spec,
-            sdk=sdk,
+            platform=platform,
             job_name="job-x",
             profile="gpu-large",
         )
@@ -60,7 +61,7 @@ async def test_compile_delegates_to_app_jobs_compiler() -> None:
     mock.assert_awaited_once_with(
         "default",
         spec,
-        sdk,
+        platform,
         job_name="job-x",
         profile="gpu-large",
     )

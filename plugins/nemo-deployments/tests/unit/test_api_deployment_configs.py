@@ -11,7 +11,11 @@ from fastapi.testclient import TestClient
 from helpers import list_response, make_deployment, make_deployment_config
 from nemo_deployments_plugin.api.v2 import deployment_configs as configs_module
 from nemo_deployments_plugin.api.v2.dependencies import get_entity_client
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_platform_plugin.entity_client import (
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+    NemoEntityValidationError,
+)
 
 
 @pytest.fixture
@@ -160,3 +164,13 @@ def test_create_deployment_config_409(client: TestClient, mock_entity_client: As
         json={"name": "cfg1"},
     )
     assert resp.status_code == 409
+
+
+def test_create_deployment_config_validation_422(client: TestClient, mock_entity_client: AsyncMock) -> None:
+    mock_entity_client.create.side_effect = NemoEntityValidationError("name: string does not match pattern")
+    resp = client.post(
+        "/apis/deployments/v2/workspaces/default/deployment-configs",
+        json={"name": "cfg 1"},
+    )
+    assert resp.status_code == 422
+    assert "pattern" in resp.json()["detail"]

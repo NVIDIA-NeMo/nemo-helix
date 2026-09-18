@@ -41,7 +41,7 @@ for i in $(seq 1 60); do
   sleep 5
 done
 python3 -m json.tool "$WORK/readyz.json"
-for check in postgres schema object_store buildkit registry build_worker; do
+for check in postgres schema object_store buildkit registry platform_jobs_controller; do
   [ "$(json "$WORK/readyz.json" "checks.$check")" = ok ] || fail "readyz check '$check' is not ok"
 done
 

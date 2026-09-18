@@ -304,11 +304,27 @@ def test_sync_resource_rejects_non_object_plugin_status() -> None:
         resource.plugin_status()
 
 
-def test_sync_resource_does_not_expose_backend_methods() -> None:
+_EVALUATOR_PUBLIC_RESOURCE_NAMES = {
+    "agent_eval_results",
+    "eval_results",
+    "from_sdk",
+    "get_job_resource",
+    "metrics",
+    "plugin_status",
+    "submit",
+    "tasks",
+    "tasksets",
+}
+
+
+def _public_resource_names(resource: object) -> set[str]:
+    return {name for name in dir(resource) if not name.startswith("_")}
+
+
+def test_sync_resource_exposes_only_evaluator_sdk_surface() -> None:
     resource = Evaluator(_SyncPlatform())
 
-    for method_name in ("create", "run_local", "evaluate", "evaluate_benchmark", "execution_mode"):
-        assert not hasattr(resource, method_name)
+    assert _public_resource_names(resource) == _EVALUATOR_PUBLIC_RESOURCE_NAMES
 
 
 def test_sync_executor_creates_evaluator_job() -> None:
@@ -679,11 +695,10 @@ async def test_async_resource_rejects_non_object_plugin_status() -> None:
         await resource.plugin_status()
 
 
-def test_async_resource_does_not_expose_backend_methods() -> None:
+def test_async_resource_exposes_only_evaluator_sdk_surface() -> None:
     resource = AsyncEvaluator(_AsyncPlatform())
 
-    for method_name in ("create", "run_local", "evaluate", "evaluate_benchmark", "execution_mode"):
-        assert not hasattr(resource, method_name)
+    assert _public_resource_names(resource) == _EVALUATOR_PUBLIC_RESOURCE_NAMES
 
 
 @pytest.mark.asyncio

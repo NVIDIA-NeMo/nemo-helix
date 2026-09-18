@@ -19,27 +19,61 @@ the verifier rewards through agent-eval — the same
 
 Unlike the quickstart, this runner is **not** zero-dependency — it shells out to Harbor and Docker:
 
-- **Python ≥ 3.12**
-- **Docker and docker daemon** installed and running
-- **Harbor**, installed from a NeMo Platform source checkout as shown below. Harbor is
-  imported lazily, so the base SDK remains usable on Python 3.11 without it; Harbor execution and
-  existing-result adaptation require Python 3.12 or newer.
+- **Python `>=3.12,<3.14`** — Harbor is imported lazily, so the base SDK remains usable on Python
+  3.11 without it; Harbor execution and existing-result adaptation require 3.12 or newer. The upper
+  bound is `nemo-platform`'s own; a source checkout resolves up to 3.14.
+- **A Docker-compatible container runtime** — Harbor invokes the `docker` executable on `PATH`
+  (`docker info` must succeed) and uses `docker compose`.
+- **Harbor** `>=0.20,<0.21` — see [Install Harbor](#install-harbor).
 
-The nemo-evaluator-sdk is not published as a standalone PyPI package. Use a NeMo Platform source checkout
-(see the repository's [setup guide](https://github.com/NVIDIA-NeMo/nemo-platform/blob/main/SETUP.md)
-for toolchain prerequisites). From the repository root, install the Harbor extra:
+</Warning>
+
+## Install Harbor
+
+`nemo-evaluator-sdk` is not published as a standalone package, so how you add Harbor depends on how
+you installed NeMo Platform.
+
+<Tabs>
+
+<Tab title="Installed package">
+
+Harbor ships with the `nemo-platform` `all` extra — `services`, `plugins`, and
+`nemo-experimentalist-plugin` include it as well:
+
+```bash
+uv pip install "nemo-platform[all]"
+```
+
+To add Harbor to an environment you already have, install it against the same constraint the SDK
+declares:
+
+```bash
+uv pip install "harbor>=0.20,<0.21"
+```
+
+Use `pip install` in place of `uv pip install` if you prefer; both work here.
+
+</Tab>
+
+<Tab title="Source checkout">
+
+`uv sync --package` resolves `nemo-evaluator-sdk` as a member of the repository's uv workspace, so
+it requires the workspace root `pyproject.toml` and does not work outside a checkout. Run it from
+the repository root (see the
+[setup guide](https://github.com/NVIDIA-NeMo/nemo-platform/blob/main/SETUP.md) for toolchain
+prerequisites):
 
 ```bash
 uv sync --frozen --package nemo-evaluator-sdk --extra harbor
 ```
 
-The runner raises a clear error pointing at this install step if `harbor` is missing.
+</Tab>
 
-Evaluator plugin submissions (`nemo evaluator agent-evaluate submit`) support the Harbor runner only
-through the host `subprocess` executor. Standalone SDK runs using `run_harbor_eval()` or
-`HarborAgentTaskRunner` invoke Harbor directly and do not use a Jobs execution profile.
+</Tabs>
 
-</Warning>
+`uv sync` has no `pip` equivalent — it resolves `nemo-evaluator-sdk` as a workspace member, which is
+why the source-checkout path needs the repository. The runner raises an error naming both of these
+install paths if `harbor` is missing.
 
 ## The dataset
 
@@ -58,6 +92,19 @@ my-suite/
 `id` and its human-readable `intent`, and `instruction.md` becomes `inputs["instruction"]` — the
 instruction the agent is prompted with. See
 [Harbor's task documentation](https://www.harborframework.com/docs/tasks) for the full task format.
+
+Those two files are the discovery contract, not a complete task — Harbor also needs an environment
+and a verifier to run the task and emit rewards. To author a new task, scaffold it with Harbor's own
+CLI rather than writing the files by hand:
+
+```bash
+harbor init my-org/my-task --task
+```
+
+This writes a populated `task.toml` alongside `instruction.md`, environment, verifier, and solution
+stubs, then prints the files to fill in. Add `--steps N` for a multi-step task, or use `-d` to
+initialize a dataset. See [Harbor's documentation](https://www.harborframework.com/docs/tasks) for
+the full task format and the rest of its CLI.
 
 <Note>
 
@@ -129,6 +176,14 @@ harbor_reward.reward: 1.0
 
 Swap `agent_name` (or `agent_import_path`) for your own agent to get a real score.
 
+<Note>
+
+Evaluator plugin submissions (`nemo evaluator agent-evaluate submit`) support the Harbor runner only
+through the host `subprocess` executor. Standalone SDK runs using `run_harbor_eval()` or
+`HarborAgentTaskRunner` invoke Harbor directly and do not use a Jobs execution profile.
+
+</Note>
+
 ## Choosing an agent
 
 `HarborRuntimeConfig` decides what runs inside each sandbox (see
@@ -141,29 +196,44 @@ Swap `agent_name` (or `agent_import_path`) for your own agent to get a real scor
 - **`agent_model_name`** — the model slug handed to the agent.
 - **`agent_kwargs`** — keyword arguments forwarded to the agent's constructor, the equivalent of
   Harbor's `--ak key=value` flags. Values must be JSON (strings, numbers, booleans, lists, mappings).
-  Do not put secrets here: Harbor persists the kwargs unredacted in the job directory's
-  `config.json`, and the run's provenance records them with only credential-looking keys
-  (`api_key`, `token`, `secret`, ...) redacted. Inject secrets into the job environment instead.
+  Do not put secrets here. Harbor copies its config into the job directory's `config.json` and
+  `lock.json` and into every trial's `config.json`, `lock.json`, `result.json` and agent run spec, and
+  needs the real value to construct the agent, so there is no later point at which the value can be
+  taken back. Name credentials in `agent_env_from_host` instead;
+  a `${NAME}` template is fine here, since it carries no value.
 
-The three agent fields map one-to-one onto Harbor's `AgentConfig`, which Harbor's agent factory
-unpacks into the agent's constructor:
+  A credential-shaped value fails validation before the run starts — a credential-looking key
+  (`api_key`, `token`, `secret`, `authorization`, ...) holding plaintext, or any value carrying a
+  recognised issued-token shape (`nvapi-`, `sk-`, `hf_`, a PEM block, ...). Treat that as a backstop,
+  not a guarantee: a secret under a key of your own naming, in a format the check does not know, will
+  pass straight through. The rule is still that secrets do not belong in `agent_kwargs`.
+- **`agent_env_from_host`** — host environment variables to forward to the agent. Each becomes a
+  `${NAME}` template on Harbor's `AgentConfig.env`: Harbor resolves it from the host environment when
+  it creates the agent and persists only the template, so the value never reaches `config.json`.
+  Provenance records the names, never the values.
+
+The agent fields map one-to-one onto Harbor's `AgentConfig`, which Harbor's agent factory unpacks
+into the agent's constructor:
 
 ```text
 HarborRunnerTarget / HarborRuntimeConfig
         │
-        ├─ agent_import_path  → Harbor AgentConfig.import_path
-        ├─ agent_model_name   → Harbor AgentConfig.model_name
-        └─ agent_kwargs       → Harbor AgentConfig.kwargs
+        ├─ agent_import_path   → Harbor AgentConfig.import_path
+        ├─ agent_model_name    → Harbor AgentConfig.model_name
+        ├─ agent_kwargs        → Harbor AgentConfig.kwargs
+        └─ agent_env_from_host → Harbor AgentConfig.env   ({NAME: "${NAME}"}, resolved by Harbor)
                                        │
                                        ▼
                      Harbor AgentFactory constructs
-                     FabricAgent(model_name=..., **kwargs)
+                     FabricAgent(model_name=..., extra_env=..., **kwargs)
 ```
 
 For example, NeMo Fabric's
-[`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.3.0-beta.2/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
+[`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.3.0/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
 is one of Harbor's [existing agents](https://www.harborframework.com/docs/agents#existing-agents);
-its constructor requires `fabric_adapter_id` and accepts `fabric_package` and `fabric_telemetry`:
+its constructor requires `fabric_adapter_id` and accepts `fabric_package` and `fabric_telemetry`. For a
+complete, runnable version with a Nemotron model, see
+[Run a NeMo Fabric Agent inside Harbor](/documentation/evaluate-models/agent-eval/harbor-fabric-agent).
 
 ```python
 config = HarborRuntimeConfig(
@@ -171,14 +241,34 @@ config = HarborRuntimeConfig(
     agent_import_path="nemo_fabric.integrations.harbor:FabricAgent",
     agent_kwargs={
         "fabric_adapter_id": "nvidia.fabric.codex",
-        "fabric_package": "nemo-fabric[codex]==0.3.0b1",
+        "fabric_package": "nemo-fabric[codex]==0.3.0",
         "fabric_telemetry": "relay",
     },
 )
 ```
 
-The same fields appear on the platform job's `HarborRunnerTarget`, so a spec submitted as a job carries
-them as `runner.agent_kwargs`.
+The same fields appear on the platform job's `HarborRunnerTarget`, the `target` of an
+`AgentEvalInputSpec` submitted with `nemo evaluator agent-evaluate submit`. Instead of
+`agent_env_from_host`, the platform target takes `env_secrets`, a mapping of environment variable name
+to NeMo Platform secret reference. The service resolves each reference into the job's environment at
+compile time and the job hands Harbor a `${NAME}` template, so the credential appears on neither the
+spec, the run bundle, nor `config.json`:
+
+```json
+{
+  "target": {
+    "kind": "harbor",
+    "agent_import_path": "nemo_fabric.integrations.harbor:FabricAgent",
+    "agent_kwargs": {
+      "fabric_adapter_id": "nvidia.fabric.codex",
+      "fabric_package": "nemo-fabric[codex]==0.3.0"
+    },
+    "env_secrets": {
+      "OPENAI_API_KEY": "my-workspace/openai-key"
+    }
+  }
+}
+```
 
 ## How scoring works
 
@@ -317,6 +407,9 @@ The SDK stores the cache stamp in `jobs_dir/<job_name>/.nemo-eval-harbor-cache.j
   can serve A, but cached A cannot serve A and B.
 - **Scoring and scheduling settings** — `reward_key`, selected metrics, `quiet`, and
   `n_concurrent_trials` do not invalidate Harbor execution results.
+- **`agent_env_from_host`** — participates by name: adding or removing a forwarded variable invalidates,
+  but the value it resolves to at run time is never fingerprinted, so rotating a credential keeps the
+  cache valid.
 - **Installed agents** — when `agent_dir` is unset, the stamp covers the agent selection or import path,
   not the installed package contents. Change the import path, use `agent_dir`, or force a rerun after
   changing installed agent code.
@@ -369,4 +462,5 @@ targets.
   <Card title="Agent Evaluation (concepts)" href="/documentation/evaluate-models/agent-eval" />
   <Card title="Agent Evaluation Quickstart" href="/documentation/evaluate-models/agent-eval/quickstart" />
   <Card title="Reading Results" href="/documentation/evaluate-models/agent-eval/reading-results" />
+  <Card title="Run a NeMo Fabric Agent inside Harbor" href="/documentation/evaluate-models/agent-eval/harbor-fabric-agent" />
 </Cards>

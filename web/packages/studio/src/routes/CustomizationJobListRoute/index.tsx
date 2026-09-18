@@ -8,6 +8,7 @@ import { CustomModelsDataView } from '@studio/components/dataViews/CustomModelsD
 import { CustomizeModelButton } from '@studio/components/dataViews/CustomModelsDataView/CustomizeModelButton';
 import { ModelPanel, ModelPanelTab } from '@studio/components/sidePanels/ModelPanels/ModelPanel';
 import { INTAKE_ENABLED } from '@studio/constants/environment';
+import { useCustomizationJobForModel } from '@studio/hooks/useCustomizationJobForModel';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getEvaluationResultsRoute, getIntakeTracesRoute } from '@studio/routes/utils';
@@ -26,6 +27,8 @@ export const CustomizationJobListRoute: FC = () => {
   useBreadcrumbs({
     items: [{ slotLabel: 'Custom Models' }],
   });
+
+  const { jobName: customizationJobName } = useCustomizationJobForModel(workspace, selectedModel);
 
   return (
     <AccessibleTitle title={`Custom Models for ${workspace}`}>
@@ -49,6 +52,7 @@ export const CustomizationJobListRoute: FC = () => {
       <ModelPanel
         open={!!selectedModel}
         model={selectedModel ?? undefined}
+        customizationJobId={customizationJobName}
         adapter={selectedAdapter}
         onOpenChange={(open) => {
           if (!open) {

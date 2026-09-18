@@ -28,7 +28,12 @@ from nemo_agents_plugin.entities import (
     AgentDeployment,
     DeploymentStatus,
 )
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError, NemoPaginationInfo
+from nemo_platform_plugin.entity_client import (
+    NemoEntityConflictError,
+    NemoEntityNotFoundError,
+    NemoEntityValidationError,
+    NemoPaginationInfo,
+)
 
 NOW = datetime.now(timezone.utc)
 
@@ -245,6 +250,19 @@ class TestCreateAgent:
 
         assert resp.status_code == 409
         assert "already exists" in resp.json()["detail"]
+
+    def test_create_validation_error_returns_422(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        mock_entity_client.create = AsyncMock(
+            side_effect=NemoEntityValidationError("name: string does not match pattern")
+        )
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/agents",
+            json={"name": "my agent", "config": {}},
+        )
+
+        assert resp.status_code == 422
+        assert "pattern" in resp.json()["detail"]
 
     def test_create_server_error_returns_500(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         mock_entity_client.create = AsyncMock(side_effect=RuntimeError("db down"))

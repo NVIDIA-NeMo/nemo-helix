@@ -36,6 +36,7 @@ def oidc_config():
         authorization_endpoint="https://sso.example.com/authorize",
         token_endpoint="https://sso.example.com/token",
         device_authorization_endpoint="https://sso.example.com/device/code",
+        userinfo_endpoint="https://sso.example.com/userinfo",
         workload_token_exchange_enabled=True,
         workload_client_id="test-workload-client",
         workload_token_endpoint="https://workload-idp.example.com/token",
@@ -176,6 +177,7 @@ class TestGetAuthDiscovery:
             assert result.oidc.authorization_endpoint == "https://sso.example.com/authorize"
             assert result.oidc.token_endpoint == "https://sso.example.com/token"
             assert result.oidc.device_authorization_endpoint == "https://sso.example.com/device/code"
+            assert result.oidc.userinfo_endpoint == "https://sso.example.com/userinfo"
             assert result.oidc.workload_token_exchange_enabled is True
             assert result.oidc.workload_client_id == "test-workload-client"
             assert result.oidc.workload_token_endpoint == "https://workload-idp.example.com/token"
@@ -345,6 +347,49 @@ class TestGetAuthDiscovery:
                 assert result.oidc.authorization_endpoint == "https://custom.example.com/authorize"
                 # Discovery value is used for unconfigured endpoint
                 assert result.oidc.token_endpoint == "https://sso.example.com/token"
+        finally:
+            Configuration.clear_overrides()
+
+    @pytest.mark.asyncio
+    async def test_configured_userinfo_endpoint_used_when_discovery_omits_it(self):
+        """A configured userinfo_endpoint override must surface even if the IdP's discovery
+        document doesn't advertise one (matches the other endpoint overrides)."""
+        oidc_config = OIDCConfig(
+            enabled=True,
+            issuer="https://sso.example.com",
+            client_id="test-client",
+            userinfo_endpoint="https://custom.example.com/userinfo",
+        )
+
+        auth_config = AuthConfig(
+            enabled=True,
+            policy_decision_point_base_url="http://localhost:8181",
+            oidc=oidc_config,
+        )
+
+        Configuration.set_override(auth_config)
+
+        discovery_doc = {
+            "authorization_endpoint": "https://sso.example.com/auth",
+            "token_endpoint": "https://sso.example.com/token",
+            # userinfo_endpoint intentionally omitted from discovery
+        }
+
+        try:
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_client = AsyncMock()
+                mock_response = MagicMock()
+                mock_response.is_success = True
+                mock_response.json.return_value = discovery_doc
+                mock_client.get.return_value = mock_response
+                mock_client.__aenter__.return_value = mock_client
+                mock_client.__aexit__.return_value = None
+                mock_client_class.return_value = mock_client
+
+                result = await get_auth_discovery()
+
+                assert result.oidc is not None
+                assert result.oidc.userinfo_endpoint == "https://custom.example.com/userinfo"
         finally:
             Configuration.clear_overrides()
 

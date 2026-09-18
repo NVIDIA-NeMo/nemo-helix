@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import logging
 
-from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
@@ -36,11 +35,11 @@ from nmp.customization_common.schemas.file_io import (
     FileSetRef,
     UploadItem,
 )
-from nmp.customization_common.schemas.model_entity import (
-    DeploymentParameters as ModelEntityDeploymentParameters,
-)
 from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
-from nmp.customization_common.service.platform_client import fetch_model_entity
+from nmp.customization_common.service.platform_client import (
+    AsyncCustomizationPlatformClients,
+    fetch_model_entity,
+)
 from nmp.customization_common.tasks.file_io_metadata import build_output_fileset_metadata_from_model_entity
 from nmp.unsloth.app.constants import (
     DEFAULT_DATASET_PATH,
@@ -194,16 +193,6 @@ def _build_model_entity_config(
     *,
     trust_remote_code: bool,
 ) -> ModelEntityTaskConfig:
-    # Forward the user-supplied deployment_config from the job spec.
-    # String refs are passed through as-is; inline DeploymentParams are
-    # converted from the user-facing shape to the task-side shape via
-    # model_validate(model_dump()).
-    deployment_config: str | ModelEntityDeploymentParameters | None = None
-    if isinstance(job_spec.deployment_config, str):
-        deployment_config = job_spec.deployment_config
-    elif job_spec.deployment_config is not None:
-        deployment_config = ModelEntityDeploymentParameters.model_validate(job_spec.deployment_config.model_dump())
-
     return ModelEntityTaskConfig(
         name=job_spec.output.name,
         workspace=workspace,
@@ -213,14 +202,14 @@ def _build_model_entity_config(
         base_model=job_spec.model.name,
         peft=_build_peft_config(job_spec),
         trust_remote_code=trust_remote_code,
-        deployment_config=deployment_config,
+        deployment_config=job_spec.deployment_config,
     )
 
 
 async def platform_job_config_compiler(
     workspace: str,
     job_spec: UnslothJobOutput,
-    sdk: AsyncNeMoPlatform,
+    platform: AsyncCustomizationPlatformClients,
     *,
     job_name: str | None = None,
     profile: str | None = None,
@@ -230,7 +219,7 @@ async def platform_job_config_compiler(
 
     logger.info(f"Compiling Unsloth job to PlatformJobSpec: {job_spec.model_dump_json(indent=2)}")
 
-    me = await fetch_model_entity(job_spec.model.name, workspace, sdk)
+    me = await fetch_model_entity(job_spec.model.name, workspace, platform)
 
     cpu_resources = _get_cpu_resources()
     base_env = _get_base_environment()

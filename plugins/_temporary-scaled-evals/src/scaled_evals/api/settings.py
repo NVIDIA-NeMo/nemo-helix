@@ -172,6 +172,67 @@ class Settings(BaseSettings):
     # control-plane Deployment rollouts do not terminate active orchestration.
     dispatch_kubernetes_jobs_enabled: bool = False
     dispatch_job_reconcile_stale_seconds: float = 60.0
+    # Platform Jobs migration flags. Postgres remains the admission and
+    # compatibility source of truth while these are enabled.
+    platform_build_jobs_enabled: bool = Field(
+        default=False,
+        validation_alias="SCALED_EVALS_PLATFORM_BUILD_JOBS_ENABLED",
+    )
+    platform_evaluation_jobs_enabled: bool = Field(
+        default=False,
+        validation_alias="SCALED_EVALS_PLATFORM_EVALUATION_JOBS_ENABLED",
+    )
+    platform_jobs_workspace: str = Field(
+        default="default",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_WORKSPACE",
+    )
+    platform_jobs_profile: str = Field(
+        default="default",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_PROFILE",
+    )
+    platform_jobs_provider: Literal["cpu", "subprocess"] = Field(
+        default="cpu",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_PROVIDER",
+    )
+    # The image must contain this plugin plus its Harbor/sandbox runtime.
+    # Deployments set an immutable image reference before enabling either flag.
+    platform_jobs_image: str = Field(
+        default="",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_IMAGE",
+    )
+    platform_jobs_postgres_password_secret: str = Field(
+        default="",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_POSTGRES_PASSWORD_SECRET",
+    )
+    platform_jobs_credentials_encryption_key_secret: str = Field(
+        default="",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_CREDENTIALS_ENCRYPTION_KEY_SECRET",
+    )
+    platform_jobs_registry_auth_secret: str = Field(
+        default="",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_REGISTRY_AUTH_SECRET",
+    )
+    # Entity Store migration flags. Projection writes a derived read model while
+    # Postgres stays authoritative; reads only flip once parity is established,
+    # so the two are deliberately separate switches.
+    entity_store_projection_enabled: bool = Field(
+        default=False,
+        validation_alias="SCALED_EVALS_ENTITY_STORE_PROJECTION_ENABLED",
+    )
+    entity_store_reads_enabled: bool = Field(
+        default=False,
+        validation_alias="SCALED_EVALS_ENTITY_STORE_READS_ENABLED",
+    )
+    entity_store_workspace: str = Field(
+        default="default",
+        validation_alias="SCALED_EVALS_ENTITY_STORE_WORKSPACE",
+    )
+    entity_store_projection_batch_size: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        validation_alias="SCALED_EVALS_ENTITY_STORE_PROJECTION_BATCH_SIZE",
+    )
     # Registry the finalized sandbox images are pushed to and pulled from.
     # Local compose: the in-stack `registry:2` service. Remote: NGC. Everything
     # that differs local-vs-remote lives here — the build logic has no hardcoded
@@ -195,6 +256,7 @@ class Settings(BaseSettings):
     task_image_allowed_repositories: str = ""
     task_image_registry_insecure: bool = False
     task_image_registry_auth_file: str = ""
+    task_image_registry_auth_json: str = ""
     task_image_registry_timeout_seconds: float = 10.0
     task_image_hosted_mode: bool = False
     # Primary Fernet key for BYOK credential payloads. There is deliberately no

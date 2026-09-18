@@ -23,6 +23,7 @@ from sandboxed_gym.backends._opensandbox_driver import (
     OpenSandboxDriver,
     _exec_identity,
     _joined_output,
+    _resource_limits,
     _resource_requests,
 )
 from sandboxed_gym.backends.base import UnsupportedEpisodeOperationError
@@ -36,6 +37,19 @@ requires_opensandbox = pytest.mark.skipif(
 
 def spec_with(**resources: object) -> SandboxSpec:
     return SandboxSpec(image="img:1", resources=SandboxResources(**resources))  # ty: ignore[invalid-argument-type]
+
+
+def test_configured_resource_limits_are_forwarded_as_strings() -> None:
+    # `resource` is the hard cap, separate from the scheduling requests. Values arrive from
+    # operator YAML, so ints must survive as the strings the SDK expects.
+    assert _resource_limits({"resource": {"cpu": 4, "memory": "12Gi"}}) == {"cpu": "4", "memory": "12Gi"}
+
+
+def test_absent_resource_limits_are_none_rather_than_empty() -> None:
+    # None lets the SDK apply its own default; an empty dict would be forwarded as a real,
+    # zero-valued limit set.
+    assert _resource_limits({}) is None
+    assert _resource_limits({"resource": {}}) is None
 
 
 def test_resources_map_onto_the_sdk_kubernetes_style_strings() -> None:
@@ -201,3 +215,31 @@ async def test_cleanup_failure_does_not_mask_create_failure(
             await driver.create(SandboxSpec(image="img:1"))
 
     assert "failed to reconcile sandbox create attempt" in caplog.text
+
+
+@requires_opensandbox
+async def test_create_passes_the_configured_cap_and_the_episode_requests_separately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # What this guards is the wiring, not the translation `_resource_limits` already covers.
+    # `resource` is the operator's hard cap and `resource_requests` is what the episode is
+    # scheduled with; they are separate SDK arguments. Pinning only the cap would still pass if
+    # the two were collapsed back into one, which is the shape the original bug took.
+    from types import SimpleNamespace
+
+    Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
+
+    driver = OpenSandboxDriver(create={"resource": {"cpu": 4, "memory": "12Gi"}})
+    captured: dict[str, object] = {}
+
+    async def capture_create(image: str, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return SimpleNamespace(sandbox_id="sandbox-1")
+
+    monkeypatch.setattr(Sandbox, "create", staticmethod(capture_create))
+
+    handle = await driver.create(spec_with(cpu=0.5))
+
+    assert handle.sandbox_id == "sandbox-1"
+    assert captured["resource"] == {"cpu": "4", "memory": "12Gi"}
+    assert captured["resource_requests"] == {"cpu": "500m"}

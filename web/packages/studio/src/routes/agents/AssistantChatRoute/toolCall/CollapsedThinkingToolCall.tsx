@@ -5,7 +5,13 @@ import { Text } from '@nvidia/foundations-react-core';
 import { splitCollapsedThinkingParagraphs } from '@studio/routes/agents/AssistantChatRoute/toolCall/helpers';
 import { ChevronRight, ClipboardList } from 'lucide-react';
 
-export const CollapsedThinkingToolCall = ({ text }: { readonly text: string }) => {
+export const CollapsedThinkingToolCall = ({
+  label = 'Earlier thinking',
+  text,
+}: {
+  readonly label?: string;
+  readonly text: string;
+}) => {
   const paragraphs = splitCollapsedThinkingParagraphs(text);
   if (!paragraphs.length) return null;
 
@@ -21,7 +27,7 @@ export const CollapsedThinkingToolCall = ({ text }: { readonly text: string }) =
             className="size-3 shrink-0 transition-transform group-open/thinking:rotate-90"
           />
           <ClipboardList aria-hidden className="size-3.5 shrink-0" />
-          <span>Earlier thinking</span>
+          <span>{label}</span>
         </summary>
         <div
           className="mt-density-xs space-y-density-xs border-l border-base pl-density-md text-secondary"

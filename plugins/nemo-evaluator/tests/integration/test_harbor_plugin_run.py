@@ -1,15 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Plugin-level end-to-end Harbor run through the real local execution machinery.
+"""Plugin-level end-to-end Harbor run through the real sync job machinery.
 
 Unlike the unit tests (which fake the evaluator so the Harbor runner is built but never executed),
-this drives ``NemoJobScheduler().run_local(AgentEvalJob, ...)`` against a *real* HarborRunnerTarget:
-the scheduler validates the submitter ``AgentEvalInputSpec``, runs ``to_spec`` to the canonical spec,
-builds/uses the job context, then runs — the same in-process lifecycle a local job goes through. The
-Harbor runner resolves to a native ``HarborAgentTaskRunner``, Harbor runs the bundled hello-world task
-in Docker, and the verifier reward is scored (by a cloudpickle-bundled ``HarborRewardMetric``) and
-persisted into the run bundle. It is the plugin analog of the SDK's ``test_harbor_runtime_e2e.py``.
+This drives ``AgentEvalJob.run(...)`` against a *real* HarborRunnerTarget using an explicit
+``JobContext`` and sync typed client. The Harbor runner resolves to a native
+``HarborAgentTaskRunner``, Harbor runs the bundled hello-world task in Docker, and the verifier
+reward is scored (by a cloudpickle-bundled ``HarborRewardMetric``) and persisted into the run bundle.
+It is the plugin analog of the SDK's ``test_harbor_runtime_e2e.py``.
 
 Needs the ``harbor`` extra (Python >=3.12; ``pip install nemo-evaluator-sdk[harbor]``) and a working
 Docker daemon; ``importorskip('harbor')`` + a Docker check skip it otherwise (so it's inert on the
@@ -24,15 +23,15 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from nemo_evaluator.api.schemas import MetricInline
+from nemo_evaluator.api.schemas import MetadataItem, MetricInline, TaskInputs
 from nemo_evaluator.jobs.agent_evaluate import AGENT_BUNDLE_DIR, DEFAULT_RESULT_NAME, AgentEvalJob
-from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, AgentEvalTaskInput, HarborRunnerTarget
+from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, AgentEvalSpec, AgentEvalTaskInput, HarborRunnerTarget
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRewardMetric, discover_harbor_tasks
+from nemo_platform_plugin.client.client import NemoClient
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_platform_plugin.scheduler import NemoJobScheduler
 
 pytestmark = [pytest.mark.integration]
 
@@ -70,7 +69,7 @@ def _job_context(tmp_path: Path) -> JobContext:
 
 
 @pytest.mark.timeout(600)
-def test_run_local_runs_a_real_harbor_target(tmp_path: Path) -> None:
+def test_sync_job_runs_a_real_harbor_target(tmp_path: Path) -> None:
     pytest.importorskip("harbor")
     if not _docker_available():
         pytest.skip("Docker daemon is required to run a Harbor job")
@@ -85,9 +84,9 @@ def test_run_local_runs_a_real_harbor_target(tmp_path: Path) -> None:
             AgentEvalTaskInput(
                 id=rt.id,
                 intent=rt.intent,
-                inputs=rt.inputs,
+                inputs=TaskInputs.model_validate(rt.inputs),
                 metrics=[_reward_metric()],
-                metadata=[{"key": key, "value": str(value)} for key, value in rt.metadata.items()],
+                metadata=[MetadataItem(key=key, value=value) for key, value in rt.metadata.items()],
             )
             for rt in runtime_tasks
         ],
@@ -95,11 +94,17 @@ def test_run_local_runs_a_real_harbor_target(tmp_path: Path) -> None:
     )
     ctx = _job_context(tmp_path)
 
-    # The real local execution path: the scheduler validates the submitter spec, runs to_spec, and
-    # invokes run() with the real evaluator (no fake) → resolve the Harbor target → native
-    # HarborAgentTaskRunner → Harbor runs the task in Docker → adapt to trials → score → persist. The
-    # explicit ctx keeps storage hermetic under tmp_path so the persisted bundle is readable here.
-    result = NemoJobScheduler().run_local(AgentEvalJob, input_spec.model_dump(mode="json"), workspace="dev", ctx=ctx)
+    # The real sync job path: validate the submitter spec to the canonical spec, then invoke run()
+    # with the real evaluator (no fake) → resolve the Harbor target → native HarborAgentTaskRunner →
+    # Harbor runs the task in Docker → adapt to trials → score → persist. The explicit ctx keeps
+    # storage hermetic under tmp_path so the persisted bundle is readable here.
+    client = NemoClient(base_url="http://platform.test", workspace="dev")
+    canonical = AgentEvalSpec.model_validate(input_spec.model_dump(mode="json"))
+    result = AgentEvalJob().run(
+        canonical.model_dump(mode="json"),
+        ctx=ctx,
+        client=client,
+    )
 
     assert result["status"] == "completed", result
     assert result["artifact"]["name"] == DEFAULT_RESULT_NAME

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, Self, Union
 
+from nemo_platform_plugin.deployment import DEPLOYMENT_CONFIG_DESCRIPTION, DeploymentParams
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nmp.customization_common.schema import NamespacedModel
 from nmp.customization_common.schemas.values import OutputNameType
@@ -649,6 +650,15 @@ class OutputResponse(_OutputBase):
     fileset: str = Field(max_length=255)
 
 
+def trains_lora_adapter(training: TrainingMethod) -> bool:
+    """True when ``training`` produces a LoRA adapter rather than a full-weight model.
+
+    Only GRPO can train LoRA, and the platform DTensor path has no merge-at-export,
+    so an unmerged adapter is the only possible LoRA output.
+    """
+    return isinstance(training, GRPOTraining) and training.finetuning_type == "lora"
+
+
 class RlJobOutput(RlSchema):
     """Canonical NeMo-RL job spec (output of the plugin transform)."""
 
@@ -661,10 +671,19 @@ class RlJobOutput(RlSchema):
     training: TrainingMethod = Field(description="Training method and hyperparameters.")
     integrations: IntegrationsSpec | None = Field(default=None)
     output: OutputResponse = Field(description="Output artifact created by this job.")
+    deployment_config: str | DeploymentParams | None = Field(
+        default=None,
+        description=DEPLOYMENT_CONFIG_DESCRIPTION,
+    )
 
     @property
     def training_type(self) -> TrainingType:
         return TrainingType(self.training.type)
+
+    @property
+    def trains_lora_adapter(self) -> bool:
+        """True when this job produces a LoRA adapter rather than a full-weight model."""
+        return trains_lora_adapter(self.training)
 
     def validate_for_training(self) -> None:
         """Validate parallelism/batch consistency before compiling."""

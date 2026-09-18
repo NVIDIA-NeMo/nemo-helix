@@ -7,6 +7,7 @@ from typing import Literal, Protocol
 
 from _pytest.mark.structures import Mark, MarkDecorator
 from nemo_platform import NeMoPlatform
+from nemo_platform_ext.client.tls import HttpxTLSConfig
 
 from tests.auth_idp.providers import ProviderConfig
 
@@ -75,6 +76,19 @@ class AuthIdpRuntime(Protocol):
         raise NotImplementedError
 
     def workload_role_principals(self) -> list[str]:
+        raise NotImplementedError
+
+    def authenticate_device_flow(
+        self,
+        *,
+        device_authorization_endpoint: str,
+        token_endpoint: str,
+        client_id: str,
+        scope: str,
+        username: str,
+        password: str,
+        tls_config: HttpxTLSConfig,
+    ) -> JsonObject:
         raise NotImplementedError
 
     def cleanup(self) -> None:

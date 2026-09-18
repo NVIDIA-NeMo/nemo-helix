@@ -1817,6 +1817,9 @@ def test_schedule_kubernetes_gpu(mock_nmp_client, kubernetes_execution_profile_c
         num_gpus = pod_spec.containers[0].resources.limits["nvidia.com/gpu"]
         assert int(num_gpus) == 2
 
+        # GPU steps keep whatever the image sets for device visibility
+        assert "NVIDIA_VISIBLE_DEVICES" not in {env.name for env in main_container.env}
+
         # GPU jobs get a memory-backed /dev/shm (default 1Gi per GPU)
         dshm_vol = next((v for v in pod_spec.volumes if v.name == JOB_DSHM_VOLUME_NAME), None)
         assert dshm_vol is not None
@@ -1949,6 +1952,29 @@ def test_schedule_injects_opensandbox_secret_env_when_cluster_capable(
     assert secret_ref.name == "opensandbox-server-api-key"
     assert secret_ref.key == "api-key"
     assert env_by_name["OPEN_SANDBOX_API_KEY"].value is None
+
+
+def test_schedule_hides_gpus_from_cpu_steps(kubernetes_job, cpu_execution_provider, test_step_pending):
+    """CPU steps run NGC-derived images that bake in NVIDIA_VISIBLE_DEVICES=all."""
+    kubernetes_job.schedule(cpu_execution_provider, test_step_pending)
+
+    job_body = kubernetes_job._batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    env_vars = {env.name: env.value for env in job_body.spec.template.spec.containers[0].env}
+    assert env_vars["NVIDIA_VISIBLE_DEVICES"] == "void"
+
+
+def test_schedule_lets_profile_override_gpu_visibility_for_cpu_steps(
+    kubernetes_job, cpu_execution_provider, test_step_pending
+):
+    kubernetes_job._execution_profile_config.env = {"NVIDIA_VISIBLE_DEVICES": "all"}
+
+    kubernetes_job.schedule(cpu_execution_provider, test_step_pending)
+
+    job_body = kubernetes_job._batch_v1.create_namespaced_job.call_args.kwargs["body"]
+    visibility = [
+        env.value for env in job_body.spec.template.spec.containers[0].env if env.name == "NVIDIA_VISIBLE_DEVICES"
+    ]
+    assert visibility == ["all"]
 
 
 def test_schedule_omits_opensandbox_env_when_cluster_not_capable(

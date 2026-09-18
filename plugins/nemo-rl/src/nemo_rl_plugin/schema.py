@@ -12,6 +12,12 @@ into the canonical output.
 
 from __future__ import annotations
 
+from nemo_platform_plugin.deployment import (
+    DEPLOYMENT_CONFIG_DESCRIPTION,
+    DeploymentParams,
+    ToolCallParams,
+    reject_lora_without_lora_enabled,
+)
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nmp.rl.schemas import (
     DPOTraining,
@@ -22,11 +28,13 @@ from nmp.rl.schemas import (
     RlJobOutput,
     RlSchema,
     TrainingMethod,
+    trains_lora_adapter,
 )
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 __all__ = [
     "DPOTraining",
+    "DeploymentParams",
     "GRPOTraining",
     "LoRAParams",
     "OutputRequest",
@@ -34,6 +42,7 @@ __all__ = [
     "ParallelismParams",
     "RlJobInput",
     "RlJobOutput",
+    "ToolCallParams",
     "TrainingMethod",
 ]
 
@@ -66,3 +75,20 @@ class RlJobInput(RlSchema):
     training: TrainingMethod = Field(description="Training method and hyperparameters (DPO or GRPO).")
     integrations: IntegrationsSpec | None = None
     output: OutputRequest | None = None
+    deployment_config: str | DeploymentParams | None = Field(
+        default=None,
+        description=DEPLOYMENT_CONFIG_DESCRIPTION,
+    )
+
+    @property
+    def trains_lora_adapter(self) -> bool:
+        """True when the job produces a LoRA adapter rather than a full-weight model."""
+        return trains_lora_adapter(self.training)
+
+    @model_validator(mode="after")
+    def _reject_lora_without_lora_enabled(self) -> RlJobInput:
+        reject_lora_without_lora_enabled(
+            self.deployment_config,
+            trains_lora_adapter=self.trains_lora_adapter,
+        )
+        return self

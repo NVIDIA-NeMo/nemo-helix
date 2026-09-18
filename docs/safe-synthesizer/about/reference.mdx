@@ -6,9 +6,6 @@ title: "Parameters Reference"
 description: ""
 ---
 
-<a id="safe-synthesizer-reference"></a>
-# Parameters Reference
-
 This page summarizes the main configuration groups available when creating
 NeMo Safe Synthesizer jobs. For generated REST API schema details, see the
 [Safe Synthesizer API Reference](/documentation/reference/api-reference).
@@ -20,7 +17,7 @@ Top-level fields on the Safe Synthesizer job spec (alongside `config`):
 | Field | Description |
 |-------|-------------|
 | `data_source` | Input data as a platform fileset URL (`workspace/fileset#path`). |
-| `pretrained_model_job` | Prior completed job whose **`adapter`** result in Files is reused for **generation-only** synthesis. Format: `<job>` or `<workspace>/<job>`. Mutually exclusive with `config.training.pretrained_model`. |
+| `pretrained_model_job` | Prior completed job whose **`adapter`** result in Files is reused for **generation-only** synthesis. Format: `<job>` or `<workspace>/<job>`. Takes precedence over `config.training.pretrained_model`. |
 | `hf_token_secret` | Platform secret name for Hugging Face token during model initialization |
 
 ## Top-Level Configuration

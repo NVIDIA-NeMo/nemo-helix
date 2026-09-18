@@ -501,10 +501,15 @@ async def test_query_available_models_gateway_404_provider_not_in_cache_is_trans
 
 
 @pytest.mark.asyncio
-async def test_query_available_models_502_backend_404_is_non_compliant(reconciler, mock_models_sdk):
-    """502 with 'Backend returned 404' means backend has no GET /v1/models — non-compliant."""
+async def test_query_available_models_424_upstream_rejected_is_non_compliant(reconciler, mock_models_sdk):
+    """424 whose detail carries the upstream-rejection marker means the backend rejected
+    GET /v1/models (no such route) — non-compliant."""
     mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
-        side_effect=_status_error(502, "Backend returned 404: Not Found")
+        side_effect=_status_error(
+            424,
+            "Model provider 'p' at upstream 'https://x' rejected the request for model 'ws/m' "
+            "with HTTP status 404. This is a client-side error and will not resolve by retrying.",
+        )
     )
 
     model_provider = ModelProvider(
@@ -520,8 +525,30 @@ async def test_query_available_models_502_backend_404_is_non_compliant(reconcile
 
 
 @pytest.mark.asyncio
-async def test_query_available_models_502_other_detail_is_transient(reconciler, mock_models_sdk):
-    """502 with detail other than 'Backend returned 404' is treated as transient."""
+async def test_query_available_models_424_unresolved_secret_is_transient(reconciler, mock_models_sdk):
+    """A 424 WITHOUT the upstream-rejection marker is the platform-side unresolved-secret
+    case (not a backend rejection) and must be treated as transient, not non-compliant."""
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
+        side_effect=_status_error(
+            424, "Could not fetch secret for provider test-ns/test-provider; secret not found or unreachable"
+        )
+    )
+
+    model_provider = ModelProvider(
+        name="test-provider",
+        workspace="test-ns",
+        host_url="https://test-provider.com",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+    )
+    result = await reconciler._discover_models(model_provider)
+
+    assert isinstance(result, DiscoveryTransientError)
+
+
+@pytest.mark.asyncio
+async def test_query_available_models_502_is_transient(reconciler, mock_models_sdk):
+    """A 502 from the gateway (e.g. a networking error) is treated as transient."""
     mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
         side_effect=_status_error(502, "Backend networking error: Connection refused")
     )

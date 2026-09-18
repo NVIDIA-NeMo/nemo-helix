@@ -15,7 +15,7 @@ import contextlib
 import json
 import logging
 import math
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -43,14 +43,11 @@ from nemo_evaluator_sdk.values.evidence import (
     EVIDENCE_TRACE,
     CandidateEvidence,
     EvidenceDescriptor,
-    Trajectory,
+    final_agent_message,
     read_atif,
+    read_otlp_spans,
 )
-from nemo_evaluator_sdk.values.otlp import (
-    final_output_text,
-    parse_resource_spans,
-    resource_spans_from_text,
-)
+from nemo_evaluator_sdk.values.otlp import final_output_text
 from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans
 from pydantic import ValidationError
 
@@ -90,6 +87,8 @@ _TRIAL_LOG_DESCRIPTIONS = {
 _MAX_TRACEBACK_CHARS = 8192
 _HARBOR_EXTRA_REQUIRED_MESSAGE = (
     "Harbor execution and result adaptation require the optional `harbor` extra on Python >=3.12. "
+    "If NeMo Platform is installed as a package, run: uv pip install 'harbor>=0.20,<0.21' "
+    "(the `all`, `services`, `plugins`, and `nemo-experimentalist-plugin` extras already include it). "
     "From a NeMo Platform source checkout's repository root, run: "
     "uv sync --frozen --package nemo-evaluator-sdk --extra harbor"
 )
@@ -137,7 +136,7 @@ def _trial_from_harbor_result(
     trial_id = str(data.get("trial_name") or trial_dir.name)
     rewards = _rewards_mapping(data)
     reward = _primary_reward(rewards, reward_key)
-    error = _trial_error(data.get("exception_info"))
+    error = _trial_error(_reported_exception_info(data))
 
     metadata: dict[str, Any] = {
         "reward": reward,
@@ -192,33 +191,14 @@ def _trial_output_text(otlp_spans: list[ResourceSpans] | None, atif_trace: Evide
             return answer
     if atif_trace is None or atif_trace.ref is None:
         return None
-    return _final_agent_message(read_atif(Path(atif_trace.ref)))
+    return final_agent_message(read_atif(Path(atif_trace.ref)))
 
 
 def _read_otlp(descriptor: EvidenceDescriptor | None) -> list[ResourceSpans] | None:
     """Parse a trial's OTLP trace, or ``None`` when it is absent or will not read."""
     if descriptor is None or descriptor.ref is None:
         return None
-    path = Path(descriptor.ref)
-    try:
-        return parse_resource_spans(resource_spans_from_text(path.read_text(encoding="utf-8")))
-    except (OSError, ValueError) as error:
-        logger.warning("Ignoring unreadable OTLP trace %s: %s", path, error)
-        return None
-
-
-def _final_agent_message(trajectory: Trajectory | None) -> str | None:
-    """The agent's last message, which is its user-visible answer for the trial.
-
-    Only the *last* agent step can be the answer. An earlier one is intermediate reasoning, so an
-    agent that ends on an empty message has produced no answer rather than the previous one.
-    """
-    if trajectory is None:
-        return None
-    for step in reversed(trajectory.steps):
-        if step.source == "agent":
-            return step.message or None
-    return None
+    return read_otlp_spans(Path(descriptor.ref))
 
 
 def _add_extension_descriptor(
@@ -555,6 +535,33 @@ def _primary_reward(rewards: ParsedHarborRewards, reward_key: str) -> float | No
             sorted(rewards.values),
             reward_key,
         )
+    return None
+
+
+def _reported_exception_info(data: Mapping[str, Any]) -> Any:
+    """The exception Harbor recorded for a trial, from the trial or from whichever step raised.
+
+    Harbor sets the top-level ``exception_info`` for a single-step trial, but a multi-step trial
+    leaves it ``None`` and records the exception on the ``step_results`` entry that raised.
+
+    Args:
+        data: Parsed Harbor ``result.json`` payload.
+
+    Returns:
+        The first exception payload found, trial-level first, or ``None`` when no step raised.
+    """
+    trial_level = data.get("exception_info")
+    if trial_level is not None:
+        return trial_level
+    steps = data.get("step_results")
+    if not isinstance(steps, Sequence) or isinstance(steps, (str, bytes)):
+        return None
+    for step in steps:
+        if not isinstance(step, Mapping):
+            continue
+        step_level = step.get("exception_info")
+        if step_level is not None:
+            return step_level
     return None
 
 

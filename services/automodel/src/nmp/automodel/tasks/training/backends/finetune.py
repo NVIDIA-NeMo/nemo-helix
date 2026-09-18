@@ -20,6 +20,7 @@ from nemo_automodel.recipes.llm.kd import KnowledgeDistillationRecipeForNextToke
 from nemo_automodel.recipes.llm.train_ft import TrainFinetuneRecipeForNextTokenPrediction
 from nemo_automodel.recipes.retrieval.train_bi_encoder import TrainBiEncoderRecipe
 from nemo_automodel.recipes.retrieval.train_cross_encoder import TrainCrossEncoderRecipe
+from nmp.automodel.tasks.tqdm_logging import install_line_tqdm
 from nmp.automodel.tasks.training.progress import JobsServiceProgressReporter
 from nmp.customization_common.service.context import NMPJobContext
 from nmp.customization_common.training.callbacks import DatasetQualifier, TrainingProgressCallback
@@ -389,6 +390,10 @@ def create_automodel_recipe(cfg: Any) -> AutomodelRecipeWrapper:
 
 
 def main() -> None:
+    # Automodel's base recipe imports tqdm lazily when it builds the bar, so this
+    # takes effect here despite the recipe imports above. Without it the bar's
+    # carriage-return refreshes arrive as partial per-line log records.
+    install_line_tqdm()
     cfg = parse_args_and_load_config()
     recipe = create_automodel_recipe(cfg)
     recipe.run_train_validation_loop()

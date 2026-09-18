@@ -23,6 +23,12 @@ Embedding models convert text into dense vector representations that capture sem
 
 **About the baseline:** In retrieval benchmarks like SciDocs, the pretrained model achieves ~0.159 Recall@5. After fine-tuning on scientific paper triplets, you can expect 6-10% improvement (~0.17 Recall@5).
 
+<Note>
+
+The cosine-similarity demo later in this notebook is **serving sanity** only. Domain retrieval quality is Nemotron Stage 3: freeze Stage 1 `eval_beir`, then `nemo evaluator retrieve-eval submit` with a `baseline` and `k: [1,5,10,100]`. The end-to-end recipe is the `nemo-retrieval-recipes` skill. Default catalog model for that recipe is `nvidia/Nemotron-3-Embed-1B-BF16` (`recipe: bi_encoder`); this tutorial's Llama embed path remains valid for the SPECTER demo.
+
+</Note>
+
 ### Dataset Format for Embedding Models
 
 Embedding models require **triplet format** for contrastive learning:
@@ -790,6 +796,14 @@ For detailed information on all available hyperparameters, recommended values, a
 - Increase dataset size: 10K+ triplets recommended for meaningful improvement
 - Try more epochs: embedding models often need multiple passes
 - Lower learning rate: embedding models are sensitive to LR
+
+**Training fails immediately with `neg_doc must contain at least 1 document`:**
+- Convert-only retrieval Stage 1 left `neg_doc: []`. Sample `training.jsonl` and
+  require a non-empty list on every checked row before submit; a single empty
+  list can be selected by the collator and fail the run. If any row is empty, run
+  `nemo data-designer retrieval-prepare` with `enable_mining: true` (see
+  [Retrieval SDG](/documentation/design-synthetic-data/retrieval-sdg)).
+- `neg_doc` must be a JSON list of strings, not a string and not `null`.
 
 **Training loss not decreasing:**
 - Check triplet format: ensure `neg_doc` is a list even for single negatives

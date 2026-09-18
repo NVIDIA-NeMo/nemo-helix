@@ -23,11 +23,14 @@ Lookup order for the provider
 
 Usage from a plugin ``__main__.py``::
 
+    from nemo_platform_plugin.client.adapter import client_from_platform
+    from nemo_platform_plugin.client.client import NemoClient
     from nemo_platform_plugin.sdk_provider import get_task_sdk
-    from nemo_platform_plugin.tasks.dispatcher import run_task
+    from nemo_platform_plugin.tasks.dispatcher import build_ctx_from_env, run_task_with_client
 
     sdk = get_task_sdk("evaluator")
-    sys.exit(run_task(EvaluateJob, sdk=sdk))
+    client = client_from_platform(sdk, NemoClient)
+    sys.exit(run_task_with_client(EvaluateJob, client=client, ctx=build_ctx_from_env(sdk)))
 """
 
 from __future__ import annotations
@@ -411,8 +414,8 @@ def get_platform_sdk(
     """Build a general-purpose sync SDK handle.
 
     Lower-level than :func:`get_task_sdk` — callers choose their own auth
-    mode.  Useful for plugins that don't use :func:`run_task` (e.g.
-    ``safe-synthesizer``).
+    mode. Useful for plugins that do not use task-container SDK helpers
+    (e.g. ``safe-synthesizer``).
     """
     return _resolve_provider().get_platform_sdk(
         as_service=as_service,

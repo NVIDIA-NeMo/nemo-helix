@@ -35,15 +35,17 @@ The current sidebar groups related pages under expandable parents. Selecting a p
 | **Observability** | **Insights** | Review optimization insights generated from observed agent sessions. Shown when optimization is enabled; see [NeMo Studio Insights](/documentation/studio/insights). |
 | **Observability** | **Traces** | Inspect ingested traces, spans, and session details; see [NeMo Studio Traces](/documentation/studio/traces). |
 | **Components** | **Agents** | Opens the agent list. Select an agent to access Deployments, Logs, Chat, Evaluations, and Details. |
-| **Components** | **Models** | Opens the base-model list directly. Expand **Models** for **Fine-tune**, **Model Evaluations**, **Playground**, and **Virtual Models**, when those capabilities are enabled. **Fine-tune** opens the Custom Models list; see [NeMo Studio Custom Models](/documentation/studio/custom-models). **Model Evaluations** opens evaluation job results; see [NeMo Studio Model Evaluations](/documentation/studio/model-evaluations). |
+| **Components** | **Models** | Opens the base-model list directly. Expand **Models** for **Fine-tune**, **Model Evaluations**, **Playground**, and **Virtual Models**, when those capabilities are enabled. **Fine-tune** opens the Custom Models list; see [NeMo Studio Custom Models](/documentation/studio/customization). **Model Evaluations** opens evaluation job results; see [NeMo Studio Model Evaluations](/documentation/studio/model-evaluations). |
 | **Evaluations** | **Experiments** | Group evaluations for comparison, drill into results, and compare runs side by side; see [NeMo Studio Experiments](/documentation/studio/experiments). |
+| **Data** | **Datasets > Anonymizer** | Detect and protect PII in a dataset. Enabled by default; see [NeMo Studio Anonymizer](/documentation/studio/anonymizer). |
 | **Data** | **Datasets > Data Designer** | Build and monitor synthetic-data jobs. Other installed data plugins can appear below **Datasets**. |
+| **Data** | **Datasets > Safe Synthesizer** | Create and monitor privacy-preserving synthetic tabular data jobs. Enabled by default. |
 | **Governance** | **Guardrails** | Manage guardrail configurations. Disabled by default; see [Studio Guardrail Configs](/documentation/studio/guardrail-configs). |
 | **Governance** | **Agent Hardener** | Plugin-provided agent hardening UI. Appears only when the Agent Hardener plugin is installed; see [Studio Plugin UIs](/documentation/studio/plugins). |
 | **System** | **Filesets** | Organize and manage files used by agents and jobs. |
 | **System** | **Jobs** | Monitor jobs across enabled platform capabilities. |
 
-Additional entries, including Dashboard, Safe Synthesizer, Anonymizer, deployments, and workspace settings, appear when their corresponding capability or feature flag is enabled. Because plugins contribute navigation at runtime, an installed plugin can also add pages to an existing group or add a new group.
+Additional entries, including Dashboard, Deployments, and Playground, are disabled by default and appear only when an administrator enables their feature flag. Because plugins contribute navigation at runtime, an installed plugin can also add pages to an existing group or add a new group.
 
 ### Agents
 
@@ -62,12 +64,6 @@ For the full workflow, see [Studio Insights](/documentation/studio/insights).
 Use **Observability > Traces** to inspect ingested telemetry in the Traces and Spans tables, and drill into a session's trace and span detail, with specialized views for LLM, tool, agent, chain, embedding, reranker, retriever, guardrail, and evaluator spans.
 
 For the full workflow, see [Studio Traces](/documentation/studio/traces).
-
-### Monitor
-
-Use **Agents \> Monitor** to inspect agent telemetry stored by the platform, including recent inference logs and token usage summaries.
-
-For the full workflow, see [Studio Monitor](/documentation/studio/monitor).
 
 ### Guardrails
 
@@ -95,7 +91,7 @@ The model details side panel shows model metadata, parameters, and available act
 
 ### Custom Models
 
-Select **Models > Fine-tune** to open the Custom Models list, start a fine-tuning job against an eligible base model, and track job progress. Enabled by default; see [NeMo Studio Custom Models](/documentation/studio/custom-models).
+Select **Models > Fine-tune** to open the Custom Models list, start a fine-tuning job against an eligible base model, and track job progress. Enabled by default; see [NeMo Studio Custom Models](/documentation/studio/customization).
 
 ### Workspaces
 
@@ -119,9 +115,15 @@ You can upload any file type into a fileset. However, each service supports spec
 | --------------------------------------------------- | ------------------------------------- |
 | [Data Designer](/documentation/design-synthetic-data) | `.json`, `.jsonl`, `.csv`, `.parquet` |
 
+### Anonymizer
+
+Use **Datasets > Anonymizer** to detect and protect PII in a dataset, choosing a substitute, redact, annotate, hash, or rewrite strategy, previewing the result on a few records, and running a full job. Enabled by default.
+
+For the full workflow, see [NeMo Studio Anonymizer](/documentation/studio/anonymizer).
+
 ### Safe Synthesizer
 
-Use **Data > Safe Synthesizer** to create and monitor privacy-preserving synthetic tabular data jobs from NeMo Studio. The Studio page provides access to job creation, job status, details, reports, and result downloads for Safe Synthesizer workflows.
+Use **Datasets > Safe Synthesizer** to create and monitor privacy-preserving synthetic tabular data jobs from NeMo Studio. The Studio page provides access to job creation, job status, details, reports, and result downloads for Safe Synthesizer workflows.
 
 For the full workflow, see [Synthesize Safe Data](/documentation/synthesize-safe-data).
 

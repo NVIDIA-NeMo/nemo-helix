@@ -494,3 +494,25 @@ def test_no_validation_generations_knob_is_exposed() -> None:
     be accepted and read by nothing. mean@k comes from repeating rows in validation.jsonl.
     """
     assert "num_val_generations_per_prompt" not in GRPOTraining.model_fields
+
+
+def test_job_output_trains_lora_adapter_for_grpo_lora() -> None:
+    job = RlJobOutput(
+        model="default/base-model",
+        dataset="default/gym",
+        environment="default/my-env",
+        training=GRPOTraining(type="grpo", finetuning_type="lora"),
+        output=_make_output(out_type=OutputNameType.ADAPTER),
+    )
+
+    assert job.trains_lora_adapter is True
+
+
+def test_job_output_does_not_train_lora_adapter_for_dpo() -> None:
+    job = _make_job_output(DPOTraining(type="dpo"))
+
+    assert job.trains_lora_adapter is False
+
+
+def test_job_output_deployment_config_defaults_to_none() -> None:
+    assert _make_job_output(DPOTraining(type="dpo")).deployment_config is None

@@ -165,6 +165,7 @@ def test_scheduler_flat_is_constant_lr() -> None:
     assert isinstance(sched, list)
     assert sched[0]["name"] == "torch.optim.lr_scheduler.ConstantLR"
     assert sched[0]["kwargs"] == {"factor": 1.0, "total_iters": 100}
+    assert sched[1]["milestones"] == []
 
 
 @pytest.mark.parametrize(

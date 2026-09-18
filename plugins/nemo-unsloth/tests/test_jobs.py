@@ -28,6 +28,7 @@ from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
 from nemo_unsloth_plugin.jobs.jobs import UnslothJob
 from nemo_unsloth_plugin.schema import UnslothJobInput
+from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
 from nmp.unsloth.schemas import UnslothJobOutput
 
 BASE_URL = "http://test"
@@ -163,6 +164,8 @@ class TestCompile:
         kwargs = compile_mock.await_args.kwargs
         assert kwargs["workspace"] == "default"
         assert kwargs["job_name"] == "my-unsloth-job"
+        assert isinstance(kwargs["platform"], AsyncCustomizationPlatformClients)
+        assert "sdk" not in kwargs
         # Profile falls through to the unsloth config default (`gpu`).
         assert kwargs["profile"] == "gpu"
 
