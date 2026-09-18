@@ -37,6 +37,12 @@ def _app(entity_client: AsyncMock, spans_service: AsyncMock) -> FastAPI:
     return app
 
 
+def test_service_exposes_analysis_runs_without_legacy_job_routes() -> None:
+    paths = _app(AsyncMock(), AsyncMock()).openapi()["paths"]
+    assert "/v2/workspaces/{workspace}/analysis-runs" in paths
+    assert not any("/jobs/" in path for path in paths)
+
+
 def test_list_insights_enriches_the_page_with_counts_and_last_seen_at() -> None:
     entity_client = AsyncMock()
     spans_service = AsyncMock()

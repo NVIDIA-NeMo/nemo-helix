@@ -1,7 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Framework-managed periodic controller for insights analysis."""
+"""Periodic Insights analysis scheduler.
+
+Execution belongs to AnalysisRuns/agents.execute; only cadence, overlap checks,
+and the incremental success cursor remain owned by this controller.
+"""
 
 from __future__ import annotations
 
@@ -12,19 +16,15 @@ from datetime import datetime, timezone
 from typing import ClassVar, TypeVar
 from zoneinfo import ZoneInfo
 
+from nemo_insights_plugin.analysis_runs import submit_analysis_run
 from nemo_insights_plugin.analyst.analyst_backend import make_analyst_backend
 from nemo_insights_plugin.config import InsightsConfig
-from nemo_insights_plugin.entities import AnalysisConfig, AnalysisRunStatus
+from nemo_insights_plugin.entities import AnalysisConfig, AnalysisConfigStatus, AnalysisRunStatus
 from nemo_insights_plugin.schedule import is_due
-from nemo_insights_plugin.sdk_resources.analysis_jobs import (
-    AnalysisJob,
-    AsyncAnalysisJobsClient,
-    CreateAnalysisJobRequest,
-    ListAnalysisJobsQueryParams,
-)
-from nemo_insights_plugin.types import AnalyzeSpec
+from nemo_insights_plugin.schema import CreateAnalysisRunRequest
 from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
+from nemo_platform_plugin.client.errors import NotFoundError
 from nemo_platform_plugin.config import get_nemo_config
 from nemo_platform_plugin.controller import NemoController
 from nemo_platform_plugin.entities.client import AsyncEntitiesClient
@@ -33,6 +33,9 @@ from nemo_platform_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
 )
+from nemo_platform_plugin.jobs.client import AsyncJobsClient
+from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
+from nemo_platform_plugin.jobs.types import ListJobsQueryParams, PlatformJobResponse
 from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
 
 logger = logging.getLogger(__name__)
@@ -67,12 +70,12 @@ class InsightsAnalysisController(NemoController):
     """Submit insights analyzer jobs for enabled agents on a global cadence."""
 
     name: ClassVar[str] = "insights-analysis"
-    dependencies: ClassVar[list[str]] = ["entities", "jobs"]
+    dependencies: ClassVar[list[str]] = ["entities", "jobs", "agents", "insights"]
 
     def __init__(self) -> None:
         self._sdk: AsyncNeMoPlatform | None = None
         self._entities: NemoEntitiesClient | None = None
-        self._jobs: AsyncAnalysisJobsClient | None = None
+        self._jobs: AsyncJobsClient | None = None
         self._config: InsightsConfig | None = None
 
     @property
@@ -84,7 +87,7 @@ class InsightsAnalysisController(NemoController):
         return _require(self._entities, "entities")
 
     @property
-    def jobs(self) -> AsyncAnalysisJobsClient:
+    def jobs(self) -> AsyncJobsClient:
         return _require(self._jobs, "jobs")
 
     @property
@@ -102,25 +105,21 @@ class InsightsAnalysisController(NemoController):
         self._config = get_nemo_config(InsightsConfig)
         self._sdk = get_async_platform_sdk(as_service="insights", internal=True)
         self._entities = NemoEntitiesClient(client_from_platform(self._sdk, AsyncEntitiesClient))
-        self._jobs = client_from_platform(self._sdk, AsyncAnalysisJobsClient)
+        self._jobs = client_from_platform(self._sdk, AsyncJobsClient)
         logger.info("InsightsAnalysisController started.")
 
     async def on_shutdown(self) -> None:
         logger.info("InsightsAnalysisController shut down.")
 
     async def list_objects(self) -> list:
-        """List enabled analysis configs across all workspaces."""
+        """Include disabled configs so in-flight runs still get reconciled."""
         if not self.insights_config.analyst.enabled:
             return []
         try:
-            result = await self.entities.list(
-                AnalysisConfig,
-                workspace="-",
-                filter_obj={"enabled": True},
-            )
+            result = await self.entities.list(AnalysisConfig, workspace="-")
             return result.data
         except Exception:
-            logger.exception("Failed to list enabled insights analysis configs")
+            logger.exception("Failed to list insights analysis configs")
             return []
 
     async def reconcile_one(self, obj: object) -> None:
@@ -135,7 +134,12 @@ class InsightsAnalysisController(NemoController):
             )
 
     async def _reconcile_config(self, config: AnalysisConfig) -> None:
-        if not config.enabled:
+        # Check both legacy and execute jobs, including on-demand analysis.
+        if await self._has_active_job(config):
+            return
+        status = await self._get_run_status(config)
+        status = await self._reconcile_run(config, status)
+        if not config.enabled or (status is not None and status.status == AnalysisConfigStatus.RUNNING):
             return
         if not config.default_model:
             logger.error(
@@ -147,15 +151,39 @@ class InsightsAnalysisController(NemoController):
                 config.workspace,
             )
             return
-        if await self._has_active_job(config):
-            return
-        status = await self._get_run_status(config)
         now = datetime.now(timezone.utc)
         if not self._is_due(status, now):
             return
         if not await self._has_enough_new_traces(config, status):
             return
         await self._submit_analysis_job(config, status, now)
+
+    async def _reconcile_run(
+        self, config: AnalysisConfig, status: AnalysisRunStatus | None
+    ) -> AnalysisRunStatus | None:
+        """Reconcile only the pending attempt recorded before submission."""
+        if status is None or not status.last_submitted_job or status.status != AnalysisConfigStatus.RUNNING:
+            return status
+        updated = status.model_copy()
+        try:
+            job = (await self.jobs.get_job(workspace=config.workspace, name=status.last_submitted_job)).data()
+        except NotFoundError:
+            updated.status = AnalysisConfigStatus.ERROR
+            updated.last_error = "Analysis job was not submitted or no longer exists"
+        else:
+            if not job.status.is_terminal():
+                return status
+            if job.status == PlatformJobStatus.COMPLETED:
+                updated.status = AnalysisConfigStatus.IDLE
+                # The pre-submission boundary keeps telemetry arriving during
+                # execution eligible for the next analysis.
+                updated.last_successful_run_at = status.last_attempted_at
+                updated.last_error = ""
+            else:
+                updated.status = AnalysisConfigStatus.ERROR
+                updated.last_error = f"Analysis job {job.status.value}"
+        updated.last_completed_at = datetime.now(timezone.utc)
+        return await self.entities.update(updated)
 
     async def _get_run_status(self, config: AnalysisConfig) -> AnalysisRunStatus | None:
         try:
@@ -205,12 +233,12 @@ class InsightsAnalysisController(NemoController):
 
     async def _has_active_job(self, config: AnalysisConfig) -> bool:
         try:
-            query_params: ListAnalysisJobsQueryParams = {
+            query_params: ListJobsQueryParams = {
                 "filter": json.dumps({"status": {"$in": _ACTIVE_JOB_STATUSES}}),
                 "page_size": 100,
                 "sort": "-created_at",
             }
-            jobs = await self.jobs.list_analysis_jobs(
+            jobs = await self.jobs.list_jobs(
                 workspace=config.workspace,
                 query_params=query_params,
             )
@@ -253,24 +281,38 @@ class InsightsAnalysisController(NemoController):
         status: AnalysisRunStatus | None,
         submitted_at: datetime,
     ) -> None:
-        spec = AnalyzeSpec(
+        request = CreateAnalysisRunRequest(
             agent=config.agent,
-            base_url=self.insights_config.analyst.base_url,
             since=status.last_successful_run_at if status is not None else None,
             default_model=config.default_model,
             fast_model=config.fast_model or config.default_model,
         )
         job_name = _job_name(config, submitted_at)
-        (
-            await self.jobs.create_analysis_job(
-                workspace=config.workspace,
-                body=CreateAnalysisJobRequest(
-                    name=job_name,
-                    spec=spec,
-                    custom_fields={"insights_analysis_agent": config.agent},
-                ),
-            )
-        ).data()
+        pending = (
+            status.model_copy()
+            if status
+            else AnalysisRunStatus(name=config.agent, workspace=config.workspace, agent=config.agent)
+        )
+        pending.status = AnalysisConfigStatus.RUNNING
+        pending.last_submitted_job = job_name
+        pending.last_attempted_at = submitted_at
+        pending.last_completed_at = None
+        pending.last_error = ""
+        # Persist the name before the request: even a timeout or process crash
+        # leaves a specific job to check on the next controller pass.
+        if status is None:
+            await self.entities.create(pending)
+        else:
+            await self.entities.update(pending)
+        await submit_analysis_run(
+            workspace=config.workspace,
+            request=request,
+            sdk=self.sdk,
+            entity_client=self.entities,
+            name=job_name,
+            profile=self.insights_config.analyst.job_profile,
+            base_url=self.insights_config.analyst.base_url,
+        )
         logger.info(
             "Submitted insights analysis job '%s' for agent '%s' in workspace '%s'",
             job_name,
@@ -279,7 +321,7 @@ class InsightsAnalysisController(NemoController):
         )
 
 
-def _job_targets_agent(job: AnalysisJob, agent: str) -> bool:
+def _job_targets_agent(job: PlatformJobResponse, agent: str) -> bool:
     return (job.custom_fields or {}).get("insights_analysis_agent") == agent
 
 

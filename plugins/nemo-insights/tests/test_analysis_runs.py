@@ -22,6 +22,7 @@ from nemo_insights_plugin.analysis_runs import (
     get_analysis_run,
     list_analysis_runs,
     mint_analysis_run_name,
+    submit_analysis_run,
 )
 from nemo_insights_plugin.entities import AnalysisRun
 from nemo_insights_plugin.schema import AnalysisRunPage
@@ -59,6 +60,7 @@ class _StubExecuteJobs:
         get_error: Exception | None = None,
     ) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.requests: list[CreateExecuteJobRequest] = []
         self.gets: list[str] = []
         self._response = response or {"name": RUN_NAME, "status": "created"}
         self._error = error
@@ -107,6 +109,7 @@ class _TypedAgentsClient:
         self, *, body: CreateExecuteJobRequest, workspace: str | None = None
     ) -> _TypedResponse:
         assert workspace is not None
+        self._jobs.requests.append(body)
         return _TypedResponse(await self._jobs.create(spec=body.spec, name=body.name, workspace=workspace))
 
     async def get_execute_job(self, *, name: str, workspace: str | None = None) -> _TypedResponse:
@@ -293,7 +296,7 @@ def test_read_scope_reaches_the_inline_analyst_settings() -> None:
 
 
 def test_ethos_is_inlined_into_the_analyst_harness_settings() -> None:
-    """Parity with AnalyzeSpec.ethos: the Fabric adapter has no Files access to resolve a ref."""
+    """The Fabric adapter has no Files access to resolve an Ethos reference."""
     request = _request(ethos="# Ethos\n\nBe careful.")
 
     config = ExecuteAgentJobConfig.model_validate(
@@ -381,7 +384,31 @@ async def test_the_job_takes_the_run_name_so_the_link_needs_no_write_back() -> N
     response = await create_analysis_run("default", _request(), _sdk(jobs), _entities(entities))
 
     assert jobs.calls[0]["name"] == response.run.name
+    assert jobs.requests[0].custom_fields == {"insights_analysis_agent": "demo-agent"}
     assert response.run.name.startswith(ANALYSIS_RUN_NAME_PREFIX)
+
+
+async def test_scheduler_submission_preserves_name_profile_and_platform_url() -> None:
+    jobs = _StubExecuteJobs()
+    entities = _StubEntities()
+    name = "opt-analyze-default-demo-20260918120000"
+    response = await submit_analysis_run(
+        workspace="default",
+        request=_request(),
+        sdk=_sdk(jobs),
+        entity_client=_entities(entities),
+        name=name,
+        profile="cpu-cluster",
+        base_url="https://platform.example.com",
+    )
+
+    assert response.run.name == name
+    assert jobs.requests[0].name == name
+    assert jobs.requests[0].profile == "cpu-cluster"
+    config = ExecuteAgentJobConfig.model_validate(jobs.requests[0].spec)
+    assert isinstance(config.agent, AgentInline)
+    settings = next(iter(config.agent.config["harnesses"].values()))["settings"]
+    assert settings["base_url"] == "https://platform.example.com"
 
 
 async def test_the_run_captures_the_request_scope() -> None:

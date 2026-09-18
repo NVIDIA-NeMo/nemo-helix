@@ -35,9 +35,6 @@ insights = "nemo_insights_plugin.service:InsightsService"
 [project.entry-points."nemo.controllers"]
 insights-analysis = "nemo_insights_plugin.controller:InsightsAnalysisController"
 
-[project.entry-points."nemo.jobs"]
-"insights.analyze-job" = "nemo_insights_plugin.jobs.analyze:AnalyzeJob"
-
 [project.entry-points."nemo.agents.execute_extensions"]
 "insights.analysis" = "nemo_insights_plugin.execute_extensions:InsightsAnalysisExtension"
 

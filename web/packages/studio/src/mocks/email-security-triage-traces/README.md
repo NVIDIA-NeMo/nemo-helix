@@ -96,7 +96,7 @@ those confined to one. Each cluster above clears that bar on its own.
 The periodic controller also skips a scheduled run for an agent with fewer than 10 new traces
 since its last cursor, which 18 clears comfortably.
 
-Analysis must be enabled for the agent before a run can be triggered — the analyze-job spec needs
+Analysis must be enabled for the agent before a run can be triggered — the analysis run needs
 the default/fast model pair, and that is only captured on the agent's analysis config:
 
 ```bash

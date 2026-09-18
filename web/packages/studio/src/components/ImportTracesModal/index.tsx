@@ -197,7 +197,7 @@ export const ImportTracesModal: FC<ImportTracesModalProps> = ({
     importable.some(({ detection }) => UNATTRIBUTABLE_FORMATS.has(detection.format as string));
   const invalidSource = needsSource && !SOURCE_PATTERN.test(source.trim());
 
-  /** A malformed override would only fail once the analyze-job is already running. */
+  /** A malformed override would only fail once the analysis run is already running. */
   const hasInvalidModelRef =
     willRunInsights &&
     [defaultModel, fastModel].some(

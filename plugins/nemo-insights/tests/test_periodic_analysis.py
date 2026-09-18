@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Generic, TypeVar
+from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -32,34 +33,23 @@ from nemo_insights_plugin.config import (
 from nemo_insights_plugin.controller import InsightsAnalysisController, _job_name
 from nemo_insights_plugin.entities import (
     AnalysisConfig,
-    AnalysisConfigStatus,
+    AnalysisRun,
     AnalysisRunStatus,
     Insight,
     InsightStatus,
 )
-from nemo_insights_plugin.jobs.analyze import AnalyzeJob, AnalyzeSpec
 from nemo_insights_plugin.schedule import is_due, previous_scheduled
-from nemo_insights_plugin.schema import UpdateAnalysisRunStatusRequest
-from nemo_insights_plugin.sdk_resources.analysis_jobs import (
-    AnalysisJob,
-    AsyncAnalysisJobsClient,
-    CreateAnalysisJobRequest,
-    ListAnalysisJobsQueryParams,
-)
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_insights_plugin.schema import AnalysisRunResponse, CreateAnalysisRunRequest
+from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.entities.client import AsyncEntitiesClient
 from nemo_platform_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_platform_plugin.intake.client import AsyncIntakeClient
 from nemo_platform_plugin.intake.types import SpanFilterParam, SpanGroup, SpanGroupsPage
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import JobResults, ResultRef
-from nemo_platform_plugin.jobs.constants import (
-    DEFAULT_JOB_STORAGE_PATH,
-    PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
-)
+from nemo_platform_plugin.jobs.client import AsyncJobsClient
 from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
-from nemo_platform_plugin.nooa_model_client import ConfiguredModelRefs
+from nemo_platform_plugin.jobs.spec import PlatformJobSpec
+from nemo_platform_plugin.jobs.types import ListJobsQueryParams, PlatformJobResponse
 from nemo_platform_plugin.schema import PaginationData
 from pydantic import JsonValue, ValidationError
 
@@ -747,185 +737,25 @@ def test_config_rejects_unknown_timezone() -> None:
         AnalystSchedulerConfig(timezone="Mars/Olympus_Mons")
 
 
-class _Results(JobResults):
-    def __init__(self) -> None:
-        self.saved: list[tuple[str, Path]] = []
-
-    def save(
-        self,
-        name: str,
-        local_path: str | Path,
-        *,
-        ignore_patterns: list[str] | str | None = None,
-    ) -> ResultRef:
-        del ignore_patterns
-        path = Path(local_path)
-        self.saved.append((name, path))
-        return ResultRef(name=name, artifact_url=f"file://{path}")
-
-
-class _RecordingAnalysisRunStatuses:
-    def __init__(self) -> None:
-        self.updates: list[UpdateAnalysisRunStatusRequest] = []
-
-    def update(
-        self,
-        *,
-        workspace: str,
-        agent: str,
-        status: AnalysisConfigStatus | str | None = None,
-        last_successful_run_at: datetime | None = None,
-        last_attempted_at: datetime | None = None,
-        last_completed_at: datetime | None = None,
-        last_submitted_job: str | None = None,
-        last_error: str | None = None,
-    ) -> AnalysisRunStatus:
-        resolved_status = AnalysisConfigStatus(status) if isinstance(status, str) else status
-        update = UpdateAnalysisRunStatusRequest(
-            status=resolved_status,
-            last_successful_run_at=last_successful_run_at,
-            last_attempted_at=last_attempted_at,
-            last_completed_at=last_completed_at,
-            last_submitted_job=last_submitted_job,
-            last_error=last_error,
-        )
-        self.updates.append(update)
-        row = AnalysisRunStatus(
-            name=agent,
-            workspace=workspace,
-            agent=agent,
-            status=update.status or AnalysisConfigStatus.IDLE,
-            last_successful_run_at=update.last_successful_run_at,
-            last_attempted_at=update.last_attempted_at,
-            last_completed_at=update.last_completed_at,
-            last_submitted_job=update.last_submitted_job or "",
-            last_error=update.last_error or "",
-        )
-        row._id = "analysis-run-status-1"
-        row._created_at = _STAMP
-        row._updated_at = _STAMP
-        row._db_version = 1
-        return row
-
-
-def _ctx(tmp_path: Path) -> JobContext:
-    persistent = tmp_path / "persistent"
-    ephemeral = tmp_path / "ephemeral"
-    persistent.mkdir()
-    ephemeral.mkdir()
-    return JobContext(
-        workspace="default",
-        storage=StoragePaths(ephemeral=ephemeral, persistent=persistent),
-        results=_Results(),
-        job_id="insights-job-1",
-    )
-
-
-def _analyze_spec(agent: str = "research-agent") -> AnalyzeSpec:
-    return AnalyzeSpec(
-        agent=agent,
-        default_model="default/gpt-5",
-        fast_model="default/gpt-5-mini",
-    )
-
-
-def test_analyze_job_records_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    calls: list[dict[str, object]] = []
-    async_client = object()
-
-    async def fake_run_analyst(**kwargs: object) -> str:
-        calls.append(kwargs)
-        return "analysis report"
-
-    monkeypatch.setattr("nemo_insights_plugin.jobs.analyze.run_analyst", fake_run_analyst)
-    monkeypatch.setattr(
-        "nemo_insights_plugin.jobs.analyze.get_async_task_sdk",
-        lambda plugin: async_client,
-    )
-    statuses = _RecordingAnalysisRunStatuses()
-    with NeMoPlatform(base_url=_BASE_URL) as sdk:
-        monkeypatch.setattr(sdk.insights.analysis_run_statuses, "update", statuses.update)
-        result = AnalyzeJob().run(
-            _analyze_spec().model_dump(mode="json"),
-            ctx=_ctx(tmp_path),
-            sdk=sdk,
-        )
-
-    assert result["status"] == "completed"
-    assert result["artifact"] == {
-        "name": "analysis-report",
-        "artifact_url": f"file://{tmp_path / 'persistent' / 'analysis-report.txt'}",
-    }
-    updates = statuses.updates
-    assert [u.status for u in updates] == [
-        AnalysisConfigStatus.RUNNING,
-        AnalysisConfigStatus.IDLE,
-    ]
-    assert updates[-1].last_submitted_job == "insights-job-1"
-    assert (tmp_path / "persistent" / "analysis-report.txt").read_text() == "analysis report"
-    assert calls[0]["client"] is async_client
-    assert calls[0]["model_refs"] == ConfiguredModelRefs(
-        default="default/gpt-5",
-        fast="default/gpt-5-mini",
-    )
-
-
-@pytest.mark.asyncio
-async def test_analyze_job_compile_requests_storage_without_provider_credentials(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("INFERENCE_API_KEY", "must-not-be-forwarded")
-    platform_spec = await AnalyzeJob.compile(
-        workspace="default",
-        spec=_analyze_spec(),
-        entity_client=object(),
-        job_name="opt-analyze-default-research-agent-20260608204901",
-        async_sdk=object(),
-    )
-
-    step = next(iter(platform_spec["steps"]))
-    assert [env.model_dump(exclude_none=True) for env in step["environment"]] == [
-        {
-            "name": PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
-            "value": DEFAULT_JOB_STORAGE_PATH,
-        },
-    ]
-
-
-class _RecordingAnalysisJobs:
+class _RecordingJobs:
     def __init__(
         self,
         *,
-        jobs: list[AnalysisJob] | None = None,
+        jobs: list[PlatformJobResponse] | None = None,
     ) -> None:
-        self.created: list[CreateAnalysisJobRequest] = []
-        self.query_params: list[ListAnalysisJobsQueryParams | None] = []
+        self.runs: list[CreateAnalysisRunRequest] = []
+        self.query_params: list[ListJobsQueryParams | None] = []
         self._listed_jobs = list(jobs or [])
 
-    async def list_analysis_jobs(
+    async def list_jobs(
         self,
         *,
         workspace: str | None = None,
-        query_params: ListAnalysisJobsQueryParams | None = None,
-    ) -> _AsyncItems[AnalysisJob]:
+        query_params: ListJobsQueryParams | None = None,
+    ) -> _AsyncItems[PlatformJobResponse]:
         del workspace
         self.query_params.append(query_params)
         return _AsyncItems(self._listed_jobs)
-
-    async def create_analysis_job(
-        self,
-        *,
-        workspace: str | None = None,
-        body: CreateAnalysisJobRequest,
-    ) -> _TypedResponse[AnalysisJob]:
-        del workspace
-        self.created.append(body)
-        job = AnalysisJob(
-            name=body.name or "analysis-job",
-            spec=body.spec,
-            custom_fields=body.custom_fields,
-        )
-        return _TypedResponse(job)
 
 
 class _RunStatusLookup:
@@ -950,9 +780,9 @@ class _RunStatusLookup:
 async def _controller(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    jobs: list[AnalysisJob] | None = None,
+    jobs: list[PlatformJobResponse] | None = None,
     run_status: AnalysisRunStatus | None = None,
-) -> AsyncIterator[tuple[InsightsAnalysisController, _RecordingAnalysisJobs]]:
+) -> AsyncIterator[tuple[InsightsAnalysisController, _RecordingJobs]]:
     controller = InsightsAnalysisController()
     controller._config = InsightsConfig(
         analyst=AnalystSchedulerConfig(
@@ -962,15 +792,29 @@ async def _controller(
         )
     )
     async with _async_platform() as sdk:
-        jobs_client = client_from_platform(sdk, AsyncAnalysisJobsClient)
-        recording_jobs = _RecordingAnalysisJobs(jobs=jobs)
+        jobs_client = client_from_platform(sdk, AsyncJobsClient)
+        recording_jobs = _RecordingJobs(jobs=jobs)
         entities = NemoEntitiesClient(client_from_platform(sdk, AsyncEntitiesClient))
-        monkeypatch.setattr(jobs_client, "list_analysis_jobs", recording_jobs.list_analysis_jobs)
-        monkeypatch.setattr(jobs_client, "create_analysis_job", recording_jobs.create_analysis_job)
+        monkeypatch.setattr(jobs_client, "list_jobs", recording_jobs.list_jobs)
         monkeypatch.setattr(entities, "get", _RunStatusLookup(run_status).get)
         controller._sdk = sdk
         controller._jobs = jobs_client
         controller._entities = entities
+
+        async def submit_run(
+            *, workspace: str, request: CreateAnalysisRunRequest, name: str, **kwargs: object
+        ) -> AnalysisRunResponse:
+            recording_jobs.runs.append(request)
+            run = AnalysisRun(name=name, workspace=workspace, agent=request.agent)
+            run._created_at = _STAMP
+            return AnalysisRunResponse(run=run, job={"name": name, "status": "created"})
+
+        async def save_status(status: AnalysisRunStatus) -> AnalysisRunStatus:
+            return status
+
+        monkeypatch.setattr(entities, "create", save_status)
+        monkeypatch.setattr(entities, "update", save_status)
+        monkeypatch.setattr("nemo_insights_plugin.controller.submit_analysis_run", submit_run)
         yield controller, recording_jobs
 
 
@@ -1001,12 +845,8 @@ async def test_controller_submits_due_job(monkeypatch: pytest.MonkeyPatch) -> No
     async with _controller(monkeypatch) as (controller, jobs):
         await controller._reconcile_config(config)
 
-    assert len(jobs.created) == 1
-    created = jobs.created[0]
-    created_spec = created.spec
-    assert created.name is not None
-    assert created.name.startswith("opt-analyze-default-research-agent-")
-    assert created.custom_fields == {"insights_analysis_agent": "research-agent"}
+    assert len(jobs.runs) == 1
+    created_spec = jobs.runs[0]
     assert created_spec.agent == "research-agent"
     assert created_spec.since is None
     assert created_spec.default_model == "default/gpt-5"
@@ -1024,7 +864,7 @@ async def test_controller_defers_legacy_config_without_persisted_models(
         with caplog.at_level("ERROR", logger="nemo_insights_plugin.controller"):
             await controller._reconcile_config(config)
 
-    assert jobs.created == []
+    assert jobs.runs == []
     assert "has no model selection" in caplog.text
     assert "nemo insights analysis enable" in caplog.text
 
@@ -1042,9 +882,16 @@ async def test_controller_skips_active_job(monkeypatch: pytest.MonkeyPatch) -> N
     async with _controller(
         monkeypatch,
         jobs=[
-            AnalysisJob(
+            PlatformJobResponse(
                 name="existing-analysis-job",
-                spec=_analyze_spec(),
+                id="job-1",
+                attempt_id="attempt-1",
+                workspace="default",
+                source="agents.execute",
+                platform_spec=PlatformJobSpec.model_validate(
+                    {"steps": [{"name": "analysis", "executor": {"provider": "cpu", "container": {"image": "test"}}}]}
+                ),
+                fileset="fileset-1",
                 status=PlatformJobStatus.ACTIVE,
                 custom_fields={"insights_analysis_agent": "research-agent"},
             )
@@ -1052,4 +899,65 @@ async def test_controller_skips_active_job(monkeypatch: pytest.MonkeyPatch) -> N
     ) as (controller, jobs):
         await controller._reconcile_config(config)
 
-    assert jobs.created == []
+    assert jobs.runs == []
+
+
+@pytest.mark.asyncio
+async def test_controller_passes_success_cursor_and_fast_model_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = AnalysisConfig(
+        name="research-agent",
+        workspace="default",
+        agent="research-agent",
+        default_model="default/gpt-5",
+    )
+    status = AnalysisRunStatus(
+        name=config.agent,
+        workspace=config.workspace,
+        agent=config.agent,
+        last_successful_run_at=_STAMP,
+    )
+    backend = AsyncMock()
+    backend.count_agent_sessions.return_value = 10
+    monkeypatch.setattr("nemo_insights_plugin.controller.make_analyst_backend", lambda **kwargs: backend)
+
+    async with _controller(monkeypatch, run_status=status) as (controller, jobs):
+        await controller._reconcile_config(config)
+
+    assert len(jobs.runs) == 1
+    assert jobs.runs[0].since == _STAMP
+    assert jobs.runs[0].fast_model == config.default_model
+    backend.count_agent_sessions.assert_awaited_once_with(
+        agent=config.agent,
+        workspace=config.workspace,
+        since=_STAMP,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count", [0, 9, None])
+async def test_controller_defers_insufficient_or_unreadable_new_traces(
+    monkeypatch: pytest.MonkeyPatch,
+    count: int | None,
+) -> None:
+    config = AnalysisConfig(
+        name="research-agent",
+        workspace="default",
+        agent="research-agent",
+        default_model="default/gpt-5",
+    )
+    status = AnalysisRunStatus(
+        name=config.agent,
+        workspace=config.workspace,
+        agent=config.agent,
+        last_successful_run_at=_STAMP,
+    )
+    backend = AsyncMock()
+    backend.count_agent_sessions.return_value = count
+    if count is None:
+        backend.count_agent_sessions.side_effect = RuntimeError("Intake unavailable")
+    monkeypatch.setattr("nemo_insights_plugin.controller.make_analyst_backend", lambda **kwargs: backend)
+
+    async with _controller(monkeypatch, run_status=status) as (controller, jobs):
+        await controller._reconcile_config(config)
+
+    assert jobs.runs == []

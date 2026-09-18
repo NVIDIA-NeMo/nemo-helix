@@ -3,9 +3,7 @@
 
 """High-level Insights analysis-run request helpers.
 
-This module is a thin facade over the generic ``agents.execute`` job. The
-current ``AnalyzeJob`` can continue to run side-by-side while this path
-exercises the Analyst-as-Agent implementation.
+This module is a thin facade over the generic ``agents.execute`` job.
 
 Insights persists one :class:`~nemo_insights_plugin.entities.AnalysisRun` per
 run, holding only what the Jobs layer cannot know: that a job was an analysis
@@ -91,6 +89,24 @@ async def create_analysis_run(
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AnalysisRunResponse:
     """Create an Insights analysis run backed by the generic ``agents.execute`` job."""
+    return await submit_analysis_run(workspace=workspace, request=request, sdk=sdk, entity_client=entity_client)
+
+
+async def submit_analysis_run(
+    *,
+    workspace: str,
+    request: CreateAnalysisRunRequest,
+    sdk: AsyncNeMoPlatform,
+    entity_client: NemoEntitiesClient,
+    name: str | None = None,
+    profile: str | None = None,
+    base_url: str | None = None,
+) -> AnalysisRunResponse:
+    """Shared submission path for the API and the Insights scheduler.
+
+    The scheduler supplies a name so a persisted intent remains discoverable
+    even if submission or the subsequent scheduler-status write fails.
+    """
     agents_client = client_from_platform(sdk, AsyncAgentsClient)
     models_client = client_from_platform(sdk, AsyncModelsClient)
     # Resolve before recording anything: a bogus ref would otherwise persist a
@@ -98,7 +114,7 @@ async def create_analysis_run(
     # copy of the operator's intent.
     request = await _resolve_model_refs(models_client, request, workspace=workspace)
     run = AnalysisRun(
-        name=mint_analysis_run_name(),
+        name=name or mint_analysis_run_name(),
         workspace=workspace,
         agent=request.agent,
         since=request.since,
@@ -113,12 +129,17 @@ async def create_analysis_run(
         logger.exception("Failed to record analysis run for agent '%s'", safe_agent)
         raise HTTPException(status_code=500, detail="Failed to record the analysis run.") from exc
 
-    spec = build_execute_agent_job_config(request, workspace=workspace, run_name=saved.name)
+    spec = build_execute_agent_job_config(request, workspace=workspace, run_name=saved.name, base_url=base_url)
     try:
         job = (
             await agents_client.create_execute_job(
                 workspace=workspace,
-                body=CreateExecuteJobRequest(spec=spec, name=saved.name),
+                body=CreateExecuteJobRequest(
+                    spec=spec,
+                    name=saved.name,
+                    profile=profile,
+                    custom_fields={"insights_analysis_agent": request.agent},
+                ),
             )
         ).data()
     except NemoHTTPError as exc:
@@ -279,7 +300,9 @@ async def _resolve_model_ref(client: ModelLookupClient, ref: str, *, field: str,
     return f"{model_workspace}/{name}"
 
 
-def build_execute_agent_job_config(request: CreateAnalysisRunRequest, *, workspace: str, run_name: str) -> JsonObject:
+def build_execute_agent_job_config(
+    request: CreateAnalysisRunRequest, *, workspace: str, run_name: str, base_url: str | None = None
+) -> JsonObject:
     """Translate a high-level Insights request into a generic execute-agent job config."""
     extension_config: JsonObject = {
         "agent": request.agent,
@@ -287,7 +310,7 @@ def build_execute_agent_job_config(request: CreateAnalysisRunRequest, *, workspa
     }
     payload = _json_object(
         {
-            "agent": _inline_analyst(request, workspace=workspace),
+            "agent": _inline_analyst(request, workspace=workspace, base_url=base_url),
             "input": _analysis_prompt(request.agent),
             "extension": {
                 "kind": INSIGHTS_ANALYSIS_EXTENSION_KIND,
@@ -301,7 +324,7 @@ def build_execute_agent_job_config(request: CreateAnalysisRunRequest, *, workspa
     return payload
 
 
-def _inline_analyst(request: CreateAnalysisRunRequest, *, workspace: str) -> JsonObject:
+def _inline_analyst(request: CreateAnalysisRunRequest, *, workspace: str, base_url: str | None = None) -> JsonObject:
     """Build the ``agent`` arm of the execute job as an inline definition.
 
     The Analyst has no Agent entity: its config is composed here from the
@@ -317,6 +340,7 @@ def _inline_analyst(request: CreateAnalysisRunRequest, *, workspace: str) -> Jso
             "config": build_analyst_agent_config(
                 agent=request.agent,
                 workspace=workspace,
+                base_url=base_url,
                 default_model=request.default_model,
                 fast_model=request.fast_model,
                 ethos=request.ethos,
