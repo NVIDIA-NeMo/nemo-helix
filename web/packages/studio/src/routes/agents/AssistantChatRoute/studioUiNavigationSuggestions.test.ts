@@ -20,7 +20,6 @@ describe('getStudioUiNavigationSuggestion', () => {
       intakeEnabled: true,
       jobsEnabled: true,
       modelCompareEnabled: true,
-      monitorEnabled: true,
       safeSynthesizerEnabled: true,
       secretsEnabled: true,
       settingsEnabled: true,
@@ -48,10 +47,6 @@ describe('getStudioUiNavigationSuggestion', () => {
 
   it('keeps navigation shortcuts when prompts include Studio product context', () => {
     const cases = [
-      {
-        prompt: 'Show agent token usage',
-        id: 'agent-monitor',
-      },
       {
         prompt: 'Manage workspace secrets',
         id: 'secrets',

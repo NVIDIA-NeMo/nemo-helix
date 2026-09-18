@@ -12,7 +12,6 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_OPTIMIZER_ENABLED', 'false');
   vi.stubEnv('VITE_FF_CUSTOMIZER_ENABLED', 'true');
   vi.stubEnv('VITE_FF_GUARDRAILS_ENABLED', 'true');
-  vi.stubEnv('VITE_FF_MONITOR_ENABLED', 'true');
 });
 
 /** A parent row's label is a link; its chevron is a separate disclosure button. */
@@ -95,22 +94,25 @@ describe('WorkspaceSideNav', () => {
       '/workspaces/test-workspace/base-models'
     );
     expect(screen.queryByRole('link', { name: 'Base Models' })).not.toBeInTheDocument();
+
+    // Agents has no sub-items, so it is a plain leaf link with no disclosure chevron.
+    expect(screen.queryByRole('button', { name: /Agents/i })).not.toBeInTheDocument();
   });
 
   it('expands and collapses a parent from the chevron alone', async () => {
     const user = userEvent.setup();
-    renderSideNav('/workspaces/test-workspace/agents/monitor');
+    renderSideNav('/workspaces/test-workspace/customizations');
 
-    expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('link', { name: 'Monitor' })).toHaveAttribute(
+    expect(disclosure('Models')).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('link', { name: 'Fine-tune' })).toHaveAttribute(
       'href',
-      '/workspaces/test-workspace/agents/monitor'
+      '/workspaces/test-workspace/customizations'
     );
 
-    await user.click(disclosure('Agents'));
-    expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByRole('link', { name: 'Monitor' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Agents' })).toBeInTheDocument();
+    await user.click(disclosure('Models'));
+    expect(disclosure('Models')).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('link', { name: 'Fine-tune' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Models' })).toBeInTheDocument();
   });
 
   it('renders the customization screen as Fine-tune under Models', () => {
@@ -124,10 +126,10 @@ describe('WorkspaceSideNav', () => {
   });
 
   it('expands only the parent owning the current nested route', () => {
-    renderSideNav('/workspaces/test-workspace/agents/monitor');
+    renderSideNav('/workspaces/test-workspace/customizations');
 
-    expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'true');
-    expect(disclosure('Models')).toHaveAttribute('aria-expanded', 'false');
+    expect(disclosure('Models')).toHaveAttribute('aria-expanded', 'true');
+    expect(disclosure('Datasets')).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('collapses a manually opened Datasets once the route moves elsewhere', async () => {
@@ -140,21 +142,21 @@ describe('WorkspaceSideNav', () => {
     await user.click(disclosure('Datasets'));
     expect(disclosure('Datasets')).toHaveAttribute('aria-expanded', 'true');
 
-    await user.click(screen.getByRole('link', { name: 'Agents' }));
-    expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'true');
+    await user.click(screen.getByRole('link', { name: 'Models' }));
+    expect(disclosure('Models')).toHaveAttribute('aria-expanded', 'true');
     expect(disclosure('Datasets')).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('reopens a chevron-collapsed parent when the route comes back to it', async () => {
     const user = userEvent.setup();
-    renderSideNav('/workspaces/test-workspace/agents');
+    renderSideNav('/workspaces/test-workspace/base-models');
 
-    await user.click(disclosure('Agents'));
-    expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'false');
+    await user.click(disclosure('Models'));
+    expect(disclosure('Models')).toHaveAttribute('aria-expanded', 'false');
 
-    await user.click(screen.getByRole('link', { name: 'Models' }));
     await user.click(screen.getByRole('link', { name: 'Agents' }));
-    expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'true');
+    await user.click(screen.getByRole('link', { name: 'Models' }));
+    expect(disclosure('Models')).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('folds a plugin group into the core group of the same name', () => {

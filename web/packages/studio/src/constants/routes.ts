@@ -148,7 +148,6 @@ export const ROUTES = {
     agentEvaluationDetail: `/workspaces/:${P.workspace}/agents/evaluations/:${P.agentEvalJobName}`,
     agentOptimizationDetail: `/workspaces/:${P.workspace}/agents/optimizations/:${P.optimizeJobName}`,
     modelCompare: `/workspaces/:${P.workspace}/playground`,
-    agentMonitor: `/workspaces/:${P.workspace}/agents/monitor`,
     /** Plugin-owned page; the plugin's internal router owns sub-paths via a `/*` suffix. */
     plugin: `/workspaces/:${P.workspace}/plugin/:${P.pluginName}`,
   },

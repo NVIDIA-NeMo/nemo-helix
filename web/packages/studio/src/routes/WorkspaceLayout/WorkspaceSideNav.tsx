@@ -20,7 +20,6 @@ import {
 } from '@studio/plugins/PluginContext';
 import { iconColorClass } from '@studio/routes/constants';
 import {
-  getAgentSideNavItems,
   getAnonymizerSideNavItems,
   getCustomizationSideNavItems,
   getDashboardSideNavItems,
@@ -105,7 +104,6 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
     const safeSynthesizerNav = getSafeSynthesizerSideNavItems(workspace);
     const dataDesignerNav = getDataDesignerSideNavItems(workspace);
     const anonymizerNav = getAnonymizerSideNavItems(workspace);
-    const agentItems = showAgents ? getAgentSideNavItems(workspace) : [];
     const optimizerNav = getOptimizerSideNavItems(workspace);
     const virtualModelsNav = getVirtualModelsSideNavItems(workspace);
     const modelCompareNav = getModelCompareSideNavItems(workspace);
@@ -122,7 +120,7 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
     ];
     const datasetSubItems = [...anonymizerNav, ...dataDesignerNav, ...safeSynthesizerNav];
 
-    // Agents and Models link to their own entity list page; the chevron expands any sub-items.
+    // Agents and Models link to their own entity list page; Models' chevron expands its sub-items (Agents has none).
     const agentsHref = showAgents ? getAgentsListRoute(workspace) : undefined;
     const modelsHref = BASE_MODELS_ENABLED ? getWorkspaceBaseModelsRoute(workspace) : undefined;
 
@@ -134,7 +132,6 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
               slotIcon: <AgentsIcon className={iconColorClass} />,
               slotLabel: 'Agents',
               href: agentsHref,
-              subItems: agentItems,
             },
           ]
         : []),

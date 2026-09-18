@@ -1219,7 +1219,6 @@ def test_studio_link_destinations_cover_registered_workspace_routes():
         "agentDetail": "agent",
         "agentEvaluationDetail": "agent_evaluation",
         "agentEvaluationsList": "agent_evaluations",
-        "agentMonitor": "agent_monitor",
         "agentOptimizations": "agent_optimizations",
         "agentsList": "agents",
         "baseModels": "base_models",

@@ -672,10 +672,6 @@ export const getAgentDeploymentDetailRoute = (workspace: string, agentDeployment
   });
 };
 
-export const getAgentMonitorRoute = (workspace: string) => {
-  return generatePath(ROUTES.workspace.agentMonitor, { workspace });
-};
-
 export const getAgentEvaluationDetailRoute = (workspace: string, agentEvalJobName: string) => {
   return generatePath(ROUTES.workspace.agentEvaluationDetail, {
     workspace,

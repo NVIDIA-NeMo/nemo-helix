@@ -2,15 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
-import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
-import {
-  AGENT_OPTIMIZATIONS_ENABLED,
-  AGENTS_ENABLED,
-  MONITOR_ENABLED,
-} from '@studio/constants/environment';
+import { AGENT_OPTIMIZATIONS_ENABLED, AGENTS_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
-import { iconColorClass } from '@studio/routes/constants';
-import { agentsRoutes, getAgentMonitorRoute } from '@studio/routes/utils';
+import { agentsRoutes } from '@studio/routes/utils';
 import { lazy } from 'react';
 import type { RouteObject } from 'react-router';
 
@@ -28,11 +22,6 @@ const AgentDetailRoute =
       default: m.AgentDetailRoute,
     }))
   );
-const AgentMonitorRoute = lazy(() =>
-  import('@studio/routes/agents/AgentMonitorRoute').then((m) => ({
-    default: m.AgentMonitorRoute,
-  }))
-);
 const AgentEvaluationDetailRoute =
   AGENTS_ENABLED &&
   lazy(() =>
@@ -55,15 +44,6 @@ export const agentRoutes: RouteObject[] = agentsRoutes([
     element: AgentsListRoute ? <AgentsListRoute /> : null,
     errorElement: <RouteErrorPanel title="Agents" />,
   },
-  ...(MONITOR_ENABLED
-    ? [
-        {
-          path: ROUTES.workspace.agentMonitor,
-          element: <AgentMonitorRoute />,
-          errorElement: <RouteErrorPanel title="Monitor" />,
-        },
-      ]
-    : []),
   {
     path: ROUTES.workspace.agentEvaluationDetail,
     element: AgentEvaluationDetailRoute ? <AgentEvaluationDetailRoute /> : null,
@@ -84,21 +64,3 @@ export const agentRoutes: RouteObject[] = agentsRoutes([
     errorElement: <RouteErrorPanel title="Agent details" />,
   },
 ]);
-
-const NavIcon = ENTITY_ICONS.agentMonitorRuns;
-
-export const getAgentSideNavItems = (workspace: string) =>
-  AGENTS_ENABLED
-    ? [
-        ...(MONITOR_ENABLED
-          ? [
-              {
-                id: 'agent-monitor',
-                slotIcon: <NavIcon className={iconColorClass} />,
-                slotLabel: 'Monitor',
-                href: getAgentMonitorRoute(workspace),
-              },
-            ]
-          : []),
-      ]
-    : [];

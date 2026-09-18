@@ -223,11 +223,6 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     heading: 'No spans yet',
     subheading: 'Spans will appear here once your agent starts sending telemetry.',
   },
-  agentMonitorRuns: {
-    heading: 'No runs yet',
-    subheading:
-      'Agent invocations populate this list once telemetry reaches the nemo-agent-telemetry fileset.',
-  },
   agentOptimizations: {
     heading: 'No optimizations yet',
     subheading:
