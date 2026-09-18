@@ -4163,7 +4163,7 @@ dependencies = [
     { name = "nemo-agents-example-email-phishing", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-agents-example-email-security", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-deployments-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "nemo-fabric", extra = ["claude", "codex", "relay"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-fabric", extra = ["claude", "codex", "relay", "streaming"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-deepagents", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-hermes", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-optimization-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -4205,7 +4205,7 @@ requires-dist = [
     { name = "nemo-agents-example-email-phishing", editable = "plugins/nemo-agents/examples/email-phishing-analyzer" },
     { name = "nemo-agents-example-email-security", editable = "plugins/nemo-agents/examples/email-security-analyst" },
     { name = "nemo-deployments-plugin", editable = "plugins/nemo-deployments" },
-    { name = "nemo-fabric", extras = ["claude", "codex", "relay"], specifier = ">=0.3.0,<0.4.0" },
+    { name = "nemo-fabric", extras = ["claude", "codex", "relay", "streaming"], specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-fabric-adapters-deepagents", specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14'", specifier = ">=0.3.0,<0.4.0" },
     { name = "nemo-optimization-plugin", editable = "plugins/nemo-optimization" },
@@ -4729,6 +4729,10 @@ relay = [
     { name = "nemo-relay", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 
+streaming = [
+    { name = "nemo-fabric-runtime", extra = ["streaming"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+
 [[package]]
 name = "nemo-fabric-adapter-contract"
 version = "0.3.0"
@@ -4814,6 +4818,18 @@ wheels = [
 ]
 
 [[package]]
+name = "nemo-fabric-collector"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "starlette", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "uvicorn", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8f/48/11d35278a659b3d94ab18a2d6583cd41f0e96ed595a603dc1f8a297af0f4/nemo_fabric_collector-0.3.0-py3-none-any.whl", hash = "sha256:31894ff33d37f8376600ae0ccf1ebd84305f795cf1383350e2ee9bb584715f83", size = 13834, upload-time = "2026-09-15T16:41:31.405Z" },
+]
+
+[[package]]
 name = "nemo-fabric-runtime"
 version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4826,6 +4842,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/44/e0/8006977eb670404257efb18cd6c2cb6079904aee9bb5d7be94ee8c57e103/nemo_fabric_runtime-0.3.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:d49f7b7c83c8ee548f7baf53d68102db13b6fbbf3e43a998210e82505f5b19c6", size = 2796555, upload-time = "2026-09-15T16:41:34.333Z" },
     { url = "https://files.pythonhosted.org/packages/f0/3f/5cdd4bb42e27c33c6af065294d71e0d2cd3e9716b8ff159f2a24a2553d67/nemo_fabric_runtime-0.3.0-cp311-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e2c2bf02e5ecafe78612453b86952ae7f76008371d45d2227317ba30ff9eef94", size = 2678665, upload-time = "2026-09-15T16:41:57.427Z" },
     { url = "https://files.pythonhosted.org/packages/7d/30/18c4763a7536c0bcdd1b67ffa3203d2cc7cbe66c2d17ca53c215e072774f/nemo_fabric_runtime-0.3.0-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:2427487ce0e50151f1995da57de7433bd8a5bd122cf377738c76dad5891a8865", size = 2871108, upload-time = "2026-09-15T16:42:21.394Z" },
+]
+
+[package.optional-dependencies]
+streaming = [
+    { name = "nemo-fabric-collector", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 
 [[package]]
