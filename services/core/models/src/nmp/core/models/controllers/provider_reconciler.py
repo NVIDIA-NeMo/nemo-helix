@@ -476,20 +476,11 @@ class ModelProviderReconciler:
                     non_compliant_update_ok = True
                 except Exception as e:
                     logger.error(f"Failed to update provider {provider_id} status: {e}")
-                # A provider that goes non-compliant serves nothing this cycle, so every
-                # entity it served last cycle must be unlinked — the same per-model pruning
-                # the success path does, just with an empty resolved set. Without this the
-                # cleared served_models mapping (above) prunes routing but leaves the
-                # entity's model_providers back-reference stale, and because the persisted
-                # served_models is now [], a later cycle has nothing left to diff against.
-                # ``provider`` still holds the pre-update served_models here (update_provider_status
-                # returns a fresh object into ctx.model_provider; the local is untouched).
-                #
-                # Only unlink once the mapping-wipe actually persisted: if the update
-                # FAILED the persisted served_models is unchanged, so removing the entity
-                # back-references would leave the entity saying "no provider" while the
-                # provider still claims to serve it — the inverse of the staleness this
-                # fix targets. A later successful cycle re-runs the unlink.
+                # A non-compliant provider serves nothing this cycle, so unlink every entity
+                # it served last cycle (same pruning as the success path, empty resolved set).
+                # ``provider`` still holds the pre-update served_models to diff against. Guarded
+                # on the status write succeeding: if it failed the persisted mapping is
+                # unchanged, so unlinking now would leave entities inconsistent with it.
                 if non_compliant_update_ok:
                     self._unlink_dropped_model_entities(provider, provider_id, [])
                 return
@@ -585,24 +576,13 @@ class ModelProviderReconciler:
             await self._ensure_passthrough_virtual_model(ref.workspace, ref.name, existing_vm_names)
             self._emit_heartbeat()
 
-        # Unlink this provider from any Model Entity it served last cycle but no
-        # longer serves this cycle. Without this, a model dropped from a still-alive
-        # provider's discovered set (e.g. removed upstream) keeps a stale provider
-        # back-reference on its entity, so every Studio surface gating on
-        # hasModelProvider goes on advertising a model that is no longer served.
-        #
-        # The served_models mapping and the autoprovisioned passthrough VirtualModel
-        # already prune on removal (the mapping is regenerated fresh each cycle and
-        # overwritten; orphaned VMs are reaped by _cleanup_orphaned_virtual_models).
-        # The entity's model_providers list was the one piece never pruned per-model —
-        # stage_provider_unlink was only ever called on full provider/deployment
-        # teardown (deployment_reconciler._cleanup_model_entities_for_provider).
-        #
-        # Guarded on update_ok: if the served_models write above FAILED, the persisted
-        # mapping is unchanged, so unlinking entity back-references now would leave the
-        # entity inconsistent with the provider (entity drops the link while the provider
-        # still lists the model). Skipping the unlink on failure preserves the prior
-        # consistent state; the next successful cycle re-runs the diff and unlinks then.
+        # Unlink this provider from any Model Entity it served last cycle but not this
+        # one: the served_models mapping and passthrough VM already prune on removal, but
+        # the entity's model_providers back-reference did not (unlink was previously only
+        # done on full provider/deployment teardown), so a removed model kept advertising a
+        # provider that no longer serves it. Guarded on update_ok: if the mapping write above
+        # failed, the persisted served_models is unchanged, so unlinking now would leave the
+        # entity inconsistent with the provider; the next successful cycle re-runs the diff.
         if update_ok:
             self._unlink_dropped_model_entities(provider, provider_id, served_models)
 
