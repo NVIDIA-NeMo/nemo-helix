@@ -118,6 +118,9 @@ for the platform job form.
 
 ## Custom (wrapped) agents
 
+**SDK-only:** Loose wrapper source through `agent_dir` is supported by standalone
+`nemo-evaluator-sdk` runs, not by submitted `nemo-evaluator` plugin jobs.
+
 To run a real agent instead of the oracle, set `agent_import_path`. Two packaging
 shapes are supported, and the SDK imposes neither:
 
@@ -153,6 +156,22 @@ must be **self-contained**: a single module, or one that reaches sibling files
 via relative imports (`from .helper import ...`). A wrapper that does an absolute
 `import helper` of a sibling won't resolve — package and install it, then use the
 `agent_dir`-less form above.
+
+## Built-in Codex agent
+
+Harbor's built-in `codex` agent needs no wrapper directory. Run `codex login` once before using
+this optional path. Then opt into Harbor's auth-file transport for a standalone local run:
+
+```bash
+CODEX_FORCE_AUTH_JSON=1 uv run python your_harbor_run.py
+```
+
+Set that flag in the host environment only; do not include it in `agent_env_from_host`.
+
+Configure that run with `agent_name="codex"`, an explicit `agent_model_name`, and optionally
+`agent_kwargs={"version": "0.153.0"}`. The adapter installs that Codex CLI version inside each task
+container. A platform-submitted job cannot see the submitter's `~/.codex/auth.json`; configure
+`HarborRunnerTarget.env_secrets` with an `OPENAI_API_KEY` platform secret instead.
 
 ## End-to-end test
 

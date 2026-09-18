@@ -12,15 +12,16 @@ each other.
 
 from __future__ import annotations
 
-from typing import Any, Literal, Self, TypeAlias
+from typing import Annotated, Any, Literal, Self, TypeAlias
 
 # Imported for their registration side effects: each module registers its bundle
 # payload kind so MetricBundle payloads round-trip through validation.
 import nemo_evaluator.shared.metric_bundles.cloudpickle  # noqa: F401
 import nemo_evaluator.shared.metric_bundles.inline  # noqa: F401
 from filesets import FilesetPathError, parse_fileset_ref
-from nemo_evaluator.api.schemas import MetricInline, TaskInputs, TaskMetadataList, TasksetRef
+from nemo_evaluator.api.schemas import MetricInline, TaskInputs, TaskMetadataList, TaskRef, TasksetRef
 from nemo_evaluator.filesets import FilesetRef
+from nemo_evaluator.harbor.tasks import PinnedHarborSource, PinnedHarborTaskList, PinnedHarborTaskset
 from nemo_evaluator.jobs.metric_resolution import to_runtime_bundle, unresolved_model_refs
 from nemo_evaluator.jobs.publication_spec import PublicationSpec
 from nemo_evaluator.metric_refs import MetricRefOrInline
@@ -419,13 +420,12 @@ class _AgentEvalSpecCommon(BaseModel):
 class AgentEvalInputSpec(_AgentEvalSpecCommon):
     """Submitter-facing agent-evaluation input.
 
-    ``tasks`` is either an inline list of tasks (whose metrics may be inline or references) or a
-    :class:`TasksetRef` naming a stored taskset whose member tasks are loaded and expanded during spec
-    resolution. Either way it hydrates to the canonical ``AgentEvalSpec.tasks`` list.
+    ``tasks`` accepts inline tasks, stored task references, or a stored taskset reference.
+    Evaluator definitions expand at submission; stored Harbor sources are pinned for worker resolution.
     """
 
-    tasks: TasksetRef | list[AgentEvalTaskInput] = Field(
-        description="Tasks to evaluate: an inline list (at least one) or a reference to a stored taskset.",
+    tasks: TasksetRef | list[AgentEvalTaskInput] | list[TaskRef] = Field(
+        description="Tasks to evaluate: a nonempty list containing only inline tasks or only task references, or a stored taskset reference.",
     )
 
     @model_validator(mode="after")
@@ -438,12 +438,26 @@ class AgentEvalInputSpec(_AgentEvalSpecCommon):
 
 
 class AgentEvalSpec(_AgentEvalSpecCommon):
-    """Canonical agent-evaluation spec: tasks with all metric references resolved to inline."""
+    """Canonical evaluation: resolved evaluator tasks or an immutable stored Harbor source."""
 
-    tasks: list[AgentEvalTaskSpec] = Field(min_length=1, description="Tasks to evaluate; at least one is required.")
+    tasks: Annotated[list[AgentEvalTaskSpec], Field(min_length=1)] | PinnedHarborSource = Field(
+        description="Resolved inline tasks, or immutable stored Harbor references whose archives are materialized "
+        "on the executing worker. Stored sources select an existing taskset revision or explicit task revisions "
+        "and require a Harbor target; they do not define another stored taskset entity."
+    )
+
+    @model_validator(mode="after")
+    def _require_harbor_source_target(self) -> Self:
+        if isinstance(self.tasks, (PinnedHarborTaskset, PinnedHarborTaskList)) and not isinstance(
+            self.target, HarborRunnerTarget
+        ):
+            raise ValueError("Stored Harbor sources require a Harbor target and cannot use offline trials")
+        return self
 
     @model_validator(mode="after")
     def _reject_unresolved_metric_model_refs(self) -> Self:
+        if isinstance(self.tasks, (PinnedHarborTaskset, PinnedHarborTaskList)):
+            return self
         for task in self.tasks:
             unresolved = unresolved_model_refs([unbundle_metric(to_runtime_bundle(metric)) for metric in task.metrics])
             if unresolved:

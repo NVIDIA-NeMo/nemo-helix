@@ -8,6 +8,7 @@ readme = "README.md"
 requires-python = ">=3.11,<3.15"
 dependencies = [
     "cloudpickle>=3.1.1",
+    "filesets",
     "nemo-evaluator-sdk",
     "nemo-platform-plugin",
     "pydantic>=2.12.0",
@@ -32,6 +33,11 @@ evaluator = "nemo_evaluator.sdk.resources:evaluator_sdk_resources"
 [project.entry-points."nemo.skills"]
 evaluator = "nemo_evaluator.skills:get_skills_path"
 
+[project.optional-dependencies]
+harbor = [
+    "nemo-evaluator-sdk[harbor]",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -41,9 +47,10 @@ packages = ["src/nemo_evaluator"]
 
 
 [tool.uv.sources]
-nemo-evaluator-sdk = { workspace = true }
 nemo-platform-plugin = { workspace = true }
 nmp-testing = { workspace = true }
+filesets = { workspace = true }
+nemo-evaluator-sdk = { workspace = true }
 
 
 [dependency-groups]

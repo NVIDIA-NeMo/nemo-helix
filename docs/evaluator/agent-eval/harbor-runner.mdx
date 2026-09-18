@@ -115,7 +115,138 @@ your own Harbor suite.
 
 </Note>
 
+### Upload and Register Harbor Dataset
+Upload and register a complete local Harbor dataset or a single task using `upload_harbor_dataset()` and `upload_harbor_task()` helper functions:
+
+```python
+from pathlib import Path
+from nemo_evaluator.sdk.harbor import upload_harbor_task, upload_harbor_dataset
+from nemo_platform_plugin.client.client import NemoClient
+
+client = NemoClient(base_url="http://localhost:8080", workspace="default")
+single_task = upload_harbor_task(Path("./my_task"), client=client)
+taskset = upload_harbor_dataset(Path("./mydataset"), client=client, taskset_name="suite")
+print(single_task.task_ref) # default/my_task#<entity-content-hash>
+print(taskset.taskset_ref) # default/suite#<entity-content-hash>
+```
+
+- Registration defaults to enabled in `upload_harbor_task()`. Pass `register=False` to receive verified archive definitions without
+creating Tasks or a Taskset. 
+- Repeated identical uploads reuse artifacts and entity revisions.
+- Different existing entity content raises a conflict unless `replace=True` is explicit. 
+- Write responses return the content digest of the revision published by that operation, even if a concurrent writer has since advanced the latest revision.
+
+The helpers compose archive publication with the existing task and taskset resource APIs.
+To control registration yourself, upload the archive first and pass its verified definition
+to the task resource:
+
+```python
+from pathlib import Path
+
+from nemo_evaluator.api.schemas import TaskInput
+from nemo_evaluator.sdk.harbor import upload_harbor_task
+from nemo_evaluator.sdk.task_resources import EvaluatorTasksResource
+from nemo_platform_plugin.client.client import NemoClient
+from nemo_platform_plugin.evaluator.client import EvaluatorClient
+
+client = NemoClient(base_url="http://localhost:8080", workspace="default")
+tasks_resource = EvaluatorTasksResource(EvaluatorClient.from_client(client))
+uploaded = upload_harbor_task(Path("./my_task"), client=client, register=False)
+task = tasks_resource.create("my_task", task=TaskInput(spec=uploaded.definition))
+published = next(
+    revision
+    for revision in tasks_resource.list_revisions("my_task").data
+    if revision.revision == task.revision
+)
+
+print(task.name, task.revision, published.content_hash)
+# my_task 1 <64-character SHA-256 digest>
+```
+
+- The explicit `create()` requires a new task name; rerunning it with an existing name fails.
+Use the combined helper above for identical-content reuse and explicit `replace=True` behavior.
+- The resource response's `revision` is an ordinal, not a digest reference. 
+- The combined helper looks up and verifies that exact revision before returning `task_ref`, so it remains correct
+even if another writer advances the task's head. Dataset publication also preflights every
+local task before uploading and reports partial progress if a later operation fails.
+
+#### Limitations
+- Dataset-authoring tools may place a `task_template/` directory beside generated task directories
+  as the common scaffold from which those tasks were created. It is not an executable dataset member,
+  so the uploader skips it and emits a warning.
+- Publication uses ordinary Files uploads and may replace existing content at the archive-hash path.
+Every upload is downloaded and checksum-verified before returning. Later writes/deletions remain possible;
+registration and workers independently verify the archive. Conditional creation is deferred to a follow-up.
+A failed registration retains successfully uploaded artifacts; `HarborUploadError.upload_details` reports completed
+members and pins for retry. Cleanup is explicitly caller-managed; never delete potentially shared objects.
+
+#### Harbor Tasks and Taskset Grouping in Fileset
+By default, `upload_harbor_task()` stores archives in `default/harbor-tasks`, while
+`upload_harbor_dataset()` groups them in `default/harbor-tasksets`.
+
+The upload helpers provide these storage overrides:
+
+- `workspace` (both helpers): Changes the registration workspace and the workspace used by the
+  default Fileset. For example, `workspace="team-a"` stores a standalone task at
+  `team-a/harbor-tasks#my_task/<H1>/task_archive`.
+- `fileset_ref` (both helpers): Replaces the complete default `workspace/fileset` destination
+  without changing the registration workspace. For example, `fileset_ref="shared/evaluations"`
+  stores the same task at `shared/evaluations#my_task/<H1>/task_archive`.
+- `path_prefix` (`upload_harbor_task()`): Adds a path before the task directory. For example,
+  `path_prefix="release-1"` produces
+  `default/harbor-tasks#release-1/my_task/<H1>/task_archive`.
+- `dataset_prefix` (`upload_harbor_dataset()`): Adds a path before every task in the dataset.
+  It defaults to the dataset directory name. For example, `dataset_prefix="release-1"` produces
+  `default/harbor-tasksets#release-1/my_task/<H1>/task_archive`;
+
+```text
+default/harbor-tasks#my_task/
+└── <H1>/
+    └── task_archive
+default/harbor-tasksets#mydataset/
+├── my_task/
+│   └── <H1>/
+│       └── task_archive
+└── search/
+    └── <H2>/
+        └── task_archive
+```
+
+`H1`, `H2` are SHA-256 of completed compressed task_archive bytes.
+
+Each task_archive contains one named directory:
+
+```txt
+my_task/
+├── task.toml
+├── instruction.md
+├── environment/
+│   └── Dockerfile
+├── tests/
+│   └── test.sh
+└── ...all other task files and empty directories...
+```
+
+#### Task Archiving Details
+
+- The uploader captures a quiescent source and packages entries in sorted order.
+- Tar timestamps are normalized, and the gzip header contains no timestamp. Compression is stable
+  within the same tooling, but a compressor upgrade may produce a new hash.
+- The uploader verifies the stored bytes and native structure after downloading the archive.
+- The named task root, full permission bits (`0o7777`), dotfiles, ignored files, and empty directories
+  are preserved.
+- Original file ownership is not preserved. Archive UID and GID values are normalized to `0`;
+  extracted files remain owned by the worker process without using `chown`.
+- Workers retain Harbor's Docker transfer behavior.
+- Symlinks and special files are rejected.
+
+#### Constraints
+Server registration and workers independently verify archive bytes, bounded extraction, native metadata
+and packaged step references. Initial limits are 100,000 entries, 4 GiB per file, 16 GiB payload, plus bounded
+compressed/expanded streams and tar metadata records.
+
 ## Run it
+### Standalone SDK
 
 A Harbor run is a normal agent-eval run: `AgentEvaluator().run(tasks=..., target=runner)`, exactly like
 the [quickstart](/documentation/evaluate-models/agent-eval/quickstart) (a callable) and the
@@ -183,6 +314,161 @@ through the host `subprocess` executor. Standalone SDK runs using `run_harbor_ev
 `HarborAgentTaskRunner` invoke Harbor directly and do not use a Jobs execution profile.
 
 </Note>
+### Platform Plugin
+
+After [uploading and registering the dataset](#upload-and-register-harbor-dataset), submit its
+taskset reference with a Harbor target. These examples use `default/suite`; replace it with the
+`taskset_ref` returned by the upload helper to pin the uploaded revision. The `oracle` agent runs
+the task's reference solution without model credentials.
+
+The job host needs Python 3.12+, Harbor, and a running Docker daemon. Local deployments with the
+Docker or `none` runtime predefine a `subprocess` execution profile named `default`, unless the
+subprocess executor is disabled. Harbor selects that provider explicitly. The examples use this
+profile; API and CLI submissions can select another configured subprocess profile by name.
+Running Harbor job in Kubernetes or Docker execution profile is not supported at this time.
+
+<Tabs>
+<Tab title="API">
+
+Submit to the evaluator plugin's agent-evaluation jobs endpoint:
+
+```bash
+curl --fail-with-body -X POST \
+  http://localhost:8080/apis/evaluator/v2/workspaces/default/agent-evaluate/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "profile": "default",
+    "spec": {
+      "tasks": "default/suite",
+      "target": {
+        "kind": "harbor",
+        "agent_name": "oracle",
+        "reward_key": "reward"
+      }
+    }
+  }'
+```
+
+The response contains the job's `name`. Copy it into `JOB_NAME` and check its status with curl
+(the output filter requires `jq`):
+
+```bash
+JOB_NAME=nemo-evaluator.agent-h1f68xpa  # Replace with your returned job name.
+curl --silent --show-error --fail-with-body \
+  "http://localhost:8080/apis/evaluator/v2/workspaces/default/agent-evaluate/jobs/${JOB_NAME}/status" \
+  | jq '{name, status}'
+```
+
+Expected output once the job finishes (your job name will differ):
+
+```json
+{
+  "name": "nemo-evaluator.agent-h1f68xpa",
+  "status": "completed"
+}
+```
+
+Repeat the curl command while the status is `created`, `pending`, or `active`.
+
+</Tab>
+<Tab title="SDK">
+
+Use the typed evaluator client to submit a Harbor target spec. This helper
+uses the deployment's **default** execution profile, which must use the `subprocess` executor.
+Use the API or CLI tab when you need to select a named profile.
+
+```python
+from nemo_evaluator.api.schemas import TasksetRef
+from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, HarborRunnerTarget
+from nemo_platform_plugin.evaluator.client import EvaluatorClient
+from nemo_platform_plugin.evaluator.types import SubmitAgentEvalJobRequest
+
+client = EvaluatorClient(base_url="http://localhost:8080", workspace="default")
+spec = AgentEvalInputSpec(
+    tasks=TasksetRef("default/suite"),
+    target=HarborRunnerTarget(agent_name="oracle", reward_key="reward"),
+)
+job = client.submit_agent_eval_job(
+    body=SubmitAgentEvalJobRequest(spec=spec.model_dump(mode="json")),
+).data()
+print(job.name)
+print(client.get_agent_eval_job_status(name=job.name).data().status.value)
+```
+
+Example output immediately after submission (the generated name and initial status may vary):
+
+```text
+nemo-evaluator.agent-bcpoq3pr
+created
+```
+
+Repeat the status call to check progress; it prints `completed` after a successful run.
+
+</Tab>
+<Tab title="CLI">
+
+Save the job input as `harbor-eval.json`:
+
+```bash
+cat > harbor-eval.json <<'JSON'
+{
+  "tasks": "default/suite",
+  "target": {
+    "kind": "harbor",
+    "agent_name": "oracle",
+    "reward_key": "reward"
+  }
+}
+JSON
+```
+
+Submit it from your NeMo Platform source checkout. Save the response so polling can reuse the
+generated job name (`jq` is required):
+
+```bash
+uv run nemo evaluator agent-evaluate submit \
+  --base-url http://localhost:8080 \
+  --workspace default \
+  --profile default \
+  --spec-file harbor-eval.json > harbor-job.json
+jq '{name, status}' harbor-job.json
+```
+
+Example output (your job name will differ):
+
+```json
+{
+  "name": "nemo-evaluator.agent-27iuxxxc",
+  "status": "created"
+}
+```
+
+Poll every two seconds until the job completes or reaches an unsuccessful terminal status:
+
+```bash
+JOB_NAME=$(jq -er '.name' harbor-job.json)
+while true; do
+  STATUS=$(curl --silent --show-error --fail-with-body \
+    "http://localhost:8080/apis/evaluator/v2/workspaces/default/agent-evaluate/jobs/${JOB_NAME}/status" \
+    | jq -er '.status') || break
+  printf '%s\n' "$STATUS"
+  case "$STATUS" in
+    completed|error|failed|cancelled) break ;;
+  esac
+  sleep 2
+done
+```
+
+Example output (intermediate states and repetitions depend on when polling starts):
+
+```text
+pending
+active
+completed
+```
+
+</Tab>
+</Tabs>
 
 ## Choosing an agent
 
@@ -192,7 +478,8 @@ through the host `subprocess` executor. Standalone SDK runs using `run_harbor_ev
 - **`agent_name`** — a built-in Harbor agent (for example `"oracle"`, Harbor's reference agent, handy
   as a smoke test that the harness and dataset are wired up).
 - **`agent_import_path`** — your own Harbor agent, e.g. `"my_agent_module:MyAgent"`. Set `agent_dir`
-  as well when it's a loose file rather than an installed package. Overrides `agent_name`.
+  as well for a loose local source tree. Overrides `agent_name`. Platform-submitted jobs do not
+  currently accept `agent_dir`; see [Standalone and submitted custom agents](#standalone-and-submitted-custom-agents).
 - **`agent_model_name`** — the model slug handed to the agent.
 - **`agent_kwargs`** — keyword arguments forwarded to the agent's constructor, the equivalent of
   Harbor's `--ak key=value` flags. Values must be JSON (strings, numbers, booleans, lists, mappings).
@@ -212,8 +499,8 @@ through the host `subprocess` executor. Standalone SDK runs using `run_harbor_ev
   it creates the agent and persists only the template, so the value never reaches `config.json`.
   Provenance records the names, never the values.
 
-The agent fields map one-to-one onto Harbor's `AgentConfig`, which Harbor's agent factory unpacks
-into the agent's constructor:
+The shared agent fields map onto Harbor's `AgentConfig`, which Harbor's agent factory unpacks into
+the agent's constructor. `agent_dir` is an SDK-only local import aid, not an `AgentConfig` field:
 
 ```text
 HarborRunnerTarget / HarborRuntimeConfig
@@ -227,6 +514,11 @@ HarborRunnerTarget / HarborRuntimeConfig
                      Harbor AgentFactory constructs
                      FabricAgent(model_name=..., extra_env=..., **kwargs)
 ```
+
+### Standalone and submitted custom agents
+
+Loose wrapper source through `agent_dir` is supported only by standalone `nemo-evaluator-sdk` runs.
+It is not supported by submitted `nemo-evaluator` plugin jobs.
 
 For example, NeMo Fabric's
 [`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.3.0/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
@@ -247,12 +539,13 @@ config = HarborRuntimeConfig(
 )
 ```
 
-The same fields appear on the platform job's `HarborRunnerTarget`, the `target` of an
+The fields shared with platform submission appear on `HarborRunnerTarget`, the `target` of an
 `AgentEvalInputSpec` submitted with `nemo evaluator agent-evaluate submit`. Instead of
 `agent_env_from_host`, the platform target takes `env_secrets`, a mapping of environment variable name
 to NeMo Platform secret reference. The service resolves each reference into the job's environment at
 compile time and the job hands Harbor a `${NAME}` template, so the credential appears on neither the
-spec, the run bundle, nor `config.json`:
+spec, the run bundle, nor `config.json`. This installed NeMo Fabric adapter example needs no loose
+source directory:
 
 ```json
 {
@@ -269,6 +562,30 @@ spec, the run bundle, nor `config.json`:
   }
 }
 ```
+
+### Built-in Codex agent
+
+Harbor registers `codex` as a built-in installed agent. It installs the requested Codex CLI version
+inside each task container, so neither an `agent_import_path` nor wrapper-source upload is required.
+For a direct plugin job target:
+
+```python
+from nemo_evaluator.jobs.agent_spec import HarborRunnerTarget
+from nemo_evaluator_sdk import SecretRef
+
+target = HarborRunnerTarget(
+    agent_name="codex",
+    agent_model_name="gpt-5.6-luna",
+    agent_kwargs={"version": "0.153.0"},
+    env_secrets={
+        "OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key"),
+    },
+)
+```
+
+Replace the model and secret reference with values available to your account. The task image needs
+network access and the system tools Harbor's Codex adapter uses to install the CLI. The CLI version
+above is an explicit reproducibility pin, not a platform-wide default.
 
 ## How scoring works
 

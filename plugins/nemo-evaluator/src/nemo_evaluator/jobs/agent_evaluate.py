@@ -28,6 +28,7 @@ from filesets import FilesetPathError, parse_fileset_ref
 from nemo_evaluator.api.schemas import MetricInline
 from nemo_evaluator.config import get_config
 from nemo_evaluator.filesets import FilesetRef
+from nemo_evaluator.harbor.tasks import PinnedHarborTaskList, PinnedHarborTaskset
 from nemo_evaluator.jobs.agent_compiler import (
     _compile_agent_eval_cpu_job,
     compile_agent_eval_job,
@@ -61,11 +62,12 @@ from nemo_evaluator.jobs.publication import publish_agent_eval_result
 from nemo_evaluator.jobs.result_persistence import persist_agent_eval_result
 from nemo_evaluator.jobs.utils import async_client_from_sync_client
 from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
-from nemo_evaluator.task_refs import resolve_agent_eval_tasks
+from nemo_evaluator.task_refs import canonicalize_agent_eval_tasks
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
+from nemo_evaluator_sdk.agent_eval.runtimes.gym.dataset import gym_task_row
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTarget
@@ -309,12 +311,16 @@ class _AgentEvalJobBase(NemoJob):
             else AgentEvalInputSpec.model_validate_json(input_spec.model_dump_json())
         )
         entity_client = entity_client if isinstance(entity_client, EntityClient) else None
-        # A `tasks` taskset reference is loaded and expanded into inline task DTOs first, so the
-        # metric-ref resolution below is identical whether the tasks were submitted inline or via a
-        # stored taskset.
-        task_inputs = await resolve_agent_eval_tasks(
-            submit_spec.tasks, workspace=workspace, entity_client=entity_client
+        # Evaluator references expand before metric resolution. Stored Harbor sources stay
+        # pinned in the canonical job and resolve into native tasks during worker preparation.
+        task_inputs = await canonicalize_agent_eval_tasks(
+            submit_spec.tasks, workspace=workspace, entity_client=entity_client, target=submit_spec.target
         )
+        if isinstance(task_inputs, (PinnedHarborTaskset, PinnedHarborTaskList)):
+            return AgentEvalSpec(
+                tasks=task_inputs,
+                **submit_spec.model_dump(exclude={"tasks"}),
+            )
         resolved_tasks: list[AgentEvalTaskSpec] = []
         for task in task_inputs:
             metrics = await resolve_metrics_to_inline(
@@ -334,6 +340,15 @@ class _AgentEvalJobBase(NemoJob):
                     metadata=task.metadata,
                 )
             )
+        if isinstance(submit_spec.target, GymRunnerTarget):
+            # Validate Gym row fields before resolving the environment.
+            # The returned row is only needed later during dataset materialization.
+            for task in resolved_tasks:
+                gym_task_row(
+                    task_id=task.id,
+                    inputs=task.inputs.model_dump(exclude_none=True),
+                    metadata={item.key: item.value for item in task.metadata},
+                )
         resolved_target = await _resolve_gym_environment(
             submit_spec.target,
             workspace=workspace,
@@ -639,7 +654,17 @@ class _AgentEvalJobBase(NemoJob):
     ) -> dict:
         """Run the agent evaluation with one platform client color chosen by the concrete class."""
         spec = AgentEvalSpec.model_validate(config)
-        tasks = [_to_runtime_task(task) for task in spec.tasks]
+        if isinstance(spec.tasks, (PinnedHarborTaskset, PinnedHarborTaskList)):
+            from nemo_evaluator.harbor.preparation import prepare_stored_harbor_tasks
+
+            tasks = prepare_stored_harbor_tasks(
+                spec.tasks,
+                destination_root=ctx.storage.persistent / "harbor-inputs",
+                sdk=platform_client if isinstance(platform_client, NemoClient) else None,
+                async_sdk=async_client,
+            )
+        else:
+            tasks = [_to_runtime_task(task) for task in spec.tasks]
         target, prompt_template, params = self._resolve_target(spec.target, ctx)
         run_config = AgentEvalRunConfig(
             params=params,

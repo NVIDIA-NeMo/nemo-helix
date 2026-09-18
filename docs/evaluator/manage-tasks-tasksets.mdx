@@ -117,7 +117,7 @@ print(stored_france.id, stored_japan.id, stored_france.spec.metrics)
 A task is an evaluation unit; its `kind` says which runner executes it. There are two:
 
 - `evaluator` — the task's content is fields you author, scored by platform metrics.
-- `harbor` — the task's content is a packaged directory of files, scored by Harbor's own reward.
+- `harbor` — the task's content is a self-contained Fileset archive, scored by Harbor's own reward.
 
 Both are stored as the same record type, so a taskset can group them and you manage every evaluation
 unit in one place regardless of which runner executes it.
@@ -136,16 +136,13 @@ unit in one place regardless of which runner executes it.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `archive_ref` | `str` | Yes | Files reference to the task's packaged directory (`workspace/fileset#path`). One fileset per task, so a task shared by several tasksets is stored once. |
-| `archive_digest` | `str` | Yes | Content hash Harbor computed over the task directory. |
-| `instruction` | `str` | No | The task's instruction text, when it has one. |
-| `config` | `dict` | No | Harbor's own task configuration (verifier, agent, environment, steps), stored as published. |
+| `source` | `HarborArchiveSource` | Yes | Exact `fileset_ref`, compressed-byte SHA-256 `files_hash`, `kind="fileset-archive"`, and `archive_format="tar-gzip-v1"`. |
+| `harbor_hash` | `HarborTaskHash` | Yes | Stored-only producer fingerprint, method and Harbor version. Never used for verification or execution. |
+| `instruction` | `str` | No | Verified instruction projection. |
+| `config` | `dict` | No | Verified `task.toml` projection; excluded from revision identity. |
 
-<Note>
-Storing a Harbor task is supported; **running one from storage is not yet**. A taskset may group both
-kinds, but expanding a `harbor` member is rejected with `422` before the run starts, whatever target
-you submit against. Harbor evaluations continue to run through the existing dataset-driven path.
-</Note>
+See [Upload and Register Harbor Dataset](/documentation/evaluate-models/agent-eval/harbor-runner#upload-and-register-harbor-dataset)
+for details about managing Harbor datasets in NeMo Platform.
 
 <Note>
 A stored task holds **metric references only**. Any inline metric bundle you pass on create is stored

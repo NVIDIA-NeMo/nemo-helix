@@ -85,7 +85,7 @@ def _port_in_use(host: str, port: int) -> bool:
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
-        if CLICKHOUSE_XDIST_FIXTURE in item.fixturenames:
+        if CLICKHOUSE_XDIST_FIXTURE in getattr(item, "fixturenames", ()):
             item.add_marker(pytest.mark.xdist_group(CLICKHOUSE_XDIST_GROUP))
 
 
@@ -148,7 +148,7 @@ def _materialize_subprocess_config(work_root: Path, *, base_url: str, auth_enabl
     """Write a self-contained subprocess-backend platform config under ``work_root``.
 
     Owned here rather than borrowed from ``e2e/configs`` (legacy, not run in CI). It pins
-    ``platform.runtime: none`` with an explicit subprocess jobs executor and ABSOLUTE storage paths:
+    ``platform.runtime: none`` with explicit subprocess job profiles and ABSOLUTE storage paths:
     the jobs service writes each step config under ``working_directory`` while the task subprocess
     resolves the same path against a different CWD, so a relative dir would make the task miss its
     config. Absolute paths keep the step-config path agreeing across both processes.
@@ -174,7 +174,13 @@ def _materialize_subprocess_config(work_root: Path, *, base_url: str, auth_enabl
                     "profile": "default",
                     "backend": "subprocess",
                     "config": subprocess_executor_config,
-                }
+                },
+                {
+                    "provider": "subprocess",
+                    "profile": "harbor-test",
+                    "backend": "subprocess",
+                    "config": subprocess_executor_config,
+                },
             ],
             "executor_defaults": {"subprocess": subprocess_executor_config},
         },

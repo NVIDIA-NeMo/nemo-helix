@@ -109,10 +109,11 @@ def _compile_agent_eval_cpu_job(
 
 def _secret_refs(spec: AgentEvalSpec) -> Iterator[tuple[str, str]]:
     """Yield ``(env_name, secret_name)`` for each metric secret and the endpoint target's api key."""
-    for task in spec.tasks:
-        for bundle in task.metrics:
-            for env_name, secret_ref in bundle.secrets.items():
-                yield env_name, secret_ref.root
+    if isinstance(spec.tasks, list):
+        for task in spec.tasks:
+            for bundle in task.metrics:
+                for env_name, secret_ref in bundle.secrets.items():
+                    yield env_name, secret_ref.root
 
     # A runner target may need credentials of its own -- a Gym environment's or Harbor agent's model
     # API key reaches it through the OS environment, not through an endpoint spec.

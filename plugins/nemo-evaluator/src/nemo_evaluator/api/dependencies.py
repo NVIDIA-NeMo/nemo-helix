@@ -34,10 +34,11 @@ def get_result_service(
 def get_task_service(
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
     metric_service: MetricService = Depends(get_metric_service),
+    async_client: AsyncNemoClient = Depends(get_nemo_client),
 ) -> TaskService:
     """Provide a TaskService. It uses the MetricService to normalize inline task metrics into
     (derived) stored metrics, so a persisted task holds only references."""
-    return TaskService(entity_client, metric_service)
+    return TaskService(entity_client, metric_service, AsyncFilesClient.from_client(async_client))
 
 
 def get_taskset_service(

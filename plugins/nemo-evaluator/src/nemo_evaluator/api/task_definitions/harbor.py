@@ -1,58 +1,65 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The Harbor task kind: a packaged task directory, run and scored by Harbor."""
+"""Self-contained Harbor task archive references."""
 
-from __future__ import annotations
+import unicodedata
+from typing import Annotated, Any, Literal
 
-from typing import Any, Literal
-
-from nemo_evaluator.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
+from filesets import parse_fileset_ref
+from nemo_evaluator.content_hash import DIGEST_PATTERN
 from nemo_platform_plugin.refs import FILESET_REF_PATTERN
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+ArchiveDigest = Annotated[str, Field(pattern=DIGEST_PATTERN, min_length=64, max_length=64)]
+
+
+def validate_archive_path(value: str) -> str:
+    """Require an unambiguous relative POSIX path before normalization."""
+    if (
+        not value
+        or len(value.encode("utf-8")) > 4096
+        or any(part in {"", ".", ".."} or part.endswith((" ", ".")) for part in value.split("/"))
+        or any(ord(char) < 32 or ord(char) == 127 or char in "\\%?#:" for char in value)
+        or unicodedata.normalize("NFC", value) != value
+    ):
+        raise ValueError(f"Unsafe or ambiguous archive path: {value!r}")
+    return value
+
+
+class HarborArchiveSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["fileset-archive"] = "fileset-archive"
+    fileset_ref: str = Field(pattern=FILESET_REF_PATTERN, description="Exact qualified archive object reference.")
+    files_hash: ArchiveDigest = Field(description="SHA-256 of the exact compressed archive bytes.")
+    archive_format: Literal["tar-gzip-v1"] = "tar-gzip-v1"
+
+    @field_validator("fileset_ref")
+    @classmethod
+    def _reference(cls, value: str) -> str:
+        workspace, name, path = parse_fileset_ref(value, workspace_fallback=None)
+        if not workspace or not name or value != f"{workspace}/{name}#{path}":
+            raise ValueError("Archive references must be qualified and canonical")
+        for part in (workspace, name, path):
+            validate_archive_path(part)
+        return value
+
+
+class HarborTaskHash(BaseModel):
+    """Producer fingerprint for future use; never an integrity or execution gate."""
+
+    model_config = ConfigDict(extra="forbid")
+    digest: ArchiveDigest
+    method: Literal["harbor-packager-content-v1"] = "harbor-packager-content-v1"
+    harbor_version: str = Field(min_length=1, max_length=128)
+    source_commit: str | None = Field(default=None, max_length=128)
 
 
 class HarborTaskDefinition(BaseModel):
-    """A reference to the task's packaged files, plus a projection of Harbor's own config.
-
-    Harbor identifies a task by a *directory* — ``task.toml``, an instruction, an environment — so
-    what is stored is a reference to that directory's archive in the Files service, not the files
-    themselves. One fileset per task, so a task shared by several tasksets is stored once. The
-    archive is materialized back into ``<dir>/<task-name>/`` at run time, which is the layout
-    Harbor's own discovery expects.
-
-    Which agent runs the task is *not* stored here. That comes from the run's target
-    (``HarborRunnerTarget``), so the same stored task can be evaluated against different agents.
-    Harbor's own ``[agent]`` block — carried inside ``config`` — configures how the agent *phase*
-    runs (timeout, user, network policy), not which agent it is.
-    """
-
     model_config = ConfigDict(extra="forbid")
-
-    kind: Literal["harbor"] = Field(description="Task kind discriminator.")
-    archive_ref: str = Field(
-        pattern=FILESET_REF_PATTERN,
-        description="Files reference to the task's packaged directory (format: workspace/fileset#path).",
-    )
-    archive_digest: str = Field(
-        description="Content hash Harbor computed over the task directory. This is the authoritative "
-        "identity of a Harbor task's content — every file, including task.toml.",
-        min_length=DIGEST_LENGTH,
-        max_length=DIGEST_LENGTH,
-        pattern=DIGEST_PATTERN,
-    )
-    instruction: str | None = Field(
-        default=None, description="The task's instruction text, when it has one (multi-step tasks may not)."
-    )
-    # Excluded from the revision digest (see ``_DERIVED_SPEC_FIELDS`` in ``entities``). Safe only
-    # because this is never an execution input: Harbor reads the real ``task.toml`` out of the
-    # materialized archive, and ``archive_digest`` already covers every file in that directory.
-    # Hashing the projection too would add no coverage, and would make revision history sensitive to
-    # Harbor's serialization — a release that reordered keys would cut a revision for byte-identical
-    # files. Anything here that becomes a genuine execution or grading input must be digested.
-    config: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Harbor's own task configuration (verifier, agent, environment, steps), as published. "
-        "A queryable projection of task.toml — inspect a task's verifier without downloading the "
-        "archive. Opaque here: Harbor owns this schema.",
-    )
+    kind: Literal["harbor"]
+    source: HarborArchiveSource
+    harbor_hash: HarborTaskHash
+    instruction: str | None = None
+    # Verified task.toml is authoritative, and this projection is excluded from revision identity.
+    config: dict[str, Any] = Field(default_factory=dict)

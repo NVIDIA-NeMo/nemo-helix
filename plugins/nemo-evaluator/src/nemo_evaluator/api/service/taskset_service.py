@@ -275,7 +275,7 @@ class TasksetService:
         except NemoEntityConflictError as exc:
             raise TasksetExistsError(f"Taskset '{workspace}/{name}' already exists") from exc
         try:
-            head, published = await self._publish(created, tags=set(taskset_input.tags))
+            revision, head, published = await self._publish(created, tags=set(taskset_input.tags))
         except Exception:
             # A head with no revision would break the invariant consumers rely on — `#latest`
             # always resolves and `revision` is never 0. No cross-entity transaction exists, so
@@ -292,7 +292,7 @@ class TasksetService:
             "Taskset created",
             extra={"workspace": sanitize_for_log(workspace), "taskset_name": sanitize_for_log(name)},
         )
-        return _entity_to_taskset(head), published
+        return _revision_to_taskset(head, revision), published
 
     async def replace_taskset(
         self, name: str, taskset_input: TasksetInput, *, workspace: str, project: str | None = None
@@ -320,7 +320,7 @@ class TasksetService:
         # Publish the staged content *without* committing the head first — see the matching comment
         # in ``TaskService.replace_task``. Publishing writes the head itself, so a pre-write would
         # only open a window where a failed publish leaves the head serving uncovered content.
-        published_head, published = await self._publish(head, tags=set(taskset_input.tags))
+        revision, published_head, published = await self._publish(head, tags=set(taskset_input.tags))
         if not published:
             # Publishing wrote nothing (content already published and tagged as requested), so
             # persist what sits outside the digest — ``project``.
@@ -333,14 +333,16 @@ class TasksetService:
                 "published": published,
             },
         )
-        return _entity_to_taskset(published_head), published
+        return _revision_to_taskset(published_head, revision), published
 
-    async def _publish(self, head: TasksetEntity, *, tags: set[str]) -> tuple[TasksetEntity, bool]:
+    async def _publish(
+        self, head: TasksetEntity, *, tags: set[str]
+    ) -> tuple[TasksetRevisionEntity, TasksetEntity, bool]:
         """Freeze the head as a revision. The returned head already carries the new pointers."""
-        _, published_head, created = await publish_revision(
+        revision, published_head, created = await publish_revision(
             self.entity_client, self.revision_client, head, TasksetRevisionEntity, tags=tags
         )
-        return published_head, created
+        return revision, published_head, created
 
     async def list_revisions(
         self, workspace: str, name: str, *, page: int = 1, page_size: int = 100

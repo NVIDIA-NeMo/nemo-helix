@@ -26,6 +26,7 @@ from nemo_evaluator.api.schemas import (
     TaskInput,
 )
 from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity
+from nemo_evaluator.harbor.materialization import verify_definition
 from nemo_evaluator.metric_refs import parse_metric_ref
 from nemo_evaluator.revisions import (
     apply_tag,
@@ -42,6 +43,7 @@ from nemo_platform_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
 )
+from nemo_platform_plugin.files.client import AsyncFilesClient
 from nemo_platform_plugin.filter_ops import FilterOperation
 from nemo_platform_plugin.log_utils import sanitize_for_log
 from nemo_platform_plugin.schema import Page, PaginationData
@@ -138,7 +140,12 @@ class TaskEntityStoreProtocol(EntityClientProtocol[TaskEntity], EntityUpdateClie
 class TaskService:
     """Create/get/list/delete for persisted agent-eval task entities, exposed as the ``Task`` DTO."""
 
-    def __init__(self, entity_client: TaskEntityStoreProtocol, metric_service: _MetricService):
+    def __init__(
+        self,
+        entity_client: TaskEntityStoreProtocol,
+        metric_service: _MetricService,
+        files_client: AsyncFilesClient | None = None,
+    ):
         self.entity_client = entity_client
         #: The same client, viewed at the revision type. Python has no intersection types, so a
         #: single annotation cannot say "serves TaskEntity *and* TaskRevisionEntity" — but the
@@ -147,6 +154,7 @@ class TaskService:
             EntityClientProtocol[TaskRevisionEntity], entity_client
         )
         self.metric_service = metric_service
+        self.files_client = files_client
 
     async def _normalize_metrics(self, metrics: list[MetricRef | MetricInline], *, workspace: str) -> list[MetricRef]:
         """Resolve a task's submitted metrics to references — inline metrics are stored as derived
@@ -170,11 +178,14 @@ class TaskService:
         """Narrow a submitted spec to its stored form.
 
         Only the agent-eval variant changes: its inline metrics are offloaded to derived stored
-        metrics so a persisted task holds references only. A Harbor spec is already in stored form —
-        its archive was uploaded before the task was submitted.
+        metrics so a persisted task holds references only. Harbor archives are independently verified
+        with request credentials before their projections are persisted.
         """
         if isinstance(spec, HarborTaskDefinition):
-            return spec
+            if self.files_client is None:
+                raise ValueError("Harbor registration requires an authenticated Files client")
+            native = await verify_definition(spec, self.files_client)
+            return spec.model_copy(update={"config": native.config, "instruction": native.instruction})
         # Same model in and out — only ``metrics`` narrows, from possibly-inline to references.
         return spec.model_copy(update={"metrics": await self._normalize_metrics(spec.metrics, workspace=workspace)})
 
@@ -206,7 +217,7 @@ class TaskService:
         except NemoEntityConflictError as exc:
             raise ValueError(f"Task '{workspace}/{name}' already exists") from exc
         try:
-            head, published = await self._publish(created, tags=set(task_input.tags))
+            revision, head, published = await self._publish(created, tags=set(task_input.tags))
         except Exception:
             # A head with no revision would violate the invariant every consumer relies on — that
             # `#latest` always resolves and `revision` is never 0. There is no cross-entity
@@ -222,7 +233,7 @@ class TaskService:
         logger.info(
             "Task created", extra={"workspace": sanitize_for_log(workspace), "task_name": sanitize_for_log(name)}
         )
-        return _entity_to_task(head), published
+        return _revision_to_task(head, revision), published
 
     async def replace_task(
         self, name: str, task_input: TaskInput, *, workspace: str, project: str | None = None
@@ -251,7 +262,7 @@ class TaskService:
         # the head (pointers and content together), so a pre-write would be a second round trip
         # whose only distinct effect is a window: if publishing then failed, the head would hold
         # content no revision covers and a plain GET would serve it.
-        published_head, published = await self._publish(head, tags=set(task_input.tags))
+        revision, published_head, published = await self._publish(head, tags=set(task_input.tags))
         if not published:
             # Content matched a revision that is already tagged as requested, so publishing wrote
             # nothing. Anything outside the digest — ``project`` — still has to be persisted.
@@ -264,14 +275,14 @@ class TaskService:
                 "published": published,
             },
         )
-        return _entity_to_task(published_head), published
+        return _revision_to_task(published_head, revision), published
 
-    async def _publish(self, head: TaskEntity, *, tags: set[str]) -> tuple[TaskEntity, bool]:
+    async def _publish(self, head: TaskEntity, *, tags: set[str]) -> tuple[TaskRevisionEntity, TaskEntity, bool]:
         """Freeze the head as a revision. The returned head already carries the new pointers."""
-        _, published_head, created = await publish_revision(
+        revision, published_head, created = await publish_revision(
             self.entity_client, self.revision_client, head, TaskRevisionEntity, tags=tags
         )
-        return published_head, created
+        return revision, published_head, created
 
     async def resolve_revision(self, workspace: str, name: str, fragment: str = LATEST_TAG) -> str:
         """Return the content digest of the revision a ref fragment names.

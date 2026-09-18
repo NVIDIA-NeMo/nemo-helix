@@ -243,7 +243,13 @@ export const AgentEvaluationDetailRoute: FC = () => {
               <KVPair label="Agent" value={agentNameForJob(job) ?? '-'} loading={isLoadingJob} />
               <KVPair
                 label="Tasks"
-                value={String(job.spec.tasks?.length ?? '-')}
+                value={String(
+                  Array.isArray(job.spec.tasks)
+                    ? job.spec.tasks.length
+                    : job.spec.tasks?.kind === 'harbor-task-list'
+                      ? job.spec.tasks.task_refs.length
+                      : '-'
+                )}
                 loading={isLoadingJob}
               />
               {evalConfigName(job) && (

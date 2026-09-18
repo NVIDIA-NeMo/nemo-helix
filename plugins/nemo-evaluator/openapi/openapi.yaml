@@ -2554,9 +2554,12 @@ components:
           - items:
               $ref: '#/components/schemas/AgentEvalTaskInput'
             type: array
+          - items:
+              $ref: '#/components/schemas/TaskRef'
+            type: array
           title: Tasks
-          description: 'Tasks to evaluate: an inline list (at least one) or a reference
-            to a stored taskset.'
+          description: 'Tasks to evaluate: a nonempty list containing only inline
+            tasks or only task references, or a stored taskset reference.'
       additionalProperties: false
       type: object
       required:
@@ -2565,14 +2568,11 @@ components:
       description: 'Submitter-facing agent-evaluation input.
 
 
-        ``tasks`` is either an inline list of tasks (whose metrics may be inline or
-        references) or a
+        ``tasks`` accepts inline tasks, stored task references, or a stored taskset
+        reference.
 
-        :class:`TasksetRef` naming a stored taskset whose member tasks are loaded
-        and expanded during spec
-
-        resolution. Either way it hydrates to the canonical ``AgentEvalSpec.tasks``
-        list.'
+        Evaluator definitions expand at submission; stored Harbor sources are pinned
+        for worker resolution.'
     AgentEvalResult:
       properties:
         id:
@@ -2721,19 +2721,31 @@ components:
           description: Where the completed run publishes its results, beyond its own
             result bundle. Omit to publish nowhere.
         tasks:
-          items:
-            $ref: '#/components/schemas/AgentEvalTaskSpec'
-          type: array
-          minItems: 1
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/AgentEvalTaskSpec'
+            type: array
+            minItems: 1
+          - oneOf:
+            - $ref: '#/components/schemas/PinnedHarborTaskset'
+            - $ref: '#/components/schemas/PinnedHarborTaskList'
+            discriminator:
+              propertyName: kind
+              mapping:
+                harbor-task-list: '#/components/schemas/PinnedHarborTaskList'
+                harbor-taskset: '#/components/schemas/PinnedHarborTaskset'
           title: Tasks
-          description: Tasks to evaluate; at least one is required.
+          description: Resolved inline tasks, or immutable stored Harbor references
+            whose archives are materialized on the executing worker. Stored sources
+            select an existing taskset revision or explicit task revisions and require
+            a Harbor target; they do not define another stored taskset entity.
       additionalProperties: false
       type: object
       required:
       - tasks
       title: AgentEvalSpec
-      description: 'Canonical agent-evaluation spec: tasks with all metric references
-        resolved to inline.'
+      description: 'Canonical evaluation: resolved evaluator tasks or an immutable
+        stored Harbor source.'
     AgentEvalTaskInput:
       properties:
         id:
@@ -4311,6 +4323,36 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HarborArchiveSource:
+      properties:
+        kind:
+          type: string
+          const: fileset-archive
+          title: Kind
+          default: fileset-archive
+        fileset_ref:
+          type: string
+          pattern: ^[\w\-.]+/[\w\-.]+#[\w\-./]+$
+          title: Fileset Ref
+          description: Exact qualified archive object reference.
+        files_hash:
+          type: string
+          maxLength: 64
+          minLength: 64
+          pattern: ^[0-9a-f]{64}$
+          title: Files Hash
+          description: SHA-256 of the exact compressed archive bytes.
+        archive_format:
+          type: string
+          const: tar-gzip-v1
+          title: Archive Format
+          default: tar-gzip-v1
+      additionalProperties: false
+      type: object
+      required:
+      - fileset_ref
+      - files_hash
+      title: HarborArchiveSource
     HarborRunnerTarget:
       properties:
         kind:
@@ -4415,54 +4457,54 @@ components:
           type: string
           const: harbor
           title: Kind
-          description: Task kind discriminator.
-        archive_ref:
-          type: string
-          pattern: ^[\w\-.]+/[\w\-.]+#[\w\-./]+$
-          title: Archive Ref
-          description: 'Files reference to the task''s packaged directory (format:
-            workspace/fileset#path).'
-        archive_digest:
-          type: string
-          maxLength: 64
-          minLength: 64
-          pattern: ^[0-9a-f]{64}$
-          title: Archive Digest
-          description: "Content hash Harbor computed over the task directory. This\
-            \ is the authoritative identity of a Harbor task's content \u2014 every\
-            \ file, including task.toml."
+        source:
+          $ref: '#/components/schemas/HarborArchiveSource'
+        harbor_hash:
+          $ref: '#/components/schemas/HarborTaskHash'
         instruction:
           title: Instruction
-          description: The task's instruction text, when it has one (multi-step tasks
-            may not).
           type: string
         config:
           additionalProperties: true
           type: object
           title: Config
-          description: "Harbor's own task configuration (verifier, agent, environment,\
-            \ steps), as published. A queryable projection of task.toml \u2014 inspect\
-            \ a task's verifier without downloading the archive. Opaque here: Harbor\
-            \ owns this schema."
       additionalProperties: false
       type: object
       required:
       - kind
-      - archive_ref
-      - archive_digest
+      - source
+      - harbor_hash
       title: HarborTaskDefinition
-      description: "A reference to the task's packaged files, plus a projection of\
-        \ Harbor's own config.\n\nHarbor identifies a task by a *directory* \u2014\
-        \ ``task.toml``, an instruction, an environment \u2014 so\nwhat is stored\
-        \ is a reference to that directory's archive in the Files service, not the\
-        \ files\nthemselves. One fileset per task, so a task shared by several tasksets\
-        \ is stored once. The\narchive is materialized back into ``<dir>/<task-name>/``\
-        \ at run time, which is the layout\nHarbor's own discovery expects.\n\nWhich\
-        \ agent runs the task is *not* stored here. That comes from the run's target\n\
-        (``HarborRunnerTarget``), so the same stored task can be evaluated against\
-        \ different agents.\nHarbor's own ``[agent]`` block \u2014 carried inside\
-        \ ``config`` \u2014 configures how the agent *phase*\nruns (timeout, user,\
-        \ network policy), not which agent it is."
+    HarborTaskHash:
+      properties:
+        digest:
+          type: string
+          maxLength: 64
+          minLength: 64
+          pattern: ^[0-9a-f]{64}$
+          title: Digest
+        method:
+          type: string
+          const: harbor-packager-content-v1
+          title: Method
+          default: harbor-packager-content-v1
+        harbor_version:
+          type: string
+          maxLength: 128
+          minLength: 1
+          title: Harbor Version
+        source_commit:
+          title: Source Commit
+          type: string
+          maxLength: 128
+      additionalProperties: false
+      type: object
+      required:
+      - digest
+      - harbor_version
+      title: HarborTaskHash
+      description: Producer fingerprint for future use; never an integrity or execution
+        gate.
     HelloResponse:
       properties:
         message:
@@ -5160,6 +5202,58 @@ components:
       - p100
       title: Percentiles
       description: Percentile distribution of scores.
+    PinnedHarborTaskList:
+      properties:
+        kind:
+          type: string
+          const: harbor-task-list
+          title: Kind
+          default: harbor-task-list
+        task_refs:
+          items:
+            $ref: '#/components/schemas/TaskRef'
+          type: array
+          minItems: 1
+          title: Task Refs
+          description: Task revisions in execution order, each in workspace/name#<sha256-digest>
+            form. References must be qualified and digest-pinned; mutable tags and
+            repeated task identities are not accepted.
+      additionalProperties: false
+      type: object
+      required:
+      - task_refs
+      title: PinnedHarborTaskList
+      description: 'Canonical job source selecting exact task revisions without creating
+        a taskset.
+
+
+        The worker resolves these references and materializes their Harbor archives
+
+        locally, preserving the requested task order.'
+    PinnedHarborTaskset:
+      properties:
+        kind:
+          type: string
+          const: harbor-taskset
+          title: Kind
+          default: harbor-taskset
+        taskset_ref:
+          allOf:
+          - $ref: '#/components/schemas/TasksetRef'
+          description: Existing taskset revision in workspace/name#<sha256-digest>
+            form. The reference must be qualified and digest-pinned; mutable tags
+            are not accepted.
+      additionalProperties: false
+      type: object
+      required:
+      - taskset_ref
+      title: PinnedHarborTaskset
+      description: 'Canonical job source pointing to an existing Taskset revision.
+
+
+        This is a deferred job input, not another stored taskset schema. The worker
+
+        resolves its pinned members and materializes their Harbor archives locally.'
     PlatformJobListResultResponse:
       properties:
         data:

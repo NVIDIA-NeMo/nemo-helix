@@ -9,7 +9,7 @@ import math
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from nemo_platform_plugin.entities import EntityBase, ListResponse, PaginationInfo
+from nemo_platform_plugin.entities import EntityBase, EntityClient, ListResponse, PaginationInfo
 from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_platform_plugin.filter_ops import LogicalOperation
 
@@ -30,7 +30,7 @@ def matches_filter(entity, operation) -> bool:
     return actual == operation.value
 
 
-class FakeEntityStore:
+class FakeEntityStore(EntityClient):
     """In-memory entity store standing in for ``NemoEntitiesClient``.
 
     Two behaviors are reproduced deliberately, because service logic depends on them:
@@ -52,6 +52,8 @@ class FakeEntityStore:
     """
 
     def __init__(self) -> None:
+        # The job transformer now accepts only the concrete typed-client boundary. This fake
+        # implements that boundary directly while keeping all storage in memory.
         self.entities: dict[tuple[str, str, str, str | None], EntityBase] = {}
         #: Monotonic tick for creation timestamps. Wall-clock ``now()`` can repeat within a test,
         #: which would make ``-created_at`` ordering non-deterministic — the real store's inserts
