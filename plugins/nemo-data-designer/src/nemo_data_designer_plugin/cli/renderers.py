@@ -48,6 +48,7 @@ from nemo_data_designer_plugin.functions._types import (
 from nemo_platform_plugin.cli_renderer import CLIRenderer, RendererContext
 from nemo_platform_plugin.functions.frames import Done, Error, Heartbeat
 from pydantic import BaseModel, TypeAdapter
+from rich.markup import escape
 
 _PREVIEW_FRAME_ADAPTER: TypeAdapter[PreviewFrame] = TypeAdapter(PreviewFrame)
 
@@ -319,12 +320,19 @@ class CreateRenderer(CLIRenderer):
             # soft_wrap keeps the follow-up commands on one logical line;
             # Rich's default wrapping would split them mid-flag and break
             # the copy-paste these lines exist for.
-            console.print(f"{_SUMMARY_INDENT}[bold]{f'{label}:':<{width}}[/bold]  {value}", soft_wrap=True)
+            # escape(): values carry no intentional markup, and Rich raises
+            # MarkupError on anything that parses as a stray closing tag —
+            # a bracketed path in a server message is enough. Crashing here
+            # would lose the job name for a job that is already running.
+            console.print(f"{_SUMMARY_INDENT}[bold]{f'{label}:':<{width}}[/bold]  {escape(value)}", soft_wrap=True)
 
         error_details = frame.get("error_details")
         if error_details:
             console.print()
-            console.print(f"{_SUMMARY_INDENT}[yellow]⚠ Error details: {error_details}[/yellow]", soft_wrap=True)
+            console.print(
+                f"{_SUMMARY_INDENT}[yellow]⚠ Error details: {escape(str(error_details))}[/yellow]",
+                soft_wrap=True,
+            )
 
     def _render_fallback(self) -> None:
         """Dump the raw payload when the response shape isn't what we expect.

@@ -160,6 +160,18 @@ def test_surfaces_error_details_when_present() -> None:
     assert "quota exceeded" in out
 
 
+def test_bracketed_server_text_does_not_crash_the_summary() -> None:
+    """Rich reads a bracketed path as a stray closing tag and raises MarkupError.
+
+    The summary runs after the job is already submitted, so a crash here would
+    lose the job name for a job that is running.
+    """
+    out = _render(_job_response(error_details={"detail": "config not found [/data/config.yaml]"}))
+
+    assert "[/data/config.yaml]" in out
+    assert "nemo-data-designer-p-cdrb2nfx" in out
+
+
 @pytest.mark.parametrize(
     "frame",
     [
