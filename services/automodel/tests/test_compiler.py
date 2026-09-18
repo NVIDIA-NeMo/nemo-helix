@@ -24,7 +24,7 @@ from nmp.automodel.api.v2.jobs.schemas import (
 )
 from nmp.automodel.app.jobs.compiler import _build_file_download_config
 from nmp.automodel.compile import platform_job_config_compiler
-from nmp.automodel.entities.values import OutputNameType
+from nmp.automodel.entities.values import CheckpointSelection, OutputNameType
 from nmp.automodel.images import get_tasks_image, get_training_image
 from nmp.common.entities.utils import get_random_id
 from nmp.common.jobs.exceptions import PlatformJobCompilationError
@@ -150,6 +150,7 @@ def test_compile_training_step_carries_retrieval_config() -> None:
         training=SFTTraining(
             recipe="bi_encoder",
             peft=None,
+            checkpoint_selection=CheckpointSelection.BOTH,
             batch_size=4,
             micro_batch_size=1,
             retrieval=RetrievalParams(
@@ -172,6 +173,7 @@ def test_compile_training_step_carries_retrieval_config() -> None:
     assert cfg["retrieval"]["query_max_length"] == 256
     assert cfg["retrieval"]["export"]["primary"] == "hf"
     assert cfg["retrieval"]["export"]["opset"] == 18
+    assert cfg["training"]["checkpoint_selection"] == "both"
 
 
 def test_sft_training_applies_nemotron_defaults_for_encoder_recipes() -> None:

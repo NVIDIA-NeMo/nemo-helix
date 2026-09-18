@@ -7,7 +7,7 @@ from typing import Annotated, Any, Dict, Literal, Optional, Self, Union
 
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nmp.automodel.entities.validators import validate_fileset_uri
-from nmp.automodel.entities.values import FinetuningType, OutputNameType, Precision
+from nmp.automodel.entities.values import CheckpointSelection, FinetuningType, OutputNameType, Precision
 from nmp.common.entities.constants import (
     MAX_LENGTH_255,
     REGEX_WORD_CHARACTER_DOT_DASH,
@@ -295,6 +295,14 @@ class _TrainingBase(BaseModel):
         gt=0,
         lt=1,
         description="Validation split to use when a validation dataset is not provided.",
+    )
+    checkpoint_selection: CheckpointSelection = Field(
+        default=CheckpointSelection.BEST,
+        description=(
+            "Checkpoint(s) to publish: 'best' selects the lowest validation loss, "
+            "'last' preserves the end of training, and 'both' publishes best at the root "
+            "with last under alternates/last."
+        ),
     )
     # `log_every_n_steps` used to sit here, described as "Logging frequency in steps.
     # Controls how often training metrics are logged." It controlled nothing: no

@@ -10,7 +10,13 @@ from nmp.automodel.app.constants import (
     DEFAULT_SEED,
     DEFAULT_TRAINING_OUTPUT_PATH,
 )
-from nmp.automodel.entities.values import CheckpointFormat, FinetuningType, Precision, TrainingType
+from nmp.automodel.entities.values import (
+    CheckpointFormat,
+    CheckpointSelection,
+    FinetuningType,
+    Precision,
+    TrainingType,
+)
 from nmp.customization_common.training.reporting import ProgressReportingConfig
 from pydantic import BaseModel, Field
 
@@ -205,6 +211,10 @@ class TrainingStepConfig(BaseModel):
         training_type: TrainingType
         recipe: TrainingRecipe = TrainingRecipe.AUTO
         finetuning_type: Optional[FinetuningType] = None
+        checkpoint_selection: CheckpointSelection = Field(
+            default=CheckpointSelection.BEST,
+            description="Checkpoint(s) published after training: lowest validation loss, last, or both.",
+        )
         lora: Optional[LoRAConfig] = None
         kd: Optional[DistillationConfig] = None
 

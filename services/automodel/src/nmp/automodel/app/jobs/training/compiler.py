@@ -322,6 +322,7 @@ def _translate_training_config(
         training_type=training_type,
         recipe=recipe,
         finetuning_type=training.finetuning_type,
+        checkpoint_selection=training.checkpoint_selection,
         lora=lora,
         kd=kd,
     )

@@ -9,8 +9,11 @@ Wraps nemo_automodel recipes with Jobs-service progress reporting (SFT, KD, embe
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from nemo_automodel.components.checkpoint.checkpointing import Checkpointer
@@ -30,6 +33,23 @@ from nmp.customization_common.training.reporting import (
 )
 
 logger = logging.getLogger(__name__)
+
+CHECKPOINT_STATS_FILENAME = "checkpoint_stats.json"
+
+
+def _json_metric(value: Any) -> Any:
+    """Convert tensor/numpy scalar metric values into JSON-compatible values."""
+    if isinstance(value, Mapping):
+        return {str(key): _json_metric(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_metric(item) for item in value]
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            return item()
+        except (TypeError, ValueError):
+            pass
+    return value
 
 
 @runtime_checkable
@@ -229,6 +249,7 @@ class AutomodelRecipeWrapper:
         self._original_log_train_metrics = recipe.log_train_metrics
         self._original_log_val_metrics = recipe.log_val_metrics
         self._original_save_checkpoint = recipe.save_checkpoint
+        self._checkpoint_stats: list[dict[str, Any]] = []
 
         # Monkey-patch the recipe's methods to add our callbacks
         recipe.log_train_metrics = self._log_train_metrics  # type: ignore[method-assign]
@@ -325,13 +346,13 @@ class AutomodelRecipeWrapper:
     ) -> None:
         """Wrapped save_checkpoint with Jobs-service reporting."""
         self._original_save_checkpoint(epoch, step, train_loss, val_loss, best_metric_key)
+        checkpoint_dir = getattr(
+            getattr(self._recipe.checkpointer, "config", None),
+            "checkpoint_dir",
+            None,
+        )
         if self.callback:
             try:
-                checkpoint_dir = getattr(
-                    getattr(self._recipe.checkpointer, "config", None),
-                    "checkpoint_dir",
-                    None,
-                )
                 self.callback.report_checkpoint_saved(
                     step=step + 1,  # Convert to 1-based
                     epoch=epoch + 1,  # Convert to 1-based
@@ -339,6 +360,28 @@ class AutomodelRecipeWrapper:
                 )
             except Exception as e:
                 logger.warning(f"Failed to report checkpoint save: {e}")
+
+        if checkpoint_dir and int(os.environ.get("RANK", "0")) == 0:
+            try:
+                self._checkpoint_stats.append(
+                    {
+                        "epoch": epoch + 1,
+                        "step": step + 1,
+                        "train_loss": _json_metric(train_loss),
+                        "val_loss": _json_metric(val_loss),
+                        "best_metric_key": best_metric_key,
+                    }
+                )
+                stats_path = Path(checkpoint_dir) / CHECKPOINT_STATS_FILENAME
+                stats_path.parent.mkdir(parents=True, exist_ok=True)
+                temp_path = stats_path.with_suffix(".tmp")
+                temp_path.write_text(
+                    json.dumps({"checkpoints": self._checkpoint_stats}, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                temp_path.replace(stats_path)
+            except Exception as e:
+                logger.warning(f"Failed to write checkpoint statistics: {e}")
 
 
 def _is_kd_config(cfg: Any) -> bool:
