@@ -131,29 +131,6 @@ def test_omits_record_count_when_unavailable() -> None:
     assert "nemo-data-designer-p-cdrb2nfx" in out
 
 
-def test_default_workspace_adds_no_flag() -> None:
-    out = _render(_job_response())
-
-    assert "--workspace" not in out
-
-
-def test_non_default_workspace_is_appended_to_commands() -> None:
-    out = _render(_job_response(workspace="research"), cli_kwargs={"workspace": "research"})
-
-    assert "nemo jobs get nemo-data-designer-p-cdrb2nfx --workspace research" in out
-    assert "nemo jobs watch nemo-data-designer-p-cdrb2nfx --workspace research" in out
-    assert "nemo jobs results list nemo-data-designer-p-cdrb2nfx --workspace research" in out
-
-
-def test_workspace_falls_back_to_cli_kwargs() -> None:
-    frame = _job_response()
-    del frame["workspace"]
-
-    out = _render(frame, cli_kwargs={"workspace": "research"})
-
-    assert "--workspace research" in out
-
-
 def test_surfaces_error_details_when_present() -> None:
     out = _render(_job_response(error_details={"reason": "quota exceeded"}))
 
@@ -173,16 +150,21 @@ def test_bracketed_server_text_does_not_crash_the_summary() -> None:
 
 
 @pytest.mark.parametrize(
-    "frame",
+    ("frame", "expected_in_dump"),
     [
-        pytest.param({"id": "platform-job-abc", "status": "created"}, id="missing-name"),
-        pytest.param({"name": "", "id": "platform-job-abc"}, id="empty-name"),
-        pytest.param("unexpected string payload", id="not-a-dict"),
-        pytest.param(None, id="none"),
+        pytest.param({"id": "platform-job-abc", "status": "created"}, "platform-job-abc", id="missing-name"),
+        pytest.param({"name": "", "id": "platform-job-abc"}, "platform-job-abc", id="empty-name"),
+        pytest.param("unexpected string payload", "unexpected string payload", id="not-a-dict"),
+        pytest.param(None, "None", id="none"),
     ],
 )
-def test_unexpected_shape_falls_back_to_raw_dump(frame: Any) -> None:
-    """Never hide the payload when we can't find the job's identity in it."""
+def test_unexpected_shape_falls_back_to_raw_dump(frame: Any, expected_in_dump: str) -> None:
+    """Never hide the payload when we can't find the job's identity in it.
+
+    Asserting the hint alone would still pass if the dump itself regressed,
+    which is the half that actually matters here.
+    """
     out = _render(frame)
 
+    assert expected_in_dump in out
     assert "nemo jobs list" in out

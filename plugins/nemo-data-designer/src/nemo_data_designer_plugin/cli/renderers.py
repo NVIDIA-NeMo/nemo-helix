@@ -306,12 +306,16 @@ class CreateRenderer(CLIRenderer):
         if num_records is not None:
             rows.append(("Records", str(num_records)))
 
-        suffix = _workspace_suffix(frame, ctx)
+        # Bare commands only. The user may have a non-standard CLI context
+        # active and/or may have supplied flags like --workspace, --base-url,
+        # --cluster, etc. Rather than try to identify these and get it wrong,
+        # we only show the basic commands and expect the user to fill in any
+        # optional customization flags.
         rows.extend(
             [
-                ("Track", f"nemo jobs get {job_name}{suffix}"),
-                ("Watch", f"nemo jobs watch {job_name}{suffix}"),
-                ("Results", f"nemo jobs results list {job_name}{suffix}"),
+                ("Track", f"nemo jobs get {job_name}"),
+                ("Watch", f"nemo jobs watch {job_name}"),
+                ("Results", f"nemo jobs results list {job_name}"),
             ]
         )
 
@@ -386,21 +390,6 @@ def _num_records(frame: dict, ctx: RendererContext) -> int | None:
             if isinstance(value, int):
                 return value
     return None
-
-
-def _workspace_suffix(frame: dict, ctx: RendererContext) -> str:
-    """Return ``" --workspace <ws>"`` for non-default workspaces, else ``""``.
-
-    Without it the printed commands are silently wrong for anyone who
-    passed ``-w``/``--workspace`` to ``create``.
-    """
-    workspace = frame.get("workspace")
-    if not isinstance(workspace, str) or not workspace:
-        candidate = ctx.cli_kwargs.get("workspace")
-        workspace = candidate if isinstance(candidate, str) else None
-    if not workspace or workspace == "default":
-        return ""
-    return f" --workspace {workspace}"
 
 
 def _print_log(frame: LogFrame) -> None:
