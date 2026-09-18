@@ -16,11 +16,12 @@ TraceMode = Literal["summary", "preview", "detailed"]
 TraceStatus = Literal["OK", "ERROR", "UNSET"] | str
 SpanMode = Literal["summary", "preview", "detailed"]
 # The server's SpanKind / SpanStatus enums; direct span ingest is validated against them.
-SpanKind = Literal[
-    "LLM", "CHAIN", "TOOL", "RETRIEVER", "EMBEDDING", "AGENT", "RERANKER", "EVALUATOR", "GUARDRAIL", "UNKNOWN"
-]
+SpanKind = (
+    Literal["LLM", "CHAIN", "TOOL", "RETRIEVER", "EMBEDDING", "AGENT", "RERANKER", "EVALUATOR", "GUARDRAIL", "UNKNOWN"]
+    | str
+)
 
-SpanStatus = Literal["success", "error", "cancelled", "unknown"]
+SpanStatus = Literal["success", "error", "cancelled", "unknown"] | str
 
 
 @with_config(ConfigDict(extra="allow"))
@@ -600,38 +601,6 @@ AnnotationInput = Annotated[
 ANNOTATION_INPUT_ADAPTER: TypeAdapter[
     FeedbackAnnotationInput | NoteAnnotationInput | MetadataAnnotationInput | LabelAnnotationInput
 ] = TypeAdapter(AnnotationInput)
-
-
-class _AnnotationReadBase(BaseModel):
-    annotation_id: str
-    workspace: str
-    span_id: str | None = None
-    session_id: str
-    created_by: str | None = None
-    created_at: datetime
-    ingested_at: datetime
-
-
-class FeedbackAnnotation(_AnnotationReadBase):
-    kind: Literal["feedback"]
-    value: Literal["positive", "negative"]
-
-
-class NoteAnnotation(_AnnotationReadBase):
-    kind: Literal["note"]
-    text: str
-
-
-class MetadataAnnotation(_AnnotationReadBase):
-    kind: Literal["metadata"]
-    metadata: dict[str, Any]
-
-
-class LabelAnnotation(_AnnotationReadBase):
-    kind: Literal["label"]
-    value_type: Literal["text", "numeric"]
-    value: str | float
-    name: str | None = None
 
 
 class ChatCompletionsIngestRequest(BaseModel):
