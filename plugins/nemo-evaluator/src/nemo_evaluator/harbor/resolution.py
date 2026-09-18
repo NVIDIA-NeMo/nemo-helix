@@ -5,6 +5,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from typing import cast
 
 from nemo_evaluator.api.schemas import HarborTaskDefinition, TaskRef, TasksetRef, parse_subentity_ref
@@ -23,6 +24,23 @@ from nemo_platform_plugin.entities import EntityClientProtocol, SyncEntityClient
 from nemo_platform_plugin.filter_ops import ComparisonOperation, FilterOperator, LogicalOperation
 
 RESOLUTION_CONCURRENCY = 16
+
+
+@dataclass(frozen=True)
+class ResolvedHarborSelection:
+    """Resolved selectors before metric resolution and canonical job construction."""
+
+    members: list[StoredHarborTask]
+    taskset_ref: TasksetRef | None = None
+
+    def __post_init__(self) -> None:
+        validate_native_task_ids(self.members)
+
+
+def validate_native_task_ids(members: Sequence[StoredHarborTask]) -> None:
+    ids = [member.definition.native_task_id.casefold() for member in members]
+    if len(set(ids)) != len(ids):
+        raise ValueError("Duplicate Harbor task IDs")
 
 
 async def bounded_ordered_map[T, R](fn: Callable[[T], Awaitable[R]], items: Sequence[T]) -> list[R]:
@@ -96,11 +114,29 @@ async def resolve_harbor_source(
         source = PinnedHarborTaskList.model_validate(source.model_dump())
         refs = source.task_refs
 
+    return await resolve_harbor_members(refs, entity_client=entity_client)
+
+
+async def resolve_harbor_members(
+    refs: Sequence[TaskRef], *, entity_client: EntityClientProtocol[TasksetEntity]
+) -> list[StoredHarborTask]:
+    """Resolve task references without requiring a compiled scoring configuration."""
+
     async def resolve(ref: TaskRef) -> StoredHarborTask:
         head, revision = await task_revision(ref, entity_client)
         return harbor_member(head, revision)
 
     return await bounded_ordered_map(resolve, refs)
+
+
+async def resolve_harbor_taskset(
+    ref: TasksetRef, *, entity_client: EntityClientProtocol[TasksetEntity], workspace: str = "default"
+) -> ResolvedHarborSelection:
+    head, revision = await taskset_revision(ref, entity_client, workspace)
+    members = await resolve_harbor_members(pinned_members(revision), entity_client=entity_client)
+    return ResolvedHarborSelection(
+        members=members, taskset_ref=TasksetRef(f"{head.workspace}/{head.name}#{revision.content_hash}")
+    )
 
 
 def _pinned_revision_sync[R: (TaskRevisionEntity, TasksetRevisionEntity)](

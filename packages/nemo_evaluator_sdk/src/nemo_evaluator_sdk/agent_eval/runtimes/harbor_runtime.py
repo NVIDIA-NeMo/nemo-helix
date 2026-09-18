@@ -55,7 +55,8 @@ from types import ModuleType
 from typing import Any
 
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
-from nemo_evaluator_sdk.agent_eval.reward_keys import ParsedHarborRewards, validate_reward_key
+from nemo_evaluator_sdk.agent_eval.reward_keys import validate_reward_key
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_scoring import harbor_scoring_metrics
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_trial_adapter import (
     _HARBOR_EXTRA_REQUIRED_MESSAGE,
     _iter_harbor_trial_results,
@@ -64,9 +65,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.harbor_trial_adapter import (
 from nemo_evaluator_sdk.agent_eval.runtimes.provenance import redact_credentials, require_no_plaintext_credentials
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask, AgentEvalTaskset
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, RunnerInfo
-from nemo_evaluator_sdk.enums import MetricType
 from nemo_evaluator_sdk.metrics.protocol import Metric
-from nemo_evaluator_sdk.metrics.utils import metric_type_name
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 logger = logging.getLogger(__name__)
@@ -398,27 +397,7 @@ class HarborAgentTaskRunner:
         ``agent_eval/trials.py``. It adds secondary rewards discovered in this task's trials as
         optional outputs.
         """
-        keys: set[str] = set()
-        for metric in task.metrics:
-            if metric_type_name(metric) == MetricType.HARBOR_REWARD:
-                keys.update(output.name for output in metric.output_spec() if not output.required)
-        for trial in trials:
-            # A reward the verifier emitted but the adapter could not use still names an output:
-            # the metric declares it and reports the rejection, rather than hiding the key.
-            rewards = ParsedHarborRewards.from_metadata(trial.metadata)
-            keys.update(rewards.values)
-            keys.update(rewards.rejected_by_key)
-        reward_keys = (self._reward_key, *sorted(keys - {self._reward_key}))
-        # ``output_name`` is deliberately the runner's ``reward_key``, not the task metric's own:
-        # ``discover_harbor_tasks`` builds ``HarborRewardMetric()`` with the default name, and a run
-        # with ``reward_key="score"`` relies on this rename. It is why this hook lives on the runner
-        # rather than on the metric.
-        return [
-            _harbor_reward_metric(output_name=self._reward_key, reward_keys=reward_keys)
-            if metric_type_name(metric) == MetricType.HARBOR_REWARD
-            else metric
-            for metric in task.metrics
-        ]
+        return harbor_scoring_metrics(task, trials, reward_key=self._reward_key)
 
 
 def _dataset_path_from_tasks(tasks: Sequence[AgentEvalTask]) -> Path:
@@ -1237,6 +1216,11 @@ def _strip_leading_spdx_html_comments(text: str) -> str:
     return text[position:]
 
 
+def normalize_harbor_instruction(instruction: str | None, *, task_id: str) -> str:
+    """Use identical scoring inputs for archived and stored Harbor definitions."""
+    return task_id if instruction is None else _strip_leading_spdx_html_comments(instruction).strip()
+
+
 def discover_harbor_tasks(dataset_path: str | Path) -> list[AgentEvalTask]:
     """Build one :class:`AgentEvalTask` per Harbor task folder in ``dataset_path``.
 
@@ -1261,10 +1245,9 @@ def discover_harbor_tasks(dataset_path: str | Path) -> list[AgentEvalTask]:
         task_name = config.get("task", {}).get("name", task_dir.name)
         instruction_path = task_dir / "instruction.md"
         try:
-            instruction = (
-                _strip_leading_spdx_html_comments(instruction_path.read_text(encoding="utf-8")).strip()
-                if instruction_path.is_file()
-                else task_name
+            instruction = normalize_harbor_instruction(
+                instruction_path.read_text(encoding="utf-8") if instruction_path.is_file() else None,
+                task_id=task_name,
             )
         except (OSError, UnicodeDecodeError) as exc:
             raise ValueError(f"unreadable Harbor instruction at {instruction_path}: {exc}") from exc

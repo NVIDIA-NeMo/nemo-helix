@@ -180,6 +180,119 @@ registration and workers independently verify the archive. Conditional creation 
 A failed registration retains successfully uploaded artifacts; `HarborUploadError.upload_details` reports completed
 members and pins for retry. Cleanup is explicitly caller-managed; never delete potentially shared objects.
 
+#### Custom metrics and views
+
+Stored Harbor tasks support additional SDK metrics and semantic views. The plugin always scores
+`HarborRewardMetric` first, then the metrics you supply. An omitted or empty `metrics` list keeps
+reward-only scoring. Do not add another `HarborRewardMetric`; duplicate metric types are rejected
+at job submission.
+
+Upload without registration, add scoring to the verified definition, and register it. This example
+adds an exact-match check against the agent's final answer; adapt the expected answer for your task.
+Use a new task name for the first run, or the task resource's explicit `replace()` operation to
+publish a scoring change to an existing task.
+
+```python
+from pathlib import Path
+
+from nemo_evaluator.api.schemas import HarborTaskDefinition, TaskInput, TaskRef
+from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, HarborRunnerTarget
+from nemo_evaluator.jobs.metric_resolution import to_inline
+from nemo_evaluator.sdk.harbor import upload_harbor_task
+from nemo_evaluator.sdk.task_resources import EvaluatorTasksResource
+from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
+from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evaluator_sdk.agent_eval.tasks import SemanticReducer, SemanticView, ViewSignal
+from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
+from nemo_platform_plugin.client.client import NemoClient
+from nemo_platform_plugin.evaluator.client import EvaluatorClient
+from nemo_platform_plugin.evaluator.types import SubmitAgentEvalJobRequest
+
+client = NemoClient(base_url="http://localhost:8080", workspace="default")
+evaluator_client = EvaluatorClient.from_client(client)
+tasks = EvaluatorTasksResource(evaluator_client)
+uploaded = upload_harbor_task(Path("./my_task"), client=client, register=False)
+metric = to_inline(bundle_metric(
+    ExactMatchMetric(reference="Done", candidate="{{sample.output_text}}"),
+    CloudpickleMetricBundlePackager(),
+))
+
+definition = HarborTaskDefinition.model_validate({
+    **uploaded.definition.model_dump(),
+    "metrics": [metric],
+    "views": {
+        "quality": SemanticView(reducer=SemanticReducer.MEAN, signals=[
+            ViewSignal(metric="harbor_reward", output="reward"),
+            ViewSignal(metric="exact-match", output="exact-match"),
+        ]),
+    },
+})
+
+task = tasks.create("my_task_scored", task=TaskInput(spec=definition))
+
+# This example creates a new task; its first revision is in the returned history page.
+revision = next(item for item in tasks.list_revisions(task.name).data if item.revision == task.revision)
+task_ref = TaskRef(f"default/{task.name}#{revision.content_hash}")
+spec = AgentEvalInputSpec(tasks=[task_ref], target=HarborRunnerTarget(agent_name="oracle"))
+job = evaluator_client.submit_agent_eval_job(
+    body=SubmitAgentEvalJobRequest(spec=spec.model_dump(mode="json")),
+).data()
+```
+
+- **Reuse:** Supply existing references in `metrics`; include `task_ref` in a taskset's `tasks`.
+- **Scoring resolution:** Submit task or taskset references only. Evaluator loads the
+  metrics and views from each selected task revision. The runner always reports the Harbor
+  verifier's primary reward, even when the task's `metrics` list is empty. Configure only additional
+  metrics. Do not add `HarborRewardMetric` yourself since it's set provided by default.
+- **Task publication:** Use `upload_harbor_task()` or `upload_harbor_dataset()` to publish Harbor
+  tasks. The helpers create and verify the required archive and register it by default. Uploading an archived
+  task directory or Harbor dataset bypassing these functions will lead to a failure.
+- **Views:** Reference the primary output (`reward`, or the target's `reward_key`) and declared
+  custom metric outputs.
+
+#### Rescore saved Harbor trials
+
+Submit stored task or taskset references with saved SDK trials and omit `target`. The worker
+loads pinned definitions and applies `HarborRewardMetric`, additional metrics, and views without
+downloading task archives or running the agent or verifier. Metric evidence such as traces and
+artifacts must still be accessible from the worker.
+
+```python
+from pathlib import Path
+
+from nemo_evaluator.api.schemas import TasksetRef
+from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec
+from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
+from nemo_platform_plugin.client.client import NemoClient
+from nemo_platform_plugin.evaluator.client import EvaluatorClient
+from nemo_platform_plugin.evaluator.types import SubmitAgentEvalJobRequest
+
+trials = [
+    AgentEvalTrial.model_validate_json(line)
+    for line in Path("./trials.jsonl").read_text().splitlines()
+    if line.strip()
+]
+client = NemoClient(base_url="http://localhost:8080", workspace="default")
+spec = AgentEvalInputSpec(tasks=TasksetRef("default/suite"), trials=trials)
+job = EvaluatorClient.from_client(client).submit_agent_eval_job(
+    body=SubmitAgentEvalJobRequest(spec=spec.model_dump(mode="json")),
+).data()
+```
+
+- **Change scoring:** Publish task revisions with new metrics/views → update the taskset → submit
+  with the same trials. Unknown trial tasks and selected tasks without trials fail.
+- **Resolution and size:** New submissions resolve metric/model dependencies again; compiled-job
+  retries retain resolved scoring. Job size grows with task count and metric bundles.
+- **Reward key:** Every trial must contain the same valid `metadata["harbor_primary_reward_key"]`
+  (for example, `"grade"`). New Harbor adaptation records it even on failed trials. Rescoring
+  preserves that primary selection and discovers secondary outputs from saved rewards; renaming
+  an output does not reinterpret the primary value.
+- **Older trials:** Missing reward-key metadata is rejected. Re-import original results with the
+  current SDK's `build_trials_from_job_dir(job_dir, tasks, reward_key="grade")` from
+  `nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime`, using SDK tasks with the original native
+  IDs and the original reward key (`"grade"` is illustrative). This rebuilds metadata without
+  rerunning Harbor. Keep or publish referenced evidence where the scoring worker can read it.
+
 #### Harbor Tasks and Taskset Grouping in Fileset
 By default, `upload_harbor_task()` stores archives in `default/harbor-tasks`, while
 `upload_harbor_dataset()` groups them in `default/harbor-tasksets`.

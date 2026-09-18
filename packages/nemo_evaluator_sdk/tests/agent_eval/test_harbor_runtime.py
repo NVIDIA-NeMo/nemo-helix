@@ -193,6 +193,7 @@ async def test_primary_reward_matrix_survives_adaptation_and_metric_diagnostics(
     if raw is not _MISSING:
         rewards["score"] = raw
     trial = _adapt_raw_trial(tmp_path, rewards=rewards, reward_key="score")
+    assert trial.metadata["harbor_primary_reward_key"] == "score"
     result = await HarborRewardMetric(output_name="score", reward_keys=("score",)).compute_scores(
         MetricInput(row=DatasetRow(data={}), candidate=CandidateOutput(metadata=trial.metadata))
     )
@@ -477,6 +478,8 @@ async def test_errored_harbor_rewards_and_metric_owned_exclusions_are_independen
     )
 
     result = await AgentEvaluator().run(tasks=[task], target=HarborAgentTaskRunner(job_dir=job_dir))
+
+    assert all(trial.metadata["harbor_primary_reward_key"] == "reward" for trial in result.trials)
 
     assert [(trial.id, trial.status) for trial in result.trials] == [
         ("t__a_success", AgentEvalTrialStatus.COMPLETED),

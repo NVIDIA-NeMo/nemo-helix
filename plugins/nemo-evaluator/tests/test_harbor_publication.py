@@ -140,6 +140,7 @@ async def test_registration_rejects_before_persistence(root, entity_store, bad):
     service = TaskService(entity_store, AsyncMock(), client)
     definition = HarborTaskDefinition(
         kind="harbor",
+        native_task_id="task",
         source=HarborArchiveSource(
             fileset_ref="default/files#task_archive",
             files_hash="0" * 64 if bad == "checksum" else hashlib.sha256(data).hexdigest(),
@@ -161,6 +162,7 @@ def test_registration_uses_published_ordinal_not_latest():
 
     spec = HarborTaskDefinition(
         kind="harbor",
+        native_task_id="task",
         source=HarborArchiveSource(fileset_ref="default/files#task_archive", files_hash="a" * 64),
         harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
     )
@@ -186,6 +188,7 @@ def test_registration_reconciles_lost_response_by_intended_digest():
 
     spec = HarborTaskDefinition(
         kind="harbor",
+        native_task_id="task",
         source=HarborArchiveSource(fileset_ref="default/files#task_archive", files_hash="a" * 64),
         harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
     )
@@ -286,6 +289,7 @@ async def test_registration_root_does_not_collide_with_download(root, entity_sto
     service = TaskService(entity_store, AsyncMock(), client)
     definition = HarborTaskDefinition(
         kind="harbor",
+        native_task_id=name,
         source=HarborArchiveSource(fileset_ref="default/files#task_archive", files_hash=digest),
         harbor_hash=HarborTaskHash(digest="a" * 64, harbor_version="test"),
     )

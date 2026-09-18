@@ -25,10 +25,11 @@ from typing import Any, ClassVar, Literal
 
 import nemo_evaluator.agent_seeds  # noqa: F401 - registers the platform 'fileset' workspace-seed handler
 from filesets import FilesetPathError, parse_fileset_ref
-from nemo_evaluator.api.schemas import MetricInline
+from nemo_evaluator.api.schemas import MetricInline, TaskRef
 from nemo_evaluator.config import get_config
 from nemo_evaluator.filesets import FilesetRef
-from nemo_evaluator.harbor.tasks import PinnedHarborTaskList, PinnedHarborTaskset
+from nemo_evaluator.harbor.resolution import ResolvedHarborSelection
+from nemo_evaluator.harbor.tasks import HarborTaskScoring, PinnedHarborTaskList, PinnedHarborTaskset
 from nemo_evaluator.jobs.agent_compiler import (
     _compile_agent_eval_cpu_job,
     compile_agent_eval_job,
@@ -316,9 +317,27 @@ class _AgentEvalJobBase(NemoJob):
         task_inputs = await canonicalize_agent_eval_tasks(
             submit_spec.tasks, workspace=workspace, entity_client=entity_client, target=submit_spec.target
         )
-        if isinstance(task_inputs, (PinnedHarborTaskset, PinnedHarborTaskList)):
+        if isinstance(task_inputs, ResolvedHarborSelection):
+            scoring = [
+                HarborTaskScoring(
+                    task_ref=TaskRef(f"{member.entity_name}#{member.revision_digest}"),
+                    metrics=await resolve_metrics_to_inline(
+                        member.definition.metrics,
+                        workspace=member.entity_name.split("/", 1)[0],
+                        entity_client=entity_client,
+                        async_sdk=async_sdk,
+                    ),
+                    views=member.definition.views,
+                )
+                for member in task_inputs.members
+            ]
+            source = (
+                PinnedHarborTaskset(taskset_ref=task_inputs.taskset_ref, scoring=scoring)
+                if task_inputs.taskset_ref is not None
+                else PinnedHarborTaskList(task_refs=[entry.task_ref for entry in scoring], scoring=scoring)
+            )
             return AgentEvalSpec(
-                tasks=task_inputs,
+                tasks=source,
                 **submit_spec.model_dump(exclude={"tasks"}),
             )
         resolved_tasks: list[AgentEvalTaskSpec] = []
@@ -656,12 +675,19 @@ class _AgentEvalJobBase(NemoJob):
         spec = AgentEvalSpec.model_validate(config)
         if isinstance(spec.tasks, (PinnedHarborTaskset, PinnedHarborTaskList)):
             from nemo_evaluator.harbor.preparation import prepare_stored_harbor_tasks
+            from nemo_evaluator_sdk.agent_eval.runtimes.harbor_scoring import saved_harbor_reward_key
 
             tasks = prepare_stored_harbor_tasks(
                 spec.tasks,
                 destination_root=ctx.storage.persistent / "harbor-inputs",
-                sdk=platform_client if isinstance(platform_client, NemoClient) else None,
-                async_sdk=async_client,
+                client=platform_client if isinstance(platform_client, NemoClient) else None,
+                async_client=async_client,
+                reward_key=(
+                    spec.target.reward_key
+                    if isinstance(spec.target, HarborRunnerTarget)
+                    else saved_harbor_reward_key(spec.trials or [])
+                ),
+                trials=spec.trials,
             )
         else:
             tasks = [_to_runtime_task(task) for task in spec.tasks]

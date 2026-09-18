@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from nemo_evaluator_sdk.agent_eval.reward_keys import (
+    HARBOR_PRIMARY_REWARD_KEY,
     HarborRewardValueRejection,
     ParsedHarborRewards,
     RewardKeyRejection,
@@ -142,6 +143,7 @@ def _trial_from_harbor_result(
     error = _trial_error(_reported_exception_info(data))
 
     metadata: dict[str, Any] = {
+        HARBOR_PRIMARY_REWARD_KEY: reward_key,
         "reward": reward,
         **rewards.to_metadata(),
         "harbor_trial_dir": str(trial_dir),

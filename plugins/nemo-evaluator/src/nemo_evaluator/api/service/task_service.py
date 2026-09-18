@@ -177,15 +177,23 @@ class TaskService:
     async def _normalize_spec(self, spec: TaskDefinition, *, workspace: str) -> TaskDefinition:
         """Narrow a submitted spec to its stored form.
 
-        Only the agent-eval variant changes: its inline metrics are offloaded to derived stored
-        metrics so a persisted task holds references only. Harbor archives are independently verified
+        Inline metrics are offloaded to derived stored metrics for both task kinds.
+        Harbor archives are independently verified
         with request credentials before their projections are persisted.
         """
         if isinstance(spec, HarborTaskDefinition):
             if self.files_client is None:
                 raise ValueError("Harbor registration requires an authenticated Files client")
             native = await verify_definition(spec, self.files_client)
-            return spec.model_copy(update={"config": native.config, "instruction": native.instruction})
+            if spec.native_task_id != native.task_id:
+                raise ValueError("Harbor native_task_id does not match the verified archive")
+            return spec.model_copy(
+                update={
+                    "config": native.config,
+                    "instruction": native.instruction,
+                    "metrics": await self._normalize_metrics(spec.metrics, workspace=workspace),
+                }
+            )
         # Same model in and out — only ``metrics`` narrows, from possibly-inline to references.
         return spec.model_copy(update={"metrics": await self._normalize_metrics(spec.metrics, workspace=workspace)})
 

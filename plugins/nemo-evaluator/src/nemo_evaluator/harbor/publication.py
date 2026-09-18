@@ -63,6 +63,7 @@ def publish_harbor_task_archive(
             _, native = extract_task(downloaded, extracted)
         return HarborTaskDefinition(
             kind="harbor",
+            native_task_id=native.task_id,
             source=source,
             harbor_hash=HarborTaskHash(digest=fingerprint, harbor_version=version("harbor")),
             instruction=native.instruction,

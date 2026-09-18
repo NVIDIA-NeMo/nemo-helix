@@ -339,6 +339,7 @@ def test_list_includes_harbor_tasks(client: TestClient) -> None:
         json=TaskInput(
             spec=HarborTaskDefinition(
                 kind="harbor",
+                native_task_id="fixture",
                 harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
                 source=HarborArchiveSource(
                     fileset_ref="default/harbor#packages/o-n/abc/files",

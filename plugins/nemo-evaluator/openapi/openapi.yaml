@@ -2737,8 +2737,9 @@ components:
           title: Tasks
           description: Resolved inline tasks, or immutable stored Harbor references
             whose archives are materialized on the executing worker. Stored sources
-            select an existing taskset revision or explicit task revisions and require
-            a Harbor target; they do not define another stored taskset entity.
+            select an existing taskset revision or explicit task revisions and accept
+            a Harbor target or saved Harbor trials; they do not define another stored
+            taskset entity.
       additionalProperties: false
       type: object
       required:
@@ -4457,6 +4458,11 @@ components:
           type: string
           const: harbor
           title: Kind
+        native_task_id:
+          type: string
+          minLength: 1
+          title: Native Task Id
+          description: Native task identity, independently verified from the archive.
         source:
           $ref: '#/components/schemas/HarborArchiveSource'
         harbor_hash:
@@ -4468,10 +4474,28 @@ components:
           additionalProperties: true
           type: object
           title: Config
+        metrics:
+          items:
+            anyOf:
+            - $ref: '#/components/schemas/MetricInline'
+            - $ref: '#/components/schemas/MetricRef'
+          type: array
+          title: Metrics
+          description: Additional metrics, appended to the mandatory HarborRewardMetric.
+            Inline bundles are normalized to stored metric references on registration.
+            Do not include HarborRewardMetric here.
+        views:
+          additionalProperties:
+            $ref: '#/components/schemas/SemanticView'
+          type: object
+          title: Views
+          description: Reporting views over the primary Harbor reward and declared
+            additional metric outputs.
       additionalProperties: false
       type: object
       required:
       - kind
+      - native_task_id
       - source
       - harbor_hash
       title: HarborTaskDefinition
@@ -4505,6 +4529,26 @@ components:
       title: HarborTaskHash
       description: Producer fingerprint for future use; never an integrity or execution
         gate.
+    HarborTaskScoring:
+      properties:
+        task_ref:
+          $ref: '#/components/schemas/TaskRef'
+        metrics:
+          items:
+            $ref: '#/components/schemas/MetricInline'
+          type: array
+          title: Metrics
+        views:
+          additionalProperties:
+            $ref: '#/components/schemas/SemanticView'
+          type: object
+          title: Views
+      additionalProperties: false
+      type: object
+      required:
+      - task_ref
+      title: HarborTaskScoring
+      description: Resolved additional scoring for one immutable task revision.
     HelloResponse:
       properties:
         message:
@@ -5204,6 +5248,14 @@ components:
       description: Percentile distribution of scores.
     PinnedHarborTaskList:
       properties:
+        scoring:
+          items:
+            $ref: '#/components/schemas/HarborTaskScoring'
+          type: array
+          minItems: 1
+          title: Scoring
+          description: Resolved scoring for every pinned member, including reward-only
+            members.
         kind:
           type: string
           const: harbor-task-list
@@ -5221,6 +5273,7 @@ components:
       additionalProperties: false
       type: object
       required:
+      - scoring
       - task_refs
       title: PinnedHarborTaskList
       description: 'Canonical job source selecting exact task revisions without creating
@@ -5232,6 +5285,14 @@ components:
         locally, preserving the requested task order.'
     PinnedHarborTaskset:
       properties:
+        scoring:
+          items:
+            $ref: '#/components/schemas/HarborTaskScoring'
+          type: array
+          minItems: 1
+          title: Scoring
+          description: Resolved scoring for every pinned member, including reward-only
+            members.
         kind:
           type: string
           const: harbor-taskset
@@ -5246,6 +5307,7 @@ components:
       additionalProperties: false
       type: object
       required:
+      - scoring
       - taskset_ref
       title: PinnedHarborTaskset
       description: 'Canonical job source pointing to an existing Taskset revision.

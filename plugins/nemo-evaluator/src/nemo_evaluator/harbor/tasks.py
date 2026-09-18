@@ -6,8 +6,9 @@
 import re
 from typing import Annotated, Literal, Self
 
-from nemo_evaluator.api.schemas import HarborTaskDefinition, TaskRef, TasksetRef, parse_subentity_ref
+from nemo_evaluator.api.schemas import HarborTaskDefinition, MetricInline, TaskRef, TasksetRef, parse_subentity_ref
 from nemo_evaluator.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
+from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -47,7 +48,35 @@ def qualified_task_refs(refs: list[TaskRef], workspace: str) -> list[TaskRef]:
     return qualified
 
 
-class PinnedHarborTaskset(BaseModel):
+class HarborTaskScoring(BaseModel):
+    """Resolved additional scoring for one immutable task revision."""
+
+    model_config = ConfigDict(extra="forbid")
+    task_ref: TaskRef
+    metrics: list[MetricInline] = Field(default_factory=list)
+    views: dict[str, SemanticView] = Field(default_factory=dict)
+
+    @field_validator("task_ref")
+    @classmethod
+    def _pin(cls, value: TaskRef) -> TaskRef:
+        require_pin(value)
+        return value
+
+
+class _ScoredHarborSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scoring: list[HarborTaskScoring] = Field(
+        min_length=1, description="Resolved scoring for every pinned member, including reward-only members."
+    )
+
+    @field_validator("scoring")
+    @classmethod
+    def _unique_scoring(cls, value: list[HarborTaskScoring]) -> list[HarborTaskScoring]:
+        qualified_task_refs([entry.task_ref for entry in value], "default")
+        return value
+
+
+class PinnedHarborTaskset(_ScoredHarborSource):
     """Canonical job source pointing to an existing Taskset revision.
 
     This is a deferred job input, not another stored taskset schema. The worker
@@ -68,7 +97,7 @@ class PinnedHarborTaskset(BaseModel):
         return value
 
 
-class PinnedHarborTaskList(BaseModel):
+class PinnedHarborTaskList(_ScoredHarborSource):
     """Canonical job source selecting exact task revisions without creating a taskset.
 
     The worker resolves these references and materializes their Harbor archives
@@ -89,6 +118,12 @@ class PinnedHarborTaskList(BaseModel):
         for ref in value:
             require_pin(ref)
         return qualified_task_refs(value, "default")
+
+    @model_validator(mode="after")
+    def _scoring_matches_tasks(self) -> Self:
+        if {entry.task_ref.root for entry in self.scoring} != {ref.root for ref in self.task_refs}:
+            raise ValueError("Harbor scoring references must match the pinned tasks")
+        return self
 
 
 PinnedHarborSource = Annotated[PinnedHarborTaskset | PinnedHarborTaskList, Field(discriminator="kind")]

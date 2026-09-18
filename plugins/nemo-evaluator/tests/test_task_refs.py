@@ -20,7 +20,8 @@ from nemo_evaluator.api.schemas import (
 )
 from nemo_evaluator.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash
 from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
-from nemo_evaluator.harbor.tasks import PinnedHarborTaskList, PinnedHarborTaskset
+from nemo_evaluator.harbor.resolution import ResolvedHarborSelection
+from nemo_evaluator.harbor.tasks import HarborTaskScoring, PinnedHarborTaskList, PinnedHarborTaskset
 from nemo_evaluator.jobs.agent_spec import AgentEvalSpec, AgentEvalTaskInput
 from nemo_evaluator.revisions import apply_tag, get_revision, head_digest, is_digest, publish_revision
 from nemo_evaluator.task_refs import (
@@ -64,17 +65,14 @@ def _taskset(name: str, task_refs: list[str], *, workspace: str = "default") -> 
 _ABSENT_MEMBER_DIGEST = "f" * 64
 
 
-async def test_harbor_suite_submission_defers_missing_member_resolution(entity_store):
+async def test_harbor_suite_submission_rejects_missing_members(entity_store):
     from nemo_evaluator.jobs.agent_spec import HarborRunnerTarget
 
     client = await _store(entity_store, _taskset("suite", [f"default/missing#{_ABSENT_MEMBER_DIGEST}"]))
-    source = await canonicalize_agent_eval_tasks(
-        TasksetRef("default/suite"), workspace="default", entity_client=client, target=HarborRunnerTarget()
-    )
-    assert isinstance(source, PinnedHarborTaskset)
-    assert source.kind == "harbor-taskset"
-    assert source.taskset_ref.root.startswith("default/suite#")
-    assert "members" not in source.model_dump()
+    with pytest.raises(NemoEntityNotFoundError):
+        await canonicalize_agent_eval_tasks(
+            TasksetRef("default/suite"), workspace="default", entity_client=client, target=HarborRunnerTarget()
+        )
 
 
 async def test_harbor_direct_list_pins_and_worker_resolves_selected_revision(entity_store):
@@ -86,6 +84,7 @@ async def test_harbor_direct_list_pins_and_worker_resolves_selected_revision(ent
         workspace="default",
         spec=HarborTaskDefinition(
             kind="harbor",
+            native_task_id="task",
             harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
             source=HarborArchiveSource(
                 fileset_ref="default/files#v1/task/files",
@@ -97,12 +96,14 @@ async def test_harbor_direct_list_pins_and_worker_resolves_selected_revision(ent
     source = await canonicalize_agent_eval_tasks(
         [TaskRef("checkout")], workspace="default", entity_client=entity_store, target=HarborRunnerTarget()
     )
-    assert isinstance(source, PinnedHarborTaskList)
+    assert isinstance(source, ResolvedHarborSelection)
+    refs = [TaskRef(f"{member.entity_name}#{member.revision_digest}") for member in source.members]
+    compiled = PinnedHarborTaskList(task_refs=refs, scoring=[HarborTaskScoring(task_ref=ref) for ref in refs])
     assert isinstance(task.spec, HarborTaskDefinition)
     task.spec.source.fileset_ref = "default/files#v2/task/files"
     await entity_store.update(task)
     await publish_revision(entity_store, entity_store, task, TaskRevisionEntity)
-    members = await resolve_harbor_source(source, entity_client=entity_store)
+    members = await resolve_harbor_source(compiled, entity_client=entity_store)
     assert members[0].definition.source.fileset_ref == "default/files#v1/task/files"
     assert members[0].entity_name == "default/checkout"
 
@@ -129,6 +130,7 @@ async def test_harbor_worker_keeps_compiled_suite_pin_after_tag_moves(entity_sto
         workspace="default",
         spec=HarborTaskDefinition(
             kind="harbor",
+            native_task_id="task",
             harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
             source=HarborArchiveSource(
                 fileset_ref="default/files#v1/task/files",
@@ -172,12 +174,25 @@ async def test_harbor_worker_keeps_compiled_suite_pin_after_tag_moves(entity_sto
     assert after.tasks != before.tasks
 
 
-async def test_large_harbor_suite_post_does_not_fetch_member_definitions(entity_store, monkeypatch):
+async def test_harbor_suite_post_resolves_each_member_with_scoring(entity_store, monkeypatch):
     from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob
     from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec
 
-    suite = _taskset("large", [f"default/task-{i}#{_ABSENT_MEMBER_DIGEST}" for i in range(2000)])
-    await _store(entity_store, suite)
+    tasks = [
+        TaskEntity(
+            name=f"task-{i}",
+            workspace="default",
+            spec=HarborTaskDefinition(
+                kind="harbor",
+                native_task_id=f"task-{i}",
+                harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
+                source=HarborArchiveSource(fileset_ref=f"default/files#task-{i}/archive", files_hash="a" * 64),
+            ),
+        )
+        for i in range(32)
+    ]
+    suite = _taskset("large", [f"default/{task.name}" for task in tasks])
+    await _store(entity_store, *tasks, suite)
     original = entity_store.get
     fetched = []
 
@@ -193,28 +208,30 @@ async def test_large_harbor_suite_post_does_not_fetch_member_definitions(entity_
         async_sdk=None,
         is_local=False,
     )
-    assert TaskEntity not in fetched and TaskRevisionEntity not in fetched
+    assert fetched.count(TaskEntity) == len(tasks)
     assert isinstance(result, AgentEvalSpec)
     assert isinstance(result.tasks, PinnedHarborTaskset)
-    assert result.tasks.model_dump() == {"kind": "harbor-taskset", "taskset_ref": f"default/large#{head_digest(suite)}"}
-    assert len(result.model_dump_json()) < 2000
+    assert len(result.tasks.scoring) == len(tasks)
+    assert all(entry.metrics == [] and entry.views == {} for entry in result.tasks.scoring)
+    assert {entry.task_ref.root for entry in result.tasks.scoring} == {
+        f"default/{task.name}#{head_digest(task)}" for task in tasks
+    }
 
 
-async def test_worker_rejects_incompatible_suite_member_and_deleted_revision(entity_store):
-    from nemo_evaluator.harbor.resolution import resolve_harbor_source
+async def test_submission_rejects_incompatible_suite_member_and_deleted_task(entity_store):
     from nemo_evaluator.jobs.agent_spec import HarborRunnerTarget
 
     task = _task("wrong-kind")
     await _store(entity_store, task, _taskset("suite", ["default/wrong-kind"]))
-    source = await canonicalize_agent_eval_tasks(
-        TasksetRef("suite"), workspace="default", entity_client=entity_store, target=HarborRunnerTarget()
-    )
-    assert isinstance(source, PinnedHarborTaskset)
     with pytest.raises(ValueError, match="stored kind 'evaluator'.*target 'harbor'"):
-        await resolve_harbor_source(source, entity_client=entity_store)
+        await canonicalize_agent_eval_tasks(
+            TasksetRef("suite"), workspace="default", entity_client=entity_store, target=HarborRunnerTarget()
+        )
     await entity_store.delete(TaskEntity, task.name, workspace=task.workspace)
     with pytest.raises(NemoEntityNotFoundError):
-        await resolve_harbor_source(source, entity_client=entity_store)
+        await canonicalize_agent_eval_tasks(
+            TasksetRef("suite"), workspace="default", entity_client=entity_store, target=HarborRunnerTarget()
+        )
 
 
 async def test_sync_worker_resolves_same_exact_pins(entity_store):
@@ -227,6 +244,7 @@ async def test_sync_worker_resolves_same_exact_pins(entity_store):
         workspace="default",
         spec=HarborTaskDefinition(
             kind="harbor",
+            native_task_id="task",
             harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
             source=HarborArchiveSource(
                 fileset_ref="default/files#v1/task/files",
@@ -246,7 +264,14 @@ async def test_sync_worker_resolves_same_exact_pins(entity_store):
         def list(self, *args, **kwargs):
             return run_sync(lambda: entity_store.list(*args, **kwargs))
 
-    assert isinstance(source, PinnedHarborTaskset)
+    assert isinstance(source, ResolvedHarborSelection) and source.taskset_ref is not None
+    source = PinnedHarborTaskset(
+        taskset_ref=source.taskset_ref,
+        scoring=[
+            HarborTaskScoring(task_ref=TaskRef(f"{member.entity_name}#{member.revision_digest}"))
+            for member in source.members
+        ],
+    )
     assert resolve_harbor_source_sync(
         source, entity_client=cast(SyncEntityClient, SyncStore())
     ) == await resolve_harbor_source(source, entity_client=entity_store)
@@ -578,6 +603,7 @@ async def test_expansion_rejects_a_task_whose_runner_the_target_cannot_run(entit
         workspace="default",
         spec=HarborTaskDefinition(
             kind="harbor",
+            native_task_id="task",
             harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
             source=HarborArchiveSource(
                 fileset_ref="default/harbor#packages/o-n/abc/files",
@@ -600,6 +626,7 @@ async def test_incompatible_target_error_names_requested_target(entity_store):
         workspace="default",
         spec=HarborTaskDefinition(
             kind="harbor",
+            native_task_id="task",
             harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
             source=HarborArchiveSource(
                 fileset_ref="default/files#task/files",
@@ -870,6 +897,7 @@ async def test_direct_reference_failures_for_every_evaluator_target(kind, failur
             workspace="default",
             spec=HarborTaskDefinition(
                 kind="harbor",
+                native_task_id="task",
                 harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
                 source=HarborArchiveSource(
                     fileset_ref="default/files#task/files",
@@ -880,6 +908,10 @@ async def test_direct_reference_failures_for_every_evaluator_target(kind, failur
         await _store(entity_store, task)
         refs = [TaskRef("harbor")]
         match = "stored kind 'harbor'"
+        if kind == "offline":
+            resolved = await canonicalize_agent_eval_tasks(refs, workspace="default", entity_client=entity_store)
+            assert isinstance(resolved, ResolvedHarborSelection)
+            return
     with pytest.raises(NemoEntityNotFoundError if failure == "missing" else ValueError, match=match):
         await canonicalize_agent_eval_tasks(
             refs, workspace="default", entity_client=entity_store, target=_direct_target(kind)

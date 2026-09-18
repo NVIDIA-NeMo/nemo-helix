@@ -7,7 +7,9 @@ import unicodedata
 from typing import Annotated, Any, Literal
 
 from filesets import parse_fileset_ref
+from nemo_evaluator.api.fields import MetricRefOrInline
 from nemo_evaluator.content_hash import DIGEST_PATTERN
+from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
 from nemo_platform_plugin.refs import FILESET_REF_PATTERN
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -58,8 +60,20 @@ class HarborTaskHash(BaseModel):
 class HarborTaskDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["harbor"]
+    native_task_id: str = Field(
+        min_length=1, description="Native task identity, independently verified from the archive."
+    )
     source: HarborArchiveSource
     harbor_hash: HarborTaskHash
     instruction: str | None = None
     # Verified task.toml is authoritative, and this projection is excluded from revision identity.
     config: dict[str, Any] = Field(default_factory=dict)
+    metrics: list[MetricRefOrInline] = Field(
+        default_factory=list,
+        description="Additional metrics, appended to the mandatory HarborRewardMetric. Inline bundles are "
+        "normalized to stored metric references on registration. Do not include HarborRewardMetric here.",
+    )
+    views: dict[str, SemanticView] = Field(
+        default_factory=dict,
+        description="Reporting views over the primary Harbor reward and declared additional metric outputs.",
+    )

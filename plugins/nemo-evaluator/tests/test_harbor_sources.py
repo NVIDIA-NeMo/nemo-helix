@@ -6,6 +6,7 @@ from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, AgentEvalSpec
 from pydantic import ValidationError
 
 DIGEST = "a" * 64
+SCORING = [{"task_ref": f"default/task#{DIGEST}", "metrics": [], "views": {}}]
 
 
 def test_pinned_sources_round_trip_without_definitions():
@@ -13,6 +14,7 @@ def test_pinned_sources_round_trip_without_definitions():
         {"kind": "harbor-taskset", "taskset_ref": f"default/suite#{DIGEST}"},
         {"kind": "harbor-task-list", "task_refs": [f"default/task#{DIGEST}"]},
     ]:
+        source["scoring"] = SCORING
         spec = AgentEvalSpec.model_validate({"tasks": source, "target": {"kind": "harbor"}})
         assert spec.model_dump(mode="json")["tasks"] == source
         assert AgentEvalSpec.model_validate_json(spec.model_dump_json()) == spec
@@ -26,6 +28,7 @@ def test_canonical_source_requires_qualified_digest(ref, source_kind):
         if source_kind == "harbor-taskset"
         else {"kind": source_kind, "task_refs": [ref]}
     )
+    source["scoring"] = SCORING
     with pytest.raises(ValidationError):
         AgentEvalSpec.model_validate({"tasks": source, "target": {"kind": "harbor"}})
 
@@ -47,33 +50,65 @@ def test_canonical_source_rejects_duplicate_identity_and_nonharbor_target():
         },
         {"tasks": {"kind": "harbor-taskset", "taskset_ref": f"default/suite#{DIGEST}"}, "trials": []},
     ]:
+        payload["tasks"]["scoring"] = SCORING
         with pytest.raises(ValidationError):
             AgentEvalSpec.model_validate(payload)
 
 
 def test_worker_without_clients_fails_before_allocating_inputs(tmp_path):
-    from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob
-    from nemo_platform_plugin.job_context import JobContext, StoragePaths
-    from nemo_platform_plugin.job_results import LocalJobResults
+    from nemo_evaluator.api.schemas import TaskRef, TasksetRef
+    from nemo_evaluator.harbor.preparation import prepare_stored_harbor_tasks
+    from nemo_evaluator.harbor.tasks import HarborTaskScoring, PinnedHarborTaskset
 
-    ctx = JobContext(
-        workspace="default",
-        job_id="test",
-        storage=StoragePaths(
-            ephemeral=tmp_path / "ephemeral",
-            persistent=tmp_path / "persistent",
-        ),
-        results=LocalJobResults(root=tmp_path / "results"),
-    )
     with pytest.raises(ValueError, match="authenticated platform client"):
-        AgentEvalJob().run(
-            {
-                "tasks": {"kind": "harbor-taskset", "taskset_ref": f"default/suite#{DIGEST}"},
-                "target": {"kind": "harbor"},
-            },
-            ctx=ctx,
+        prepare_stored_harbor_tasks(
+            PinnedHarborTaskset(
+                taskset_ref=TasksetRef(f"default/suite#{DIGEST}"),
+                scoring=[HarborTaskScoring(task_ref=TaskRef(f"default/task#{DIGEST}"))],
+            ),
+            destination_root=tmp_path / "persistent" / "harbor-inputs",
+            client=None,
+            async_client=None,
+            reward_key="reward",
         )
     assert not (tmp_path / "persistent" / "harbor-inputs").exists()
+
+
+@pytest.mark.parametrize("kind", ["harbor-task-list", "harbor-taskset"])
+@pytest.mark.parametrize("scoring", [None, []])
+def test_canonical_source_requires_nonempty_scoring(kind, scoring):
+    source = (
+        {"kind": kind, "task_refs": [f"default/task#{DIGEST}"]}
+        if kind == "harbor-task-list"
+        else {"kind": kind, "taskset_ref": f"default/suite#{DIGEST}"}
+    )
+    if scoring is not None:
+        source["scoring"] = scoring
+    with pytest.raises(ValidationError, match="scoring"):
+        AgentEvalSpec.model_validate({"tasks": source, "target": {"kind": "harbor"}})
+
+
+@pytest.mark.parametrize("kind", ["harbor-task-list", "harbor-taskset"])
+def test_source_rejects_duplicate_scoring_references(kind):
+    source = (
+        {"kind": kind, "task_refs": [f"default/task#{DIGEST}"]}
+        if kind == "harbor-task-list"
+        else {"kind": kind, "taskset_ref": f"default/suite#{DIGEST}"}
+    )
+    source["scoring"] = SCORING * 2
+    with pytest.raises(ValidationError, match="Duplicate task identity"):
+        AgentEvalSpec.model_validate({"tasks": source, "target": {"kind": "harbor"}})
+
+
+def test_job_rejects_top_level_scoring():
+    with pytest.raises(ValidationError, match="harbor_scoring"):
+        AgentEvalSpec.model_validate(
+            {
+                "tasks": {"kind": "harbor-task-list", "task_refs": [f"default/task#{DIGEST}"], "scoring": SCORING},
+                "target": {"kind": "harbor"},
+                "harbor_scoring": SCORING,
+            }
+        )
 
 
 async def test_bounded_resolution_preserves_order_and_drains_failure():

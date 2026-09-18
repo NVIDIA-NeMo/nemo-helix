@@ -22,10 +22,12 @@ from filesets import FilesetPathError, parse_fileset_ref
 from nemo_evaluator.api.schemas import MetricInline, TaskInputs, TaskMetadataList, TaskRef, TasksetRef
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.harbor.tasks import PinnedHarborSource, PinnedHarborTaskList, PinnedHarborTaskset
+from nemo_evaluator.jobs.harbor_scoring import validate_harbor_scoring
 from nemo_evaluator.jobs.metric_resolution import to_runtime_bundle, unresolved_model_refs
 from nemo_evaluator.jobs.publication_spec import PublicationSpec
 from nemo_evaluator.metric_refs import MetricRefOrInline
 from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_scoring import saved_harbor_reward_key
 from nemo_evaluator_sdk.agent_eval.runtimes.provenance import require_no_plaintext_credentials
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
@@ -443,20 +445,29 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
     tasks: Annotated[list[AgentEvalTaskSpec], Field(min_length=1)] | PinnedHarborSource = Field(
         description="Resolved inline tasks, or immutable stored Harbor references whose archives are materialized "
         "on the executing worker. Stored sources select an existing taskset revision or explicit task revisions "
-        "and require a Harbor target; they do not define another stored taskset entity."
+        "and accept a Harbor target or saved Harbor trials; they do not define another stored taskset entity."
     )
 
     @model_validator(mode="after")
     def _require_harbor_source_target(self) -> Self:
-        if isinstance(self.tasks, (PinnedHarborTaskset, PinnedHarborTaskList)) and not isinstance(
-            self.target, HarborRunnerTarget
+        if (
+            isinstance(self.tasks, (PinnedHarborTaskset, PinnedHarborTaskList))
+            and self.target is not None
+            and not isinstance(self.target, HarborRunnerTarget)
         ):
-            raise ValueError("Stored Harbor sources require a Harbor target and cannot use offline trials")
+            raise ValueError("Stored Harbor sources require a Harbor target for online execution")
         return self
 
     @model_validator(mode="after")
     def _reject_unresolved_metric_model_refs(self) -> Self:
         if isinstance(self.tasks, (PinnedHarborTaskset, PinnedHarborTaskList)):
+            reward_key = (
+                self.target.reward_key
+                if isinstance(self.target, HarborRunnerTarget)
+                else saved_harbor_reward_key(self.trials or [])
+            )
+            for entry in self.tasks.scoring:
+                validate_harbor_scoring(entry, reward_key=reward_key)
             return self
         for task in self.tasks:
             unresolved = unresolved_model_refs([unbundle_metric(to_runtime_bundle(metric)) for metric in task.metrics])

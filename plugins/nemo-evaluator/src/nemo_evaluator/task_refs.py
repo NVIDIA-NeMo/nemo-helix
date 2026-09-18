@@ -10,16 +10,20 @@ from typing import cast
 
 from nemo_evaluator.api.schemas import EvaluatorTaskDefinition, TaskRef, TasksetRef, parse_subentity_ref
 from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
-from nemo_evaluator.harbor.resolution import bounded_ordered_map, harbor_member, task_revision, taskset_revision
-from nemo_evaluator.harbor.tasks import (
-    PinnedHarborSource,
-    PinnedHarborTaskList,
-    PinnedHarborTaskset,
-    qualified_task_refs,
-    require_task_kind,
+from nemo_evaluator.harbor.resolution import (
+    ResolvedHarborSelection,
+    bounded_ordered_map,
+    harbor_member,
+    pinned_members,
+    resolve_harbor_taskset,
+    task_revision,
 )
 from nemo_evaluator.harbor.tasks import (
     UnsupportedTaskKindError as UnsupportedTaskKindError,
+)
+from nemo_evaluator.harbor.tasks import (
+    qualified_task_refs,
+    require_task_kind,
 )
 from nemo_evaluator.jobs.agent_spec import AgentEvalTaskInput, HarborRunnerTarget, Target
 from nemo_evaluator.revisions import RevisionNotFoundError, get_revision
@@ -153,20 +157,35 @@ async def canonicalize_agent_eval_tasks(
     workspace: str,
     entity_client: TasksetStoreProtocol | None,
     target: Target | None = None,
-) -> list[AgentEvalTaskInput] | PinnedHarborSource:
+) -> list[AgentEvalTaskInput] | ResolvedHarborSelection:
     """Canonicalize task selectors without materializing Harbor archives.
 
-    For a Harbor target, a taskset reference becomes a ``PinnedHarborTaskset``
-    and direct task references become a ``PinnedHarborTaskList``. Both retain
-    exact revisions for worker preparation. Other supported inputs return a list
+    Harbor selectors resolve into member definitions and exact revision references.
+    Scoring is resolved before constructing the canonical worker source. Other inputs return a list
     of ``AgentEvalTaskInput``: inline tasks pass through and stored evaluator
     references expand into their task definitions.
     """
     if isinstance(tasks, TasksetRef) and isinstance(target, HarborRunnerTarget):
         if entity_client is None:
             raise ValueError("A TasksetRef requires a platform connection (entity store)")
-        head, revision = await taskset_revision(tasks, entity_client, workspace)
-        return PinnedHarborTaskset(taskset_ref=TasksetRef(f"{head.workspace}/{head.name}#{revision.content_hash}"))
+        return await resolve_harbor_taskset(tasks, entity_client=entity_client, workspace=workspace)
+    if isinstance(tasks, TasksetRef) and target is None:
+        if entity_client is None:
+            raise ValueError("A TasksetRef requires a platform connection (entity store)")
+        ref_workspace, name, fragment = parse_subentity_ref(tasks.root, workspace)
+        head = await entity_client.get(TasksetEntity, name=name, workspace=ref_workspace)
+        revision = await get_revision(
+            cast(EntityClientProtocol[TasksetRevisionEntity], entity_client), TasksetRevisionEntity, head, fragment
+        )
+        refs = qualified_task_refs(revision.tasks, ref_workspace)
+        resolved = await canonicalize_agent_eval_tasks(refs, workspace=ref_workspace, entity_client=entity_client)
+        if isinstance(resolved, ResolvedHarborSelection):
+            pinned_members(revision)
+            return ResolvedHarborSelection(
+                members=resolved.members,
+                taskset_ref=TasksetRef(f"{head.workspace}/{head.name}#{revision.content_hash}"),
+            )
+        return resolved
     if isinstance(tasks, TasksetRef):
         return await resolve_taskset_ref(
             tasks, workspace=workspace, entity_client=entity_client, target_kind=target.kind if target else "offline"
@@ -180,12 +199,11 @@ async def canonicalize_agent_eval_tasks(
     if entity_client is None:
         raise ValueError("TaskRef inputs require a platform connection (entity store)")
     revisions = await bounded_ordered_map(lambda ref: task_revision(ref, entity_client), refs)
-    if isinstance(target, HarborRunnerTarget):
-        pins = []
-        for head, revision in revisions:
-            harbor_member(head, revision)
-            pins.append(TaskRef(f"{head.workspace}/{head.name}#{revision.content_hash}"))
-        return PinnedHarborTaskList(task_refs=pins)
+    kinds = {revision.spec.kind for _, revision in revisions}
+    if target is None and len(kinds) != 1:
+        raise ValueError("Cannot mix Harbor and evaluator tasks in an offline evaluation")
+    if isinstance(target, HarborRunnerTarget) or (target is None and kinds == {"harbor"}):
+        return ResolvedHarborSelection(members=[harbor_member(head, revision) for head, revision in revisions])
     result = [
         _entity_to_task_input(head, revision, target_kind=target.kind if target else "offline")
         for head, revision in revisions

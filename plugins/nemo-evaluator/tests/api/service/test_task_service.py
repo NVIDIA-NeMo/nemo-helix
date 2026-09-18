@@ -407,6 +407,7 @@ def _harbor_input(digest: str = "a" * 64) -> TaskInput:
     return TaskInput(
         spec=HarborTaskDefinition(
             kind="harbor",
+            native_task_id="fixture",
             harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
             source=HarborArchiveSource(
                 fileset_ref="default/harbor-tasks#packages/org-name/abc/files",
@@ -417,6 +418,13 @@ def _harbor_input(digest: str = "a" * 64) -> TaskInput:
         ),
         metadata=[MetadataItem(key="suite", value="swe")],
     )
+
+
+async def test_harbor_registration_rejects_incorrect_native_identity(service):
+    request = _harbor_input()
+    request.spec.native_task_id = "incorrect"
+    with pytest.raises(ValueError, match="native_task_id does not match"):
+        await service.create_task("incorrect", request, workspace="default")
 
 
 async def test_stores_a_harbor_task(service: TaskService) -> None:
@@ -439,19 +447,25 @@ async def test_harbor_task_publishes_revisions_like_any_other(service: TaskServi
     assert published and changed.revision == 2
 
 
-async def test_a_harbor_task_never_reaches_the_metric_service(
+async def test_reward_only_harbor_task_does_not_need_metric_service(
     service: TaskService, metric_service: _FakeMetricService
 ) -> None:
-    """Metric normalization is agent-eval-specific: a Harbor task is scored by Harbor's own reward,
-    and its spec arrives already in stored form.
-
-    Both entry points, not just the write: a Harbor spec must not be validated against stored
-    metrics either, so ``_normalize_spec`` has to short-circuit before ref resolution rather than
-    merely find nothing to offload.
-    """
+    """The mandatory reward metric needs no stored metric entity."""
     await service.create_task("fix-test", _harbor_input(), workspace="default")
     assert metric_service.stored == []
     assert metric_service.looked_up == []
+
+
+async def test_harbor_additional_metrics_are_normalized(service: TaskService, metric_service: _FakeMetricService):
+    task = _harbor_input()
+    task.spec.metrics = [_inline_metric(), MetricRef("default/stored-metric")]
+    created, _ = await service.create_task("custom-scoring", task, workspace="default")
+    assert len(metric_service.stored) == 1
+    assert metric_service.looked_up == [("default", "stored-metric")]
+    assert all(isinstance(metric, MetricRef) for metric in created.spec.metrics)
+    again, published = await service.replace_task("custom-scoring", task, workspace="default")
+    assert not published
+    assert again.revision == created.revision
 
 
 async def test_kinds_with_matching_metadata_do_not_share_a_digest(service: TaskService) -> None:
@@ -474,6 +488,7 @@ async def test_harbor_config_is_stored_but_not_hashed(service: TaskService) -> N
     reserialized = TaskInput(
         spec=HarborTaskDefinition(
             kind="harbor",
+            native_task_id="fixture",
             harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
             source=HarborArchiveSource(
                 fileset_ref="default/harbor-tasks#packages/org-name/abc/files",

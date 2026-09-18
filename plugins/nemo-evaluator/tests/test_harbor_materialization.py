@@ -27,6 +27,7 @@ def snapshot(root, folder="wrapped", entity="stored"):
         revision_digest="a" * 64,
         definition=HarborTaskDefinition(
             kind="harbor",
+            native_task_id="commerce/checkout",
             source=HarborArchiveSource(
                 fileset_ref=f"default/files#{entity}/task_archive", files_hash=hashlib.sha256(data).hexdigest()
             ),
@@ -103,7 +104,7 @@ def test_complete_tree_round_trip(tree, tmp_path, transport):
 
 @pytest.mark.parametrize("transport", ["sync", "async"])
 @pytest.mark.parametrize(
-    "failure", ["manifest", "tree", "file", "size", "truncated", "missing", "duplicate", "later-member"]
+    "failure", ["manifest", "tree", "file", "size", "truncated", "missing", "duplicate", "later-member", "native-id"]
 )
 def test_failure_is_atomic(tree, tmp_path, transport, failure):
     member, objects = snapshot(tree)
@@ -118,6 +119,8 @@ def test_failure_is_atomic(tree, tmp_path, transport, failure):
         del objects["stored/task_archive"]
     elif failure == "duplicate":
         members.append(member)
+    elif failure == "native-id":
+        member.definition.native_task_id = "incorrect"
     else:
         second, other = snapshot(tree, folder="second", entity="second")
         second.definition.source.files_hash = "0" * 64
@@ -253,6 +256,7 @@ def test_many_small_files_suite(tree, tmp_path, transport):
         for file_index in range(100):
             (root / f"file-{file_index:03}.txt").write_bytes(b"x" * 256)
         member, files = snapshot(root, folder=f"task-{index}", entity=f"task-{index}")
+        member.definition.native_task_id = f"suite/task-{index}"
         members.append(member)
         objects.update(files)
     start = time.monotonic()

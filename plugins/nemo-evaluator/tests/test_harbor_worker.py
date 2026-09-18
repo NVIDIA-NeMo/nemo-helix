@@ -12,15 +12,21 @@ import httpx
 import pytest
 
 pytest.importorskip("harbor")
-from nemo_evaluator.api.schemas import HarborTaskDefinition, TaskRef
+from nemo_evaluator.api.schemas import HarborTaskDefinition, TaskRef, TasksetRef
 from nemo_evaluator.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash
-from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity
+from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
 from nemo_evaluator.harbor.archive import pack_task
-from nemo_evaluator.harbor.tasks import PinnedHarborTaskList
+from nemo_evaluator.harbor.tasks import HarborTaskScoring, PinnedHarborTaskList, PinnedHarborTaskset
 from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob, AsyncAgentEvalJob
+from nemo_evaluator.jobs.metric_resolution import to_inline
 from nemo_evaluator.revisions import publish_revision
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRewardMetric
+from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
+from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRewardMetric
+from nemo_evaluator_sdk.agent_eval.tasks import SemanticView, ViewSignal
+from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentOutput
 from nemo_evaluator_sdk.execution.metric_execution import run_sync
+from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
@@ -53,6 +59,8 @@ def stored_packages(tmp_path, entity_store):
             workspace="default",
             spec=HarborTaskDefinition(
                 kind="harbor",
+                native_task_id=task_id,
+                instruction="Fix it",
                 source=HarborArchiveSource(fileset_ref=f"default/files#{entity_name}/task_archive", files_hash=digest),
                 harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
             ),
@@ -105,7 +113,11 @@ def stored_packages(tmp_path, entity_store):
             },
         )
 
-    return PinnedHarborTaskList(task_refs=refs), handler, requests
+    return (
+        PinnedHarborTaskList(task_refs=refs, scoring=[HarborTaskScoring(task_ref=ref) for ref in refs]),
+        handler,
+        requests,
+    )
 
 
 @pytest.mark.parametrize("transport", ["sync", "async"])
@@ -145,6 +157,133 @@ def test_worker_passes_verified_ordered_tasks_to_public_evaluator(tmp_path, stor
     assert sum("/apis/files/" in request.url.path for request in requests) == 2
     sync_http.close()
     run_sync(async_http.aclose)
+
+
+@pytest.mark.parametrize("offline", [False, True])
+def test_worker_executes_additional_metric_and_view(tmp_path, stored_packages, monkeypatch, offline):
+    source, handler, _ = stored_packages
+    async_http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr("nemo_evaluator.jobs.utils.httpx", SimpleNamespace(AsyncClient=lambda **_: async_http))
+    metric = to_inline(
+        bundle_metric(
+            ExactMatchMetric(reference="Fix it", candidate="{{inputs.instruction}}"), CloudpickleMetricBundlePackager()
+        )
+    )
+    views = {
+        "quality": SemanticView(
+            reducer="mean",
+            signals=[
+                ViewSignal(metric="harbor_reward", output="grade"),
+                ViewSignal(metric="exact-match", output="exact-match"),
+            ],
+        )
+    }
+    # Reverse scoring entries to prove association uses exact refs, not list position.
+    scoring = [
+        HarborTaskScoring(task_ref=ref, metrics=[metric] if index == 0 else [], views=views if index == 0 else {})
+        for index, ref in enumerate(source.task_refs)
+    ]
+
+    async def trials(self, tasks, config=None):
+        return [
+            AgentEvalTrial(
+                id=f"trial-{task.id}",
+                task_id=task.id,
+                status="completed",
+                output=AgentOutput(output_text="yes"),
+                metadata={
+                    "harbor_primary_reward_key": "grade",
+                    "reward": 0.5,
+                    "reward_details": {"grade": 0.5, "secondary": 0.25},
+                },
+            )
+            for task in tasks
+        ]
+
+    monkeypatch.setattr(HarborAgentTaskRunner, "run_tasks", trials)
+    monkeypatch.setattr("nemo_evaluator.jobs.agent_evaluate.persist_agent_eval_result", lambda *args, **kwargs: None)
+    ctx = JobContext(
+        workspace="default",
+        job_id="scoring",
+        storage=StoragePaths(ephemeral=tmp_path / "ephemeral", persistent=tmp_path / "persistent"),
+        results=LocalJobResults(root=tmp_path / "results"),
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as transport:
+        client = NemoClient(
+            http_client=transport,
+            base_url="http://platform.test",
+            workspace="default",
+            default_headers={"X-NMP-Principal-Id": "service:harbor-test", "Authorization": "Bearer test-token"},
+        )
+        result = AgentEvalJob().run(
+            {
+                "tasks": PinnedHarborTaskList(task_refs=source.task_refs, scoring=list(reversed(scoring))).model_dump(
+                    mode="json"
+                ),
+                **(
+                    {
+                        "trials": [
+                            trial.model_dump(mode="json")
+                            for trial in run_sync(
+                                lambda: trials(
+                                    None,
+                                    [SimpleNamespace(id="commerce/checkout"), SimpleNamespace(id="commerce/search")],
+                                )
+                            )
+                        ]
+                    }
+                    if offline
+                    else {"target": {"kind": "harbor", "reward_key": "grade"}}
+                ),
+            },
+            ctx=ctx,
+            client=client,
+        )
+    assert result["status"] == "completed"
+    summary_path = next((tmp_path / "persistent").rglob("summary.json"))
+    summary = json.loads(summary_path.read_text())
+    scores = {score["name"]: score for score in summary["scores"]["scores"]}
+    assert scores["harbor_reward.grade"]["mean"] == 0.5
+    assert scores["harbor_reward.secondary"]["mean"] == 0.25
+    assert scores["exact-match.exact-match"]["mean"] == 1.0
+    assert scores["exact-match.exact-match"]["count"] == 1
+    assert scores["view.quality"]["mean"] == 0.75
+
+
+@pytest.mark.parametrize("case", ["missing", "extra", "mismatched"])
+@pytest.mark.parametrize("taskset", [False, True])
+def test_worker_requires_exact_scoring_membership(tmp_path, stored_packages, entity_store, case, taskset):
+    from nemo_evaluator.harbor.preparation import prepare_stored_harbor_tasks
+
+    source, handler, _ = stored_packages
+    if taskset:
+        suite = TasksetEntity(name="suite", workspace="default", tasks=source.task_refs)
+        run_sync(lambda: entity_store.create(suite))
+        revision, _, _ = run_sync(lambda: publish_revision(entity_store, entity_store, suite, TasksetRevisionEntity))
+        source = PinnedHarborTaskset(
+            taskset_ref=TasksetRef(f"default/suite#{revision.content_hash}"), scoring=source.scoring
+        )
+    scoring = list(source.scoring)
+    other = HarborTaskScoring(task_ref=TaskRef(f"default/other#{'a' * 64}"))
+    if case == "missing":
+        scoring.pop()
+    elif case == "extra":
+        scoring.append(other)
+    else:
+        scoring[0] = other
+    # Mutation after construction must still be rejected at the worker boundary.
+    source.scoring = scoring
+    with httpx.Client(transport=httpx.MockTransport(handler)) as transport:
+        client = NemoClient(
+            http_client=transport,
+            base_url="http://platform.test",
+            workspace="default",
+            default_headers={"X-NMP-Principal-Id": "service:harbor-test", "Authorization": "Bearer test-token"},
+        )
+        with pytest.raises(ValueError, match="must match"):
+            prepare_stored_harbor_tasks(
+                source, destination_root=tmp_path / "inputs", client=client, async_client=None, reward_key="reward"
+            )
 
 
 async def test_adapter_returns_receipt_from_same_verified_packages(

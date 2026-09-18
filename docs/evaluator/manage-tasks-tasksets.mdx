@@ -138,8 +138,16 @@ unit in one place regardless of which runner executes it.
 |-------|------|----------|-------------|
 | `source` | `HarborArchiveSource` | Yes | Exact `fileset_ref`, compressed-byte SHA-256 `files_hash`, `kind="fileset-archive"`, and `archive_format="tar-gzip-v1"`. |
 | `harbor_hash` | `HarborTaskHash` | Yes | Stored-only producer fingerprint, method and Harbor version. Never used for verification or execution. |
+| `native_task_id` | `str` | Yes | Native task identity populated by upload and independently verified at registration. Matches saved trial task IDs. |
 | `instruction` | `str` | No | Verified instruction projection. |
 | `config` | `dict` | No | Verified `task.toml` projection; excluded from revision identity. |
+| `metrics` | `list[MetricRefOrInline]` | No | Additional metrics appended to the mandatory `HarborRewardMetric`. Inline bundles are normalized to stored references. Defaults to `[]`. |
+| `views` | `dict[str, SemanticView]` | No | Reporting views over the primary Harbor reward and declared additional metric outputs. Defaults to `{}`. |
+
+Harbor scoring always includes `HarborRewardMetric`; do not include it again in `metrics`.
+Custom metrics and views are part of the task revision, so changing them creates a new revision
+while reusing the archive. See [custom Harbor scoring](/documentation/evaluate-models/agent-eval/harbor-runner#custom-metrics-and-views)
+for a registration and submission example.
 
 See [Upload and Register Harbor Dataset](/documentation/evaluate-models/agent-eval/harbor-runner#upload-and-register-harbor-dataset)
 for details about managing Harbor datasets in NeMo Platform.

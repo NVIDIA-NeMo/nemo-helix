@@ -7,8 +7,8 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from nemo_evaluator.api.schemas import TasksetRef
-from nemo_evaluator.harbor.resolution import resolve_harbor_source
-from nemo_evaluator.harbor.tasks import PinnedHarborTaskset
+from nemo_evaluator.harbor.resolution import resolve_harbor_taskset
+from nemo_evaluator.harbor.tasks import require_pin
 from nemo_evaluator_sdk.agent_eval.taskset_sources import TasksetSourceAdapter, TasksetSourceMaterialization
 from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.client.adapter import client_from_platform
@@ -41,16 +41,19 @@ class EvaluatorTasksetSourceAdapter:
             or "?" in source_uri
         ):
             raise ValueError("Expected a pinned nemo-evaluator-taskset URI in the configured workspace")
-        source = PinnedHarborTaskset(taskset_ref=TasksetRef(f"{workspace}/{name[1:]}#{digest}"))
+        ref = TasksetRef(f"{workspace}/{name[1:]}#{digest}")
+        require_pin(ref)
         canonical_uri = f"nemo-evaluator-taskset://{workspace}/{name[1:]}#{digest}"
-        members = await resolve_harbor_source(
-            source, entity_client=EntityClient(client_from_platform(self._sdk, AsyncEntitiesClient))
+        selection = await resolve_harbor_taskset(
+            ref, entity_client=EntityClient(client_from_platform(self._sdk, AsyncEntitiesClient))
         )
 
         from nemo_evaluator.harbor.materialization import materialize_harbor_tasks
 
         materialized = await materialize_harbor_tasks(
-            members, files_client=client_from_platform(self._sdk, AsyncFilesClient), destination_root=destination_root
+            selection.members,
+            files_client=client_from_platform(self._sdk, AsyncFilesClient),
+            destination_root=destination_root,
         )
         root = materialized.dataset_root.resolve(strict=True)
         if not root.is_relative_to(destination_root.resolve(strict=True)):

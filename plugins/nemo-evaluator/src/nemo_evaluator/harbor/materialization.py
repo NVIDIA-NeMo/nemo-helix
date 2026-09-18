@@ -91,6 +91,8 @@ def _staging(members: Sequence[StoredHarborTask], destination: Path) -> Iterator
 
 
 def _member(source: StoredHarborTask, root: Path, native: NativeTask, owned: Path) -> MaterializedHarborMember:
+    if source.definition.native_task_id != native.task_id:
+        raise ValueError("Harbor native_task_id does not match the verified archive")
     target = owned / "staging" / root.name
     if any(path.name.casefold() == root.name.casefold() for path in target.parent.iterdir()):
         raise ValueError("Duplicate physical task folder")

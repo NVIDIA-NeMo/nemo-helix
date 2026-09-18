@@ -27,6 +27,7 @@ async def test_post_pins_sources_in_canonical_and_compiled_job(entity_store, mon
         workspace="default",
         spec=HarborTaskDefinition(
             kind="harbor",
+            native_task_id="task",
             harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
             source=HarborArchiveSource(
                 fileset_ref="default/files#v1/task/files",
@@ -90,6 +91,7 @@ async def test_post_pins_sources_in_canonical_and_compiled_job(entity_store, mon
         if direct
         else {"kind": "harbor-taskset", "taskset_ref": f"default/suite#{suite_revision.content_hash}"}
     )
+    expected["scoring"] = [{"task_ref": f"default/checkout#{revision.content_hash}", "metrics": [], "views": {}}]
     assert body.spec["tasks"] == expected
     assert response.json()["spec"]["tasks"] == expected
     assert body.platform_spec.steps[0].config["tasks"] == expected
