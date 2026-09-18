@@ -14,6 +14,9 @@ import {
   streamAssistantMessage,
 } from '@studio/routes/agents/AssistantChatRoute/api';
 
+const TEST_ID_TOKEN =
+  'eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjQxMDI0NDQ4MDAsInN1YiI6InVzZXItMSJ9.signature';
+
 const getExpectedStudioBaseUrl = (): string => {
   const normalizedBaseUrl = BASE_URL.replace(/\/+$/, '');
   const basePath = normalizedBaseUrl && normalizedBaseUrl !== '/' ? normalizedBaseUrl : '';
@@ -48,6 +51,31 @@ describe('Assistant API helpers', () => {
 
     const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
     expect(new Headers(requestInit?.headers).get('Authorization')).toBe('Bearer assistant-token');
+  });
+
+  it('uses the current ID token for Assistant requests when configured', async () => {
+    const authority = 'https://auth.example.test';
+    const clientId = 'MixedCaseClient';
+    vi.stubEnv('VITE_AUTH_AUTHORITY', authority);
+    vi.stubEnv('VITE_AUTH_CLIENT_ID', clientId);
+    vi.stubEnv('VITE_AUTH_BEARER_TOKEN_SOURCE', 'id_token');
+    localStorage.setItem(
+      `oidc.user:${authority}:${clientId}`,
+      JSON.stringify({
+        access_token: 'opaque-access-token',
+        expires_at: Math.floor(Date.now() / 1000) + 3600,
+        id_token: TEST_ID_TOKEN,
+        profile: { sub: 'user-1' },
+        token_type: 'Bearer',
+      })
+    );
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await listAssistantSkills();
+
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(new Headers(requestInit?.headers).get('Authorization')).toBe(`Bearer ${TEST_ID_TOKEN}`);
   });
 
   it('scopes session creation and history requests to the active workspace', async () => {

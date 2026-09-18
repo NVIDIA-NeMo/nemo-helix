@@ -502,6 +502,20 @@ class TestStudioConfigEnvReplacements:
         assert "STUDIO_UI_VITE_TELEMETRY_ENABLED" in replacements
         assert replacements["STUDIO_UI_VITE_TELEMETRY_ENABLED"] == "true"
 
+    def test_env_replacements_publishes_oidc_bearer_token_source(self, monkeypatch: pytest.MonkeyPatch):
+        """Test that Studio receives the configured OIDC bearer token source."""
+        from nmp.common import config as common_config
+
+        monkeypatch.setattr(
+            common_config.Configuration,
+            "get_global_settings_from_env",
+            lambda: {"auth": {"oidc": {"bearer_token_source": "id_token"}}},
+        )
+
+        replacements = StudioConfig().env_replacements
+
+        assert replacements["STUDIO_UI_VITE_AUTH_BEARER_TOKEN_SOURCE"] == "id_token"
+
     def test_env_replacements_empty_global_setting_falls_back_to_config_field(self, monkeypatch: pytest.MonkeyPatch):
         """Test that empty global settings do not block StudioConfig field fallback."""
         mock_settings = {"studio": {"platform_base_url": ""}}

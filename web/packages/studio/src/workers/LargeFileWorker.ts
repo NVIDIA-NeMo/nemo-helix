@@ -11,7 +11,7 @@ export interface LargeFileWorkerMessage {
   workspace?: string;
   action: 'downloadAsFile';
   path: string;
-  /** Access token passed from the main thread (localStorage is unavailable in workers). */
+  /** Configured OIDC bearer passed from the main thread (localStorage is unavailable in workers). */
   accessToken?: string;
 }
 

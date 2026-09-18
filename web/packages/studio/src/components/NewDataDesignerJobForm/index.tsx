@@ -21,6 +21,7 @@ import {
 } from '@studio/components/NewDataDesignerJobForm/utils';
 import { DEFAULT_BUILD_MODEL_NAME, DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
+import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
 import {
   getDataDesignerJobDetailsRoute,
   getDataDesignerJobListRoute,
@@ -28,7 +29,6 @@ import {
 } from '@studio/routes/utils';
 import { type FC, useCallback, useEffect, useMemo } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
-import { useAuth } from 'react-oidc-context';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { z } from 'zod';
 
@@ -78,7 +78,7 @@ export const NewDataDesignerJobForm: FC = () => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
   const { state } = useLocation();
-  const { user } = useAuth();
+  const bearerToken = useOidcBearerToken();
 
   const modelRef = `${workspace}/${DEFAULT_BUILD_MODEL_NAME}`;
 
@@ -139,7 +139,7 @@ export const NewDataDesignerJobForm: FC = () => {
   );
   const { previewLogs, isPreviewing, runPreview } = usePreview({
     workspace,
-    accessToken: user?.access_token ?? undefined,
+    accessToken: bearerToken,
     getCurrentConfig,
   });
 

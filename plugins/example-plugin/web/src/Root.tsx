@@ -171,11 +171,11 @@ function OverviewPage({ host }: { host: PluginHost }) {
 }
 
 function AuthPage({ getAccessToken }: { getAccessToken: () => string }) {
-  const accessToken = getAccessToken();
+  const bearerToken = getAccessToken();
   // Parse the JWT payload (without verification — for display only).
   let claims: Record<string, unknown> | null = null;
   try {
-    const payload = accessToken.split(".")[1];
+    const payload = bearerToken.split(".")[1];
     if (payload) {
       claims = JSON.parse(
         atob(payload.replace(/-/g, "+").replace(/_/g, "/")),
@@ -189,9 +189,10 @@ function AuthPage({ getAccessToken }: { getAccessToken: () => string }) {
     <Stack gap="3">
       <Text kind="label/bold/md">Auth</Text>
       <Text kind="body/regular/sm" color="secondary">
-        Studio passes an OIDC access token to every plugin via the plugin&apos;s
-        auth prop. Call getAccessToken() per request — it returns the current
-        token after silent renewal — and use it as a Bearer token.
+        Studio passes its configured OIDC bearer token (access token or ID token)
+        to every plugin via the plugin&apos;s auth prop. Call getAccessToken() per
+        request — it returns the current token after silent renewal — and use it
+        as a Bearer token.
       </Text>
 
       <Stack gap="1">
@@ -207,7 +208,7 @@ function AuthPage({ getAccessToken }: { getAccessToken: () => string }) {
           <CodeBlock>{JSON.stringify(claims, null, 2)}</CodeBlock>
         ) : (
           <Text kind="body/regular/xs" color="secondary">
-            {accessToken ? "Could not decode token." : "No token provided."}
+            {bearerToken ? "Could not decode token." : "No token provided."}
           </Text>
         )}
       </Stack>
