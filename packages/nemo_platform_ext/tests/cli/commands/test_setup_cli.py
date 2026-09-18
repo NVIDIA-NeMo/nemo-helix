@@ -11,6 +11,7 @@ import pytest
 from nemo_platform_ext.cli.app import app
 from nemo_platform_ext.cli.core.context import CLIContext
 from nemo_platform_ext.config.config import Config
+from nemo_platform_plugin.workspaces.client import WorkspacesClient
 from typer.testing import CliRunner
 
 SETUP_MOD = "nemo_platform_ext.cli.commands.setup"
@@ -24,6 +25,13 @@ class _StubWorkspaces:
 
     def create_workspace(self, **kwargs) -> SimpleNamespace:
         return SimpleNamespace(data=lambda: object())
+
+
+def _typed_client(client_cls: type, timeout: float = 60.0) -> object:
+    """Stand in for ``CLIContext.typed_client``: real workspace stub, mocks for everything else."""
+    if client_cls is WorkspacesClient:
+        return _StubWorkspaces()
+    return MagicMock()
 
 
 def test_setup_help_documents_resume_flag() -> None:
@@ -42,8 +50,6 @@ def test_remote_choice_retries_and_persists_connection(
     config_path.touch()
     monkeypatch.setenv("NMP_CONFIG_FILE", str(config_path))
 
-    client = MagicMock()
-
     with (
         patch(f"{SETUP_MOD}.is_interactive", return_value=True),
         patch(f"{SETUP_MOD}._check_platform_reachable", return_value=False),
@@ -58,8 +64,7 @@ def test_remote_choice_retries_and_persists_connection(
         ),
         patch(f"{SETUP_MOD}._ensure_platform_auth") as ensure_auth,
         patch(f"{SETUP_MOD}._start_services_background") as start_services,
-        patch.object(CLIContext, "get_client", return_value=client),
-        patch(f"{SETUP_MOD}.client_from_platform", return_value=_StubWorkspaces()),
+        patch.object(CLIContext, "typed_client", side_effect=_typed_client),
         patch(f"{SETUP_MOD}._run_interactive_mode") as run_interactive,
     ):
         result = CliRunner().invoke(app, ["setup"])
@@ -81,7 +86,6 @@ def test_local_choice_starts_services_and_keeps_local_connection(
     config_path.touch()
     monkeypatch.setenv("NMP_CONFIG_FILE", str(config_path))
 
-    client = MagicMock()
     process = MagicMock(pid=1234)
 
     with (
@@ -94,8 +98,7 @@ def test_local_choice_starts_services_and_keeps_local_connection(
         patch(f"{SETUP_MOD}._start_services_background", return_value=process) as start_services,
         patch(f"{SETUP_MOD}._wait_for_platform", return_value=True),
         patch(f"{SETUP_MOD}._check_platform_reachable_with_retries", return_value=True),
-        patch.object(CLIContext, "get_client", return_value=client),
-        patch(f"{SETUP_MOD}.client_from_platform", return_value=_StubWorkspaces()),
+        patch.object(CLIContext, "typed_client", side_effect=_typed_client),
         patch(f"{SETUP_MOD}._run_interactive_mode") as run_interactive,
     ):
         result = CliRunner().invoke(app, ["setup"])
