@@ -69,21 +69,38 @@ def task_subdir_name(index: int, task_id: str) -> str:
     return f"{index:06d}-{safe}" if safe else f"task-{index:06d}"
 
 
+#: Mapping keys a Fabric adapter puts its final message under, in precedence order.
+_TEXT_KEYS = ("response", "output_text", "text", "message")
+
+
 def extract_output_text(output: object) -> str | None:
     """Pull the user-visible message out of a Fabric output value (already unwrapped from the result).
 
     Harness outputs vary; adapters commonly nest the final message under ``response`` (the codex-cli
     adapter does). Prefer a string ``response``/``output_text``/``text``/``message``, else stringify.
+
+    An envelope carrying no text at all yields ``None`` rather than its own serialization: an
+    adapter that always emits ``{"response": null}`` has produced no answer, and returning
+    ``'{"response": null}'`` would both read as an answer and mask the trace evidence that holds
+    the real one. A payload with no text key (``{"answer": 42}``) still stringifies, since that is
+    the whole of what the harness returned.
     """
     if output is None:
         return None
     if isinstance(output, str):
         return output
     if isinstance(output, Mapping):
-        for key in ("response", "output_text", "text", "message"):
+        if not output:
+            return None
+        explicitly_absent = False
+        for key in _TEXT_KEYS:
             value = output.get(key)
             if isinstance(value, str):
                 return value
+            if value is None and key in output:
+                explicitly_absent = True
+        if explicitly_absent:
+            return None
     return json.dumps(output, default=str)
 
 

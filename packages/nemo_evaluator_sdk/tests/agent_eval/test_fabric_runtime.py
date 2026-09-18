@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric import _common
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric import runtime as fabric_runtime
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 from nemo_evaluator_sdk.values.evidence import EVIDENCE_FORMAT_ATIF, EVIDENCE_TRACE
@@ -416,6 +417,32 @@ async def test_fabric_runtime_reads_the_answer_from_atif_when_the_harness_report
     assert trials[0].output is not None
     assert trials[0].output.output_text == "PONG"
     assert trials[0].output.response is None
+
+
+@pytest.mark.asyncio
+async def test_fabric_runtime_reads_the_answer_from_atif_when_the_harness_answer_is_null(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An adapter that always emits its envelope reports "no answer" as a null field rather than by
+    # omitting the output, so the envelope is present and only its answer is missing.
+    atif = _FakeArtifact("relay_atif", "atif", tmp_path / "trajectory.atif.json", "application/json")
+    atif.path.write_text(
+        json.dumps({"schema_version": "ATIF-v1.7", "steps": [{"source": "agent", "message": "PONG"}]}),
+        encoding="utf-8",
+    )
+
+    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
+        return _FakeResult(status="succeeded", output={"response": None}, artifacts=[atif])
+
+    _install_fake_fabric(monkeypatch, handler)
+    runtime = fabric_runtime.FabricAgentRuntime(config=_CONFIG, work_root=tmp_path / "fabric")
+
+    trials = await runtime.run_tasks([_TASK])
+
+    assert trials[0].output is not None
+    assert trials[0].output.output_text == "PONG"
+    # The envelope is still the response: only the answer came from elsewhere.
+    assert trials[0].output.response == {"response": None}
 
 
 def _workspace_from_config(config: Any) -> Path:
@@ -1053,6 +1080,28 @@ async def test_fabric_runtime_codex_skills_removed_even_when_run_fails(
     assert not (workspace / ".agents").exists()
     # Provenance is still stamped on the failed trial for the A/B diff.
     assert [prov["name"] for prov in trials[0].metadata["skills"]] == list(names)
+
+
+# --- harness output text ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ("plain text", "plain text"),
+        ({"response": "PONG"}, "PONG"),
+        ({"response": None, "text": "PONG"}, "PONG"),
+        # No text key at all: the payload *is* the output, so it stringifies.
+        ({"answer": 42}, '{"answer": 42}'),
+        ({"response": {"text": "PONG"}}, '{"response": {"text": "PONG"}}'),
+        # Nothing to say: None, so the caller falls back to the trace instead of scoring the envelope.
+        (None, None),
+        ({}, None),
+        ({"response": None}, None),
+    ],
+)
+def test_extract_output_text_answers_only_when_the_envelope_carries_one(output: Any, expected: str | None) -> None:
+    assert _common.extract_output_text(output) == expected
 
 
 # --- ATIF token capture -----------------------------------------------------
