@@ -88,12 +88,12 @@ if not report.ok:
 
 Each call bills a real generation per model alias, so use it when you first wire up a config or change a model or provider, rather than on every edit. Models configured with `skip_health_check=True` are skipped.
 
-Unlike `validate()`, the probe stops at the first model that fails. Enable logging for the `data_designer` logger at `INFO` to see which alias each probe is checking:
+Unlike `validate()`, the probe stops at the first model that fails. The resource logs each alias as it checks it, so the output identifies which model failed:
 
-```python
-import logging
-
-logging.getLogger("data_designer").setLevel(logging.INFO)
+```text
+🩺 Running health checks for models...
+👀 Checking 'nvidia/nemotron-3.5-lightning-30b-a3b' in provider named 'default/nvidia-build' for model alias 'text'...
+✅ Passed!
 ```
 
 The `workspace` keyword argument behaves the same as it does for `validate()`.

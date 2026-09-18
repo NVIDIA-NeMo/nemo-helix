@@ -19,6 +19,8 @@ drops the in-process test transport — the same harness limitation that keeps
 
 from __future__ import annotations
 
+import logging
+
 import data_designer.config as dd
 import nemo_data_designer_plugin.testing.utils as u
 import pytest
@@ -30,6 +32,9 @@ from nemo_data_designer_plugin.sdk.resources import AsyncDataDesignerResource
 
 pytestmark = pytest.mark.integration
 
+# Shape mirrors the real engine log that names the alias being probed.
+_PROBE_LOG = "👀 Checking 'nano-v3' in provider named 'p' for model alias 'text'..."
+
 
 def _builder(provider: str = u.OPEN_PROVIDER_NAME) -> dd.DataDesignerConfigBuilder:
     builder = dd.DataDesignerConfigBuilder(
@@ -39,16 +44,46 @@ def _builder(provider: str = u.OPEN_PROVIDER_NAME) -> dd.DataDesignerConfigBuild
     return builder
 
 
-def _patch_probe(monkeypatch: pytest.MonkeyPatch, outcome: Exception | None) -> list[bool]:
+def _patch_probe(
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: Exception | None,
+    *,
+    emit_log: bool = False,
+) -> list[bool]:
     calls: list[bool] = []
 
     def _probe(*args, **kwargs) -> None:
         calls.append(True)
+        if emit_log:
+            logging.getLogger("data_designer.engine.models.registry").info(_PROBE_LOG)
         if outcome is not None:
             raise outcome
 
     monkeypatch.setattr(DataDesigner, "check_models", _probe)
     return calls
+
+
+async def test_check_models_surfaces_engine_logs_without_caller_setup(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The engine names each alias as it probes it, and that is the only place
+    the alias appears — the error it raises on failure does not carry it. An SDK
+    caller should get those lines from the resource's own logging setup, without
+    having to configure logging themselves.
+    """
+    _patch_probe(monkeypatch, None, emit_log=True)
+    # pytest attaches its own root handler, which would make the resource think
+    # the caller already configured logging. Clear it to model a bare caller.
+    monkeypatch.setattr(logging.getLogger(), "handlers", [])
+
+    with (
+        u.make_mock_client_context() as client_context,
+        u.setup_mock_providers(client_context),
+    ):
+        report = await AsyncDataDesignerResource(client_context.async_sdk).check_models(_builder())
+
+    assert report.ok is True
+    assert "model alias 'text'" in capsys.readouterr().err
 
 
 async def test_check_models_returns_ok_report(monkeypatch: pytest.MonkeyPatch) -> None:

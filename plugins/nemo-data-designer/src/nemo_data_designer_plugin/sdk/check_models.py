@@ -41,6 +41,7 @@ from data_designer_nemo.context.engine_protocol import DataDesignerEngineContext
 from data_designer_nemo.context.execution import create_execution_context
 from nemo_data_designer_plugin.sdk._engine_logs import LogCallback, forward_engine_logs
 from nemo_data_designer_plugin.sdk._engine_pass import run_engine_pass
+from nemo_data_designer_plugin.sdk.logging import ensure_library_logging_handler
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
 from pydantic import BaseModel, Field, computed_field
 
@@ -136,8 +137,9 @@ async def check_models_config(
             sources. Pass ``"default"`` if you have no better value.
         config_source: Informational identifier echoed back through the report.
             Not used for any logic.
-        on_log: Optional sink for the engine's per-alias log records. Pass one
-            to see which alias is being probed and which one failed.
+        on_log: Optional sink for the engine's per-alias log records, for
+            callers that render logs themselves. When omitted, those records go
+            to the SDK's stream handler unless logging is already configured.
 
     Returns:
         A ``CheckModelsReport``.
@@ -145,7 +147,12 @@ async def check_models_config(
     Raises:
         ValueError: If neither ``sdk`` nor ``async_sdk`` is provided.
     """
-    with forward_engine_logs(on_log):
+    # The engine names each alias as it probes it, and that is the only place
+    # that identity appears. A caller supplying ``on_log`` renders those records
+    # itself; everyone else gets them through the SDK's usual stream handler.
+    log_ctx = forward_engine_logs(on_log) if on_log is not None else ensure_library_logging_handler()
+
+    with log_ctx:
         result = await run_engine_pass(
             config_builder,
             sdk=sdk,
