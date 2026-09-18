@@ -281,16 +281,15 @@ job = EvaluatorClient.from_client(client).submit_agent_eval_job(
 
 - **Change scoring:** Publish task revisions with new metrics/views → update the taskset → submit
   with the same trials. Unknown trial tasks and selected tasks without trials fail.
-- **Resolution and size:** New submissions resolve metric/model dependencies again; compiled-job
-  retries retain resolved scoring. Job size grows with task count and metric bundles.
+- **Resolution and size:** New submissions resolve metric/model dependencies again.
 - **Reward key:** Every trial must contain the same valid `metadata["harbor_primary_reward_key"]`
-  (for example, `"grade"`). New Harbor adaptation records it even on failed trials. Rescoring
+  (for example, `"reward"`). Rescoring
   preserves that primary selection and discovers secondary outputs from saved rewards; renaming
   an output does not reinterpret the primary value.
 - **Older trials:** Missing reward-key metadata is rejected. Re-import original results with the
-  current SDK's `build_trials_from_job_dir(job_dir, tasks, reward_key="grade")` from
+  current SDK's `build_trials_from_job_dir(job_dir, tasks, reward_key="reward")` from
   `nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime`, using SDK tasks with the original native
-  IDs and the original reward key (`"grade"` is illustrative). This rebuilds metadata without
+  IDs and the original reward key (`"reward"` is illustrative). This rebuilds metadata without
   rerunning Harbor. Keep or publish referenced evidence where the scoring worker can read it.
 
 #### Harbor Tasks and Taskset Grouping in Fileset

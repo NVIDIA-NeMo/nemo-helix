@@ -403,6 +403,32 @@ async def test_unknown_taskset_raises_clear_error(entity_store) -> None:
         )
 
 
+@pytest.mark.parametrize("missing", ["taskset", "taskset-revision", "member", "member-revision"])
+async def test_offline_taskset_translates_resolution_errors(entity_store, missing):
+    from nemo_evaluator.revisions import RevisionNotFoundError
+
+    client = await _store(entity_store, _task("only"))
+    ref = TasksetRef("default/geo")
+    if missing != "taskset":
+        member_ref = (
+            f"default/gone#{_ABSENT_MEMBER_DIGEST}" if missing == "member" else f"default/only#{_ABSENT_MEMBER_DIGEST}"
+        )
+        await _create_published(client, _taskset("geo", [member_ref]))
+    if missing == "taskset-revision":
+        ref = TasksetRef(f"default/geo#{'c' * 64}")
+    message = {
+        "taskset": "not found",
+        "taskset-revision": "names a revision that does not resolve",
+        "member": "names a member that does not resolve",
+        "member-revision": "names a member that does not resolve",
+    }[missing]
+    with pytest.raises(ValueError, match=message) as caught:
+        await canonicalize_agent_eval_tasks(ref, workspace="default", entity_client=client, target=None)
+    assert f"Taskset reference '{ref.root}'" in str(caught.value)
+    expected_cause = RevisionNotFoundError if missing.endswith("revision") else NemoEntityNotFoundError
+    assert isinstance(caught.value.__cause__, expected_cause)
+
+
 async def test_missing_member_task_raises_clear_error(entity_store) -> None:
     client = await _store(entity_store, _taskset("geo", ["default/gone"]))
     with pytest.raises(ValueError, match=r"Task 'default/gone#\w+' referenced by taskset 'default/geo'"):

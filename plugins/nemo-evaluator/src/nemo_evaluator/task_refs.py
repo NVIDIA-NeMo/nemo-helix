@@ -173,12 +173,25 @@ async def canonicalize_agent_eval_tasks(
         if entity_client is None:
             raise ValueError("A TasksetRef requires a platform connection (entity store)")
         ref_workspace, name, fragment = parse_subentity_ref(tasks.root, workspace)
-        head = await entity_client.get(TasksetEntity, name=name, workspace=ref_workspace)
-        revision = await get_revision(
-            cast(EntityClientProtocol[TasksetRevisionEntity], entity_client), TasksetRevisionEntity, head, fragment
-        )
+        try:
+            head = await entity_client.get(TasksetEntity, name=name, workspace=ref_workspace)
+        except NemoEntityNotFoundError as exc:
+            raise ValueError(
+                f"Taskset reference '{tasks.root}' not found. "
+                f"Ensure a stored taskset named '{name}' exists in workspace '{ref_workspace}', "
+                "or pass an inline task list instead."
+            ) from exc
+        try:
+            revision = await get_revision(
+                cast(EntityClientProtocol[TasksetRevisionEntity], entity_client), TasksetRevisionEntity, head, fragment
+            )
+        except RevisionNotFoundError as exc:
+            raise ValueError(f"Taskset reference '{tasks.root}' names a revision that does not resolve: {exc}") from exc
         refs = qualified_task_refs(revision.tasks, ref_workspace)
-        resolved = await canonicalize_agent_eval_tasks(refs, workspace=ref_workspace, entity_client=entity_client)
+        try:
+            resolved = await canonicalize_agent_eval_tasks(refs, workspace=ref_workspace, entity_client=entity_client)
+        except (NemoEntityNotFoundError, RevisionNotFoundError) as exc:
+            raise ValueError(f"Taskset reference '{tasks.root}' names a member that does not resolve: {exc}") from exc
         if isinstance(resolved, ResolvedHarborSelection):
             pinned_members(revision)
             return ResolvedHarborSelection(
