@@ -49,7 +49,7 @@ ENV PATH="/opt/gym-venv/bin:/app/.venv/bin:$PATH" \
 FROM runtime AS smoke-test
 RUN gym --help >/dev/null \
     && /app/.venv/bin/python -c \
-        'import importlib.metadata as m; import nemo_evaluator, sandboxed_gym; from opensandbox.config import ConnectionConfig; print({"nemo-evaluator-plugin": m.version("nemo-evaluator-plugin"), "sandboxed-gym": m.version("sandboxed-gym"), "opensandbox": m.version("opensandbox"), "connection_config": ConnectionConfig.__name__})' \
+        'import importlib.metadata as m; import nemo_evaluator, sandboxed_gym; from opensandbox.config import ConnectionConfig; print({"nemo-evaluator-plugin": m.version("nemo-evaluator-plugin"), "nemo-sandboxed-gym": m.version("nemo-sandboxed-gym"), "opensandbox": m.version("opensandbox"), "connection_config": ConnectionConfig.__name__})' \
     && /opt/gym-venv/bin/python -c \
         'import importlib.metadata as m; import nemo_gym, ray, tiktoken; print({"nemo-gym": m.version("nemo-gym"), "ray": m.version("ray"), "tiktoken": m.version("tiktoken")})'
 

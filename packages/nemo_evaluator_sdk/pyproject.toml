@@ -23,9 +23,11 @@ classifiers = [
 dependencies = [
   "pydantic>=2.10.6",
   # The broker sandbox provider imports the wire contract at module scope. Cheap to depend on
-  # directly: sandboxed-gym's base install is Pydantic alone -- its server, OpenSandbox and Ray
+  # directly: nemo-sandboxed-gym's base install is Pydantic alone -- its server, OpenSandbox and Ray
   # pieces are extras -- so this adds request/response models, not a web stack.
-  "sandboxed-gym",
+  # Workspace member for now; becomes an exact PyPI pin once published, per the note on
+  # `[tool.bundle-package]` in packages/nemo_platform/pyproject.toml.
+  "nemo-sandboxed-gym",
   "jinja2>=3.1.6",
   "jsonschema>=4.23.0",
   "jsonpath-ng>=1.7.0",

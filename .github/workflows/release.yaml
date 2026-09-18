@@ -27,7 +27,7 @@ on:
         type: string
         default: ""
       version:
-        description: "Stable SemVer core release version, for example 1.0.0."
+        description: "Release version, for example 1.0.0 or 1.0.0-rc0. Becomes the git tag, which an independent wheel prefixes with its own tagPrefix."
         required: false
         type: string
         default: ""
@@ -45,7 +45,7 @@ on:
       wheel-ids:
         description: >-
           Custom only. Comma-separated wheel IDs.
-          Allowed: nemo-platform, nemo-platform-plugin.
+          Allowed: nemo-platform, nemo-platform-plugin, nemo-sandboxed-gym.
         required: false
         type: string
         default: ""
@@ -102,13 +102,19 @@ env:
   # descriptions in the Run workflow form.
   #
   # Wheel fields:
-  #   id      - value users type in wheel-ids and the release artifact id
-  #   package - package passed to uv build --package
-  #   path    - package directory checked before any later release work starts
+  #   id          - value users type in wheel-ids and the release artifact id
+  #   package     - package passed to uv build --package
+  #   path        - package directory checked before any later release work starts
+  #   independent - optional. Releases on its own version line: excluded from every scope
+  #                 except `custom`, where it must be the only artifact selected, and not
+  #                 released as a nightly.
+  #   tagPrefix   - optional. Git tag prefix for an independent wheel. Must match the
+  #                 `pattern-prefix` its dynamic versioning reads.
   RELEASE_WHEELS_JSON: >-
     [
       {"id":"nemo-platform","package":"nemo-platform","path":"packages/nemo_platform"},
-      {"id":"nemo-platform-plugin","package":"nemo-platform-plugin","path":"packages/nemo_platform_plugin"}
+      {"id":"nemo-platform-plugin","package":"nemo-platform-plugin","path":"packages/nemo_platform_plugin"},
+      {"id":"nemo-sandboxed-gym","package":"nemo-sandboxed-gym","path":"packages/sandboxed_gym","independent":true,"tagPrefix":"nemo-sandboxed-gym-v"}
     ]
   # Container fields:
   #   id     - value users type in container-ids and the published image name
@@ -153,6 +159,9 @@ jobs:
       release_scope: ${{ steps.plan.outputs.release_scope }}
       source_sha: ${{ steps.plan.outputs.source_sha }}
       version: ${{ steps.plan.outputs.version }}
+      is_prerelease: ${{ steps.plan.outputs.is_prerelease }}
+      release_tag: ${{ steps.plan.outputs.release_tag }}
+      tag_prefix: ${{ steps.plan.outputs.tag_prefix }}
       release_label: ${{ steps.plan.outputs.release_label }}
       nightly_timestamp: ${{ steps.plan.outputs.nightly_timestamp }}
       wheel_version: ${{ steps.wheel-version.outputs.wheel_version }}
@@ -208,6 +217,9 @@ jobs:
               source_sha: plan.sourceSha,
               source_branch: plan.sourceBranch,
               version: plan.version,
+              is_prerelease: String(plan.isPrerelease),
+              release_tag: plan.releaseTag,
+              tag_prefix: plan.tagPrefix,
               release_label: plan.releaseLabel,
               nightly_timestamp: plan.nightlyTimestamp,
               nightly_base_version: nightlyBaseVersion,
@@ -276,6 +288,7 @@ jobs:
           WHEEL_IDS: ${{ steps.plan.outputs.wheel_ids }}
           RELEASE_TYPE: ${{ steps.plan.outputs.release_type }}
           RELEASE_VERSION: ${{ steps.plan.outputs.version }}
+          IS_PRERELEASE: ${{ steps.plan.outputs.is_prerelease }}
           NIGHTLY_TIMESTAMP: ${{ steps.plan.outputs.nightly_timestamp }}
           NIGHTLY_BASE_VERSION: ${{ steps.plan.outputs.nightly_base_version }}
         run: |
@@ -288,6 +301,8 @@ jobs:
 
           if [[ "${RELEASE_TYPE}" == "nightly" ]]; then
             cadence="nightly"
+          elif [[ "${IS_PRERELEASE}" == "true" ]]; then
+            cadence="prerelease"
           else
             cadence="release"
           fi
@@ -452,6 +467,7 @@ jobs:
           SOURCE_RUN_URL: >-
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           WHEEL_IDS: ${{ needs.plan-release.outputs.wheel_ids }}
+          WHEEL_VERSION: ${{ needs.plan-release.outputs.wheel_version }}
           CONTAINER_IDS: ${{ needs.plan-release.outputs.container_ids }}
           INCLUDE_HELM: ${{ needs.plan-release.outputs.include_helm }}
           HELM_VERSION: ${{ needs.plan-release.outputs.helm_version }}
@@ -469,6 +485,9 @@ jobs:
                 source_sha: process.env.SOURCE_SHA,
                 source_run_url: process.env.SOURCE_RUN_URL,
                 wheel_ids: JSON.parse(process.env.WHEEL_IDS),
+                // Differs from `version` for a pre-release: tagged `1.0.0-rc0`, shipped
+                // as `1.0.0rc0`, and Artifactory holds the latter.
+                wheel_version: process.env.WHEEL_VERSION,
                 container_ids: JSON.parse(process.env.CONTAINER_IDS),
                 helm_id: process.env.INCLUDE_HELM === "true"
                   ? process.env.RELEASE_HELM_ID
@@ -493,6 +512,7 @@ jobs:
           DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
           SOURCE_SHA: ${{ needs.plan-release.outputs.source_sha }}
           RELEASE_TYPE: ${{ needs.plan-release.outputs.release_type }}
+          IS_PRERELEASE: ${{ needs.plan-release.outputs.is_prerelease }}
           RELEASE_LABEL: ${{ needs.plan-release.outputs.release_label }}
           NIGHTLY_TIMESTAMP: ${{ needs.plan-release.outputs.nightly_timestamp }}
           WHEEL_VERSION: ${{ needs.plan-release.outputs.wheel_version }}
@@ -509,7 +529,11 @@ jobs:
               event_type: "stage-wheels",
               client_payload: {
                 ref: process.env.SOURCE_SHA,
-                cadence: process.env.RELEASE_TYPE === "stable" ? "release" : "nightly",
+                cadence: process.env.RELEASE_TYPE !== "stable"
+                  ? "nightly"
+                  : process.env.IS_PRERELEASE === "true"
+                    ? "prerelease"
+                    : "release",
                 release_label: process.env.RELEASE_LABEL,
                 nightly_timestamp: process.env.NIGHTLY_TIMESTAMP,
                 wheel_version: process.env.WHEEL_VERSION,
@@ -691,6 +715,7 @@ jobs:
           DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
           SOURCE_SHA: ${{ needs.plan-release.outputs.source_sha }}
           RELEASE_TYPE: ${{ needs.plan-release.outputs.release_type }}
+          IS_PRERELEASE: ${{ needs.plan-release.outputs.is_prerelease }}
           RELEASE_LABEL: ${{ needs.plan-release.outputs.release_label }}
           HELM_VERSION: ${{ needs.stage-helm.outputs.chart_version }}
         with:
@@ -704,7 +729,11 @@ jobs:
               event_type: "create-release-deployment",
               client_payload: {
                 ref: process.env.SOURCE_SHA,
-                cadence: process.env.RELEASE_TYPE === "stable" ? "release" : "nightly",
+                cadence: process.env.RELEASE_TYPE !== "stable"
+                  ? "nightly"
+                  : process.env.IS_PRERELEASE === "true"
+                    ? "prerelease"
+                    : "release",
                 release_label: process.env.RELEASE_LABEL,
                 helm_version: process.env.HELM_VERSION,
               },
@@ -957,7 +986,9 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.plan-release.outputs.version }}
+          RELEASE_TAG: ${{ needs.plan-release.outputs.release_tag }}
+          TAG_PREFIX: ${{ needs.plan-release.outputs.tag_prefix }}
+          IS_PRERELEASE: ${{ needs.plan-release.outputs.is_prerelease }}
           SOURCE_SHA: ${{ needs.plan-release.outputs.source_sha }}
         run: |
           set -euo pipefail
@@ -994,7 +1025,8 @@ jobs:
 
           notes_start_tag="$(
             {
-              git tag -l | grep -E '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' || true
+              git tag -l "${TAG_PREFIX}*" \
+                | grep -E "^${TAG_PREFIX}(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$" || true
               printf '%s\n' "${RELEASE_TAG}"
             } | sort -V -u | awk -v version="${RELEASE_TAG}" '$0 == version {print previous} {previous = $0}'
           )"
@@ -1003,10 +1035,16 @@ jobs:
             notes_range=(--notes-start-tag "${notes_start_tag}")
           fi
 
+          prerelease_flag=()
+          if [[ "${IS_PRERELEASE}" == "true" ]]; then
+            prerelease_flag=(--prerelease)
+          fi
+
           gh release create "${RELEASE_TAG}" \
             --target "${SOURCE_SHA}" \
             --title "${RELEASE_TAG}" \
             --generate-notes \
+            "${prerelease_flag[@]}" \
             "${notes_range[@]}"
 
   notify-end:
