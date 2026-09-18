@@ -75,10 +75,7 @@ export interface AssistantChatProps {
    * Optional OpenAI-compatible tools for the request.
    */
   tools?: ChatCompletionTool[];
-  /**
-   * Extra HTTP headers sent with every completion request. Memoize it: a fresh
-   * object each render rebuilds the runtime's completion callback.
-   */
+  /** Extra headers sent with every completion request; memoize it. */
   extraHeaders?: Record<string, string>;
   /**
    * Display name used in the composer placeholder.
