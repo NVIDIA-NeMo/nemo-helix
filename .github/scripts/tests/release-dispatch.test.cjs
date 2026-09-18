@@ -11,7 +11,11 @@ test("ACT reports an act-compatible repository_dispatch envelope", async () => {
   await dispatchOrReport({
     core: { info: (message) => logs.push(message) },
     github: {
-      rest: { repos: { createDispatchEvent: async (request) => requests.push(request) } },
+      rest: {
+        repos: {
+          createDispatchEvent: async (request) => requests.push(request),
+        },
+      },
     },
     env: { ACT: "true" },
     eventType: "stage-wheels",
@@ -33,7 +37,11 @@ test("GitHub dispatches the event to the configured destination", async () => {
   await dispatchOrReport({
     core: { info: () => {} },
     github: {
-      rest: { repos: { createDispatchEvent: async (request) => requests.push(request) } },
+      rest: {
+        repos: {
+          createDispatchEvent: async (request) => requests.push(request),
+        },
+      },
     },
     env: { DISPATCH_REPO: "NVIDIA-NeMo/Platform-Deploy" },
     eventType: "release",

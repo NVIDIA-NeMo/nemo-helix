@@ -5,7 +5,13 @@ function eventEnvelope(eventType, clientPayload) {
   return { action: eventType, client_payload: clientPayload };
 }
 
-async function dispatchOrReport({ core, github, env, eventType, clientPayload }) {
+async function dispatchOrReport({
+  core,
+  github,
+  env,
+  eventType,
+  clientPayload,
+}) {
   const envelope = eventEnvelope(eventType, clientPayload);
   if (env.ACT === "true") {
     core.info(
