@@ -47,3 +47,6 @@ dev = [
 asyncio_mode = "auto"
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    "integration: Optimizer integration tests with real local backend orchestration and injected external dependencies",
+]
