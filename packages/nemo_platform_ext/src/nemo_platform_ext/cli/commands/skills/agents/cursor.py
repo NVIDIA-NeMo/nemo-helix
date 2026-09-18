@@ -12,7 +12,10 @@ from nemo_platform_ext.cli.commands.skills.installer import BaseAgentInstaller
 class CursorInstaller(BaseAgentInstaller):
     name = "cursor"
     display_name = "Cursor"
-    supported_scopes = [Scope.PROJECT]
+    supported_scopes = [Scope.PROJECT, Scope.USER]
 
     def get_install_path(self, scope: Scope, project_root: Path, skill_name: str) -> Path:
-        return project_root / ".cursor" / "rules" / installed_skill_name(skill_name) / "SKILL.md"
+        target_name = installed_skill_name(skill_name)
+        if scope == Scope.PROJECT:
+            return project_root / ".cursor" / "skills" / target_name / "SKILL.md"
+        return Path.home() / ".cursor" / "skills" / target_name / "SKILL.md"

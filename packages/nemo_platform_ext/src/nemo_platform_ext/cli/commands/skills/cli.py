@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from nemo_platform_ext.cli.commands.skills.agents.custom import CustomPathInstaller
 from nemo_platform_ext.cli.commands.skills.base import Scope, Skill
 from nemo_platform_ext.cli.commands.skills.registry import (
     DuplicateSkillError,
@@ -266,9 +267,9 @@ def show(
 @app.command("install")
 def install(
     agent: Annotated[
-        str,
-        typer.Option("--agent", "-a", help=f"Agent to install for (required). Supported: {_AGENT_NAMES}"),
-    ],
+        str | None,
+        typer.Option("--agent", "-a", help=f"Agent to install for. Supported: {_AGENT_NAMES}"),
+    ] = None,
     skill: Annotated[
         list[str] | None,
         typer.Option("--skill", "-s", help="Install specific skill(s) only. Can be repeated."),
@@ -289,26 +290,52 @@ def install(
             resolve_path=True,
         ),
     ] = None,
+    path: Annotated[
+        Path | None,
+        typer.Option(
+            "--path",
+            help="Install to a custom skills directory (for example ~/.my-agent/skills)",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+        ),
+    ] = None,
 ) -> None:
     """Install Nemo skill files for an AI coding agent.
 
-    By default, installs all skills to project scope.
+    Use --agent for a known coding agent and --path for any other agent.
     Use --skill to select specific skills, --user for user scope, or
-    --project-dir to explicitly select the project install directory.
+    --project-dir to explicitly select a known agent's project directory.
 
     Examples:
       nemo skills install --agent claude
       nemo skills install --agent claude --user
       nemo skills install --agent claude --skill inference
       nemo skills install --agent claude --project-dir /path/to/project
+      nemo skills install --path ~/.my-agent/skills
     """
-    try:
-        installer = get_installer(agent)
-    except UnsupportedAgentError as e:
-        typer.echo(f"Error: {e}", err=True)
+    if agent is None and path is None:
+        typer.echo("Error: provide --agent or --path.", err=True)
+        raise typer.Exit(code=1)
+    if agent is not None and path is not None:
+        typer.echo("Error: --agent and --path cannot be used together.", err=True)
         raise typer.Exit(code=1)
 
+    if path is not None:
+        installer = CustomPathInstaller()
+    else:
+        assert agent is not None
+        try:
+            installer = get_installer(agent)
+        except UnsupportedAgentError as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(code=1)
+
     scope = Scope.USER if user else Scope.PROJECT
+
+    if path is not None and project_dir is not None:
+        typer.echo("Error: --path and --project-dir cannot be used together.", err=True)
+        raise typer.Exit(code=1)
 
     if scope not in installer.supported_scopes:
         supported = ", ".join(s.value for s in installer.supported_scopes)
@@ -319,7 +346,7 @@ def install(
         raise typer.Exit(code=1)
 
     skills = _resolve_skills(skill)
-    project_root = _find_project_root(project_dir)
+    project_root = path if path is not None else _find_project_root(project_dir)
     result_paths = installer.install(scope, project_root, skills)
     typer.echo(f"Installed {len(skills)} skill(s) for {installer.display_name}:")
     for path in result_paths:

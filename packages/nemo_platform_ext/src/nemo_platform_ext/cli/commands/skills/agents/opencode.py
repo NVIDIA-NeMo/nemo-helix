@@ -17,5 +17,5 @@ class OpenCodeInstaller(BaseAgentInstaller):
     def get_install_path(self, scope: Scope, project_root: Path, skill_name: str) -> Path:
         target_name = installed_skill_name(skill_name)
         if scope == Scope.PROJECT:
-            return project_root / ".opencode" / "commands" / target_name / "SKILL.md"
-        return Path.home() / ".opencode" / "commands" / target_name / "SKILL.md"
+            return project_root / ".opencode" / "skills" / target_name / "SKILL.md"
+        return Path.home() / ".config" / "opencode" / "skills" / target_name / "SKILL.md"

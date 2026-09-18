@@ -28,19 +28,19 @@ def test_name():
 def test_project_install_path(tmp_path: Path):
     installer = OpenCodeInstaller()
     path = installer.get_install_path(Scope.PROJECT, tmp_path, "inference")
-    assert path == tmp_path / ".opencode" / "commands" / "nemo-inference" / "SKILL.md"
+    assert path == tmp_path / ".opencode" / "skills" / "nemo-inference" / "SKILL.md"
 
 
 def test_project_install_path_keeps_existing_nemo_prefix(tmp_path: Path):
     installer = OpenCodeInstaller()
     path = installer.get_install_path(Scope.PROJECT, tmp_path, "nemo-files")
-    assert path == tmp_path / ".opencode" / "commands" / "nemo-files" / "SKILL.md"
+    assert path == tmp_path / ".opencode" / "skills" / "nemo-files" / "SKILL.md"
 
 
 def test_user_install_path(tmp_path: Path):
     installer = OpenCodeInstaller()
     path = installer.get_install_path(Scope.USER, tmp_path, "inference")
-    assert path == Path.home() / ".opencode" / "commands" / "nemo-inference" / "SKILL.md"
+    assert path == Path.home() / ".config" / "opencode" / "skills" / "nemo-inference" / "SKILL.md"
 
 
 def test_install_copies_companion_files(tmp_path: Path):
@@ -55,6 +55,6 @@ def test_install_copies_companion_files(tmp_path: Path):
     skills = {"evaluation": _make_skill("evaluation", source_dir=source_dir)}
     installer.install(Scope.PROJECT, tmp_path, skills)
 
-    skill_dir = tmp_path / ".opencode" / "commands" / "nemo-evaluation"
+    skill_dir = tmp_path / ".opencode" / "skills" / "nemo-evaluation"
     assert (skill_dir / "SKILL.md").exists()
     assert (skill_dir / "resources" / "guide.md").exists()

@@ -27,19 +27,26 @@ def test_name():
 
 def test_supported_scopes():
     installer = CursorInstaller()
-    assert installer.supported_scopes == [Scope.PROJECT]
+    assert installer.supported_scopes == [Scope.PROJECT, Scope.USER]
 
 
 def test_project_install_path(tmp_path: Path):
     installer = CursorInstaller()
     path = installer.get_install_path(Scope.PROJECT, tmp_path, "inference")
-    assert path == tmp_path / ".cursor" / "rules" / "nemo-inference" / "SKILL.md"
+    assert path == tmp_path / ".cursor" / "skills" / "nemo-inference" / "SKILL.md"
 
 
 def test_project_install_path_keeps_existing_nemo_prefix(tmp_path: Path):
     installer = CursorInstaller()
     path = installer.get_install_path(Scope.PROJECT, tmp_path, "nemo-files")
-    assert path == tmp_path / ".cursor" / "rules" / "nemo-files" / "SKILL.md"
+    assert path == tmp_path / ".cursor" / "skills" / "nemo-files" / "SKILL.md"
+
+
+def test_user_install_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    installer = CursorInstaller()
+    path = installer.get_install_path(Scope.USER, tmp_path / "project", "inference")
+    assert path == tmp_path / ".cursor" / "skills" / "nemo-inference" / "SKILL.md"
 
 
 def test_install_creates_files(tmp_path: Path):
@@ -62,6 +69,6 @@ def test_install_copies_companion_files(tmp_path: Path):
     skills = {"evaluation": _make_skill("evaluation", source_dir=source_dir)}
     installer.install(Scope.PROJECT, tmp_path, skills)
 
-    skill_dir = tmp_path / ".cursor" / "rules" / "nemo-evaluation"
+    skill_dir = tmp_path / ".cursor" / "skills" / "nemo-evaluation"
     assert (skill_dir / "SKILL.md").exists()
     assert (skill_dir / "resources" / "llm-judge.md").exists()
