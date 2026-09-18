@@ -434,7 +434,12 @@ jobs:
               process.env.DRY_RUN === "true" && "Mode: dry run (no publishing)",
               `:link: <${process.env.RUN_URL}|Release run #${process.env.RUN_NUMBER}>`,
             );
-            if (process.env.ACT === "true") {
+            // ACT renders notifications by default. To test Slack deliberately,
+            // set ACT_SEND_NOTIFICATIONS=true and supply a test-channel webhook.
+            if (
+              process.env.ACT === "true"
+              && process.env.ACT_SEND_NOTIFICATIONS !== "true"
+            ) {
               core.info(`ACT=true; would send Slack notification:\n${lines.filter((line) => line !== false).join("\n")}`);
               return;
             }
@@ -466,6 +471,13 @@ jobs:
       needs.plan-release.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
+      # This is a fresh job. Load the workflow revision, not the selected
+      # release source, because it owns the dispatch helper.
+      - name: Check out workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
       - name: Dispatch registration workflow
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
@@ -480,7 +492,9 @@ jobs:
           INCLUDE_HELM: ${{ needs.plan-release.outputs.include_helm }}
           HELM_VERSION: ${{ needs.plan-release.outputs.helm_version }}
         with:
-          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          # github-script requires a token input, but ACT only reports the
+          # payload and must not receive the cross-repository dispatch token.
+          github-token: ${{ needs.plan-release.outputs.act == 'true' && 'act-no-dispatch' || secrets.CI_DISPATCH_TOKEN }}
           script: |
             const { dispatchOrReport } = require("./.github/scripts/release-dispatch.cjs");
             await dispatchOrReport({
@@ -514,6 +528,13 @@ jobs:
       needs.plan-release.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
+      # This is a fresh job. Load the workflow revision, not the selected
+      # release source, because it owns the dispatch helper.
+      - name: Check out workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
       - name: Dispatch wheel builds
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
@@ -527,7 +548,9 @@ jobs:
           WHEEL_IDS: ${{ needs.plan-release.outputs.wheel_ids }}
           PUBLISH_NIGHTLY_WHEELS: ${{ env.RELEASE_PUBLISH_NIGHTLY_WHEELS }}
         with:
-          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          # github-script requires a token input, but ACT only reports the
+          # payload and must not receive the cross-repository dispatch token.
+          github-token: ${{ needs.plan-release.outputs.act == 'true' && 'act-no-dispatch' || secrets.CI_DISPATCH_TOKEN }}
           script: |
             const { dispatchOrReport } = require("./.github/scripts/release-dispatch.cjs");
             await dispatchOrReport({
@@ -558,6 +581,13 @@ jobs:
       needs.plan-release.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
+      # This is a fresh job. Load the workflow revision, not the selected
+      # release source, because it owns the dispatch helper.
+      - name: Check out workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
       - name: Dispatch container builds
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
@@ -567,7 +597,9 @@ jobs:
           RELEASE_LABEL: ${{ needs.plan-release.outputs.release_label }}
           CONTAINER_IDS: ${{ needs.plan-release.outputs.container_ids }}
         with:
-          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          # github-script requires a token input, but ACT only reports the
+          # payload and must not receive the cross-repository dispatch token.
+          github-token: ${{ needs.plan-release.outputs.act == 'true' && 'act-no-dispatch' || secrets.CI_DISPATCH_TOKEN }}
           script: |
             const { dispatchOrReport } = require("./.github/scripts/release-dispatch.cjs");
             await dispatchOrReport({
@@ -720,6 +752,13 @@ jobs:
       needs.plan-release.outputs.act != 'true'
     runs-on: ubuntu-latest
     steps:
+      # This is a fresh job. Load the workflow revision, not the selected
+      # release source, because it owns the dispatch helper.
+      - name: Check out workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
       - name: Dispatch deployment creation
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
@@ -730,7 +769,9 @@ jobs:
           RELEASE_LABEL: ${{ needs.plan-release.outputs.release_label }}
           HELM_VERSION: ${{ needs.stage-helm.outputs.chart_version }}
         with:
-          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          # github-script requires a token input, but ACT only reports the
+          # payload and must not receive the cross-repository dispatch token.
+          github-token: ${{ needs.plan-release.outputs.act == 'true' && 'act-no-dispatch' || secrets.CI_DISPATCH_TOKEN }}
           script: |
             const { dispatchOrReport } = require("./.github/scripts/release-dispatch.cjs");
             await dispatchOrReport({
