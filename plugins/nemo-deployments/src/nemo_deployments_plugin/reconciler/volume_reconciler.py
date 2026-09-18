@@ -69,7 +69,7 @@ class VolumeReconciler:
         # retries, otherwise the entity disappears while the PVC is orphaned.
         if update.status != "RELEASED":
             logger.warning(
-                "Backend delete for volume %s reported %s — will retry: %s",
+                "Backend delete for volume %s did not succeed (reported %s) — will retry: %s",
                 volume_id,
                 update.status,
                 update.status_message,
