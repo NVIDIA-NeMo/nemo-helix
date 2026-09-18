@@ -109,8 +109,8 @@ def check_file(path: Path) -> list[Violation]:
 
     metadata = data.get("metadata")
     author = metadata.get("author") if isinstance(metadata, dict) else None
-    if not author or not str(author).strip():
-        violations.append(Violation(path, "missing `metadata.author`"))
+    if not isinstance(author, str) or not author.strip():
+        violations.append(Violation(path, "missing or invalid `metadata.author` (must be a non-empty string)"))
 
     tools = data.get("allowed-tools")
     if not isinstance(tools, str) or not tools.strip():

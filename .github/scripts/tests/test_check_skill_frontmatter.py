@@ -114,6 +114,25 @@ def test_check_file_flags_missing_author(tmp_path):
     assert "metadata.author" in violations[0].issue
 
 
+@pytest.mark.parametrize(
+    "author_yaml",
+    [
+        "42",
+        "true",
+        "[team@example.com]",
+        "{email: team@example.com}",
+        '""',
+        '"   "',
+    ],
+)
+def test_check_file_flags_non_string_or_empty_author(tmp_path, author_yaml):
+    skill = tmp_path / "SKILL.md"
+    skill.write_text(VALID_FRONTMATTER.replace("someone@example.com", author_yaml))
+    violations = check_file(skill)
+    assert len(violations) == 1
+    assert "metadata.author" in violations[0].issue
+
+
 def test_check_file_flags_missing_tools(tmp_path):
     skill = tmp_path / "SKILL.md"
     skill.write_text(MISSING_TOOLS_FRONTMATTER)
