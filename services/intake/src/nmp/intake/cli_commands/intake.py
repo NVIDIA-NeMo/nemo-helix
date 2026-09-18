@@ -919,10 +919,9 @@ def create_evaluator_results(
     nemo intake evaluator-results create <name> --<option> "value"
     """
     # Read base input (optional if all fields provided via flags)
+    input_payload = {}
     if input_file or input_data:
         input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
-    else:
-        input_payload = {}
 
     # Apply CLI flag overrides (flags take precedence)
     if workspace is not None:

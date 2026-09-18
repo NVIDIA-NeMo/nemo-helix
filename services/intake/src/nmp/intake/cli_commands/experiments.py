@@ -40,8 +40,12 @@ from nemo_platform_plugin.intake.types import (
     ListExperimentsQueryParams,
 )
 from nmp.intake.cli_commands.common import list_query_params
+from pydantic import TypeAdapter
 
 app = create_typer_app(name="experiments", help="Manage experiments")
+
+# --input-data may carry exist_ok as a JSON/YAML string; parse it like the server would.
+_BOOL = TypeAdapter(bool)
 
 _COLUMN_LAYOUT_HELP = (
     "A saved table layout for a group's evaluations list: column order and which columns are hidden.Column ids "
@@ -169,10 +173,11 @@ def create_experiments(
     body = build_request_body(
         ExperimentCreateRequest, input_payload, exclude={"workspace", "exist_ok"}, command_name="experiments create"
     )
+    resolved_exist_ok = _BOOL.validate_python(input_payload.get("exist_ok", False))
     kwargs = build_kwargs(
         workspace=input_payload.get("workspace"),
         body=body,
-        exist_ok=input_payload.get("exist_ok"),
+        exist_ok=resolved_exist_ok or None,
     )
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
