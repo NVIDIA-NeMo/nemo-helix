@@ -23,7 +23,9 @@ compatibility: nemo-platform >= 0.1.0; writes one markdown file under agents/; u
 maturity: active
 license: Apache-2.0
 user-invocable: true
-allowed-tools: [Read, Write, Edit, Bash]
+allowed-tools: Read, Write, Edit, Bash
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # NeMo Platform agent Ethos

@@ -20,7 +20,9 @@ compatibility: nemo-platform >= 0.1.0; read-only; loads references/benchmark_cac
 maturity: active
 license: Apache-2.0
 user-invocable: true
-allowed-tools: [Read, Bash]
+allowed-tools: Read, Bash
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # NeMo Platform model selection
