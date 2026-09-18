@@ -185,6 +185,12 @@ class RetrievalConfig(BaseModel):
         ),
     )
 
+    # Contrastive objective
+    do_distributed_inbatch_negative: bool = Field(
+        default=False,
+        description=("Use other queries' passages in the global batch as extra negatives. Ignored for cross_encoder."),
+    )
+
     # Tokenization configuration
     query_max_length: int = Field(default=512, description="Maximum token length for query tokenization")
     passage_max_length: int = Field(default=512, description="Maximum token length for passage tokenization")

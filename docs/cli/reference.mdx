@@ -9596,6 +9596,7 @@ nemo customization automodel.jobs submit [OPTIONS]
 * `--training.retrieval.train-n-passages <INTEGER>`: Override `training.retrieval.train_n_passages` in the spec.
 * `--training.retrieval.eval-negative-size <INTEGER>`: Override `training.retrieval.eval_negative_size` in the spec.
 * `--training.retrieval.do-gradient-checkpointing`: Override `training.retrieval.do_gradient_checkpointing` in the spec.
+* `--training.retrieval.do-distributed-inbatch-negative`: Score each query against every passage in the global batch rather than only its own train_n_passages. Ignored for cross_encoder.
 * `--training.retrieval.query-max-length <INTEGER>`: Override `training.retrieval.query_max_length` in the spec.
 * `--training.retrieval.passage-max-length <INTEGER>`: Override `training.retrieval.passage_max_length` in the spec.
 * `--training.retrieval.query-prefix`: Collator-side prefix; BiEncoderCollator adds a space.

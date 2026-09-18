@@ -68,6 +68,7 @@ def test_adapter_plumbs_retrieval_spec() -> None:
                     "train_n_passages": 7,
                     "query_prefix": "query:",
                     "passage_prefix": "passage:",
+                    "do_distributed_inbatch_negative": True,
                     "export": {"dimensions": True, "opset": 18},
                 },
             },
@@ -79,6 +80,7 @@ def test_adapter_plumbs_retrieval_spec() -> None:
     assert spec.training.retrieval.train_n_passages == 7
     assert spec.training.retrieval.query_prefix == "query:"
     assert spec.training.retrieval.passage_prefix == "passage:"
+    assert spec.training.retrieval.do_distributed_inbatch_negative is True
     assert spec.training.retrieval.export is not None
     assert spec.training.retrieval.export.dimensions is True
     assert spec.training.retrieval.export.opset == 18

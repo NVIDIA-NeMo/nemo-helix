@@ -158,6 +158,7 @@ def test_compile_training_step_carries_retrieval_config() -> None:
                 query_prefix="query: ",
                 passage_prefix="passage: ",
                 query_max_length=256,
+                do_distributed_inbatch_negative=True,
                 export=ExportParams(primary="hf", opset=18),
             ),
         ),
@@ -171,6 +172,7 @@ def test_compile_training_step_carries_retrieval_config() -> None:
     assert cfg["retrieval"]["query_prefix"] == "query: "
     assert cfg["retrieval"]["passage_prefix"] == "passage: "
     assert cfg["retrieval"]["query_max_length"] == 256
+    assert cfg["retrieval"]["do_distributed_inbatch_negative"] is True
     assert cfg["retrieval"]["export"]["primary"] == "hf"
     assert cfg["retrieval"]["export"]["opset"] == 18
     assert cfg["training"]["checkpoint_selection"] == "both"
