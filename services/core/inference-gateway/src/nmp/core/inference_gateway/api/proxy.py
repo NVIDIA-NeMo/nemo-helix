@@ -1031,12 +1031,8 @@ async def virtual_model_proxy(
             parse_adapters_suffix(body_model) if isinstance(body_model, str) and "&adapters/" in body_model else None
         )
         if adapter_parts is not None:
-            # Graft the request's adapter segments onto the VM's base entity. The body
-            # model may be bare (no workspace, which comes from the URL path), so its
-            # adapter parts are recovered with parse_adapters_suffix. default_model_entity
-            # is the base id and is used verbatim as the prefix (as before) - we do NOT
-            # parse it: it is an unrestricted VirtualModel field that need not be
-            # workspace-qualified, and parsing it would add a new raise/500 path here.
+            # Splice the request's adapter onto the VM's base entity. default_model_entity
+            # is used verbatim as the prefix (not parsed - it's an unrestricted field).
             # Example: body ``myvm&adapters/a-ws/a-name`` + default ``base-ws/base`` ->
             # ``base-ws/base&adapters/a-ws/a-name``.
             _, adapter_workspace, adapter_name = adapter_parts

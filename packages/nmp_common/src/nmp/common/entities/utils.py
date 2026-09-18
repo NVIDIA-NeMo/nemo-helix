@@ -324,10 +324,9 @@ class ModelEntityId:
 
     This is a *composition* of :func:`parse_model_entity_ref` (the first-``/``-only split
     that yields ``(workspace, name)`` while preserving a composite ``name``) plus a
-    decomposition of that ``name`` on :data:`ADAPTERS_INFIX`. It deliberately does **not**
-    extend :class:`ParsedEntityRef`: that is the platform-wide entity ref (filesets,
-    guardrails, agents, secrets, …) whose own parser rejects composites, so LoRA/adapter
-    semantics have no business on it.
+    decomposition of that ``name`` on :data:`ADAPTERS_INFIX`. It composes
+    :class:`ParsedEntityRef` rather than extending it, since that type's parser rejects
+    composite names.
 
     Fields:
         workspace: The base model's workspace (the segment before the first ``/``).
@@ -397,6 +396,7 @@ class ModelEntityId:
                 f"invalid LoRA composite model entity id {identifier!r}; expected "
                 "'workspace/base&adapters/adapter_workspace/adapter_name' with non-empty segments"
             )
+        # parse_adapters_suffix returns a 3-tuple or None; the None case is handled above.
         base_name, adapter_workspace, adapter_name = parts
         return cls(
             workspace=ref.workspace,

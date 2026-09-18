@@ -268,12 +268,17 @@ def test_parse_adapters_suffix_rejects_surplus_segment():
     assert parse_adapters_suffix("base&adapters/ws/name/extra") is None
 
 
-def test_model_entity_id_rejects_partial_adapter_state():
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"adapter_workspace": "a-ws"},  # workspace without name
+        {"adapter_name": "a-name"},  # name without workspace
+    ],
+)
+def test_model_entity_id_rejects_partial_adapter_state(kwargs: dict[str, str]):
     """Constructing with only one adapter field set is rejected (all-or-nothing)."""
     with pytest.raises(ValueError, match="provided together"):
-        ModelEntityId(workspace="ws", base_name="base", adapter_workspace="a-ws")
-    with pytest.raises(ValueError, match="provided together"):
-        ModelEntityId(workspace="ws", base_name="base", adapter_name="a-name")
+        ModelEntityId(workspace="ws", base_name="base", **kwargs)
 
 
 def test_model_entity_id_rejects_empty_adapter_fields():
