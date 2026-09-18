@@ -48,9 +48,9 @@ app = create_typer_app(name="experiments", help="Manage experiments")
 _BOOL = TypeAdapter(bool)
 
 _COLUMN_LAYOUT_HELP = (
-    "A saved table layout for a group's evaluations list: column order and which columns are hidden.Column ids "
+    "A saved table layout for a group's evaluations list: column order and which columns are hidden. Column ids "
     "are Studio's and cannot be enumerated here — the table builds a column per evaluator and metadata key found "
-    "in the rows — so ids are stored and echoed back unvalidated.Visibility is stored as the _hidden_ ids rather "
+    "in the rows — so ids are stored and echoed back unvalidated. Visibility is stored as the _hidden_ ids rather "
     "than a map over every column, so a column that appears later (a new evaluator, a new metadata key) shows up "
     "by default. (JSON string)"
 )
@@ -61,7 +61,7 @@ _DEFAULT_SORT_HELP = (
     "evaluations list `sort` param does; clients apply it as the list `sort` param."
 )
 _PARETO_HELP = (
-    "Default X/Y metrics for a group's cost-vs-accuracy Pareto view.Metric ids use the same vocabulary as the "
+    "Default X/Y metrics for a group's cost-vs-accuracy Pareto view. Metric ids use the same vocabulary as the "
     "evaluations list sort/filter fields — `cost_usd`, `latency_ms`, or `evaluators.<name>`. Defaults to cost (x) "
     "vs latency (y): both exist for every group, so the chart always has something to render before anyone "
     "customizes it. (JSON string)"
