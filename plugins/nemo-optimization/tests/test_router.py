@@ -86,13 +86,19 @@ def test_dispatch_uses_executed_trial_count_for_phase_range(ctx: JobContext) -> 
     assert result["trial_number_range"] == {"start": 0, "end_exclusive": 1, "count": 1}
 
 
-def test_dispatch_prompt_enabled_returns_failed_phase_result(ctx: JobContext) -> None:
+def test_dispatch_prompt_enabled_without_eval_returns_failed_phase(ctx: JobContext) -> None:
     payload = {
         "schema_version": "fabric.agent/v1alpha1",
         "models": {"prompt_optimizer": {"provider": "openai", "model": "gpt-5-mini"}},
         "instructions": {"system": {"content": "Base prompt."}},
         "optimizer": {
-            "prompt": {"enabled": True, "backend": "ga", "model": "prompt_optimizer"},
+            "prompt": {
+                "enabled": True,
+                "backend": "ga",
+                "model": "prompt_optimizer",
+                "population_size": 3,
+                "generations": 1,
+            },
             "eval_metrics": {
                 "average_score": {"direction": "maximize", "weight": 1.0},
             },
@@ -111,7 +117,8 @@ def test_dispatch_prompt_enabled_returns_failed_phase_result(ctx: JobContext) ->
     assert result["status"] == "failed"
     assert result["backend"] == "ga"
     assert result["phase"] == "prompt"
-    assert "not supported yet" in result["error"]
+    assert result["executed_trials"] == 0
+    assert "requires payload.eval" in result["error"]
     assert (ctx.storage.persistent / "results" / "optimizer_results" / "prompt_phase_failure.json").is_file()
 
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import pytest
+from nemo_optimization.backends.ga.config import parse_ga_prompt_optimizer_config
 from nemo_optimization.backends.optuna.search_space import (
     SearchSpaceSpec,
     grid_trial_count,
@@ -197,6 +198,134 @@ def test_prompt_search_space_requires_boolean_is_prompt() -> None:
                 }
             }
         )
+
+
+def test_prompt_optimizer_config_requires_model_reference() -> None:
+    payload = {
+        "optimizer": {
+            "prompt": {"enabled": True},
+            "search_space": {
+                "system_prompt": {
+                    "path": "instructions.system.content",
+                    "is_prompt": True,
+                    "purpose": "Answer accurately.",
+                }
+            },
+        },
+        "instructions": {"system": {"content": "Base prompt."}},
+        "models": {"prompt_optimizer": {"provider": "openai", "model": "gpt-5-mini"}},
+    }
+
+    with pytest.raises(ValueError, match="prompt.model"):
+        parse_ga_prompt_optimizer_config(payload)
+
+
+def test_prompt_optimizer_config_rejects_non_string_backend() -> None:
+    payload = {
+        "optimizer": {
+            "prompt": {"enabled": True, "backend": 123, "model": "prompt_optimizer"},
+            "search_space": {
+                "system_prompt": {
+                    "path": "instructions.system.content",
+                    "is_prompt": True,
+                    "purpose": "Answer accurately.",
+                }
+            },
+        },
+        "instructions": {"system": {"content": "Base prompt."}},
+        "models": {"prompt_optimizer": {"provider": "openai", "model": "gpt-5-mini"}},
+    }
+
+    with pytest.raises(ValueError, match="prompt.backend"):
+        parse_ga_prompt_optimizer_config(payload)
+
+
+def test_prompt_optimizer_config_validates_path_resolves_to_string() -> None:
+    payload = {
+        "optimizer": {
+            "prompt": {"enabled": True, "model": "prompt_optimizer"},
+            "eval_metrics": {"score": {"direction": "maximize"}},
+            "search_space": {
+                "system_prompt": {
+                    "path": "instructions.system.content",
+                    "is_prompt": True,
+                    "purpose": "Answer accurately.",
+                }
+            },
+        },
+        "instructions": {"system": {"content": "Base prompt."}},
+        "models": {"prompt_optimizer": {"provider": "openai", "model": "gpt-5-mini"}},
+    }
+
+    config = parse_ga_prompt_optimizer_config(payload)
+
+    assert config.backend == "ga"
+    assert config.model == "prompt_optimizer"
+    assert config.search_space["system_prompt"].path == "instructions.system.content"
+
+
+def test_prompt_optimizer_config_infers_required_variables_from_initial_prompt() -> None:
+    payload = {
+        "optimizer": {
+            "prompt": {"enabled": True, "model": "prompt_optimizer"},
+            "eval_metrics": {"score": {"direction": "maximize"}},
+            "search_space": {
+                "system_prompt": {
+                    "path": "instructions.system.content",
+                    "is_prompt": True,
+                    "purpose": "Answer accurately.",
+                }
+            },
+        },
+        "instructions": {"system": {"content": "Answer {{ user }} about {topic}."}},
+        "models": {"prompt_optimizer": {"provider": "openai", "model": "gpt-5-mini"}},
+    }
+
+    config = parse_ga_prompt_optimizer_config(payload)
+
+    assert config.search_space["system_prompt"].required_variables == ("topic", "user")
+
+
+def test_prompt_optimizer_config_validates_explicit_initial_prompt_variables() -> None:
+    payload = {
+        "optimizer": {
+            "prompt": {"enabled": True, "model": "prompt_optimizer"},
+            "search_space": {
+                "system_prompt": {
+                    "path": "instructions.system.content",
+                    "is_prompt": True,
+                    "purpose": "Answer accurately.",
+                    "initial_prompt": "Answer plainly.",
+                    "required_variables": ["topic"],
+                }
+            },
+        },
+        "instructions": {"system": {"content": "Payload prompt {topic}."}},
+        "models": {"prompt_optimizer": {"provider": "openai", "model": "gpt-5-mini"}},
+    }
+
+    with pytest.raises(ValueError, match="missing required variable"):
+        parse_ga_prompt_optimizer_config(payload)
+
+
+def test_prompt_optimizer_config_rejects_non_string_prompt_path() -> None:
+    payload = {
+        "optimizer": {
+            "prompt": {"enabled": True, "model": "prompt_optimizer"},
+            "search_space": {
+                "system_prompt": {
+                    "path": "instructions.system",
+                    "is_prompt": True,
+                    "purpose": "Answer accurately.",
+                }
+            },
+        },
+        "instructions": {"system": {"content": "Base prompt."}},
+        "models": {"prompt_optimizer": {"provider": "openai", "model": "gpt-5-mini"}},
+    }
+
+    with pytest.raises(ValueError, match="must resolve to a string"):
+        parse_ga_prompt_optimizer_config(payload)
 
 
 def test_parse_search_space_rejects_unknown_type() -> None:
