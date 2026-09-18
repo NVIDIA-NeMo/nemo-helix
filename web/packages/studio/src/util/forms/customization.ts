@@ -264,7 +264,12 @@ export const formToAutomodelCreate = (f: CustomizationFormFields): AutomodelJobs
       integrations: cleanIntegrations(f.automodel.integrations),
       training: {
         ...training,
-        lora: usesLora ? training.lora : undefined,
+        // The backend merges when `finetuning_type` is lora_merged *or* `lora.merge` is
+        // set, so the two say the same thing. The form only offers the first, and sends
+        // the second to match rather than letting a cloned job's stale flag decide.
+        lora: usesLora
+          ? { ...training.lora, merge: training.finetuning_type === 'lora_merged' }
+          : undefined,
         teacher_model: isDistillation ? training.teacher_model || undefined : undefined,
         teacher_precision: isDistillation ? training.teacher_precision : undefined,
         distillation_ratio: isDistillation ? training.distillation_ratio : undefined,
@@ -478,12 +483,20 @@ const stripNulls = <T>(value: T): T => {
 
 export const jobToFormFields = (job: CustomizationJob): CustomizationFormFields => {
   if (isAutomodelJob(job)) {
+    const spec = stripNulls(job.spec) as AutomodelJobInput;
+    // A job submitted outside Studio can ask to merge either way round. Both merge, and
+    // the form only shows `finetuning_type`, so a job carrying `lora.merge` has to come
+    // back as lora_merged or it would replay as an unmerged adapter.
+    const merges = spec.training?.lora?.merge === true;
     return {
       ...FORM_DEFAULTS,
       outputName: generateDefaultName(),
       description: job.description ?? '',
       backend: 'automodel',
-      automodel: stripNulls(job.spec) as AutomodelJobInput,
+      automodel:
+        merges && spec.training.finetuning_type === 'lora'
+          ? { ...spec, training: { ...spec.training, finetuning_type: 'lora_merged' } }
+          : spec,
     };
   }
   if (isRlJob(job)) {

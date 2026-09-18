@@ -192,6 +192,27 @@ describe('formToAutomodelCreate', () => {
     expect(result.spec.output).toEqual({ name: '', description: undefined });
   });
 
+  it('sets lora.merge from the fine-tuning type, the only control that offers it', () => {
+    // The backend merges when finetuning_type is lora_merged *or* lora.merge is set. The
+    // form shows only the first, so the second has to follow it rather than persist.
+    const merged = validAutomodel();
+    merged.automodel.training.finetuning_type = 'lora_merged';
+    expect(formToAutomodelCreate(merged).spec.training.lora?.merge).toBe(true);
+
+    const plain = validAutomodel();
+    plain.automodel.training.finetuning_type = 'lora';
+    expect(formToAutomodelCreate(plain).spec.training.lora?.merge).toBe(false);
+  });
+
+  it('clears a stale merge flag carried in from a cloned job', () => {
+    // Without the switch there is nothing to turn this off by hand, so a clone of a job
+    // that merged would otherwise keep merging however the radio is set.
+    const data = validAutomodel();
+    data.automodel.training.finetuning_type = 'lora';
+    data.automodel.training.lora = { ...data.automodel.training.lora, merge: true };
+    expect(formToAutomodelCreate(data).spec.training.lora?.merge).toBe(false);
+  });
+
   it('drops the whole distillation block for an sft job', () => {
     const data = validAutomodel();
     data.automodel.training.training_type = 'sft';
@@ -429,6 +450,41 @@ describe('jobToFormFields', () => {
     expect(fields.backend).toBe('automodel');
     expect(fields.automodel.model).toBe(customizationJob1.spec.model);
     expect(fields.description).toBe(customizationJob1.description);
+  });
+
+  it('shows a job that merged via lora.merge as LoRA (Merged)', () => {
+    // The CLI and API accept finetuning_type 'lora' with lora.merge set, which merges
+    // just the same. The form has no switch for it, so replaying the spec verbatim would
+    // present a merged job as an unmerged adapter and clone it as one.
+    const job = {
+      ...customizationJob1,
+      spec: {
+        ...customizationJob1.spec,
+        training: {
+          ...customizationJob1.spec.training,
+          finetuning_type: 'lora',
+          lora: { ...customizationJob1.spec.training?.lora, merge: true },
+        },
+      },
+    } as typeof customizationJob1;
+
+    expect(jobToFormFields(job).automodel.training.finetuning_type).toBe('lora_merged');
+  });
+
+  it('leaves an unmerged LoRA job on the plain LoRA type', () => {
+    const job = {
+      ...customizationJob1,
+      spec: {
+        ...customizationJob1.spec,
+        training: {
+          ...customizationJob1.spec.training,
+          finetuning_type: 'lora',
+          lora: { ...customizationJob1.spec.training?.lora, merge: false },
+        },
+      },
+    } as typeof customizationJob1;
+
+    expect(jobToFormFields(job).automodel.training.finetuning_type).toBe('lora');
   });
 
   it('maps an unsloth job onto the unsloth backend', () => {
