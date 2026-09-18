@@ -64,9 +64,6 @@ outputs:
   ngc-metadata:
     description: "'true' if NGC metadata scripts, tests, or assets changed"
     value: ${{ steps.filter.outputs.ngc-metadata }}
-  skill-frontmatter:
-    description: "'true' if any SKILL.md, the frontmatter checker, or its CI wiring changed"
-    value: ${{ steps.filter.outputs.skill-frontmatter }}
   cpu-smoke:
     description: "'true' if CPU smoke image or Kubernetes smoke test inputs changed"
     value: ${{ steps.filter.outputs.deps == 'true' || steps.filter.outputs.docker == 'true' || steps.filter.outputs.docker-scripts == 'true' || steps.filter.outputs.helm == 'true' || steps.filter.outputs.openapi == 'true' || steps.filter.outputs.python-runtime == 'true' || steps.filter.outputs.web-studio == 'true' || steps.filter.outputs.k8s-smoke == 'true' }}
@@ -174,12 +171,6 @@ runs:
             - '.github/scripts/ngc_metadata.py'
             - '.github/scripts/tests/test_ngc_metadata.py'
             - '.github/assets/ngc/**'
-          skill-frontmatter:
-            - '**/SKILL.md'
-            - '.github/scripts/check_skill_frontmatter.py'
-            - '.github/scripts/tests/test_check_skill_frontmatter.py'
-            - '.github/workflows/ci.yaml'
-            - '.github/actions/changes/action.yaml'
           auth-idp:
             - 'conftest.py'
             - 'pytest.ini'
