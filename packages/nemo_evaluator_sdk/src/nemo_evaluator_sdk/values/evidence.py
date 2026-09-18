@@ -368,6 +368,33 @@ def read_atif(path: Path) -> Trajectory | None:
         return None
 
 
+def read_otlp_spans(path: Path) -> list[ResourceSpans] | None:
+    """The OTLP trace at ``path``, or ``None`` if it is absent, unreadable, or not OTLP.
+
+    The tolerant counterpart to :class:`OTLPTraceHandle`, for callers assembling a trial rather than
+    scoring one: a trace that will not parse costs them a field, not the trial.
+    """
+    try:
+        return parse_resource_spans(resource_spans_from_text(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError) as error:
+        logger.warning("Ignoring unreadable OTLP trace %s: %s", path, error)
+        return None
+
+
+def final_agent_message(trajectory: Trajectory | None) -> str | None:
+    """The agent's last message in an ATIF trajectory, which is its answer for the trial.
+
+    Only the *last* agent step can be the answer. An earlier one is intermediate reasoning, so an
+    agent that ends on an empty message has produced no answer rather than the previous one.
+    """
+    if trajectory is None:
+        return None
+    for step in reversed(trajectory.steps):
+        if step.source == "agent":
+            return step.message or None
+    return None
+
+
 class OTLPTraceHandle:
     """Lazily loaded read handle over OTLP/JSON (JSONL or a single object)."""
 

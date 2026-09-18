@@ -30,7 +30,10 @@ from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTas
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus
 from nemo_evaluator_sdk.values.common import SecretRef
 
+from packages.nemo_evaluator_sdk.tests.agent_eval._otlp_testkit import write_answer_trace
+
 _CONFIG = {"metadata": {"name": "eval"}, "harness": {"adapter_id": "nvidia.fabric.hermes"}}
+_DEFAULT_OUTPUT = {"response": "fixed the bug"}
 
 
 @pytest.fixture(autouse=True)
@@ -63,6 +66,8 @@ class _FakeProvider:
         write_result: bool = True,
         result_bytes: bytes | None = None,
         atif: bool = True,
+        output: object = _DEFAULT_OUTPUT,
+        otlp_answer: str | None = None,
     ) -> None:
         self._status = status
         self._error_type = error_type  # exec sandbox-runtime failure (e.g. "timeout")
@@ -70,6 +75,8 @@ class _FakeProvider:
         self._write_result = write_result  # False => the CLI crashed before writing a RunResult
         self._result_bytes = result_bytes  # raw override for fabric_result.json (non-object / binary)
         self._atif = atif
+        self._output = output  # None => an adapter whose RunResult carries no output payload
+        self._otlp_answer = otlp_answer  # the answer Relay captured, when the run exported a trace
         self.seeded: dict[str, str] = {}
         self.env: dict[str, str] = {}
         self.image: str | None = None
@@ -109,7 +116,7 @@ class _FakeProvider:
         (out / "workspace" / "fib.py").write_text("def fib(n): return n", encoding="utf-8")
         envelope = {
             "status": self._status,
-            "output": {"response": "fixed the bug"},
+            "output": self._output,
             "error": None if self._status == "succeeded" else {"stage": "run", "code": "E", "message": "nope"},
         }
         (out / "fabric_result.json").write_text(json.dumps(envelope), encoding="utf-8")
@@ -118,6 +125,8 @@ class _FakeProvider:
             run_dir = out / "relay" / "runtime-123-4"
             run_dir.mkdir(parents=True, exist_ok=True)
             (run_dir / "trajectory-abc.atif.json").write_text('{"steps": []}', encoding="utf-8")
+        if self._otlp_answer is not None:
+            write_answer_trace(out, self._otlp_answer)
 
     async def download_file(self, handle: SandboxHandle, source_path: str, target_path: Path) -> None:
         return None
@@ -177,6 +186,23 @@ async def test_success_response_is_output_payload_not_full_envelope(tmp_path: Pa
     (trial,) = await _run(_runtime(provider), [_task()], tmp_path)
     assert trial.output is not None
     assert trial.output.response == {"response": "fixed the bug"}  # output payload only, not the envelope
+
+
+async def test_the_captured_trace_answers_when_the_harness_reports_no_output(tmp_path: Path) -> None:
+    # Otherwise the same SDK call returns an answer for a local run and an empty one service-side.
+    provider = _FakeProvider(output=None, otlp_answer="fixed the bug")
+    (trial,) = await _run(_runtime(provider), [_task()], tmp_path)
+
+    assert trial.output is not None
+    assert trial.output.output_text == "fixed the bug"
+    assert trial.output.response is None
+
+
+async def test_the_harness_output_wins_over_the_captured_trace(tmp_path: Path) -> None:
+    provider = _FakeProvider(otlp_answer="from the trace")
+    (trial,) = await _run(_runtime(provider), [_task()], tmp_path)
+
+    assert trial.output is not None and trial.output.output_text == "fixed the bug"
 
 
 async def test_success_trial_stamps_agent_ok_true(tmp_path: Path) -> None:
