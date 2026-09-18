@@ -118,6 +118,7 @@ export const RewardEnvironmentSection: FC = () => {
       <Stack gap="density-lg">
         <FormField
           slotLabel="Environment"
+          slotInfo="NeMo Gym package that runs the rollouts and scores them. Filesets uploaded with purpose 'environment' appear here."
           slotError={fieldError?.message}
           status={fieldError ? 'error' : undefined}
         >
