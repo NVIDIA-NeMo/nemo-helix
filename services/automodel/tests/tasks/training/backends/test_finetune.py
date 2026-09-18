@@ -12,9 +12,11 @@ that first -- otherwise the prefix arrives twice.
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import sys
 from collections.abc import Iterator
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 from unittest.mock import MagicMock
@@ -178,7 +180,7 @@ def test_the_default_keeps_the_diagnostic_metrics_and_drops_the_counters(finetun
 
     class _Reporter:
         def __init__(self) -> None:
-            self.reports: list[dict[str, object]] = []
+            self.reports: list[dict[str, Any]] = []
 
         def fetch_current_metrics(self) -> dict[str, list[dict[str, float]]]:
             return {}
@@ -186,7 +188,7 @@ def test_the_default_keeps_the_diagnostic_metrics_and_drops_the_counters(finetun
         def configure_progress_tracking(self, max_steps: int, num_epochs: int) -> None:
             pass
 
-        def report_running(self, phase: str, **details: object) -> None:
+        def report_running(self, phase: str, **details: Any) -> None:
             self.reports.append(details)
 
         def close(self) -> None:
@@ -367,13 +369,23 @@ class _Sample:
         self.step, self.epoch, self.metrics = step, epoch, metrics
 
 
+class _CheckpointerConfig:
+    def __init__(self, checkpoint_dir: str) -> None:
+        self.checkpoint_dir = checkpoint_dir
+
+
+class _Checkpointer:
+    def __init__(self, checkpoint_dir: str) -> None:
+        self.config = _CheckpointerConfig(checkpoint_dir)
+
+
 class _FakeRecipe:
     """A recipe with the surface the wrapper touches, and nothing else."""
 
-    def __init__(self, cfg: object | None = None) -> None:
+    def __init__(self, cfg: object | None = None, checkpoint_dir: str = "/ckpt") -> None:
         self.cfg = cfg if cfg is not None else {}
         self.step_scheduler = _Scheduler()
-        self.checkpointer = type("C", (), {"config": type("D", (), {"checkpoint_dir": "/ckpt"})()})()
+        self.checkpointer = _Checkpointer(checkpoint_dir)
         self.dist_env = None
         self.calls: list[str] = []
 
@@ -514,8 +526,10 @@ def test_the_wrapper_states_the_schedule_and_closes_the_callback(
     closed: list[bool] = []
     monkeypatch.setattr(wrapper.callback, "close", lambda: closed.append(True))
 
-    recipe.run_train_validation_loop = lambda: (_ for _ in ()).throw(RuntimeError("cuda oom"))
-    wrapper._recipe.run_train_validation_loop = recipe.run_train_validation_loop
+    def _raise_cuda_oom() -> None:
+        raise RuntimeError("cuda oom")
+
+    monkeypatch.setattr(wrapper._recipe, "run_train_validation_loop", _raise_cuda_oom)
     with pytest.raises(RuntimeError, match="cuda oom"):
         wrapper.run_train_validation_loop()
 
@@ -536,3 +550,31 @@ def test_the_wrapper_reports_a_checkpoint_one_based_with_its_path(
     assert saved[-1]["step"] == 20
     assert saved[-1]["epoch"] == 2
     assert saved[-1]["checkpoint_path"] == "/ckpt"
+
+
+def test_the_wrapper_writes_validation_stats_for_each_checkpoint(
+    finetune: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    recipe = _FakeRecipe(checkpoint_dir=str(tmp_path))
+    _wrapper(finetune, monkeypatch, recipe)
+
+    recipe.save_checkpoint(epoch=0, step=9, train_loss=0.6, val_loss={"default": 0.5})
+    recipe.save_checkpoint(epoch=1, step=19, train_loss=0.4, val_loss={"default": 0.3})
+
+    stats = json.loads((tmp_path / "checkpoint_stats.json").read_text())
+    assert stats["checkpoints"] == [
+        {
+            "epoch": 1,
+            "step": 10,
+            "train_loss": 0.6,
+            "val_loss": {"default": 0.5},
+            "best_metric_key": "default",
+        },
+        {
+            "epoch": 2,
+            "step": 20,
+            "train_loss": 0.4,
+            "val_loss": {"default": 0.3},
+            "best_metric_key": "default",
+        },
+    ]

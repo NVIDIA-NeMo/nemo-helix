@@ -9684,6 +9684,7 @@ nemo customization automodel.jobs submit [OPTIONS]
 * `--training.retrieval.train-n-passages <INTEGER>`: Override `training.retrieval.train_n_passages` in the spec.
 * `--training.retrieval.eval-negative-size <INTEGER>`: Override `training.retrieval.eval_negative_size` in the spec.
 * `--training.retrieval.do-gradient-checkpointing`: Override `training.retrieval.do_gradient_checkpointing` in the spec.
+* `--training.retrieval.do-distributed-inbatch-negative`: Score each query against every passage in the global batch rather than only its own train_n_passages. Ignored for cross_encoder.
 * `--training.retrieval.query-max-length <INTEGER>`: Override `training.retrieval.query_max_length` in the spec.
 * `--training.retrieval.passage-max-length <INTEGER>`: Override `training.retrieval.passage_max_length` in the spec.
 * `--training.retrieval.query-prefix`: Collator-side prefix; BiEncoderCollator adds a space.
@@ -9745,7 +9746,7 @@ nemo customization automodel.jobs submit [OPTIONS]
 
 Job Spec flags are generated from the AutomodelJobInput Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.retrieval.export.pooling`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `deployment_config (other union forms)`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.retrieval.export.pooling`, `schedule.checkpoint_selection`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `deployment_config (other union forms)`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 ##### nemo customization automodel.jobs explain

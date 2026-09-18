@@ -44,10 +44,12 @@ RUN if UV_LINK_MODE=copy gym env prefetch "+config_paths=[responses_api_agents/s
     fi
 
 # Full MLflow carries gateway server CVEs, while this image only needs Gym's client-side imports.
-RUN for py in /opt/gym-host-venv/bin/python "${NEMO_GYM_VENV_DIR}"/*/bin/python; do \
-      [ -x "${py}" ] || continue; \
-      uv pip uninstall --python "${py}" mlflow || true; \
-    done \
+# Prefetched Gym venvs live at ${NEMO_GYM_VENV_DIR}/<kind>/<server>/.venv, not one directory deep.
+RUN find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" \
+      \( -type f -o -type l \) -path '*/bin/python' \
+    | while IFS= read -r py; do \
+        uv pip uninstall --python "${py}" mlflow || true; \
+      done \
     && find "${UV_CACHE_DIR}" -path '*/archive-v0/*/mlflow-*.dist-info' -prune \
       -exec sh -c 'for path; do rm -rf "$(dirname "${path}")"; done' sh {} + \
     && test -z "$(find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
