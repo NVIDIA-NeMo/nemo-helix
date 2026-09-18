@@ -176,7 +176,7 @@ class TestCheckpointSelection:
         (checkpoints / "LATEST").symlink_to(last.parent.parent)
         config = MagicMock()
         config.training.finetuning_type = FinetuningType.ALL_WEIGHTS
-        config.training.checkpoint_selection = CheckpointSelection.BOTH
+        config.schedule.checkpoint_selection = CheckpointSelection.BOTH
 
         selected = find_selected_checkpoints(tmp_path, config)
 
@@ -190,7 +190,7 @@ class TestCheckpointSelection:
         (checkpoints / "LATEST").symlink_to(last.parent.parent)
         config = MagicMock()
         config.training.finetuning_type = FinetuningType.ALL_WEIGHTS
-        config.training.checkpoint_selection = CheckpointSelection.LAST
+        config.schedule.checkpoint_selection = CheckpointSelection.LAST
 
         assert find_selected_checkpoints(tmp_path, config) == {"last": last.resolve()}
 

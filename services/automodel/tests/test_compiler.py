@@ -175,7 +175,7 @@ def test_compile_training_step_carries_retrieval_config() -> None:
     assert cfg["retrieval"]["do_distributed_inbatch_negative"] is True
     assert cfg["retrieval"]["export"]["primary"] == "hf"
     assert cfg["retrieval"]["export"]["opset"] == 18
-    assert cfg["training"]["checkpoint_selection"] == "both"
+    assert cfg["schedule"]["checkpoint_selection"] == "both"
 
 
 def test_sft_training_applies_nemotron_defaults_for_encoder_recipes() -> None:

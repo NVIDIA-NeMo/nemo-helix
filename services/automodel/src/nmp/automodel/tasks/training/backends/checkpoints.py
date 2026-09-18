@@ -166,7 +166,7 @@ def find_selected_checkpoints(
     model_type: ModelType = ModelType.LLM,
 ) -> dict[str, Path]:
     """Resolve the configured checkpoint selection in publication order."""
-    selection = config.training.checkpoint_selection
+    selection = config.schedule.checkpoint_selection
     if selection == CheckpointSelection.BEST:
         return {"best": _resolve_checkpoint_link(workspace_dir, config, ("LOWEST_VAL", "LATEST"), model_type)}
     if selection == CheckpointSelection.LAST:

@@ -183,6 +183,7 @@ def compile_training_step(
             max_steps=training.max_steps,
             val_check_interval=training.val_check_interval,
             validation_split=training.validation_split,
+            checkpoint_selection=training.checkpoint_selection,
             progress_reporting=training.progress_reporting,
         ),
         batch=TrainingStepConfig.BatchConfig(
@@ -322,7 +323,6 @@ def _translate_training_config(
         training_type=training_type,
         recipe=recipe,
         finetuning_type=training.finetuning_type,
-        checkpoint_selection=training.checkpoint_selection,
         lora=lora,
         kd=kd,
     )

@@ -217,10 +217,6 @@ class TrainingStepConfig(BaseModel):
         training_type: TrainingType
         recipe: TrainingRecipe = TrainingRecipe.AUTO
         finetuning_type: Optional[FinetuningType] = None
-        checkpoint_selection: CheckpointSelection = Field(
-            default=CheckpointSelection.BEST,
-            description="Checkpoint(s) published after training: lowest validation loss, last, or both.",
-        )
         lora: Optional[LoRAConfig] = None
         kd: Optional[DistillationConfig] = None
 
@@ -229,6 +225,10 @@ class TrainingStepConfig(BaseModel):
         max_steps: Optional[int] = None
         val_check_interval: Optional[float] = None
         validation_split: Optional[float] = Field(default=0.1, gt=0, lt=1)
+        checkpoint_selection: CheckpointSelection = Field(
+            default=CheckpointSelection.BEST,
+            description="Checkpoint(s) published after training: lowest validation loss, last, or both.",
+        )
         progress_reporting: ProgressReportingConfig = Field(default_factory=ProgressReportingConfig)
 
     class BatchConfig(BaseModel):
