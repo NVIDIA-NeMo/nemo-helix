@@ -1,12 +1,20 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# NOTE: This file is auto-generated
+"""``nemo adapters`` command group, backed by the typed Models client."""
+
 from __future__ import annotations
 
-from typing import Annotated, Literal
+import json
+from typing import Annotated, Any, Literal, cast
 
 import typer
+from nemo_platform_plugin.models.client import ModelsClient
+from nemo_platform_plugin.models.types import (
+    CreateAdapterRequest,
+    ListAdaptersQueryParams,
+    UpdateAdapterRequest,
+)
 
 from nemo_platform_ext.cli.core.api import build_kwargs, merge_filter_dict
 from nemo_platform_ext.cli.core.code_generator import handle_code_generation
@@ -19,8 +27,13 @@ from nemo_platform_ext.cli.core.formatters import (
     validate_stream_output_format,
 )
 from nemo_platform_ext.cli.core.help_formatter import collect_warnings, create_typer_app
-from nemo_platform_ext.cli.core.pagination import PaginationType, fetch_all_pages, warn_if_more_pages
-from nemo_platform_ext.cli.core.stdin_utils import read_data_input_with_flags, read_payload, validate_required_fields
+from nemo_platform_ext.cli.core.pagination import PaginationType, collect_offset_pages, warn_if_more_pages
+from nemo_platform_ext.cli.core.stdin_utils import (
+    build_request_body,
+    read_data_input_with_flags,
+    read_payload,
+    validate_required_fields,
+)
 from nemo_platform_ext.cli.core.types import (
     EntityOutputFormatOption,
     ListOutputFormatOption,
@@ -29,7 +42,60 @@ from nemo_platform_ext.cli.core.types import (
     StreamOutputOption,
 )
 
-app = create_typer_app(name="adapters", help="Manage adapters")
+FinetuningTypeValue = Literal[
+    "lora_merged",
+    "all_weights",
+    "last_layer",
+    "top_layers",
+    "gradual_unfreezing",
+    "bias_only",
+    "attention_only",
+    "lora",
+    "qlora",
+    "adalora",
+    "dora",
+    "lora_plus",
+    "prompt_tuning",
+    "prefix_tuning",
+    "p_tuning",
+    "p_tuning_v2",
+    "soft_prompt",
+    "ppo",
+    "dpo",
+    "cdpo",
+    "ipo",
+    "orpo",
+    "kto",
+    "rrhf",
+    "grpo",
+]
+
+app = create_typer_app(name="adapters", help="Manage adapters.")
+
+
+def _filter_query(value: str | dict[str, Any] | None) -> str | None:
+    if isinstance(value, dict):
+        return json.dumps(value)
+    return value
+
+
+def _list_adapters_query_params(
+    *,
+    filter_value: str | None,
+    page: int | None,
+    page_size: int | None,
+    sort: str | None,
+) -> ListAdaptersQueryParams | None:
+    query_params: ListAdaptersQueryParams = {}
+    if filter_value is not None:
+        query_params["filter"] = filter_value
+    if page is not None:
+        query_params["page"] = page
+    if page_size is not None:
+        query_params["page_size"] = page_size
+    if sort is not None:
+        query_params["sort"] = sort
+    return query_params or None
 
 
 @app.command("create")
@@ -52,34 +118,7 @@ def create_adapters(
         ),
     ] = None,
     finetuning_type: Annotated[
-        Literal[
-            "lora_merged",
-            "all_weights",
-            "last_layer",
-            "top_layers",
-            "gradual_unfreezing",
-            "bias_only",
-            "attention_only",
-            "lora",
-            "qlora",
-            "adalora",
-            "dora",
-            "lora_plus",
-            "prompt_tuning",
-            "prefix_tuning",
-            "p_tuning",
-            "p_tuning_v2",
-            "soft_prompt",
-            "ppo",
-            "dpo",
-            "cdpo",
-            "ipo",
-            "orpo",
-            "kto",
-            "rrhf",
-            "grpo",
-        ]
-        | None,
+        FinetuningTypeValue | None,
         typer.Option("--finetuning-type", help="Finetuning types. (required)"),
     ] = None,
     model: Annotated[
@@ -119,13 +158,11 @@ def create_adapters(
     echo '{"json": "data"}' | nemo adapters create <name> --input-file -
     nemo adapters create <name> --<option> "value"
     """
-    # Read base input (optional if all fields provided via flags)
     if input_file or input_data:
         input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
     else:
         input_payload = {}
 
-    # Apply CLI flag overrides (flags take precedence)
     if workspace is not None:
         input_payload["workspace"] = workspace
     if fileset is not None:
@@ -142,7 +179,7 @@ def create_adapters(
         input_payload["enabled"] = enabled
     if lora_config is not None:
         input_payload["lora_config"] = read_payload("lora_config", lora_config)
-    # Validate required fields are present after merging
+
     validate_required_fields(
         input_payload,
         ["fileset", "finetuning_type", "model", "name"],
@@ -155,20 +192,24 @@ def create_adapters(
         },
     )
 
-    all_kwargs = input_payload
-    state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    request_workspace = cast(str | None, input_payload.get("workspace"))
+    body = build_request_body(
+        CreateAdapterRequest, input_payload, exclude={"workspace"}, command_name="adapters create"
+    )
 
-    if handle_code_generation(["adapters"], "create", all_kwargs, output_format, state):
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+
+    kwargs = build_kwargs(workspace=request_workspace, body=body)
+    if handle_code_generation(ModelsClient, "create_adapter", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.adapters.create(**all_kwargs)
+    result = state.typed_client(ModelsClient).create_adapter(workspace=request_workspace, body=body)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -184,12 +225,7 @@ def delete_adapters(
 ) -> None:
     """Delete Adapter"""
     state: CLIContext = ctx.obj
-    client = state.get_client()
-
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-    client.adapters.delete(name, **kwargs)
+    state.typed_client(ModelsClient).delete_adapter(name=name, workspace=workspace)
 
     typer.echo("✓ Deleted successfully")
 
@@ -235,22 +271,22 @@ def list_adapters(
 ) -> None:
     """List Adapters"""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
-    validate_stream_output_format(output_format, stream)
+    resolved_output_format = state.get_output_format(output_format)
+    validate_stream_output_format(resolved_output_format, stream)
 
-    check_output_columns_with_format(columns, output_format)
+    check_output_columns_with_format(columns, resolved_output_format)
 
     default_columns = [
         Column("name", None),
         Column("workspace", None),
         Column("created_at", None),
     ]
+    output_columns: str | list[Column] | None = columns
     if columns is None or str(columns).strip() == "default":
-        columns = default_columns
+        output_columns = default_columns
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-        filter=merge_filter_dict(
+    filter_value = _filter_query(
+        merge_filter_dict(
             filter,
             description=filter_description,
             enabled=filter_enabled,
@@ -258,33 +294,22 @@ def list_adapters(
             finetuning_type=filter_finetuning_type,
             model=filter_model,
             name=filter_name,
-        ),
-        page=page,
-        page_size=page_size,
-        sort=sort,
+        )
     )
-
-    if handle_code_generation(["adapters"], "list", kwargs, output_format, state):
+    query_params = _list_adapters_query_params(filter_value=filter_value, page=page, page_size=page_size, sort=sort)
+    kwargs = build_kwargs(workspace=workspace, query_params=query_params)
+    if handle_code_generation(ModelsClient, "list_adapters", kwargs, resolved_output_format, state, result="list"):
         return
 
-    client = state.get_client()
-    path_args = ()
+    response = state.typed_client(ModelsClient).list_adapters(workspace=workspace, query_params=query_params)
     pagination_type = PaginationType.PAGE_NUMBER
-    if all_pages:
-        items = fetch_all_pages(
-            client.adapters.list,
-            path_args=path_args,
-            body_args=kwargs,
-            pagination_type=pagination_type,
-        )
-    else:
-        items = client.adapters.list(*path_args, **kwargs)
+    items = collect_offset_pages(response, all_pages=all_pages)
 
     format_output(
         items,
         is_list=True,
-        output_format=output_format,
-        output_columns=columns,
+        output_format=resolved_output_format,
+        output_columns=output_columns,
         no_truncate=state.get_no_truncate(no_truncate),
         timestamp_format=state.get_timestamp_format(),
         stream=stream,
@@ -326,13 +351,11 @@ def patch_adapters(
     echo '{"json": "data"}' | nemo adapters patch <name> --input-file -
     nemo adapters patch <name> --<option> "value"
     """
-    # Read base input (optional if all fields provided via flags)
     if input_file or input_data:
         input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
     else:
         input_payload = {}
 
-    # Apply CLI flag overrides (flags take precedence)
     if workspace is not None:
         input_payload["workspace"] = workspace
     if description is not None:
@@ -342,21 +365,22 @@ def patch_adapters(
     if fileset is not None:
         input_payload["fileset"] = fileset
 
-    all_kwargs = {"name": name, **input_payload}
+    request_workspace = cast(str | None, input_payload.get("workspace"))
+    body = build_request_body(UpdateAdapterRequest, input_payload, exclude={"workspace"}, command_name="adapters patch")
 
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["adapters"], "patch", all_kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=request_workspace, body=body)
+    if handle_code_generation(ModelsClient, "update_adapter", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.adapters.patch(**all_kwargs)
+    result = state.typed_client(ModelsClient).update_adapter(name=name, workspace=request_workspace, body=body)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -373,21 +397,18 @@ def retrieve_adapters(
 ) -> None:
     """Get Adapter"""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-    if handle_code_generation(["adapters"], "retrieve", kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=workspace)
+    if handle_code_generation(ModelsClient, "get_adapter", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.adapters.retrieve(name, **kwargs)
+    result = state.typed_client(ModelsClient).get_adapter(name=name, workspace=workspace)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )

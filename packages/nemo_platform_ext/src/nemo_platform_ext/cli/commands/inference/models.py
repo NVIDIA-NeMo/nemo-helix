@@ -1,12 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# NOTE: This file is auto-generated
+"""``nemo inference models``: the workspace's OpenAI-compatible model catalog, via the gateway client."""
+
 from __future__ import annotations
 
 from typing import Annotated
 
 import typer
+from nemo_platform_plugin.inference_gateway.client import InferenceGatewayClient
 
 from nemo_platform_ext.cli.core.api import build_kwargs
 from nemo_platform_ext.cli.core.code_generator import handle_code_generation
@@ -47,21 +49,18 @@ def get_models(
     VirtualModels, including custom ones, so this route agrees with the list route
     and the inference proxy."""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    resolved_output_format = state.get_output_format(output_format)
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-    if handle_code_generation(["inference", "gateway", "openai", "v1", "models"], "get", kwargs, output_format, state):
+    kwargs = build_kwargs(name=name, workspace=workspace)
+    if handle_code_generation(InferenceGatewayClient, "get_openai_model", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.inference.gateway.openai.v1.models.get(name, **kwargs)
+    result = state.typed_client(InferenceGatewayClient).get_openai_model(name=name, workspace=workspace)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
@@ -85,35 +84,31 @@ def list_models(
     the catalog in agreement with the inference proxy, which also resolves
     VirtualModels scoped to the request workspace."""
     state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
-    validate_stream_output_format(output_format, stream)
+    resolved_output_format = state.get_output_format(output_format)
+    validate_stream_output_format(resolved_output_format, stream)
 
-    check_output_columns_with_format(columns, output_format)
+    check_output_columns_with_format(columns, resolved_output_format)
 
     default_columns = [
-        Column("name", None),
-        Column("workspace", None),
-        Column("created_at", None),
+        Column("id", None),
+        Column("owned_by", None),
+        Column("created", None),
     ]
+    output_columns: str | list[Column] | None = columns
     if columns is None or str(columns).strip() == "default":
-        columns = default_columns
+        output_columns = default_columns
 
-    kwargs = build_kwargs(
-        workspace=workspace,
-    )
-
-    if handle_code_generation(["inference", "gateway", "openai", "v1", "models"], "list", kwargs, output_format, state):
+    kwargs = build_kwargs(workspace=workspace)
+    if handle_code_generation(InferenceGatewayClient, "list_openai_models", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    path_args = ()
-    items = client.inference.gateway.openai.v1.models.list(*path_args, **kwargs)
+    items = state.typed_client(InferenceGatewayClient).list_openai_models(workspace=workspace)
 
     format_output(
         items,
         is_list=True,
-        output_format=output_format,
-        output_columns=columns,
+        output_format=resolved_output_format,
+        output_columns=output_columns,
         no_truncate=state.get_no_truncate(no_truncate),
         timestamp_format=state.get_timestamp_format(),
         stream=stream,
