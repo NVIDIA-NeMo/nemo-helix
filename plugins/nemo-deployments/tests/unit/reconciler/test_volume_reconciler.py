@@ -68,28 +68,20 @@ async def test_deleting_volume_keeps_entity_when_backend_delete_fails(
     vol = make_volume()
     vol.status = "DELETING"
     mock_backend.delete_volume = AsyncMock(
-        return_value=VolumeStatusUpdate(status="FAILED", status_message="PVC deletion failed")
+        return_value=VolumeStatusUpdate(
+            status="FAILED",
+            status_message="PVC deletion failed",
+            error_details={"reason": "forbidden"},
+        )
     )
 
     await volume_reconciler.reconcile_one(vol)
 
     mock_backend.delete_volume.assert_awaited_once()
-    mock_entities.delete.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_deleting_volume_keeps_entity_when_backend_returns_no_result(
-    volume_reconciler: VolumeReconciler,
-    mock_backend: MockDeploymentBackend,
-    mock_entities: AsyncMock,
-) -> None:
-    vol = make_volume()
-    vol.status = "DELETING"
-    mock_backend.delete_volume = AsyncMock(return_value=None)
-
-    await volume_reconciler.reconcile_one(vol)
-
-    mock_backend.delete_volume.assert_awaited_once()
+    assert vol.status == "DELETING"
+    assert vol.status_message == "PVC deletion failed"
+    assert vol.error_details == {"reason": "forbidden"}
+    mock_entities.update.assert_awaited_once_with(vol)
     mock_entities.delete.assert_not_awaited()
 
 

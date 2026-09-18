@@ -61,15 +61,20 @@ class VolumeReconciler:
         except Exception:
             logger.warning("Backend delete failed for volume %s — will retry", volume_id, exc_info=True)
             return
-        if result is None:
-            logger.warning("Backend delete for volume %s returned no result — will retry", volume_id)
-            return
         if result.status != "RELEASED":
             logger.warning(
                 "Backend delete for volume %s returned %s (%s) — will retry",
                 volume_id,
                 result.status,
                 result.status_message,
+            )
+            await self._update_volume_status(
+                volume,
+                VolumeStatusUpdate(
+                    status="DELETING",
+                    status_message=result.status_message,
+                    error_details=result.error_details,
+                ),
             )
             return
 
