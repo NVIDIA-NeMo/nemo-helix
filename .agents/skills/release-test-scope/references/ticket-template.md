@@ -13,15 +13,17 @@
 | Release/main merge base | `<merge_base_sha>` |
 | Generated | `<timestamp>` |
 | Review deadline | `<timestamp>` |
+| GitHub enrichment | `Complete / Unavailable / Partial` |
 
 ## Release collection summary
 
 - Candidate range: `<previous_ref>..<release_ref>`.
 - Release-range commits: `<count>`.
-- Associated PRs: `<count>`; unassociated commits: `<count>`.
+- Associated PRs: `<count or unavailable>`; commit-only evidence: `<count>`.
 - Documentation-touched PRs: `<count>`; substantive candidates after release-note exclusion: `<count>`.
 - Consolidated capabilities: `<count>`.
 - Forward-merge states: `<counts by state>`.
+- Release-note coverage: `<Covered / Partial / Missing counts>`.
 - Dispositions: `<counts by disposition>`.
 - Status: `Draft`; human review is required before the release scope is finalized.
 
@@ -49,8 +51,9 @@
 | Surface | `Studio / CLI / API-SDK / Deployment / Backend` |
 | Forward-merge state | `<state>` |
 | Owner | `<evidence-backed owner or TBD>` |
-| Release PRs | `<links>` |
+| Release sources | `<commit SHAs and PR links when available>` |
 | Release documentation | `<paths and immutable links>` |
+| Release-note coverage | `Covered / Partial / Missing — <note path and heading or reason>` |
 | Forward-merge evidence | `<main evidence>` |
 
 **Description**
@@ -116,6 +119,10 @@ Write `Not applicable` when no CLI surface exists. Write `Needs clarification` w
 
 - `<documentation change and related implementation evidence>`
 
+### Release-note coverage gaps
+
+- `<user-visible release or cherry-equivalent change absent or only partially represented in the release-note diff/content>`
+
 ### Release-to-main forwarding gaps
 
 - `<release-derived capability and required follow-up, or None>`
@@ -126,19 +133,22 @@ Write `Not applicable` when no CLI surface exists. Write `Needs clarification` w
 
 ## Draft release notes
 
-Include only proposed or approved capabilities with sufficient evidence. Omit excluded and unresolved entries.
+Include only proposed or approved capabilities with sufficient evidence and resolved release-note coverage. Omit excluded and unresolved entries. Group the blocks under established product-area headings.
 
-### Highlights
+### <Product area>
 
-- `<highlight>`
+#### <User-visible capability>
 
-### Improvements
+**Description:** `<What changed, who benefits, and any essential boundary.>`
 
-- `<improvement>`
+**Documentation:** [`<Task or concept title>`](`<canonical published documentation URL>`)
 
-### Fixes
+**Use it:**
 
-- `<user-visible fix>`
+- **CLI:** `<verified command>`
+- **Studio:** Open **<verified navigation labels>**.
+
+Include only applicable interface bullets. When neither applies, write: `This behavior applies automatically; there is no separate CLI or Studio entry point.`
 
 ### Known limitations
 

@@ -46,8 +46,8 @@ Optional inputs include manual additions, agreed exclusions, and a GitHub issue 
 - The only automatic candidate-producing range is `previous_ref..release_ref`.
 - Main is used only to trace or verify release-derived commits or PRs. Never enumerate unrelated main development as release candidates.
 - Release reachability, not presence on main, determines whether work shipped.
-- Documentation in the release range is the default automatic inclusion gate.
-- Exclude `docs/about/release-notes/**` when it only summarizes the same release.
+- Substantive documentation in the release range that is published through the release snapshot's Fern navigation is the default automatic inclusion gate.
+- Exclude `docs/about/release-notes/**` from automatic candidate qualification when it only summarizes the same release, but always inspect its content and history as release-note coverage evidence.
 - Group related implementation, documentation, fix, and polish PRs into one user-visible capability.
 - Do not invent behavior, Studio navigation, CLI commands, expected results, owners, or documentation links.
 - Mark incomplete evidence `Needs clarification` and name the missing evidence.
@@ -58,10 +58,11 @@ Optional inputs include manual additions, agreed exclusions, and a GitHub issue 
 ## Required capabilities
 
 - Read access to repository history.
-- Network access and authenticated `gh` access for complete PR metadata.
+- Local Git history is sufficient to generate a commit-backed draft.
+- Network access and authenticated `gh` access enrich the artifact with authoritative PR metadata, owners, labels, and linked issues.
 - GitHub write access only when the user explicitly authorizes issue creation or update.
 
-If `gh auth status` or API access fails, report the exact capability problem. Do not call an incomplete local commit list a complete artifact.
+If `gh auth status` or API access fails, continue from local Git unless the user explicitly required complete GitHub metadata. Mark GitHub enrichment unavailable, use commit SHAs instead of guessed PR metadata or owners, and identify the affected fields as incomplete. Do not call a locally generated artifact complete when GitHub-only evidence is missing.
 
 ## Workflow
 
@@ -79,10 +80,11 @@ git rev-parse "${previous_ref}^{commit}"
 git rev-parse "${release_ref}^{commit}"
 git rev-parse "${main_ref}^{commit}"
 git merge-base "${release_ref}" "${main_ref}"
-gh auth status
 ```
 
 Stop if a ref does not resolve. If the previous release is not an ancestor of either snapshot, report the topology and ask for corrected boundaries. Do not substitute a triple-dot range or merge base silently.
+
+Run `gh auth status` before GitHub enrichment or issue operations. Authentication failure does not invalidate the local Git comparison; apply the fallback under **Required capabilities**.
 
 ### 2. Collect the release range
 
@@ -93,8 +95,8 @@ previous_ref..release_ref
 ```
 
 1. Enumerate all commits in that range.
-2. Associate each commit with PRs through GitHub commit-to-PR metadata. Do not rely only on commit-message PR numbers.
-3. Fetch PR number, title, URL, body, labels, author, base branch, merge commit, linked issues, and changed files.
+2. Preserve commit SHAs as the baseline source evidence. When GitHub is available, also associate each commit with PRs through GitHub commit-to-PR metadata. Do not rely only on commit-message PR numbers.
+3. When GitHub is available, fetch PR number, title, URL, body, labels, author, base branch, merge commit, linked issues, and changed files. Otherwise retain commit-backed evidence and mark those fields unavailable.
 4. Record release commits that have no associated PR.
 5. Identify PRs with changed paths under `docs/**`.
 6. Exclude release-note-only changes from automatic qualification.
@@ -104,7 +106,15 @@ Collect the authoritative documentation delta with:
 ```bash
 git diff --name-status "${previous_ref}..${release_ref}" -- docs/
 git diff --find-renames "${previous_ref}..${release_ref}" -- docs/
+
+git diff --find-renames "${previous_ref}..${release_ref}" -- \
+  docs/about/release-notes/
+git log --format='%H%x09%cs%x09%s' \
+  "${previous_ref}..${release_ref}" -- docs/about/release-notes/
+git show "${release_ref}:docs/fern/versions/latest.yml"
 ```
+
+The release-note diff is coverage evidence, not a candidate source. Compare every user-visible release capability with the actual note content. A change being reachable from the release branch or represented by a release-note commit does not prove that the capability itself is described. A documentation source file counts as published only when its page is reachable from the release snapshot's `docs/fern/versions/latest.yml`; record gated pages as missing publication evidence.
 
 ### 3. Verify release-derived work on main
 
@@ -126,12 +136,22 @@ Use evidence in this order:
 
 Do not match similar titles alone. A forward-merge PR is supporting evidence, not a separate feature. If the release snapshot is an ancestor of main, classify its release-derived items as exact and do not enumerate main-only PRs.
 
+Use a cherry-marked comparison to expose patch-equivalent changes that different commit IDs would otherwise hide:
+
+```bash
+git log --left-right --cherry-mark --no-merges \
+  --format='%m%x09%H%x09%cs%x09%s' \
+  "${release_ref}...${main_ref}"
+```
+
+`=` establishes patch equivalence, not release-note coverage. Keep user-visible equivalence groups in the evidence ledger until their documentation and release-note disposition are checked. For aggregate forward merges, inspect the commits introduced from the release parent and never treat the merge wrapper as a feature.
+
 ### 4. Build and consolidate evidence
 
 For every candidate capability, capture:
 
 - Plain-language feature description and user impact.
-- Source PRs and linked issues.
+- Source commits, plus PRs and linked issues when GitHub enrichment is available.
 - Release documentation paths and relevant headings.
 - Component and surface: Studio, CLI, API/SDK, Deployment, or Backend.
 - Exact documented Studio navigation.
@@ -140,6 +160,7 @@ For every candidate capability, capture:
 - Upgrade, compatibility, permissions, and security considerations.
 - Evidence-backed owner when available.
 - Confidence, disposition, and forward-merge state.
+- Release-note coverage: `Covered`, `Partial`, or `Missing`, with the exact note path and heading when present.
 - Release evidence separately from main-forwarding evidence.
 
 Keep command blocks verbatim except for clearly labeled placeholders. Do not infer Studio paths from component names or convert SDK examples into CLI commands.
@@ -156,8 +177,11 @@ Explicitly identify:
 - Commands or Studio paths that cannot be sourced.
 - Conflicting or incomplete descriptions.
 - Critical security, migration, or compatibility work needing manual inclusion.
+- User-visible release or cherry-equivalent changes missing from the release-note diff and resulting note text.
 
 Do not add undocumented work automatically. Put it in a warning or manual-decision section.
+
+Before finalizing draft release notes in an interactive run, present all otherwise-includable capabilities with missing substantive documentation or `Partial`/`Missing` release-note coverage as one grouped decision. Let the user include, omit, or defer each item. In headless or explicitly non-interactive runs, retain the items in gaps and warnings but omit them from draft release notes.
 
 ### 6. Generate the shared local artifact
 
@@ -170,6 +194,8 @@ release-artifacts/<version>/qa-test-scope.md
 ```
 
 The artifact must be readable by all release stakeholders. Use one section per consolidated feature and include the description, user impact, release-snapshot docs, Studio path, CLI command, expected result, risks, and draft release-note text. State clearly that it is a consolidated feature scope, not an exhaustive PR manifest.
+
+Draft release notes must use one structured block per included user-visible capability: `Description`, `Documentation`, and `Use it`. Under `Use it`, include verified CLI commands and/or Studio navigation as applicable; state explicitly when neither surface applies. Keep internal-only maintenance compact and do not invent an interface to fill the template.
 
 In the metadata table, set `Review deadline` to the report generation date. Do not add top-level QA owner or approver fields, an approval section, or generation notes. Track stakeholder decisions outside the generated artifact unless they are preserved human notes, manual additions, or exclusions.
 
@@ -185,9 +211,11 @@ Verify:
 - Candidate discovery used only `previous_ref..release_ref`.
 - Main was queried only for release-derived work.
 - Every capability has one forward-merge state.
+- Every user-visible cherry-equivalent group has a documented disposition.
 - No unrelated main-only PR appears.
-- Every automatic capability cites at least one PR and one release-snapshot docs path.
+- Every automatic capability cites at least one release commit, a source PR when GitHub enrichment is available, and one published release-snapshot docs path.
 - All cited release docs exist at the release SHA.
+- Every capability has `Covered`, `Partial`, or `Missing` release-note coverage backed by the release-note diff and content.
 - Commands and Studio paths are source-backed or explicitly need clarification.
 - Draft release notes omit excluded and unresolved capabilities.
 - Manual additions and exclusions have rationale and owner placeholders.
@@ -212,6 +240,7 @@ Report:
 - Version and the three resolved SHAs.
 - Release-range commit and PR counts.
 - Docs-touched PR and consolidated feature counts.
+- GitHub enrichment status and release-note coverage counts.
 - Counts by forward-merge state and disposition.
 - Path to the local shared artifact.
 - Missing evidence and review decisions.
