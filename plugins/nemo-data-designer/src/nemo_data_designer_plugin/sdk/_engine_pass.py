@@ -24,11 +24,9 @@ from dataclasses import dataclass
 
 import data_designer.config as dd
 from data_designer.interface.data_designer import DataDesigner
-from data_designer_nemo.context import (
-    DataDesignerEngineContext,
-    create_execution_context,
-    create_validation_context,
-)
+from data_designer_nemo.context.engine_protocol import DataDesignerEngineContext
+from data_designer_nemo.context.execution import create_execution_context
+from data_designer_nemo.context.validation import create_validation_context
 from data_designer_nemo.errors import NDDError
 from data_designer_nemo.runnable import resolve_runnable_config
 from data_designer_nemo.sdk_translation import sync_to_async_sdk

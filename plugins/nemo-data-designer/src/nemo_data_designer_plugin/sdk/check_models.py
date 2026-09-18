@@ -36,8 +36,9 @@ import asyncio
 import data_designer.config as dd
 from data_designer.errors import DataDesignerError
 from data_designer.interface.data_designer import DataDesigner
-from data_designer_nemo.check_models_context import create_check_models_context
-from data_designer_nemo.context import DataDesignerEngineContext, create_execution_context
+from data_designer_nemo.context.check_models import create_check_models_context
+from data_designer_nemo.context.engine_protocol import DataDesignerEngineContext
+from data_designer_nemo.context.execution import create_execution_context
 from nemo_data_designer_plugin.sdk._engine_logs import LogCallback, forward_engine_logs
 from nemo_data_designer_plugin.sdk._engine_pass import run_engine_pass
 from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
@@ -84,7 +85,7 @@ def _make_engine_context_factory(config_builder: dd.DataDesignerConfigBuilder):
     A sync SDK gives us the real thing, so the sync path behaves exactly as it
     would for a preview. An async-only caller cannot build one, and a probe
     does not need it — see
-    :mod:`data_designer_nemo.check_models_context`.
+    :mod:`data_designer_nemo.context.check_models`.
     """
 
     def factory(

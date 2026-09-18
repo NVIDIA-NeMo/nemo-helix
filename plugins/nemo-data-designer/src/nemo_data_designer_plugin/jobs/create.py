@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import ClassVar, cast
 
-from data_designer_nemo.context import create_validation_context
+from data_designer_nemo.context.validation import create_validation_context
 from data_designer_nemo.errors import raise_if_errors
 from data_designer_nemo.runnable import resolve_runnable_config
 from nemo_data_designer_plugin.jobs.run import run_step_config_result

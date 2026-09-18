@@ -8,7 +8,7 @@ from pathlib import Path
 import data_designer.config as dd
 import data_designer.interface.data_designer as data_designer_interface
 from data_designer.interface.data_designer import DataDesigner
-from data_designer_nemo.context import DataDesignerEngineContext
+from data_designer_nemo.context.engine_protocol import DataDesignerEngineContext
 
 
 def create_data_designer(
