@@ -153,6 +153,14 @@ class ScheduleSpec(AutomodelSchema):
         lt=1,
         description="Validation split to use when a validation dataset is not provided.",
     )
+    checkpoint_selection: Literal["best", "last", "both"] = Field(
+        default="best",
+        description=(
+            "Checkpoint(s) to publish: 'best' selects the lowest validation loss, "
+            "'last' preserves the end of training, and 'both' publishes best at the root "
+            "with last under alternates/last."
+        ),
+    )
     seed: int | None = None
     progress_reporting: ProgressReportingConfig = Field(default_factory=ProgressReportingConfig)
 

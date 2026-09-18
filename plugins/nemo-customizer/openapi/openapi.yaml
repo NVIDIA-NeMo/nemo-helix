@@ -1746,6 +1746,17 @@ components:
           type: number
           exclusiveMaximum: 1.0
           exclusiveMinimum: 0.0
+        checkpoint_selection:
+          type: string
+          enum:
+          - best
+          - last
+          - both
+          title: Checkpoint Selection
+          description: 'Checkpoint(s) to publish: ''best'' selects the lowest validation
+            loss, ''last'' preserves the end of training, and ''both'' publishes best
+            at the root with last under alternates/last.'
+          default: best
         seed:
           title: Seed
           type: integer
