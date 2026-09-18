@@ -129,6 +129,24 @@ def test_rejects_a_config_with_no_optimizer_enabled(tmp_path: Path) -> None:
         preflight_bundle(tmp_path, "optimize.yml")
 
 
+def test_rejects_non_mapping_optimizer_phase_section(tmp_path: Path) -> None:
+    config = full_config()
+    config["optimizer"] = {"numeric": "enabled"}
+    make_bundle(tmp_path, config, files={"dataset.json": DATASET})
+
+    with pytest.raises(BundlePreflightError, match="optimizer.numeric must be a mapping"):
+        preflight_bundle(tmp_path, "optimize.yml")
+
+
+def test_rejects_non_boolean_optimizer_enabled(tmp_path: Path) -> None:
+    config = full_config()
+    config["optimizer"] = {"numeric": {"enabled": "false"}}
+    make_bundle(tmp_path, config, files={"dataset.json": DATASET})
+
+    with pytest.raises(BundlePreflightError, match="optimizer.numeric.enabled must be a boolean"):
+        preflight_bundle(tmp_path, "optimize.yml")
+
+
 def test_rejects_numeric_optimization_with_an_empty_search_space(tmp_path: Path) -> None:
     config = full_config()
     config["optimizer"] = {"numeric": {"enabled": True}}
