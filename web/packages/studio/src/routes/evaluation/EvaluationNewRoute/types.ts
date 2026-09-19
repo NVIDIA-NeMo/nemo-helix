@@ -320,20 +320,33 @@ export const evaluationSchema = z
   .object({
     model: z.string().min(1, 'Select a model to evaluate.'),
     dataset: z.string().min(1, 'Select an input file.').nullable(),
-    fieldMapping: z.record(z.string()),
-    body: z
-      .object({
-        metrics: z.record(z.boolean()),
-        judgeModel: z.string(),
-        scores: z.array(z.any()),
-        numberCheck: z
-          .object({ operation: z.string(), epsilon: z.number().nullable() })
-          .passthrough(),
-        stringCheck: z.object({ operation: z.string() }).passthrough(),
-      })
-      .passthrough(),
+    // Explicit rather than `z.record(z.enum(...))`, which zod infers as
+    // `Partial<Record<...>>` and so cannot satisfy the form type's required keys.
+    fieldMapping: z.object({
+      input: z.string(),
+      reference: z.string(),
+      context: z.string(),
+      messages: z.string(),
+    }),
+    body: z.object({
+      metrics: z.object({
+        'llm-judge': z.boolean(),
+        'exact-match': z.boolean(),
+        f1: z.boolean(),
+        bleu: z.boolean(),
+        rouge: z.boolean(),
+        'string-check': z.boolean(),
+        'number-check': z.boolean(),
+      }),
+      judgeModel: z.string(),
+      scores: z.array(z.custom<PanelScoreFormData>()),
+      numberCheck: z.object({
+        operation: z.enum(NUMBER_CHECK_OPERATIONS),
+        epsilon: z.number().nullable(),
+      }),
+      stringCheck: z.object({ operation: z.enum(STRING_CHECK_OPERATIONS) }),
+    }),
   })
-  .passthrough()
   .superRefine((values, ctx) => {
     const mapping = values.fieldMapping ?? {};
     const selected = SELECTABLE_METRICS.map((metric) => metric.type).filter(

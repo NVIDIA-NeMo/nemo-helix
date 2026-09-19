@@ -29,7 +29,7 @@ import { useDatasetBindings } from '@studio/routes/evaluation/EvaluationNewRoute
 import { useWizardProgress } from '@studio/routes/evaluation/EvaluationNewRoute/useWizardProgress';
 import { getEvaluationResultsRoute } from '@studio/routes/utils';
 import { FC } from 'react';
-import { FormProvider, type Resolver, useForm, useFormContext } from 'react-hook-form';
+import { FormProvider, useForm, useFormContext } from 'react-hook-form';
 
 /** The form body lives inside FormProvider so it can read the template bindings
  *  and wizard progress, both of which derive from form state. */
@@ -134,10 +134,7 @@ export const EvaluationNewRoute: FC = () => {
 
   const form = useForm<EvaluationFormValues>({
     defaultValues: EVALUATION_FORM_DEFAULTS,
-    // The schema is passthrough (it validates a subset and leaves the rest
-    // alone), so its inferred output is an index-signature record rather than
-    // EvaluationFormValues. The shapes agree on every field the schema names.
-    resolver: zodResolver(evaluationSchema) as unknown as Resolver<EvaluationFormValues>,
+    resolver: zodResolver(evaluationSchema),
   });
 
   return (
