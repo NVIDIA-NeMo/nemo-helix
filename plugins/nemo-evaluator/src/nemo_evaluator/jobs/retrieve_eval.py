@@ -89,6 +89,14 @@ class RetrievalInputSpec(BaseModel):
         gt=0,
         description="Expected embedding width. Omit to accept the model's native width.",
     )
+    query_prefix: str = Field(
+        default="query: ",
+        description="Literal prefix prepended to each query. Empty string disables prefixing.",
+    )
+    passage_prefix: str = Field(
+        default="passage: ",
+        description="Literal prefix prepended to each passage. Empty string disables prefixing.",
+    )
 
 
 class RetrieveEvalInputSpec(BaseModel):
@@ -364,6 +372,8 @@ async def _resolve_retrieval(
         batch_size=value.batch_size,
         embedding_in_flight=value.embedding_in_flight,
         embedding_dimensions=value.embedding_dimensions,
+        query_prefix=value.query_prefix,
+        passage_prefix=value.passage_prefix,
     )
 
 

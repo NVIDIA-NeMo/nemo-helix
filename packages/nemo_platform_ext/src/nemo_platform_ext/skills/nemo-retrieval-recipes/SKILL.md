@@ -70,7 +70,7 @@ Read only the matching recipe after this routing step:
 
 Use one workspace. Stage 1 publishes one `artifacts` fileset holding `training.jsonl`
 and `eval_beir/`; Automodel and `retrieve-eval` both read that one fileset directly.
-Keep `query:` / `passage:` prefixes for embed and
+Keep `query: ` / `passage: ` prefixes for embed and
 `question:{query} \n \n passage:{passage}` for rerank.
 
 ## Safe workflow

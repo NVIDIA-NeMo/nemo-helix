@@ -194,8 +194,14 @@ class RetrievalConfig(BaseModel):
     # Tokenization configuration
     query_max_length: int = Field(default=512, description="Maximum token length for query tokenization")
     passage_max_length: int = Field(default=512, description="Maximum token length for passage tokenization")
-    query_prefix: str = Field(default="query:", description="Prefix to prepend to queries before tokenization")
-    passage_prefix: str = Field(default="passage:", description="Prefix to prepend to passages before tokenization")
+    query_prefix: str = Field(
+        default="query: ",
+        description="Literal prefix prepended to each query. Empty string disables prefixing.",
+    )
+    passage_prefix: str = Field(
+        default="passage: ",
+        description="Literal prefix prepended to each passage. Empty string disables prefixing.",
+    )
 
     # Post-training export
     export: Optional[ExportConfig] = Field(

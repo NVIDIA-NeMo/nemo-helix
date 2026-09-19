@@ -12,14 +12,22 @@ import math
 import httpx
 import numpy as np
 from nemo_evaluator_sdk.retrieval.beir import BeirDataset
-from nemo_evaluator_sdk.retrieval.nim_embeddings import InputType, NimEmbeddingClient
+from nemo_evaluator_sdk.retrieval.nim_embeddings import NimEmbeddingClient
 from nemo_evaluator_sdk.retrieval.nim_ranking import NimRankingClient
-from nemo_evaluator_sdk.retrieval.passages import Truncation, passage_text
+from nemo_evaluator_sdk.retrieval.passages import DOCUMENT_CHARACTER_LIMIT, Truncation, passage_text
 from nemo_evaluator_sdk.values.retrieval import Retrieval
 
 __all__ = ["dense_search", "retrieve"]
 
 logger = logging.getLogger(__name__)
+
+
+def _cap_passage(text: str, truncate_long_documents: Truncation | None) -> str:
+    if truncate_long_documents is None or len(text) <= DOCUMENT_CHARACTER_LIMIT:
+        return text
+    if truncate_long_documents == "start":
+        return text[-DOCUMENT_CHARACTER_LIMIT:]
+    return text[:DOCUMENT_CHARACTER_LIMIT]
 
 
 # Cells in one query-chunk score block, bounding it to ~256 MB of float32.
@@ -48,6 +56,9 @@ async def retrieve(
             batch_size=target.batch_size,
             in_flight=target.embedding_in_flight,
             top_k=target.first_stage_k,
+            query_prefix=target.query_prefix,
+            passage_prefix=target.passage_prefix,
+            truncate_long_documents=target.truncate_long_documents,
             client=client,
         )
         if target.reranker is None:
@@ -67,6 +78,8 @@ async def dense_search(
     client: httpx.AsyncClient | None = None,
     passages: dict[str, str] | None = None,
     truncate_long_documents: Truncation | None = "end",
+    query_prefix: str = "query: ",
+    passage_prefix: str = "passage: ",
 ) -> dict[str, dict[str, float]]:
     """Score every query against the corpus with cosine similarity."""
     if batch_size < 1:
@@ -93,16 +106,17 @@ async def dense_search(
     try:
         document_vectors = await _encode_batches(
             embeddings,
-            [passages[document_id] for document_id in document_ids],
-            input_type="passage",
+            [
+                _cap_passage(f"{passage_prefix}{passages[document_id]}", truncate_long_documents)
+                for document_id in document_ids
+            ],
             batch_size=batch_size,
             in_flight=in_flight,
             client=client,
         )
         query_vectors = await _encode_batches(
             embeddings,
-            [dataset.queries[query_id].text for query_id in query_ids],
-            input_type="query",
+            [f"{query_prefix}{dataset.queries[query_id].text}" for query_id in query_ids],
             batch_size=batch_size,
             in_flight=in_flight,
             client=client,
@@ -137,8 +151,8 @@ async def _rerank(
     for query_id, scores in rankings.items():
         document_ids = list(scores)
         ranked = await ranker.rank(
-            dataset.queries[query_id].text,
-            [passages[document_id] for document_id in document_ids],
+            f"{target.query_prefix}{dataset.queries[query_id].text}",
+            [f"{target.passage_prefix}{passages[document_id]}" for document_id in document_ids],
             client=client,
             truncate=truncate,
         )
@@ -149,7 +163,6 @@ async def _rerank(
 async def _encode_batches(
     embeddings: NimEmbeddingClient,
     texts: list[str],
-    input_type: InputType,
     batch_size: int,
     in_flight: int,
     client: httpx.AsyncClient,
@@ -160,7 +173,7 @@ async def _encode_batches(
     n_batches = len(batches)
     model_name = embeddings.model.name
     logger.info(
-        f"encoding {input_type} for {model_name}: {len(texts)} texts in {n_batches} batches "
+        f"encoding {model_name}: {len(texts)} texts in {n_batches} batches "
         f"(batch_size={batch_size}, in_flight={in_flight})"
     )
     semaphore = asyncio.Semaphore(in_flight)
@@ -174,14 +187,13 @@ async def _encode_batches(
         chars = sum(len(text) for text in batch)
         async with semaphore:
             logger.debug(
-                f"encode {model_name} {input_type} batch {index + 1}/{n_batches} "
-                f"offset={offset} n={len(batch)} chars={chars}"
+                f"encode {model_name} batch {index + 1}/{n_batches} offset={offset} n={len(batch)} chars={chars}"
             )
             try:
-                result = await embeddings.encode(batch, input_type=input_type, client=client)
+                result = await embeddings.encode(batch, client=client)
             except Exception as error:
                 logger.error(
-                    f"encode {model_name} {input_type} failed batch {index + 1}/{n_batches} "
+                    f"encode {model_name} failed batch {index + 1}/{n_batches} "
                     f"offset={offset} n={len(batch)} chars={chars}: {error}"
                 )
                 raise
@@ -189,8 +201,7 @@ async def _encode_batches(
                 completed += 1
                 if completed == n_batches or completed % progress_every == 0:
                     logger.info(
-                        f"encoded {model_name} {input_type} {completed}/{n_batches} batches "
-                        f"({100 * completed / n_batches:.0f}%)"
+                        f"encoded {model_name} {completed}/{n_batches} batches ({100 * completed / n_batches:.0f}%)"
                     )
             return result
 
@@ -205,7 +216,7 @@ async def _encode_batches(
     vectors: list[list[float]] = []
     for part in encoded:
         vectors.extend(part)
-    logger.info(f"finished encoding {input_type} for {model_name}: {len(texts)} texts")
+    logger.info(f"finished encoding {model_name}: {len(texts)} texts")
     return vectors
 
 

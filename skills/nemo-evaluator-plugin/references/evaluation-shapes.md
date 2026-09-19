@@ -51,6 +51,10 @@ for a set of queries. The dataset must use the BEIR test layout:
 This is not row-based RAG answer scoring. Do not convert qrels into artificial
 answer rows or use an LLM judge for deterministic retrieval quality.
 
+`query_prefix` and `passage_prefix` default to `query: ` / `passage: ` — the same
+literal values as Automodel bi-encoder training and Stage 1 mining. Set them on
+`target` and `baseline` to match training. Empty string disables prefixing.
+
 Submit the fileset and embedding target as references:
 
 ```bash

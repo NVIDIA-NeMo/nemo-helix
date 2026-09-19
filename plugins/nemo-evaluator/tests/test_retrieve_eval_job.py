@@ -114,6 +114,8 @@ async def test_to_spec_forwards_retrieval_pipeline_fields() -> None:
             batch_size=16,
             embedding_in_flight=3,
             embedding_dimensions=1024,
+            query_prefix="query:",
+            passage_prefix="passage:",
         ),
     )
 
@@ -131,6 +133,8 @@ async def test_to_spec_forwards_retrieval_pipeline_fields() -> None:
     assert canonical.target.batch_size == 16
     assert canonical.target.embedding_in_flight == 3
     assert canonical.target.embedding_dimensions == 1024
+    assert canonical.target.query_prefix == "query:"
+    assert canonical.target.passage_prefix == "passage:"
 
 
 async def test_to_spec_preflights_and_stamps_reranker_model_ref(mocker: MockerFixture) -> None:

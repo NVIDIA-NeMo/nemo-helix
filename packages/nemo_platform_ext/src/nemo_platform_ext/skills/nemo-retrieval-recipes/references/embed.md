@@ -96,13 +96,23 @@ Pass the Stage 1 artifacts fileset as-is: `training.jsonl` and `eval_beir/` sit
 at the result root; wrapped `train.json` and mining caches are under `additional/`.
 
 Stage 3 reads the same fileset — the BEIR loader accepts a root containing `eval_beir`.
-Both `target` and `baseline` must already have IGW providers (`deploy.md`) before submit:
+Both `target` and `baseline` must already have IGW providers (`deploy.md`) before submit.
+`query_prefix` / `passage_prefix` default to `query:` / `passage:`, matching Stage 2
+training and Stage 1 mining.
 
 ```bash
 nemo evaluator retrieve-eval submit --spec '{
   "dataset": "default/retrieval-stage1-artifacts",
-  "target": "default/nemotron-3-embed-1b-tuned",
-  "baseline": "default/nemotron-3-embed-1b",
+  "target": {
+    "embeddings": "default/nemotron-3-embed-1b-tuned",
+    "query_prefix": "query:",
+    "passage_prefix": "passage:"
+  },
+  "baseline": {
+    "embeddings": "default/nemotron-3-embed-1b",
+    "query_prefix": "query:",
+    "passage_prefix": "passage:"
+  },
   "k": [1, 5, 10, 100]
 }'
 ```
