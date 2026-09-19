@@ -34,6 +34,12 @@ from pydantic import ValidationError
 from pytest_mock import MockerFixture
 
 
+def _beir_dataset(mocker: MockerFixture, *, dropped_qrel_rows: int = 0) -> BeirDataset:
+    dataset = mocker.Mock(spec=BeirDataset)
+    dataset.dropped_qrel_rows = dropped_qrel_rows
+    return dataset
+
+
 def _context(tmp_path: Path) -> JobContext:
     storage = StoragePaths(ephemeral=tmp_path / "ephemeral", persistent=tmp_path / "persistent")
     storage.ephemeral.mkdir()
@@ -223,7 +229,7 @@ def test_run_validates_fileset_and_persists_nemotron_keys(tmp_path: Path, mocker
         "nemo_evaluator.jobs.retrieve_eval.download_dataset_sync",
         return_value=downloaded,
     )
-    dataset = mocker.Mock(spec=BeirDataset)
+    dataset = _beir_dataset(mocker)
     load = mocker.patch("nemo_evaluator.jobs.retrieve_eval.load_beir_dataset", return_value=dataset)
     evaluator = mocker.Mock()
     evaluator.run = mocker.AsyncMock(return_value=_result())
@@ -242,6 +248,7 @@ def test_run_validates_fileset_and_persists_nemotron_keys(tmp_path: Path, mocker
         "recall_10": 1.0,
         "P_10": 0.1,
         "map_cut_10": 0.7,
+        "dropped_qrel_rows": 0,
     }
     assert json.loads((ctx.storage.persistent / EVAL_RESULTS_FILE_NAME).read_text()) == output["eval_results"]
     assert (ctx.storage.persistent / "results" / EVAL_RESULTS_RESULT_NAME).exists()
@@ -255,7 +262,7 @@ def test_run_reports_relative_baseline_scores(tmp_path: Path, mocker: MockerFixt
     )
     mocker.patch(
         "nemo_evaluator.jobs.retrieve_eval.load_beir_dataset",
-        return_value=mocker.Mock(spec=BeirDataset),
+        return_value=_beir_dataset(mocker),
     )
     evaluator = mocker.Mock()
     evaluator.run = mocker.AsyncMock(
@@ -287,7 +294,7 @@ def test_run_scores_baseline_concurrently(tmp_path: Path, mocker: MockerFixture)
     )
     mocker.patch(
         "nemo_evaluator.jobs.retrieve_eval.load_beir_dataset",
-        return_value=mocker.Mock(spec=BeirDataset),
+        return_value=_beir_dataset(mocker),
     )
     in_flight = 0
     max_in_flight = 0
@@ -324,7 +331,7 @@ def test_run_includes_cutoff_10_when_baseline_omits_it(tmp_path: Path, mocker: M
     )
     mocker.patch(
         "nemo_evaluator.jobs.retrieve_eval.load_beir_dataset",
-        return_value=mocker.Mock(spec=BeirDataset),
+        return_value=_beir_dataset(mocker),
     )
     evaluator = mocker.Mock()
     evaluator.run = mocker.AsyncMock(
@@ -363,7 +370,7 @@ def test_run_records_started_at_before_evaluation(tmp_path: Path, mocker: Mocker
     )
     mocker.patch(
         "nemo_evaluator.jobs.retrieve_eval.load_beir_dataset",
-        return_value=mocker.Mock(spec=BeirDataset),
+        return_value=_beir_dataset(mocker),
     )
     started = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
     mocker.patch("nemo_evaluator.jobs.retrieve_eval.datetime", wraps=datetime).now.return_value = started
@@ -384,7 +391,7 @@ def test_run_passes_the_declared_typed_client_for_fileset_refs(tmp_path: Path, m
         "nemo_evaluator.jobs.retrieve_eval.download_dataset_sync",
         return_value=tmp_path / "downloaded",
     )
-    mocker.patch("nemo_evaluator.jobs.retrieve_eval.load_beir_dataset", return_value=mocker.Mock(spec=BeirDataset))
+    mocker.patch("nemo_evaluator.jobs.retrieve_eval.load_beir_dataset", return_value=_beir_dataset(mocker))
     evaluator = mocker.Mock()
     evaluator.run = mocker.AsyncMock(return_value=_result())
     mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
@@ -399,3 +406,24 @@ def test_run_passes_the_declared_typed_client_for_fileset_refs(tmp_path: Path, m
 
     assert download.call_args.kwargs["client"] is client
     assert output["eval_results"]["ndcg_cut_10"] == 0.75
+    assert output["eval_results"]["dropped_qrel_rows"] == 0
+
+
+def test_run_includes_dropped_qrel_rows_in_eval_results(tmp_path: Path, mocker: MockerFixture) -> None:
+    ctx = _context(tmp_path)
+    mocker.patch(
+        "nemo_evaluator.jobs.retrieve_eval.download_dataset_sync",
+        return_value=tmp_path / "downloaded",
+    )
+    mocker.patch(
+        "nemo_evaluator.jobs.retrieve_eval.load_beir_dataset",
+        return_value=_beir_dataset(mocker, dropped_qrel_rows=1),
+    )
+    evaluator = mocker.Mock()
+    evaluator.run = mocker.AsyncMock(return_value=_result())
+    mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
+
+    output = RetrieveEvalJob().run(_spec().model_dump(mode="json"), ctx=ctx, client=mocker.Mock(spec=NemoClient))
+
+    assert output["eval_results"]["dropped_qrel_rows"] == 1
+    assert json.loads((ctx.storage.persistent / EVAL_RESULTS_FILE_NAME).read_text())["dropped_qrel_rows"] == 1
