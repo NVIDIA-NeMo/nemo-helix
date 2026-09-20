@@ -34,7 +34,7 @@ name = "nemo-my-plugin"
 version = "0.1.0"
 description = "My NeMo Platform plugin."
 requires-python = ">=3.12"
-dependencies = ["nemo-platform-plugin", "nemo-platform"]
+dependencies = ["nemo-platform-plugin"]
 
 [project.entry-points."nemo.services"]
 "my-plugin" = "nemo_my_plugin.service:MyService"
@@ -305,5 +305,5 @@ Use `dependency_overrides` to inject a mock entity client — no platform requir
 ## Common pitfalls
 
 - **`name` mismatch:** `MyService.name = "my_plugin"` but entry-point key is `"my-plugin"` — routing breaks silently (only a warning is logged). They must be identical.
-- **Missing `nemo-platform`:** `get_entity_client` requires `nemo-platform` installed. Without it, entity injection at startup will fail.
+- **Do not depend on `nemo-platform`:** `nemo-platform-plugin` already provides `get_entity_client` and bundles the `nemo_platform` SDK module. Adding `nemo-platform` pulls every platform service into your dependency closure for no gain.
 - **Do not add `__init__.py`**: The package directory does not require one. Do not add it.

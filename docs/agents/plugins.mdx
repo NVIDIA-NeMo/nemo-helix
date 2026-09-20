@@ -25,14 +25,77 @@ can contribute one or more surfaces:
 | Inference middleware | `nemo.inference_middleware` | Virtual-model request or response middleware |
 | Entity | plugin code | Entity definitions stored in Entity Store |
 
-The default first-party plugins are installed by `uv sync` and
-`make bootstrap-python` through the root workspace's `enabled-plugins` group.
-Install or remove custom plugins in the same environment as `nemo-platform`,
-then restart local services so entry points are discovered:
+## Install a Plugin
+
+First-party plugins ship with the platform. The `all` extra installs them. A
+source checkout installs them through the root workspace's `enabled-plugins`
+group, with `uv sync` or `make bootstrap-python`.
+
+To add a third-party plugin, install it into the same environment as
+`nemo-platform`.
+
+<Tabs>
+
+<Tab title="uv tool install">
+
+uv manages the tool environment. Do not install into it directly. Re-run the
+install and pass the plugin with `--with`:
 
 ```bash
-nemo services run
+uv tool install "nemo-platform[all]" --with <plugin>
 ```
+
+A re-run replaces the environment, so anything you omit is removed. Read the
+current install line first:
+
+```bash
+uv tool list --show-with --show-extras
+```
+
+`uv tool upgrade nemo-platform` keeps the extras and the `--with` packages.
+
+</Tab>
+
+<Tab title="Virtual environment">
+
+```bash
+uv pip install <plugin>
+```
+
+</Tab>
+
+</Tabs>
+
+<Warning>
+Never uninstall `nemo-platform-plugin`. Every plugin depends on it, so your
+installer adds it. The `nemo-platform` wheel also bundles the same
+`nemo_platform` and `nemo_platform_plugin` modules, so removing the
+`nemo-platform-plugin` distribution deletes files that `nemo-platform` still
+needs. To repair a broken environment, re-run the full platform install.
+</Warning>
+
+Restart local services after you install or remove a plugin. The platform reads
+entry points only at startup:
+
+```bash
+nemo services restart
+```
+
+Then list what is installed:
+
+```bash
+nemo plugins list
+```
+
+This command reads package metadata. It lists a plugin even when the platform
+failed to import it. If a listed plugin does not work, check the service log for
+an import warning.
+
+To remove a plugin, take it out of the install line and restart services. In a
+tool environment, re-run `uv tool install` without the `--with` entry. In a
+virtual environment, run `uv pip uninstall <plugin>`. The distribution name and
+the plugin name can differ: `nemo plugins list` shows plugin names, and
+`uv pip list` shows distribution names.
 
 ## First-Party Plugins
 

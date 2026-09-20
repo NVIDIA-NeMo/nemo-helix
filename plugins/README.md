@@ -22,6 +22,8 @@ uv pip install -e plugins/example-plugin/
 
 Restart `nemo services run` after installing or uninstalling plugins. Service, controller, and inference middleware entry points are discovered at platform startup.
 
+This is the local-checkout path. To install a **published** plugin, see [Plugins and Skills](https://docs.nvidia.com/nemo-platform/documentation/agents/plugins-and-skills).
+
 ## Default bootstrap behavior
 
 `make bootstrap-python` syncs the root uv workspace. Bare `uv sync` and `make bootstrap-python` include the `enabled-plugins` dependency group by default through `tool.uv.default-groups`.
@@ -80,6 +82,14 @@ uv pip uninstall nemo-example-plugin
 ## Verifying a plugin is active
 
 ```bash
+nemo plugins list
+```
+
+This scans every surface entry-point group, so it reports plugins that add no CLI command and no HTTP route — inference middleware, jobs, and Studio pages included. It reads package metadata only, so it lists a plugin that the platform failed to import.
+
+Per-surface checks, once the plugin is listed:
+
+```bash
 # CLI commands appear under the plugin name:
 nemo <plugin-name> --help
 
@@ -87,12 +97,7 @@ nemo <plugin-name> --help
 curl http://localhost:8080/apis/<plugin-name>/health
 ```
 
-Inference middleware plugins do not necessarily add CLI commands or HTTP routes. Verify they are loaded by checking platform startup logs for the middleware entry point, then reference that entry point from a VirtualModel:
-
-```bash
-# Example log text emitted during platform startup:
-# Loaded inference middleware plugin: nemo-switchyard
-```
+Inference middleware adds no CLI command and no route. To confirm that the running platform loaded it, grep the platform log for `Loaded inference middleware plugin`. See [SETUP.md](../SETUP.md) for that check and the `422 references unknown plugin` signal.
 
 ## Writing a new plugin
 

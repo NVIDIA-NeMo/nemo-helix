@@ -26,7 +26,7 @@ my-plugin/
 [project]
 name = "nemo-my-plugin"
 version = "0.1.0"
-dependencies = ["nemo-platform-plugin", "nemo-platform"]
+dependencies = ["nemo-platform-plugin"]
 
 [project.entry-points."nemo.services"]
 my-plugin = "nemo_my_plugin.service:MyService"
@@ -89,7 +89,7 @@ name = "nemo-my-plugin"
 version = "0.1.0"
 description = "My NeMo Platform plugin."
 requires-python = ">=3.11"
-dependencies = ["nemo-platform-plugin", "nemo-platform", "pydantic>=2.0.0"]
+dependencies = ["nemo-platform-plugin", "pydantic>=2.0.0"]
 
 [project.entry-points."nemo.services"]
 my-plugin = "nemo_my_plugin.service:MyService"
@@ -259,7 +259,7 @@ from nemo_platform_plugin.discovery import discover, discover_entry_points
 # discover_entry_points() is metadata-only (no imports)
 ```
 
-A broken plugin (import error) logs a warning and is skipped — the platform continues. To disable a plugin, uninstall its package.
+A broken plugin (import error) logs a warning and is skipped — the platform continues. To disable a plugin, uninstall its package. `NEMO_PLUGIN_ALLOWLIST` and the per-surface `NEMO_PLUGIN_<SURFACE>_ALLOWLIST` suppress discovery without uninstalling. Both are allowlists keyed by entry-point name, so every plugin you leave out is also disabled. Use them for debugging, not as a per-plugin off switch.
 
 **Tests that mock entry-points must clear the cache:**
 
@@ -274,7 +274,7 @@ discover_entry_points.cache_clear()
 
 - **No `__init__.py`**: The package directory does not need one. Do not add it.
 - **`name` must match entry-point key**: For jobs, `NemoJob.name` is the suffix after the dot, not the full key.
-- **Both `nemo-platform-plugin` AND `nemo-platform` required**: `nemo-platform-plugin` provides the ABCs; `nemo-platform` provides `get_entity_client` and SDK features.
+- **`nemo-platform-plugin` is the only NeMo dependency you need**: it provides the ABCs, `get_entity_client` (import it from `nemo_platform_plugin.entity_client`), and the `nemo_platform` SDK module, which it bundles. Adding `nemo-platform` pulls every platform service and first-party plugin into your dependency closure for no gain.
 - **Install with `-e` (editable)**: `uv pip install -e .` — non-editable installs require reinstall on every change.
 - **`discover.cache_clear()` in tests**: Any test that mocks entry-points must call both `discover.cache_clear()` and `discover_entry_points.cache_clear()` to avoid stale caches between tests.
 - **`packages = ["src/nemo_my_plugin"]` in hatchling config**: Without this, the wheel will not include the `nmp` namespace package correctly.

@@ -7,7 +7,7 @@
 
 ## Key Concepts
 
-- **One install, everything included**: `nemo-platform-plugin` depends on `nmp-common` (the platform library) transitively. Plugin authors also need `nemo-platform` for `get_entity_client` and SDK features.
+- **One install, everything included**: `nemo-platform-plugin` provides `get_entity_client` and bundles the `nemo_platform` SDK module. It does not pull in `nmp-common` or platform internals. A plugin needs no other NeMo dependency.
 - **Four primary surfaces**: `NemoService` (HTTP routes), `NemoCLI` (CLI commands), `NemoJob` (schedulable jobs), `NemoController` (background reconcile loop).
 - **Discovery via entry-points**: Plugins register surfaces under entry-point groups (`nemo.services`, `nemo.cli`, `nemo.jobs`, `nemo.controllers`) in `pyproject.toml`. The platform scans these at startup — no code registration needed.
 - **Entities for persistent state**: Use `NemoEntity` + `NemoEntitiesClient` to store plugin data in the NeMo Platform entity store. Entity types are global — use plugin-scoped names (`"my_plugin_widget"` not `"widget"`).
