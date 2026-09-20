@@ -1,18 +1,18 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { OptimizeJob } from '@nemo/sdk/generated/agents/schema';
+import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { http, HttpResponse } from 'msw';
 
-const OPTIMIZE_JOBS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/optimize`;
+const OPTIMIZE_JOBS_URL = `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/workspaces/:workspace/jobs/run-strategy`;
 
 /**
  * Two studies for `react-agent` and one for another agent, so a test can prove the request scopes
  * the list to one agent — the handler below filters exactly as the server does. One study lives in
  * another workspace, so a test can prove the list is scoped to the requested workspace too.
  */
-export const mockOptimizeJobs: OptimizeJob[] = [
+export const mockOptimizeJobs: RunStrategyJob[] = [
   {
     id: 'opt-8f21',
     name: 'brevity-sweep-3',
@@ -20,7 +20,7 @@ export const mockOptimizeJobs: OptimizeJob[] = [
     status: 'completed',
     created_at: '2026-08-14T09:00:00Z',
     updated_at: '2026-08-14T11:00:00Z',
-    spec: { optimize_config: 'optimize-brevity.yaml', agent: 'react-agent' },
+    spec: { strategy: 'nat', optimize_config: 'optimize-brevity.yaml', agent: 'react-agent' },
   },
   {
     id: 'opt-9a03',
@@ -30,7 +30,11 @@ export const mockOptimizeJobs: OptimizeJob[] = [
     created_at: '2026-08-13T09:00:00Z',
     updated_at: '2026-08-13T09:30:00Z',
     // Workspace-qualified reference for the same agent — must still match.
-    spec: { optimize_config: 'optimize-accuracy.yaml', agent: 'default/react-agent' },
+    spec: {
+      strategy: 'nat',
+      optimize_config: 'optimize-accuracy.yaml',
+      agent: 'default/react-agent',
+    },
   },
   {
     id: 'opt-4400',
@@ -38,7 +42,7 @@ export const mockOptimizeJobs: OptimizeJob[] = [
     workspace: 'default',
     status: 'error',
     created_at: '2026-08-12T09:00:00Z',
-    spec: { optimize_config: 'optimize-other.yaml', agent: 'other-agent' },
+    spec: { strategy: 'nat', optimize_config: 'optimize-other.yaml', agent: 'other-agent' },
   },
   {
     id: 'opt-7c15',
@@ -46,7 +50,7 @@ export const mockOptimizeJobs: OptimizeJob[] = [
     workspace: 'staging',
     status: 'completed',
     created_at: '2026-08-11T09:00:00Z',
-    spec: { optimize_config: 'optimize-brevity.yaml', agent: 'react-agent' },
+    spec: { strategy: 'nat', optimize_config: 'optimize-brevity.yaml', agent: 'react-agent' },
   },
 ];
 
@@ -100,7 +104,7 @@ const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\
 const likeMatches = (value: string, pattern: string): boolean =>
   new RegExp(`^${pattern.split('%').map(escapeRegExp).join('.*')}$`, 'i').test(value);
 
-const applyFilter = (jobs: OptimizeJob[], filter: FilterQuery): OptimizeJob[] => {
+const applyFilter = (jobs: RunStrategyJob[], filter: FilterQuery): RunStrategyJob[] => {
   const agents = filter['spec.agent']?.$in;
   const like = filter.name?.$like;
   return jobs.filter((job) => {

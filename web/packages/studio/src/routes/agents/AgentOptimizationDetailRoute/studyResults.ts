@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
-import { agentsListOptimizeJobResults } from '@nemo/sdk/generated/agents/agents';
+import { agentOptimizationListRunStrategyJobResults } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import { filesDownloadFile, filesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { FileStorageType } from '@nemo/sdk/generated/platform/schema';
 import Papa from 'papaparse';
@@ -138,7 +138,11 @@ const locateStudyFiles = async (
   summaryPath?: string;
   trialsPath?: string;
 } | null> => {
-  const { data: results } = await agentsListOptimizeJobResults(workspace, jobName, signal);
+  const { data: results } = await agentOptimizationListRunStrategyJobResults(
+    workspace,
+    jobName,
+    signal
+  );
 
   for (const result of results) {
     if (result.artifact_storage_type !== FileStorageType.fileset) continue;
