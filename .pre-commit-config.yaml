@@ -68,6 +68,21 @@ repos:
             docs/set-up/config-reference\.mdx
           )$
 
+      - id: docs-internal-links
+        name: Check Fern docs internal links
+        entry: bash -c 'node docs/fern/scripts/sync-helm-docs.mjs && uv run --frozen python docs/_scripts/check_internal_links.py'
+        language: system
+        pass_filenames: false
+        files: |
+          (?x)^(
+            docs/.*\.(md|mdx)|
+            docs/fern/docs\.yml|
+            docs/fern/versions/latest\.yml|
+            docs/_scripts/check_internal_links\.py|
+            docs/fern/scripts/sync-helm-docs\.mjs|
+            k8s/helm/(README\.md|values\.yaml)
+          )$
+
   - repo: https://github.com/norwoodj/helm-docs
     # The container itself is 'latest' no matter what here
     rev: v1.14.2

@@ -47,6 +47,10 @@ const EXAMPLES_OVERLAY_REPLACEMENT =
 function rewritePublishedDocsUrls(text) {
   return text
     .replace(
+      /https:\/\/docs\.nvidia\.com\/nemo-platform\/(?:latest\/)?(?=documentation\/)/g,
+      "/",
+    )
+    .replace(
       /\/documentation\/self-managed-deployment\//g,
       "/documentation/kubernetes-deployment/",
     )

@@ -155,6 +155,11 @@ docs-run-notebook: ## Execute one Fern notebook source (DOCS_PATH=.mdx/.ipynb/.m
 docs-broken-links: ## Report broken links across the built docs
 	cd docs/fern && npm run broken-links
 
+.PHONY: docs-check-internal-links
+docs-check-internal-links: ## Check canonical, routable internal Fern docs links locally
+	node docs/fern/scripts/sync-helm-docs.mjs
+	$(UV) run --frozen python docs/_scripts/check_internal_links.py
+
 .PHONY: docs-fix-links
 docs-fix-links: ## Delink references from published pages into gated (unready) pages
 	cd docs/fern && npm run fix:gated-links

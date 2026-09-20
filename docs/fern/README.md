@@ -11,7 +11,7 @@ This directory holds the Fern **configuration** for the NeMo Platform documentat
 | --- | --- |
 | Fern dashboard | https://dashboard.buildwithfern.com (NVIDIA org) |
 | Contributor/agent guide | [`../AGENTS.md`](../AGENTS.md) |
-| Make targets | `make docs`, `make docs-watch`, `docs-check`, `docs-broken-links`, `docs-fix-links`, `docs-preview` (repo root) |
+| Make targets | `make docs`, `make docs-watch`, `docs-check`, `docs-check-internal-links`, `docs-broken-links`, `docs-fix-links`, `docs-preview` (repo root) |
 | CI workflows | [`../../.github/workflows/`](../../.github/workflows/) (`fern-docs-*.yaml`) |
 | Publish workflow | [`../../.github/workflows/publish-fern-docs.yaml`](../../.github/workflows/publish-fern-docs.yaml) |
 
@@ -82,6 +82,8 @@ Use Fern's nav-derived canonical URLs:
 ```
 
 Avoid source-path links such as `/get-started/concepts/workspaces`, `/latest/get-started/concepts/workspaces`, and relative `.md` links. If a public URL changes, add a redirect in `docs.yml`.
+
+`make docs-check-internal-links` derives the current routes from `versions/latest.yml`, scans published pages, and fails on both unroutable links and legacy URLs that only work through a redirect. The same fast check runs from the root pre-commit configuration when relevant docs or Fern navigation files change.
 
 ## API Reference
 
