@@ -44,7 +44,7 @@ describe('AgentDetailRoute optimizations tab', () => {
     const filters: string[] = [];
     const capture = ({ request }: { request: Request }) => {
       const url = new URL(request.url);
-      if (!url.pathname.endsWith('/jobs/optimize')) return;
+      if (!url.pathname.endsWith('/jobs/run-strategy')) return;
       filters.push(url.searchParams.get('filter') ?? '');
     };
     server.events.on('request:start', capture);
