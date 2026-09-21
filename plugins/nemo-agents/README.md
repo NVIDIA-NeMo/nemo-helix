@@ -40,29 +40,54 @@ executes it through the selected harness.
 | Python | `>=3.11,<3.15` |
 | NeMo Platform | Installed and running with an inference provider and model configured |
 | Model credentials | Set the credentials required by the selected provider; the examples use `NVIDIA_API_KEY` |
-| Harness CLI and authentication | Install and authenticate the selected harness when required; for example, run `codex login` for Codex or complete the Claude CLI login flow |
-| NeMo Relay CLI | Required for Claude and Codex; install it with `script/dev-install-fabric.sh` after installing the plugin |
+| Harness authentication | Authenticate the selected harness when required; for example, run `codex login` for Codex or complete the Claude CLI login flow |
 | Hermes runtime | Required only for Hermes; install it with `script/dev-install-hermes.sh` and set `ADAPTER_PYTHON` as described in the [Hermes example](examples/nemo-agent-config/README.md#hermes) |
 
-Install the plugin from the repository root, after `uv sync`. This installs
-Fabric, the Relay Python bindings, and the supported harness adapters. The NeMo
-Relay CLI and Hermes harness runtime remain separate as noted above.
+### Harness installation matrix
+
+The base Agents plugin installs Fabric, Relay support, and the Claude, Codex,
+DeepAgents, and Hermes adapter implementations. It does not install the
+third-party harness packages. Choose an extra when the harness should share the
+Platform environment:
+
+| Harness selection | `nemo-platform` package expression | Plugin expression (source or local wheel) | Harness packages installed |
+|---|---|---|---|
+| Adapters only | `nemo-platform[nemo-agents-plugin]` | `nemo-agents-plugin` | None |
+| Claude Code | `nemo-platform[nemo-agents-plugin-claude]` | `nemo-agents-plugin[claude]` | Claude Agent SDK and NeMo Relay CLI |
+| Codex | `nemo-platform[nemo-agents-plugin-codex]` | `nemo-agents-plugin[codex]` | OpenAI Codex and NeMo Relay CLI |
+| DeepAgents | `nemo-platform[nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[deepagents]` | LangChain Deep Agents |
+| All installable harnesses | `nemo-platform[nemo-agents-plugin-claude,nemo-agents-plugin-codex,nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[all]` | Claude Code, Codex, and DeepAgents |
+| Hermes | `nemo-platform[nemo-agents-plugin]`, then install Hermes separately | `nemo-agents-plugin`, then install Hermes separately | Hermes is not included in an extra |
+
+Install the Agents plugin and one harness with its namespaced Platform extra.
+For example, install DeepAgents with:
 
 ```bash
-uv pip install -e plugins/nemo-agents/
+uv tool install "nemo-platform[nemo-agents-plugin-deepagents]"
+```
+
+In an activated virtual environment, install the same package expression with:
+
+```bash
+uv pip install "nemo-platform[nemo-agents-plugin-deepagents]"
+```
+
+Plain `pip install` also works in an environment you manage yourself.
+Add `all` to the extra list only when the environment must also run every local
+Platform service: `nemo-platform[all,nemo-agents-plugin-deepagents]`.
+
+The standalone plugin expressions apply when installing the plugin directly,
+including from a source checkout. From the repository root, install one harness
+with:
+
+```bash
+uv sync --package nemo-agents-plugin --extra deepagents
 ```
 
 Verify it loaded:
 
 ```bash
 nemo --help   # should show "agents" under Plugins
-```
-
-If you are using Claude or Codex, install and verify the NeMo Relay CLI:
-
-```bash
-script/dev-install-fabric.sh
-nemo-relay --version
 ```
 
 > **Working directory:** Platform-backed examples use paths relative to the
