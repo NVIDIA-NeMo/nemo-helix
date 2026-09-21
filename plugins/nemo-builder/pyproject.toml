@@ -12,6 +12,9 @@ version = "0.1.0"
 nemo-platform = { path = "../../packages/nemo_platform", editable = true }
 nemo-platform-plugin = { path = "../../packages/nemo_platform_plugin", editable = true }
 
+[project.entry-points."nemo.services"]
+builder = "nemo_builder_plugin.service:BuilderService"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
