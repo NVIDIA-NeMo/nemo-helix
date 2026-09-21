@@ -30,9 +30,10 @@ import os
 import re
 from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import jinja2
+import yaml
 
 # Marker written as the first line of every plugin-generated ``.dockerignore``
 # / ``Dockerfile``.  ``render_dockerignore`` and the CLI no-build path only
@@ -65,6 +66,23 @@ def is_plugin_managed(path: Path) -> bool:
     if not first_line:
         return False
     return first_line[0] in (DOCKERFILE_SENTINEL, DOCKERIGNORE_SENTINEL)
+
+
+def resolve_fabric_harness_install(agent_config: Path) -> tuple[str, bool]:
+    """Return the Platform extra and Hermes isolation flag for the default harness."""
+    try:
+        payload = yaml.safe_load(agent_config.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return "nemo-agents-plugin", False
+    if not isinstance(payload, Mapping):
+        return "nemo-agents-plugin", False
+
+    harnesses = payload.get("harnesses")
+    selected = harnesses.get(payload.get("default_harness")) if isinstance(harnesses, Mapping) else None
+    kind = selected.get("kind") if isinstance(selected, Mapping) else None
+    if not isinstance(kind, str):
+        return "nemo-agents-plugin", False
+    return _FABRIC_HARNESS_INSTALLS.get(kind, "nemo-agents-plugin"), kind in _HERMES_HARNESS_KINDS
 
 
 # -- Defaults ---------------------------------------------------------------
@@ -105,9 +123,17 @@ WHEEL_ENV = "NEMO_AGENTS_WHEEL"
 #: Newest wheel in the checkout's ``dist``, so the value survives every rebuild.
 WHEEL_LATEST = "LATEST"
 
-PINNED_NEMO_RELAY_CLI_VERSION = "0.7.3"
-PINNED_NEMO_RELAY_INSTALLER_COMMIT = "40c5990361afc26ae8b901ff1f49c2b03ddd9ede"
-PINNED_NEMO_RELAY_INSTALLER_SHA256 = "ba2585a32e568643819992fa66b750004328351fce422b979d8c11cfc8bbfadb"
+PINNED_HERMES_COMMIT = "f80f453ae0679347e38abc917c7f94f717bf96c5"  # Hermes Agent 0.20.1
+
+_FABRIC_HARNESS_INSTALLS = {
+    "claude": "nemo-agents-plugin-claude",
+    "nvidia.fabric.claude": "nemo-agents-plugin-claude",
+    "codex": "nemo-agents-plugin-codex",
+    "nvidia.fabric.codex": "nemo-agents-plugin-codex",
+    "deepagents": "nemo-agents-plugin-deepagents",
+    "nvidia.fabric.langchain.deepagents": "nemo-agents-plugin-deepagents",
+}
+_HERMES_HARNESS_KINDS = {"hermes", "nvidia.fabric.hermes"}
 
 # -- Jinja2 template --------------------------------------------------------
 
@@ -227,18 +253,9 @@ ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python \\
     UV_LINK_MODE=copy
 
 RUN apt-get update && \\
-    apt-get install -y --no-install-recommends g++ gcc ca-certificates curl{% if sandbox_apt_packages %} {{ sandbox_apt_packages }}{% endif %} && \\
+    apt-get install -y --no-install-recommends g++ gcc ca-certificates curl{% if install_hermes %} git{% endif %}{% if sandbox_apt_packages %} {{ sandbox_apt_packages }}{% endif %} && \\
     update-ca-certificates && \\
     rm -rf /var/lib/apt/lists/*
-
-# Claude and Codex Relay integration launches this external CLI. Authenticate
-# the immutable installer before root execution; it separately verifies the
-# pinned release binary before placing it on the global runtime PATH.
-RUN curl -fsSL https://raw.githubusercontent.com/NVIDIA/NeMo-Relay/{{ pinned_nemo_relay_installer_commit }}/install.sh -o /tmp/install-nemo-relay.sh && \\
-    echo "{{ pinned_nemo_relay_installer_sha256 }}  /tmp/install-nemo-relay.sh" | sha256sum -c - && \\
-    NEMO_RELAY_VERSION={{ pinned_nemo_relay_cli_version }} sh /tmp/install-nemo-relay.sh --install-dir /usr/local/bin && \\
-    rm /tmp/install-nemo-relay.sh && \\
-    nemo-relay --version
 
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
@@ -254,17 +271,30 @@ COPY ./ /workspace
 RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
     uv venv --python ${PYTHON_VERSION} /workspace/.venv && \\
     . /workspace/.venv/bin/activate && \\
-    uv pip install --no-sources --prerelease=allow {% if wheel_filename %}"/workspace/{{ wheel_filename }}[nemo-agents-plugin]"{% else %}"nemo-platform[nemo-agents-plugin]=={{ contract_version }}"{% endif %} \\
-      "nemo-relay=={{ pinned_nemo_relay_cli_version }}" . && \\
+    uv pip install --no-sources --prerelease=allow {% if wheel_filename %}"/workspace/{{ wheel_filename }}[{{ platform_extra }}]"{% else %}"nemo-platform[{{ platform_extra }}]=={{ contract_version }}"{% endif %} . && \\
     chmod -R a+rX /opt/uv /workspace/.venv
 {% else %}
-# The plugin owns the supported Fabric adapter and harness dependency set.
+# Install the release-matched NeMo Agents runtime and selected harness.
 RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
     uv venv --python ${PYTHON_VERSION} /workspace/.venv && \\
     . /workspace/.venv/bin/activate && \\
-    uv pip install --no-sources --prerelease=allow {% if wheel_filename %}"/workspace/{{ wheel_filename }}[nemo-agents-plugin]"{% else %}"nemo-platform[nemo-agents-plugin]=={{ contract_version }}"{% endif %} \\
-      "nemo-relay=={{ pinned_nemo_relay_cli_version }}" && \\
+    uv pip install --no-sources --prerelease=allow {% if wheel_filename %}"/workspace/{{ wheel_filename }}[{{ platform_extra }}]"{% else %}"nemo-platform[{{ platform_extra }}]=={{ contract_version }}"{% endif %} && \\
     chmod -R a+rX /opt/uv /workspace/.venv
+{% endif %}
+{% if install_hermes %}
+# Hermes Agent cannot share the Platform environment. Install the pinned source
+# and matching Fabric adapter in Python 3.12, then let Fabric launch that adapter
+# through its isolated interpreter.
+RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
+    uv venv --python 3.12 /opt/hermes-venv && \\
+    FABRIC_VERSION="$(/workspace/.venv/bin/python -c 'import importlib.metadata as m; print(m.version("nemo-fabric"))')" && \\
+    uv pip install --no-sources --prerelease=allow --python /opt/hermes-venv/bin/python \\
+      "nemo-fabric[relay]==${FABRIC_VERSION}" \\
+      "nemo-fabric-adapters-hermes==${FABRIC_VERSION}" \\
+      "hermes-agent @ git+https://github.com/NousResearch/hermes-agent.git@{{ pinned_hermes_commit }}" && \\
+    uv pip check --python /opt/hermes-venv/bin/python && \\
+    chmod -R a+rX /opt/hermes-venv
+ENV ADAPTER_PYTHON=/opt/hermes-venv/bin/python
 {% endif %}
 
 LABEL org.opencontainers.image.title="{{ agent_name | dockerfile_escape }}" \\
@@ -372,6 +402,8 @@ class FabricRenderParams(SharedRenderParams):
     #: Wheel to install instead of the pinned requirement, relative to the build
     #: context. Empty means resolve ``contract_version`` from an index.
     wheel_filename: str = ""
+    platform_extra: str = "nemo-agents-plugin"
+    install_hermes: bool = False
 
 
 # -- Public API -------------------------------------------------------------
@@ -446,9 +478,7 @@ def _jinja_env() -> jinja2.Environment:
     )
     env.filters["dockerfile_escape"] = _dockerfile_escape
     template_globals: dict[str, Any] = env.globals
-    template_globals["pinned_nemo_relay_cli_version"] = PINNED_NEMO_RELAY_CLI_VERSION
-    template_globals["pinned_nemo_relay_installer_commit"] = PINNED_NEMO_RELAY_INSTALLER_COMMIT
-    template_globals["pinned_nemo_relay_installer_sha256"] = PINNED_NEMO_RELAY_INSTALLER_SHA256
+    template_globals["pinned_hermes_commit"] = PINNED_HERMES_COMMIT
     return env
 
 
@@ -672,8 +702,12 @@ def render_fabric_dockerfile(
         shared.contract_version,
         pins_contract_version=template_path is None and not wheel_filename,
     )
+    platform_extra, install_hermes = resolve_fabric_harness_install(agent_config)
     params = FabricRenderParams(
-        **{f.name: getattr(shared, f.name) for f in fields(shared)}, wheel_filename=wheel_filename
+        **{f.name: getattr(shared, f.name) for f in fields(shared)},
+        wheel_filename=wheel_filename,
+        platform_extra=platform_extra,
+        install_hermes=install_hermes,
     )
 
     if template_path:

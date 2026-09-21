@@ -237,7 +237,6 @@ class TestFabricBuilderValidationHook:
             build_env={
                 "agent_framework": "nemo_platform_agent",
                 "contract_version": "1.0.0",
-                "nemo_relay_cli_version": template.PINNED_NEMO_RELAY_CLI_VERSION,
                 "base_image_url": "registry.example/base",
                 "base_image_tag": "release",
                 "python_version": "3.13",
@@ -252,16 +251,12 @@ class TestFabricBuilderValidationHook:
             NEMO_PLATFORM_AGENT_FRAMEWORK,
             extract_agent_metadata,
         )
-        from nemo_agents_plugin.container.template import (
-            PINNED_NEMO_RELAY_CLI_VERSION,
-            get_contract_version,
-        )
+        from nemo_agents_plugin.container.template import get_contract_version
 
         agent_config_path = _write_package_config(tmp_path / "agent.yaml")
         build_env = {
             "agent_framework": NEMO_PLATFORM_AGENT_FRAMEWORK,
             "contract_version": get_contract_version(),
-            "nemo_relay_cli_version": PINNED_NEMO_RELAY_CLI_VERSION,
             "base_image_url": "registry.example/base",
             "base_image_tag": "release",
             "python_version": "3.13",

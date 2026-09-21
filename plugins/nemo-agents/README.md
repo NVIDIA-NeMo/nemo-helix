@@ -196,9 +196,11 @@ The packaging command runs locally; Platform services are not required.
 
 ##### Packaging a Fabric agent from a source checkout
 
-`nemo agents package` renders `uv pip install "nemo-platform[nemo-agents-plugin]==<version>"`
-into the Fabric image, where `<version>` is whatever is installed on the build
-host. A checkout reports something like `0.3.0.post402.dev0+062f0ac6e8`, which is
+`nemo agents package` renders a release-pinned `nemo-platform` requirement with
+the extra for `default_harness`, such as
+`nemo-platform[nemo-agents-plugin-deepagents]==<version>`. Here, `<version>` is
+whatever is installed on the build host. A checkout reports something like
+`0.3.0.post402.dev0+062f0ac6e8`, which is
 both a developmental release and a local build identifier — neither of which a
 public index serves — so the command fails immediately:
 
@@ -538,14 +540,16 @@ installation differs:
 
 | Mode | Trigger | Install strategy |
 |---|---|---|
-| Config-only | No `--pyproject` | Install the release-matched `nemo-platform[nemo-agents-plugin]` runtime |
-| Project | `--pyproject` provided | Install the release-matched runtime and the project together |
+| Config-only | No `--pyproject` | Install the release-matched Agents plugin and the configured `default_harness` |
+| Project | `--pyproject` provided | Install that runtime and the project together |
 
-The image includes the supported harness adapters and dependencies, matching
-NeMo Relay CLI and Python binding version `0.7.3`, a non-root `agent` user, and
-the packaged agent server on port `8000`. The Hermes adapter is installed, but
-the Hermes harness runtime remains excluded until its Python dependency
-constraint is resolved.
+The image installs only `default_harness`; other entries under `harnesses` are
+configuration alternatives and are not available in the immutable image.
+Claude, Codex, and DeepAgents use their corresponding `nemo-platform` extras.
+Hermes uses the adapter-only Platform extra and installs the pinned Hermes
+source plus matching Fabric adapter in an isolated Python 3.12 environment.
+Every image runs as a non-root `agent` user and serves the packaged agent on
+port `8000`.
 
 #### Deploy the packaged calculator image
 
