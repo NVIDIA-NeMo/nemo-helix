@@ -4,6 +4,7 @@
 package authz
 
 import future.keywords.contains
+import future.keywords.every
 import future.keywords.if
 import future.keywords.in
 
@@ -13,6 +14,7 @@ import data.authz.scope_check_passed
 import data.common.endpoint_scan
 import data.common.get_applicable_principals
 import data.common.has_permissions
+import data.common.has_specific_permission
 import data.common.req_callers
 import data.common.req_deny
 import data.common.req_permissions
@@ -91,6 +93,47 @@ allow_request if {
 	# Check if any principal has the required permissions
 	some principal in applicable_principals
 	has_permissions(principal, workspace, required_permissions)
+}
+
+# Global workspace reads (ASTD-526). The "default" workspace doubles as the
+# installation-wide GLOBAL workspace so teams share expensive resources (deployed models,
+# LoRA adapters, filesets) instead of duplicating them per workspace.
+#
+# A GET/HEAD against workspace "default" is allowed when EVERY permission the endpoint
+# requires is marked `global_read: true` in the permission registry AND the principal holds
+# that permission in some workspace it is bound to. So the caller must already be a platform
+# user with that read right somewhere; it just does not need a binding in "default".
+#
+# Deliberately narrow: the allowlist is opt-in per permission, so secrets, role bindings,
+# jobs, and agent sessions living in "default" stay unreadable to non-members. Mutating
+# methods never match — writing to the global workspace still requires access to it.
+allow_request if {
+	applicable_principals := get_applicable_principals
+	count(applicable_principals) > 0
+
+	scope_check_passed
+
+	method := extract_method
+	method in ["GET", "HEAD"]
+
+	workspace_scan == "default"
+
+	required_permissions := req_permissions
+	count(required_permissions) > 0
+	every perm in required_permissions {
+		perm in data.authz.global_read_permissions
+	}
+
+	some principal in applicable_principals
+	every perm in required_permissions {
+		has_permission_in_any_workspace(principal, perm)
+	}
+}
+
+# True when *principal* satisfies *perm* in at least one workspace it is bound to.
+has_permission_in_any_workspace(principal, perm) if {
+	some workspace, _ in data.authz.principals[principal].workspaces
+	has_specific_permission(principal, workspace, perm)
 }
 
 # Wildcard workspace "-" with mutating methods: permission-based authorization.

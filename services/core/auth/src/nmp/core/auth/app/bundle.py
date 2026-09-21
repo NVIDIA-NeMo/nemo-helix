@@ -16,7 +16,7 @@ from typing import Optional, Tuple
 
 import yaml
 from nmp.common.auth import ALL_WORKSPACES
-from nmp.common.auth.authz_format import validate_static_authz_data
+from nmp.common.auth.authz_format import global_read_permissions, validate_static_authz_data
 from nmp.common.config import get_service_config
 from nmp.common.entities import EntityClient
 from nmp.core.auth.config import AuthServiceConfig
@@ -216,6 +216,10 @@ async def _build_authorization_data_internal(entities_client: Optional[EntityCli
 
     static_data = merge_plugin_authz_contributions(static_data)
     validate_static_authz_data(static_data)
+
+    # Flatten the registry's global_read markers for the policy, which cannot walk the
+    # nested permission tree. Runs after plugin merge so plugins can mark their own.
+    static_data["authz"]["global_read_permissions"] = global_read_permissions(static_data)
 
     # Initialize workspaces and principals if not present
     if "workspaces" not in static_data["authz"]:
