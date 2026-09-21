@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { StatTile, type StatTileProps } from '@nemo/common/src/components/StatTile';
+import { StatTile, type StatTileDiagnosticProps } from '@nemo/common/src/components/StatTile';
 import { Flex, Grid, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { RangeBand, type RangeBandSeries } from '@studio/components/charts/RangeBand';
 import type { RewardChartData } from '@studio/util/grpoMetrics';
@@ -9,8 +9,8 @@ import type { FC } from 'react';
 
 interface Props {
   reward?: RewardChartData;
-  metrics: StatTileProps[];
-  progress: StatTileProps[];
+  metrics: StatTileDiagnosticProps[];
+  progress: StatTileDiagnosticProps[];
 }
 
 const TRAINING_COLOR = 'var(--text-color-accent-green)';
