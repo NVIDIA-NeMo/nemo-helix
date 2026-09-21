@@ -20,7 +20,6 @@ not-for:
   - nemo-experiments-upload (use to upload traces or evaluation results)
   - nemo-evaluator (use to author a new evaluation or metric)
   - nemo-insights / agents analyst (use to generate the Insight before optimizing from it)
-  - nemo-eval-author (use to author an evaluation outside an Experimentalist run)
   - agents-optimize (use to tune routing, cost, or latency for a deployed agent)
 compatibility: requires the enabled `nemo-experimentalist-plugin`, Docker for Harbor evaluation, a running local platform, and the repository-root `.venv` for LLM-authored code.
 maturity: beta

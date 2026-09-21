@@ -45,8 +45,9 @@ want to automate portions of the agent improvement loop.
 - A NeMo Platform deployment (local or remote) with Intake enabled, so the
   Analyst has traces to read.
 - The optimization plugins installed in the same Python environment as the NeMo command-line
-  interface (CLI). From a source checkout, `uv sync` installs all three through the default
-  `enabled-plugins` group. The Experimenter and Eval Author plugins require Python earlier than 3.14.
+  interface (CLI). From a source checkout, `uv sync` installs Insights and Experimentalist
+  through the default `enabled-plugins` group. Experimentalist includes the internal
+  Eval Author agent and requires Python earlier than 3.14.
 - Access to the code base for the agent under test. The Experimenter needs
   a change surface (source, prompts, tool definitions, model selection, or
   runtime configuration) and a way to run or evaluate the agent reproducibly.
@@ -63,7 +64,7 @@ To install only one side of the loop, use the convenience groups:
 
 ```bash
 uv sync --only-group insights         # Analyst only
-uv sync --only-group experimentalist  # Experimenter and Eval Author
+uv sync --only-group experimentalist  # Experimenter, including its internal Eval Author
 ```
 
 ### Dependencies

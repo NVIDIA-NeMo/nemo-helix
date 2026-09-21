@@ -11,7 +11,7 @@ Intake answers the way the logic expects. This script proves the second half.
 
 Read-only: every call is a GET.
 
-    uv run --frozen python plugins/nemo-eval-author/tests/manual/intake_tool_checks.py
+    uv run --frozen python plugins/nemo-experimentalist/tests/eval_author/manual/intake_tool_checks.py
 """
 
 import argparse

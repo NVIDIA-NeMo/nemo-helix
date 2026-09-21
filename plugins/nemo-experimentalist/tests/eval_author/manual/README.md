@@ -34,7 +34,7 @@ workspace that holds agent-scoped spans, then runs the checks against it, so it 
 no configuration. It prints one line per check and exits nonzero if any check fails.
 
 ```bash
-uv run --frozen python plugins/nemo-eval-author/tests/manual/intake_tool_checks.py
+uv run --frozen python plugins/nemo-experimentalist/tests/eval_author/manual/intake_tool_checks.py
 ```
 
 ### `intake_vocabulary_probe.py`
@@ -49,7 +49,7 @@ Intake published but could not serve, fixed in nemo-platform#1225. If the report
 docstrings disagree, the docstrings are wrong.
 
 ```bash
-uv run --frozen python plugins/nemo-eval-author/tests/manual/intake_vocabulary_probe.py
+uv run --frozen python plugins/nemo-experimentalist/tests/eval_author/manual/intake_vocabulary_probe.py
 ```
 
 ## Options
