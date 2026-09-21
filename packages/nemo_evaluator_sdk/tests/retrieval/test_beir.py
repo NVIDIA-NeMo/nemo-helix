@@ -42,6 +42,7 @@ def test_loads_beir_test_split(tmp_path: Path) -> None:
     assert dataset.corpus["d3"].title == ""
     assert dataset.queries["q2"].text == "third"
     assert dataset.qrels == {"q1": {"d1": 1}, "q2": {"d3": 2}}
+    assert dataset.dropped_qrel_rows == 0
     assert dataset.query_rows() == [
         {"query_id": "q1", "query": "first", "qrels": {"d1": 1}},
         {"query_id": "q2", "query": "third", "qrels": {"d3": 2}},
@@ -57,6 +58,19 @@ def test_discovers_eval_beir_below_fileset_root(tmp_path: Path) -> None:
 def test_rejects_missing_layout(tmp_path: Path) -> None:
     with pytest.raises(BeirDatasetError, match=r"corpus\.jsonl.*queries\.jsonl.*qrels/test\.tsv"):
         BeirDataset.from_path(tmp_path)
+
+
+def test_keeps_first_duplicate_qrel_score(tmp_path: Path) -> None:
+    root = _write_beir_dataset(tmp_path / "beir")
+    (root / "qrels" / "test.tsv").write_text(
+        "query-id\tcorpus-id\tscore\nq1\td1\t1\nq1\td1\t2\nq2\td3\t2\n",
+        encoding="utf-8",
+    )
+
+    dataset = BeirDataset.from_path(root)
+
+    assert dataset.qrels == {"q1": {"d1": 1}, "q2": {"d3": 2}}
+    assert dataset.dropped_qrel_rows == 1
 
 
 def test_rejects_unknown_qrel_document(tmp_path: Path) -> None:

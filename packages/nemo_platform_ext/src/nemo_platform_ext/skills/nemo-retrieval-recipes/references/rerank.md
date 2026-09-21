@@ -7,7 +7,7 @@ Keep the first-stage retriever fixed while comparing base and tuned rerankers.
 
 ## Prerequisites
 
-- A Stage 1 `artifacts` fileset from `sdg.md` whose every `training.jsonl` row
+- A Stage 1 `artifacts` result path from `sdg.md` whose every `training.jsonl` row
   has a non-empty `neg_doc` list.
 - A fileset-backed reranker model entity for training.
 - A fixed embedding model and base reranker served through Inference Gateway
@@ -32,8 +32,8 @@ the Stage 4 ONNX/HF layout.
 
 Stage 0+1 is identical to embed; see `sdg.md`. Run the `sdg.md` pre-submit
 `neg_doc` check before Stage 2 — convert-only JSONL makes `cross_encoder` fail
-the same way as `bi_encoder`. Both stages below read the Stage 1 `artifacts`
-fileset directly.
+the same way as `bi_encoder`. Training reads the Stage 1 result directory
+fragment; evaluation reads its frozen `eval_beir` subtree.
 
 Register a fileset-backed reranker checkpoint if it does not already exist; an
 Inference Gateway endpoint entity has no fileset and cannot be trained:
@@ -65,7 +65,9 @@ Stage 2:
 ```json
 {
   "model": "default/llama-nemotron-rerank-1b-v2",
-  "dataset": {"training": "default/retrieval-stage1-artifacts"},
+  "dataset": {
+    "training": "default/job-fileset-<job>#results/<attempt>/artifacts/"
+  },
   "training": {
     "recipe": "cross_encoder",
     "training_type": "sft",
@@ -82,7 +84,7 @@ Stage 3 (two-stage):
 
 ```bash
 nemo evaluator retrieve-eval submit --spec '{
-  "dataset": "default/retrieval-stage1-artifacts",
+  "dataset": "default/job-fileset-<job>#results/<attempt>/artifacts/eval_beir/**",
   "target": {
     "embeddings": "default/llama-nemotron-embed-1b-v2",
     "reranker": "default/llama-nemotron-rerank-1b-v2-tuned",

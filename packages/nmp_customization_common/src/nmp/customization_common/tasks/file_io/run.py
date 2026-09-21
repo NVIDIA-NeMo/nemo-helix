@@ -133,8 +133,11 @@ class FileIORunner:
                     )
                     .data()
                 )
-                logger.info(f"Found {len(response.data)} files in FileSet {fileset!s}")
-                return response.data
+                files = response.data
+                if fileset.path is not None:
+                    files = [file for file in files if file.path.lstrip("/").startswith(fileset.path)]
+                logger.info(f"Found {len(files)} files in FileSet {fileset!s}")
+                return files
         except NotFoundError as e:
             raise FileDownloadError(
                 f"FileSet {fileset!s} not found. Please ensure the FileSet exists and contains the expected files.",
@@ -155,7 +158,10 @@ class FileIORunner:
 
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        file_sizes = {f.path.lstrip("/"): f.size for f in files}
+        file_sizes = {
+            (f.path.lstrip("/").removeprefix(fileset.path) if fileset.path is not None else f.path.lstrip("/")): f.size
+            for f in files
+        }
 
         with filesystem_sdk_error_handler(
             FileDownloadError,
@@ -164,6 +170,7 @@ class FileIORunner:
             stats = self._download_with_retry(
                 fileset_name=fileset.name,
                 fileset_workspace=self._workspace_for(fileset),
+                fileset_path=fileset.path,
                 dest_dir=str(dest_dir),
                 fileset_display_name=fileset_name,
                 dest_path=dest_dir,
@@ -186,6 +193,7 @@ class FileIORunner:
         self,
         fileset_name: str,
         fileset_workspace: str,
+        fileset_path: str | None,
         dest_dir: str,
         fileset_display_name: str,
         dest_path: Path,
@@ -210,7 +218,7 @@ class FileIORunner:
         composite_callback = CompositeCallback(tqdm_callback, jobs_callback)
 
         FilesetFileSystem(client=self.files.with_options(timeout=DOWNLOAD_TIMEOUT)).get(
-            build_fileset_ref("", workspace=fileset_workspace, fileset=fileset_name),
+            build_fileset_ref(fileset_path or "", workspace=fileset_workspace, fileset=fileset_name),
             dest_dir,
             recursive=True,
             callback=composite_callback,
@@ -219,6 +227,8 @@ class FileIORunner:
 
     def upload_fileset(self, fileset: FileSetRef, src_path: Path) -> UploadStats:
         """Upload all files from a source path (file or directory) to a FileSet."""
+        if fileset.path is not None:
+            raise FileUploadError("Upload destination must reference a FileSet root, not a '#path/' directory.")
         fileset_name = str(fileset)
 
         if src_path.is_dir():
