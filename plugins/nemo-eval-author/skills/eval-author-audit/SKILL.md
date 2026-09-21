@@ -8,7 +8,8 @@ description: >-
   for Eval Author. Use when the user wants a hand-editable audit.md file derived
   from Ethos, needs schema enforcement for declared tools, capabilities, failure
   cases, evidence, and references, wants to measure which audit items one ATIF
-  trace covers, or wants to aggregate coverage across measured traces. Changes
+  trace covers, wants to aggregate coverage across measured traces, or accepts
+  a coverage audit after adapting existing evals. Changes
   none of the user's source, and saves audit artifacts under `.eval-author/`.
 triggers:
   - generate audit.md from ETHOS.md
@@ -18,6 +19,7 @@ triggers:
   - check audit.md coverage denominator
   - what should my evals cover from the agent ethos
   - review the audit coverage denominator
+  - audit coverage of my adapted evals against the ethos
 not-for:
   - eval-author (use for the standard, the boundaries, and to pick a sub-flow)
   - eval-author-discover (use to prove whether a Harbor suite is runnable)
@@ -81,6 +83,13 @@ Read `eval-author` for the shared standard, vocabulary, and boundaries. This
 sub-flow generates and validates a finite coverage denominator from `<ethos_path>`
 and reviewed audit items, then can measure one ATIF trace and aggregate coverage
 reports against it. It does not generate tasks yet.
+
+When the user accepts the audit offered after adaptation, read
+[Review adapted eval coverage](references/adapted-eval-coverage.md). Carry forward
+the selected task paths, adaptation findings, known Ethos path, and run artifacts.
+Complete the Ethos pre-flight, then Steps 1–3 and that review. Use Steps 4–5 only
+when suitable trace evidence is available; task inspection is not measured
+coverage. Do not restart source selection or conversion approval.
 
 The audit-spec approach has three item kinds in v1:
 

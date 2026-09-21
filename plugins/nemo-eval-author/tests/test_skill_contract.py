@@ -57,6 +57,7 @@ import yaml
 _SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills"
 _CORE_DIR = _SKILLS_DIR / "eval-author"
 _DISCOVER_DIR = _SKILLS_DIR / "eval-author-discover"
+_ADAPT_DIR = _SKILLS_DIR / "eval-author-adapt"
 _AUDIT_DIR = _SKILLS_DIR / "eval-author-audit"
 _TASK_CREATE_DIR = _SKILLS_DIR / "eval-author-task-create"
 _FIRST_EVAL_DIR = _SKILLS_DIR / "eval-author-first-eval"
@@ -66,6 +67,7 @@ _TRACE_ENVIRONMENT_DIR = _SKILLS_DIR / "eval-author-trace-environment"
 _SKILL_DIRS = (
     _CORE_DIR,
     _DISCOVER_DIR,
+    _ADAPT_DIR,
     _AUDIT_DIR,
     _TASK_CREATE_DIR,
     _FIRST_EVAL_DIR,
@@ -73,7 +75,15 @@ _SKILL_DIRS = (
     _MLFLOW_TO_ATIF_DIR,
     _TRACE_ENVIRONMENT_DIR,
 )
-_SUB_FLOW_DIRS = (_DISCOVER_DIR, _AUDIT_DIR, _TASK_CREATE_DIR, _FIRST_EVAL_DIR, _INSPECT_DIR, _TRACE_ENVIRONMENT_DIR)
+_SUB_FLOW_DIRS = (
+    _DISCOVER_DIR,
+    _ADAPT_DIR,
+    _AUDIT_DIR,
+    _TASK_CREATE_DIR,
+    _FIRST_EVAL_DIR,
+    _INSPECT_DIR,
+    _TRACE_ENVIRONMENT_DIR,
+)
 _DISCOVER_SCRIPTS_DIR = _DISCOVER_DIR / "scripts"
 _AUDIT_SPEC_DIR = _AUDIT_DIR / "scripts" / "audit_spec"
 _TASK_CREATE_SCRIPTS_DIR = _TASK_CREATE_DIR / "scripts"
@@ -673,6 +683,7 @@ def test_the_core_routes_and_the_sub_flow_executes() -> None:
     """The core only picks a sub-flow, so it neither runs nor saves anything."""
     core_tools = _allowed_tools(_frontmatter_and_body(_CORE_DIR)[0])
     discover_tools = _allowed_tools(_frontmatter_and_body(_DISCOVER_DIR)[0])
+    adapt_tools = _allowed_tools(_frontmatter_and_body(_ADAPT_DIR)[0])
     audit_tools = _allowed_tools(_frontmatter_and_body(_AUDIT_DIR)[0])
     task_create_tools = _allowed_tools(_frontmatter_and_body(_TASK_CREATE_DIR)[0])
     inspect_tools = _allowed_tools(_frontmatter_and_body(_INSPECT_DIR)[0])
@@ -681,6 +692,9 @@ def test_the_core_routes_and_the_sub_flow_executes() -> None:
     assert not {"Bash", "Write"} & core_tools, f"the core routes and explains; {sorted(core_tools)} is too broad"
     assert {"Bash", "Write"} <= discover_tools, (
         f"{_DISCOVER_DIR.name} runs a script and saves a report; it has {sorted(discover_tools)}"
+    )
+    assert {"Bash", "Write"} <= adapt_tools, (
+        f"{_ADAPT_DIR.name} scaffolds and validates task files; it has {sorted(adapt_tools)}"
     )
     assert {"Bash", "Write"} <= audit_tools, (
         f"{_AUDIT_DIR.name} generates and validates audit files; it has {sorted(audit_tools)}"
@@ -789,6 +803,7 @@ def test_every_bundled_path_the_skill_names_exists() -> None:
     for relative in (
         "scripts/discover.py",
         "scripts/render_report.py",
+        "references/harbor-setup.md",
         "scripts/_checks.py",
         "scripts/providers/harbor/_probe.py",
         "scripts/providers/harbor/_inventory.py",
@@ -801,6 +816,7 @@ def test_every_bundled_path_the_skill_names_exists() -> None:
 def test_discover_saved_report_is_human_friendly_before_json_evidence() -> None:
     """The saved discovery report should lead with the user verdict, not raw JSON."""
     _, body = _frontmatter_and_body(_DISCOVER_DIR)
+    normalized_body = " ".join(body.split())
     required_guidance = (
         "The saved report must be useful to a human first, and auditable second",
         "does this repo have evals, and how do I run",
@@ -812,7 +828,7 @@ def test_discover_saved_report_is_human_friendly_before_json_evidence() -> None:
         "preserves the original stdout JSON",
     )
     for phrase in required_guidance:
-        assert phrase in body, f"discover report guidance is missing {phrase!r}"
+        assert phrase in normalized_body, f"discover report guidance is missing {phrase!r}"
 
     assert body.index("--summary") < body.index("Evidence JSON")
 
@@ -964,7 +980,7 @@ def test_discover_report_renderer_handles_unproven_outcome(monkeypatch: pytest.M
 
     assert "readiness has not been checked" in markdown
     assert "| `harbor-job.yaml` | Not checked | Not checked |" in markdown
-    assert "Use the Python environment for this suite" in markdown
+    assert "Check the existing Harbor installation" in markdown
     assert "No required failures" not in markdown
     assert "## Evidence JSON" in markdown
 
@@ -1038,16 +1054,58 @@ def test_discover_report_renderer_empty_repo(monkeypatch: pytest.MonkeyPatch, pr
     report = _discovery_report_fixture(proven=proven, runnable=False, configs=[], run_command=None)
     report.update(task_count=0, dataset_paths=[])
     summary = renderer.render_summary(report)
-    assert summary.startswith("I did not find Harbor evals")
+    assert summary.startswith("Eval Author uses [Harbor](https://www.harborframework.com/docs) to run evals.")
+    assert "It doesn't look like you have any Harbor evals in the locations I checked" in summary
     assert "other kinds of evaluations" in summary
+    assert "Do you already have evals in any form" in summary
+    assert summary.endswith("Can you point me to them?")
     assert "has Harbor evals" not in summary
     assert "Python" not in summary
+    markdown = renderer.render_report(report)
+    assert summary in markdown
+    evidence = markdown.split("```json\n", 1)[1].split("\n```", 1)[0]
+    assert json.loads(evidence) == report
 
 
 def test_discover_report_renderer_tasks_without_config(monkeypatch: pytest.MonkeyPatch) -> None:
     renderer = _import_discover_render_report(monkeypatch)
     report = _discovery_report_fixture(proven=True, runnable=False, configs=[], run_command=None)
     assert "task or dataset files, but no run configuration" in renderer.render_summary(report)
+
+
+@pytest.mark.parametrize("has_evals", [False, True])
+@pytest.mark.parametrize("runtime_state", ["missing", "other_environment", "available", "unknown"])
+def test_discover_report_renderer_setup_matches_runtime(
+    monkeypatch: pytest.MonkeyPatch, has_evals: bool, runtime_state: str
+) -> None:
+    renderer = _import_discover_render_report(monkeypatch)
+    report = _discovery_report_fixture(
+        proven=runtime_state == "available",
+        runnable=False,
+        configs=[_config_fixture(path="harbor-job.yaml", runnable=False)] if has_evals else [],
+        run_command=None,
+    )
+    report.update(task_count=int(has_evals), dataset_paths=[])
+    report["runtime"]["harbor_cli"] = "/existing/bin/harbor" if runtime_state == "other_environment" else None
+    if runtime_state == "unknown":
+        report.pop("runtime")
+
+    summary = renderer.render_summary(report)
+    assert ("uv tool install harbor" in summary) == (runtime_state == "missing")
+    assert ("existing Harbor installation" in summary) == (runtime_state == "other_environment")
+    if runtime_state in {"missing", "other_environment"}:
+        assert "clarify requirements and grading rules" in summary
+        assert "Creating native task files" in summary
+    if runtime_state == "missing":
+        assert "harbor --help" in summary
+        assert "https://www.harborframework.com/docs/getting-started" in summary
+        assert "https://docs.astral.sh/uv/getting-started/installation/" in summary
+    if not has_evals:
+        assert summary.endswith("Can you point me to them?")
+
+    markdown = renderer.render_report(report)
+    evidence = markdown.split("```json\n", 1)[1].split("\n```", 1)[0]
+    assert json.loads(evidence) == report
 
 
 @pytest.mark.parametrize("error", ["Not a directory: /missing", "Discovery needs Python 3.11 or later"])
@@ -1142,6 +1200,19 @@ def test_discover_report_renderer_cli_summary_and_evidence(tmp_path: Path) -> No
     assert report["run_command"] in summary
     assert "Evidence JSON" not in summary
     assert source in saved
+
+
+@pytest.mark.parametrize("skill_dir", [_ADAPT_DIR, _AUDIT_DIR])
+def test_sub_flow_references_are_bundled(skill_dir: Path) -> None:
+    """Copied skills must retain their linked workflow guidance."""
+    _, body = _frontmatter_and_body(skill_dir)
+    references = re.findall(r"\]\((references/[^)]+)\)", body)
+    assert references, f"{skill_dir.name} must link its supporting workflow guidance"
+    for reference in references:
+        target = (skill_dir / reference).resolve()
+        assert target.is_relative_to(skill_dir.resolve())
+        assert target.is_file(), f"{skill_dir.name} references an unbundled file: {reference}"
+        assert target.read_text(encoding="utf-8").strip()
 
 
 def test_task_create_script_the_skill_names_exists() -> None:

@@ -35,6 +35,7 @@ group.
 | [`eval-author`](skills/eval-author/SKILL.md) | Core. Owns the standard every sub-flow follows and routes to one. |
 | [`eval-author-first-eval`](skills/eval-author-first-eval/SKILL.md) | Sub-flow. Requires Ethos, plans cases without Harbor, and builds a small working starter suite while explaining how to run and extend it. |
 | [`eval-author-discover`](skills/eval-author-discover/SKILL.md) | Sub-flow. Records whether a repository's Harbor evals are ready to run. |
+| [`eval-author-adapt`](skills/eval-author-adapt/SKILL.md) | Sub-flow. Guides existing non-Harbor evals into Harbor while preserving their cases and scoring rules. |
 | [`eval-author-audit`](skills/eval-author-audit/SKILL.md) | Sub-flow. Validates an existing finite `audit.md` coverage denominator. |
 | [`eval-author-inspect-trace`](skills/eval-author-inspect-trace/SKILL.md) | Sub-flow. Not user-invocable. Explains one Intake trace after `eval-author` selects it. |
 | [`eval-author-task-create`](skills/eval-author-task-create/SKILL.md) | Sub-flow. Creates and proves one Harbor task from an actionable audit gap. |
@@ -43,8 +44,33 @@ group.
 
 ## Where findings go
 
+Repository eval onboarding starts with discovery. If no Harbor evals are found,
+the skill explains Harbor and asks whether the user has evals in another form.
+When inspection finds possible eval material, the skill explains what it found
+and asks whether to use it or look elsewhere. It waits for that answer before
+conversion, reusing an earlier answer or explicitly supplied eval source.
+User-identified tests, scripts, datasets, notebooks, or rubrics go to `eval-author-adapt`,
+which first explains Harbor, the proposed conversion, and execution needs, then
+asks whether the user wants to proceed. Identifying the source does not start
+conversion. After acceptance, it saves its mapping in `.eval-author/adaptation.md` and creates requested
+drafts under `.eval-author/adapted-tasks/`. Original evals stay unchanged.
+Conversion produces task files and the grading checks supported by the source;
+unavailable app access blocks live execution, not task creation. Written
+specifications support the tasks rather than replacing them.
+Once the user says they are done adapting their evals, the skill offers an
+optional coverage audit against their Ethos. On acceptance, `eval-author-audit`
+generates or reconciles the audit specification and reviews the created tasks;
+trace-based measured coverage is reported separately when evidence is available.
+Confirmed absence routes to the bundled `eval-author-first-eval` flow to establish
+Ethos and build a starter suite, carrying forward discovery and prior answers.
+
+If Harbor is unavailable, the [setup guidance](skills/eval-author-discover/references/harbor-setup.md)
+helps locate an existing installation or install and verify one. Source discovery,
+requirements, and grading design can continue meanwhile. Installation is never
+automatic; native task creation and execution resume after Harbor is verified.
+
 `eval-author-discover` leaves a report at `.eval-author/discovery.md`, carrying the
-JSON as front matter so a later model reads the verdict without Harbor. It is
+JSON in an evidence section so a later model reads the verdict without Harbor. It is
 visible and worth committing: a teammate who reads it skips the discovery pass.
 
 `eval-author-inspect-trace` leaves one report per trace under

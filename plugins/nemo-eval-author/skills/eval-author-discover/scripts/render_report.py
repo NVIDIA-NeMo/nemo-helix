@@ -40,6 +40,31 @@ def _action(check: dict[str, Any]) -> str:
     }.get(name, "Review the diagnostic details below and resolve the reported problem before checking again.")
 
 
+def _harbor_setup_guidance(report: dict[str, Any]) -> str:
+    runtime = report.get("runtime", {})
+    if runtime.get("harbor_importable") is not False:
+        return ""
+    preparation = (
+        "We can still inspect your eval material and clarify requirements and grading rules. "
+        "Creating native task files, validating them, and running evals need a working Harbor installation."
+    )
+    if runtime.get("harbor_cli"):
+        return (
+            "A Harbor command was found, but Harbor is unavailable in the environment checked. "
+            "Check the existing Harbor installation and use its working environment before rerunning discovery. "
+            + preparation
+        )
+    return (
+        "Harbor is unavailable in the environment checked. "
+        + preparation
+        + " If you already have Harbor installed elsewhere, use that environment. Otherwise, follow "
+        "[Harbor's setup guide](https://www.harborframework.com/docs/getting-started): "
+        "with uv available, run `uv tool install harbor`, then `harbor --help`. "
+        "If uv is missing, use the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/). "
+        "After setup, we'll verify Harbor and resume from the saved findings."
+    )
+
+
 def render_summary(report: dict[str, Any]) -> str:
     """Return the short user reply, also used at the top of the saved report."""
     if "error" in report:
@@ -49,17 +74,22 @@ def render_summary(report: dict[str, Any]) -> str:
     configs = report.get("configs", [])
     found = bool(configs or report.get("task_count") or report.get("dataset_paths"))
     proven = bool(report.get("proven"))
+    setup = _harbor_setup_guidance(report)
     if not found:
         return (
-            "I did not find Harbor evals in this repo.\n\n"
-            "Discovery searches for Harbor configurations up to four directories deep. "
-            "Confirm where the evals live or whether they use another framework. "
-            "This does not rule out other kinds of evaluations."
+            "Eval Author uses [Harbor](https://www.harborframework.com/docs) to run evals. "
+            "It gives your agent a task, checks the result, and lets you repeat the same "
+            "test after changes to see how your agent is doing.\n\n"
+            "It doesn't look like you have any Harbor evals in the locations I checked. "
+            "You may still have other kinds of evaluations we can work from. "
+            "Let's first make sure we're starting with the right material.\n\n"
+            + (setup + "\n\n" if setup else "")
+            + "Do you already have evals in any form, such as tests, scripts, a dataset, a notebook, "
+            "or a manual checklist? Can you point me to them?"
         )
     if not proven:
-        return (
-            "I found possible Harbor evals, but readiness has not been checked.\n\n"
-            "Use the Python environment for this suite with Harbor installed, then rerun the readiness check."
+        return "I found possible Harbor evals, but readiness has not been checked.\n\n" + (
+            setup or "Use the Python environment for this suite with Harbor installed, then rerun the readiness check."
         )
     if not configs:
         return (
