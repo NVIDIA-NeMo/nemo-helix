@@ -5,11 +5,28 @@
 
 from __future__ import annotations
 
+from typing import Protocol, runtime_checkable
 from urllib.parse import quote
 
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+import httpx
 
-PlatformClient = NeMoPlatform | AsyncNeMoPlatform
+
+@runtime_checkable
+class PlatformClient(Protocol):
+    """Minimal structural surface the Anonymizer SDK needs from a platform client.
+
+    Satisfied by ``NemoClient`` / ``AsyncNemoClient`` (and the legacy generated
+    SDK) so resource code can read the base URL, default headers, and workspace
+    without depending on any concrete client class.
+    """
+
+    @property
+    def base_url(self) -> str | httpx.URL: ...
+    @property
+    def default_headers(self) -> dict[str, str]: ...
+    @property
+    def workspace(self) -> str | None: ...
+
 
 _API_PREFIX = "/apis/anonymizer/v2/workspaces"
 

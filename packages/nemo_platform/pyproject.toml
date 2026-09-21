@@ -107,6 +107,7 @@ core-service = [
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 data-designer-nemo = [
+  "nemo-platform-plugin",
   "data-designer==0.9.3",
   "anyio>=4.0",
   "duckdb",
