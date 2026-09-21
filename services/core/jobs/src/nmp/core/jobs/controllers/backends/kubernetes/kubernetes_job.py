@@ -439,7 +439,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             return self.create_step_update(step, job)
 
     def _cancel_active_step_tasks(self, step: PlatformJobStepWithContext) -> None:
-        """Mark tasks still ACTIVE as cancelled; their pods are gone by this point."""
+        """Cancel every task still ACTIVE. Best effort: a task that fails is logged and skipped."""
         tasks = self._jobs.list_job_step_tasks(
             name=step.name,
             job=step.job,
@@ -454,16 +454,27 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                     extra={"workspace": step.workspace, "job": step.job, "step": step.name},
                 )
                 continue
-            self._jobs.update_job_step_task(
-                name=task.name,
-                workspace=step.workspace,
-                job=step.job,
-                step=step.name,
-                body=PlatformJobTaskUpdate(
-                    status=PlatformJobStatus.CANCELLED,
-                    status_details={"message": "Task cancelled as part of job cancellation"},
-                ),
-            )
+            try:
+                self._jobs.update_job_step_task(
+                    name=task.name,
+                    workspace=step.workspace,
+                    job=step.job,
+                    step=step.name,
+                    body=PlatformJobTaskUpdate(
+                        status=PlatformJobStatus.CANCELLED,
+                        status_details={"message": "Task cancelled as part of job cancellation"},
+                    ),
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to cancel task as part of job cancellation",
+                    extra={
+                        "workspace": step.workspace,
+                        "job": step.job,
+                        "step": step.name,
+                        "task": task.name,
+                    },
+                )
 
     def sync_terminate_job(self, step: PlatformJobStepWithContext, job: V1Job | None) -> JobUpdate:
         if job is None:
@@ -477,10 +488,9 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         else:
             self.terminate_job(job)
             update = self.create_step_update(step, job)
-            # update_all_tasks only visits tasks that still have a pod, so a task whose pod is
-            # already gone stays ACTIVE. Once this update is terminal nothing reconciles the
-            # step again -- including the branch above -- so sweep before returning.
-            if update.status in PlatformJobStatus.terminals():
+            # update_all_tasks only updates tasks that still have a pod, so a task whose pod is
+            # already gone stays ACTIVE once the step reaches a terminal status.
+            if update.status == PlatformJobStatus.CANCELLED:
                 self._cancel_active_step_tasks(step)
             return update
 
