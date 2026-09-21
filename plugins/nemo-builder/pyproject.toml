@@ -5,12 +5,17 @@
 name = "nemo-builder-plugin"
 description = "In-cluster container image builds for NeMo Platform (RFC 001)."
 requires-python = ">=3.11,<3.15"
-dependencies = ["nemo-platform-plugin", "nemo-platform", "pydantic>=2.0.0"]
+dependencies = ["nemo-platform-plugin", "nemo-platform", "pydantic>=2.0.0", "kubernetes>=29.0.0"]
 version = "0.1.0"
 
 [tool.uv.sources]
 nemo-platform = { path = "../../packages/nemo_platform", editable = true }
 nemo-platform-plugin = { path = "../../packages/nemo_platform_plugin", editable = true }
+
+[project.scripts]
+# What the three job steps run as. The compiler emits `["nmp-build", "<step>"]` as each step's
+# container command; the launcher execs it.
+nmp-build = "nemo_builder_plugin.run.main:main"
 
 [project.entry-points."nemo.services"]
 builder = "nemo_builder_plugin.service:BuilderService"

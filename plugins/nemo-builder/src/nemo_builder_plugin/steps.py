@@ -74,6 +74,7 @@ class SandboxSpec(BaseModel):
 
     image: str = Field(description="The kaniko executor image.")
     namespace: str
+    work_pvc: str = Field(description="Claim the sandbox mounts for context and output.")
     service_account: str = Field(
         default="",
         description="Empty, always. The sandbox runs with automountServiceAccountToken: false.",

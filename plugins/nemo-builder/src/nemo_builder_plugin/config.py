@@ -57,9 +57,12 @@ class BuilderConfig(NemoConfig):
         description="Work volume claim. fetch writes it, the sandbox reads and writes it, push reads it.",
     )
     sandbox_image: str = Field(
-        default="gcr.io/kaniko-project/executor:latest",
+        default="gcr.io/kaniko-project/executor:debug",
         description=(
-            "The kaniko executor. RFC 001 wants a pinned first-party fork here (`M2-3`): "
+            "The kaniko executor. `:debug` rather than `:latest` because it ships a shell, and "
+            "the shell is what sequences a group's builds inside one sandbox -- the plain image "
+            "has no way to run two invocations.\n\n"
+            "RFC 001 wants a pinned first-party fork here (`M2-3`): "
             "upstream kaniko was archived by Google on 2025-06-03, so this is a standing "
             "third-party dependency whose advisory obligation currently has no owner."
         ),

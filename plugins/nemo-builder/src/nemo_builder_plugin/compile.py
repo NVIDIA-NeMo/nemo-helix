@@ -225,6 +225,7 @@ def _build_step(build_set: BuildSet, config: BuilderConfig, job_name: str) -> Pl
             sandbox=SandboxSpec(
                 image=config.sandbox_image,
                 namespace=config.namespace,
+                work_pvc=config.work_pvc,
                 runtime_class=config.runtime_class,
                 registry_mirror=config.registry_mirror,
                 node_selector=config.node_selector,
