@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from nemo_agents_plugin.jobs import job_usage
 from nemo_agents_plugin.jobs.job_usage import evaluation_batch_token_usage, fabric_output_token_usage
 
 
@@ -60,6 +61,36 @@ def test_harbor_batch_rejects_missing_trial_usage(tmp_path: Path) -> None:
     assert evaluation_batch_token_usage(tmp_path, runner="harbor", expected_executions=1) is None
 
 
+def test_harbor_trace_fallback_rejects_missing_token_dimension(tmp_path: Path) -> None:
+    trial_dir = _write_harbor_result_without_agent_usage(tmp_path / "batch__eval")
+    _write_session_usage(trial_dir, input_tokens=12, output_tokens=None)
+
+    assert evaluation_batch_token_usage(tmp_path, runner="harbor", expected_executions=1) is None
+
+
+def test_harbor_trace_fallback_accepts_complete_usage(tmp_path: Path) -> None:
+    trial_dir = _write_harbor_result_without_agent_usage(tmp_path / "batch__eval")
+    _write_session_usage(trial_dir, input_tokens=12, output_tokens=5, cache_tokens=3)
+
+    usage = evaluation_batch_token_usage(tmp_path, runner="harbor", expected_executions=1)
+
+    assert usage is not None
+    assert usage.input_tokens == 15
+    assert usage.output_tokens == 5
+
+
+def test_load_json_object_treats_value_error_as_invalid_json(tmp_path: Path, monkeypatch) -> None:
+    payload = tmp_path / "result.json"
+    payload.write_text("{}")
+
+    def raise_value_error(_: str) -> object:
+        raise ValueError("integer string conversion length limitation")
+
+    monkeypatch.setattr(job_usage.json, "loads", raise_value_error)
+
+    assert job_usage._load_json_object(payload) is None
+
+
 def _write_nat_result(run_dir: Path, *, prompt: int | None, completion: int | None) -> None:
     run_dir.mkdir()
     (run_dir / "result.json").write_text(
@@ -88,3 +119,28 @@ def _write_harbor_result(
             }
         )
     )
+
+
+def _write_harbor_result_without_agent_usage(job_dir: Path) -> Path:
+    trial_dir = job_dir / "trial"
+    trial_dir.mkdir(parents=True)
+    (trial_dir / "result.json").write_text(json.dumps({"task_name": "eval", "agent_result": {}}))
+    return trial_dir
+
+
+def _write_session_usage(
+    trial_dir: Path,
+    *,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    cache_tokens: int = 0,
+) -> None:
+    usage = {}
+    if input_tokens is not None:
+        usage["input_tokens"] = input_tokens
+    if output_tokens is not None:
+        usage["output_tokens"] = output_tokens
+    usage["cache_read_input_tokens"] = cache_tokens
+    sessions_dir = trial_dir / "agent" / "sessions" / "projects" / "-app"
+    sessions_dir.mkdir(parents=True)
+    (sessions_dir / "session.jsonl").write_text(json.dumps({"type": "assistant", "message": {"usage": usage}}) + "\n")
