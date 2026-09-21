@@ -490,6 +490,25 @@ def test_resolve_target_rejects_unsandboxed_custom_environment(
         AgentEvalJob._resolve_target(gym_target, ctx)
 
 
+def test_resolve_target_rejects_unsandboxed_agent_ref_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Colocated execution builds a GymRuntimeConfig, which has no agent_ref_name, so an accepted one
+    # would be dropped and the run would route to `agent` -- a plausible score for a different agent.
+    ctx = _job_context(tmp_path)
+    gym_target = GymRunnerTarget(
+        agent="simple_agent",
+        agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        resources_server="mcqa",
+        agent_ref_name="mcqa_simple_agent",
+    )
+    monkeypatch.delenv(GYM_SANDBOX_PLAN_ENVVAR, raising=False)
+
+    with pytest.raises(SandboxUnavailableError, match="agent_ref_name"):
+        AgentEvalJob._resolve_target(gym_target, ctx)
+
+
 def test_runner_target_is_accepted(tmp_path: Path) -> None:
     spec = AgentEvalSpec(tasks=[_task_spec()], target=_runner_target("openai/gpt-5.4"))
     assert isinstance(spec.target, FabricRunnerTarget)

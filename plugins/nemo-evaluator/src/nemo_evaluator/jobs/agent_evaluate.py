@@ -566,6 +566,13 @@ class _AgentEvalJobBase(NemoJob):
                     "Gym environment FileSets require sandboxed execution. Enable `sandboxed_gym_default`, "
                     "or omit `target.environment` so colocated GymAgentTaskRunner cannot ignore the staged package."
                 )
+            if target.agent_ref_name is not None:
+                raise SandboxUnavailableError(
+                    "The agent_ref_name field requires sandboxed execution; colocated GymAgentTaskRunner "
+                    "resolves its agent from Gym config and would route rollouts to "
+                    f"{target.agent!r} instead of {target.agent_ref_name!r}. Enable `sandboxed_gym_default`, "
+                    "or omit it."
+                )
             if target.agent_config is None:
                 raise ValueError(
                     "The agent_config field is required for colocated Gym execution; package-supplied agents "

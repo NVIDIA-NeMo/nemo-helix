@@ -282,10 +282,10 @@ class GymPlacement(BaseModel):
     )
     agent_ref_name: str | None = Field(
         default=None,
-        description="Gym agent instance rollouts are routed to on a sandboxed host, stamped as each row's "
-        "`agent_ref`. Defaults to the runner's `agent`. Set it when the environment's config defines the "
-        "agent under a different name -- `mcqa` registers `mcqa_simple_agent`, and routing to "
-        "`simple_agent` there does not answer.",
+        description="Gym agent *instance* the sandboxed host composes its config around, as distinct from "
+        "the runner's `agent` component. Defaults to `agent`. Set it when the environment defines the agent "
+        "under another name -- `mcqa` registers `mcqa_simple_agent`, and `simple_agent` there does not "
+        "answer. Requires sandboxed execution.",
     )
 
 
