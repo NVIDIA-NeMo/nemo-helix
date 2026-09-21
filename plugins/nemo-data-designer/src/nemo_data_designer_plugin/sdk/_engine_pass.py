@@ -45,15 +45,13 @@ EngineContextFactory = Callable[[NeMoPlatform | None, str, set[str]], DataDesign
 class EnginePassResult:
     """Outcome of :func:`run_engine_pass`.
 
-    ``engine_ran`` is what lets callers tell "the engine had nothing to
-    complain about" apart from "the engine never got to look". The two are
-    worlds apart for a liveness probe, where a skipped pass that reported
-    success would be exactly the false green this command exists to prevent.
+    The engine is only skipped when the resolution pass already found problems,
+    so ``resolution_errors`` covers that case on its own: an empty buffer with
+    no ``engine_error`` always means the engine ran and was satisfied.
     """
 
     resolution_errors: list[NDDError]
     engine_error: Exception | None
-    engine_ran: bool
 
 
 async def run_engine_pass(
@@ -96,9 +94,7 @@ async def run_engine_pass(
             and yields no engine pass without one.
 
     Returns:
-        An :class:`EnginePassResult`. Check ``engine_ran`` before reading a
-        clean ``engine_error`` as a pass — the engine is skipped entirely when
-        resolution failed or no sync ``sdk`` was supplied.
+        An :class:`EnginePassResult`.
 
     Raises:
         ValueError: If neither ``sdk`` nor ``async_sdk`` is provided.
@@ -114,12 +110,12 @@ async def run_engine_pass(
     resolution_errors, _model_configs, model_providers = await resolve_runnable_config(validation_ctx, config)
 
     if resolution_errors:
-        return EnginePassResult(resolution_errors=resolution_errors, engine_error=None, engine_ran=False)
+        return EnginePassResult(resolution_errors=resolution_errors, engine_error=None)
 
     factory = engine_context_factory or _execution_context_factory
     engine_ctx = factory(sdk, workspace, validation_ctx.validated_filesystem_roots)
     if engine_ctx is None:
-        return EnginePassResult(resolution_errors=resolution_errors, engine_error=None, engine_ran=False)
+        return EnginePassResult(resolution_errors=resolution_errors, engine_error=None)
 
     try:
         with tempfile.TemporaryDirectory() as artifact_path:
@@ -130,9 +126,9 @@ async def run_engine_pass(
             )
             await asyncio.to_thread(engine_call, data_designer, config_builder)
     except engine_errors as e:
-        return EnginePassResult(resolution_errors=resolution_errors, engine_error=e, engine_ran=True)
+        return EnginePassResult(resolution_errors=resolution_errors, engine_error=e)
 
-    return EnginePassResult(resolution_errors=resolution_errors, engine_error=None, engine_ran=True)
+    return EnginePassResult(resolution_errors=resolution_errors, engine_error=None)
 
 
 def _execution_context_factory(
