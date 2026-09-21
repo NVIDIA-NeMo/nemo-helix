@@ -62,6 +62,17 @@ def ensure_library_logging_handler() -> Generator[None, None, None]:
 
     So this is for the paths that drive the engine in the caller's own process,
     where its logs would otherwise go nowhere: today, the model health check.
+
+    Note:
+        Like :func:`~nemo_data_designer_plugin.sdk._engine_logs.forward_engine_logs`,
+        this assumes one invocation is active at a time. The handler and the
+        logger level are process-global, so two overlapping async
+        ``check_models`` calls would share them: the second sees the first's
+        handler and installs nothing, then the first's exit removes it and the
+        second call's remaining records are dropped. Concurrent SDK
+        ``check_models`` calls are not a supported usage. If that ever needs
+        supporting, switch to the singleton-handler + ``ContextVar`` routing
+        used in :mod:`nemo_data_designer_plugin.functions._preview_logs`.
     """
     with _attach_stream_handler(_LIBRARY_LOGGER_NAME):
         yield

@@ -91,7 +91,7 @@ Unlike `validate`, it stops at the first model that fails rather than listing ev
 Flags:
 
 - `--workspace <name>` — same meaning as for `validate`.
-- `--output {text,json}` — `json` emits a structured `CheckModelsReport` (each error carries an `error_type` such as `ModelNotFoundError`) and suppresses the per-model log lines.
+- `--output {text,json}` — `json` emits a structured `CheckModelsReport` (each error carries an `error_type` such as `ModelNotFoundError`) on stdout and routes the per-model log lines to stderr, so stdout stays parseable.
 
 ## Seed data
 

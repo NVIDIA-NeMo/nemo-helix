@@ -39,7 +39,17 @@ class _CallbackHandler(logging.Handler):
         self._on_log = on_log
 
     def emit(self, record: logging.LogRecord) -> None:
-        self._on_log(record.getMessage())
+        # ``Handler.handle`` does not guard ``emit``, so anything raised here
+        # propagates out of the engine's ``logger.info(...)`` call — on the
+        # worker thread, mid-probe, as an exception type the report layer does
+        # not classify. A closed stdout (``check-models cfg.py | head -1``)
+        # raising BrokenPipeError out of the callback is enough to turn a
+        # health report into a traceback. Route failures through the same
+        # ``handleError`` path every stdlib handler uses.
+        try:
+            self._on_log(record.getMessage())
+        except Exception:
+            self.handleError(record)
 
 
 @contextmanager

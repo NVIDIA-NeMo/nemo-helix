@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 
 import data_designer.config as dd
+import data_designer.interface.data_designer as data_designer_interface
 import nemo_data_designer_plugin.testing.utils as u
 import pytest
 from data_designer.engine.models.errors import ModelAuthenticationError
@@ -104,8 +105,21 @@ async def test_check_models_returns_ok_report(monkeypatch: pytest.MonkeyPatch) -
     assert report.errors == []
 
 
-async def test_check_models_reports_typed_model_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_probe(monkeypatch, ModelAuthenticationError("bad key"))
+@pytest.mark.parametrize(
+    ("outcome", "expected_type"),
+    [
+        (ModelAuthenticationError("bad key"), "ModelAuthenticationError"),
+        # TimeoutError is a builtin, not a DataDesignerError, so it only lands in
+        # a report because _ENGINE_ERRORS lists it separately. Upstream raises it
+        # when the 180s health-check budget is exhausted.
+        (TimeoutError("bad key"), "TimeoutError"),
+    ],
+    ids=["typed-model-error", "health-check-timeout"],
+)
+async def test_check_models_reports_engine_error(
+    monkeypatch: pytest.MonkeyPatch, outcome: Exception, expected_type: str
+) -> None:
+    _patch_probe(monkeypatch, outcome)
 
     with (
         u.make_mock_client_context() as client_context,
@@ -119,7 +133,7 @@ async def test_check_models_reports_typed_model_error(monkeypatch: pytest.Monkey
         )
 
     assert report.ok is False
-    assert [(e.error_type, e.message) for e in report.errors] == [("ModelAuthenticationError", "bad key")]
+    assert [(e.error_type, e.message) for e in report.errors] == [(expected_type, "bad key")]
 
 
 async def test_check_models_reports_resolution_failure_without_probing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -172,12 +186,33 @@ async def test_check_models_without_sync_sdk_surfaces_model_errors(monkeypatch: 
     assert [(e.error_type, e.message) for e in report.errors] == [("ModelAuthenticationError", "bad key")]
 
 
+def _patch_readiness(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """Patch only the network probe, leaving resource-provider construction real.
+
+    ``_patch_probe`` replaces ``DataDesigner.check_models`` wholesale, which
+    also skips ``_create_resource_provider`` — and with it the eager seed-reader
+    lookup that the probe-only context exists to satisfy. Patching one level
+    down keeps that construction in the test's path.
+    """
+    calls: list[bool] = []
+
+    def _readiness(*args, **kwargs) -> None:
+        calls.append(True)
+
+    monkeypatch.setattr(data_designer_interface, "run_readiness_check", _readiness)
+    return calls
+
+
 async def test_check_models_probes_a_seeded_config_without_a_sync_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
     """Resource-provider construction eagerly looks up a reader for the
     configured seed type, so a seeded config is the case a probe-only context
     could plausibly break on. The seed is never read — only registered.
+
+    Patches the readiness probe rather than ``check_models`` so the real
+    ``_create_resource_provider`` runs: that lookup is the whole reason
+    ``CheckModelsSeedReader`` exists, and patching a level up would skip it.
     """
-    calls = _patch_probe(monkeypatch, None)
+    calls = _patch_readiness(monkeypatch)
 
     builder = _builder()
     # FilesetFileSeedSource is registered by the plugin, so it is not in the
