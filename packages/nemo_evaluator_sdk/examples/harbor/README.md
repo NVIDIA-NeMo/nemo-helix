@@ -10,9 +10,9 @@ or API key — only the `harbor` extra installed and a working Docker daemon.
 
 ## Install
 
-The base SDK supports Python ≥ 3.11, while Harbor-backed execution and result
-adaptation require Python ≥ 3.12. The SDK is not published as a standalone PyPI
-package. Use a NeMo Platform source checkout; see [SETUP.md](../../../../SETUP.md)
+The SDK requires Python ≥ 3.12, matching Harbor's own floor; Harbor itself stays
+an optional extra because it is heavy. The SDK is not published as a standalone
+PyPI package. Use a NeMo Platform source checkout; see [SETUP.md](../../../../SETUP.md)
 for toolchain prerequisites. From the repository root, install the optional extra:
 
 ```bash
