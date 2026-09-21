@@ -43,6 +43,7 @@ from nemo_agents_plugin.jobs.execute_extensions import (
     run_execute_agent_after_invoke_extension,
     validate_execute_agent_extension_config,
 )
+from nemo_agents_plugin.jobs.gateway_proxy import authenticated_gateway_config
 from nemo_agents_plugin.tasks.execute.workdir import (
     AgentWorkdir,
     materialize_agent_workdir,
@@ -468,22 +469,23 @@ class ExecuteAgentJob(NemoJob):
         logger.info("Invoking agent %s.", agent_ref)
         started_at = time.monotonic()
         try:
-            result = asyncio.run(
-                invoke_agent_config_request_once(
-                    AgentConfigInvocationRequest(
-                        agent_config=agent_config,
-                        input=step_config.request.input,
-                        base_dir=fabric_dirs.base,
-                        request_id=ctx.job_id,
-                        caller_context={
-                            "job_id": ctx.job_id,
-                            "job_workspace": ctx.workspace,
-                            "agent": agent_ref,
-                        },
-                        timeout_seconds=step_config.request.timeout_seconds,
+            with authenticated_gateway_config(agent_config) as runtime_config:
+                result = asyncio.run(
+                    invoke_agent_config_request_once(
+                        AgentConfigInvocationRequest(
+                            agent_config=runtime_config,
+                            input=step_config.request.input,
+                            base_dir=fabric_dirs.base,
+                            request_id=ctx.job_id,
+                            caller_context={
+                                "job_id": ctx.job_id,
+                                "job_workspace": ctx.workspace,
+                                "agent": agent_ref,
+                            },
+                            timeout_seconds=step_config.request.timeout_seconds,
+                        )
                     )
                 )
-            )
         except Exception as error:
             # Fabric never produced a result, so the agent's own stderr is the
             # only account of how far it got, if anywhere.
