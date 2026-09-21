@@ -10,7 +10,11 @@ import re
 from copy import deepcopy
 from typing import Any
 
-from nemo_deployments_plugin.backends.k8s.compiler import DEFAULT_JOB_TTL_SECONDS_AFTER_FINISHED, ExecutorK8sDefaults
+from nemo_deployments_plugin.backends.k8s.compiler import (
+    DEFAULT_JOB_TTL_SECONDS_AFTER_FINISHED,
+    MIN_JOB_TTL_SECONDS_AFTER_FINISHED,
+    ExecutorK8sDefaults,
+)
 from nemo_platform_plugin.config import ImagePullSecret
 from pydantic import BaseModel, Field, field_validator
 
@@ -96,16 +100,27 @@ class K8sExecutorConfig(BaseModel):
     )
     default_job_ttl_seconds_after_finished: int | None = Field(
         default=DEFAULT_JOB_TTL_SECONDS_AFTER_FINISHED,
-        ge=0,
         description=(
             "Executor-level ttlSecondsAfterFinished applied to every finite (Never/OnFailure) Job this "
             "executor renders, such as the weight-puller. A completed puller pod holds its ReadWriteOnce "
             "weights volume attachment until reaped; a short TTL releases it promptly so the serving "
             "Deployment can mount the volume instead of failing with MultiAttachError. Set to null to omit "
-            "the field and defer to the cluster default (effectively never reaped). Overridden per-entity by "
-            "backend_config.k8s.jobTtlSecondsAfterFinished."
+            "the field and defer to the cluster default (effectively never reaped). A set value must be at "
+            f"least {MIN_JOB_TTL_SECONDS_AFTER_FINISHED}s so the reconciler can observe Job completion before "
+            "the pod is reaped. Overridden per-entity by backend_config.k8s.jobTtlSecondsAfterFinished."
         ),
     )
+
+    @field_validator("default_job_ttl_seconds_after_finished")
+    @classmethod
+    def _validate_job_ttl(cls, value: int | None) -> int | None:
+        if value is not None and value < MIN_JOB_TTL_SECONDS_AFTER_FINISHED:
+            raise ValueError(
+                f"default_job_ttl_seconds_after_finished must be >= {MIN_JOB_TTL_SECONDS_AFTER_FINISHED} "
+                "(or null to defer to the cluster default); a smaller value races the reconciler's "
+                "completion read and can mis-record the Job as FAILED"
+            )
+        return value
 
     @field_validator("default_namespace")
     @classmethod

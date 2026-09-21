@@ -62,6 +62,15 @@ NATIVE_SIDECAR_RESTART_POLICY: RestartPolicy = "Always"
 # read the pod exit code before the pod is garbage-collected.
 DEFAULT_JOB_TTL_SECONDS_AFTER_FINISHED = 60
 
+# Lower bound for a *set* ttlSecondsAfterFinished. The reconciler observes a
+# finite Job's completion + pod exit code via a status read shortly after the Job
+# finishes; if the TTL reaps the Job (and its pod) before that read lands, the read
+# 404s and the puller is recorded as FAILED (or SUCCEEDED without an exit code),
+# stalling the puller->server prerequisite. A very small or zero TTL makes that race
+# likely, so a set TTL must be >= this floor. ``None`` still opts out entirely
+# (defer to the cluster default); the floor only constrains explicit values.
+MIN_JOB_TTL_SECONDS_AFTER_FINISHED = 10
+
 logger = logging.getLogger(__name__)
 
 

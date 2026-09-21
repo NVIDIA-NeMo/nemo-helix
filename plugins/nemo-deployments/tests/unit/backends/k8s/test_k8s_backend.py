@@ -65,6 +65,21 @@ def test_default_job_ttl_rejects_negative() -> None:
         K8sExecutorConfig(default_job_ttl_seconds_after_finished=-1)
 
 
+def test_default_job_ttl_rejects_below_floor() -> None:
+    # A set TTL below the floor races the reconciler's completion read; rejected.
+    with pytest.raises(ValueError):
+        K8sExecutorConfig(default_job_ttl_seconds_after_finished=0)
+    with pytest.raises(ValueError):
+        K8sExecutorConfig(default_job_ttl_seconds_after_finished=5)
+
+
+def test_default_job_ttl_accepts_floor() -> None:
+    assert (
+        K8sExecutorConfig(default_job_ttl_seconds_after_finished=10).to_k8s_defaults().job_ttl_seconds_after_finished
+        == 10
+    )
+
+
 def test_to_k8s_defaults_empty_by_default() -> None:
     defaults = K8sExecutorConfig().to_k8s_defaults()
     assert defaults.pod_annotations == {}
