@@ -7,6 +7,7 @@ metadata:
   author: nemo-platform
   maturity: active
   tags: [evaluation, metrics, agent-eval, nemo-platform]
+allowed-tools: Bash, Read
 ---
 
 # Evaluator Plugin

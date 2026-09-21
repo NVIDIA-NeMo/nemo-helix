@@ -1,4 +1,4 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Optional Ray wrappers. Install with ``sandboxed-gym[ray]``."""
+"""Optional Ray wrappers. Install with ``nemo-sandboxed-gym[ray]``."""

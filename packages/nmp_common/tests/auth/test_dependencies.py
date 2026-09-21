@@ -308,6 +308,7 @@ class TestBuildServicePrincipalHeadersDelegation:
         try:
             h = build_service_principal_headers("guardrails")
             assert h["X-NMP-Principal-Id"] == "service:guardrails"
+            assert h["X-NMP-Actor-Aliases"] == "service:guardrails"
             assert h["X-NMP-Principal-On-Behalf-Of"] == "user@example.com"
             assert h["X-NMP-Principal-On-Behalf-Of-Email"] == "user@example.com"
             assert h["X-NMP-Principal-On-Behalf-Of-Groups"] == "team-a,team-b"
@@ -324,14 +325,41 @@ class TestBuildServicePrincipalHeadersDelegation:
         token = auth_client_context.set(AuthClient(principal=svc, config=AuthConfig()))
         try:
             h = build_service_principal_headers("jobs")
-            assert h == {"X-NMP-Principal-Id": "service:jobs"}
+            assert h == {
+                "X-NMP-Principal-Id": "service:jobs",
+                "X-NMP-Actor-Aliases": "service:jobs",
+            }
         finally:
             auth_client_context.reset(token)
 
     def test_id_only_when_no_auth_context(self):
         from nmp.common.auth import build_service_principal_headers
 
-        assert build_service_principal_headers("x") == {"X-NMP-Principal-Id": "service:x"}
+        assert build_service_principal_headers("x") == {
+            "X-NMP-Principal-Id": "service:x",
+            "X-NMP-Actor-Aliases": "service:x",
+        }
+
+    def test_propagates_effective_account_context(self):
+        from nmp.common.auth import auth_client_context, build_service_principal_headers
+        from nmp.common.auth.client import AuthClient
+        from nmp.common.auth.models import Principal
+        from nmp.common.config import AuthConfig
+
+        user = Principal(
+            id="user@example.com",
+            email="user@example.com",
+            account_id="account-user",
+            authz_aliases=["user@example.com", "legacy-user"],
+        )
+        token = auth_client_context.set(AuthClient(principal=user, config=AuthConfig()))
+        try:
+            h = build_service_principal_headers("guardrails")
+            assert h["X-NMP-Principal-On-Behalf-Of"] == "user@example.com"
+            assert h["X-NMP-Subject-Account-Id"] == "account-user"
+            assert h["X-NMP-Subject-Aliases"] == "user@example.com,legacy-user"
+        finally:
+            auth_client_context.reset(token)
 
 
 class TestGetPrincipalAuthHeadersDelegation:

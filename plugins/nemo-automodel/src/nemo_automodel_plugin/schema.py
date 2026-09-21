@@ -64,7 +64,9 @@ class LoRAParams(AutomodelSchema):
 
 
 class DatasetSpec(AutomodelSchema):
-    training: str = Field(description="Training fileset as 'name' or 'workspace/name'.")
+    training: str = Field(
+        description="Training fileset as 'name', 'workspace/name', or either form with a '#path/' directory."
+    )
     validation: str | None = None
     prompt_template: str | None = None
 
@@ -98,10 +100,23 @@ class RetrievalSpec(AutomodelSchema):
     train_n_passages: int = Field(default=5, ge=2)
     eval_negative_size: int | None = Field(default=None, ge=1)
     do_gradient_checkpointing: bool = False
+    do_distributed_inbatch_negative: bool = Field(
+        default=False,
+        description=(
+            "Score each query against every passage in the global batch rather than only its own "
+            "train_n_passages. Ignored for cross_encoder."
+        ),
+    )
     query_max_length: int = Field(default=512, ge=1)
     passage_max_length: int = Field(default=512, ge=1)
-    query_prefix: str = Field(default="query:", description="Collator-side prefix; BiEncoderCollator adds a space.")
-    passage_prefix: str = Field(default="passage:", description="Collator-side prefix; BiEncoderCollator adds a space.")
+    query_prefix: str = Field(
+        default="query: ",
+        description="Literal prefix prepended to each query. Empty string disables prefixing.",
+    )
+    passage_prefix: str = Field(
+        default="passage: ",
+        description="Literal prefix prepended to each passage. Empty string disables prefixing.",
+    )
     export: ExportSpec | None = Field(
         default=None, description="Artifact layout and ONNX export settings. Defaults are applied when omitted."
     )
@@ -160,6 +175,14 @@ class ScheduleSpec(AutomodelSchema):
         gt=0,
         lt=1,
         description="Validation split to use when a validation dataset is not provided.",
+    )
+    checkpoint_selection: Literal["best", "last", "both"] = Field(
+        default="best",
+        description=(
+            "Checkpoint(s) to publish: 'best' selects the lowest validation loss, "
+            "'last' preserves the end of training, and 'both' publishes best at the root "
+            "with last under alternates/last."
+        ),
     )
     seed: int | None = None
     progress_reporting: ProgressReportingConfig = Field(default_factory=ProgressReportingConfig)

@@ -39,7 +39,7 @@ export const DpoParametersSection = () => {
         <ControlledSliderWithTextInput
           useControllerProps={{ name: 'rl.training.preference_loss_weight', control }}
           formFieldProps={{
-            slotLabel: 'Preference Loss Weight',
+            slotLabel: 'Pref Loss Weight',
             slotInfo: 'Scaling factor for the DPO preference (chosen vs rejected) loss term.',
           }}
           {...specSliderProps(DPO_SPEC_DEFAULTS, 'preference_loss_weight')}
@@ -51,7 +51,7 @@ export const DpoParametersSection = () => {
         <ControlledSliderWithTextInput
           useControllerProps={{ name: 'rl.training.sft_loss_weight', control }}
           formFieldProps={{
-            slotLabel: 'SFT Regularization Loss Weight',
+            slotLabel: 'SFT Loss Weight',
             slotInfo:
               'Weight for the SFT (imitation) regularization loss on the chosen response. Set to 0 to disable.',
           }}
@@ -86,7 +86,7 @@ export const DpoParametersSection = () => {
                     control,
                   }}
                   formFieldProps={{
-                    slotLabel: 'Average Log-Probs (Preference)',
+                    slotLabel: 'Avg Log-Probs (Pref)',
                     labelPosition: 'left',
                     slotInfo:
                       'Average log-probabilities across tokens when computing the preference loss instead of summing.',
@@ -96,7 +96,7 @@ export const DpoParametersSection = () => {
                 <ControlledSwitch
                   useControllerProps={{ name: 'rl.training.sft_average_log_probs', control }}
                   formFieldProps={{
-                    slotLabel: 'Average Log-Probs (SFT)',
+                    slotLabel: 'Avg Log-Probs (SFT)',
                     labelPosition: 'left',
                     slotInfo:
                       'Average log-probabilities across tokens when computing the SFT regularization loss.',

@@ -30,13 +30,14 @@ inputs:
     required: true
   cadence:
     description: >
-      Forwarded to stamp_sdk_version.py. One of `nightly`, `rc`, `release`.
+      Forwarded to stamp_sdk_version.py. One of `nightly`, `prerelease`, `release`.
     required: false
     default: nightly
   release-label:
     description: >
-      Forwarded to stamp_sdk_version.py. Required for `cadence: rc` (e.g.
-      `1.0.0-rc0`) or `cadence: release` (e.g. `1.0.0`); ignored for `nightly`.
+      Forwarded to stamp_sdk_version.py. Required for `cadence: prerelease`
+      (e.g. `1.0.0-a1`, `1.0.0-b1`, `1.0.0-rc0`) or `cadence: release` (e.g.
+      `1.0.0`); ignored for `nightly`.
     required: false
     default: ""
   nightly-timestamp:

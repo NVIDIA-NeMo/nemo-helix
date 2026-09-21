@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 from nemo_platform_plugin.job_context import JobContext, StoragePaths
 from nemo_platform_plugin.job_results import LocalJobResults
+from nemo_platform_plugin.job_usage import LocalJobUsageReporter
 
 
 def _make_storage(tmp_path: Path) -> StoragePaths:
@@ -53,6 +54,15 @@ class TestJobContext:
         assert ctx.storage is storage
         assert ctx.results is results
         assert ctx.workspace == "ws"
+
+    def test_usage_defaults_to_local_reporter(self, tmp_path: Path) -> None:
+        ctx = JobContext(
+            workspace="ws",
+            storage=_make_storage(tmp_path),
+            results=LocalJobResults(root=tmp_path / "r"),
+        )
+
+        assert isinstance(ctx.usage, LocalJobUsageReporter)
 
     def test_results_is_required(self, tmp_path: Path) -> None:
         # Omitting ``results`` raises at construction; the dataclass

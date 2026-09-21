@@ -8,6 +8,9 @@ from pathlib import Path
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src" / "nmp" / "intake"
 _RAW_CLIENT_MODULE = "nmp.intake.spans.clickhouse_client"
+# The plugin CLI talks to Intake over HTTP and never touches ClickHouse; its Typer
+# ``@app.command`` registrations would otherwise trip the ``.command(...)`` heuristic.
+_CLI_SOURCE_ROOT = _SOURCE_ROOT / "cli_commands"
 
 # Only service composition roots, the local lifecycle provisioner, and the
 # executor may depend on the raw runtime client.
@@ -43,7 +46,7 @@ def test_low_level_clickhouse_calls_are_confined_to_approved_modules() -> None:
     callers = {
         path.relative_to(_SOURCE_ROOT).as_posix()
         for path in _SOURCE_ROOT.rglob("*.py")
-        if _calls_low_level_clickhouse(path)
+        if not path.is_relative_to(_CLI_SOURCE_ROOT) and _calls_low_level_clickhouse(path)
     }
 
     unexpected = callers - _EXPECTED_LOW_LEVEL_CALL_MODULES

@@ -79,7 +79,8 @@ export const JobsDataView = () => {
 
   const {
     data: jobsData,
-    isFetching,
+    isLoading,
+    isPlaceholderData,
     error,
   } = useJobsListJobs(
     workspace,
@@ -223,7 +224,7 @@ export const JobsDataView = () => {
         DataViewRoot: {
           data: jobs,
           totalCount: CUSTOMIZER_ENABLED ? jobsData?.pagination?.total_results || 0 : jobs.length,
-          requestStatus: isFetching ? 'loading' : undefined,
+          requestStatus: isLoading || isPlaceholderData ? 'loading' : undefined,
         },
         DataViewTableContent: {
           renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) =>

@@ -26,12 +26,13 @@ const AUTOMODEL_FINETUNING_TYPES = [
   {
     value: AutomodelTrainingSpecFinetuningType.lora,
     title: 'LoRA',
-    description: 'Low-rank adapter — fewer parameters, less VRAM.',
+    description: 'Low-rank adapter — fewer parameters, less VRAM. Ships as an adapter.',
   },
   {
     value: AutomodelTrainingSpecFinetuningType.lora_merged,
     title: 'LoRA (Merged)',
-    description: 'LoRA weights merged into base at the end.',
+    description:
+      'Trains the same adapter, then folds it into the base weights. Ships as a full model.',
   },
   {
     value: AutomodelTrainingSpecFinetuningType.all_weights,
@@ -255,7 +256,7 @@ export const TrainingMethodSection = () => {
                     control,
                   }}
                   formFieldProps={{
-                    slotLabel: 'Distillation Temperature',
+                    slotLabel: 'Distill Temperature',
                     slotInfo:
                       'Softens the teacher’s output distribution. Higher values spread probability mass onto lower-ranked tokens, so the student learns more than just the teacher’s top choice.',
                   }}

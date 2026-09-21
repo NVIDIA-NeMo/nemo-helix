@@ -7,9 +7,15 @@ import future.keywords.if
 
 import data.authz.extract_method
 import data.authz.extract_path
+import data.authz.extract_caller_kind
+import data.authz.extract_on_behalf_of_principal_id
+import data.authz.extract_actor_account_id
+import data.authz.extract_actor_aliases
 import data.authz.extract_principal_email
 import data.authz.extract_principal_groups
 import data.authz.extract_principal_id
+import data.authz.extract_subject_account_id
+import data.authz.extract_subject_aliases
 
 # PERMISSIONS HELPERS
 
@@ -178,7 +184,16 @@ get_all_roles_in_chain(role_name) := all_roles if {
 	all_roles := (((level_0 | level_1) | level_2) | level_3) | level_4
 }
 
-# Get all applicable principals (id, email, groups)
+# Request caller kind. The auth service injects a resolved caller_kind; direct
+# policy callers fall back to the service principal test based on the service: prefix.
+request_caller_kind := caller_kind if {
+	caller_kind := extract_caller_kind
+	caller_kind != ""
+} else := "service_principal" if {
+	startswith(extract_principal_id, "service:")
+} else := "principal"
+
+# Get all applicable principals (id, actor account/aliases, email, groups, subject identity/account/aliases)
 # Returns a set of all principal identifiers that should be checked
 get_applicable_principals := principals if {
 	# Start with empty set
@@ -187,6 +202,18 @@ get_applicable_principals := principals if {
 	# Add principal ID if present and non-empty
 	principal_id := extract_principal_id
 	id_set := {principal_id | principal_id != ""}
+
+	# Add stable actor account ID if present and non-empty
+	actor_account_id := extract_actor_account_id
+	actor_account_set := {actor_account_id | actor_account_id != ""}
+
+	# Add trusted actor authorization aliases if present
+	actor_aliases_set := {alias |
+		aliases := extract_actor_aliases
+		alias := aliases[_]
+		alias != ""
+		alias != "*"
+	}
 
 	# Add email if present and non-empty
 	email_set := {email |
@@ -201,8 +228,22 @@ get_applicable_principals := principals if {
 		g != ""
 	}
 
+	# Add delegated identity context when acting on behalf of another principal.
+	on_behalf_of := extract_on_behalf_of_principal_id
+	obo_id_set := {on_behalf_of | on_behalf_of != ""}
+
+	subject_account_id := extract_subject_account_id
+	subject_account_set := {subject_account_id | subject_account_id != ""}
+
+	subject_aliases_set := {alias |
+		aliases := extract_subject_aliases
+		alias := aliases[_]
+		alias != ""
+		alias != "*"
+	}
+
 	# Combine all sets
-	principals := ((base | id_set) | email_set) | groups_set
+	principals := ((((((base | id_set) | actor_account_set) | actor_aliases_set) | email_set) | groups_set) | obo_id_set) | (subject_account_set | subject_aliases_set)
 
 	# Ensure we have at least one principal
 	count(principals) > 0

@@ -236,7 +236,7 @@ export const GrpoAdvancedSection = () => {
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'grpo.sequence_length_round', control }}
             formFieldProps={{
-              slotLabel: 'Sequence Length Round',
+              slotLabel: 'Length Rounding',
               slotInfo: 'Round bucketed micro-batch sequence lengths up to a multiple of this.',
             }}
             {...specSliderProps(GRPO_SPEC_DEFAULTS, 'sequence_length_round')}
@@ -248,7 +248,7 @@ export const GrpoAdvancedSection = () => {
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'grpo.train_mb_tokens', control }}
             formFieldProps={{
-              slotLabel: 'Train Micro-Batch Tokens',
+              slotLabel: 'Micro-Batch Tokens',
               slotInfo:
                 'Token budget per training micro-batch, read by the dynamic and sequence_packing strategies.',
             }}
@@ -261,7 +261,7 @@ export const GrpoAdvancedSection = () => {
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'grpo.vllm_tensor_parallel_size', control }}
             formFieldProps={{
-              slotLabel: 'vLLM Tensor Parallel Size',
+              slotLabel: 'vLLM Tensor Parallel',
               slotInfo:
                 "Tensor parallel size for the vLLM rollout engine, independent of the policy's.",
             }}
@@ -274,7 +274,7 @@ export const GrpoAdvancedSection = () => {
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'grpo.vllm_gpu_memory_utilization', control }}
             formFieldProps={{
-              slotLabel: 'vLLM GPU Memory Utilization',
+              slotLabel: 'vLLM GPU Memory',
               slotInfo: 'Fraction of each GPU vLLM reserves for weights plus KV cache.',
             }}
             {...specSliderProps(GRPO_SPEC_DEFAULTS, 'vllm_gpu_memory_utilization')}
@@ -286,7 +286,7 @@ export const GrpoAdvancedSection = () => {
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'grpo.router_aux_loss_coef', control }}
             formFieldProps={{
-              slotLabel: 'Router Aux Loss Coefficient',
+              slotLabel: 'Router Aux Loss',
               slotInfo:
                 'MoE router auxiliary-loss coefficient, applied as a top-level HuggingFace config override.',
             }}

@@ -28,6 +28,9 @@ bench = [
     # `nemo_guardrails_plugin.benchmarks.bootstrap`.
 ]
 
+[project.entry-points."nemo.cli"]
+guardrail = "nemo_guardrails_plugin.cli:GuardrailCLI"
+
 [project.entry-points."nemo.inference_middleware"]
 nemo-guardrails = "nemo_guardrails_plugin.middleware:GuardrailsMiddleware"
 

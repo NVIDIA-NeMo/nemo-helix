@@ -10,8 +10,7 @@ import nemo_platform
 import pytest
 import typer
 from click.testing import CliRunner as ClickCliRunner
-from nemo_platform_ext.cli.app import app
-from nemo_platform_ext.cli.commands.api import API_TOP_LEVEL_ENTRIES
+from nemo_platform_ext.cli.app import API_TOP_LEVEL_ENTRIES, app
 from nemo_platform_ext.cli.commands.manifest_registry import TOP_LEVEL_ENTRIES
 from nemo_platform_ext.cli.core.lazy_load import (
     ManifestBackedNmpGroup,
@@ -235,9 +234,8 @@ def test_generated_api_group_no_arg_help_exits_successfully():
 def test_root_help_includes_lazy_api_commands():
     runner = CliRunner()
     sys.modules.pop("nemo_platform_ext.cli.commands.api.entities", None)
-    sys.modules.pop("nemo_platform_ext.cli.commands.api.experiments", None)
-    sys.modules.pop("nemo_platform_ext.cli.commands.api.files", None)
-    sys.modules.pop("nemo_platform_ext.cli.commands.api.intake", None)
+    sys.modules.pop("nmp.intake.cli", None)
+    sys.modules.pop("nemo_platform_ext.cli.commands.files", None)
     sys.modules.pop("nemo_platform_ext.cli.commands.auth", None)
     sys.modules.pop("nemo_platform_ext.cli.commands.use_cases.chat", None)
     sys.modules.pop("nemo_platform_ext.cli.commands.config", None)
@@ -249,16 +247,16 @@ def test_root_help_includes_lazy_api_commands():
 
     assert result.exit_code == 0
     assert "experiments" in result.stdout
-    assert "Manage experiments." in result.stdout
+    # intake and experiments are nmp-intake plugin CLIs (nemo.cli entry points).
+    assert "Plugin commands for experiments." in result.stdout
     assert "files" in result.stdout
     assert "Manage files" in result.stdout
     assert "intake" in result.stdout
-    assert "Intake operations." in result.stdout
+    assert "Plugin commands for intake." in result.stdout
     assert "entities" not in result.stdout
     assert "nemo_platform_ext.cli.commands.api.entities" not in sys.modules
-    assert "nemo_platform_ext.cli.commands.api.experiments" not in sys.modules
-    assert "nemo_platform_ext.cli.commands.api.files" not in sys.modules
-    assert "nemo_platform_ext.cli.commands.api.intake" not in sys.modules
+    assert "nmp.intake.cli" not in sys.modules
+    assert "nemo_platform_ext.cli.commands.files" not in sys.modules
     assert "nemo_platform_ext.cli.commands.auth" not in sys.modules
     assert "nemo_platform_ext.cli.commands.use_cases.chat" not in sys.modules
     assert "nemo_platform_ext.cli.commands.config" not in sys.modules
@@ -367,13 +365,13 @@ def test_auth_command_and_hidden_context_option_remain_invokable():
 
 def test_lazy_api_group_help_loads_on_demand():
     runner = CliRunner()
-    sys.modules.pop("nemo_platform_ext.cli.commands.api.files", None)
+    sys.modules.pop("nemo_platform_ext.cli.commands.files", None)
     result = runner.invoke(app, ["files", "--help"])
 
     assert result.exit_code == 0
     assert "Manage files" in result.stdout
     assert "filesets" in result.stdout
-    assert "nemo_platform_ext.cli.commands.api.files" in sys.modules
+    assert "nemo_platform_ext.cli.commands.files" in sys.modules
 
 
 @pytest.mark.parametrize(
@@ -474,7 +472,7 @@ def test_build_top_level_lazy_entries_prefers_plugin_over_api_name_collision():
             kind="group",
         ),
         TopLevelEntry(
-            import_path="nemo_platform_ext.cli.commands.api.files:app",
+            import_path="nemo_platform_ext.cli.commands.files:app",
             name="files",
             help="Manage files.",
             panel="Core plugins",
@@ -501,7 +499,7 @@ def test_build_top_level_lazy_entries_prefers_plugin_over_api_name_collision():
 def test_plugin_entry_point_name_collision_is_skipped(caplog):
     entries = (
         TopLevelEntry(
-            import_path="nemo_platform_ext.cli.commands.api.files:app",
+            import_path="nemo_platform_ext.cli.commands.files:app",
             name="files",
             help="Manage files.",
             panel="Core plugins",

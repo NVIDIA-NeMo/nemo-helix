@@ -261,9 +261,13 @@ static_resources:
                           allowed_upstream_headers:
                             patterns:
                               - exact: x-nmp-principal-id
+                              - exact: x-nmp-actor-account-id
                               - exact: x-nmp-principal-email
                               - exact: x-nmp-principal-groups
+                              - exact: x-nmp-actor-aliases
                               - exact: x-nmp-principal-on-behalf-of
+                              - exact: x-nmp-subject-account-id
+                              - exact: x-nmp-subject-aliases
                               - exact: x-nmp-principal-on-behalf-of-email
                               - exact: x-nmp-principal-on-behalf-of-groups
                               - exact: x-nmp-scopes

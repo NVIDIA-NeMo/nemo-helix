@@ -24,7 +24,7 @@ Gym's model-call captures make the same hop: the host enables capture, reads eac
 and returns it on the record. This runner writes them back out in the layout the CLI runner's parser
 expects, so per-call timing reaches a trace either way.
 
-The host itself is provisioned by ``sandboxed-gym``: start a session, take its rollout URL and
+The host itself is provisioned by ``nemo-sandboxed-gym``: start a session, take its rollout URL and
 token off the descriptor, and hand them to this runner.
 """
 

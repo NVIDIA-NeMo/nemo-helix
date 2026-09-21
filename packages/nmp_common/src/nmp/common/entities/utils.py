@@ -5,6 +5,7 @@
 
 import types
 import uuid
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Type, Union, get_args, get_origin
 
 import base58
@@ -23,7 +24,41 @@ __all__ = [
     "make_search_class",
     "parse_entity_ref",
     "parse_model_entity_ref",
+    "ModelEntityId",
+    "ADAPTERS_INFIX",
+    "parse_adapters_suffix",
 ]
+
+#: The infix that separates a base model from its LoRA adapter inside a composite
+#: model-entity name: ``{base}&adapters/{adapter_workspace}/{adapter_name}``. Defined
+#: once here so the grammar cannot drift between the parse and format directions.
+ADAPTERS_INFIX = "&adapters/"
+
+
+def parse_adapters_suffix(name: str) -> tuple[str, str, str] | None:
+    """Decompose a (workspace-less) model-entity *name* on the ``&adapters/`` infix.
+
+    The single home for the LoRA-composite grammar's structural split. Given a bare
+    entity name (the part after the workspace, i.e. what
+    :attr:`ParsedEntityRef.name` holds), returns ``(base, adapter_workspace,
+    adapter_name)`` when *name* is a well-formed
+    ``base&adapters/adapter_workspace/adapter_name`` composite, else ``None``.
+
+    Returning ``None`` (rather than raising) for a non-composite lets callers that
+    only need "is this a LoRA composite, and if so its parts" branch cheaply; callers
+    that require a valid composite treat ``None`` as their own error. A name that
+    *contains* ``&adapters/`` but is malformed (missing/empty segments) also returns
+    ``None`` — it is not a valid composite.
+    """
+    if ADAPTERS_INFIX not in name:
+        return None
+    base, _, adapter_part = name.partition(ADAPTERS_INFIX)
+    adapter_workspace, separator, adapter_name = adapter_part.partition("/")
+    # The grammar has exactly one adapter-name segment, so a surplus ``/`` in the
+    # adapter tail (e.g. ``base&adapters/ws/name/extra``) is not a valid composite.
+    if not base or not separator or not adapter_workspace or not adapter_name or "/" in adapter_name:
+        return None
+    return base, adapter_workspace, adapter_name
 
 
 def get_random_id(prefix: str) -> str:
@@ -268,3 +303,128 @@ def parse_model_entity_ref(identifier: str, default_workspace: str | None = None
             "or $entity_name."
         )
     return ParsedEntityRef(workspace=default_workspace, name=workspace)
+
+
+@dataclass(frozen=True)
+class ModelEntityId:
+    """A parsed model-entity id, LoRA-composite aware.
+
+    Consolidates the ad-hoc ``&adapters/`` partitioning that was hand-rolled across
+    the inference-gateway and models services (validation, reconciler served-model
+    checks + composite construction, VM routing, error formatting). Both the parse
+    and format directions of the composite grammar live here so they cannot drift.
+
+    A model-entity id has one of two shapes:
+
+    - **Plain**: ``{workspace}/{base_name}`` — ``is_lora`` is ``False`` and the three
+      adapter fields are ``None``.
+    - **LoRA composite**: ``{workspace}/{base_name}&adapters/{adapter_workspace}/{adapter_name}``
+      — a fine-tuned adapter parented on a base model. It has no standalone ModelEntity;
+      routing rides the base model's VirtualModel (see the IGW ``resolve_vm_for_model``).
+
+    This is a *composition* of :func:`parse_model_entity_ref` (the first-``/``-only split
+    that yields ``(workspace, name)`` while preserving a composite ``name``) plus a
+    decomposition of that ``name`` on :data:`ADAPTERS_INFIX`. It composes
+    :class:`ParsedEntityRef` rather than extending it, since that type's parser rejects
+    composite names.
+
+    Fields:
+        workspace: The base model's workspace (the segment before the first ``/``).
+        base_name: The base model entity name (the segment before ``&adapters/``).
+        adapter_workspace: The adapter's workspace, or ``None`` for a plain (non-LoRA) id.
+        adapter_name: The adapter's name, or ``None`` for a plain id.
+        is_lora: ``True`` iff this id encodes a LoRA adapter composite.
+    """
+
+    workspace: str
+    base_name: str
+    adapter_workspace: str | None = None
+    adapter_name: str | None = None
+
+    def __post_init__(self) -> None:
+        # The adapter fields are all-or-nothing: a partial pair would set is_lora False
+        # and silently drop the supplied field on to_composite(). Empty strings would
+        # serialize an invalid composite. Reject both so a constructed instance is always
+        # a well-formed plain-or-LoRA id.
+        if (self.adapter_workspace is None) != (self.adapter_name is None):
+            raise ValueError("adapter_workspace and adapter_name must be provided together")
+        if self.adapter_workspace == "" or self.adapter_name == "":
+            raise ValueError("adapter fields must not be empty")
+
+    @property
+    def is_lora(self) -> bool:
+        """Whether this id encodes a LoRA adapter composite."""
+        return self.adapter_workspace is not None and self.adapter_name is not None
+
+    @classmethod
+    def parse(cls, identifier: str, default_workspace: str | None = None) -> "ModelEntityId":
+        """Parse a (possibly composite) model-entity id into its components.
+
+        Layers on top of :func:`parse_model_entity_ref`: first split off the workspace
+        (first ``/`` only, composite-preserving), then decompose the resulting name on
+        :data:`ADAPTERS_INFIX`.
+
+        .. important::
+           *identifier* must be **workspace-qualified** (``workspace/...``) for the LoRA
+           composite to be recognized. A **bare** composite name (no leading workspace,
+           e.g. ``base&adapters/ws/adapter`` — as seen in an IGW request body where the
+           workspace comes from the URL path) would have its first ``/`` consumed as the
+           workspace split and would NOT be detected as LoRA. For a bare name, use
+           :func:`parse_adapters_suffix` directly on the name instead.
+
+        Args:
+            identifier: A model-entity id, plain or LoRA composite.
+            default_workspace: Workspace to use when *identifier* is unqualified.
+
+        Returns:
+            The parsed :class:`ModelEntityId`.
+
+        Raises:
+            ValueError: If the id is empty / has empty segments / is unqualified without a
+                default workspace (propagated from :func:`parse_model_entity_ref`), or if it
+                carries an ``&adapters/`` infix that is not a well-formed
+                ``base&adapters/adapter_workspace/adapter_name`` composite.
+        """
+        ref = parse_model_entity_ref(identifier, default_workspace=default_workspace)
+
+        if ADAPTERS_INFIX not in ref.name:
+            return cls(workspace=ref.workspace, base_name=ref.name)
+
+        parts = parse_adapters_suffix(ref.name)
+        if parts is None:
+            raise ValueError(
+                f"invalid LoRA composite model entity id {identifier!r}; expected "
+                "'workspace/base&adapters/adapter_workspace/adapter_name' with non-empty segments"
+            )
+        # parse_adapters_suffix returns a 3-tuple or None; the None case is handled above.
+        base_name, adapter_workspace, adapter_name = parts
+        return cls(
+            workspace=ref.workspace,
+            base_name=base_name,
+            adapter_workspace=adapter_workspace,
+            adapter_name=adapter_name,
+        )
+
+    @property
+    def base_id(self) -> str:
+        """The workspace-qualified base model id (``{workspace}/{base_name}``).
+
+        For a plain id this is the whole id; for a LoRA composite it is the base model
+        the adapter is parented on (the VM-routing anchor).
+        """
+        return f"{self.workspace}/{self.base_name}"
+
+    def to_composite(self) -> str:
+        """Render back to the wire id string.
+
+        Round-trips :meth:`parse`: a plain id renders as ``{workspace}/{base_name}``; a
+        LoRA id renders as ``{workspace}/{base_name}&adapters/{adapter_workspace}/{adapter_name}``.
+        This is the format side of the grammar — the single home for constructing composite
+        ids (previously hand-rolled f-strings in the reconciler and the IGW proxy splice).
+        """
+        if self.is_lora:
+            return f"{self.base_id}{ADAPTERS_INFIX}{self.adapter_workspace}/{self.adapter_name}"
+        return self.base_id
+
+    def __str__(self) -> str:
+        return self.to_composite()

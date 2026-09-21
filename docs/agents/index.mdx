@@ -43,6 +43,15 @@ The sibling-candidate pattern is the recommended way to apply changes: you
 always have a baseline to compare against, and you can roll back by
 undeploying the candidate.
 
+When you instead want to update an agent **in place** — iterating on your own
+agent's config and pushing the new version to the same name — use
+`nemo agents redeploy`. It wraps the four manual steps (undeploy → delete →
+create → deploy) into one command. Because the agent entity is immutable by
+name, redeploy validates your new config first (a bad config is a safe no-op),
+then tears the old agent down and rebuilds it; the durable `{agent}-ethos`
+fileset is preserved and re-uploaded. Once teardown starts the operation is not
+atomic, but each step is check-first, so it is safe to re-run.
+
 ## Agent Lifecycle
 
 Agents are managed end-to-end through the `nemo agents` command group:
@@ -51,6 +60,7 @@ Agents are managed end-to-end through the `nemo agents` command group:
 | --------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | Register  | `nemo agents create --name <name> --agent-config <path>`                                                      | Store the agent configuration as an `agent` entity in a workspace.               |
 | Deploy    | `nemo agents deploy --agent <name>`                                                                           | Start a running service from the stored config.                                  |
+| Redeploy  | `nemo agents redeploy --agent <name> --agent-config <path>`                                                   | Push a changed config to a deployed agent in one step (undeploy → delete → create → deploy). |
 | Wait      | `nemo agents deployments wait --agent <name>`                                                                 | Block until the deployment is `running` or `failed`.                             |
 | Invoke    | `nemo agents invoke --agent <name> --input "..."` or `nemo agents invoke --agent-config <path> --input "..."` | Send a single request through the Agents gateway or run a local config directly. |
 | Optimize  | `nemo agents optimize --optimize-config-fileset <fileset> --optimize-config <path>`                           | Run Fabric-backed numeric HPO (Optuna). Stage the bundle first with `nemo agents optimize prepare-fileset`. See [Optimize Agents](/documentation/agents/optimize-agents). |

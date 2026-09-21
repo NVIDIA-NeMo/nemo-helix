@@ -10,6 +10,11 @@ from nemo_platform_plugin.iam.types import AuthzErrorResponse, AuthzRequest, Aut
 from nmp.common.config import get_service_config
 from nmp.common.entities import EntityClient
 from nmp.common.service.dependencies import get_entity_client
+from nmp.core.auth.app.account_resolution import (
+    AccountResolutionError,
+    ServicePrincipalNotAllowedError,
+    resolve_authz_account_context,
+)
 from nmp.core.auth.app.embedded_pdp import (
     PolicyEngineError,
     evaluate,
@@ -89,8 +94,18 @@ async def evaluate_policy(
         if config.bundle_cache_seconds == 0:
             await load_policy_data(entity_client)
 
-        result = evaluate(entrypoint, request.input)
-        return AuthzResponse(result=result)
+        account_context = await resolve_authz_account_context(request.input, config)
+        enriched_input = {**request.input, **account_context.to_policy_fields()}
+
+        result = evaluate(entrypoint, enriched_input)
+        return AuthzResponse(result={**result, **account_context.to_policy_fields()})
+
+    except ServicePrincipalNotAllowedError as e:
+        logger.warning("Service principal resolution failed closed: %s", e)
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    except AccountResolutionError as e:
+        logger.warning("Account resolution failed: %s", e)
+        raise HTTPException(status_code=403, detail=str(e)) from e
 
     except PolicyEngineError as e:
         logger.error("Policy engine error: %s", e)

@@ -50,6 +50,15 @@ class _IntakeMethods:
     get_span = method(endpoints.get_span)
     list_annotations = method(endpoints.list_annotations)
     get_annotation = method(endpoints.get_annotation)
+    create_chat_completion = method(endpoints.create_chat_completion)
+    create_spans = method(endpoints.create_spans)
+    get_trace_metrics = method(endpoints.get_trace_metrics)
+    get_session = method(endpoints.get_session)
+    create_annotation = method(endpoints.create_annotation)
+    delete_annotation = method(endpoints.delete_annotation)
+    get_evaluator_result = method(endpoints.get_evaluator_result)
+    list_experiments = method(endpoints.list_experiments)
+    delete_experiment = method(endpoints.delete_experiment)
 
 
 def _list_spans_params(

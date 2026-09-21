@@ -7,6 +7,12 @@ Provides abstract interfaces and implementations for database operations.
 """
 
 from nmp.core.entities.app.database import create_async_engine_for_entities
+from nmp.core.entities.app.repository.account_identity import (
+    AccountIdentityConflictError,
+    AccountIdentityRecord,
+    AccountIdentityStore,
+    AccountIdentityUnavailableError,
+)
 from nmp.core.entities.app.repository.entity import EntityRepositoryInterface
 from nmp.core.entities.app.repository.sqlalchemy.entity import SQLAlchemyEntityRepository
 from nmp.core.entities.app.repository.sqlalchemy.workspace import SQLAlchemyWorkspaceRepository
@@ -95,6 +101,10 @@ def dep_entity_repository(session_maker: async_sessionmaker[AsyncSession]) -> En
 
 __all__ = [
     "WorkspaceRepositoryInterface",
+    "AccountIdentityConflictError",
+    "AccountIdentityRecord",
+    "AccountIdentityStore",
+    "AccountIdentityUnavailableError",
     "EntityRepositoryInterface",
     "SQLAlchemyWorkspaceRepository",
     "SQLAlchemyEntityRepository",

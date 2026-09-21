@@ -98,8 +98,11 @@ def compile_automodel_config(
     """
     recipe = resolve_compiled_recipe(customizer_config)
     if recipe in _RETRIEVAL_RECIPES:
-        return _compile_retrieval_config(customizer_config, workspace_dir, job_ctx, recipe)
-    return _compile_llm_config(customizer_config, workspace_dir, job_ctx, recipe)
+        cfg = _compile_retrieval_config(customizer_config, workspace_dir, job_ctx, recipe)
+    else:
+        cfg = _compile_llm_config(customizer_config, workspace_dir, job_ctx, recipe)
+    cfg["_recipe"] = recipe.value  # ours; create_automodel_recipe reads this
+    return cfg
 
 
 def _compile_retrieval_config(
@@ -147,6 +150,7 @@ def _compile_retrieval_config(
     )
     if is_bi_encoder:
         cfg["model"]["l2_normalize"] = True
+        cfg["model"]["do_distributed_inbatch_negative"] = retrieval_config.do_distributed_inbatch_negative
     else:
         cfg["model"]["num_labels"] = 1
         cfg["model"]["temperature"] = 1.0

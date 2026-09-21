@@ -8,7 +8,7 @@ from typing import Annotated, Any, Dict, Literal, Optional, Self, Union
 from nemo_platform_plugin.deployment import DeploymentParams
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nmp.automodel.entities.validators import validate_fileset_uri
-from nmp.automodel.entities.values import FinetuningType, OutputNameType, Precision
+from nmp.automodel.entities.values import CheckpointSelection, FinetuningType, OutputNameType, Precision
 from nmp.common.entities.constants import (
     MAX_LENGTH_255,
     REGEX_WORD_CHARACTER_DOT_DASH,
@@ -167,11 +167,23 @@ class RetrievalParams(BaseModel):
         description="Negatives per query at eval. Defaults to train_n_passages - 1.",
     )
     do_gradient_checkpointing: bool = Field(default=False)
+    do_distributed_inbatch_negative: bool = Field(
+        default=False,
+        description=(
+            "Score each query against every passage in the global batch instead of only its own "
+            "train_n_passages. Widens the negative pool to num_gpus * micro_batch_size * train_n_passages "
+            "at the cost of an all-gather per step. Ignored for cross_encoder."
+        ),
+    )
     query_max_length: int = Field(default=512, ge=1)
     passage_max_length: int = Field(default=512, ge=1)
-    query_prefix: str = Field(default="query:", description="Collator-side prefix; do not include a trailing space.")
+    query_prefix: str = Field(
+        default="query: ",
+        description="Literal prefix prepended to each query. Empty string disables prefixing.",
+    )
     passage_prefix: str = Field(
-        default="passage:", description="Collator-side prefix; do not include a trailing space."
+        default="passage: ",
+        description="Literal prefix prepended to each passage. Empty string disables prefixing.",
     )
     export: Optional[ExportParams] = Field(
         default=None,
@@ -179,9 +191,7 @@ class RetrievalParams(BaseModel):
     )
 
 
-# (batch_size, micro_batch_size) per retrieval recipe. bi_encoder takes its
-# in-batch negatives from the micro batch, which accumulation does not widen, so
-# lowering micro costs retrieval quality; cross_encoder scores pairs independently.
+# (batch_size, micro_batch_size) defaults per retrieval recipe.
 RETRIEVAL_BATCH_DEFAULTS: dict[str, tuple[int, int]] = {
     "bi_encoder": (256, 8),
     "cross_encoder": (128, 8),
@@ -296,6 +306,14 @@ class _TrainingBase(BaseModel):
         gt=0,
         lt=1,
         description="Validation split to use when a validation dataset is not provided.",
+    )
+    checkpoint_selection: CheckpointSelection = Field(
+        default=CheckpointSelection.BEST,
+        description=(
+            "Checkpoint(s) to publish: 'best' selects the lowest validation loss, "
+            "'last' preserves the end of training, and 'both' publishes best at the root "
+            "with last under alternates/last."
+        ),
     )
     # `log_every_n_steps` used to sit here, described as "Logging frequency in steps.
     # Controls how often training metrics are logged." It controlled nothing: no

@@ -9,7 +9,7 @@ import data_designer.config as dd
 import nemo_data_designer_plugin.testing.utils as u
 import pandas as pd
 import pytest
-from data_designer_nemo.context import DataDesignerValidationContext
+from data_designer_nemo.context.validation import DataDesignerValidationContext
 from data_designer_nemo.errors import NDDInvalidConfigError
 from nemo_platform import AsyncNeMoPlatform
 
@@ -74,9 +74,9 @@ async def test_remote_validate_runs_remote_validators(monkeypatch: pytest.Monkey
         assert async_sdk is sdk
         calls.append("personas")
 
-    monkeypatch.setattr("data_designer_nemo.context.validate_no_tool_configs", validate_tools)
-    monkeypatch.setattr("data_designer_nemo.context.validate_seed", validate_seed)
-    monkeypatch.setattr("data_designer_nemo.context.ensure_nemotron_personas_filesets", validate_personas)
+    monkeypatch.setattr("data_designer_nemo.context.validation.validate_no_tool_configs", validate_tools)
+    monkeypatch.setattr("data_designer_nemo.context.validation.validate_seed", validate_seed)
+    monkeypatch.setattr("data_designer_nemo.context.validation.ensure_nemotron_personas_filesets", validate_personas)
 
     errors = await DataDesignerValidationContext(sdk, u.WORKSPACE_NAME).validate(config)
 

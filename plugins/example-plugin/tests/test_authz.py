@@ -32,8 +32,10 @@ def test_example_authz_derivation_has_no_problems() -> None:
     # Factory-stamped function routes: the permissions they reference must be declared.
     assert {"example.greet", "example.count"} <= set(contrib.permissions)
 
-    # Every route is PRINCIPAL and none is denied.
+    # No route is service-only (every one stays reachable by a human) and none is denied.
+    # Not an equality check: factory-generated routes also carry ``service_principal``
+    # (see authz.GENERATED_ROUTE_CALLERS), while hand-written ones are principal-only.
     for methods in contrib.endpoints.values():
         for binding in methods.values():
-            assert binding.callers == ["principal"]
+            assert binding.callers is not None and "principal" in binding.callers
             assert binding.deny is False

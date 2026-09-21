@@ -26,7 +26,10 @@ class TestHeaderNameHelpers:
             ("openai-api-key", True),
             ("my_secret_header", True),
             ("X-Trace-Id", False),
-            ("X-NMP-Principal-Id", False),
+            ("X-NMP-Principal-Id", True),
+            ("X-NMP-Scopes", True),
+            ("X-NMP-Actor-Account-Id", True),
+            ("X-NMP-Subject-Aliases", True),
         ],
     )
     def test_is_auth_header_name(self, header_name: str, expected: bool):
@@ -39,10 +42,7 @@ class TestHeaderNameHelpers:
                 "X-Trace-Id": "trace-123",
                 "X-NMP-Principal-Id": "service:evaluator",
             }
-        ) == {
-            "X-Trace-Id": "trace-123",
-            "X-NMP-Principal-Id": "service:evaluator",
-        }
+        ) == {"X-Trace-Id": "trace-123"}
 
     def test_filter_auth_headers_returns_none_when_all_headers_are_filtered(self):
         assert filter_auth_headers({"Authorization": "Bearer secret-token", "x-auth-token": "secret-token"}) is None
@@ -69,7 +69,7 @@ class TestModelDefaultHeaders:
         model = Model(
             url="https://judge.example.test/v1/chat/completions",
             name="judge-model",
-            default_headers={"X-NMP-Principal-Id": "service:evaluator"},
+            default_headers={"X-Trace-Id": "trace-123"},
         )
 
         assert "default_headers" not in model.model_dump(mode="python")
@@ -85,6 +85,10 @@ class TestModelDefaultHeaders:
             "x-auth-token",
             "openai-api-key",
             "my_secret_header",
+            "X-NMP-Principal-Id",
+            "X-NMP-Actor-Aliases",
+            "X-NMP-Subject-Aliases",
+            "X-NMP-Scopes",
         ],
     )
     def test_rejects_auth_style_default_headers(self, header_name: str):
@@ -101,7 +105,6 @@ class TestModelDefaultHeaders:
     @pytest.mark.parametrize(
         "header_name",
         [
-            "X-NMP-Principal-Id",
             "X-Trace-Id",
         ],
     )

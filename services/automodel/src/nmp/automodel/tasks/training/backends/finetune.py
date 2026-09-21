@@ -9,8 +9,11 @@ Wraps nemo_automodel recipes with Jobs-service progress reporting (SFT, KD, embe
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from nemo_automodel.components.checkpoint.checkpointing import Checkpointer
@@ -20,6 +23,7 @@ from nemo_automodel.recipes.llm.kd import KnowledgeDistillationRecipeForNextToke
 from nemo_automodel.recipes.llm.train_ft import TrainFinetuneRecipeForNextTokenPrediction
 from nemo_automodel.recipes.retrieval.train_bi_encoder import TrainBiEncoderRecipe
 from nemo_automodel.recipes.retrieval.train_cross_encoder import TrainCrossEncoderRecipe
+from nmp.automodel.app.jobs.training.schemas import TrainingRecipe
 from nmp.automodel.tasks.tqdm_logging import install_line_tqdm
 from nmp.automodel.tasks.training.progress import JobsServiceProgressReporter
 from nmp.customization_common.service.context import NMPJobContext
@@ -30,6 +34,23 @@ from nmp.customization_common.training.reporting import (
 )
 
 logger = logging.getLogger(__name__)
+
+CHECKPOINT_STATS_FILENAME = "checkpoint_stats.json"
+
+
+def _json_metric(value: Any) -> Any:
+    """Convert tensor/numpy scalar metric values into JSON-compatible values."""
+    if isinstance(value, Mapping):
+        return {str(key): _json_metric(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_metric(item) for item in value]
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            return item()
+        except (TypeError, ValueError):
+            pass
+    return value
 
 
 @runtime_checkable
@@ -229,6 +250,7 @@ class AutomodelRecipeWrapper:
         self._original_log_train_metrics = recipe.log_train_metrics
         self._original_log_val_metrics = recipe.log_val_metrics
         self._original_save_checkpoint = recipe.save_checkpoint
+        self._checkpoint_stats: list[dict[str, Any]] = []
 
         # Monkey-patch the recipe's methods to add our callbacks
         recipe.log_train_metrics = self._log_train_metrics  # type: ignore[method-assign]
@@ -325,13 +347,13 @@ class AutomodelRecipeWrapper:
     ) -> None:
         """Wrapped save_checkpoint with Jobs-service reporting."""
         self._original_save_checkpoint(epoch, step, train_loss, val_loss, best_metric_key)
+        checkpoint_dir = getattr(
+            getattr(self._recipe.checkpointer, "config", None),
+            "checkpoint_dir",
+            None,
+        )
         if self.callback:
             try:
-                checkpoint_dir = getattr(
-                    getattr(self._recipe.checkpointer, "config", None),
-                    "checkpoint_dir",
-                    None,
-                )
                 self.callback.report_checkpoint_saved(
                     step=step + 1,  # Convert to 1-based
                     epoch=epoch + 1,  # Convert to 1-based
@@ -340,44 +362,58 @@ class AutomodelRecipeWrapper:
             except Exception as e:
                 logger.warning(f"Failed to report checkpoint save: {e}")
 
+        if checkpoint_dir and int(os.environ.get("RANK", "0")) == 0:
+            try:
+                self._checkpoint_stats.append(
+                    {
+                        "epoch": epoch + 1,
+                        "step": step + 1,
+                        "train_loss": _json_metric(train_loss),
+                        "val_loss": _json_metric(val_loss),
+                        "best_metric_key": best_metric_key,
+                    }
+                )
+                stats_path = Path(checkpoint_dir) / CHECKPOINT_STATS_FILENAME
+                stats_path.parent.mkdir(parents=True, exist_ok=True)
+                temp_path = stats_path.with_suffix(".tmp")
+                temp_path.write_text(
+                    json.dumps({"checkpoints": self._checkpoint_stats}, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                temp_path.replace(stats_path)
+            except Exception as e:
+                logger.warning(f"Failed to write checkpoint statistics: {e}")
+
 
 def _is_kd_config(cfg: Any) -> bool:
     """Check if config is for knowledge distillation."""
     return cfg.get("teacher_model") is not None or cfg.get("kd_ratio") is not None
 
 
-def _model_target_contains(cfg: Any, needle: str) -> bool:
-    """Check a resolved model target's module/name for a recipe marker.
-
-    Note: ConfigNode automatically resolves _target_ to the actual function/class,
-    so inspect the function's module and qualified name.
-    """
+def _compiled_recipe(cfg: Any) -> TrainingRecipe | None:
+    """The ``_recipe`` value config.py compiled into the YAML, if present."""
+    if not hasattr(cfg, "get"):
+        return None
+    value = cfg.get("_recipe")
+    if value is None:
+        return None
+    if isinstance(value, TrainingRecipe):
+        return value if value != TrainingRecipe.AUTO else None
     try:
-        model_cfg = cfg.get("model", {})
-        if model_cfg is None:
-            return False
-
-        target = model_cfg.get("_target_")
-        if target is None:
-            return False
-
-        # target is resolved to the actual function/class by ConfigNode
-        # Check its module path or qualified name
-        module = getattr(target, "__module__", "") or ""
-        qualname = getattr(target, "__qualname__", "") or ""
-        needle = needle.lower()
-        return needle in module.lower() or needle in qualname.lower()
-    except (AttributeError, TypeError):
-        return False
+        recipe = TrainingRecipe(str(value))
+    except ValueError:
+        return None
+    return recipe if recipe != TrainingRecipe.AUTO else None
 
 
 def create_automodel_recipe(cfg: Any) -> AutomodelRecipeWrapper:
-    """Create a progress-reporting wrapper for the recipe implied by *cfg*."""
-    if _model_target_contains(cfg, "biencoder"):
-        logger.info("Detected biencoder config, using embedding model recipe")
+    """Create a progress-reporting wrapper for the recipe compiled into *cfg*."""
+    recipe = _compiled_recipe(cfg)
+    if recipe == TrainingRecipe.BI_ENCODER:
+        logger.info("Compiled recipe is bi_encoder, using embedding model recipe")
         base_recipe = TrainBiEncoderRecipe(cfg)
-    elif _model_target_contains(cfg, "crossencoder"):
-        logger.info("Detected cross-encoder config, using reranking recipe")
+    elif recipe == TrainingRecipe.CROSS_ENCODER:
+        logger.info("Compiled recipe is cross_encoder, using reranking recipe")
         base_recipe = TrainCrossEncoderRecipe(cfg)
     elif _is_kd_config(cfg):
         logger.info("Detected Knowledge Distillation config, using KD recipe")

@@ -11,6 +11,7 @@ import re
 
 from fastapi import HTTPException, status
 from nmp.common.entities.constants import NAME_PATTERN, NAME_PATTERN_DESCRIPTION
+from nmp.common.entities.utils import parse_adapters_suffix
 
 _ENTITY_NAME_PATTERN = re.compile(NAME_PATTERN)
 
@@ -46,15 +47,18 @@ def validate_model_entity_name(value: str, *, field_name: str = "model") -> None
     Raises:
         HTTPException: 422 if value is invalid.
     """
-    if "&adapters/" in value:
-        base, _, adapter_part = value.partition("&adapters/")
-        if base and adapter_part and "/" in adapter_part:
-            adapter_workspace, _, adapter_name = adapter_part.partition("/")
-            if adapter_workspace and adapter_name:
-                validate_entity_name(base, field_name=f"{field_name} (base)")
-                validate_entity_name(adapter_workspace, field_name=f"{field_name} (adapter workspace)")
-                validate_entity_name(adapter_name, field_name=f"{field_name} (adapter)")
-                return
+    # A LoRA composite name is ``base&adapters/adapter-workspace/adapter-name``.
+    # parse_adapters_suffix owns that grammar split (shared with the models-service
+    # reconciler + IGW routing); here we only apply NAME_PATTERN to each recovered
+    # segment. A non-composite (or malformed composite) name falls through to the
+    # plain single-name validation below.
+    adapter_parts = parse_adapters_suffix(value)
+    if adapter_parts is not None:
+        base, adapter_workspace, adapter_name = adapter_parts
+        validate_entity_name(base, field_name=f"{field_name} (base)")
+        validate_entity_name(adapter_workspace, field_name=f"{field_name} (adapter workspace)")
+        validate_entity_name(adapter_name, field_name=f"{field_name} (adapter)")
+        return
     validate_entity_name(value, field_name=field_name)
 
 

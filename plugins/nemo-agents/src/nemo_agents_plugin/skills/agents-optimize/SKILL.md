@@ -13,6 +13,9 @@ description: >-
   optimize agent, accelerate agent, smaller model, switchyard router,
   routing split, agents optimize-skills, agents optimize, agents evaluate,
   new model scan, nemotron, frontier model.
+allowed-tools: Bash
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # NeMo Agent Optimization

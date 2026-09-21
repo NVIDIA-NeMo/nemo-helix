@@ -65,13 +65,29 @@ async def check_dataset_access(
     dataset_uri: str,
     default_workspace: str,
 ) -> None:
-    """Verify the caller can access the dataset fileset.
+    """Verify the caller can access the dataset fileset and optional directory path.
 
     Raises:
         ValueError: If the fileset is not found.
         PermissionError: If access is denied.
     """
     await check_fileset_access(platform, dataset_uri, default_workspace, label="dataset")
+    ref = FileSetRef.model_validate(dataset_uri)
+    if ref.path is None:
+        return
+
+    workspace = ref.workspace or default_workspace
+    try:
+        listing = (await platform.files.list_files(workspace=workspace, name=ref.name)).data()
+    except PermissionDeniedError:
+        raise PermissionError(f"Access denied to dataset fileset '{workspace}/{ref.name}'") from None
+    except NotFoundError:
+        raise ValueError(
+            f"Dataset fileset '{ref.name}' not found in workspace '{workspace}'. Verify the fileset exists."
+        ) from None
+
+    if not any(item.path.lstrip("/").startswith(ref.path) for item in listing.data):
+        raise ValueError(f"Dataset path '{ref.path}' not found in fileset '{workspace}/{ref.name}'.")
 
 
 async def check_environment_access(
@@ -81,6 +97,8 @@ async def check_environment_access(
 ) -> None:
     """Verify the caller can access the environment fileset (GRPO)."""
     ref = FileSetRef.model_validate(environment_uri)
+    if ref.path is not None:
+        raise ValueError("Environment fileset references must not include a '#path/' directory.")
     workspace = ref.workspace or default_workspace
     response = await check_fileset_access(platform, environment_uri, default_workspace, label="environment")
 
@@ -113,10 +131,11 @@ async def check_gym_dataset_layout(
             f"Dataset fileset '{ref.name}' not found in workspace '{workspace}'. Verify the dataset exists."
         ) from None
 
-    paths = {item.path for item in listing.data}
-    if "training.jsonl" not in paths:
+    paths = {item.path.lstrip("/") for item in listing.data}
+    expected_path = f"{ref.path or ''}training.jsonl"
+    if expected_path not in paths:
         raise ValueError(
-            f"GRPO dataset fileset '{workspace}/{ref.name}' must contain training.jsonl "
+            f"GRPO dataset fileset '{workspace}/{ref.name}' must contain {expected_path} "
             "(Gym JSONL rows, not DPO preference triples)."
         )
 

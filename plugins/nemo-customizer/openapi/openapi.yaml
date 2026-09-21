@@ -1209,7 +1209,8 @@ components:
         training:
           type: string
           title: Training
-          description: Training fileset as 'name' or 'workspace/name'.
+          description: Training fileset as 'name', 'workspace/name', or either form
+            with a '#path/' directory.
         validation:
           title: Validation
           type: string
@@ -1722,6 +1723,12 @@ components:
           type: boolean
           title: Do Gradient Checkpointing
           default: false
+        do_distributed_inbatch_negative:
+          type: boolean
+          title: Do Distributed Inbatch Negative
+          description: Score each query against every passage in the global batch
+            rather than only its own train_n_passages. Ignored for cross_encoder.
+          default: false
         query_max_length:
           type: integer
           minimum: 1.0
@@ -1735,13 +1742,15 @@ components:
         query_prefix:
           type: string
           title: Query Prefix
-          description: Collator-side prefix; BiEncoderCollator adds a space.
-          default: 'query:'
+          description: Literal prefix prepended to each query. Empty string disables
+            prefixing.
+          default: 'query: '
         passage_prefix:
           type: string
           title: Passage Prefix
-          description: Collator-side prefix; BiEncoderCollator adds a space.
-          default: 'passage:'
+          description: Literal prefix prepended to each passage. Empty string disables
+            prefixing.
+          default: 'passage: '
         export:
           allOf:
           - $ref: '#/components/schemas/AutomodelExportSpec'
@@ -1773,6 +1782,17 @@ components:
           type: number
           exclusiveMaximum: 1.0
           exclusiveMinimum: 0.0
+        checkpoint_selection:
+          type: string
+          enum:
+          - best
+          - last
+          - both
+          title: Checkpoint Selection
+          description: 'Checkpoint(s) to publish: ''best'' selects the lowest validation
+            loss, ''last'' preserves the end of training, and ''both'' publishes best
+            at the root with last under alternates/last.'
+          default: best
         seed:
           title: Seed
           type: integer

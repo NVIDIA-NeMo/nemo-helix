@@ -5,6 +5,7 @@ from abc import ABC
 from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated, Any, Dict, List, Literal, Optional, Self, Union
+from urllib.parse import urlparse
 
 from jinja2 import Environment
 from jinja2 import nodes as jinja_nodes
@@ -373,6 +374,22 @@ def _validate_auth_header_format(v: str | None) -> str | None:
     return v
 
 
+def _validate_host_url(v: str) -> str:
+    """Require a provider ``host_url`` to have an ``http(s)://`` scheme AND a hostname.
+
+    A bare host like ``"inference-api.nvidia.com"`` (or a hostless
+    ``"https:inference-api.nvidia.com"`` / ``"https://"``) fails later at model
+    discovery with an opaque 502, so we reject it up front with a clear 4xx.
+    Wired onto the create/upsert request schemas only — NOT the response
+    ``ModelProvider`` schema, which is rebuilt from stored rows on every read, so
+    validating there would 500 reads of providers persisted before this check.
+    """
+    parsed = urlparse(v)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError(f"Model provider host_url must include a scheme (http:// or https://); got '{v}'")
+    return v
+
+
 class ModelProviderStatus(str, Enum):
     """Status enum for ModelProvider objects."""
 
@@ -565,6 +582,11 @@ class CreateModelProviderRequest(BaseModel):
     def validate_auth_header_format(cls, v: str | None) -> str | None:
         return _validate_auth_header_format(v)
 
+    @field_validator("host_url")
+    @classmethod
+    def validate_host_url(cls, v: str) -> str:
+        return _validate_host_url(v)
+
 
 class UpsertModelProviderRequest(BaseModel):
     """Request model for upserting a ModelProvider (PUT /apis/models/v2/workspaces/{workspace}/providers/{name}).
@@ -634,6 +656,11 @@ class UpsertModelProviderRequest(BaseModel):
     @classmethod
     def validate_auth_header_format(cls, v: str | None) -> str | None:
         return _validate_auth_header_format(v)
+
+    @field_validator("host_url")
+    @classmethod
+    def validate_host_url(cls, v: str) -> str:
+        return _validate_host_url(v)
 
 
 class UpdateModelProviderStatusRequest(BaseModel):

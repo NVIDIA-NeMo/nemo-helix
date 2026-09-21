@@ -44,7 +44,11 @@ def test_parse_secret_references_rejects_whitespace_only_secret_name():
 
 
 def test_inject_secret_env_vars():
-    principal = Principal(id="creator@example.com")
+    principal = Principal(
+        id="creator@example.com",
+        account_id="account-creator",
+        authz_aliases=["legacy-creator", "creator@example.com"],
+    )
     env = {
         NEMO_JOB_SECRETS_ENVVAR: "HF_TOKEN=default/hf-token",
         NMP_PRINCIPAL_ENVVAR: principal.model_dump_json(exclude_none=True),
@@ -63,7 +67,10 @@ def test_inject_secret_env_vars():
     request = mock_urlopen.call_args.args[0]
     assert request.full_url == "http://secrets.example/apis/secrets/v2/workspaces/default/secrets/hf-token/access"
     assert request.get_header("X-nmp-principal-id") == "service:jobs"
+    assert request.get_header("X-nmp-actor-aliases") == "service:jobs"
     assert request.get_header("X-nmp-principal-on-behalf-of") == "creator@example.com"
+    assert request.get_header("X-nmp-subject-account-id") == "account-creator"
+    assert request.get_header("X-nmp-subject-aliases") == "legacy-creator,creator@example.com"
 
 
 def test_inject_secret_env_vars_rejects_missing_value_field():

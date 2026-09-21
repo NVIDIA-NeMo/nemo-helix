@@ -31,6 +31,11 @@ from nemo_data_designer_plugin.jobs.retrieval_spec import (
     RetrievalRunJobConfig,
 )
 from nemo_data_designer_plugin.jobs.spec import DataDesignerJobConfig
+from nemo_data_designer_plugin.sdk.check_models import (
+    CheckModelsReport,
+    check_models_config,
+    check_models_config_sync,
+)
 from nemo_data_designer_plugin.sdk.errors import (
     DataDesignerClientError,
     DataDesignerConfigValidationError,
@@ -366,6 +371,42 @@ class DataDesignerResource(_BaseDataDesignerResource[NeMoPlatform]):
             workspace=resolved_workspace,
         )
 
+    def check_models(
+        self,
+        config_builder: dd.DataDesignerConfigBuilder,
+        *,
+        workspace: str | None = None,
+    ) -> CheckModelsReport:
+        """Check that every model referenced by a config is reachable.
+
+        Sends a tiny generation request to each referenced model alias, routed
+        through the Inference Gateway, without submitting a workload. Models
+        with ``skip_health_check=True`` are skipped.
+
+        This complements :meth:`validate`, which checks that the configuration
+        is well-formed and that the resources it names resolve. A provider can
+        resolve while still refusing to serve the model named alongside it, so
+        a green ``ValidationReport`` is not a promise that a preview will run.
+
+        Unlike :meth:`validate`, the probe stops at the first model that fails
+        rather than reporting every problem at once.
+
+        Args:
+            config_builder: Data Designer configuration builder.
+            workspace: Workspace used to resolve provider references and seed
+                sources. Falls back to the platform client's default workspace,
+                then to ``"default"``.
+
+        Returns:
+            A :class:``CheckModelsReport``
+        """
+        resolved_workspace = workspace or self._platform.workspace or "default"
+        return check_models_config_sync(
+            config_builder,
+            sdk=self._platform,
+            workspace=resolved_workspace,
+        )
+
     def retrieval_generate(
         self,
         spec: RetrievalGenerateJobConfig,
@@ -554,6 +595,20 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNeMoPlatform]):
         """Async equivalent of :meth:`DataDesignerResource.validate`."""
         resolved_workspace = workspace or self._platform.workspace or "default"
         return await validate_config(
+            config_builder,
+            async_sdk=self._platform,
+            workspace=resolved_workspace,
+        )
+
+    async def check_models(
+        self,
+        config_builder: dd.DataDesignerConfigBuilder,
+        *,
+        workspace: str | None = None,
+    ) -> CheckModelsReport:
+        """Async equivalent of :meth:`DataDesignerResource.check_models`."""
+        resolved_workspace = workspace or self._platform.workspace or "default"
+        return await check_models_config(
             config_builder,
             async_sdk=self._platform,
             workspace=resolved_workspace,

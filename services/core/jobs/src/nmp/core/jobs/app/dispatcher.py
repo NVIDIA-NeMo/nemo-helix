@@ -1389,10 +1389,19 @@ class JobDispatcher:
                         "new_status": new_status,
                     },
                 )
-                operations_counter.add(1, attributes={"operation": "create_or_update_task"})
-                return task
-
-            task.status = new_status
+                # Pod-level error detection races the container, so progress arriving after ERROR
+                # means the workload is alive: record it, leave the status terminal. Late reports
+                # against the deliberate terminals, COMPLETED and CANCELLED, are stale.
+                live_workload_report = (
+                    current_status == PlatformJobStatus.ERROR
+                    and new_status != PlatformJobStatus.ERROR
+                    and bool(task_update.status_details)
+                )
+                if not live_workload_report:
+                    operations_counter.add(1, attributes={"operation": "create_or_update_task"})
+                    return task
+            else:
+                task.status = new_status
 
             if task_update.error_details:
                 task.error_details = task_update.error_details

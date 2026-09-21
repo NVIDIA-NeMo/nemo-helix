@@ -52,7 +52,8 @@ First image pull can take many minutes; `--wait --timeout 1800` is appropriate.
 ## Embed
 
 Image: `nvcr.io/nim/nvidia/nemotron-3-embed-1b:2.2.0`. Serving path is
-`/v1/embeddings`. Pass `input_type` query vs document at request time.
+`/v1/embeddings`. Instruction prefixes go in the input text (`query: ` / `passage: `);
+do not also send `input_type`.
 
 ```bash
 EXECUTOR='{"gpu":1,"image_name":"nvcr.io/nim/nvidia/nemotron-3-embed-1b","image_tag":"2.2.0","override_config":{"nimLegacy":false}}'

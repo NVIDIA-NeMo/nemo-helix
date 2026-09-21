@@ -17,6 +17,7 @@ from nmp.automodel.app.jobs.training.schemas import (
 )
 from nmp.automodel.entities.values import (
     CheckpointFormat,
+    CheckpointSelection,
     FinetuningType,
     Precision,
     TrainingType,
@@ -24,6 +25,7 @@ from nmp.automodel.entities.values import (
 
 __all__ = [
     "CheckpointFormat",
+    "CheckpointSelection",
     "FinetuningType",
     "Precision",
     "TrainingType",

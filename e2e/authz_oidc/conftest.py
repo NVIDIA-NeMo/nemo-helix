@@ -160,6 +160,7 @@ def _platform_env(issuer_url: str, base_url: str, data_dir: Path, extra: dict[st
             # evals are 20-25M) once seeded principal data is loaded — every
             # request 502s. Raised here to unblock; flagged for the branch.
             "NMP_AUTH_EMBEDDED_PDP_CPU_LIMIT": "2000",
+            "NMP_AUTH_ALLOWED_SERVICE_PRINCIPALS": '["e2e-harness","probe"]',
         }
     )
     env.update(extra)

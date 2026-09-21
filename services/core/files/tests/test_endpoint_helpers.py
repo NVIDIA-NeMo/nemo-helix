@@ -140,8 +140,10 @@ async def test_resolve_storage_secrets_for_user_delegates_effective_principal_cl
             id="service:jobs",
             groups=["system:serviceaccounts"],
             on_behalf_of="creator@example.com",
+            on_behalf_of_account_id="account-creator",
             on_behalf_of_email="creator@example.com",
             on_behalf_of_groups=["workspace-editors", "ml-team"],
+            on_behalf_of_authz_aliases=["legacy-creator", "creator@example.com"],
         ),
     )
     sdk = AsyncNeMoPlatform(base_url="http://testserver")
@@ -163,7 +165,10 @@ async def test_resolve_storage_secrets_for_user_delegates_effective_principal_cl
     for header, value in MARK_INTERNAL_REQUEST_HEADERS.items():
         assert captured_headers[header] == value
     assert captured_headers["X-NMP-Principal-Id"] == "service:files"
+    assert captured_headers["X-NMP-Actor-Aliases"] == "service:files"
     assert captured_headers["X-NMP-Principal-On-Behalf-Of"] == "creator@example.com"
+    assert captured_headers["X-NMP-Subject-Account-Id"] == "account-creator"
+    assert captured_headers["X-NMP-Subject-Aliases"] == "legacy-creator,creator@example.com"
     assert captured_headers["X-NMP-Principal-On-Behalf-Of-Email"] == "creator@example.com"
     assert captured_headers["X-NMP-Principal-On-Behalf-Of-Groups"] == "workspace-editors,ml-team"
 

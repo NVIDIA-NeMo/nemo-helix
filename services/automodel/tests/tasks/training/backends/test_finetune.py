@@ -12,9 +12,11 @@ that first -- otherwise the prefix arrives twice.
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import sys
 from collections.abc import Iterator
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 from unittest.mock import MagicMock
@@ -70,14 +72,54 @@ def test_every_prefixed_name_is_stripped_not_just_the_loss(finetune: ModuleType)
     assert stripped == {"loss": 0.5, "acc1": 0.8, "mrr": 0.7}
 
 
-def test_cross_encoder_target_is_detected(finetune: ModuleType) -> None:
-    def NeMoAutoModelCrossEncoder() -> None:
-        pass
+def test_the_compiled_cross_encoder_recipe_selects_the_reranker(finetune: ModuleType) -> None:
+    """The compiler writes `_recipe`; this process only sees YAML, not the job spec."""
+    cfg = {"_recipe": "cross_encoder", "model": {"_target_": object}}
 
-    cfg = {"model": {"_target_": NeMoAutoModelCrossEncoder}}
+    finetune.create_automodel_recipe(cfg)
 
-    assert finetune._model_target_contains(cfg, "crossencoder") is True
-    assert finetune._model_target_contains(cfg, "biencoder") is False
+    finetune.TrainCrossEncoderRecipe.assert_called_once_with(cfg)
+    finetune.TrainBiEncoderRecipe.assert_not_called()
+    finetune.TrainFinetuneRecipeForNextTokenPrediction.assert_not_called()
+
+
+def test_the_compiled_bi_encoder_recipe_selects_the_embedder(finetune: ModuleType) -> None:
+    cfg = {"_recipe": "bi_encoder"}
+
+    finetune.create_automodel_recipe(cfg)
+
+    finetune.TrainBiEncoderRecipe.assert_called_once_with(cfg)
+    finetune.TrainCrossEncoderRecipe.assert_not_called()
+
+
+def test_a_causal_checkpoint_still_uses_the_compiled_cross_encoder_recipe(finetune: ModuleType) -> None:
+    """Recipe, not architecture: Llama + cross_encoder must not fall through to SFT."""
+    cfg = {
+        "_recipe": "cross_encoder",
+        "model": {"_target_": "nemo_automodel.NeMoAutoModelForCausalLM.from_pretrained"},
+    }
+
+    finetune.create_automodel_recipe(cfg)
+
+    finetune.TrainCrossEncoderRecipe.assert_called_once_with(cfg)
+    finetune.TrainFinetuneRecipeForNextTokenPrediction.assert_not_called()
+
+
+def test_an_absent_compiled_recipe_uses_sft(finetune: ModuleType) -> None:
+    """A config from before `_recipe` existed should still start."""
+    finetune.create_automodel_recipe({"model": {}})
+
+    finetune.TrainFinetuneRecipeForNextTokenPrediction.assert_called_once()
+    finetune.TrainCrossEncoderRecipe.assert_not_called()
+
+
+def test_kd_still_wins_on_an_sft_compiled_recipe(finetune: ModuleType) -> None:
+    cfg = {"_recipe": "sft", "teacher_model": {"path": "teacher"}}
+
+    finetune.create_automodel_recipe(cfg)
+
+    finetune.KnowledgeDistillationRecipeForNextTokenPrediction.assert_called_once_with(cfg)
+    finetune.TrainFinetuneRecipeForNextTokenPrediction.assert_not_called()
 
 
 def test_an_unprefixed_name_is_left_alone(finetune: ModuleType) -> None:
@@ -178,7 +220,7 @@ def test_the_default_keeps_the_diagnostic_metrics_and_drops_the_counters(finetun
 
     class _Reporter:
         def __init__(self) -> None:
-            self.reports: list[dict[str, object]] = []
+            self.reports: list[dict[str, Any]] = []
 
         def fetch_current_metrics(self) -> dict[str, list[dict[str, float]]]:
             return {}
@@ -186,7 +228,7 @@ def test_the_default_keeps_the_diagnostic_metrics_and_drops_the_counters(finetun
         def configure_progress_tracking(self, max_steps: int, num_epochs: int) -> None:
             pass
 
-        def report_running(self, phase: str, **details: object) -> None:
+        def report_running(self, phase: str, **details: Any) -> None:
             self.reports.append(details)
 
         def close(self) -> None:
@@ -367,13 +409,23 @@ class _Sample:
         self.step, self.epoch, self.metrics = step, epoch, metrics
 
 
+class _CheckpointerConfig:
+    def __init__(self, checkpoint_dir: str) -> None:
+        self.checkpoint_dir = checkpoint_dir
+
+
+class _Checkpointer:
+    def __init__(self, checkpoint_dir: str) -> None:
+        self.config = _CheckpointerConfig(checkpoint_dir)
+
+
 class _FakeRecipe:
     """A recipe with the surface the wrapper touches, and nothing else."""
 
-    def __init__(self, cfg: object | None = None) -> None:
+    def __init__(self, cfg: object | None = None, checkpoint_dir: str = "/ckpt") -> None:
         self.cfg = cfg if cfg is not None else {}
         self.step_scheduler = _Scheduler()
-        self.checkpointer = type("C", (), {"config": type("D", (), {"checkpoint_dir": "/ckpt"})()})()
+        self.checkpointer = _Checkpointer(checkpoint_dir)
         self.dist_env = None
         self.calls: list[str] = []
 
@@ -514,8 +566,10 @@ def test_the_wrapper_states_the_schedule_and_closes_the_callback(
     closed: list[bool] = []
     monkeypatch.setattr(wrapper.callback, "close", lambda: closed.append(True))
 
-    recipe.run_train_validation_loop = lambda: (_ for _ in ()).throw(RuntimeError("cuda oom"))
-    wrapper._recipe.run_train_validation_loop = recipe.run_train_validation_loop
+    def _raise_cuda_oom() -> None:
+        raise RuntimeError("cuda oom")
+
+    monkeypatch.setattr(wrapper._recipe, "run_train_validation_loop", _raise_cuda_oom)
     with pytest.raises(RuntimeError, match="cuda oom"):
         wrapper.run_train_validation_loop()
 
@@ -536,3 +590,31 @@ def test_the_wrapper_reports_a_checkpoint_one_based_with_its_path(
     assert saved[-1]["step"] == 20
     assert saved[-1]["epoch"] == 2
     assert saved[-1]["checkpoint_path"] == "/ckpt"
+
+
+def test_the_wrapper_writes_validation_stats_for_each_checkpoint(
+    finetune: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    recipe = _FakeRecipe(checkpoint_dir=str(tmp_path))
+    _wrapper(finetune, monkeypatch, recipe)
+
+    recipe.save_checkpoint(epoch=0, step=9, train_loss=0.6, val_loss={"default": 0.5})
+    recipe.save_checkpoint(epoch=1, step=19, train_loss=0.4, val_loss={"default": 0.3})
+
+    stats = json.loads((tmp_path / "checkpoint_stats.json").read_text())
+    assert stats["checkpoints"] == [
+        {
+            "epoch": 1,
+            "step": 10,
+            "train_loss": 0.6,
+            "val_loss": {"default": 0.5},
+            "best_metric_key": "default",
+        },
+        {
+            "epoch": 2,
+            "step": 20,
+            "train_loss": 0.4,
+            "val_loss": {"default": 0.3},
+            "best_metric_key": "default",
+        },
+    ]

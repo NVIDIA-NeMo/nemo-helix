@@ -52,6 +52,7 @@ def test_task_client_delegates_to_job_creator(monkeypatch):
 
     assert headers["X-NMP-Internal"] == "true"
     assert headers["X-NMP-Principal-Id"] == "service:evaluator"
+    assert headers["X-NMP-Actor-Aliases"] == "service:evaluator"
     assert headers["X-NMP-Principal-On-Behalf-Of"] == "user:alice@acme.com"
     assert headers["X-NMP-Principal-On-Behalf-Of-Email"] == "alice@acme.com"
     assert headers["X-NMP-Principal-On-Behalf-Of-Groups"] == "team-a,team-b"

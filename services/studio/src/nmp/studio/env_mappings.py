@@ -105,6 +105,11 @@ ENV_MAPPINGS: list[EnvMapping] = [
         default="false",
     ),
     EnvMapping(
+        marker="STUDIO_UI_VITE_FF_DASHBOARD_SANDBOX_ENABLED",
+        config_path="studio.feature_flags.dashboard_sandbox_enabled",
+        default="false",
+    ),
+    EnvMapping(
         marker="STUDIO_UI_VITE_FF_DATA_DESIGNER_ENABLED",
         config_path="studio.feature_flags.data_designer_enabled",
         default="true",

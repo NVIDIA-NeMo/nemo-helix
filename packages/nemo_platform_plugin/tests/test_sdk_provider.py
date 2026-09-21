@@ -108,6 +108,7 @@ class TestDefaultSDKProvider:
         assert sdk.base_url == "http://test:9090"
         assert sdk.default_headers["X-NMP-Principal-Id"] == "service:evaluator"
         assert sdk.default_headers["X-NMP-Internal"] == "true"
+        assert sdk.default_headers["X-NMP-Actor-Aliases"] == "service:evaluator"
         assert sdk.default_headers["X-NMP-Principal-On-Behalf-Of"] == "creator@ex.com"
 
     def test_get_task_sdk_without_principal(self, monkeypatch):
@@ -156,6 +157,7 @@ class TestDefaultSDKProvider:
 
         assert sdk.default_headers["X-NMP-Principal-Id"] == "service:my-svc"
         assert sdk.default_headers["X-NMP-Internal"] == "true"
+        assert sdk.default_headers["X-NMP-Actor-Aliases"] == "service:my-svc"
 
     def test_get_platform_sdk_on_behalf_of(self, monkeypatch):
         monkeypatch.setenv("NMP_BASE_URL", "http://test:9090")
@@ -211,6 +213,7 @@ class TestAsyncTaskSdk:
         assert sdk.base_url == "http://test:9090"
         assert sdk.default_headers["X-NMP-Principal-Id"] == "service:evaluator"
         assert sdk.default_headers["X-NMP-Internal"] == "true"
+        assert sdk.default_headers["X-NMP-Actor-Aliases"] == "service:evaluator"
         assert sdk.default_headers["X-NMP-Principal-On-Behalf-Of"] == "creator@ex.com"
 
     def test_async_task_sdk_without_principal(self, monkeypatch):

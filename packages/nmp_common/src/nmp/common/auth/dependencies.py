@@ -118,7 +118,10 @@ def build_service_principal_headers(service_name: str) -> Dict[str, str]:
     Returns:
         Header dictionary ready to merge into an outbound request.
     """
-    headers: Dict[str, str] = {"X-NMP-Principal-Id": f"service:{service_name}"}
+    headers: Dict[str, str] = {
+        "X-NMP-Principal-Id": f"service:{service_name}",
+        "X-NMP-Actor-Aliases": f"service:{service_name}",
+    }
 
     auth_client = auth_client_context.get()
     if auth_client is None or not auth_client.principal or not auth_client.principal.id:
@@ -133,6 +136,10 @@ def build_service_principal_headers(service_name: str) -> Dict[str, str]:
         headers["X-NMP-Principal-On-Behalf-Of-Email"] = effective.email
     if effective.groups:
         headers["X-NMP-Principal-On-Behalf-Of-Groups"] = ",".join(effective.groups)
+    if effective.account_id:
+        headers["X-NMP-Subject-Account-Id"] = effective.account_id
+    if effective.authz_aliases:
+        headers["X-NMP-Subject-Aliases"] = ",".join(effective.authz_aliases)
 
     return headers
 
@@ -199,6 +206,7 @@ def auth_as_service(service: Optional[str] = None) -> Generator[None, None, None
         id=f"service:{service_name}",
         email=None,
         groups=[],
+        authz_aliases=[f"service:{service_name}"],
     )
     service_client = AuthClient(principal=service_principal, config=auth_config)
 
