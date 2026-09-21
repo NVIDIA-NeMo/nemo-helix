@@ -204,10 +204,11 @@ def test_sdk_editable_workspace_slice_includes_sdk_alias_package(slice_name: str
 def test_gym_host_lock_has_local_source_for_first_party_build_tools() -> None:
     """The standalone gym-host lock must not resolve first-party build hooks from PyPI."""
     lock_project = _load_pyproject(ROOT / "docker/locks/nmp-gym-host/pyproject.toml")
-    sources = lock_project["tool"]["uv"]["sources"]
+    uv_config = lock_project["tool"]["uv"]
     dockerfile_text = (ROOT / "docker/gym-host/Dockerfile").read_text(encoding="utf-8")
 
-    assert sources["nmp-build-tools"] == {"path": "../../../packages/nmp_build_tools"}
+    assert uv_config["sources"]["nmp-build-tools"] == {"path": "../../../packages/nmp_build_tools"}
+    assert uv_config["extra-build-dependencies"]["nemo-sandboxed-gym"] == ["nmp-build-tools"]
     assert "COPY packages/nmp_build_tools /app/packages/nmp_build_tools" in dockerfile_text
 
 

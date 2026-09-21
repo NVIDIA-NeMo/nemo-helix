@@ -18,6 +18,9 @@ nemo-sandboxed-gym = { path = "../../../packages/sandboxed_gym" }
 # local source for that build dependency instead of letting uv search the package registry.
 nmp-build-tools = { path = "../../../packages/nmp_build_tools" }
 
+[tool.uv.extra-build-dependencies]
+nemo-sandboxed-gym = ["nmp-build-tools"]
+
 [tool.uv]
 constraint-dependencies = [
     "mlflow-skinny>=3.15.0,<3.16.0",
