@@ -184,7 +184,7 @@ def _clickhouse() -> Iterator[None]:
 
 
 @pytest.fixture(scope="session")
-def platform_base_url(_clickhouse: None) -> Iterator[str]:
+def platform_base_url(_clickhouse: None, tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     # Bind the port from BASE_URL rather than letting `services run` fall back to its 8080 default:
     # NHX_BASE_URL is client-side only, so without this the suite silently requires 8080 to be free
     # and cannot run alongside a local dev platform. Mirrors the sibling fixtures in conftest, which
@@ -197,6 +197,11 @@ def platform_base_url(_clickhouse: None) -> Iterator[str]:
             **os.environ,
             "NHX_BASE_URL": BASE_URL,
             "NHX_INTAKE_CLICKHOUSE_URL": "http://localhost:8123",
+            # Its own data dir, as the conftest fixtures each take. Without it this runs against the
+            # developer's real platform database under ~/.local/share/nemo: the suite both mutates it
+            # and inherits whatever Alembic revision another branch last stamped there, which fails
+            # startup with "Can't locate revision".
+            "NHX_DATA_DIR": str(tmp_path_factory.mktemp("intake-platform") / "data"),
         },
     )
     try:

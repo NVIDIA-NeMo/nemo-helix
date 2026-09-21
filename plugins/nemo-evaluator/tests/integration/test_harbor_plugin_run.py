@@ -13,7 +13,7 @@ It is the plugin analog of the SDK's ``test_harbor_runtime_e2e.py``.
 Needs the ``harbor`` extra (Python >=3.12; ``pip install nemo-evaluator-sdk[harbor]``) and a working
 Docker daemon; ``importorskip('harbor')`` + a Docker check skip it otherwise (so it's inert on the
 3.11 workspace and in CI). Marked ``integration`` — a heavy, external-dependency run — but unlike the
-sibling tests it stands up no platform and isn't gated on ``RUN_AGENT_EVAL_INTEGRATION``.
+sibling tests it stands up no platform.
 """
 
 from __future__ import annotations

@@ -107,6 +107,26 @@ jobs:
       - name: Run NGC metadata unit tests
         run: uv run --no-cache .github/scripts/tests/test_ngc_metadata.py
 
+  test-gates:
+    name: Check test gates
+    # Deliberately unconditional. An orphaned gate arrives by editing a test file, not by editing
+    # .github/scripts, so a path filter here would let exactly the case this guards slip through.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+      - name: Run test-gate check unit tests
+        run: uv run --no-cache .github/scripts/tests/test_check_test_gates.py
+      - name: Check for test gates no workflow sets
+        run: uv run --no-cache .github/scripts/check_test_gates.py
+
   uv-lock:
     name: Check uv lock
     runs-on: ubuntu-latest
@@ -2300,6 +2320,7 @@ jobs:
       - helm-chart-verifier
       - lint
       - ngc-metadata-test
+      - test-gates
       - policy-wasm
       - python-unit-test-tools
       - python-unit-test
