@@ -1741,12 +1741,14 @@ components:
         query_prefix:
           type: string
           title: Query Prefix
-          description: Literal prefix prepended to each query. Empty string disables prefixing.
+          description: Literal prefix prepended to each query. Empty string disables
+            prefixing.
           default: 'query: '
         passage_prefix:
           type: string
           title: Passage Prefix
-          description: Literal prefix prepended to each passage. Empty string disables prefixing.
+          description: Literal prefix prepended to each passage. Empty string disables
+            prefixing.
           default: 'passage: '
         export:
           allOf:
