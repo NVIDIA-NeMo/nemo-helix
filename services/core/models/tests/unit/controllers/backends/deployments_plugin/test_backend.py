@@ -7,6 +7,7 @@ from typing import TypeAlias
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from nemo_deployments_plugin.backends.base import VolumeStatusUpdate
 from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, Volume
 from nemo_deployments_plugin.reconciler.volume_reconciler import VolumeReconciler
 from nemo_deployments_plugin.types import Endpoint
@@ -429,6 +430,7 @@ async def test_delete_marks_weights_and_scratch_volumes_deleting_and_waits() -> 
     assert all(call.args[0] is not Volume for call in backend._entities.delete.await_args_list)
 
     substrate_backend = AsyncMock()
+    substrate_backend.delete_volume.return_value = VolumeStatusUpdate(status="RELEASED")
     registry = AsyncMock()
     registry.resolve = Mock(return_value=substrate_backend)
     volume_reconciler = VolumeReconciler(backend._entities, registry)
