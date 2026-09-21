@@ -279,7 +279,7 @@ async def test_relay_activates_fabrics_config_and_scopes_the_agent(
         yield
 
     monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fake_run_analyst_change_set)
-    monkeypatch.setattr(fabric_adapter.relay_plugin, "plugin", fake_plugin)
+    monkeypatch.setattr(fabric_adapter.relay_plugin, "activate", fake_plugin)
     monkeypatch.setattr(fabric_adapter, "get_async_task_sdk", _stub_sdk_factory([]))
 
     runtime = fabric_adapter.InsightsAnalystRuntime()

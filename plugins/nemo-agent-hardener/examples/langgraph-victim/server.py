@@ -61,8 +61,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     before restarting the victim, and nothing activates them — nor the ATOF sink the run's preflight
     insists on — without this call.
     """
-    await nemo_relay.plugin.initialize(PluginConfig())
-    yield
+    async with nemo_relay.plugin.activate(PluginConfig()):
+        yield
 
 
 def create_app() -> FastAPI:
