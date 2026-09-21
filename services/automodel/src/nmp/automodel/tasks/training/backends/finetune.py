@@ -23,6 +23,7 @@ from nemo_automodel.recipes.llm.kd import KnowledgeDistillationRecipeForNextToke
 from nemo_automodel.recipes.llm.train_ft import TrainFinetuneRecipeForNextTokenPrediction
 from nemo_automodel.recipes.retrieval.train_bi_encoder import TrainBiEncoderRecipe
 from nemo_automodel.recipes.retrieval.train_cross_encoder import TrainCrossEncoderRecipe
+from nmp.automodel.app.jobs.training.schemas import TrainingRecipe
 from nmp.automodel.tasks.tqdm_logging import install_line_tqdm
 from nmp.automodel.tasks.training.progress import JobsServiceProgressReporter
 from nmp.customization_common.service.context import NMPJobContext
@@ -389,38 +390,30 @@ def _is_kd_config(cfg: Any) -> bool:
     return cfg.get("teacher_model") is not None or cfg.get("kd_ratio") is not None
 
 
-def _model_target_contains(cfg: Any, needle: str) -> bool:
-    """Check a resolved model target's module/name for a recipe marker.
-
-    Note: ConfigNode automatically resolves _target_ to the actual function/class,
-    so inspect the function's module and qualified name.
-    """
+def _compiled_recipe(cfg: Any) -> TrainingRecipe | None:
+    """The ``_recipe`` value config.py compiled into the YAML, if present."""
+    if not hasattr(cfg, "get"):
+        return None
+    value = cfg.get("_recipe")
+    if value is None:
+        return None
+    if isinstance(value, TrainingRecipe):
+        return value if value != TrainingRecipe.AUTO else None
     try:
-        model_cfg = cfg.get("model", {})
-        if model_cfg is None:
-            return False
-
-        target = model_cfg.get("_target_")
-        if target is None:
-            return False
-
-        # target is resolved to the actual function/class by ConfigNode
-        # Check its module path or qualified name
-        module = getattr(target, "__module__", "") or ""
-        qualname = getattr(target, "__qualname__", "") or ""
-        needle = needle.lower()
-        return needle in module.lower() or needle in qualname.lower()
-    except (AttributeError, TypeError):
-        return False
+        recipe = TrainingRecipe(str(value))
+    except ValueError:
+        return None
+    return recipe if recipe != TrainingRecipe.AUTO else None
 
 
 def create_automodel_recipe(cfg: Any) -> AutomodelRecipeWrapper:
-    """Create a progress-reporting wrapper for the recipe implied by *cfg*."""
-    if _model_target_contains(cfg, "biencoder"):
-        logger.info("Detected biencoder config, using embedding model recipe")
+    """Create a progress-reporting wrapper for the recipe compiled into *cfg*."""
+    recipe = _compiled_recipe(cfg)
+    if recipe == TrainingRecipe.BI_ENCODER:
+        logger.info("Compiled recipe is bi_encoder, using embedding model recipe")
         base_recipe = TrainBiEncoderRecipe(cfg)
-    elif _model_target_contains(cfg, "crossencoder"):
-        logger.info("Detected cross-encoder config, using reranking recipe")
+    elif recipe == TrainingRecipe.CROSS_ENCODER:
+        logger.info("Compiled recipe is cross_encoder, using reranking recipe")
         base_recipe = TrainCrossEncoderRecipe(cfg)
     elif _is_kd_config(cfg):
         logger.info("Detected Knowledge Distillation config, using KD recipe")

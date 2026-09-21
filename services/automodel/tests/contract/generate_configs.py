@@ -232,7 +232,7 @@ def _compile_one(input_path: Path, model_local_dir: Path) -> dict[str, Any]:
     # do it silently: the check reports a mismatch, the mismatch names the
     # embedding configs, and the branch below skips the whole test on that
     # basis. `_progress_reporting` did exactly that when it was added.
-    for _ours in ("_resolved_chat_template", "_progress_reporting"):
+    for _ours in ("_resolved_chat_template", "_progress_reporting", "_recipe"):
         compiled.pop(_ours, None)
     _replace_paths(
         compiled,
