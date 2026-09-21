@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from nemo_evaluator.jobs.token_usage import (
+    capture_agent_evaluation_usage,
     capture_evaluator_request_logs,
     report_agent_evaluation_usage,
     report_row_evaluation_usage,
@@ -150,6 +152,23 @@ def test_agent_http_target_does_not_double_count_trial_measurements() -> None:
     assert reporter.latest is not None
     assert reporter.latest.input_tokens == 31
     assert reporter.latest.output_tokens == 7
+
+
+def test_agent_request_logs_report_when_run_raises_before_result() -> None:
+    reporter = LocalJobUsageReporter()
+    request_logs = [_request(13, 5)]
+
+    with pytest.raises(RuntimeError, match="agent run failed"):
+        with capture_agent_evaluation_usage(
+            reporter,
+            request_logs,
+            include_trial_measurements=True,
+        ):
+            raise RuntimeError("agent run failed")
+
+    assert reporter.latest is not None
+    assert reporter.latest.input_tokens == 13
+    assert reporter.latest.output_tokens == 5
 
 
 def test_request_capture_restores_outer_log() -> None:

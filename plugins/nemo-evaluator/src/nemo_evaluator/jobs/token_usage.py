@@ -5,16 +5,22 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Generic, TypeVar, cast
 
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
 from nemo_evaluator_sdk.inference import requests_log_var
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.results import EvaluationResult
-from nemo_platform_plugin.job_usage import JobUsageReporter
+from nemo_platform_plugin.job_usage import JobTokenUsage, JobUsageReporter
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+_NO_RESULT = object()
 
 _INPUT_TOKEN_KEYS = ("prompt_tokens", "input_tokens", "inputTokens")
 _INPUT_CACHE_TOKEN_KEYS = ("cache_read_input_tokens", "cache_creation_input_tokens")
@@ -78,14 +84,19 @@ class _UsageAccumulator:
         else:
             self.output_tokens += output_tokens
 
-    def report(self, reporter: JobUsageReporter) -> None:
+    def usage(self) -> JobTokenUsage | None:
         if self.calls == 0:
-            return
+            return None
         input_tokens = self.input_tokens if self.input_complete else None
         output_tokens = self.output_tokens if self.output_complete else None
         if input_tokens is None and output_tokens is None:
-            return
-        reporter.report_totals(input_tokens=input_tokens, output_tokens=output_tokens)
+            return None
+        return JobTokenUsage(input_tokens=input_tokens, output_tokens=output_tokens)
+
+    def report(self, reporter: JobUsageReporter) -> None:
+        usage = self.usage()
+        if usage is not None:
+            reporter.report_totals(input_tokens=usage.input_tokens, output_tokens=usage.output_tokens)
 
 
 def _add_request_logs(accumulator: _UsageAccumulator, request_logs: Sequence[Mapping[str, object]]) -> None:
@@ -104,6 +115,41 @@ def report_row_evaluation_usage(
     accumulator.report(reporter)
 
 
+class _ResultCapture(Generic[T]):
+    """Evaluator-local holder for a result that may not exist if run_sync raises."""
+
+    def __init__(self) -> None:
+        self._result: T | object = _NO_RESULT
+
+    @property
+    def has_result(self) -> bool:
+        return self._result is not _NO_RESULT
+
+    @property
+    def result(self) -> T:
+        if self._result is _NO_RESULT:
+            raise RuntimeError("No evaluator result was recorded")
+        return cast(T, self._result)
+
+    def record(self, result: T) -> T:
+        self._result = result
+        return result
+
+
+def _agent_evaluation_usage(
+    capture: _ResultCapture[AgentEvalResult],
+    request_logs: Sequence[Mapping[str, object]],
+    *,
+    include_trial_measurements: bool,
+) -> JobTokenUsage | None:
+    accumulator = _UsageAccumulator()
+    _add_request_logs(accumulator, request_logs)
+    if include_trial_measurements and capture.has_result:
+        for trial in capture.result.trials:
+            accumulator.add(trial.measurements.prompt_tokens, trial.measurements.completion_tokens)
+    return accumulator.usage()
+
+
 def report_agent_evaluation_usage(
     result: AgentEvalResult,
     request_logs: Sequence[Mapping[str, object]],
@@ -112,12 +158,40 @@ def report_agent_evaluation_usage(
     include_trial_measurements: bool,
 ) -> None:
     """Report judge calls and, for runner targets, their trial measurements."""
-    accumulator = _UsageAccumulator()
-    _add_request_logs(accumulator, request_logs)
-    if include_trial_measurements:
-        for trial in result.trials:
-            accumulator.add(trial.measurements.prompt_tokens, trial.measurements.completion_tokens)
-    accumulator.report(reporter)
+    capture: _ResultCapture[AgentEvalResult] = _ResultCapture()
+    capture.record(result)
+    usage = _agent_evaluation_usage(capture, request_logs, include_trial_measurements=include_trial_measurements)
+    if usage is not None:
+        reporter.report_totals(input_tokens=usage.input_tokens, output_tokens=usage.output_tokens)
+
+
+@contextmanager
+def capture_agent_evaluation_usage(
+    reporter: JobUsageReporter,
+    request_logs: Sequence[Mapping[str, object]],
+    *,
+    include_trial_measurements: bool,
+) -> Iterator[_ResultCapture[AgentEvalResult]]:
+    """Report agent-evaluation usage in a source-local finalizer.
+
+    Request logs are side-channel data and can be reported even if the evaluator
+    raises before returning a result. Trial measurements are result-dependent,
+    so they are included only after ``record`` stores an ``AgentEvalResult``.
+    """
+    capture: _ResultCapture[AgentEvalResult] = _ResultCapture()
+    try:
+        yield capture
+    finally:
+        try:
+            usage = _agent_evaluation_usage(
+                capture,
+                request_logs,
+                include_trial_measurements=include_trial_measurements,
+            )
+            if usage is not None:
+                reporter.report_totals(input_tokens=usage.input_tokens, output_tokens=usage.output_tokens)
+        except Exception:
+            logger.warning("Failed to report evaluator agent token usage", exc_info=True)
 
 
 @contextmanager
@@ -132,6 +206,7 @@ def capture_evaluator_request_logs() -> Iterator[list[dict[str, Any]]]:
 
 
 __all__ = [
+    "capture_agent_evaluation_usage",
     "capture_evaluator_request_logs",
     "report_agent_evaluation_usage",
     "report_row_evaluation_usage",
