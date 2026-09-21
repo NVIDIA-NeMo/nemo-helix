@@ -20,6 +20,8 @@ In this mode, make reasonable design decisions autonomously based on the dataset
 4. **Plan** — Determine columns, samplers, processors, validators, and other dataset features needed.
 5. **Build** — Write the Python script with `load_config_builder()` returning a `DataDesignerConfigBuilder` (see Output Template in SKILL.md).
 6. **Validate** — Run `nemo data-designer validate <path>`. Address any warnings or errors and re-validate until it passes.
+   - `validate` checks the config's structure and resolves the platform resources it names. It does not check that the models respond.
+   - Once it passes, run `nemo data-designer check-models <path>` once before the first preview. This catches a model name the provider cannot actually serve, which `validate` cannot detect. Re-run it only after changing a model or provider — each run bills a real generation per model alias.
 7. **Preview** — Run `nemo data-designer preview <path> --save-results` to generate sample records as HTML files.
   - Note the sample records directory printed by the `nemo data-designer preview` command
   - Give the user a clickable link: `file://<sample-records-dir>/sample_records_browser.html`

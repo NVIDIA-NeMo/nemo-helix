@@ -45,7 +45,10 @@ def test_cli_docs_use_supported_plugins_regardless_of_environment(monkeypatch):
         "customization",
         "data-designer",
         "evaluator",
+        "experiments",
+        "guardrail",
         "insights",
+        "intake",
         "safe-synthesizer",
     )
 

@@ -137,6 +137,21 @@ def test_custom_environment_carries_component_selection_for_host_composition() -
     assert config["custom_agent"]["responses_api_agents"]["simple_agent"]["resources_server"]["name"] == "mcqa"
 
 
+def test_the_binding_is_keyed_on_the_agent_instance_without_an_environment_too() -> None:
+    """Stock Gym renames instances, so this is not a FileSet-only concern.
+
+    35 of Gym's 79 shipped agent configs key an instance differently from the component they
+    configure -- ``rewoo_agent`` on ``langgraph_agent``, the ``anyswe_*`` family on ``anyswe_agent``.
+    ``SessionBackedGymRunner`` stamps every row with ``agent_ref_name or agent`` whether or not a
+    FileSet is staged, so keying the binding on the component would bind a resources server onto an
+    instance nothing routes to and leave the one the rows ask for with no ``resources_server.name``.
+    """
+    config = gym_global_config(target(agent="langgraph_agent", agent_ref_name="rewoo_agent"))
+
+    assert "langgraph_agent" not in config, "the component name must not key the binding on its own"
+    assert config["rewoo_agent"]["responses_api_agents"]["langgraph_agent"]["resources_server"]["name"] == "mcqa"
+
+
 def test_custom_environment_omits_agent_config_when_the_package_supplies_the_agent() -> None:
     config = gym_global_config(
         target(

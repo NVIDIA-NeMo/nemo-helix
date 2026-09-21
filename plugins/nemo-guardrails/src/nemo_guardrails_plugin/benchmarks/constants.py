@@ -32,6 +32,11 @@ CS_MODEL_NAME = "nvidia/llama-3.1-nemoguard-8b-content-safety"
 
 NMP_BASE_URL = "http://localhost:8080"
 NMP_HEALTH_PATH = "/health/ready"
+# Scaled-evals validates this as a Fernet credential-encryption key at
+# startup, so it must be a valid 32-byte urlsafe-base64 key. This is a fake
+# key, only for use in local testing: benchmarks never read scaled-evals
+# secrets, so the exact value does not matter here.
+SCALED_EVALS_CREDENTIALS_ENCRYPTION_KEY = "RkFLRV9LRVlfRk9SX0JFTkNITUFSS1NfT05MWV9fMTI="
 IGW_CHAT_PATH = f"/apis/inference-gateway/v2/workspaces/{WORKSPACE}/openai/-/v1/chat/completions"
 
 # The benchmark only needs enough platform surface to seed workspaces, models,

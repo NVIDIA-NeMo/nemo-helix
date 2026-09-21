@@ -28,15 +28,6 @@ top_level:
     hidden: true
   audit:
     panel: Functional plugins
-  experiments:
-    panel: Functional plugins
-    help: Manage experiments.
-  guardrail:
-    panel: Functional plugins
-    help: Manage guardrails.
-  intake:
-    panel: Functional plugins
-    help: Intake operations.
   secrets:
     panel: Core plugins
     help: Manage secrets.
@@ -108,13 +99,6 @@ config:
         header: openai_path (workspace/name)
       - status
       - created_at
-- resource: [guardrail, configs]
-  methods:
-    list:
-      columns:
-      - name
-      - description
-      - created_at
 - resource: [jobs]
   skip: true
 - resource: [evaluation, jobs]
@@ -159,11 +143,6 @@ config:
 - resource: [safe_synthesizer]
   skip: true
 
-- resource: [guardrail]
-  methods:
-    check:
-      operation_type: create
-
 - resource: [entities]
   skip: true
   methods:
@@ -191,20 +170,6 @@ config:
 
 # The body is binary protobuf, which cannot be passed as a shell argument. Producers
 # use an OTLP exporter or the SDK's create(body=...) instead.
-- resource: [intake, ingest, otlp]
-  skip: true
-
-- resource: [intake, ingest, spans]
-  methods:
-    create:
-      examples:
-      - nemo intake ingest spans create --input-file spans.json
-      - >-
-        nemo intake ingest spans create --input-data '{"source":"langsmith","spans":[{"span_id":"span-1","trace_id":"trace-1","started_at":"2026-08-14T00:00:00Z"}]}'
-      - >-
-        echo '{"source":"langsmith","spans":[{"span_id":"span-1","trace_id":"trace-1","started_at":"2026-08-14T00:00:00Z"}]}' | nemo intake ingest spans create --input-file -
-      - >-
-        nemo intake ingest spans create --source langsmith --spans '[{"span_id":"span-1","trace_id":"trace-1","started_at":"2026-08-14T00:00:00Z"}]'
 
 # High-level inference operations at the `nemo inference` level
 
@@ -224,4 +189,13 @@ config:
   skip: true
 
 - resource: [inference]
+  skip: true
+
+- resource: [guardrail]
+  skip: true
+
+- resource: [intake]
+  skip: true
+
+- resource: [experiments]
   skip: true

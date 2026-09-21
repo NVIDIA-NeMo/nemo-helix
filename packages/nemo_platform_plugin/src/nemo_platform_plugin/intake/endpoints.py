@@ -8,11 +8,15 @@ from __future__ import annotations
 from abc import abstractmethod
 from collections.abc import AsyncIterable, Iterable
 
-from nemo_platform_plugin.client.endpoint import get, patch, post, put
+from nemo_platform_plugin.client.endpoint import delete, get, patch, post, put
 from nemo_platform_plugin.client.types import Paginated, PreparedRequest
 from nemo_platform_plugin.intake.types import (
     Annotation,
+    AnnotationInput,
     AtifCreateRequest,
+    ChatCompletionsIngestRequest,
+    ChatCompletionsIngestResponse,
+    DirectSpansIngestRequest,
     EvaluationCreateRequest,
     EvaluationPatchRequest,
     EvaluationResponse,
@@ -24,13 +28,17 @@ from nemo_platform_plugin.intake.types import (
     IngestResponse,
     ListAnnotationsQueryParams,
     ListEvaluatorResultsQueryParams,
+    ListExperimentsQueryParams,
     ListSpanGroupsQueryParams,
     ListSpansQueryParams,
     ListTracesQueryParams,
     RetrieveTraceQueryParams,
+    Session,
     Span,
     SpanGroup,
     Trace,
+    TraceMetrics,
+    TraceMetricsQueryParams,
 )
 
 _INTAKE_BASE = "/apis/intake/v2/workspaces/{workspace}"
@@ -91,30 +99,6 @@ def list_span_groups(
     workspace: str | None = None,
     query_params: ListSpanGroupsQueryParams | None = None,
 ) -> Paginated[SpanGroup]: ...
-
-
-@post(f"{_INTAKE_BASE}/experiments")
-@abstractmethod
-def create_experiment(
-    *,
-    workspace: str | None = None,
-    body: ExperimentCreateRequest,
-) -> ExperimentResponse: ...
-
-
-@get(f"{_INTAKE_BASE}/experiments/{{name}}")
-@abstractmethod
-def get_experiment(*, workspace: str | None = None, name: str) -> ExperimentResponse: ...
-
-
-@put(f"{_INTAKE_BASE}/experiments/{{name}}")
-@abstractmethod
-def update_experiment(
-    *,
-    workspace: str | None = None,
-    name: str,
-    body: ExperimentUpdateRequest,
-) -> ExperimentResponse: ...
 
 
 @post(f"{_INTAKE_BASE}/evaluations")
@@ -191,3 +175,82 @@ def list_annotations(
 @get(f"{_INTAKE_BASE}/annotations/{{annotation_id}}")
 @abstractmethod
 def get_annotation(*, workspace: str | None = None, annotation_id: str) -> Annotation: ...
+
+
+@post(f"{_INTAKE_BASE}/ingest/chat-completions")
+@abstractmethod
+def create_chat_completion(
+    *, workspace: str | None = None, body: ChatCompletionsIngestRequest
+) -> ChatCompletionsIngestResponse: ...
+
+
+@post(f"{_INTAKE_BASE}/ingest/spans")
+@abstractmethod
+def create_spans(*, workspace: str | None = None, body: DirectSpansIngestRequest) -> None: ...
+
+
+@get(f"{_INTAKE_BASE}/traces/metrics")
+@abstractmethod
+def get_trace_metrics(
+    *, workspace: str | None = None, query_params: TraceMetricsQueryParams | None = None
+) -> TraceMetrics: ...
+
+
+@get(f"{_INTAKE_BASE}/sessions/{{id}}")
+@abstractmethod
+def get_session(*, workspace: str | None = None, id: str) -> Session: ...
+
+
+@post(f"{_INTAKE_BASE}/annotations")
+@abstractmethod
+def create_annotation(*, workspace: str | None = None, body: AnnotationInput) -> Annotation: ...
+
+
+@delete(f"{_INTAKE_BASE}/annotations/{{annotation_id}}")
+@abstractmethod
+def delete_annotation(*, workspace: str | None = None, annotation_id: str) -> None: ...
+
+
+@get(f"{_INTAKE_BASE}/evaluator-results/{{evaluator_result_id}}")
+@abstractmethod
+def get_evaluator_result(*, workspace: str | None = None, evaluator_result_id: str) -> EvaluatorResult: ...
+
+
+@get(f"{_INTAKE_BASE}/experiments/{{name}}")
+@abstractmethod
+def get_experiment(*, workspace: str | None = None, name: str) -> ExperimentResponse: ...
+
+
+def _get_experiment_on_conflict(
+    body: ExperimentCreateRequest, workspace: str | None
+) -> PreparedRequest[ExperimentResponse]:
+    """Build the retrieve request replayed when ``create_experiment(exist_ok=True)`` 409s."""
+    return get_experiment(name=body.name, workspace=workspace)
+
+
+@post(f"{_INTAKE_BASE}/experiments", get_on_conflict=_get_experiment_on_conflict)
+@abstractmethod
+def create_experiment(
+    *, workspace: str | None = None, body: ExperimentCreateRequest, exist_ok: bool = False
+) -> ExperimentResponse: ...
+
+
+@get(f"{_INTAKE_BASE}/experiments")
+@abstractmethod
+def list_experiments(
+    *,
+    workspace: str | None = None,
+    query_params: ListExperimentsQueryParams | None = None,
+) -> Paginated[ExperimentResponse]: ...
+
+
+@put(f"{_INTAKE_BASE}/experiments/{{name}}")
+@abstractmethod
+def update_experiment(
+    *, workspace: str | None = None, name: str, body: ExperimentUpdateRequest
+) -> ExperimentResponse: ...
+
+
+@delete(f"{_INTAKE_BASE}/experiments/{{name}}")
+@abstractmethod
+def delete_experiment(*, workspace: str | None = None, name: str) -> None: ...

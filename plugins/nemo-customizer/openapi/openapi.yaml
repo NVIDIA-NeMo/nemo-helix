@@ -1209,7 +1209,8 @@ components:
         training:
           type: string
           title: Training
-          description: Training fileset as 'name' or 'workspace/name'.
+          description: Training fileset as 'name', 'workspace/name', or either form
+            with a '#path/' directory.
         validation:
           title: Validation
           type: string
@@ -1741,13 +1742,15 @@ components:
         query_prefix:
           type: string
           title: Query Prefix
-          description: Collator-side prefix; BiEncoderCollator adds a space.
-          default: 'query:'
+          description: Literal prefix prepended to each query. Empty string disables
+            prefixing.
+          default: 'query: '
         passage_prefix:
           type: string
           title: Passage Prefix
-          description: Collator-side prefix; BiEncoderCollator adds a space.
-          default: 'passage:'
+          description: Literal prefix prepended to each passage. Empty string disables
+            prefixing.
+          default: 'passage: '
         export:
           allOf:
           - $ref: '#/components/schemas/AutomodelExportSpec'

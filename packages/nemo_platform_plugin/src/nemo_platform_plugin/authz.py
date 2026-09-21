@@ -78,6 +78,22 @@ class CallerKind(StrEnum):
     SERVICE_PRINCIPAL = "service_principal"
 
 
+# Caller kinds stamped on every factory-generated route (see ``jobs.api_factory`` and
+# ``functions.routes``).
+#
+# Generated routes admit both kinds. Plugin controllers and other in-platform services call
+# these routes as ``service:<name>``, and a principal-only route is an unconditional PDP
+# *deny* for a service principal — it overrides even the ServiceSystem wildcard, so no role
+# grant recovers it. Caller kind is the wrong lever for narrowing service-to-service reach:
+# it distinguishes humans from services, not one service from another, so a per-route knob
+# here could only encode guesses about which service calls what. Scoping that reach properly
+# needs well-scoped service tokens, which the platform does not have yet.
+#
+# Hand-written routes are unaffected and still choose their own callers via ``@path_rule`` —
+# including the service-only routes that a controller writes to.
+GENERATED_ROUTE_CALLERS: list[CallerKind] = [CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL]
+
+
 @dataclass(frozen=True)
 class Permission:
     """A service-owned permission, structured as ``service.resource.action``.

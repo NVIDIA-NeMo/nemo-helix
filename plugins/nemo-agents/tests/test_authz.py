@@ -144,12 +144,14 @@ def test_gateway_invoke_reaches_both_roles_after_merge() -> None:
 def test_job_factory_binding() -> None:
     contrib = _contribution()
     # evaluate-suite maps to the ``agents.suite`` sub-namespace; its collection
-    # POST is a create, item DELETE is a delete, both PRINCIPAL.
+    # POST is a create and its item DELETE is a delete. Factory-generated routes carry
+    # both caller kinds (see authz.GENERATED_ROUTE_CALLERS), unlike the hand-written
+    # routes above, which stay principal-only.
     collection = f"{_BASE}/jobs/evaluate-suite"
     create = contrib.endpoints[collection]["post"]
     assert create.permissions == ["agents.suite.create"]
     assert create.scopes == ["agents:write", "platform:write"]
-    assert create.callers == ["principal"]
+    assert create.callers == ["principal", "service_principal"]
 
     delete = contrib.endpoints[f"{collection}/{{name}}"]["delete"]
     assert delete.permissions == ["agents.suite.delete"]

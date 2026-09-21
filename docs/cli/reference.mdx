@@ -7664,6 +7664,7 @@ nemo data-designer [OPTIONS] COMMAND [ARGS]...
 **Commands:**
 
 * `validate`: Validate a Data Designer configuration.
+* `check-models`: Check that every model referenced by the configuration is...
 * `preview`
 * `personas`: Manage Nemotron Personas datasets
 * `retrieval`: Build specs for Nemotron retrieval SDG commands.
@@ -7684,6 +7685,14 @@ nemo data-designer [OPTIONS] COMMAND [ARGS]...
 
 Validate a Data Designer configuration.
 
+Checks that the configuration is well-formed and that the platform
+resources it names resolve: Inference Gateway providers, Files service seed
+sources, and Nemotron Personas filesets.
+
+Does not check whether those models actually respond — a provider can
+resolve while still refusing to serve the model named alongside it. Run
+`nemo data-designer check-models` for that.
+
 **Usage:**
 
 ```shell
@@ -7698,6 +7707,42 @@ nemo data-designer validate [OPTIONS] CONFIG_SOURCE
 
 * `--workspace`: Workspace used to resolve provider references and seed sources (remote pass). Defaults to the SDK's configured workspace, or 'default'.
 * `--output <CHOICE>`: Output format. 'json' suppresses the human-formatted blocks. [possible values: text, json; default: text]
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo data-designer check-models
+
+Check that every model referenced by the configuration is reachable.
+
+Sends a tiny generation request to each referenced model alias, routed
+through the Inference Gateway. Models with skip_health_check=True are
+skipped.
+
+Complements `validate`: `validate` checks the configuration is well-formed
+and that the platform resources it names resolve; `check-models` checks
+that those models actually respond. A provider can resolve while still
+refusing to serve the model named alongside it, so a green `validate` is
+not a promise that a preview will run.
+
+Unlike `validate`, this stops at the first model that fails rather than
+reporting every problem at once.
+
+**Usage:**
+
+```shell
+nemo data-designer check-models [OPTIONS] CONFIG_SOURCE
+```
+
+**Arguments:**
+
+* `<CONFIG_SOURCE>`: Path or URL to a config file (.yaml/.yml/.json), or a local Python module (.py) that defines a load_config_builder() function.
+
+**Options:**
+
+* `--workspace`: Workspace used to resolve provider references and seed sources. Defaults to the SDK's configured workspace, or 'default'.
+* `--output <CHOICE>`: Output format. With 'json' the report is the only thing on stdout; engine progress logs go to stderr so stdout stays parseable. [possible values: text, json; default: text]
 
 **Help:**
 
@@ -8342,7 +8387,7 @@ nemo data-designer retrieval-run explain [OPTIONS]
 
 ### nemo guardrail
 
-Manage guardrails.
+Plugin commands for guardrail.
 
 **Usage:**
 
@@ -9667,7 +9712,7 @@ nemo customization automodel.jobs submit [OPTIONS]
 
 * `--name`: Override `name` in the spec.
 * `--model`: Override `model` in the spec.
-* `--dataset.training`: Training fileset as 'name' or 'workspace/name'.
+* `--dataset.training`: Training fileset as 'name', 'workspace/name', or either form with a '#path/' directory.
 * `--dataset.validation`: Override `dataset.validation` in the spec.
 * `--dataset.prompt-template`: Override `dataset.prompt_template` in the spec.
 * `--training.lora.rank <INTEGER>`: Override `training.lora.rank` in the spec.
@@ -9687,8 +9732,8 @@ nemo customization automodel.jobs submit [OPTIONS]
 * `--training.retrieval.do-distributed-inbatch-negative`: Score each query against every passage in the global batch rather than only its own train_n_passages. Ignored for cross_encoder.
 * `--training.retrieval.query-max-length <INTEGER>`: Override `training.retrieval.query_max_length` in the spec.
 * `--training.retrieval.passage-max-length <INTEGER>`: Override `training.retrieval.passage_max_length` in the spec.
-* `--training.retrieval.query-prefix`: Collator-side prefix; BiEncoderCollator adds a space.
-* `--training.retrieval.passage-prefix`: Collator-side prefix; BiEncoderCollator adds a space.
+* `--training.retrieval.query-prefix`: Literal prefix prepended to each query. Empty string disables prefixing.
+* `--training.retrieval.passage-prefix`: Literal prefix prepended to each passage. Empty string disables prefixing.
 * `--training.retrieval.export.opset <INTEGER>`: Override `training.retrieval.export.opset` in the spec.
 * `--training.retrieval.export.normalize`: L2-normalize embeddings. Ignored for cross_encoder.
 * `--training.retrieval.export.dimensions`: Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.
@@ -10428,7 +10473,7 @@ nemo safe-synthesizer generate explain [OPTIONS]
 
 ### nemo experiments
 
-Manage experiments.
+Plugin commands for experiments.
 
 **Usage:**
 
@@ -10646,7 +10691,7 @@ nemo experiments update [OPTIONS] PATH_NAME
 
 ### nemo intake
 
-Intake operations.
+Plugin commands for intake.
 
 **Usage:**
 

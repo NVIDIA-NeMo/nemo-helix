@@ -64,7 +64,9 @@ class LoRAParams(AutomodelSchema):
 
 
 class DatasetSpec(AutomodelSchema):
-    training: str = Field(description="Training fileset as 'name' or 'workspace/name'.")
+    training: str = Field(
+        description="Training fileset as 'name', 'workspace/name', or either form with a '#path/' directory."
+    )
     validation: str | None = None
     prompt_template: str | None = None
 
@@ -107,8 +109,14 @@ class RetrievalSpec(AutomodelSchema):
     )
     query_max_length: int = Field(default=512, ge=1)
     passage_max_length: int = Field(default=512, ge=1)
-    query_prefix: str = Field(default="query:", description="Collator-side prefix; BiEncoderCollator adds a space.")
-    passage_prefix: str = Field(default="passage:", description="Collator-side prefix; BiEncoderCollator adds a space.")
+    query_prefix: str = Field(
+        default="query: ",
+        description="Literal prefix prepended to each query. Empty string disables prefixing.",
+    )
+    passage_prefix: str = Field(
+        default="passage: ",
+        description="Literal prefix prepended to each passage. Empty string disables prefixing.",
+    )
     export: ExportSpec | None = Field(
         default=None, description="Artifact layout and ONNX export settings. Defaults are applied when omitted."
     )
