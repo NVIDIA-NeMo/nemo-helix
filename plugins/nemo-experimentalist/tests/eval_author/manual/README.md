@@ -7,7 +7,7 @@ These scripts are not tests. No automation runs them. Pytest does not collect th
 because their names do not start with `test_`.
 
 Run them by hand against a local NeMo Platform that has Intake running and holds real
-spans. The unit tests in `tests/test_traces.py` fake every Intake call, so they prove
+spans. The unit tests in `tests/eval_author/test_traces.py` fake every Intake call, so they prove
 the logic but never prove that Intake answers the way the logic expects. These scripts
 close that gap.
 
@@ -34,7 +34,7 @@ workspace that holds agent-scoped spans, then runs the checks against it, so it 
 no configuration. It prints one line per check and exits nonzero if any check fails.
 
 ```bash
-uv run --frozen python plugins/nemo-eval-author/tests/manual/intake_tool_checks.py
+uv run --frozen python plugins/nemo-experimentalist/tests/eval_author/manual/intake_tool_checks.py
 ```
 
 ### `intake_vocabulary_probe.py`
@@ -49,7 +49,7 @@ Intake published but could not serve, fixed in nemo-platform#1225. If the report
 docstrings disagree, the docstrings are wrong.
 
 ```bash
-uv run --frozen python plugins/nemo-eval-author/tests/manual/intake_vocabulary_probe.py
+uv run --frozen python plugins/nemo-experimentalist/tests/eval_author/manual/intake_vocabulary_probe.py
 ```
 
 ## Options

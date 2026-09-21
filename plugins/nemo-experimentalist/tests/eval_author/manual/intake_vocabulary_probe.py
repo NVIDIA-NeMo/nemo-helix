@@ -17,7 +17,7 @@ Intake filter schemas. If this report and the docstrings disagree, fix the docst
 
 Read-only: every call is a GET.
 
-    uv run --frozen python plugins/nemo-eval-author/tests/manual/intake_vocabulary_probe.py
+    uv run --frozen python plugins/nemo-experimentalist/tests/eval_author/manual/intake_vocabulary_probe.py
 """
 
 import argparse
