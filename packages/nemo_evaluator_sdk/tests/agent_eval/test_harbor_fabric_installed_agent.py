@@ -18,6 +18,7 @@ from harbor.environments.base import BaseEnvironment
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent import NemoFabricAgent
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent import (
     DEFAULT_FABRIC_MAX_TURNS,
+    DEFAULT_UV_VERSION,
     FabricInstalledAgent,
 )
 
@@ -145,12 +146,66 @@ async def test_install_provisions_curl_uv_and_the_fabric_venv_in_order(tmp_path:
     prepare = _ran(environment, "mkdir -p")
     assert "/logs/agent" in prepare and "/tmp/nemo-fabric-venv" in prepare
     assert "chown -R agent:agent" in prepare
-    install = _ran(environment, "astral.sh/uv/install.sh")
+    install = _ran(environment, "astral.sh/uv")
     assert "uv python install 3.12" in install
     assert "uv venv /tmp/nemo-fabric-venv --python 3.12 --clear" in install
     # The venv's python, never the image's: that is what makes an arbitrary task image workable.
     assert f"uv pip install --python /tmp/nemo-fabric-venv/bin/python '{_PACKAGE}'" in install
     assert environment.commands.index((prepare, "root")) < environment.commands.index((install, None))
+
+
+async def test_the_uv_installer_is_pinned_to_a_release(tmp_path: Path) -> None:
+    """Unpinned, the same eval run a week later provisions a different toolchain.
+
+    Every upstream Harbor installed agent fetches the unversioned installer; pinning is what makes
+    the provisioned toolchain a property of the config rather than of the day it ran.
+    """
+    environment = _RecordingEnvironment()
+
+    await _agent(tmp_path).install(cast(BaseEnvironment, environment))
+
+    assert f"https://astral.sh/uv/{DEFAULT_UV_VERSION}/install.sh" in _ran(environment, "astral.sh/uv")
+
+    pinned = _RecordingEnvironment()
+    await _agent(tmp_path, fabric_uv_version="0.10.10").install(cast(BaseEnvironment, pinned))
+
+    assert "https://astral.sh/uv/0.10.10/install.sh" in _ran(pinned, "astral.sh/uv")
+
+
+def test_an_unquoted_yaml_uv_version_is_rejected(tmp_path: Path) -> None:
+    """`uv_version: 0.12` parses as the float 0.12, which is not the release `0.12.17`."""
+    with pytest.raises(ValueError, match="fabric_uv_version must be a string"):
+        _agent(tmp_path, fabric_uv_version=0.12)
+
+
+async def test_the_package_manager_step_retries_with_backoff(tmp_path: Path) -> None:
+    """A blipping archive mirror should not cost the trial.
+
+    Harbor's own retry restarts the whole trial, so a one-off `apt-get` failure otherwise throws
+    away the run. The retry is in-shell -- Harbor gives the host a single exec -- so the command
+    string is the only observable surface.
+    """
+    environment = _RecordingEnvironment()
+
+    await _agent(tmp_path).install(cast(BaseEnvironment, environment))
+
+    provision = _ran(environment, "ca-certificates")
+    assert 'if eval "$install"; then break; fi' in provision, "the chosen manager is not retried"
+    assert '[ "$attempt" -ge 3 ]' in provision, "retries are not bounded"
+    assert "sleep $((attempt * 5))" in provision, "retries do not back off"
+    # Selection stays outside the loop: an image with no package manager will never grow one.
+    assert provision.index("no supported package manager") < provision.index("attempt=1")
+
+
+async def test_the_uv_installer_fetch_is_retried_by_curl(tmp_path: Path) -> None:
+    """`--retry-all-errors` is probed, not assumed: it landed in curl 7.71 and bullseye ships older."""
+    environment = _RecordingEnvironment()
+
+    await _agent(tmp_path).install(cast(BaseEnvironment, environment))
+
+    install = _ran(environment, "astral.sh/uv")
+    assert "curl -LsSf --retry 5 --retry-delay 2 $retry_all" in install
+    assert "if curl --help all 2>/dev/null | grep -q -- --retry-all-errors; then" in install
 
 
 async def test_install_runs_as_root_for_packages_and_as_the_agent_for_uv(tmp_path: Path) -> None:
@@ -162,7 +217,7 @@ async def test_install_runs_as_root_for_packages_and_as_the_agent_for_uv(tmp_pat
 
     users = {command: user for command, user in environment.commands}
     assert users[_ran(environment, "mkdir -p")] == "root"
-    assert users[_ran(environment, "astral.sh/uv/install.sh")] is None
+    assert users[_ran(environment, "astral.sh/uv")] is None
 
 
 async def test_a_config_bundle_is_uploaded_and_its_target_created(tmp_path: Path) -> None:

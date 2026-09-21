@@ -25,7 +25,7 @@ Prerequisites are the Harbor runner's (Python ≥ 3.12, Docker, the `harbor` ext
   task container at setup time with `python3 -m venv` and pip. The repo ships
   [`fabric_hello_world_dataset`](https://github.com/NVIDIA-NeMo/nemo-platform/tree/main/packages/nemo_evaluator_sdk/examples/harbor/fabric_agent/fabric_hello_world_dataset)
   on `python:3.12-slim` for exactly this. To evaluate a task whose image you do not control, use
-  [`FabricInstalledAgent`](#run-on-a-task-image-you-do-not-control) instead, which brings its own
+  [`FabricInstalledAgent`](#run-on-task-images-without-python) instead, which brings its own
   Python.
 
 Nothing Fabric-related needs to be installed on the host: the agent class below is part of the SDK,
@@ -49,15 +49,19 @@ argument through `agent_kwargs`, and resolves what a non-OpenAI model provider n
 Override the defaults with `fabric_model_api_key_env` and `fabric_model_base_url` in `agent_kwargs`,
 for example to point at a self-hosted NIM.
 
-## Run on a task image you do not control
+## Run on task images without Python
 
-`NemoFabricAgent` installs Fabric with the task image's own `python3`, which limits it to images that
-ship one. Most Harbor tasks do not, and their Dockerfiles are not yours to change.
+`NemoFabricAgent` installs Fabric with the task image's own `python3`, so it requires an image that
+ships one. Many Harbor task images do not, and a task's Dockerfile usually comes with the dataset
+rather than with your evaluation.
 
 `nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent:FabricInstalledAgent` removes
 that constraint. It is a Harbor `BaseInstalledAgent` that wraps a `NemoFabricAgent` and replaces only
 the install step, provisioning its own toolchain: `curl` and CA certificates through whatever package
-manager the image has, then `uv`, then a uv-managed CPython, and only then the Fabric virtualenv. Every
+manager the image has, then a pinned `uv`, then a uv-managed CPython, and only then the Fabric
+virtualenv. The package-manager step is retried three times with linear backoff, and the uv installer
+fetch is retried by `curl`, so a rate-limited or briefly unavailable package mirror does not end the
+trial — Harbor's own retry restarts the trial rather than the failed step. Every
 `agent_kwargs` key above still applies — they are passed through to the wrapped agent. The task's
 Dockerfile needs nothing.
 
@@ -67,7 +71,7 @@ Because the install runs through `BaseInstalledAgent`, its failures are classifi
 container and reports model-side failures in its `RunResult` (for example
 `deepagents_invocation_failed` on a 403), which Harbor records as a completed trial with reward `0`.
 
-Swap the import path and drop the image requirement:
+Swap the import path:
 
 ```python
 config = HarborRuntimeConfig(
@@ -85,16 +89,18 @@ config = HarborRuntimeConfig(
 )
 ```
 
-Three differences from `NemoFabricAgent`:
+Four differences from `NemoFabricAgent`:
 
 - `fabric_package` is required — the harness extra cannot be derived from the adapter id.
 - `fabric_python_version` (default `"3.12"`) selects the interpreter uv provisions. Quote it in YAML
   so `3.10` does not parse as the float `3.1`.
-- `fabric_max_turns` defaults to `50` instead of Fabric's unbounded `None`. An unbounded harness on a
-  task it cannot finish runs until Harbor kills the agent phase, and a killed phase writes **no**
-  `RunResult` — no trajectory, no error, just `AgentTimeoutError`. On `terminal-bench-sample` that
-  was six of ten trials. Size it for your dataset, or pass `fabric_max_turns=None` for Fabric's
-  behaviour.
+- `fabric_uv_version` (default `"0.12.17"`) pins the uv installer the task container fetches, so two
+  runs of the same eval provision the same toolchain. Quote it in YAML for the same reason.
+- `fabric_max_turns` defaults to `50` instead of Fabric's unbounded `None`. When an unbounded harness
+  cannot finish a task, Harbor eventually kills the agent phase, and a killed phase produces no
+  `RunResult` — no trajectory and no error, only `AgentTimeoutError`. A turn budget lets the harness
+  stop on its own terms instead; in our sample runs it accounted for most of the lost trials. Size it
+  for your dataset, or pass `fabric_max_turns=None` for Fabric's unbounded behaviour.
 
 The packaged example runs it against a deliberately bare `ubuntu:24.04` task — no Python, no pip, no
 curl — and `--dataset-dir` points it at any Harbor dataset, including one pulled from the Hub:
@@ -114,15 +120,20 @@ task).
 
 <Note>
 
-Two image requirements the agent cannot work around:
+Three requirements the agent cannot provision for you:
 
+- **bash.** Harbor's `BaseInstalledAgent._exec` prefixes `set -o pipefail` onto every command it runs,
+  so the environment backend has to execute through bash rather than `/bin/sh`. Docker and Daytona
+  do; Harbor's HF sandbox does not, and the install fails there before it starts. This applies to
+  every Harbor installed agent, not only this one.
 - **glibc.** `nemo-fabric-runtime` publishes no musllinux wheels, so an Alpine task fails at the final
   `uv pip install` with an unsatisfiable resolution.
-- **A working package manager**, when the image has no `curl`. Archived distributions are the trap:
-  on `debian:bullseye-slim`, `apt-get install curl ca-certificates` now exits 100 because the baked-in
-  index no longer resolves, and the image ships no curl, wget, python3, or busybox to fall back on.
-  This breaks any installed agent, not just this one — terminal-bench's own `qemu-*` verifiers run the
-  same apt-then-`uv` sequence and fail identically, so those tasks score `0` even under the oracle.
+- **A working package manager**, when the image has no `curl`. Archived distributions are the main
+  limitation: on `debian:bullseye-slim`, `apt-get install curl ca-certificates` exits 100 because the
+  baked-in index no longer resolves, and the image ships no curl, wget, python3, or busybox to fall
+  back on. Any installed agent hits this — terminal-bench's own `qemu-*` verifiers run the same
+  apt-then-`uv` sequence and fail the same way, so those tasks score `0` even under the oracle
+  agent.
 
 </Note>
 

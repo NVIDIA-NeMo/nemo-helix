@@ -22,13 +22,16 @@ Select it with ``agent_import_path`` and configure it with ``agent_kwargs``::
     )
 
 It accepts every ``FabricAgent`` keyword plus :class:`NemoFabricAgent`'s ``fabric_model_api_key_env``
-and this class's ``fabric_python_version``. ``fabric_package`` is required -- the harness extra to
-install cannot be derived from the adapter id.
+and this class's ``fabric_python_version`` and ``fabric_uv_version``. ``fabric_package`` is required
+-- the harness extra to install cannot be derived from the adapter id.
 
-Two things the task image must still provide: a supported package manager (apt-get, dnf, yum, or
-apk) when it has no curl, and glibc. ``nemo-fabric-runtime`` publishes no musllinux wheels, so
-Alpine-based tasks fail at the final ``uv pip install`` with an unsatisfiable resolution -- verified
-against 0.3.0b1, and not something this agent can work around.
+Three things the task image must still provide: bash, a supported package manager (apt-get, dnf,
+yum, or apk) when it has no curl, and glibc. Bash because Harbor's ``BaseInstalledAgent._exec``
+prefixes ``set -o pipefail`` onto every command it runs for every installed agent, so a ``/bin/sh``
+backend cannot run any of them; Docker and Daytona execute through bash, Harbor's HF sandbox does
+not. glibc because ``nemo-fabric-runtime`` publishes no musllinux wheels, so Alpine-based tasks fail
+at the final ``uv pip install`` with an unsatisfiable resolution -- verified against 0.3.0b1, and
+not something this agent can work around.
 """
 
 from __future__ import annotations
@@ -55,7 +58,19 @@ DEFAULT_FABRIC_PYTHON_VERSION = "3.12"
 #: is to make the harness stop on its own terms. Pass ``fabric_max_turns`` to size it properly, or
 #: ``fabric_max_turns=None`` for Fabric's unbounded behaviour.
 DEFAULT_FABRIC_MAX_TURNS = 50
-_UV_INSTALLER_URL = "https://astral.sh/uv/install.sh"
+#: uv release the installer is pinned to.
+#:
+#: Every upstream Harbor installed agent fetches the unversioned ``astral.sh/uv/install.sh``, which
+#: serves whatever uv shipped most recently -- so two runs of one eval, a week apart, can provision
+#: different toolchains. Pinning makes the install reproducible and narrows what an eval run trusts
+#: at execution time. Pass ``fabric_uv_version`` to move it.
+DEFAULT_UV_VERSION = "0.12.17"
+_UV_INSTALLER_URL_TEMPLATE = "https://astral.sh/uv/{version}/install.sh"
+#: Attempts allowed for the package-manager step, which is the install's most fragile network call:
+#: an archive mirror that rate-limits or blips takes the whole trial with it, and Harbor's own retry
+#: works at trial granularity. Backoff between attempts is ``attempt * _RETRY_BACKOFF_SEC``.
+_PACKAGE_MANAGER_ATTEMPTS = 3
+_RETRY_BACKOFF_SEC = 5
 #: Proxy and TLS settings ``FabricAgent`` forwards to its install step, mirrored for this one.
 _INSTALL_ENV_NAMES = frozenset(
     {
@@ -76,6 +91,22 @@ _INSTALL_ENV_NAMES = frozenset(
         "no_proxy",
     }
 )
+
+
+def _version_string(name: str, value: str | float | int) -> str:
+    """Reject a version YAML has already turned into a number.
+
+    An unquoted ``3.10`` or ``0.12`` parses as a float, and by the time it arrives here the intent
+    is unrecoverable -- ``3.1`` and ``3.10`` are different interpreters -- so the only safe move is
+    to refuse it and name the quoted form.
+    """
+    if not isinstance(value, str):
+        raise ValueError(
+            f"{name} must be a string: quote it as {str(value)!r} so a version like 3.10 survives YAML parsing"
+        )
+    if not value.strip():
+        raise ValueError(f"{name} must not be empty")
+    return value
 
 
 class FabricInstalledAgent(BaseInstalledAgent):
@@ -114,21 +145,14 @@ class FabricInstalledAgent(BaseInstalledAgent):
         extra_env: dict[str, str] | None = None,
         *,
         fabric_python_version: str | float | int = DEFAULT_FABRIC_PYTHON_VERSION,
+        fabric_uv_version: str | float | int = DEFAULT_UV_VERSION,
         model_name: str | None = None,
         mcp_servers: list[MCPServerConfig] | None = None,
         skills_dir: str | None = None,
         **fabric_kwargs: Any,
     ) -> None:
-        # YAML reads an unquoted `3.10` as the float 3.1, which would silently install the wrong
-        # interpreter; the intent is unrecoverable here, so reject it.
-        if not isinstance(fabric_python_version, str):
-            raise ValueError(
-                f"fabric_python_version must be a string: quote it as {str(fabric_python_version)!r} "
-                "so a version like 3.10 survives YAML parsing"
-            )
-        if not fabric_python_version.strip():
-            raise ValueError("fabric_python_version must not be empty")
-        self.fabric_python_version = fabric_python_version
+        self.fabric_python_version = _version_string("fabric_python_version", fabric_python_version)
+        self.fabric_uv_version = _version_string("fabric_uv_version", fabric_uv_version)
         super().__init__(
             logs_dir,
             prompt_template_path,
@@ -204,18 +228,33 @@ class FabricInstalledAgent(BaseInstalledAgent):
         that CA certificates are installed unconditionally: ``ubuntu:24.04`` ships neither, and
         without the certificates the uv installer's HTTPS fetch fails with a bare curl exit code
         that reads like a network outage.
+
+        The chosen manager is retried with linear backoff. A rate-limited or briefly unreachable
+        archive mirror is the most likely way this install fails, and a failure here costs the whole
+        trial -- Harbor's own retry restarts the trial, not the step. Selection is deliberately
+        outside the loop: an image with no supported package manager will never grow one, so that
+        branch exits immediately.
         """
+        attempts = _PACKAGE_MANAGER_ATTEMPTS
         await self.exec_as_root(
             environment,
             command=(
                 "if command -v apt-get >/dev/null 2>&1; then "
-                "apt-get update && apt-get install -y curl ca-certificates; "
-                "elif command -v apk >/dev/null 2>&1; then apk add --no-cache curl ca-certificates; "
-                "elif command -v dnf >/dev/null 2>&1; then dnf install -y curl ca-certificates; "
-                "elif command -v yum >/dev/null 2>&1; then yum install -y curl ca-certificates; "
-                "elif command -v curl >/dev/null 2>&1; then true; "
+                "install='apt-get update && apt-get install -y curl ca-certificates'; "
+                "elif command -v apk >/dev/null 2>&1; then install='apk add --no-cache curl ca-certificates'; "
+                "elif command -v dnf >/dev/null 2>&1; then install='dnf install -y curl ca-certificates'; "
+                "elif command -v yum >/dev/null 2>&1; then install='yum install -y curl ca-certificates'; "
+                "elif command -v curl >/dev/null 2>&1; then install=true; "
                 "else echo 'curl is required to install uv, and no supported package manager was found' >&2; "
-                "exit 1; fi"
+                "exit 1; fi; "
+                "attempt=1; "
+                "while true; do "
+                'if eval "$install"; then break; fi; '
+                f'if [ "$attempt" -ge {attempts} ]; then '
+                f'echo "package installation failed after {attempts} attempts: $install" >&2; exit 1; fi; '
+                f"sleep $((attempt * {_RETRY_BACKOFF_SEC})); "
+                "attempt=$((attempt + 1)); "
+                "done"
             ),
             env={"DEBIAN_FRONTEND": "noninteractive"},
         )
@@ -241,14 +280,23 @@ class FabricInstalledAgent(BaseInstalledAgent):
 
         The task image's own python is never used: it is frequently absent, and when present it is
         often older than the 3.12 Fabric's Harbor integration needs.
+
+        The installer fetch is retried by curl itself rather than by a loop, since a partial
+        download is the failure mode here and curl restarts it. ``--retry-all-errors`` is probed
+        rather than assumed: it landed in curl 7.71, and `debian:bullseye-slim` ships older. The uv
+        commands after it are left alone -- uv retries its own HTTP internally.
         """
         package = self.fabric.fabric_package
         if not package:  # Rejected in __init__; re-checked so the command builder stays total.
             raise ValueError("fabric_package is required")
         python_version = shlex.quote(self.fabric_python_version)
+        installer_url = _UV_INSTALLER_URL_TEMPLATE.format(version=self.fabric_uv_version)
         return (
             "set -euo pipefail; "
-            f"curl -LsSf {shlex.quote(_UV_INSTALLER_URL)} | sh; "
+            "retry_all=''; "
+            "if curl --help all 2>/dev/null | grep -q -- --retry-all-errors; then "
+            "retry_all=--retry-all-errors; fi; "
+            f"curl -LsSf --retry 5 --retry-delay 2 $retry_all {shlex.quote(installer_url)} | sh; "
             'if [ -f "$HOME/.local/bin/env" ]; then . "$HOME/.local/bin/env"; fi; '
             f"uv python install {python_version}; "
             f"uv venv {shlex.quote(self._venv_path)} --python {python_version} --clear; "
