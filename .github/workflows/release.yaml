@@ -137,7 +137,7 @@ env:
     ]
   RELEASE_HELM_ID: nemo-platform
   RELEASE_HELM_PATH: k8s/helm
-  RELEASE_HELM_REGISTRY: nvcr.io/0921617854601259/nemo-platform
+  RELEASE_HELM_REGISTRY: nvcr.io/0921617854601259/nemo-platform-dev
   STABLE_IMAGE_REGISTRY: nvcr.io/nvidia/nemo-platform
   RELEASE_PUBLISH_NIGHTLY_WHEELS: "true"
   RELEASE_NIGHTLY_WHEEL_INDEX: https://pypi.nvidia.com
@@ -503,6 +503,8 @@ jobs:
               clientPayload: {
                 version: process.env.RELEASE_VERSION,
                 source_sha: process.env.SOURCE_SHA,
+                source_team: "nemo-platform-dev",
+                container_version: process.env.SOURCE_SHA,
                 source_run_url: process.env.SOURCE_RUN_URL,
                 wheel_ids: JSON.parse(process.env.WHEEL_IDS),
                 // Differs from `version` for a pre-release: tagged `1.0.0-rc0`, shipped
@@ -570,10 +572,11 @@ jobs:
             });
 
   dispatch-container-stage:
-    name: Dispatch container builds
+    name: Dispatch nightly container builds
     needs: plan-release
     if: >-
       needs.plan-release.outputs.has_containers == 'true' &&
+      needs.plan-release.outputs.release_type == 'nightly' &&
       needs.plan-release.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
