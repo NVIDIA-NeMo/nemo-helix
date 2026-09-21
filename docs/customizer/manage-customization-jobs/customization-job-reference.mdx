@@ -35,12 +35,15 @@ All three backends (automodel, unsloth, RL) resolve a referenced `deployment_con
 - The string reference does not resolve to a deployment config.
 - The job trains a **standalone LoRA adapter** and the referenced config has `lora_enabled: false` — the deployment could never load the adapter.
 - The job trains a standalone LoRA adapter and the referenced config names a model other than the job's base model. The adapter is served from its base model's deployment, so the config has to target that base.
-- The job registers a **new model entity** (`all_weights`, or a LoRA job with a merged save method) and the referenced config names a different model. Retraining is fine, because the config already names that entity.
+- The job registers a **new model entity** (`all_weights`, or a LoRA job with a merged save method) and the referenced config names a different model. The output entity does **not** have to exist yet — a config may point forward at the model the run will produce, which is what Studio creates up front. Retraining is fine for the same reason.
 - The config sets `tool_call_config.tool_call_plugin` and the caller lacks the `models.tool-call-plugin.set` permission.
 
 A merged save (`lora_merged`, or unsloth's `merged_16bit` / `merged_4bit`) folds the adapter into the base weights and produces a standalone model, so the LoRA-specific rules above do not apply to it.
 
-To reuse engine and executor settings across jobs that register a new model entity, use an unbound template — a config with neither `model_entity_id` nor `model_spec.model_name`. It is accepted by any job and bound to the trained model at deploy time.
+Two config shapes are therefore valid ahead of a model that does not exist yet:
+
+- A **forward reference** — the config names the model the run will produce. Creating it up front means a bad engine or image is rejected in milliseconds at submit instead of after a training run, and the deployment can start the moment training ends. One config per run.
+- An **unbound template** — a config with neither `model_entity_id` nor `model_spec.model_name`. It carries only engine and executor settings, is accepted by any job, and is bound to the trained model at deploy time. Use this to share settings across runs.
 
 ---
 

@@ -268,8 +268,33 @@ async def test_merged_job_is_not_checked_against_the_base_model(platform: MagicM
     platform.models.get_deployment_config = AsyncMock(return_value=_response(_deployment_config()))
     platform.models.get_model = AsyncMock(side_effect=_not_found())
 
-    with pytest.raises(PlatformJobCompilationError, match="names a different model"):
+    with pytest.raises(PlatformJobCompilationError, match="targets a different model entity"):
         await platform_job_config_compiler("default", _merged_job("existing-cfg"), platform)
+
+
+@pytest.mark.asyncio
+async def test_merged_job_accepts_a_config_pointing_at_the_unborn_output_model(platform: MagicMock) -> None:
+    """A config created before the run, naming forward at the model it will produce."""
+    platform.models.get_deployment_config = AsyncMock(
+        return_value=_response(_deployment_config(model_entity_id="default/my-merged", model_name="my-merged"))
+    )
+
+    spec = await platform_job_config_compiler("default", _merged_job("forward-cfg"), platform)
+
+    assert _deployment_config_of(spec) == "forward-cfg"
+    # The entity's existence is never consulted -- only the config's target.
+    platform.models.get_model.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_all_weights_job_accepts_a_config_pointing_at_the_unborn_output_model(platform: MagicMock) -> None:
+    platform.models.get_deployment_config = AsyncMock(
+        return_value=_response(_deployment_config(model_entity_id="default/my-model", model_name="my-model"))
+    )
+
+    spec = await platform_job_config_compiler("default", _all_weights_job("forward-cfg"), platform)
+
+    assert _deployment_config_of(spec) == "forward-cfg"
 
 
 @pytest.mark.asyncio
@@ -333,7 +358,7 @@ async def test_all_weights_job_rejects_a_config_naming_another_model(platform: M
     platform.models.get_deployment_config = AsyncMock(return_value=_response(_deployment_config()))
     platform.models.get_model = AsyncMock(side_effect=_not_found())
 
-    with pytest.raises(PlatformJobCompilationError, match="names a different model"):
+    with pytest.raises(PlatformJobCompilationError, match="targets a different model entity"):
         await platform_job_config_compiler("default", _all_weights_job("existing-cfg"), platform)
 
 

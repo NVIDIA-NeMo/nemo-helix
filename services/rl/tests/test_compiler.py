@@ -666,6 +666,30 @@ async def test_lora_job_accepts_string_ref_with_lora_enabled(
 
 
 @pytest.mark.asyncio
+async def test_full_weight_job_accepts_a_config_pointing_at_the_unborn_output_model(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationPlatformClients,
+    authorized: AsyncMock,
+) -> None:
+    """A config created before the run, naming forward at the model it will produce."""
+    monkeypatch.setattr(
+        "nmp.rl.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(data=lambda: _make_deployment_config())
+    )
+    platform_clients.models.get_model = AsyncMock(side_effect=_not_found())
+    job = _make_job_output().model_copy(update={"deployment_config": "shared/some-cfg"})
+
+    spec = await platform_job_config_compiler("default", job, platform_clients)
+
+    assert _steps(spec)[3]["config"]["deployment_config"] == "shared/some-cfg"
+    # The entity's existence is never consulted -- only the config's target.
+    platform_clients.models.get_model.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_full_weight_job_accepts_an_unbound_config_for_a_new_model_entity(
     monkeypatch: pytest.MonkeyPatch,
     platform_clients: AsyncCustomizationPlatformClients,
@@ -745,17 +769,22 @@ async def test_full_weight_job_rejects_a_config_naming_another_model_for_a_new_e
     platform_clients: AsyncCustomizationPlatformClients,
     authorized: AsyncMock,
 ) -> None:
+    """Pointing forward is fine; pointing at an unrelated model is not."""
     monkeypatch.setattr(
         "nmp.rl.app.jobs.compiler.fetch_model_entity",
         AsyncMock(return_value=_make_model_entity()),
     )
     platform_clients.models.get_deployment_config = AsyncMock(
-        return_value=SimpleNamespace(data=lambda: _make_deployment_config())
+        return_value=SimpleNamespace(
+            data=lambda: _make_deployment_config(
+                model_entity_id="default/other", model_name="other", model_namespace="default"
+            )
+        )
     )
     platform_clients.models.get_model = AsyncMock(side_effect=_not_found())
     job = _make_job_output().model_copy(update={"deployment_config": "shared/some-cfg"})
 
-    with pytest.raises(PlatformJobCompilationError, match="names a different model"):
+    with pytest.raises(PlatformJobCompilationError, match="targets a different model entity"):
         await platform_job_config_compiler("default", job, platform_clients)
 
 

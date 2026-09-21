@@ -288,32 +288,20 @@ async def _validate_deployment_config(
             )
         return
 
-    # An unbound config names no model, so it is a template that the model_entity task
-    # binds to the trained model. It does not need the output entity to exist, which it
-    # cannot on a first run.
-    if is_unbound_deployment_config(resolved_config):
-        return
-
-    # Full-weight training creates its own model entity, so a pre-existing config that
-    # does name a model can only be correct if it names that entity (i.e. this is a retrain).
+    # Full-weight training registers its own model entity, so the config must be able to
+    # serve it. That entity usually does not exist yet, and two shapes are legitimate
+    # ahead of it -- a config created up front that points *forward* at the output model
+    # (Studio does this, so the deployment can start the moment training ends), and an
+    # unbound config that names no model at all and is bound to the trained model at
+    # deploy time. So validate the target rather than the entity's existence; the same
+    # comparison covers a retrain, where it already exists.
     output_name = job_spec.output.name
-    try:
-        existing_me = (await platform.models.get_model(name=output_name, workspace=workspace)).data()
-    except NotFoundError as e:
-        raise PlatformJobCompilationError(
-            f"deployment_config references '{dc}', which names a different model than the full-weight "
-            f"training output '{workspace}/{output_name}' (which does not exist yet). "
-            'Use inline deployment parameters (e.g. {"gpu": 1, "lora_enabled": true}), or a deployment '
-            "config that names no model -- one with neither model_entity_id nor model_spec.model_name "
-            "set -- which is bound to the trained model automatically."
-        ) from e
-
-    if not _config_targets_model(resolved_config, existing_me.workspace, existing_me.name):
+    if not _config_targets_model(resolved_config, workspace, output_name):
         raise PlatformJobCompilationError(
             f"deployment_config references '{dc}' which targets a different model entity "
-            f"than the output model '{existing_me.workspace}/{existing_me.name}'. "
-            "The deployment config must target the same model entity being retrained, "
-            "or use inline deployment parameters instead."
+            f"than the output model '{workspace}/{output_name}'. The deployment config must "
+            "target the model this run produces, name no model at all, or use inline "
+            'deployment parameters (e.g. {"gpu": 1, "lora_enabled": true}) instead.'
         )
 
 

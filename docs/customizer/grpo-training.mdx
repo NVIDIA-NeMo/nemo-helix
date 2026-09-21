@@ -424,7 +424,7 @@ Bad configurations fail before training starts, not after the run. These are rej
 
 - A string reference that does not resolve to a deployment config.
 - On a LoRA job, a referenced config with `lora_enabled: false`.
-- On a full-weight job, a referenced config that names a *different* model. The job registers a new model entity, so a config built for some other model cannot serve it. Retraining is fine, because the config already names that entity.
+- On a full-weight job, a referenced config that names a *different* model. The output entity does not have to exist yet — a config may point forward at the model the run will produce — but a config built for some other model cannot serve it.
 
 A deployment config that names no model — neither `model_entity_id` nor `model_spec.model_name` — is an **unbound template**. It carries only engine and executor settings, so it is accepted by any job: the trained model is stamped onto a copy of it at deploy time, leaving the template reusable for the next run. This is the only way to share engine/executor settings across full-weight jobs, whose output model does not exist when the job is submitted.
 

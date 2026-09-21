@@ -747,6 +747,37 @@ async def test_lora_job_rejects_an_unbound_config_without_lora_enabled(
 
 
 @pytest.mark.asyncio
+async def test_all_weights_job_accepts_a_config_pointing_at_the_unborn_output_model(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A config created before the run, naming forward at the model it will produce.
+
+    Studio creates the config up front so a bad engine or image surfaces at submit
+    rather than after training, and so the deployment can start the moment the run
+    ends. The output entity does not exist yet; the reference is still correct.
+    """
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: _deployment_config(model_entity_id="default/out", model_name="out", model_namespace="default")
+        )
+    )
+    platform_clients.models.get_model = AsyncMock(side_effect=_not_found())
+
+    spec = await platform_job_config_compiler(_deployable_job("default/existing-cfg"), "default", platform_clients)
+
+    steps = spec.steps if hasattr(spec, "steps") else spec["steps"]
+    me_step = next(s for s in steps if s["name"] == "model-entity-creation")
+    assert me_step["config"]["deployment_config"] == "default/existing-cfg"
+    # The entity's existence is never consulted -- only the config's target.
+    platform_clients.models.get_model.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_all_weights_job_accepts_an_unbound_config_for_a_new_model_entity(
     platform_clients: AsyncCustomizationPlatformClients,
     monkeypatch: pytest.MonkeyPatch,
@@ -787,7 +818,7 @@ async def test_all_weights_job_rejects_a_config_naming_another_model_for_a_new_e
     )
     platform_clients.models.get_model = AsyncMock(side_effect=_not_found())
 
-    with pytest.raises(PlatformJobCompilationError, match="names a different model"):
+    with pytest.raises(PlatformJobCompilationError, match="targets a different model entity"):
         await platform_job_config_compiler(_deployable_job("default/other-cfg"), "default", platform_clients)
 
 
