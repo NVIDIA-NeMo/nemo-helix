@@ -26,8 +26,6 @@ top_level:
     panel: Core plugins
     help: Manage access keys.
     hidden: true
-  audit:
-    panel: Functional plugins
   secrets:
     panel: Core plugins
     help: Manage secrets.
@@ -115,33 +113,6 @@ config:
       columns:
       - timestamp
       - message
-- resource: [audit]
-  help: Auditor operations.
-- resource: [audit, configs]
-  methods:
-    list:
-      columns:
-      - name
-      - description
-      - created_at
-- resource: [audit, targets]
-  methods:
-    list:
-      columns:
-      - name
-      - description
-      - created_at
-- resource: [audit, jobs]
-  methods:
-    list:
-      columns:
-      - name
-      - description
-      - status
-      - created_at
-
-- resource: [safe_synthesizer]
-  skip: true
 
 - resource: [entities]
   skip: true
