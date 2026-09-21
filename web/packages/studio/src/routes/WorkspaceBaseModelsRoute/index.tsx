@@ -110,7 +110,7 @@ export const WorkspaceBaseModelsRoute: FC = () => {
   const tabFromUrl = (searchParams.get(TAB_SEARCH_PARAM) ?? 'model-details') as ModelPanelTab;
 
   useBreadcrumbs({
-    items: [{ slotLabel: 'Base Models' }],
+    items: [{ slotLabel: 'Model Catalog' }],
   });
 
   const dataViewState = useStudioDataViewState<
@@ -264,7 +264,7 @@ export const WorkspaceBaseModelsRoute: FC = () => {
     : 'name';
 
   return (
-    <AccessibleTitle title="Base Models">
+    <AccessibleTitle title="Model Catalog">
       <ModelPanel
         allowModelDelete={allowModelDelete}
         onModelDeleted={() => {
@@ -300,7 +300,7 @@ export const WorkspaceBaseModelsRoute: FC = () => {
         onOpenChange={(open) => !open && handleClosePanel()}
       />
       <Stack className="h-full min-h-0" gap="density-2xl" padding="density-2xl">
-        <PageHeader className="p-0 shrink-0" slotHeading="Base Models" />
+        <PageHeader className="p-0 shrink-0" slotHeading="Model Catalog" />
         <StudioDataView<ModelEntity>
           dataViewState={dataViewState}
           makeColumns={makeFilterColumns}

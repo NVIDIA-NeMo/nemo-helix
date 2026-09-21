@@ -9,7 +9,6 @@ import type {
   NavItem as NavItemData,
 } from '@studio/components/Layouts/NavigationDrawer/types';
 import { isGroup } from '@studio/components/Layouts/NavigationDrawer/utils';
-import { BASE_MODELS_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getPluginIcon } from '@studio/plugins/iconMap';
 import {
@@ -22,6 +21,7 @@ import { iconColorClass } from '@studio/routes/constants';
 import {
   getAgentSideNavItems,
   getAnonymizerSideNavItems,
+  getBaseModelsSideNavItems,
   getCustomizationSideNavItems,
   getDashboardSideNavItems,
   getDataDesignerSideNavItems,
@@ -38,7 +38,7 @@ import {
   getSettingsSideNavItems,
   getVirtualModelsSideNavItems,
 } from '@studio/routes/groups';
-import { getAgentsListRoute, getWorkspaceBaseModelsRoute } from '@studio/routes/utils';
+import { getAgentsListRoute } from '@studio/routes/utils';
 import { useMemo } from 'react';
 import { useLocation } from 'react-router';
 
@@ -114,6 +114,7 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
     const observabilityItems = [...optimizerNav, ...tracesNav];
 
     const modelSubItems = [
+      ...getBaseModelsSideNavItems(workspace),
       ...deploymentsNav,
       ...customizerNav,
       ...evalNav,
@@ -122,9 +123,9 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
     ];
     const datasetSubItems = [...anonymizerNav, ...dataDesignerNav, ...safeSynthesizerNav];
 
-    // Agents and Models link to their own entity list page; the chevron expands any sub-items.
+    // Agents links to its own entity list page; Models is a disclosure whose 'Model Catalog'
+    // child is the list page. The chevron expands any sub-items.
     const agentsHref = showAgents ? getAgentsListRoute(workspace) : undefined;
-    const modelsHref = BASE_MODELS_ENABLED ? getWorkspaceBaseModelsRoute(workspace) : undefined;
 
     const componentItems = [
       ...(agentsHref !== undefined
@@ -138,13 +139,12 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
             },
           ]
         : []),
-      ...(modelsHref !== undefined || modelSubItems.length > 0
+      ...(modelSubItems.length > 0
         ? [
             {
               id: 'models-group',
               slotIcon: <ModelsIcon className={iconColorClass} />,
               slotLabel: 'Models',
-              href: modelsHref,
               subItems: modelSubItems,
             },
           ]
