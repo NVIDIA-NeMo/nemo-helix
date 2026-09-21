@@ -45,7 +45,7 @@ import {
   createDeploymentWizardSchema,
   type WizardFormValues,
 } from '@studio/routes/NewDeploymentRoute/schema';
-import { createWorkspaceDeploymentConfig } from '@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource';
+import { ensureWorkspaceDeploymentConfig } from '@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource';
 import { getWorkspaceCustomizationJobDetailsRoute } from '@studio/routes/utils';
 import {
   FORM_DEFAULTS,
@@ -266,9 +266,24 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
       const values = deployForm.getValues();
       const configName = configNameFromWizardBaseName(values.name.trim());
       try {
-        await createWorkspaceDeploymentConfig(workspace, values, configName, (message) =>
-          setDeployStage(message)
+        const { config, reused } = await ensureWorkspaceDeploymentConfig(
+          workspace,
+          values,
+          configName,
+          (message) => setDeployStage(message)
         );
+        // Adopting an existing config is the intended outcome — one LoRA-enabled
+        // deployment of a base serves every adapter trained against it. But it was
+        // created by an earlier run and may not match what was just filled in, so
+        // say so rather than let the form imply these settings were used. A toast
+        // because `onSuccess` navigates away the moment the job is created.
+        if (reused) {
+          toast.info(
+            `Reused the existing deployment configuration "${configName}" ` +
+              `(${config.engine}, ${config.executor_config?.gpu ?? '?'} GPU). ` +
+              'Its settings take precedence over the ones entered here.'
+          );
+        }
       } catch (e) {
         setDeployStage(null);
         setValidationErrors([

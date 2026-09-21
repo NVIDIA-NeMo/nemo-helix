@@ -51,7 +51,7 @@ vi.mock('@studio/hooks/useBaseModelDeploymentReadiness', () => ({
 }));
 
 vi.mock('@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource', () => ({
-  createWorkspaceDeploymentConfig: mockCreateDeploymentConfig,
+  ensureWorkspaceDeploymentConfig: mockCreateDeploymentConfig,
 }));
 
 /** Minimum automodel payload that clears `customizationFormSchema`. */
@@ -93,7 +93,10 @@ describe('NewCustomizationForm', () => {
     mutateUnsloth.mockReset().mockResolvedValue({ name: 'job-1' });
     mutateRl.mockReset().mockResolvedValue({ name: 'job-1' });
     mockCreateDeploymentConfig.mockReset();
-    mockCreateDeploymentConfig.mockResolvedValue(undefined);
+    mockCreateDeploymentConfig.mockResolvedValue({
+      config: { engine: 'vllm', executor_config: { gpu: 1 } },
+      reused: false,
+    });
     mockReadiness.mockReset();
     mockReadiness.mockReturnValue({
       state: 'none',
