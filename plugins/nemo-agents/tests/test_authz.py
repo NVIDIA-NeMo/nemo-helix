@@ -144,12 +144,14 @@ def test_gateway_invoke_reaches_both_roles_after_merge() -> None:
 def test_job_factory_binding() -> None:
     contrib = _contribution()
     # evaluate-suite maps to the ``agents.suite`` sub-namespace; its collection
-    # POST is a create, item DELETE is a delete, both PRINCIPAL.
+    # POST is a create and its item DELETE is a delete. Factory-generated routes carry
+    # both caller kinds (see authz.GENERATED_ROUTE_CALLERS), unlike the hand-written
+    # routes above, which stay principal-only.
     collection = f"{_BASE}/jobs/evaluate-suite"
     create = contrib.endpoints[collection]["post"]
     assert create.permissions == ["agents.suite.create"]
     assert create.scopes == ["agents:write", "platform:write"]
-    assert create.callers == ["principal"]
+    assert create.callers == ["principal", "service_principal"]
 
     delete = contrib.endpoints[f"{collection}/{{name}}"]["delete"]
     assert delete.permissions == ["agents.suite.delete"]
@@ -161,43 +163,3 @@ def test_job_factory_binding() -> None:
         for verb in ("create", "list", "read", "delete", "cancel")
     }
     assert expected_job_perms <= set(contrib.permissions)
-
-
-def test_execute_job_binding_admits_service_principals() -> None:
-    """Insights drives the execute collection as ``service:insights``.
-
-    A route whose ``callers`` list omits ``service_principal`` is an unconditional PDP
-    deny for one — the ServiceSystem wildcard does not rescue it — so these three verbs
-    have to carry the widened list, and the destructive ones must not.
-    """
-    contrib = _contribution()
-    collection = f"{_BASE}/jobs/execute"
-    both = ["principal", "service_principal"]
-
-    assert contrib.endpoints[collection]["post"].callers == both  # create
-    assert contrib.endpoints[collection]["get"].callers == both  # list
-
-    # ``read`` is one permission behind several routes; all of them widen together.
-    for path in (
-        f"{collection}/{{name}}",
-        f"{collection}/{{name}}/status",
-        f"{collection}/{{name}}/logs",
-        f"{collection}/{{name}}/results",
-        f"{collection}/{{job}}/results/{{name}}",
-    ):
-        assert contrib.endpoints[path]["get"].callers == both, path
-
-    # Destructive verbs stay principal-only.
-    assert contrib.endpoints[f"{collection}/{{name}}"]["delete"].callers == ["principal"]
-    assert contrib.endpoints[f"{collection}/{{name}}/cancel"]["post"].callers == ["principal"]
-
-
-def test_other_job_collections_stay_principal_only() -> None:
-    """The widening is scoped to ``execute`` — no sibling collection inherits it."""
-    contrib = _contribution()
-    # URL segments, which are the job names — not the permission sub-namespaces
-    # (``EvaluateSuiteJob`` is /jobs/evaluate-suite but agents.suite.*).
-    for segment in ("evaluate", "evaluate-suite", "optimize", "optimize-skills", "analyze", "package"):
-        collection = f"{_BASE}/jobs/{segment}"
-        assert contrib.endpoints[collection]["post"].callers == ["principal"], segment
-        assert contrib.endpoints[collection]["get"].callers == ["principal"], segment

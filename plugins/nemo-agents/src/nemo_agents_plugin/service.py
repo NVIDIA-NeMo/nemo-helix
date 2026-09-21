@@ -26,10 +26,6 @@ class _JobCollection(NamedTuple):
     subname: str  # permission sub-namespace suffix -> agents.<subname>.{create,...}
     service_name: str | None  # distinct jobs source (None ⇒ add_job_routes default)
     description: str
-    # Verbs this collection also opens to SERVICE_PRINCIPAL callers. Empty ⇒ principal-only,
-    # which is an outright PDP deny for service principals, not a permission check they could
-    # pass via the ServiceSystem wildcard. Widen only where another service drives the routes.
-    service_principal_verbs: frozenset[str] = frozenset()
 
 
 # Sub-names are concise and stable and need not match the job's URL path segment:
@@ -59,9 +55,6 @@ def _job_collections() -> list[_JobCollection]:
             "execute",
             "nemo-agents-plugin-execute",
             "Submit and track agent execution jobs.",
-            # This job type is a platform primitive serving other plugins; allow those
-            # plugins' service principals (e.g. controllers) to drive these jobs.
-            service_principal_verbs=frozenset({"create", "list", "read"}),
         ),
         _JobCollection(
             EvaluateSuiteJob,
@@ -152,7 +145,6 @@ class AgentsService(NemoService):
                         collection.job_cls,
                         service_name=collection.service_name,
                         authz=scope.child(collection.subname),
-                        service_principal_verbs=collection.service_principal_verbs,
                     ),
                     tag="Agents",
                     description=collection.description,
