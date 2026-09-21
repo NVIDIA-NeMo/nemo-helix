@@ -47,7 +47,10 @@ import {
   createDeploymentWizardSchema,
   type WizardFormValues,
 } from '@studio/routes/NewDeploymentRoute/schema';
-import { ensureWorkspaceDeploymentConfig } from '@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource';
+import {
+  ensureUnboundDeploymentConfig,
+  ensureWorkspaceDeploymentConfig,
+} from '@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource';
 import { getWorkspaceCustomizationJobDetailsRoute } from '@studio/routes/utils';
 import {
   FORM_DEFAULTS,
@@ -223,6 +226,7 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   const outputName = useWatch({ control: form.control, name: 'outputName' });
 
   const readiness = useBaseModelDeploymentReadiness(baseModelRef, { enabled: isAdapterRun });
+
   // Whether there is a deployment left to create at all. Only the adapter flow can
   // answer "no": its target is the base model, which may already be serving LoRA — or
   // may have failed to resolve at all, which is why this is an allowlist rather than
@@ -330,10 +334,15 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
     // milliseconds and the job is never submitted. Inline params are validated by
     // the job, after training.
     //
-    // Identical for both flows — only the model the config points at differs, and
-    // the nested form already carries that. Skipping is allowed: the user may have
-    // a serving plan of their own, and the Deployments page can deploy either
-    // target at any time afterwards.
+    // The two flows differ in whether the config can name a model at all. An adapter
+    // is served by a deployment of its *base*, which exists now, so that config names
+    // it — and is reused by every later adapter trained against the same base. A
+    // full-weight run's output does not exist until the job finishes, so its config is
+    // created **unbound**: engine and executor only, no model. The model_entity task
+    // binds it to the trained model at deploy time.
+    //
+    // Skipping is allowed either way: the user may have a serving plan of their own,
+    // and the Deployments page can deploy either target at any time afterwards.
     let deploymentConfig: string | undefined;
     if (needsDeployment && deployRequested) {
       const valid = await deployForm.trigger();
@@ -349,17 +358,18 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
       const values = deployForm.getValues();
       const configName = configNameFromWizardBaseName(values.name.trim());
       try {
-        const { config, reused } = await ensureWorkspaceDeploymentConfig(
-          workspace,
-          values,
-          configName,
-          (message) => setDeployStage(message)
+        const ensure = isAdapterRun
+          ? ensureWorkspaceDeploymentConfig
+          : ensureUnboundDeploymentConfig;
+        const { config, reused } = await ensure(workspace, values, configName, (message) =>
+          setDeployStage(message)
         );
-        // Adopting an existing config is the intended outcome — one LoRA-enabled
-        // deployment of a base serves every adapter trained against it. But it was
-        // created by an earlier run and may not match what was just filled in, so
-        // say so rather than let the form imply these settings were used. A toast
-        // because `onSuccess` navigates away the moment the job is created.
+        // Adopting an existing config is the intended outcome for the adapter flow —
+        // one LoRA-enabled deployment of a base serves every adapter trained against
+        // it — and a tolerable one for a reused output name. Either way it was created
+        // by an earlier run and may not match what was just filled in, so say so rather
+        // than let the form imply these settings were used. A toast because `onSuccess`
+        // navigates away the moment the job is created.
         if (reused) {
           toast.info(
             `Reused the existing deployment configuration "${configName}" ` +

@@ -54,17 +54,18 @@ export function baseDeploymentDefaults(modelRef?: string): WizardFormValues {
 /**
  * Defaults for deploying the **model this run produces**.
  *
- * `modelRef` is a forward reference: the output Model Entity does not exist when
- * the config is created, and will not until the job finishes. That is deliberate
- * and supported — `create_deployment_config` never requires the referenced entity
- * to exist, and only looks one up at all when `model_entity_id` is absent, which
- * `createWorkspaceDeploymentConfig` always supplies. Pointing the config forward
- * is what lets the job deploy the moment training ends.
+ * `modelRef` is set but never sent. The output Model Entity does not exist when the
+ * config is created and will not until the job finishes, so the config is created
+ * unbound — engine and executor only — and the model_entity task binds it to the
+ * trained model at deploy time. The ref is carried anyway because it names the
+ * config (`<output>-config`) and because `createDeploymentWizardSchema` requires it
+ * on the Workspace branch; `createUnboundDeploymentConfig` drops it.
  *
  * `loraEnabled` is left at the wizard's default rather than pinned. For a
  * full-weight model it decides whether adapters trained against it later can be
  * served alongside it, which is a genuine preference and nothing this run
- * depends on.
+ * depends on. It survives onto the derived config the task binds, because it
+ * describes serving rather than which model is served.
  */
 export function outputDeploymentDefaults(workspace: string, outputName?: string): WizardFormValues {
   return {

@@ -45,6 +45,7 @@ vi.mock('@studio/hooks/useCustomizationDatasetValidation', async (importOriginal
 
 const mockReadiness = vi.hoisted(() => vi.fn());
 const mockCreateDeploymentConfig = vi.hoisted(() => vi.fn());
+const mockCreateUnboundConfig = vi.hoisted(() => vi.fn());
 
 vi.mock('@studio/hooks/useBaseModelDeploymentReadiness', () => ({
   useBaseModelDeploymentReadiness: mockReadiness,
@@ -52,6 +53,7 @@ vi.mock('@studio/hooks/useBaseModelDeploymentReadiness', () => ({
 
 vi.mock('@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource', () => ({
   ensureWorkspaceDeploymentConfig: mockCreateDeploymentConfig,
+  ensureUnboundDeploymentConfig: mockCreateUnboundConfig,
 }));
 
 /** Minimum automodel payload that clears `customizationFormSchema`. */
@@ -94,6 +96,11 @@ describe('NewCustomizationForm', () => {
     mutateRl.mockReset().mockResolvedValue({ name: 'job-1' });
     mockCreateDeploymentConfig.mockReset();
     mockCreateDeploymentConfig.mockResolvedValue({
+      config: { engine: 'vllm', executor_config: { gpu: 1 } },
+      reused: false,
+    });
+    mockCreateUnboundConfig.mockReset();
+    mockCreateUnboundConfig.mockResolvedValue({
       config: { engine: 'vllm', executor_config: { gpu: 1 } },
       reused: false,
     });
@@ -436,6 +443,8 @@ describe('NewCustomizationForm', () => {
           }),
         })
       );
+      // The adapter's base exists now, so this config names it rather than being unbound.
+      expect(mockCreateUnboundConfig).not.toHaveBeenCalled();
       // Ordering is the point: a config that fails must not cost a training run.
       expect(mockCreateDeploymentConfig.mock.invocationCallOrder[0]).toBeLessThan(
         mutateAutomodel.mock.invocationCallOrder[0]
@@ -490,7 +499,7 @@ describe('NewCustomizationForm', () => {
 
       // The job still runs — only the deployment is withheld.
       await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
-      expect(mockCreateDeploymentConfig).not.toHaveBeenCalled();
+      expect(mockCreateUnboundConfig).not.toHaveBeenCalled();
       expect(mutateAutomodel.mock.calls[0][0].data.spec.deployment_config).toBeUndefined();
     });
 
@@ -579,10 +588,12 @@ describe('NewCustomizationForm', () => {
       await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
 
       await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
-      expect(mockCreateDeploymentConfig).toHaveBeenCalledWith(
+      // Unbound, not the model-bound creator: the output entity does not exist until
+      // the job finishes, so the config names no model and the job binds it at deploy.
+      expect(mockCreateDeploymentConfig).not.toHaveBeenCalled();
+      expect(mockCreateUnboundConfig).toHaveBeenCalledWith(
         'default',
-        // Forward reference: the output entity does not exist until the job finishes.
-        expect.objectContaining({ modelRef: 'default/my-model' }),
+        expect.anything(),
         'my-model-config',
         expect.any(Function)
       );
@@ -596,7 +607,7 @@ describe('NewCustomizationForm', () => {
     });
 
     it('does not start the job when the config is rejected', async () => {
-      mockCreateDeploymentConfig.mockRejectedValue(new Error('image pull denied'));
+      mockCreateUnboundConfig.mockRejectedValue(new Error('image pull denied'));
       const user = userEvent.setup();
       renderRoute(<NewCustomizationForm workspace="default" initialValues={fullWeightValues()} />);
 
