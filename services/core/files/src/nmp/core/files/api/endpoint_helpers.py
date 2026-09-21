@@ -317,6 +317,26 @@ async def resolve_storage_secrets_for_user(
     return await resolve_storage_secrets(storage, workspace, service_sdk)
 
 
+async def resolve_fileset_secrets(
+    fileset: Fileset,
+    sdk: AsyncNeMoPlatform,
+    auth_client: AuthClient,
+) -> dict[str, str]:
+    """Resolve a fileset's storage secrets against the workspace that owns the fileset.
+
+    An unqualified secret reference on a fileset names a secret in the fileset's own
+    workspace, not the caller's. That distinction only becomes visible once a fileset is
+    shared out of the global workspace and read from elsewhere: resolving against the
+    request workspace would look for a secret that workspace does not have.
+
+    Note that serving a shared fileset backed by external storage necessarily *uses* the
+    owning workspace's storage credential on behalf of the caller. The value is never
+    exposed to them — the same service-delegation path as a workspace-local fileset — but
+    sharing a fileset does share the use of its credential.
+    """
+    return await resolve_storage_secrets_for_user(fileset.storage, fileset.workspace, sdk, auth_client)
+
+
 async def get_cache_status_for_files(
     files: list[FileInfo],
     source_storage: StorageImpl,

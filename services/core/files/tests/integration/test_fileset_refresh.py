@@ -132,7 +132,7 @@ class TestRefreshFileset:
             _create_github_fileset(client, name, revision=FIRST_SHA)
 
         with patch(
-            "nmp.core.files.api.v2.filesets.endpoints.resolve_storage_secrets_for_user",
+            "nmp.core.files.api.v2.filesets.endpoints.resolve_fileset_secrets",
             side_effect=AssertionError("secrets must not be resolved for an ineligible fileset"),
         ):
             response = client.post(f"{FILESETS_URL}/{name}/refresh")

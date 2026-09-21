@@ -30,6 +30,8 @@ from nmp.common.entities.client import (
     EntityNotFoundError,
     EntityStoreError,
 )
+from nmp.common.entities.constants import ALL_WORKSPACES
+from nmp.common.entities.global_workspace import GLOBAL_WORKSPACE
 from nmp.common.files.storage_config import LocalStorageConfig, S3StorageConfig
 from nmp.common.observability import BaseContext, scoped_app_ctx
 from nmp.common.secrets.exceptions import SecretAccessDeniedError, SecretNotFoundError
@@ -44,6 +46,7 @@ from nmp.core.files.api.endpoint_helpers import (
     get_download_file_info,
     get_fileset,
     list_storage_files,
+    resolve_fileset_secrets,
     resolve_storage_secrets_for_user,
     stream_file_download,
 )
@@ -156,21 +159,31 @@ async def _count_entity_fileset_references(
     workspace: str,
     name: str,
 ) -> int:
-    """Count qualified, legacy URI, and same-workspace bare references."""
+    """Count qualified, legacy URI, and bare references.
+
+    A bare reference means "the fileset of this name in my own workspace", so it is
+    normally counted only within *workspace*. A fileset in the global workspace is the
+    exception: a bare reference from any workspace without its own fileset of that name
+    resolves to the global one, so bare references are counted everywhere. That
+    over-counts when another workspace has a same-named fileset of its own, which
+    refuses a delete that would have been safe — the conservative direction for an
+    operation that otherwise breaks another team's models silently.
+    """
     qualified_ref = f"{workspace}/{name}"
+    bare_scope = ALL_WORKSPACES if workspace == GLOBAL_WORKSPACE else workspace
     qualified_count = await _count_fileset_references(entity_store, entity_type, qualified_ref)
     legacy_uri_count = await _count_fileset_references(entity_store, entity_type, f"fileset://{qualified_ref}")
     bare_count = await _count_fileset_references(
         entity_store,
         entity_type,
         name,
-        workspace=workspace,
+        workspace=bare_scope,
     )
     legacy_bare_count = await _count_fileset_references(
         entity_store,
         entity_type,
         f"fileset://{name}",
-        workspace=workspace,
+        workspace=bare_scope,
     )
     return qualified_count + legacy_uri_count + bare_count + legacy_bare_count
 
@@ -510,7 +523,7 @@ async def delete_fileset(
     # Delete underlying source storage data. This is a no-op for external backends
     # like NGC/HuggingFace, and removes files for backends we own (local/S3).
     try:
-        secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+        secrets = await resolve_fileset_secrets(fileset, sdk, auth_client)
         storage = storage_impl_factory(fileset.storage, secrets)
         await storage.delete_all()
     except (SecretNotFoundError, SecretAccessDeniedError) as exc:
@@ -643,7 +656,7 @@ async def refresh_fileset(
         )
 
     try:
-        secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+        secrets = await resolve_fileset_secrets(fileset, sdk, auth_client)
         storage_impl = storage_impl_factory(fileset.storage, secrets)
         tracked_impl = storage_impl_factory(storage_impl.config_at_tracked_revision(), secrets)
         # The host allowlist is enforced at create time; re-check it here so a host
@@ -718,7 +731,7 @@ async def list_fileset_files(
     """
     logger.info(f"GET /filesets/{name}/files - workspace={workspace}, path={path}")
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_fileset_secrets(fileset, sdk, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
     files = await list_storage_files(storage, path)
 
@@ -763,7 +776,7 @@ async def head_file(
     """
     logger.info(f"HEAD /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_fileset_secrets(fileset, sdk, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     cache_ctx: CacheContext | None = None
@@ -823,7 +836,7 @@ async def download_file(
     logger.info(f"GET /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
     with scoped_app_ctx(FilesContext(fileset_name=fileset.name, path=path)):
-        secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+        secrets = await resolve_fileset_secrets(fileset, sdk, auth_client)
         storage = storage_impl_factory(fileset.storage, secrets)
 
         cache_ctx: CacheContext | None = None
@@ -885,7 +898,7 @@ async def upload_file(
     """Upload file content to a fileset."""
     logger.info(f"PUT /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_fileset_secrets(fileset, sdk, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     # Determine chunk processor based on Content-Type
@@ -963,7 +976,7 @@ async def delete_file(
     """
     logger.info(f"DELETE /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_fileset_secrets(fileset, sdk, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     try:

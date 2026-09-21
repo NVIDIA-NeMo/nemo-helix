@@ -67,8 +67,34 @@ async def test_count_entity_fileset_references_includes_supported_ref_formats() 
         "weights",
         "fileset://weights",
     ]
-    assert count_references.await_args_list[2].kwargs == {"workspace": "default"}
-    assert count_references.await_args_list[3].kwargs == {"workspace": "default"}
+    # "default" is the global workspace: a bare reference from any workspace can resolve
+    # to it, so bare refs are counted everywhere rather than just in the owning workspace.
+    assert count_references.await_args_list[2].kwargs == {"workspace": "-"}
+    assert count_references.await_args_list[3].kwargs == {"workspace": "-"}
+
+
+async def test_count_entity_fileset_references_scopes_bare_refs_to_a_non_global_workspace() -> None:
+    with patch(
+        "nmp.core.files.api.v2.filesets.endpoints._count_fileset_references",
+        new=AsyncMock(side_effect=[2, 1, 3, 4]),
+    ) as count_references:
+        count = await _count_entity_fileset_references(
+            MagicMock(),
+            _ModelFilesetReference,
+            "team-a",
+            "weights",
+        )
+
+    assert count == 10
+    assert [call.args[2] for call in count_references.await_args_list] == [
+        "team-a/weights",
+        "fileset://team-a/weights",
+        "weights",
+        "fileset://weights",
+    ]
+    # A bare reference elsewhere means that workspace's own fileset, not this one.
+    assert count_references.await_args_list[2].kwargs == {"workspace": "team-a"}
+    assert count_references.await_args_list[3].kwargs == {"workspace": "team-a"}
 
 
 async def test_delete_fileset_rejects_references_before_deleting_storage() -> None:
@@ -169,7 +195,7 @@ async def test_delete_unreferenced_fileset_deletes_storage_and_entity() -> None:
             new=AsyncMock(side_effect=[0, 0]),
         ),
         patch(
-            "nmp.core.files.api.v2.filesets.endpoints.resolve_storage_secrets_for_user",
+            "nmp.core.files.api.v2.filesets.endpoints.resolve_fileset_secrets",
             new=AsyncMock(return_value={}),
         ),
         patch(

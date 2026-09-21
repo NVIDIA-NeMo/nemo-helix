@@ -26,7 +26,7 @@ from nmp.core.files.api.endpoint_helpers import (
     get_file_info,
     get_fileset,
     list_storage_files,
-    resolve_storage_secrets_for_user,
+    resolve_fileset_secrets,
     stream_file_download,
 )
 from nmp.core.files.api.v2.hf.schemas import (
@@ -82,7 +82,7 @@ async def head_file(
 ) -> Response:
     """Get file metadata without downloading content."""
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_fileset_secrets(fileset, sdk, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     cache_ctx: CacheContext | None = None
@@ -126,7 +126,7 @@ async def download_file(
 ) -> Response:
     """Download file content with Range support."""
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_fileset_secrets(fileset, sdk, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     # Set up caching for external storage backends (HuggingFace, NGC, etc.)
@@ -168,7 +168,7 @@ async def get_repo_info(
 ) -> HfRepoInfo:
     """Get repository metadata including file list."""
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_fileset_secrets(fileset, sdk, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     files = await list_storage_files(storage)
@@ -199,7 +199,7 @@ async def get_repo_info_at_revision(
 ) -> HfRepoInfo:
     """Get repository metadata including file list (revision is ignored)."""
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_fileset_secrets(fileset, sdk, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     files = await list_storage_files(storage)
@@ -230,7 +230,7 @@ async def get_tree(
 ) -> list[HfTreeEntry]:
     """List files in repository."""
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_fileset_secrets(fileset, sdk, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
     files = await list_storage_files(storage)
 
@@ -261,7 +261,7 @@ async def get_paths_info(
 ) -> list[PathInfo]:
     """Get info for specific file paths."""
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_fileset_secrets(fileset, sdk, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     result = []

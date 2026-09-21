@@ -16,7 +16,7 @@ from nmp.common.jobs.schemas import InvalidPageCursorError, PlatformJobLogPage
 from nmp.common.service.dependencies import get_entity_client, get_sdk_client
 from nmp.core.files.api.endpoint_helpers import (
     get_fileset,
-    resolve_storage_secrets_for_user,
+    resolve_fileset_secrets,
 )
 from nmp.core.files.api.v2.otlp.schemas import (
     OtelExportLogsPartialSuccess,
@@ -117,7 +117,7 @@ async def query_otlp_logs(
         workspace,
     )
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_fileset_secrets(fileset, sdk, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
     effective_limit = _validate_log_query_request(request)
 
@@ -173,7 +173,7 @@ async def upload_otlp_logs(
         workspace,
     )
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_fileset_secrets(fileset, sdk, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     # Parse request based on content type

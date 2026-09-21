@@ -111,7 +111,7 @@ def test_client(
             return_value=mock_storage,
         ),
         patch(
-            "nmp.core.files.api.v2.otlp.endpoints.resolve_storage_secrets_for_user",
+            "nmp.core.files.api.v2.otlp.endpoints.resolve_fileset_secrets",
             return_value={},
         ),
     ):

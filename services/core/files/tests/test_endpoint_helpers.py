@@ -19,6 +19,7 @@ from nmp.core.files.api.endpoint_helpers import (
     get_download_file_info,
     get_file_info,
     list_storage_files,
+    resolve_fileset_secrets,
     resolve_storage_secrets,
     resolve_storage_secrets_for_user,
     stream_file_download,
@@ -560,3 +561,28 @@ async def test_stream_file_download_preflight_success_returns_streaming_response
         else:
             chunks.append(bytes(chunk))
     assert b"".join(chunks) == b"chunk1chunk2"
+
+
+async def test_resolve_fileset_secrets_uses_the_filesets_own_workspace():
+    """A bare secret ref on a shared fileset names a secret where the fileset lives."""
+    fileset = MagicMock()
+    fileset.workspace = "default"
+    fileset.storage = HuggingfaceStorageConfig(
+        repo_id="org/repo",
+        token_secret=SecretRef(root="my-hf-token"),
+    )
+    auth_client = AuthClient(config=AuthConfig(), principal=Principal(id="reader@example.com"))
+    sdk = AsyncNeMoPlatform(base_url="http://testserver")
+    secrets_client = MagicMock()
+    secrets_client.access_secret = AsyncMock(return_value=_access_result("hf_token_value"))
+
+    try:
+        with patch("nmp.core.files.api.endpoint_helpers.client_from_platform", return_value=secrets_client):
+            secrets = await resolve_fileset_secrets(fileset, sdk, auth_client)
+    finally:
+        await sdk.close()
+
+    assert secrets == {"token": "hf_token_value"}
+    # Not the caller's workspace — resolving there would miss the shared fileset's secret.
+    assert secrets_client.access_secret.await_args.kwargs["workspace"] == "default"
+    assert secrets_client.access_secret.await_args.kwargs["name"] == "my-hf-token"
