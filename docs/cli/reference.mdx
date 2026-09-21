@@ -6823,7 +6823,7 @@ nemo agents analyze [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the AnalyzeBatchConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -6886,7 +6886,7 @@ nemo agents evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the EvaluateAgentSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -6954,7 +6954,7 @@ nemo agents evaluate-suite [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the EvaluateSuiteSubmitConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -7021,7 +7021,7 @@ nemo agents execute [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the ExecuteAgentJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -7084,7 +7084,7 @@ nemo agents optimize [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the OptimizeSubmitSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -7183,7 +7183,7 @@ nemo agents optimize-skills [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the OptimizeSkillsConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -7255,7 +7255,7 @@ nemo agents package-agent [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the PackageAgentInput Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 ​
@@ -8000,7 +8000,7 @@ nemo data-designer retrieval-preview [OPTIONS]
 
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace path segment used in the submit URL. [default: default]
+* `--workspace`: Workspace path segment used in the submit URL. Defaults to the active CLI context's workspace.
 * `--request-id`: Set the X-Request-ID header (echoed back in ctx.request_id).
 
 Function Spec flags are generated from the RetrievalPreviewSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -8111,7 +8111,7 @@ nemo data-designer retrieval-generate [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the RetrievalGenerateJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -8199,7 +8199,7 @@ nemo data-designer retrieval-prepare [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the RetrievalPrepareJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -8310,7 +8310,7 @@ nemo data-designer retrieval-run [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the RetrievalRunJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -8969,7 +8969,7 @@ nemo auditor audit submit [OPTIONS]
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the AuditInputSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -9083,7 +9083,7 @@ nemo anonymizer preview [OPTIONS]
 
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace path segment used in the submit URL. [default: default]
+* `--workspace`: Workspace path segment used in the submit URL. Defaults to the active CLI context's workspace.
 * `--request-id`: Set the X-Request-ID header (echoed back in ctx.request_id).
 
 Function Spec flags are generated from the PreviewRequest Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
@@ -9134,7 +9134,7 @@ nemo anonymizer run [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the AnonymizerRequest Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -9258,7 +9258,7 @@ nemo evaluator agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the AgentEvalInputSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -9323,7 +9323,7 @@ nemo evaluator evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the EvaluateInputSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -9383,7 +9383,7 @@ nemo evaluator retrieve-eval [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the RetrieveEvalInputSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -9742,7 +9742,7 @@ nemo customization automodel.jobs submit [OPTIONS]
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the AutomodelJobInput Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -9832,7 +9832,7 @@ nemo customization rl.jobs submit [OPTIONS]
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the RlJobInput Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -9958,7 +9958,7 @@ nemo customization unsloth.jobs submit [OPTIONS]
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the UnslothJobInput Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -10247,7 +10247,7 @@ nemo insights analyze-job submit [OPTIONS]
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the AnalyzeSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
@@ -10396,7 +10396,7 @@ nemo safe-synthesizer generate [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--cluster`: Configured cluster name to resolve via the NeMo CLI config.
 * `--base-url`: Explicit plugin-service base URL (overrides --cluster and all other submit host resolution).
-* `--workspace`: Workspace scope for the submission. [default: default]
+* `--workspace`: Workspace scope for the submission. Defaults to the active CLI context's workspace.
 
 Job Spec flags are generated from the SafeSynthesizerJobConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
