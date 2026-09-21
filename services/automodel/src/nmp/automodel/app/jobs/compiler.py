@@ -6,7 +6,7 @@
 import logging
 
 from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.deployment import LORA_ENABLED_REQUIRED_MESSAGE
+from nemo_platform_plugin.deployment import LORA_ENABLED_REQUIRED_MESSAGE, is_unbound_deployment_config
 from nemo_platform_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
@@ -306,11 +306,15 @@ async def _require_tool_call_plugin_permission(workspace: str) -> None:
 
 
 def _config_targets_model(config: ModelDeploymentConfig, workspace: str, name: str) -> bool:
-    """Whether ``config`` deploys the model entity ``workspace/name``.
+    """Whether ``config`` can serve the model entity ``workspace/name``.
 
     ``model_entity_id`` is the canonical link; older configs only carry the
-    name/namespace pair on ``model_spec``, so both are accepted.
+    name/namespace pair on ``model_spec``, so both are accepted. A config that
+    names no model at all serves any model: the model_entity task binds it to the
+    trained one at deploy time.
     """
+    if is_unbound_deployment_config(config):
+        return True
     model_spec = config.model_spec
     return (config.model_entity_id == f"{workspace}/{name}") or (
         model_spec.model_name == name and model_spec.model_namespace == workspace
@@ -372,17 +376,25 @@ async def _validate_deployment_config(
 
     # SFT or lora_merged referencing a string config
     if produces_new_model:
+        # An unbound config names no model, so it is a template that the model_entity
+        # task binds to the trained model. It does not need the output entity to exist,
+        # which it cannot on a first run.
+        if is_unbound_deployment_config(resolved_config):
+            return
+
         output_name = transformed_spec.output.name
         try:
             response = await platform.models.get_model(name=output_name, workspace=workspace)
             existing_me = response.data()
         except NotFoundError:
-            # Output model entity doesn't exist yet, so a string
-            # ref is inherently invalid -- it was created for a different model.
+            # The output model entity doesn't exist yet and the config names some other
+            # model, so it was created for a different model.
             raise PlatformJobCompilationError(
-                f"deployment_config cannot be a string reference ('{dc}') for {ft_type.value} training "
-                "that creates a new model entity. The referenced config was created for a different model. "
-                "Use inline deployment parameters (e.g., DeploymentParams(gpu=1, lora_enabled=True)) instead."
+                f"deployment_config references '{dc}', which names a different model than the "
+                f"{ft_type.value} training output '{workspace}/{output_name}' (which does not exist yet). "
+                "Use inline deployment parameters (e.g., DeploymentParams(gpu=1, lora_enabled=True)), "
+                "or a deployment config that names no model -- one with neither model_entity_id nor "
+                "model_spec.model_name set -- which is bound to the trained model automatically."
             )
 
         # Output model entity already exists (retraining to create a new FileSet).

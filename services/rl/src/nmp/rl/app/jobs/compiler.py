@@ -22,7 +22,11 @@ from __future__ import annotations
 import logging
 
 from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.deployment import LORA_ENABLED_REQUIRED_MESSAGE, DeploymentParams
+from nemo_platform_plugin.deployment import (
+    LORA_ENABLED_REQUIRED_MESSAGE,
+    DeploymentParams,
+    is_unbound_deployment_config,
+)
 from nemo_platform_plugin.integrations import IntegrationsSpec
 from nemo_platform_plugin.jobs.api_factory import (
     ContainerSpec,
@@ -222,11 +226,15 @@ async def _require_tool_call_plugin_permission(workspace: str) -> None:
 
 
 def _config_targets_model(config: ModelDeploymentConfig, workspace: str, name: str) -> bool:
-    """Whether ``config`` deploys the model entity ``workspace/name``.
+    """Whether ``config`` can serve the model entity ``workspace/name``.
 
     ``model_entity_id`` is the canonical link; older configs only carry the
-    name/namespace pair on ``model_spec``, so both are accepted.
+    name/namespace pair on ``model_spec``, so both are accepted. A config that
+    names no model at all serves any model: the model_entity task binds it to the
+    trained one at deploy time.
     """
+    if is_unbound_deployment_config(config):
+        return True
     model_spec = config.model_spec
     return (config.model_entity_id == f"{workspace}/{name}") or (
         model_spec.model_name == name and model_spec.model_namespace == workspace
@@ -280,16 +288,24 @@ async def _validate_deployment_config(
             )
         return
 
-    # Full-weight training creates its own model entity, so a pre-existing config can
-    # only be correct if it already targets that entity (i.e. this is a retrain).
+    # An unbound config names no model, so it is a template that the model_entity task
+    # binds to the trained model. It does not need the output entity to exist, which it
+    # cannot on a first run.
+    if is_unbound_deployment_config(resolved_config):
+        return
+
+    # Full-weight training creates its own model entity, so a pre-existing config that
+    # does name a model can only be correct if it names that entity (i.e. this is a retrain).
     output_name = job_spec.output.name
     try:
         existing_me = (await platform.models.get_model(name=output_name, workspace=workspace)).data()
     except NotFoundError as e:
         raise PlatformJobCompilationError(
-            f"deployment_config cannot be a string reference ('{dc}') for full-weight training "
-            "that creates a new model entity. The referenced config was created for a different model. "
-            'Use inline deployment parameters (e.g. {"gpu": 1, "lora_enabled": true}) instead.'
+            f"deployment_config references '{dc}', which names a different model than the full-weight "
+            f"training output '{workspace}/{output_name}' (which does not exist yet). "
+            'Use inline deployment parameters (e.g. {"gpu": 1, "lora_enabled": true}), or a deployment '
+            "config that names no model -- one with neither model_entity_id nor model_spec.model_name "
+            "set -- which is bound to the trained model automatically."
         ) from e
 
     if not _config_targets_model(resolved_config, existing_me.workspace, existing_me.name):

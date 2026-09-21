@@ -21,7 +21,7 @@ from nemo_platform_plugin.client.errors import (
     NemoTransportError,
     NotFoundError,
 )
-from nemo_platform_plugin.deployment import DeploymentParams
+from nemo_platform_plugin.deployment import DeploymentParams, is_unbound_deployment_config
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.models.client import ModelsClient
 from nemo_platform_plugin.models.types import (
@@ -302,7 +302,11 @@ class ModelEntityRunner:
 
         if isinstance(dc, str):
             logger.info(f"Resolving deployment config reference: {dc}")
-            deployment_config = self._resolve_config_ref(dc, me.workspace)
+            referenced = self._resolve_config_ref(dc, me.workspace)
+            if is_unbound_deployment_config(referenced):
+                deployment_config = self._bind_deployment_config(referenced, me)
+            else:
+                deployment_config = referenced
             logger.info(f"Using deployment config: {deployment_config.workspace}/{deployment_config.name}")
         else:
             deployment_config = self._create_deployment_config(dc, me)
@@ -372,13 +376,51 @@ class ModelEntityRunner:
                 deploy_params.tool_call_config.model_dump(exclude_none=True)
             )
 
+        return self._create_or_update_config(
+            me=me,
+            engine=Engine.NIM,
+            model_spec=model_spec,
+            executor_config=executor_config,
+        )
+
+    def _bind_deployment_config(self, template: ModelDeploymentConfig, me: ModelEntity) -> ModelDeploymentConfig:
+        """Derive a config that serves ``me`` from an unbound ``template``.
+
+        The referenced config names no model, so deploying it verbatim would leave
+        the deployment with no weights to resolve. Instead copy its engine, executor
+        and serving options onto a config of our own and stamp this model onto it.
+
+        A derived config is created rather than binding the template in place so the
+        template stays reusable: the next job gets the same settings, pointed at its
+        own trained model. ``model_entity_id`` is left for the models service to
+        back-fill from the name/namespace pair, as it does for inline parameters.
+        """
+        model_spec = template.model_spec.model_copy(
+            update={"model_name": me.name, "model_namespace": me.workspace},
+        )
+        return self._create_or_update_config(
+            me=me,
+            engine=template.engine,
+            model_spec=model_spec,
+            executor_config=template.executor_config,
+        )
+
+    def _create_or_update_config(
+        self,
+        *,
+        me: ModelEntity,
+        engine: Engine,
+        model_spec: ModelDeploymentConfigModelSpec,
+        executor_config: ContainerExecutorConfig,
+    ) -> ModelDeploymentConfig:
+        """Create the auto-deploy config for ``me``, updating it if it already exists."""
         deployment_cfg_name = sanitize_name("sft-cfg", me.name)
         try:
             return self.models.create_deployment_config(
                 workspace=me.workspace,
                 body=CreateModelDeploymentConfigRequest(
                     name=deployment_cfg_name,
-                    engine=Engine.NIM,
+                    engine=engine,
                     model_spec=model_spec,
                     executor_config=executor_config,
                 ),
@@ -389,7 +431,7 @@ class ModelEntityRunner:
                 workspace=me.workspace,
                 name=deployment_cfg_name,
                 body=UpdateModelDeploymentConfigRequest(
-                    engine=Engine.NIM,
+                    engine=engine,
                     model_spec=model_spec,
                     executor_config=executor_config,
                 ),

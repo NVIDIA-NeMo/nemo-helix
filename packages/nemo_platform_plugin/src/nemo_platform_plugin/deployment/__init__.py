@@ -8,6 +8,7 @@ from nemo_platform_plugin.deployment.schemas import (
     LORA_ENABLED_REQUIRED_MESSAGE,
     DeploymentParams,
     ToolCallParams,
+    is_unbound_deployment_config,
     reject_lora_without_lora_enabled,
 )
 
@@ -16,5 +17,6 @@ __all__ = [
     "LORA_ENABLED_REQUIRED_MESSAGE",
     "DeploymentParams",
     "ToolCallParams",
+    "is_unbound_deployment_config",
     "reject_lora_without_lora_enabled",
 ]

@@ -88,6 +88,40 @@ def _raise_runner_conflict() -> None:
     raise run_mod.ConflictError.__new__(run_mod.ConflictError, "already exists")
 
 
+def _resolved_config(
+    *,
+    workspace: str = "shared",
+    name: str = "existing-cfg",
+    model_entity_id: str | None = "shared/x",
+    model_name: str | None = "x",
+    model_namespace: str | None = "shared",
+    engine: Engine = Engine.VLLM,
+    gpu: int = 4,
+) -> types.SimpleNamespace:
+    """A ``ModelDeploymentConfig`` as ``get_deployment_config`` returns it.
+
+    Defaults are bound (they name a model); pass ``None`` for both links to get the
+    unbound template shape that full-weight training has to use.
+    """
+    from nemo_platform_plugin.models.types import (
+        ContainerExecutorConfig,
+        ModelDeploymentConfigModelSpec,
+    )
+
+    return types.SimpleNamespace(
+        workspace=workspace,
+        name=name,
+        engine=engine,
+        model_entity_id=model_entity_id,
+        model_spec=ModelDeploymentConfigModelSpec(
+            model_name=model_name,
+            model_namespace=model_namespace,
+            lora_enabled=True,
+        ),
+        executor_config=ContainerExecutorConfig(gpu=gpu, image_name="tmpl-img", image_tag="2.0"),
+    )
+
+
 def _model_entity(*, workspace: str = "default", name: str = "base", spec: object | None = None) -> MagicMock:
     me = MagicMock()
     me.workspace = workspace
@@ -429,7 +463,7 @@ class TestLaunchModel:
         from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig
 
         models, files = _make_clients()
-        deployment_config = types.SimpleNamespace(workspace="shared", name="existing-cfg")
+        deployment_config = _resolved_config()
         deployment = types.SimpleNamespace(workspace="shared", name="sft-deploy-x")
         models.get_deployment_config.return_value = _response(deployment_config)
         models.create_deployment.return_value = _response(deployment)
@@ -458,6 +492,137 @@ class TestLaunchModel:
         deployment_call = models.create_deployment.call_args
         assert deployment_call.kwargs["workspace"] == "shared"
         assert deployment_call.kwargs["body"].config == "existing-cfg"
+
+    def test_unbound_string_ref_binds_the_template_to_the_trained_model(self) -> None:
+        """A referenced config naming no model is a template, not something to deploy as-is.
+
+        Deploying it verbatim would leave the deployment with no weights to resolve,
+        so the template's engine and executor are copied onto a config for this model.
+        """
+        from nmp.customization_common.schemas.file_io import FileSetRef
+        from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig
+
+        models, files = _make_clients()
+        template = _resolved_config(model_entity_id=None, model_name=None, model_namespace=None)
+        models.get_deployment_config.return_value = _response(template)
+        models.create_deployment_config.return_value = _response(
+            types.SimpleNamespace(workspace="default", name="sft-cfg-x")
+        )
+        models.create_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="default", name="sft-deploy-x")
+        )
+        models.get_deployment.return_value = _response(
+            types.SimpleNamespace(
+                workspace="default",
+                name="sft-deploy-x",
+                status=ModelDeploymentStatus.PENDING,
+            )
+        )
+
+        runner = _make_runner(models, files)
+        me = _model_entity(name="x", spec=types.SimpleNamespace(family="llama", base_num_parameters=1))
+        config = ModelEntityTaskConfig(
+            name="x",
+            workspace="default",
+            fileset=FileSetRef(workspace="default", name="x"),
+            model_entity="default/base",
+            deployment_config="shared/template-cfg",
+        )
+
+        runner.launch_model(config, me)
+
+        body = models.create_deployment_config.call_args.kwargs["body"]
+        assert isinstance(body, CreateModelDeploymentConfigRequest)
+        assert body.name == "sft-cfg-x"
+        assert body.model_spec.model_name == "x"
+        assert body.model_spec.model_namespace == "default"
+        # Engine, executor and serving options come from the template, not NIM defaults.
+        assert body.engine is Engine.VLLM
+        assert body.executor_config.gpu == 4
+        assert body.executor_config.image_name == "tmpl-img"
+        assert body.model_spec.lora_enabled is True
+
+        # The derived config is deployed; the template is left untouched for reuse.
+        models.update_deployment_config.assert_not_called()
+        assert models.create_deployment.call_args.kwargs["body"].config == "sft-cfg-x"
+
+    def test_unbound_string_ref_updates_a_derived_config_on_conflict(self) -> None:
+        from nmp.customization_common.schemas.file_io import FileSetRef
+        from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig
+
+        models, files = _make_clients()
+        models.get_deployment_config.return_value = _response(
+            _resolved_config(model_entity_id=None, model_name=None, model_namespace=None)
+        )
+        models.create_deployment_config.side_effect = lambda **_: _raise_runner_conflict()
+        models.update_deployment_config.return_value = _response(
+            types.SimpleNamespace(workspace="default", name="sft-cfg-x")
+        )
+        models.create_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="default", name="sft-deploy-x")
+        )
+        models.get_deployment.return_value = _response(
+            types.SimpleNamespace(
+                workspace="default",
+                name="sft-deploy-x",
+                status=ModelDeploymentStatus.PENDING,
+            )
+        )
+
+        runner = _make_runner(models, files)
+        me = _model_entity(name="x", spec=types.SimpleNamespace(family="llama", base_num_parameters=1))
+        config = ModelEntityTaskConfig(
+            name="x",
+            workspace="default",
+            fileset=FileSetRef(workspace="default", name="x"),
+            model_entity="default/base",
+            deployment_config="shared/template-cfg",
+        )
+
+        runner.launch_model(config, me)
+
+        update_call = models.update_deployment_config.call_args
+        assert update_call.kwargs["name"] == "sft-cfg-x"
+        body = update_call.kwargs["body"]
+        assert isinstance(body, UpdateModelDeploymentConfigRequest)
+        assert body.engine is Engine.VLLM
+        assert body.model_spec.model_name == "x"
+        models.create_deployment.assert_called_once()
+
+    def test_bound_string_ref_is_deployed_as_is(self) -> None:
+        """A config that already names a model is used verbatim -- nothing to bind."""
+        from nmp.customization_common.schemas.file_io import FileSetRef
+        from nmp.customization_common.schemas.model_entity import ModelEntityTaskConfig
+
+        models, files = _make_clients()
+        models.get_deployment_config.return_value = _response(
+            _resolved_config(model_entity_id=None, model_name="x", model_namespace="shared")
+        )
+        models.create_deployment.return_value = _response(
+            types.SimpleNamespace(workspace="shared", name="sft-deploy-x")
+        )
+        models.get_deployment.return_value = _response(
+            types.SimpleNamespace(
+                workspace="shared",
+                name="sft-deploy-x",
+                status=ModelDeploymentStatus.PENDING,
+            )
+        )
+
+        runner = _make_runner(models, files)
+        me = _model_entity(name="x", spec=types.SimpleNamespace(family="llama", base_num_parameters=1))
+        config = ModelEntityTaskConfig(
+            name="x",
+            workspace="default",
+            fileset=FileSetRef(workspace="default", name="x"),
+            model_entity="default/base",
+            deployment_config="shared/existing-cfg",
+        )
+
+        runner.launch_model(config, me)
+
+        models.create_deployment_config.assert_not_called()
+        assert models.create_deployment.call_args.kwargs["body"].config == "existing-cfg"
 
     def test_lora_with_active_deployment_skips(self) -> None:
         from nemo_platform_plugin.deployment import DeploymentParams
