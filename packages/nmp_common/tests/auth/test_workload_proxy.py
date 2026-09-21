@@ -15,9 +15,52 @@ import httpx
 import pytest
 import respx
 from fastapi.testclient import TestClient
+from nemo_platform_plugin.client.auth import StaticToken, TokenProviderAuth
 from nmp.common.auth.workload_proxy import main as workload_proxy_main
 from nmp.common.auth.workload_proxy.main import build_app
 from nmp.common.controller import ControllerManager, Loop
+
+
+@pytest.mark.parametrize("status", [200, 401, 403, 307])
+@respx.mock
+def test_transport_auth_replaces_inbound_identity_and_preserves_response(status: int) -> None:
+    route = respx.post(
+        "https://platform.test/apis/inference-gateway/v2/workspaces/test/openai/-/v1/responses?stream=1"
+    ).mock(
+        return_value=httpx.Response(
+            status,
+            content=b'data: {"output":"hello"}\n\ndata: [DONE]\n\n',
+            headers={"content-type": "text/event-stream", "location": "https://other.test/"},
+        )
+    )
+    app = build_app(base_url="https://platform.test", auth=TokenProviderAuth(StaticToken("workload-token")))
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/apis/inference-gateway/v2/workspaces/test/openai/-/v1/responses?stream=1",
+            headers={
+                "authorization": "Bearer not-used",
+                "x-nmp-principal-id": "service:admin",
+                "x-nmp-principal-on-behalf-of": "attacker",
+                "x-nmp-subject-aliases": "admin",
+            },
+            json={"stream": True},
+        )
+    assert route.call_count == 1
+    sent = route.calls.last.request
+    assert sent.headers["authorization"] == "Bearer workload-token"
+    assert not any(name.startswith("x-nmp-") for name in sent.headers)
+    assert response.status_code == status
+    assert response.content == b'data: {"output":"hello"}\n\ndata: [DONE]\n\n'
+    assert response.headers["content-type"] == "text/event-stream"
+
+
+def test_proxy_requires_exactly_one_auth_mode() -> None:
+    with pytest.raises(ValueError, match="exactly one"):
+        build_app(base_url="https://platform.test")
+    with pytest.raises(ValueError, match="exactly one"):
+        build_app(base_url="https://platform.test", principal="agents", auth=httpx.BasicAuth("a", "b"))
+    with pytest.raises(ValueError, match="on_behalf_of"):
+        build_app(base_url="https://platform.test", auth=httpx.BasicAuth("a", "b"), on_behalf_of="user")
 
 
 @respx.mock
@@ -54,6 +97,29 @@ def test_forward_stamps_service_principal_and_preserves_path() -> None:
     assert "connection" not in resp.headers
     assert "x-upstream-hop" not in resp.headers
     assert sent.content == b'{"model":"m","messages":[]}'
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+@respx.mock
+def test_forward_preserves_request_body_framing(chunked: bool) -> None:
+    body = b'{"model":"m","messages":[]}'
+    route = respx.post("http://platform.test/inference").mock(return_value=httpx.Response(200, json={}))
+    app = build_app(base_url="http://platform.test", principal="agents")
+    with TestClient(app) as client:
+        response = client.post(
+            "/inference",
+            content=iter([body[:10], body[10:]]) if chunked else body,
+            headers={"transfer-encoding": "chunked", "content-length": "999"} if chunked else {},
+        )
+    assert response.status_code == 200
+    sent = route.calls.last.request
+    assert sent.content == body
+    if chunked:
+        assert sent.headers["transfer-encoding"] == "chunked"
+        assert "content-length" not in sent.headers
+    else:
+        assert sent.headers["content-length"] == str(len(body))
+        assert "transfer-encoding" not in sent.headers
 
 
 @respx.mock
