@@ -167,20 +167,6 @@ async def check_models_config(
     if result.engine_error is not None:
         errors.append(_to_model_check_error(result.engine_error))
 
-    # Unlike validate, this command has nothing left to report if the engine
-    # never ran — every model is unprobed. Saying so explicitly keeps a skipped
-    # probe from reading as a clean bill of health, which is the exact failure
-    # mode this command exists to close.
-    if not result.engine_ran and not errors:  # pragma: no cover - safety net
-        errors.append(
-            ModelCheckError(
-                error_type="ModelsNotProbed",
-                message=(
-                    "No models were probed: the health check needs a sync NeMo Platform SDK and none was supplied."
-                ),
-            )
-        )
-
     return CheckModelsReport(config_source=config_source, errors=errors)
 
 

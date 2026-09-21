@@ -132,7 +132,7 @@ The command exits `0` only when every probe succeeds, so you can gate a pipeline
 | Option | Description |
 |--------|-------------|
 | `--workspace <WORKSPACE>` | Workspace used to resolve provider references and seed sources. Defaults to the workspace of the active CLI context, or `default`. |
-| `--output <text\|json>` | Output format. Defaults to `text`. `json` suppresses the per-model log lines. |
+| `--output <text\|json>` | Output format. Defaults to `text`. With `json`, the report is the only thing on stdout; per-model log lines go to stderr so stdout stays parseable. |
 
 ```bash
 nemo data-designer check-models product_reviews.py --output json

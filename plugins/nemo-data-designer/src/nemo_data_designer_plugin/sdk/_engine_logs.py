@@ -53,6 +53,16 @@ def forward_engine_logs(on_log: LogCallback | None) -> Iterator[None]:
     The callback may be invoked from a worker thread, since the engine's sync
     APIs run under ``asyncio.to_thread``.
 
+    Note:
+        This assumes a single invocation is active at a time. The handler has
+        no per-invocation filter, so two overlapping async ``check_models`` calls
+        in the same process would each receive the other's records. The CLI
+        path is single-call (``asyncio.run``), so this is only a concern for a
+        caller that concurrently awaits two SDK ``check_models`` calls — not a
+        supported usage. If that ever needs to be supported, switch to the
+        singleton-handler + ``ContextVar`` routing used in
+        :mod:`nemo_data_designer_plugin.functions._preview_logs`.
+
     Args:
         on_log: Receives each record's formatted message, or ``None`` to disable.
     """
@@ -69,8 +79,13 @@ def forward_engine_logs(on_log: LogCallback | None) -> Iterator[None]:
     # logger inherits root's default (``WARNING``) and the INFO records we care
     # about drop before reaching the handler.
     previous_level = lib_logger.level
+    previous_propagate = lib_logger.propagate
     if lib_logger.getEffectiveLevel() > logging.INFO:
         lib_logger.setLevel(logging.INFO)
+    # Stop the record from also reaching ancestor (root) handlers. Under
+    # ``nemo -v`` the top-level CLI installs a root handler; without this the
+    # callback's copy and root's copy would both fire.
+    lib_logger.propagate = False
 
     lib_logger.addHandler(handler)
     try:
@@ -78,3 +93,4 @@ def forward_engine_logs(on_log: LogCallback | None) -> Iterator[None]:
     finally:
         lib_logger.removeHandler(handler)
         lib_logger.setLevel(previous_level)
+        lib_logger.propagate = previous_propagate

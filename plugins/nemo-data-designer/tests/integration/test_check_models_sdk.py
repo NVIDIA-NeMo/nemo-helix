@@ -193,3 +193,28 @@ async def test_check_models_probes_a_seeded_config_without_a_sync_sdk(monkeypatc
 
     assert calls == [True]
     assert report.ok is True, [e.message for e in report.errors]
+
+
+async def test_check_models_restores_the_library_logger_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A check_models call that attaches the fallback library handler must not
+    leave the ``data_designer`` logger pinned at INFO afterward — the level is
+    saved and restored, mirroring ``_engine_logs.forward_engine_logs``.
+    """
+    lib_logger = logging.getLogger("data_designer")
+    # A bare caller: no root or library handler configured, so the fallback
+    # stream handler attaches, as it would in a real CLI process.
+    monkeypatch.setattr(logging.getLogger(), "handlers", [])
+    monkeypatch.setattr(lib_logger, "handlers", [])
+    monkeypatch.setattr(lib_logger, "level", logging.WARNING)
+
+    _patch_probe(monkeypatch, None, emit_log=True)
+
+    with (
+        u.make_mock_client_context() as client_context,
+        u.setup_mock_providers(client_context),
+    ):
+        report = await AsyncDataDesignerResource(client_context.async_sdk).check_models(_builder())
+
+    assert report.ok is True
+    # The level we set before the call must survive it (not be left at INFO).
+    assert lib_logger.level == logging.WARNING

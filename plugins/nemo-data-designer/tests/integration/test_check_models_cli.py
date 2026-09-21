@@ -200,3 +200,73 @@ def test_check_models_json_output_on_success(tmp_path: Path, monkeypatch: pytest
     payload = json.loads(result.output.strip())
     assert payload["ok"] is True
     assert payload["errors"] == []
+
+
+def test_check_models_engine_log_appears_exactly_once_under_a_root_handler(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under ``nemo -v`` the top-level CLI installs a root handler. The forwarded
+    engine log must reach the user exactly once (via the callback to stdout), not
+    a second time through root propagation.
+
+    The sub-app test harness mounts the plugin directly and never runs the
+    top-level ``configure_logging``, so this test installs a root handler itself
+    to model verbose mode.
+    """
+    config_path = _write_valid_config(tmp_path)
+    _patch_probe(monkeypatch, ModelNotFoundError("nope"), emit_log=True)
+
+    root_records: list[str] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            root_records.append(record.getMessage())
+
+    collect = _Collect()
+    collect.setLevel(logging.DEBUG)
+    monkeypatch.setattr(logging.getLogger(), "handlers", [collect])
+
+    with (
+        u.make_mock_client_context() as client_context,
+        u.setup_mock_providers(client_context),
+    ):
+        result = u.invoke_cli(["check-models", str(config_path)], client_context)
+
+    assert result.exit_code == 1, result.output
+    # Forwarded to stdout exactly once via the CLI callback.
+    assert result.output.count("model alias 'text'") == 1
+    # Not also delivered to the root handler (which would double-log it).
+    assert "model alias 'text'" not in root_records
+
+
+def test_check_models_json_routes_engine_logs_to_stderr_not_stdout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With ``--output json`` the report is the only thing on stdout; the
+    per-alias engine progress logs route to stderr (via the SDK's fallback
+    stream handler) so stdout stays a clean, parseable document.
+
+    pytest installs a root handler by default, which makes ``hasHandlers()`` true
+    and so masks the fallback handler the real CLI relies on. Clear root and
+    library handlers to model a bare CLI process.
+    """
+    config_path = _write_valid_config(tmp_path)
+    _patch_probe(monkeypatch, ModelNotFoundError("nope"), emit_log=True)
+
+    monkeypatch.setattr(logging.getLogger(), "handlers", [])
+    monkeypatch.setattr(logging.getLogger("data_designer"), "handlers", [])
+
+    with (
+        u.make_mock_client_context() as client_context,
+        u.setup_mock_providers(client_context),
+    ):
+        result = u.invoke_cli(["check-models", str(config_path), "--output", "json"], client_context)
+
+    assert result.exit_code == 1, result.output
+    # stdout is the clean, parseable document — no human-formatted engine log.
+    assert "Checking" not in result.output
+    payload = json.loads(result.output.strip())
+    assert payload["ok"] is False
+    assert payload["errors"] == [{"error_type": "ModelNotFoundError", "message": "nope"}]
+    # The engine progress log routed to stderr, not stdout.
+    assert "model alias 'text'" in result.stderr

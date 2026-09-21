@@ -23,16 +23,23 @@ def _attach_stream_handler(logger_name: str) -> Generator[None, None, None]:
     """
     logger = logging.getLogger(logger_name)
     handler: logging.Handler | None = None
+    previous_level: int | None = None
     if not logger.hasHandlers():
         handler = logging.StreamHandler()
         handler.setFormatter(_make_stream_formatter())
         logger.addHandler(handler)
+        # Save the level we are about to override so it can be restored on exit;
+        # leaving it pinned at INFO would leak a process-wide logging side
+        # effect across SDK calls (mirrors ``_engine_logs.forward_engine_logs``).
+        previous_level = logger.level
         logger.setLevel("INFO")
     try:
         yield
     finally:
         if handler is not None:
             logger.removeHandler(handler)
+            if previous_level is not None:
+                logger.setLevel(previous_level)
 
 
 @contextmanager

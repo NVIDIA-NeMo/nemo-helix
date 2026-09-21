@@ -43,7 +43,11 @@ def check_models_command(
         OutputFormat,
         typer.Option(
             "--output",
-            help="Output format. 'json' suppresses the human-formatted blocks.",
+            help=(
+                "Output format. With 'json' the report is the only thing on "
+                "stdout; engine progress logs go to stderr so stdout stays "
+                "parseable."
+            ),
         ),
     ] = "text",
 ) -> None:
@@ -79,7 +83,8 @@ def check_models_command(
         config_source=config_source,
         # The engine names each alias as it probes it, which is the only place
         # that identity appears — the error it raises on failure does not carry
-        # it. Suppressed for json so the document stays the only thing on stdout.
+        # it. Routed to stderr (not stdout) for json so the document stays the
+        # only thing on stdout and stays parseable.
         on_log=_echo_engine_log if output == "text" else None,
     )
 
