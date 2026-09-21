@@ -76,7 +76,7 @@ def apply_content_replacements() -> None:
             continue
         updated = replace_text(text)
         if updated != text:
-            path.write_bytes(updated.encode("utf-8"))
+            path.write_bytes(updated.encode("utf-8", errors="surrogateescape"))
 
 
 def apply_path_renames() -> None:

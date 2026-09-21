@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -45,7 +46,7 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
 
     (repo / ".gitignore").write_text("dist/\n")
     (repo / "dist").mkdir()
-    (repo / "dist/index.js").write_text("window.product = 'NeMo Platform'; window.acronym = 'NMP';\n")
+    (repo / "dist/index.js").write_bytes(b"window.product = 'NeMo Platform'; window.acronym = 'NMP';\nraw = '\xff';\n")
     (repo / "docs").mkdir()
     (repo / "docs/overview.md").write_text("The nemo-platform repository publishes auditor-tasks.\n")
     (repo / "docker-bake.hcl").write_text('target "images" { tags = sha_and_maybe_latest_tags("auditor-tasks") }\n')
@@ -57,8 +58,10 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
     result = run(["tools/rename/rename-to-nemo-helix.sh"], repo)
 
     assert "tools/rename/verify-nemo-helix-rename.sh" in result.stdout
-    assert "NeMo Helix" in (repo / "dist/index.js").read_text()
-    assert "NHX" in (repo / "dist/index.js").read_text()
+    index_bytes = (repo / "dist/index.js").read_bytes()
+    assert b"NeMo Helix" in index_bytes
+    assert b"NHX" in index_bytes
+    assert b"\xff" in index_bytes
     assert "nemo-helix" in (repo / "docs/overview.md").read_text()
     assert "nhx-auditor-tasks" in (repo / "docker-bake.hcl").read_text()
 
@@ -99,4 +102,4 @@ def test_rename_tools_do_not_depend_on_perl_or_ripgrep() -> None:
 
     assert "perl" not in combined_text.lower()
     assert "ripgrep" not in combined_text.lower()
-    assert " rg" not in combined_text
+    assert not re.search(r"\brg\b", combined_text)

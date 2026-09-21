@@ -3,12 +3,12 @@
 
 # NeMo Helix rename HOW-TO
 
-Use these scripts from the repository root to preview, apply, and verify the NeMo Platform to NeMo Helix rename.
+Use these scripts from the repository root to preview, apply, and verify the NeMo Helix to NeMo Helix rename.
 
 ## Prerequisites
 
-- Run from a git checkout of `nemo-platform`.
-- Install the standard repository tools, including `git`, `grep`, `sed`, and Python 3.
+- Run from a git checkout of `nemo-helix`.
+- Install the standard repository tools, including `git`, `grep`, `sed`, and Python 3.7 or newer.
 - Start with a clean worktree before the actual rename. The script refuses to run when `git status --short` is non-empty unless `--continue` is used.
 - Review the dry-run output before applying changes.
 

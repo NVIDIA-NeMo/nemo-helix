@@ -79,8 +79,8 @@ def content_paths() -> list[Path]:
 
 def read_text(path: Path) -> str | None:
     try:
-        return path.read_bytes().decode("utf-8")
-    except (OSError, UnicodeDecodeError):
+        return path.read_bytes().decode("utf-8", errors="surrogateescape")
+    except OSError:
         return None
 
 

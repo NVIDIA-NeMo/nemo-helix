@@ -37,14 +37,16 @@ def main() -> int:
     os.chdir(repo_root())
     failed = False
 
-    if any(print_matches(path, LEGACY_PRODUCT_PATTERN.search) for path in content_paths()):
+    paths = content_paths()
+    product_matches = [print_matches(path, LEGACY_PRODUCT_PATTERN.search) for path in paths]
+    if any(product_matches):
         print("Legacy product names remain in tracked file contents.", file=sys.stderr)
         failed = True
 
-    if any(
-        print_matches(path, lambda line: any(acronym in line for acronym in LEGACY_ACRONYMS))
-        for path in content_paths()
-    ):
+    acronym_matches = [
+        print_matches(path, lambda line: any(acronym in line for acronym in LEGACY_ACRONYMS)) for path in paths
+    ]
+    if any(acronym_matches):
         print("Legacy acronym references remain in tracked file contents.", file=sys.stderr)
         failed = True
 
