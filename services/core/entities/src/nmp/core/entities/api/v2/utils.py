@@ -20,6 +20,7 @@ from nmp.core.entities.app.repository.entity import EntityRepositoryInterface
 from nmp.core.entities.cache import TTLCache
 from nmp.core.entities.config import EntitiesConfig
 from nmp.core.entities.entities import Entity
+from nmp.core.entities.utils.sharing import GLOBAL_WORKSPACE, is_globally_shareable
 
 # Entity type for role bindings (used for access control queries)
 ROLE_BINDING_ENTITY_TYPE = "role_binding"
@@ -348,3 +349,30 @@ def add_workspace_filtering(
         )
 
     return workspace_filter
+
+
+def expand_readable_workspaces(
+    accessible_workspaces: Optional[Set[str]],
+    entity_type: Optional[str],
+) -> Optional[Set[str]]:
+    """Widen a write-scoped workspace set to the set readable for *entity_type*.
+
+    The ``default`` workspace is the installation-wide GLOBAL workspace: entities of a
+    globally shareable type that live there are readable from every workspace. Writes
+    keep using :func:`get_accessible_workspaces` unchanged, so a caller that gains read
+    access here still cannot mutate anything in ``default``.
+
+    ``None`` (unscoped / full access) passes through untouched.
+    """
+    if accessible_workspaces is None or not is_globally_shareable(entity_type):
+        return accessible_workspaces
+    return accessible_workspaces | {GLOBAL_WORKSPACE}
+
+
+async def get_readable_workspaces(
+    entity_repository: EntityRepositoryInterface,
+    entity_type: Optional[str],
+) -> Optional[Set[str]]:
+    """Accessible workspaces for a read of *entity_type*, including the global workspace."""
+    accessible = await get_accessible_workspaces(entity_repository)
+    return expand_readable_workspaces(accessible, entity_type)

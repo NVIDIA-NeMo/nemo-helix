@@ -35,7 +35,8 @@ from nmp.core.entities.api.v2.utils import (
     ROLE_BINDING_ENTITY_TYPE,
     add_workspace_filtering,
     bindings_cache_delete,
-    get_accessible_workspaces,
+    expand_readable_workspaces,
+    get_readable_workspaces,
     raise_if_workspace_inaccessible,
     require_workspace_access,
 )
@@ -95,10 +96,15 @@ async def _validate_parent_access(
     request. Here we only ensure the **parent row's** workspace is in
     ``get_accessible_workspaces`` (same role-binding / OBO logic as list filters), so a child in W1
     cannot point at a parent in W2 unless the effective user has access to W2.
+
+    Referencing is a read of the parent, so a globally shareable parent in the global workspace
+    is allowed — this is the case where a workspace fine-tunes an adapter against a shared base
+    model. The child still lands in the request workspace.
     """
 
     parent = await repository.get_entity_by_id(entity_id=parent_id)
-    if not parent or (accessible is not None and parent.workspace not in accessible):
+    readable = expand_readable_workspaces(accessible, parent.entity_type) if parent else accessible
+    if not parent or (readable is not None and parent.workspace not in readable):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Parent entity '{parent_id}' not found or not in accessible workspaces",
@@ -343,7 +349,8 @@ async def list_entities(
     ),
 ) -> EntitiesPage:
     """List entities with filtering, supporting cross-workspace queries."""
-    accessible_workspaces = await get_accessible_workspaces(repository)
+    # Reads of a globally shareable type also see the global workspace; writes do not.
+    accessible_workspaces = await get_readable_workspaces(repository, entity_type)
     # Handle cross-workspace query (workspace = "*")
     if workspace == ALL_WORKSPACES:
         # Build combined filter for workspace access and user's filter
@@ -425,8 +432,8 @@ async def get_entity_by_name(
     # Check if workspace is being deleted (404 for user requests)
     await validate_workspace_not_deleting(workspace_repository, auth_client, workspace)
 
-    await require_workspace_access(
-        repository,
+    raise_if_workspace_inaccessible(
+        await get_readable_workspaces(repository, entity_type),
         workspace,
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
     )
