@@ -429,7 +429,7 @@ def test_sdk_session_uses_public_sdk_request_methods() -> None:
     client.get.assert_called_once_with(
         "https://platform.example.com/apis/intake/v2/workspaces/default/spans",
         cast_to=httpx.Response,
-        options={"params": [("page", 1)], "headers": {}, "timeout": 60, "follow_redirects": False},
+        options={"params": {"page": 1}, "headers": {}, "timeout": 60, "follow_redirects": False},
     )
     client.post.assert_called_once_with(
         "https://platform.example.com/apis/intake/v2/workspaces/default/annotations",
@@ -469,3 +469,32 @@ def _at_path(value: Any, path: list[str | int]) -> Any:
     for part in path:
         current = current[part]
     return current
+
+
+def test_sdk_session_query_filters_reach_real_sdk_transport() -> None:
+    from nemo_platform import NeMoPlatform
+
+    common = importlib.import_module("_import_common")
+    captured: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"data": []})
+
+    with NeMoPlatform(
+        base_url="https://platform.example.com",
+        access_token="test-token",
+        http_client=httpx.Client(transport=httpx.MockTransport(handle)),
+    ) as sdk:
+        response = common._SdkSession(sdk).request(
+            "GET",
+            "https://platform.example.com/apis/intake/v2/workspaces/default/spans",
+            params=[("filter[trace_id]", "gym-trace"), ("filter[source]", "gym"), ("page", 1)],
+            follow_redirects=False,
+        )
+    assert response.status_code == 200
+    assert dict(captured[0].url.params) == {
+        "filter[trace_id]": "gym-trace",
+        "filter[source]": "gym",
+        "page": "1",
+    }
