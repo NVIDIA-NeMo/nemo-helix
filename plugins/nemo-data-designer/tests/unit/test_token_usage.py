@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 from data_designer.engine.models.usage_events import TokenUsageEvent, emit_token_usage_event
 from data_designer.engine.observability import RuntimeCorrelation, runtime_correlation_provider
-from data_designer_nemo.token_usage import capture_token_usage
+from data_designer_nemo.token_usage import capture_data_designer_token_usage
 from nemo_platform_plugin.job_usage import LocalJobUsageReporter
 
 
@@ -22,10 +22,10 @@ def _event(*, input_tokens: int, output_tokens: int, correlation: RuntimeCorrela
     )
 
 
-def test_capture_token_usage_reports_cumulative_totals() -> None:
+def test_capture_data_designer_token_usage_reports_cumulative_totals() -> None:
     reporter = LocalJobUsageReporter()
 
-    with capture_token_usage(reporter):
+    with capture_data_designer_token_usage(reporter):
         correlation = runtime_correlation_provider.current()
         emit_token_usage_event(_event(input_tokens=10, output_tokens=4, correlation=correlation))
         emit_token_usage_event(_event(input_tokens=7, output_tokens=3, correlation=correlation))
@@ -35,10 +35,10 @@ def test_capture_token_usage_reports_cumulative_totals() -> None:
     assert reporter.latest.output_tokens == 7
 
 
-def test_capture_token_usage_ignores_other_runs() -> None:
+def test_capture_data_designer_token_usage_ignores_other_runs() -> None:
     reporter = LocalJobUsageReporter()
 
-    with capture_token_usage(reporter):
+    with capture_data_designer_token_usage(reporter):
         current = runtime_correlation_provider.current()
         assert current is not None
         unrelated = RuntimeCorrelation(
@@ -58,20 +58,20 @@ def test_capture_token_usage_ignores_other_runs() -> None:
     assert reporter.latest.output_tokens == 1
 
 
-def test_capture_token_usage_leaves_no_report_without_events() -> None:
+def test_capture_data_designer_token_usage_leaves_no_report_without_events() -> None:
     reporter = LocalJobUsageReporter()
 
-    with capture_token_usage(reporter):
+    with capture_data_designer_token_usage(reporter):
         pass
 
     assert reporter.latest is None
 
 
-def test_capture_token_usage_reports_before_propagating_failure() -> None:
+def test_capture_data_designer_token_usage_reports_before_propagating_failure() -> None:
     reporter = LocalJobUsageReporter()
 
     with pytest.raises(RuntimeError, match="generation failed"):
-        with capture_token_usage(reporter):
+        with capture_data_designer_token_usage(reporter):
             correlation = runtime_correlation_provider.current()
             emit_token_usage_event(_event(input_tokens=5, output_tokens=2, correlation=correlation))
             raise RuntimeError("generation failed")
@@ -81,7 +81,7 @@ def test_capture_token_usage_reports_before_propagating_failure() -> None:
     assert reporter.latest.output_tokens == 2
 
 
-def test_capture_token_usage_restores_outer_correlation() -> None:
+def test_capture_data_designer_token_usage_restores_outer_correlation() -> None:
     reporter = LocalJobUsageReporter()
     outer = RuntimeCorrelation(
         run_id="outer",
@@ -94,21 +94,21 @@ def test_capture_token_usage_restores_outer_correlation() -> None:
     )
     token = runtime_correlation_provider.set(outer)
     try:
-        with capture_token_usage(reporter):
+        with capture_data_designer_token_usage(reporter):
             assert runtime_correlation_provider.current() != outer
         assert runtime_correlation_provider.current() == outer
     finally:
         runtime_correlation_provider.reset(token)
 
 
-def test_capture_token_usage_nested_contexts_are_isolated() -> None:
+def test_capture_data_designer_token_usage_nested_contexts_are_isolated() -> None:
     outer_reporter = LocalJobUsageReporter()
     inner_reporter = LocalJobUsageReporter()
 
-    with capture_token_usage(outer_reporter):
+    with capture_data_designer_token_usage(outer_reporter):
         outer = runtime_correlation_provider.current()
         emit_token_usage_event(_event(input_tokens=3, output_tokens=1, correlation=outer))
-        with capture_token_usage(inner_reporter):
+        with capture_data_designer_token_usage(inner_reporter):
             inner = runtime_correlation_provider.current()
             assert inner != outer
             emit_token_usage_event(_event(input_tokens=11, output_tokens=7, correlation=inner))

@@ -46,13 +46,13 @@ class _TokenUsageAccumulator:
 
 
 @contextmanager
-def capture_token_usage(reporter: JobUsageReporter) -> Iterator[None]:
+def capture_data_designer_token_usage(reporter: JobUsageReporter) -> Iterator[None]:
     """Capture Data Designer model-token events and report them on exit.
 
-    The wrapper owns the full setup/teardown sequence shared by Data Designer
-    and Anonymizer tasks: create a fresh runtime correlation, subscribe to the
-    Data Designer token-event bus, restore the previous correlation, unsubscribe,
-    and report cumulative totals even when the wrapped generation raises.
+    This adapter owns Data Designer's source-specific event subscription,
+    runtime-correlation handling, cleanup, and finally reporting. Correlation
+    reset and unsubscribe happen before reporting so teardown order matches the
+    original implementation.
     """
     run_id = f"nemo-platform-{uuid4().hex}"
     accumulator = _TokenUsageAccumulator(run_id)
@@ -76,4 +76,4 @@ def capture_token_usage(reporter: JobUsageReporter) -> Iterator[None]:
         accumulator.report(reporter)
 
 
-__all__ = ["capture_token_usage"]
+__all__ = ["capture_data_designer_token_usage"]
