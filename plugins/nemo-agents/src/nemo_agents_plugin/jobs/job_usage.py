@@ -88,7 +88,7 @@ def _harbor_trial_usage(result_path: Path) -> JobTokenUsage | None:
                 output_tokens=output_tokens,
             )
 
-    trace_usage = extract_token_usage(result_path.parent)
+    trace_usage = extract_token_usage(result_path.parent, require_token_fields=True)
     if trace_usage is None:
         return None
     return JobTokenUsage(
@@ -121,8 +121,12 @@ def _nat_execution_usages(batch_dir: Path) -> list[JobTokenUsage | None]:
 
 def _load_json_object(path: Path) -> dict[str, Any] | None:
     try:
-        payload = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
+        text = path.read_text()
+    except OSError:
+        return None
+    try:
+        payload = json.loads(text)
+    except ValueError:
         return None
     return payload if isinstance(payload, dict) else None
 
