@@ -128,7 +128,10 @@ def build_auth_proxy_app(
         url = httpx.URL(path="/" + path, query=request.url.query.encode("utf-8"))
         # Stream request bodies to keep a co-located caller from forcing the
         # privileged proxy to buffer an unbounded payload in memory.
-        upstream = client.build_request(request.method, url, headers=headers, content=request.stream())
+        has_body = "content-length" in request.headers or "transfer-encoding" in request.headers
+        upstream = client.build_request(
+            request.method, url, headers=headers, content=request.stream() if has_body else None
+        )
         response = await client.send(upstream, stream=True)
 
         async def _body() -> AsyncIterator[bytes]:

@@ -21,13 +21,14 @@ from werkzeug.wrappers import Request, Response
 pytestmark = pytest.mark.integration
 
 
-@pytest.mark.parametrize("identity_mode", ["workload", "principal"])
-def test_real_agent_authenticates_gateway_and_returns_file(
+@pytest.mark.parametrize("identity_mode", ["workload", "principal", "anonymous"])
+def test_real_agent_calls_gateway_and_returns_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpserver: HTTPServer, identity_mode: str
 ) -> None:
     monkeypatch.setenv("NMP_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.delenv("NMP_WORKLOAD_IDENTITY_TOKEN_FILE", raising=False)
     monkeypatch.delenv("NMP_PRINCIPAL", raising=False)
+    monkeypatch.delenv("NMP_AUTH_ENABLED", raising=False)
     Configuration.clear_cache()
     proof = tmp_path / "proof"
     proof.write_text("test-job-subject-token")
@@ -43,8 +44,15 @@ def test_real_agent_authenticates_gateway_and_returns_file(
         # Only discovery is replaced. Token exchange, expiry handling, the proxy,
         # Fabric, Deep Agents and its file tool all execute normally.
         monkeypatch.setattr(gateway_proxy, "resolve_workload_exchange_provider", lambda **kwargs: provider)
-    else:
+    elif identity_mode == "principal":
         monkeypatch.setenv("NMP_PRINCIPAL", json.dumps({"id": "test-job-user", "groups": ["test-workspace-users"]}))
+    else:
+        # Jobs also carry an anonymous principal when platform auth is disabled
+        # in YAML rather than through NMP_AUTH_ENABLED.
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("auth:\n  enabled: false\n")
+        monkeypatch.setenv("NMP_CONFIG_FILE_PATH", str(config_file))
+        monkeypatch.setenv("NMP_PRINCIPAL", '{"id":"","groups":[]}')
     issued: list[str] = []
     seen: list[str] = []
 
@@ -66,13 +74,15 @@ def test_real_agent_authenticates_gateway_and_returns_file(
         identity = request.headers.get("X-NMP-Principal-Id", "")
         if identity_mode == "workload":
             authenticated = bool(issued) and authorization == f"Bearer {issued[-1]}" and not identity
-        else:
+        elif identity_mode == "principal":
             authenticated = (
                 not authorization
                 and identity == "test-job-user"
                 and request.headers.get("X-NMP-Principal-Groups") == "test-workspace-users"
                 and not request.headers.get("X-NMP-Internal")
             )
+        else:
+            authenticated = authorization == "Bearer not-used" and not identity
         if not authenticated:
             return Response('{"detail":"Invalid or expired token"}', status=401, content_type="application/json")
         seen.append(authorization or identity)
@@ -151,8 +161,11 @@ def test_real_agent_authenticates_gateway_and_returns_file(
         if identity_mode == "workload":
             assert seen == ["Bearer test-job-access-1", "Bearer test-job-access-2"]
             assert len(issued) == 2
-        else:
+        elif identity_mode == "principal":
             assert seen == ["test-job-user", "test-job-user"]
+            assert not issued
+        else:
+            assert seen == ["Bearer not-used", "Bearer not-used"]
             assert not issued
         assert (results / "output_workdir" / "auth-proof.txt").read_text() == "authenticated artifact\n"
         assert json.loads((results / "fabric_run_result").read_text())["response"] == "hello"

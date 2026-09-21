@@ -99,6 +99,20 @@ def test_forward_stamps_service_principal_and_preserves_path() -> None:
     assert sent.content == b'{"model":"m","messages":[]}'
 
 
+@pytest.mark.parametrize("method", ["GET", "HEAD", "DELETE", "OPTIONS"])
+@respx.mock
+def test_forward_keeps_bodyless_requests_bodyless(method: str) -> None:
+    route = respx.request(method, "http://platform.test/inference").mock(return_value=httpx.Response(200))
+    app = build_app(base_url="http://platform.test", principal="agents")
+    with TestClient(app) as client:
+        response = client.request(method, "/inference")
+    assert response.status_code == 200
+    sent = route.calls.last.request
+    assert sent.content == b""
+    assert "transfer-encoding" not in sent.headers
+    assert "content-length" not in sent.headers
+
+
 @pytest.mark.parametrize("chunked", [False, True])
 @respx.mock
 def test_forward_preserves_request_body_framing(chunked: bool) -> None:

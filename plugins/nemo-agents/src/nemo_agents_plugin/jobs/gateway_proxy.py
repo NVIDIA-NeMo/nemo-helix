@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 import uvicorn
 from nemo_agents_plugin.agent_config import AgentConfig, ModelConfig
+from nemo_platform_plugin.auth import platform_auth_enabled
 from nemo_platform_plugin.client.auth import TokenProviderAuth
 from nemo_platform_plugin.client.auth_proxy import build_auth_proxy_app
 from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
@@ -66,7 +67,7 @@ def authenticated_gateway_config(config: AgentConfig) -> Iterator[AgentConfig]:
         if not any(name.lower() == "x-nmp-principal-id" and value.strip() for name, value in headers.items()):
             # Auth-disabled platforms serialize an anonymous Principal into
             # jobs too. Preserve that existing unauthenticated execution mode.
-            if os.environ.get("NMP_AUTH_ENABLED", "").lower() == "false":
+            if not platform_auth_enabled():
                 yield config
                 return
             raise ValueError("NMP_PRINCIPAL must provide a principal ID for authenticated agent jobs")

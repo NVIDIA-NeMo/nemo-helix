@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
+from pathlib import Path
 from unittest.mock import Mock
 from urllib.parse import urlsplit
 
@@ -196,10 +197,14 @@ def test_principal_headers_preserve_identity_and_replace_caller_headers(
     _assert_closed(proxy_url)
 
 
-@pytest.mark.parametrize("principal", ["broken-json", "{}", '{"id":""}'])
+@pytest.mark.parametrize(
+    "auth_enabled,principal",
+    [("true", "broken-json"), ("false", "broken-json"), ("true", "{}"), ("true", '{"id":""}')],
+)
 def test_invalid_principal_fails_before_invocation(
-    monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer, principal: str
+    monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer, auth_enabled: str, principal: str
 ) -> None:
+    monkeypatch.setenv("NMP_AUTH_ENABLED", auth_enabled)
     monkeypatch.setenv("NMP_PRINCIPAL", principal)
     monkeypatch.setenv("NMP_BASE_URL", httpserver.url_for(""))
     with pytest.raises(ValueError):
@@ -207,13 +212,27 @@ def test_invalid_principal_fails_before_invocation(
             pytest.fail("Must not invoke the agent")
 
 
-def test_explicitly_disabled_auth_preserves_anonymous_job(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NMP_AUTH_ENABLED", "false")
+@pytest.mark.parametrize("auth_enabled", [False, True])
+@pytest.mark.parametrize("source", ["environment", "config-file"])
+def test_anonymous_job_respects_platform_auth_configuration(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, auth_enabled: bool, source: str
+) -> None:
+    value = str(auth_enabled).lower()
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(f"auth:\n  enabled: {value}\n" if source == "config-file" else "auth: {}\n")
+    monkeypatch.setenv("NMP_CONFIG_FILE_PATH", str(config_file))
+    if source == "environment":
+        monkeypatch.setenv("NMP_AUTH_ENABLED", value)
     monkeypatch.setenv("NMP_PRINCIPAL", '{"id":"","groups":[]}')
     monkeypatch.setenv("NMP_BASE_URL", "http://localhost:8080")
     config = _config()
-    with gateway_proxy.authenticated_gateway_config(config) as runtime:
-        assert runtime is config
+    if auth_enabled:
+        with pytest.raises(ValueError, match="principal ID"):
+            with gateway_proxy.authenticated_gateway_config(config):
+                pytest.fail("Must not invoke the agent")
+    else:
+        with gateway_proxy.authenticated_gateway_config(config) as runtime:
+            assert runtime is config
 
 
 @pytest.mark.parametrize("startup", ["error", "timeout"])
