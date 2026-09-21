@@ -331,11 +331,15 @@ def _validate_http_url(url: str, field_name: str) -> None:
 
 def _secret_request_headers(principal: Principal | None) -> dict[str, str]:
     if principal is None or not principal.id:
-        return {"X-NMP-Principal-Id": "service:jobs"}
+        return Principal(id="service:jobs", authz_aliases=["service:jobs"]).get_headers()
+    effective_principal = principal.effective_principal
     service_principal = Principal(
         id="service:jobs",
-        on_behalf_of=principal.effective_id,
-        on_behalf_of_email=principal.effective_email,
-        on_behalf_of_groups=principal.effective_groups,
+        authz_aliases=["service:jobs"],
+        on_behalf_of=effective_principal.id,
+        on_behalf_of_email=effective_principal.email,
+        on_behalf_of_groups=effective_principal.groups,
+        on_behalf_of_account_id=effective_principal.account_id,
+        on_behalf_of_authz_aliases=effective_principal.authz_aliases,
     )
     return service_principal.get_headers()

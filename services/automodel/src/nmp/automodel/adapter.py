@@ -65,6 +65,7 @@ def _build_training_block(spec: dict[str, Any]) -> SFTTraining | DistillationTra
         "max_steps": schedule.get("max_steps"),
         "val_check_interval": schedule.get("val_check_interval"),
         "validation_split": schedule.get("validation_split"),
+        "checkpoint_selection": schedule.get("checkpoint_selection", "best"),
         # Absent from a spec compiled before this knob existed, and `or` rather
         # than a `.get` default because model_dump renders an unset nested model
         # as None on some paths; either way the field's own default applies.

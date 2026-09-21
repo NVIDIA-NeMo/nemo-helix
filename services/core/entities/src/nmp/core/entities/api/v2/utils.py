@@ -147,13 +147,22 @@ async def _fetch_bindings_for_principal(
 def _applicable_principal_strings(principal: Principal) -> List[str]:
     """Principal identifiers that may appear on role bindings (aligned with OPA get_applicable_principals).
 
-    Bindings may be keyed by JWT subject/oid, email, or group id; all must be queried.
+    Bindings may be keyed by stable account id, JWT subject/oid, aliases, email, or group id;
+    all must be queried.
     """
     identifiers: List[str] = []
     if principal.id:
         pid = principal.id.strip()
         if pid:
             identifiers.append(pid)
+    if principal.account_id:
+        account_id = principal.account_id.strip()
+        if account_id and account_id not in identifiers:
+            identifiers.append(account_id)
+    for alias in principal.authz_aliases:
+        a = alias.strip() if isinstance(alias, str) else ""
+        if a and a != WILDCARD_PRINCIPAL and a not in identifiers:
+            identifiers.append(a)
     if principal.email:
         email = principal.email.strip()
         if email and email not in identifiers:

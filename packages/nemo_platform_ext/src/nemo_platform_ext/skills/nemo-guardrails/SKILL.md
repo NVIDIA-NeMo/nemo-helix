@@ -17,6 +17,8 @@ preconditions:
   - guardrails_plugin_available
 user-invocable: true
 allowed-tools: Bash, Read, Grep
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # NeMo Guardrails CLI Reference

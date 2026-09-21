@@ -231,12 +231,17 @@ async def _resolve_gym_environment(
 _FORWARDED_IDENTITY_HEADERS = frozenset(
     {
         "X-NMP-Principal-Id",
+        "X-NMP-Actor-Account-Id",
+        "X-NMP-Actor-Aliases",
         "X-NMP-Principal-Email",
         "X-NMP-Principal-Groups",
         "X-NMP-Principal-On-Behalf-Of",
         "X-NMP-Principal-On-Behalf-Of-Email",
         "X-NMP-Principal-On-Behalf-Of-Groups",
         "X-NMP-Internal",
+        "X-NMP-Subject-Account-Id",
+        "X-NMP-Subject-Aliases",
+        "X-NMP-Scopes",
     }
 )
 

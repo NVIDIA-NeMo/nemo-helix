@@ -682,6 +682,34 @@ def test_bi_encoder_compile_uses_fused_adam_and_job_retrieval_config(tmp_path: P
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelBiEncoder.from_pretrained")
 
 
+@pytest.mark.parametrize("requested", [False, True])
+def test_bi_encoder_compile_forwards_distributed_inbatch_negative(tmp_path: Path, requested: bool) -> None:
+    config, prepared = _embed_training_config(
+        tmp_path,
+        retrieval=RetrievalConfig(do_distributed_inbatch_negative=requested),
+    )
+    config.training.recipe = TrainingRecipe.BI_ENCODER
+
+    compiled = _compile_retrieval(config, tmp_path, prepared)
+
+    # Emitted either way: the trainer reads the attribute off the model, so
+    # writing it explicitly keeps the objective readable in the compiled config
+    # rather than leaving it to the upstream default.
+    assert compiled["model"]["do_distributed_inbatch_negative"] is requested
+
+
+def test_cross_encoder_compile_omits_distributed_inbatch_negative(tmp_path: Path) -> None:
+    config, prepared = _embed_training_config(
+        tmp_path,
+        retrieval=RetrievalConfig(do_distributed_inbatch_negative=True),
+    )
+    config.training.recipe = TrainingRecipe.CROSS_ENCODER
+
+    compiled = _compile_retrieval(config, tmp_path, prepared)
+
+    assert "do_distributed_inbatch_negative" not in compiled["model"]
+
+
 @pytest.mark.parametrize(
     ("optimizer_name", "recipe", "expected_target"),
     [

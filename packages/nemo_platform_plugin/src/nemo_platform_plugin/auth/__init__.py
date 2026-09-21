@@ -31,7 +31,15 @@ class RuntimePrincipal(Protocol):
         raise NotImplementedError
 
     @property
+    def account_id(self) -> str | None:
+        raise NotImplementedError
+
+    @property
     def groups(self) -> Sequence[str]:
+        raise NotImplementedError
+
+    @property
+    def authz_aliases(self) -> Sequence[str]:
         raise NotImplementedError
 
     @property
@@ -47,6 +55,14 @@ class RuntimePrincipal(Protocol):
         raise NotImplementedError
 
     @property
+    def on_behalf_of_account_id(self) -> str | None:
+        raise NotImplementedError
+
+    @property
+    def on_behalf_of_authz_aliases(self) -> Sequence[str]:
+        raise NotImplementedError
+
+    @property
     def effective_principal(self) -> RuntimePrincipal:
         raise NotImplementedError
 
@@ -57,8 +73,15 @@ class AuthContext(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     principal_id: str = Field(..., description="The principal's unique identifier")
+    principal_account_id: str | None = Field(
+        default=None, description="Stable NeMo account identifier for the principal"
+    )
     principal_email: str | None = Field(default=None, description="The principal's email address")
     principal_groups: list[str] = Field(default_factory=list, description="Groups the principal belongs to")
+    principal_authz_aliases: list[str] = Field(
+        default_factory=list,
+        description="Alternate trusted identifiers for the principal",
+    )
     principal_on_behalf_of: str | None = Field(
         default=None, description="If acting on behalf of another principal, their principal ID"
     )
@@ -67,6 +90,14 @@ class AuthContext(BaseModel):
     )
     principal_on_behalf_of_email: str | None = Field(
         default=None, description="The on-behalf-of principal's email address"
+    )
+    principal_on_behalf_of_account_id: str | None = Field(
+        default=None,
+        description="Stable NeMo account identifier for the on-behalf-of principal",
+    )
+    principal_on_behalf_of_authz_aliases: list[str] = Field(
+        default_factory=list,
+        description="Alternate trusted identifiers for the on-behalf-of principal",
     )
 
     def __eq__(self, other: object) -> bool:
@@ -88,8 +119,10 @@ class AuthContext(BaseModel):
         on_behalf_of = lower.get("x-nmp-principal-on-behalf-of", "").strip() or None
         return cls(
             principal_id=principal_id,
+            principal_account_id=lower.get("x-nmp-actor-account-id", "").strip() or None,
             principal_email=lower.get("x-nmp-principal-email", "").strip() or None,
             principal_groups=_split_groups(lower.get("x-nmp-principal-groups")),
+            principal_authz_aliases=_split_groups(lower.get("x-nmp-actor-aliases")),
             principal_on_behalf_of=on_behalf_of,
             principal_on_behalf_of_groups=_split_groups(lower.get("x-nmp-principal-on-behalf-of-groups"))
             if on_behalf_of
@@ -97,6 +130,12 @@ class AuthContext(BaseModel):
             principal_on_behalf_of_email=lower.get("x-nmp-principal-on-behalf-of-email", "").strip() or None
             if on_behalf_of
             else None,
+            principal_on_behalf_of_account_id=lower.get("x-nmp-subject-account-id", "").strip() or None
+            if on_behalf_of
+            else None,
+            principal_on_behalf_of_authz_aliases=_split_groups(lower.get("x-nmp-subject-aliases"))
+            if on_behalf_of
+            else [],
         )
 
     @classmethod
@@ -104,13 +143,17 @@ class AuthContext(BaseModel):
         """Create from a runtime Principal-like value."""
         return cls(
             principal_id=principal.id,
+            principal_account_id=principal.account_id,
             principal_email=principal.email,
             principal_groups=list(principal.groups or []),
+            principal_authz_aliases=list(principal.authz_aliases or []),
             principal_on_behalf_of=principal.on_behalf_of,
             principal_on_behalf_of_groups=list(principal.on_behalf_of_groups or [])
             if principal.on_behalf_of_groups is not None
             else None,
             principal_on_behalf_of_email=principal.on_behalf_of_email,
+            principal_on_behalf_of_account_id=principal.on_behalf_of_account_id,
+            principal_on_behalf_of_authz_aliases=list(principal.on_behalf_of_authz_aliases or []),
         )
 
     @classmethod
@@ -129,11 +172,15 @@ class AuthContext(BaseModel):
 
         return Principal(
             id=self.principal_id,
+            account_id=self.principal_account_id,
             email=self.principal_email,
             groups=self.principal_groups,
+            authz_aliases=self.principal_authz_aliases,
             on_behalf_of=self.principal_on_behalf_of,
             on_behalf_of_groups=self.principal_on_behalf_of_groups,
             on_behalf_of_email=self.principal_on_behalf_of_email,
+            on_behalf_of_account_id=self.principal_on_behalf_of_account_id,
+            on_behalf_of_authz_aliases=self.principal_on_behalf_of_authz_aliases,
         )
 
 

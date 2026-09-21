@@ -22,7 +22,7 @@ markers, image resolution, timeouts, and best-effort backend cleanup).
 import time
 import uuid
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import pytest
@@ -30,8 +30,12 @@ from nemo_agents_plugin.entities import NAT_WORKFLOW_CONFIG_FORMAT, NEMO_AGENTS_
 from nemo_platform import NeMoPlatform
 from nmp.testing import MockProviderResponse, add_mock_provider
 
+from e2e.utils import collect_sse_chunks
+
 # The mocked completion the deployed agent must round-trip back to the caller.
 TEST_AGENT_RESPONSE = "The answer to your question is 42."
+
+AgentInvocationMode = Literal["non_streaming", "streaming", "session"]
 
 
 def unique_name(prefix: str) -> str:
@@ -213,6 +217,79 @@ def wait_for_deployment_running(
     pytest.fail(f"Deployment {name!r} did not reach running within {timeout_seconds}s: {last_deployment}")
 
 
+def _assert_non_streaming_invocation(
+    sdk: NeMoPlatform,
+    *,
+    workspace: str,
+    agent_name: str,
+) -> None:
+    response = sdk.agents.invoke(
+        workspace=workspace,
+        agent=agent_name,
+        input="What is 12 multiplied by 8?",
+    )
+    content = response["choices"][0]["message"]["content"]
+    assert TEST_AGENT_RESPONSE in content, response
+
+
+def _assert_streaming_invocation(
+    sdk: NeMoPlatform,
+    *,
+    workspace: str,
+    deployment_name: str,
+) -> None:
+    """Stream one Fabric turn through the deployed-agent gateway."""
+    path = f"/apis/agents/v2/workspaces/{workspace}/deployments/{deployment_name}/-/v1/chat/completions"
+    with sdk._client.stream(
+        "POST",
+        path,
+        json={
+            "messages": [{"role": "user", "content": "What is 12 multiplied by 8?"}],
+            "stream": True,
+        },
+    ) as response:
+        if response.status_code != 200:
+            pytest.fail(f"Streaming agent invocation returned {response.status_code}: {response.read().decode()}")
+        assert "text/event-stream" in response.headers.get("content-type", "")
+        chunks = collect_sse_chunks(response)
+
+    content = "".join(
+        choice.get("delta", {}).get("content", "") for chunk in chunks for choice in chunk.get("choices", [])
+    )
+    assert TEST_AGENT_RESPONSE in content, chunks
+
+
+def _assert_persisted_session_invocation(
+    sdk: NeMoPlatform,
+    *,
+    workspace: str,
+    deployment_name: str,
+    deployment_id: str,
+) -> None:
+    """Create a persisted session and invoke its streaming-enabled runtime."""
+    session_name = unique_name("calc-session")
+    sessions_path = f"/apis/agents/v2/workspaces/{workspace}/sessions"
+    create_response = sdk._client.post(
+        sessions_path,
+        json={"deployment_id": deployment_id, "name": session_name},
+    )
+    create_response.raise_for_status()
+    session = create_response.json()
+
+    try:
+        response = sdk.agents.invoke(
+            workspace=workspace,
+            deployment=deployment_name,
+            session_id=session["id"],
+            input="What is 12 multiplied by 8?",
+        )
+        content = response["choices"][0]["message"]["content"]
+        assert TEST_AGENT_RESPONSE in content, response
+    finally:
+        close_response = sdk._client.post(f"{sessions_path}/{session_name}/close")
+        close_response.raise_for_status()
+
+
 def run_agent_deploy_and_invoke(
     sdk: NeMoPlatform,
     *,
@@ -223,6 +300,7 @@ def run_agent_deploy_and_invoke(
     running_timeout_seconds: float = 300,
     reap_backend_resources: Callable[[str], None] | None = None,
     after_invoke: Callable[[str], None] | None = None,
+    invocation_modes: tuple[AgentInvocationMode, ...] = ("non_streaming",),
 ) -> None:
     """Deploy a mock-backed agent and invoke it through the gateway.
 
@@ -232,12 +310,18 @@ def run_agent_deploy_and_invoke(
        the requested ``config_format``.
     2. Deploy it using ``deployment_mode`` and the optional container ``image``.
     3. Wait for ``running`` and assert the mode-specific endpoint shape.
-    4. Invoke through the gateway and assert the mocked completion round-trips.
+    4. Invoke through the gateway using each ``invocation_modes`` entry and assert the
+       mocked completion round-trips.
     5. Clean up the deployment and agent (best-effort, isolated steps).
 
     ``after_invoke``, if given, is called with the agent name once the response
     has been asserted and while the deployment is still up, for checks a caller
     wants to make against a live deployment.
+
+    ``streaming`` and ``session`` modes are Fabric-only. The latter sends a
+    non-streaming chat request through a persisted session; opening that session
+    still starts Fabric with streaming enabled and therefore exercises the
+    collector dependency.
 
     ``reap_backend_resources``, if given, is called with the deployment name
     during teardown (after the deployment is deleted) so a backend module can
@@ -245,6 +329,9 @@ def run_agent_deploy_and_invoke(
     docker container. It must not raise; failures are swallowed like the rest of
     teardown.
     """
+    if not invocation_modes:
+        raise ValueError("invocation_modes must contain at least one mode")
+
     agent_name = unique_name("calc-agent")
     deployment_name = unique_name("calc-deployment")
     model_name = unique_name("calc-model")
@@ -255,7 +342,8 @@ def run_agent_deploy_and_invoke(
         name=unique_name("calc-provider"),
         mock_response_body_by_model={
             f"{workspace}/{model_name}": [
-                MockProviderResponse(response_body=_chat_completion_response(TEST_AGENT_RESPONSE, model_name)),
+                MockProviderResponse(response_body=_chat_completion_response(TEST_AGENT_RESPONSE, model_name))
+                for _ in invocation_modes
             ],
         },
         served_models={model_name: model_name},
@@ -304,13 +392,22 @@ def run_agent_deploy_and_invoke(
 
         sdk.models.wait_for_openai_model(model_name, workspace=workspace)
 
-        response = sdk.agents.invoke(
-            workspace=workspace,
-            agent=agent_name,
-            input="What is 12 multiplied by 8?",
-        )
-        content = response["choices"][0]["message"]["content"]
-        assert TEST_AGENT_RESPONSE in content, response
+        for invocation_mode in invocation_modes:
+            if invocation_mode == "non_streaming":
+                _assert_non_streaming_invocation(sdk, workspace=workspace, agent_name=agent_name)
+            elif config_format != NEMO_AGENTS_SPEC_CONFIG_FORMAT:
+                raise ValueError(f"{invocation_mode!r} invocation mode requires a Fabric-backed agent")
+            elif invocation_mode == "streaming":
+                _assert_streaming_invocation(sdk, workspace=workspace, deployment_name=deployment_name)
+            elif invocation_mode == "session":
+                _assert_persisted_session_invocation(
+                    sdk,
+                    workspace=workspace,
+                    deployment_name=deployment_name,
+                    deployment_id=deployment["id"],
+                )
+            else:
+                raise ValueError(f"Unsupported invocation mode: {invocation_mode!r}")
 
         if after_invoke is not None:
             after_invoke(agent_name)
@@ -333,6 +430,7 @@ def run_container_agent_deploy_and_invoke(
     config_format: str = NAT_WORKFLOW_CONFIG_FORMAT,
     running_timeout_seconds: float = 300,
     reap_backend_resources: Callable[[str], None] | None = None,
+    invocation_modes: tuple[AgentInvocationMode, ...] = ("non_streaming",),
 ) -> None:
     """Deploy a mock-backed container agent and invoke it through the gateway."""
     run_agent_deploy_and_invoke(
@@ -343,6 +441,7 @@ def run_container_agent_deploy_and_invoke(
         image=image,
         running_timeout_seconds=running_timeout_seconds,
         reap_backend_resources=reap_backend_resources,
+        invocation_modes=invocation_modes,
     )
 
 

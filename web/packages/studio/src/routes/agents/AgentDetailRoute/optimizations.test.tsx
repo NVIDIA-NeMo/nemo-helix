@@ -10,6 +10,7 @@ import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import { getAgentDetailRoute } from '@studio/routes/utils';
+import { LG_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 
 const agentName = 'react-agent';
@@ -29,7 +30,9 @@ describe('AgentDetailRoute optimizations tab', () => {
       'aria-selected',
       'true'
     );
-    expect(await screen.findByText('brevity-sweep-3')).toBeInTheDocument();
+    expect(
+      await screen.findByText('brevity-sweep-3', undefined, { timeout: LG_SELECTOR_TIMEOUT })
+    ).toBeInTheDocument();
     expect(screen.getByText('accuracy-sweep-1')).toBeInTheDocument();
     expect(screen.queryByText('other-agent-sweep')).not.toBeInTheDocument();
   });
@@ -45,7 +48,7 @@ describe('AgentDetailRoute optimizations tab', () => {
 
     try {
       renderDetail();
-      await screen.findByText('brevity-sweep-3');
+      await screen.findByText('brevity-sweep-3', undefined, { timeout: LG_SELECTOR_TIMEOUT });
 
       await waitFor(() =>
         expect(filters).toContain(

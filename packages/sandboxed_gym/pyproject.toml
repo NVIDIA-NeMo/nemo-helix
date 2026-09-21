@@ -2,13 +2,29 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [project]
-name = "sandboxed-gym"
-version = "0.1.0"
+name = "nemo-sandboxed-gym"
+dynamic = ["version"]
 description = "Trusted episode broker + sandboxed NeMo-Gym host orchestrator"
 readme = "README.md"
-authors = [{ name = "NVIDIA", email = "nemo@nvidia.com" }]
+authors = [
+  { name = "NVIDIA", email = "nemo@nvidia.com" },
+  { name = "Sandy Chapman", email = "schapman@nvidia.com" },
+  { name = "Sam Oluwalana", email = "soluwalana@nvidia.com" },
+]
 requires-python = ">=3.11,<3.15"
 license = "Apache-2.0"
+classifiers = [
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Operating System :: OS Independent",
+  "Operating System :: POSIX",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
 # Base install is the wire contract and the type declarations: `sandboxed_gym.wire` and
 # `sandboxed_gym.sandbox_types` import nothing but the standard library and Pydantic. A client that
 # speaks the broker protocol without running a broker -- Evaluator's `BrokerSandboxProvider` is the
@@ -24,7 +40,7 @@ dependencies = [
 server = [
   "fastapi>=0.115.0",
   "uvicorn[standard]>=0.30.0",
-  "sandboxed-gym[runtime]",
+  "nemo-sandboxed-gym[runtime]",
 ]
 # Dependencies imported by gym_host_runtime.py inside the sandbox image. NeMo-Gym itself is
 # supplied by that image for the compatibility reasons documented below.
@@ -54,14 +70,20 @@ dev = [
   "httpx>=0.27.0",
   # The suite exercises the broker app and the orchestrator, so it needs the server extra.
   # The OpenSandbox extra lets the episode backend construct a real provider under test.
-  "sandboxed-gym[server,opensandbox]",
+  "nemo-sandboxed-gym[server,opensandbox]",
 ]
 
 [project.scripts]
 sandboxed-gym = "sandboxed_gym.cli:main"
 
+[tool.hatch.version]
+source = "nmp-dynamic-versioning"
+# Tags of its own, so a build never inherits the platform's release lineage.
+pattern-prefix = "nemo-sandboxed-gym-v"
+fallback-version = "0.0.0"
+
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "nmp-build-tools"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

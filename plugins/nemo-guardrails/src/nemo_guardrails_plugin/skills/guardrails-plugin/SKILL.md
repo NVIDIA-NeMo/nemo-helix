@@ -4,7 +4,9 @@
 
 name: guardrails-plugin
 description: Use when working on guardrailing chat completions through the Inference Gateway API — creating guardrail configs, validating them with the `/checks` endpoint, attaching `nemo-guardrails` middleware to a VirtualModel, or proving guarded behavior.
+allowed-tools: Bash
 metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
   owner: guardrails
   maturity: active
 ---

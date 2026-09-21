@@ -93,6 +93,7 @@ def _auth_configs(private_key_file: str) -> tuple[AuthConfig, AuthServiceConfig]
         policy_data_refresh_interval=0.2,
         bundle_cache_seconds=0.1,
         admin_email="admin@example.com",
+        allowed_service_principals=["integration-test"],
     )
     return shared_config, service_config
 

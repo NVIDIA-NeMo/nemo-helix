@@ -260,6 +260,14 @@ def build_metadata(labels: dict[str, str] | None, metadata: KubernetesObjectMeta
     return client.V1ObjectMeta(labels=merged_labels, annotations=metadata.annotations)
 
 
+# Waiting reasons that cannot resolve without a spec change.
+FATAL_WAITING_REASONS = frozenset({"InvalidImageName", "CreateContainerConfigError"})
+
+# Kubelet retries these, so the pod has not started rather than failed. A pull
+# that never succeeds is caught by ttl_seconds_before_active.
+RECOVERABLE_WAITING_REASONS = frozenset({"ImagePullBackOff", "ErrImagePull"})
+
+
 def map_pod_to_pod_status(pod: V1Pod) -> PodStatus:
     """Map Kubernetes job status to PodStatus."""
     statuses = (
@@ -283,13 +291,10 @@ def map_pod_to_pod_status(pod: V1Pod) -> PodStatus:
         if state.running is not None:
             status.active.add(name)
         elif state.waiting is not None:
-            if state.waiting.reason in [
-                "ImagePullBackOff",
-                "ErrImagePull",
-                "InvalidImageName",
-                "CreateContainerConfigError",
-            ]:
+            if state.waiting.reason in FATAL_WAITING_REASONS:
                 status.errors[name] = state.waiting.reason
+            elif state.waiting.reason in RECOVERABLE_WAITING_REASONS:
+                status.waiting[name] = state.waiting.reason
             else:
                 status.waiting[name] = "waiting"
         elif state.terminated is not None:
@@ -305,6 +310,14 @@ def map_pod_to_pod_status(pod: V1Pod) -> PodStatus:
     return status
 
 
+def is_retrying_image_pull(pod_status: PodStatus) -> bool:
+    """Whether the pod has not failed and is only held up by a pull the kubelet keeps retrying."""
+    if pod_status.errors or pod_status.phase == "Failed":
+        return False
+    # One or more containers still pulling holds the whole pod back; during init it is a sibling.
+    return any(reason in RECOVERABLE_WAITING_REASONS for reason in pod_status.waiting.values())
+
+
 def map_pod_status_to_platform_status(pod_status: PodStatus) -> PlatformJobStatus:
     """Map Kubernetes job status to PlatformJobStatus."""
 
@@ -312,12 +325,12 @@ def map_pod_status_to_platform_status(pod_status: PodStatus) -> PlatformJobStatu
         return PlatformJobStatus.ERROR
     elif pod_status.phase == "Succeeded":
         return PlatformJobStatus.COMPLETED
+    elif len(pod_status.errors) > 0:
+        return PlatformJobStatus.ERROR
     elif len(pod_status.active) > 0:
         return PlatformJobStatus.ACTIVE
     elif len(pod_status.waiting) > 0:
         return PlatformJobStatus.PENDING
-    elif len(pod_status.errors) > 0:
-        return PlatformJobStatus.ERROR
     elif len(pod_status.completed) > 0:
         return PlatformJobStatus.COMPLETED
     else:
@@ -1281,11 +1294,23 @@ def update_all_tasks(
     for pod_status in pod_statuses:
         status_details, error_details, error_stack = get_pod_details(core_v1, namespace, pod_status.name)
 
-        # If we have error details from pod events or container statuses, mark the status as ERROR.
-        if error_details:
+        # ERROR is terminal, so only let a Warning set it when the pod is neither live nor retrying:
+        # events outlive the failure by an hour and a backing-off pull re-emits one per attempt.
+        live_status = map_pod_status_to_platform_status(pod_status)
+        pod_is_failing = not is_retrying_image_pull(pod_status) and live_status not in (
+            PlatformJobStatus.ACTIVE,
+            PlatformJobStatus.COMPLETED,
+        )
+        if error_details and pod_is_failing:
             status = PlatformJobStatus.ERROR
         else:
-            status = map_pod_status_to_platform_status(pod_status)
+            if error_details:
+                logger.info(
+                    "Ignoring pod warning events for a pod that is running, finished, or retrying",
+                    extra={"pod": pod_status.name, "status": live_status, "events": error_details},
+                )
+                error_details = {}
+            status = live_status
 
         if status == PlatformJobStatus.ERROR:
             if not has_errors:

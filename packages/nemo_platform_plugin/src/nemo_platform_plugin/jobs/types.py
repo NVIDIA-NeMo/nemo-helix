@@ -89,8 +89,15 @@ class AuthContext(BaseModel):
     """
 
     principal_id: str = Field(..., description="The principal's unique identifier")
+    principal_account_id: Optional[str] = Field(
+        default=None, description="Stable NeMo account identifier for the principal"
+    )
     principal_email: Optional[str] = Field(default=None, description="The principal's email address")
     principal_groups: list[str] = Field(default_factory=list, description="Groups the principal belongs to")
+    principal_authz_aliases: list[str] = Field(
+        default_factory=list,
+        description="Alternate trusted identifiers for the principal",
+    )
     principal_on_behalf_of: Optional[str] = Field(
         default=None, description="If acting on behalf of another principal, their principal ID"
     )
@@ -99,6 +106,14 @@ class AuthContext(BaseModel):
     )
     principal_on_behalf_of_email: Optional[str] = Field(
         default=None, description="The on-behalf-of principal's email address"
+    )
+    principal_on_behalf_of_account_id: Optional[str] = Field(
+        default=None,
+        description="Stable NeMo account identifier for the on-behalf-of principal",
+    )
+    principal_on_behalf_of_authz_aliases: list[str] = Field(
+        default_factory=list,
+        description="Alternate trusted identifiers for the on-behalf-of principal",
     )
 
 

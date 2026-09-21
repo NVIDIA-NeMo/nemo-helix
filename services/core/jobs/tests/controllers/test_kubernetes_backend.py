@@ -2343,6 +2343,8 @@ def test_kubernetes_job_schedule_with_auth_context(
         "id": "creator@example.com",
         "email": "creator@example.com",
         "groups": ["engineering", "ml-team"],
+        "authz_aliases": [],
+        "on_behalf_of_authz_aliases": [],
     }
 
     # Verify launcher application log auth is not configured through env headers.

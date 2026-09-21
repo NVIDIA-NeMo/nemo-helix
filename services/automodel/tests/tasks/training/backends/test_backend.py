@@ -23,7 +23,7 @@ from nmp.automodel.tasks.training.schemas import TrainingRecipe  # noqa: E402
 class TestAutomodelBackend:
     """Tests for AutomodelBackend."""
 
-    def test_find_best_checkpoint_uses_model_embedding_flag(
+    def test_find_checkpoints_uses_model_embedding_flag(
         self,
         mocker: MockerFixture,
         tmp_path: Path,
@@ -35,22 +35,22 @@ class TestAutomodelBackend:
         customizer_config.model.is_embedding_model = True
         customizer_config.model.name = "meta/llama-3.1-8b-instruct"
 
-        expected_path = tmp_path / "best.ckpt"
-        mock_find_best_checkpoint = mocker.patch(
-            "nmp.automodel.tasks.training.backends.backend.find_best_checkpoint",
-            return_value=expected_path,
+        expected = {"best": tmp_path / "best.ckpt"}
+        mock_find_selected = mocker.patch(
+            "nmp.automodel.tasks.training.backends.backend.find_selected_checkpoints",
+            return_value=expected,
         )
 
-        result = backend.find_best_checkpoint(tmp_path, customizer_config)
+        result = backend.find_checkpoints(tmp_path, customizer_config)
 
-        assert result == expected_path
-        mock_find_best_checkpoint.assert_called_once_with(
+        assert result == expected
+        mock_find_selected.assert_called_once_with(
             tmp_path,
             customizer_config,
             model_type=ModelType.EMBEDDING,
         )
 
-    def test_process_checkpoint_uses_model_embedding_flag_not_model_name(
+    def test_process_checkpoints_uses_model_embedding_flag_not_model_name(
         self,
         mocker: MockerFixture,
         tmp_path: Path,
@@ -63,24 +63,26 @@ class TestAutomodelBackend:
         customizer_config.model.name = "nvidia/llama-nemotron-embed-1b-v2"
 
         checkpoint_info = MagicMock()
-        mock_process_checkpoint = mocker.patch(
-            "nmp.automodel.tasks.training.backends.backend.process_checkpoint",
+        mock_process = mocker.patch(
+            "nmp.automodel.tasks.training.backends.backend.process_selected_checkpoints",
             return_value=checkpoint_info,
         )
 
-        checkpoint_path = tmp_path / "checkpoint"
+        checkpoints = {"best": tmp_path / "checkpoint"}
         output_path = tmp_path / "output_model"
-        result = backend.process_checkpoint(
-            checkpoint_path=checkpoint_path,
+        result = backend.process_checkpoints(
+            checkpoints=checkpoints,
             output_path=output_path,
+            workspace_dir=tmp_path,
             customizer_config=customizer_config,
             library_config=None,
         )
 
         assert result == checkpoint_info
-        mock_process_checkpoint.assert_called_once_with(
-            checkpoint_path,
+        mock_process.assert_called_once_with(
+            checkpoints,
             output_path,
+            tmp_path,
             customizer_config,
             model_type=ModelType.LLM,
             resolved_chat_template=None,
@@ -95,14 +97,14 @@ class TestAutomodelBackend:
         customizer_config = MagicMock()
         customizer_config.training.recipe = TrainingRecipe.CROSS_ENCODER
 
-        expected_path = tmp_path / "best.ckpt"
-        mock_find_best_checkpoint = mocker.patch(
-            "nmp.automodel.tasks.training.backends.backend.find_best_checkpoint",
-            return_value=expected_path,
+        expected = {"best": tmp_path / "best.ckpt"}
+        mock_find_selected = mocker.patch(
+            "nmp.automodel.tasks.training.backends.backend.find_selected_checkpoints",
+            return_value=expected,
         )
 
-        assert backend.find_best_checkpoint(tmp_path, customizer_config) == expected_path
-        mock_find_best_checkpoint.assert_called_once_with(
+        assert backend.find_checkpoints(tmp_path, customizer_config) == expected
+        mock_find_selected.assert_called_once_with(
             tmp_path,
             customizer_config,
             model_type=ModelType.CROSS_ENCODER,
@@ -119,16 +121,17 @@ class TestAutomodelBackend:
         customizer_config.model.is_embedding_model = False
         customizer_config.model.checkpoint_head_type = "cross_encoder"
 
-        mock_process_checkpoint = mocker.patch(
-            "nmp.automodel.tasks.training.backends.backend.process_checkpoint",
+        mock_process = mocker.patch(
+            "nmp.automodel.tasks.training.backends.backend.process_selected_checkpoints",
             return_value=MagicMock(),
         )
 
-        backend.process_checkpoint(
-            checkpoint_path=tmp_path / "checkpoint",
+        backend.process_checkpoints(
+            checkpoints={"best": tmp_path / "checkpoint"},
             output_path=tmp_path / "output_model",
+            workspace_dir=tmp_path,
             customizer_config=customizer_config,
             library_config=None,
         )
 
-        assert mock_process_checkpoint.call_args.kwargs["model_type"] == ModelType.CROSS_ENCODER
+        assert mock_process.call_args.kwargs["model_type"] == ModelType.CROSS_ENCODER

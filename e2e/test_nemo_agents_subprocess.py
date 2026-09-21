@@ -68,3 +68,25 @@ def test_fabric_agent_deploys_and_invokes_through_gateway(sdk: NeMoPlatform, wor
         config_format=NEMO_AGENTS_SPEC_CONFIG_FORMAT,
         after_invoke=assert_trajectory_reached_intake,
     )
+
+
+def test_fabric_agent_streams_through_gateway(sdk: NeMoPlatform, workspace: str) -> None:
+    """A default Fabric deployment supports SSE chat completions."""
+    run_agent_deploy_and_invoke(
+        sdk,
+        workspace=workspace,
+        deployment_mode="subprocess",
+        config_format=NEMO_AGENTS_SPEC_CONFIG_FORMAT,
+        invocation_modes=("streaming",),
+    )
+
+
+def test_fabric_agent_invokes_with_persisted_session(sdk: NeMoPlatform, workspace: str) -> None:
+    """A persisted session can start its streaming-enabled Fabric runtime."""
+    run_agent_deploy_and_invoke(
+        sdk,
+        workspace=workspace,
+        deployment_mode="subprocess",
+        config_format=NEMO_AGENTS_SPEC_CONFIG_FORMAT,
+        invocation_modes=("session",),
+    )

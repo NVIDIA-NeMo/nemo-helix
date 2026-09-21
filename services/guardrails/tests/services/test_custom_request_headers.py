@@ -178,6 +178,7 @@ class TestChatCustomHeaders:
         assert context_headers == {
             **expected_custom_headers,
             "X-NMP-Principal-Id": "service:guardrails",
+            "X-NMP-Actor-Aliases": "service:guardrails",
         }
 
     @pytest.mark.asyncio
