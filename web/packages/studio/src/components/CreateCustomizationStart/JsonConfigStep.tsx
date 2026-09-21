@@ -22,14 +22,14 @@ export const JsonConfigStep: FC<Props> = ({ onBack, onContinue }) => {
 
   return (
     <Stack className="h-full">
-      <Block className="flex-1 overflow-auto">
-        <Stack gap="density-2xl" padding="density-2xl">
+      <Block className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <Stack gap="density-2xl" padding="density-2xl" className="min-h-0 flex-1">
           <PageHeader
             slotHeading="Load a job config"
             slotDescription="Paste the config or upload the file. It is checked as you type, and opens in the form once it reads."
           />
-          <Flex justify="center" className="w-full">
-            <div className="w-full max-w-[768px]">
+          <Flex justify="center" className="min-h-0 w-full flex-1">
+            <div className="flex min-h-0 w-full max-w-[768px] flex-1 flex-col">
               <JsonConfigPanel onValidConfig={setFields} />
             </div>
           </Flex>

@@ -66,7 +66,7 @@ export const JsonConfigPanel: FC<JsonConfigPanelProps> = ({ onValidConfig }) => 
   };
 
   return (
-    <Stack gap="density-md" className="w-full">
+    <Stack gap="density-md" className="min-h-0 w-full flex-1">
       <Flex align="center" justify="between" className="w-full gap-4">
         <Text kind="body/regular/sm" className="text-secondary">
           Paste a full job request (<code>{'{ "spec": … }'}</code>) or just the spec. Unspecified
@@ -92,7 +92,7 @@ export const JsonConfigPanel: FC<JsonConfigPanelProps> = ({ onValidConfig }) => 
         />
       </Flex>
 
-      <div className="h-[360px] overflow-auto rounded-md border border-base">
+      <div className="min-h-0 flex-1 overflow-auto rounded-md border border-base">
         <CodeEditor
           id="job-config-json"
           className="h-full"
