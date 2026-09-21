@@ -18,7 +18,7 @@ from data_designer_nemo.model_provider import (
     get_nmp_provider,
     parse_provider_reference,
 )
-from data_designer_nemo.token_usage import capture_token_usage
+from data_designer_nemo.token_usage import capture_data_designer_token_usage
 from nemo_anonymizer_plugin.app.input import prepare_anonymizer_input
 from nemo_anonymizer_plugin.app.task_config import AnonymizerStepConfig
 from nemo_anonymizer_plugin.app.upstream_logging import preserve_root_logging
@@ -98,7 +98,7 @@ def _run_with_step_config(
                 artifact_path=storage_path / "anonymizer-artifacts",
             )
         logger.info("Running anonymizer pipeline")
-        with capture_token_usage(ctx.usage):
+        with capture_data_designer_token_usage(ctx.usage):
             result = anonymizer.run(config=request.config, data=prepared_input.input)
     finally:
         prepared_input.cleanup()
