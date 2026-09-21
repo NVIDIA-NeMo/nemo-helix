@@ -29,10 +29,8 @@ authz:
       delete:
         description: "Delete filesets"
       list:
-        global_read: true
         description: "List filesets"
       read:
-        global_read: true
         description: "Read filesets"
       update:
         description: "Update filesets"

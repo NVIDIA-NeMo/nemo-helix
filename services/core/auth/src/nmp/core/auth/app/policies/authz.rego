@@ -97,7 +97,7 @@ allow_request if {
 
 # Global workspace reads (ASTD-526). The "default" workspace doubles as the
 # installation-wide GLOBAL workspace so teams share expensive resources (deployed models,
-# LoRA adapters, filesets) instead of duplicating them per workspace.
+# LoRA adapters) instead of duplicating them per workspace.
 #
 # A GET/HEAD against workspace "default" is allowed when EVERY permission the endpoint
 # requires is marked `global_read: true` in the permission registry AND the principal holds

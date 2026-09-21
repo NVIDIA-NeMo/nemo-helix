@@ -22,7 +22,6 @@ _GLOBALLY_SHAREABLE: frozenset[str] = frozenset(
         "adapter",
         "model_provider",
         "virtual_model",
-        "fileset",
     }
 )
 
