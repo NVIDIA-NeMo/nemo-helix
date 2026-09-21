@@ -21,7 +21,7 @@ run engine-level checks of its own.
 from __future__ import annotations
 
 import data_designer.config as dd
-from data_designer_nemo.context import DataDesignerValidationContext
+from data_designer_nemo.context.validation import DataDesignerValidationContext
 from data_designer_nemo.errors import NDDError, NDDInternalError, NDDInvalidConfigError
 from data_designer_nemo.model_configs import get_model_configs
 
