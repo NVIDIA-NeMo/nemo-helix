@@ -180,7 +180,7 @@ def test_check_models_json_output_is_machine_readable(tmp_path: Path, monkeypatc
     assert result.exit_code == 1
     # Engine logs are suppressed for json so the document is the only thing on
     # stdout and stays parseable as a whole.
-    payload = json.loads(result.output.strip())
+    payload = json.loads(result.stdout.strip())
     assert payload["ok"] is False
     assert payload["config_source"] == str(config_path)
     assert payload["errors"] == [{"error_type": "ModelNotFoundError", "message": "nope"}]
@@ -197,7 +197,7 @@ def test_check_models_json_output_on_success(tmp_path: Path, monkeypatch: pytest
         result = u.invoke_cli(["check-models", str(config_path), "--output", "json"], client_context)
 
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.output.strip())
+    payload = json.loads(result.stdout.strip())
     assert payload["ok"] is True
     assert payload["errors"] == []
 
@@ -263,9 +263,10 @@ def test_check_models_json_routes_engine_logs_to_stderr_not_stdout(
         result = u.invoke_cli(["check-models", str(config_path), "--output", "json"], client_context)
 
     assert result.exit_code == 1, result.output
-    # stdout is the clean, parseable document — no human-formatted engine log.
-    assert "Checking" not in result.output
-    payload = json.loads(result.output.strip())
+    # ``result.output`` interleaves both streams (Click >= 8.2), so assert against
+    # ``result.stdout`` — mixing them back together cannot show the separation.
+    assert "Checking" not in result.stdout
+    payload = json.loads(result.stdout.strip())
     assert payload["ok"] is False
     assert payload["errors"] == [{"error_type": "ModelNotFoundError", "message": "nope"}]
     # The engine progress log routed to stderr, not stdout.
