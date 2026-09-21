@@ -97,7 +97,7 @@ hierarchy, inputs, outputs, statuses, errors, and semantic attributes.
 
 ## Import an existing trace store
 
-When the user names MLflow, LangSmith, Arize Phoenix, or Braintrust, read only that provider's
+When the user names Gym, MLflow, LangSmith, Arize Phoenix, or Braintrust, read only that provider's
 reference below and run its bundled script. Do not load the other provider references.
 
 | Provider | Reference | Script |
@@ -106,8 +106,12 @@ reference below and run its bundled script. Do not load the other provider refer
 | LangSmith | `references/import-langsmith.md` | `scripts/import_langsmith.py` |
 | Arize Phoenix | `references/import-phoenix.md` | `scripts/import_phoenix.py` |
 | Braintrust | `references/import-braintrust.md` | `scripts/import_braintrust.py` |
+| NeMo Gym | `references/import-gym.md` | `scripts/import_gym.py` |
 
-Every live import requires an explicit `--project`, `--since`, and `--until`. The scripts write
+Gym imports local rollout JSONL with `ng_trajectory` 1.0 and requires `--run-id` and `--agent-name`.
+Read its reference for timestamp handling and evidence coverage.
+
+Every live provider fetch requires an explicit `--project`, `--since`, and `--until`. The scripts write
 spans first, then provider evaluations and human annotations, verify the imported span IDs, and are
 safe to replay. They use the existing SDK client factory, including the active CLI context and OAuth
 token refresh; explicit `--nmp-base-url`, `--workspace`, and `NMP_ACCESS_TOKEN` overrides still
