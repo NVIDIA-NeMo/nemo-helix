@@ -9,6 +9,7 @@ import {
   Flex,
   PageHeader,
   RadioGroupRoot,
+  Skeleton,
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
@@ -20,6 +21,9 @@ const CONTENT_WIDTH = 'w-full max-w-[768px]';
 
 /** The design's tile is `radius/md`; Card's own `radius-density-xl` is visibly rounder. */
 const TILE_RADIUS = 'rounded-[var(--radius-md)]';
+
+/** Placeholders shown for a group that is still loading — the design's rows are pairs. */
+const PLACEHOLDER_TILES = 2;
 
 /**
  * "How do you want to start?" — the entry point shared by the create flows.
@@ -42,11 +46,13 @@ export const StartPage: FC<StartPageProps> = ({
   onContinue,
   slotBanner,
 }) => {
-  const groups = templateGroups.filter((group) => group.templates.length > 0);
+  const groups = templateGroups.filter((group) => group.loading || group.templates.length > 0);
 
   const selectedLabel =
     options.find((option) => option.id === value)?.title ??
-    groups.flatMap((group) => group.templates).find((template) => template.id === value)?.name;
+    groups
+      .flatMap((group) => (group.loading ? [] : group.templates))
+      .find((template) => template.id === value)?.name;
 
   return (
     <Stack className="h-full">
@@ -92,18 +98,28 @@ export const StartPage: FC<StartPageProps> = ({
                       <Stack key={group.id} gap="density-md">
                         <Text kind="label/bold/md">{group.title}</Text>
                         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                          {group.templates.map((template) => (
-                            <RadioCard
-                              key={template.id}
-                              value={template.id}
-                              label={template.name}
-                              description={template.description}
-                              icon={<template.icon size={16} aria-hidden />}
-                              showIndicator={false}
-                              className={TILE_RADIUS}
-                              disabled={disabled}
-                            />
-                          ))}
+                          {group.loading
+                            ? Array.from({ length: PLACEHOLDER_TILES }, (_, i) => (
+                                <Skeleton
+                                  key={i}
+                                  className={`h-[61px] w-full ${TILE_RADIUS}`}
+                                  aria-label={`Loading ${group.title}`}
+                                />
+                              ))
+                            : group.templates.map((template) => (
+                                <RadioCard
+                                  key={template.id}
+                                  value={template.id}
+                                  label={template.name}
+                                  description={template.description}
+                                  icon={
+                                    <template.icon size={16} color={group.accent} aria-hidden />
+                                  }
+                                  showIndicator={false}
+                                  className={TILE_RADIUS}
+                                  disabled={disabled}
+                                />
+                              ))}
                         </div>
                       </Stack>
                     ))}

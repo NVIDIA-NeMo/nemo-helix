@@ -79,6 +79,31 @@ export const Default: Story = { render: () => <Demo /> };
 /** Options only — a flow with nothing to template from yet. */
 export const WithoutTemplates: Story = { render: () => <Demo templateGroups={[]} /> };
 
+/** A group still fetching holds its place rather than appearing later and shifting the page. */
+export const GroupStillLoading: Story = {
+  render: () => (
+    <Demo
+      templateGroups={[
+        group('a', 'Loaded Group', ['Template Name', 'Template Name']),
+        { id: 'b', title: 'Still Loading', templates: [], loading: true },
+      ]}
+    />
+  ),
+};
+
+/** Per-group icon colour. What it signifies is the caller's to decide. */
+export const AccentedGroups: Story = {
+  render: () => (
+    <Demo
+      templateGroups={[
+        { ...group('a', 'Purple', ['Template Name', 'Template Name']), accent: '#b78bf7' },
+        { ...group('b', 'Orange', ['Template Name']), accent: '#f0883e' },
+        { ...group('c', 'Teal', ['Template Name', 'Template Name']), accent: '#4dd4c1' },
+      ]}
+    />
+  ),
+};
+
 /** Locked while the picked entry point is being acted on. */
 export const Working: Story = {
   render: () => <Demo disabled continueLoading canContinue={false} continueLabel="Setting up…" />,
