@@ -1,0 +1,11 @@
+*
+!pyproject.toml
+!uv.lock
+!sdk
+!packages
+!plugins/nemo-builder
+**/.venv
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/*.pyc

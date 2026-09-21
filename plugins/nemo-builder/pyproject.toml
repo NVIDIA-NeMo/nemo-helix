@@ -5,8 +5,17 @@
 name = "nemo-builder-plugin"
 description = "In-cluster container image builds for NeMo Platform (RFC 001)."
 requires-python = ">=3.11,<3.15"
-dependencies = ["nemo-platform-plugin", "nemo-platform", "pydantic>=2.0.0", "kubernetes>=29.0.0"]
 version = "0.1.0"
+# Runtime dependencies of the THREE STEP BINARIES, which is what the nmp-build image installs:
+# a platform client, the Kubernetes client, pydantic. Nothing else runs in a build pod.
+dependencies = ["nemo-platform-plugin", "pydantic>=2.0.0", "kubernetes>=29.0.0"]
+
+[project.optional-dependencies]
+# The API-process half. `service.py` annotates a FastAPI dependency as `AsyncNeMoPlatform`, and
+# FastAPI evaluates that annotation at runtime, so the full SDK is a real requirement *there*.
+# It is not one in a build pod -- no step binary imports it. Splitting it keeps the step image
+# small and keeps the dependency graph honest about what actually runs in a job.
+service = ["nemo-platform"]
 
 [tool.uv.sources]
 nemo-platform = { path = "../../packages/nemo_platform", editable = true }
