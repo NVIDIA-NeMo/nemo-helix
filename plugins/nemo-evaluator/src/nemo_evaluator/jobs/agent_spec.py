@@ -256,6 +256,38 @@ class GymRunnerTarget(BaseModel):
             raise ValueError("The agent_config field is required when no environment FileSet is supplied")
         return self
 
+    @model_validator(mode="after")
+    def _no_variable_is_both_plaintext_and_a_secret(self) -> Self:
+        overlap = sorted(set(self.env_vars) & set(self.env_secrets))
+        if overlap:
+            raise ValueError(f"{overlap} appear in both env_vars and env_secrets; name each variable once")
+        return self
+
+
+class GymPlacement(BaseModel):
+    """Where and how the platform runs a :class:`GymAgentTaskRunner`, supplied at submission.
+
+    Deliberately *not* on ``GymRuntimeConfig``: the local ``gym`` CLI has no equivalent of either,
+    so a runner carrying them would hold fields that do nothing wherever it actually runs. A setting
+    that means the same thing in both worlds — ``env_secrets`` — stays on the runner.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    environment: FilesetRef | None = Field(
+        default=None,
+        description="Environment FileSet containing a native-v1 or wheels-v1 Gym package. "
+        "The complete FileSet is staged read-only; file fragments are not supported. Requires a "
+        "deployment with sandboxed Gym execution.",
+    )
+    agent_ref_name: str | None = Field(
+        default=None,
+        description="Gym agent instance rollouts are routed to on a sandboxed host, stamped as each row's "
+        "`agent_ref`. Defaults to the runner's `agent`. Set it when the environment's config defines the "
+        "agent under a different name -- `mcqa` registers `mcqa_simple_agent`, and routing to "
+        "`simple_agent` there does not answer.",
+    )
+
 
 #: The agent-runner slot of the target union — the spec-side mirror of ``AgentTaskRunner``, resolved
 #: to a runtime at run time. ``kind``-discriminated; widen with more members as runners land.
