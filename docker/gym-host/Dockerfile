@@ -11,6 +11,9 @@ FROM ${NMP_PYTHON_BASE} AS builder
 # Copy the host's standalone dependency manifest and lockfile.
 COPY docker/locks/nmp-gym-host /app/docker/locks/nmp-gym-host
 
+# Copy local sources used by the standalone lock, including build-system requirements.
+COPY packages/nmp_build_tools /app/packages/nmp_build_tools
+
 # Copy the complete package inputs at the path used by the lock's local source.
 COPY packages/sandboxed_gym/pyproject.toml /app/packages/sandboxed_gym/pyproject.toml
 COPY packages/sandboxed_gym/README.md /app/packages/sandboxed_gym/README.md
