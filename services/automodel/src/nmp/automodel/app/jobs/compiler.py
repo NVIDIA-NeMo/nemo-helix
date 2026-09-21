@@ -386,7 +386,7 @@ async def _validate_deployment_config(
         try:
             response = await platform.models.get_model(name=output_name, workspace=workspace)
             existing_me = response.data()
-        except NotFoundError:
+        except NotFoundError as e:
             # The output model entity doesn't exist yet and the config names some other
             # model, so it was created for a different model.
             raise PlatformJobCompilationError(
@@ -395,7 +395,7 @@ async def _validate_deployment_config(
                 "Use inline deployment parameters (e.g., DeploymentParams(gpu=1, lora_enabled=True)), "
                 "or a deployment config that names no model -- one with neither model_entity_id nor "
                 "model_spec.model_name set -- which is bound to the trained model automatically."
-            )
+            ) from e
 
         # Output model entity already exists (retraining to create a new FileSet).
         # Verify the config actually targets this model entity.
