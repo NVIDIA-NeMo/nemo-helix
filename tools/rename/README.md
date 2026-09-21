@@ -8,7 +8,7 @@ Use these scripts from the repository root to preview, apply, and verify the NeM
 ## Prerequisites
 
 - Run from a git checkout of `nemo-platform`.
-- Install the standard repository tools, including `git`, `rg` (ripgrep), `perl`, `grep`, and `sed`.
+- Install the standard repository tools, including `git`, `grep`, `sed`, and Python 3.
 - Start with a clean worktree before the actual rename. The script refuses to run when `git status --short` is non-empty unless `--continue` is used.
 - Review the dry-run output before applying changes.
 
@@ -26,7 +26,7 @@ Expected outcome: the command prints the legacy content categories, tracked path
 tools/rename/rename-to-nemo-helix.sh
 ```
 
-Expected outcome: the script updates file contents, renames tracked and newly created files, normalizes first-party image names, and prints the verification command to run next.
+Expected outcome: the script updates file contents, renames tracked and newly created non-ignored files, normalizes first-party image names, and prints the verification command to run next. The implementation uses Git's file set rather than walking the whole checkout, so ignored environments such as `.venv/` are not scanned.
 
 If a previous rename attempt stopped after making changes, inspect the worktree and then resume the remaining passes with:
 

@@ -9,7 +9,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RENAME_SCRIPT = REPO_ROOT / "tools/rename/rename-to-nemo-helix.sh"
+RENAME_IMPL = REPO_ROOT / "tools/rename/rename_to_nemo_helix.py"
 VERIFY_SCRIPT = REPO_ROOT / "tools/rename/verify-nemo-helix-rename.sh"
+VERIFY_IMPL = REPO_ROOT / "tools/rename/verify_nemo_helix_rename.py"
+COMMON_IMPL = REPO_ROOT / "tools/rename/rename_common.py"
 README = REPO_ROOT / "tools/rename/README.md"
 
 
@@ -27,7 +30,10 @@ def install_rename_tools(path: Path) -> None:
     tools_dir = path / "tools/rename"
     tools_dir.mkdir(parents=True)
     shutil.copy2(RENAME_SCRIPT, tools_dir / RENAME_SCRIPT.name)
+    shutil.copy2(RENAME_IMPL, tools_dir / RENAME_IMPL.name)
     shutil.copy2(VERIFY_SCRIPT, tools_dir / VERIFY_SCRIPT.name)
+    shutil.copy2(VERIFY_IMPL, tools_dir / VERIFY_IMPL.name)
+    shutil.copy2(COMMON_IMPL, tools_dir / COMMON_IMPL.name)
     shutil.copy2(README, tools_dir / README.name)
 
 
@@ -56,10 +62,10 @@ def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: P
     assert "nemo-helix" in (repo / "docs/overview.md").read_text()
     assert "nhx-auditor-tasks" in (repo / "docker-bake.hcl").read_text()
 
-    script_text = (repo / "tools/rename/rename-to-nemo-helix.sh").read_text()
-    assert 'old_product="NeMo Platform"' in script_text
-    assert '"auditor-tasks"' in script_text
-    assert '"nhx-auditor-tasks"' not in script_text
+    common_text = (repo / "tools/rename/rename_common.py").read_text()
+    assert '("NeMo Platform", "NeMo Helix")' in common_text
+    assert '"auditor-tasks"' in common_text
+    assert '"nhx-auditor-tasks"' not in common_text
 
     verify = run(["tools/rename/verify-nemo-helix-rename.sh"], repo)
     assert "No legacy product" in verify.stdout
@@ -85,3 +91,12 @@ def test_verifier_scans_tracked_ignored_files(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "dist/index.js" in result.stdout
     assert "Legacy product names remain" in result.stderr
+
+
+def test_rename_tools_do_not_depend_on_perl_or_ripgrep() -> None:
+    checked_files = [RENAME_SCRIPT, RENAME_IMPL, VERIFY_SCRIPT, VERIFY_IMPL, COMMON_IMPL, README]
+    combined_text = "\n".join(path.read_text() for path in checked_files)
+
+    assert "perl" not in combined_text.lower()
+    assert "ripgrep" not in combined_text.lower()
+    assert " rg" not in combined_text
