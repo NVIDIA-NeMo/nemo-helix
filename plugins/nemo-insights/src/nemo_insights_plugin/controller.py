@@ -177,7 +177,7 @@ class InsightsAnalysisController(NemoController):
                 updated.status = AnalysisConfigStatus.IDLE
                 # The pre-submission boundary keeps telemetry arriving during
                 # execution eligible for the next analysis.
-                updated.last_successful_run_at = status.last_attempted_at
+                updated.last_successful_run_at = status.last_attempted_at or status.last_successful_run_at
                 updated.last_error = ""
             else:
                 updated.status = AnalysisConfigStatus.ERROR

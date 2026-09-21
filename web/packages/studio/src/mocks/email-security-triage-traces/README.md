@@ -3,6 +3,18 @@
 
 # email-security-triage — sample traces
 
+## Prerequisites
+
+For automatic Insights analysis after import, enable analysis for `email-security-triage`
+and configure its default/fast model pair before importing. Trace import itself does not
+require an analysis config.
+
+```bash
+uv run nemo insights analysis enable --agent email-security-triage
+```
+
+## Sample traces
+
 Eighteen hand-written ATIF trajectories for the `email-security-triage` agent, one file per
 trace. They exercise all three of the agent's capabilities and carry three deliberate failure
 clusters, so an evaluation run has something to pass _and_ something to fail on — and so the
@@ -96,15 +108,10 @@ those confined to one. Each cluster above clears that bar on its own.
 The periodic controller also skips a scheduled run for an agent with fewer than 10 new traces
 since its last cursor, which 18 clears comfortably.
 
-Analysis must be enabled for the agent before a run can be triggered — the analysis run needs
-the default/fast model pair, and that is only captured on the agent's analysis config:
-
-```bash
-uv run nemo insights analysis enable --agent email-security-triage
-```
+See [Prerequisites](#prerequisites) to configure automatic analysis after import.
 
 Studio's **Import traces** modal triggers a run per agent automatically after a successful import
-(the "Run insights analysis after import" checkbox). Without the config above it reports
+(the "Run insights analysis after import" checkbox). Without the [analysis config](#prerequisites) it reports
 `analysis not enabled` and leaves the import untouched.
 
 ## Notes

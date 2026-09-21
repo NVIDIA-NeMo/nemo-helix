@@ -64,6 +64,18 @@ async def test_success_reads_only_tracked_job_and_advances_to_attempt_start() ->
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("previous_cursor", [PREVIOUS, None])
+async def test_success_without_attempt_timestamp_preserves_cursor(previous_cursor: datetime | None) -> None:
+    controller, entities, _ = _controller()
+    pending = _pending().model_copy(update={"last_attempted_at": None, "last_successful_run_at": previous_cursor})
+    status = await controller._reconcile_run(_config(), pending)
+    assert status.status == AnalysisConfigStatus.IDLE
+    assert status.last_successful_run_at == previous_cursor
+    assert status.last_completed_at is not None
+    entities.update.assert_awaited_once_with(status)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("job_status", PlatformJobStatus.non_terminals())
 async def test_active_job_leaves_pending_attempt_unchanged(job_status) -> None:
     controller, entities, _ = _controller(job_status)
