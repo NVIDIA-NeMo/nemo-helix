@@ -178,3 +178,38 @@ def validate_static_authz_data(data: dict[str, Any]) -> None:
                         [c for c in callers_list if isinstance(c, str)],
                         context=f"endpoints[{path!r}].{method_name}.callers",
                     )
+
+
+def flatten_permission_registry(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Flatten ``authz.permissions`` into ``{"models.adapters.read": {...}}``.
+
+    Accepts both flat keys (``"audit.configs.read": {description: ...}``) and nested
+    ones (``audit: configs: read: {description: ...}``). A leaf is any mapping with a
+    ``description`` key.
+    """
+    raw = data.get("authz", {}).get("permissions", {}) or {}
+
+    def _flatten(node: dict[str, Any], prefix: str = "") -> dict[str, dict[str, Any]]:
+        result: dict[str, dict[str, Any]] = {}
+        for key, value in node.items():
+            full_key = f"{prefix}.{key}" if prefix else key
+            if isinstance(value, dict) and "description" in value:
+                result[full_key] = value
+            elif isinstance(value, dict):
+                result.update(_flatten(value, full_key))
+        return result
+
+    return _flatten(raw)
+
+
+def global_read_permissions(data: dict[str, Any]) -> list[str]:
+    """Permissions marked ``global_read: true`` in the registry, sorted.
+
+    A read carrying only these permissions may be satisfied from the global workspace
+    by a principal that holds them in some workspace, without a binding in the global
+    workspace itself. The policy consumes the flattened list as
+    ``data.authz.global_read_permissions``; keeping the marker on the registry entry
+    keeps ``static-authz.yaml`` the single source of truth.
+    """
+    registry = flatten_permission_registry(data)
+    return sorted(name for name, meta in registry.items() if isinstance(meta, dict) and meta.get("global_read") is True)
