@@ -769,7 +769,11 @@ def _generated_optional_dependency_groups(optional: tomlkit.items.Table) -> set[
 
 
 def _merge_matching_project_optional_dependencies(
-    target_project: dict, source_project: dict, patterns: list[str]
+    target_project: dict,
+    source_project: dict,
+    patterns: list[str],
+    base_extra: str,
+    extra_prefix: str,
 ) -> None:
     source_optional = source_project.get("optional-dependencies", {})
     if not source_optional or not patterns:
@@ -777,13 +781,26 @@ def _merge_matching_project_optional_dependencies(
 
     target_project_name = target_project.get("name")
     target_optional = target_project.setdefault("optional-dependencies", tomlkit.table())
+    target_dependencies = {
+        canonicalize_name(Requirement(dependency).name) for dependency in target_project.get("dependencies", [])
+    }
+    source_project_name = source_project.get("name")
+    base_requirement = (
+        f"{target_project_name}[{base_extra}]"
+        if target_project_name
+        and source_project_name
+        and canonicalize_name(source_project_name) not in target_dependencies
+        else None
+    )
     for extra_name, deps in source_optional.items():
         if not _matches_any_pattern(extra_name, patterns):
             continue
         if not _should_copy_optional_dependency_extra(extra_name, target_project_name):
             continue
-        if extra_name not in target_optional:
-            target_optional[extra_name] = _build_dependency_array(list(deps))
+        inherited_extra_name = f"{extra_prefix}{extra_name}"
+        if inherited_extra_name not in target_optional:
+            inherited = ([base_requirement] if base_requirement else []) + list(deps)
+            target_optional[inherited_extra_name] = _build_dependency_array(inherited)
 
 
 def _bundle_deps_group(pkg_name: str, pkg_config: dict) -> str:
@@ -908,7 +925,11 @@ def _process_bundle_packages() -> None:
             _merge_matching_project_scripts(pyproject["project"], pkg_project, inherited_script_patterns)
             _merge_matching_project_entrypoints(pyproject["project"], pkg_project, inherited_entrypoint_patterns)
             _merge_matching_project_optional_dependencies(
-                pyproject["project"], pkg_project, inherited_optional_patterns
+                pyproject["project"],
+                pkg_project,
+                inherited_optional_patterns,
+                deps_group,
+                pkg_config.get("optional-dependencies-prefix", ""),
             )
 
             pkg_deps = list(pkg_project.get("dependencies", []))
@@ -1302,11 +1323,12 @@ def _annotate_generated_bundle_groups() -> None:
             inherited_script_patterns = _bundle_inherit_patterns(pkg_config, "scripts")
             inherited_entrypoint_patterns = _bundle_inherit_patterns(pkg_config, "entry-points")
             inherited_optional_patterns = _bundle_inherit_patterns(pkg_config, "optional-dependencies")
+            inherited_optional_prefix = pkg_config.get("optional-dependencies-prefix", "")
             pkg_project = _load_bundle_project(pkg_name, pkg_config, member_dir)
             bundle_owned_names.add(_bundle_deps_group(pkg_name, pkg_config))
             if inherited_optional_patterns:
                 bundle_owned_names.update(
-                    extra_name
+                    f"{inherited_optional_prefix}{extra_name}"
                     for extra_name in pkg_project.get("optional-dependencies", {})
                     if _matches_any_pattern(extra_name, inherited_optional_patterns)
                     if _should_copy_optional_dependency_extra(extra_name, member_project_name)
