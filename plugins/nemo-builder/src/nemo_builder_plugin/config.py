@@ -128,6 +128,23 @@ class BuilderConfig(NemoConfig):
             "this system builds, and a MUST with a fallback is a default."
         ),
     )
+    registry_username: str = Field(
+        default="",
+        description=(
+            "Read-only registry credential for the RECONCILER, which resolves digests and checks "
+            "for signatures. Separate from `push_secret` on purpose: this one never writes, so "
+            "it should be scoped to pulls. For GAR the pair is `oauth2accesstoken` plus an "
+            "access token.\n\n"
+            "PoC-only shape. A production deployment resolves this from the Secrets service as "
+            "the platform, rather than from operator config."
+        ),
+    )
+    registry_password: str = Field(default="", description="See `registry_username`.")
+    reconcile_interval_seconds: float = Field(
+        default=10.0,
+        description="How often the reconciler looks for `pending` rows. It queries rather than watching.",
+    )
+
     signature_storage: Literal["tag", "referrers"] = Field(
         default="tag",
         description=(

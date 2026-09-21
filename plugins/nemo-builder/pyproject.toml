@@ -29,6 +29,9 @@ nmp-build = "nemo_builder_plugin.run.main:main"
 [project.entry-points."nemo.services"]
 builder = "nemo_builder_plugin.service:BuilderService"
 
+[project.entry-points."nemo.controllers"]
+builder = "nemo_builder_plugin.controller:BuilderController"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
