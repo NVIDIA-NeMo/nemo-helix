@@ -1,27 +1,33 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# NOTE: This file is auto-generated
+"""``nemo guardrail`` command group, backed by the typed Guardrail client."""
+
 from __future__ import annotations
 
-from importlib import import_module as _importlib_import_module
 from typing import Annotated
 
 import typer
-
+from nemo_guardrails_plugin.cli_commands.configs import app as configs_app
+from nemo_platform_ext.cli.core.api import build_kwargs
 from nemo_platform_ext.cli.core.code_generator import handle_code_generation
 from nemo_platform_ext.cli.core.context import CLIContext
 from nemo_platform_ext.cli.core.errors import handle_errors
 from nemo_platform_ext.cli.core.formatters import format_output
 from nemo_platform_ext.cli.core.help_formatter import collect_warnings, create_typer_app
-from nemo_platform_ext.cli.core.stdin_utils import read_data_input_with_flags, read_payload, validate_required_fields
+from nemo_platform_ext.cli.core.stdin_utils import (
+    build_request_body,
+    read_data_input_with_flags,
+    read_payload,
+    validate_required_fields,
+)
 from nemo_platform_ext.cli.core.types import EntityOutputFormatOption
-
-_cli_child_configs = _importlib_import_module("nemo_platform_ext.cli.commands.api.guardrail.configs")
+from nemo_platform_plugin.guardrail.client import GuardrailClient
+from nemo_platform_plugin.guardrail.types import GuardrailCheckRequest
 
 app = create_typer_app(name="guardrail", help="Manage guardrail")
 
-app.add_typer(_cli_child_configs.app, name="configs")
+app.add_typer(configs_app, name="configs")
 
 
 @app.command("check")
@@ -253,20 +259,23 @@ def check_guardrail(
         },
     )
 
-    all_kwargs = input_payload
-    state: CLIContext = ctx.obj
-    output_format = state.get_output_format(output_format)
+    body = build_request_body(
+        GuardrailCheckRequest, input_payload, exclude={"workspace"}, command_name="guardrail check"
+    )
+    kwargs = build_kwargs(workspace=input_payload.get("workspace"), body=body)
 
-    if handle_code_generation(["guardrail"], "check", all_kwargs, output_format, state):
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+
+    if handle_code_generation(GuardrailClient, "check_guardrail", kwargs, resolved_output_format, state):
         return
 
-    client = state.get_client()
-    result = client.guardrail.check(**all_kwargs)
+    result = state.typed_client(GuardrailClient).check_guardrail(**kwargs)
 
     format_output(
         result,
         is_list=False,
-        output_format=output_format,
+        output_format=resolved_output_format,
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )

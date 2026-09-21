@@ -33,7 +33,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from nemo_platform import AsyncNeMoPlatform
 from nemo_platform_plugin.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nemo_platform_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
-from nemo_platform_plugin.authz import AuthzScope, CallerKind, path_rule
+from nemo_platform_plugin.authz import GENERATED_ROUTE_CALLERS, AuthzScope, path_rule
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.errors import NemoHTTPError
 from nemo_platform_plugin.client.types import RetryPolicy
@@ -825,6 +825,11 @@ def job_route_factory(
             use the same name for related fields (e.g., output).
         generate_job_name: Called when user doesn't provide a job name. Returns the
             auto-generated name to use.
+        authz: The plugin's ``AuthzScope``. When set, each generated route is stamped
+            with a ``@path_rule`` — permission minted from the scope, callers
+            :data:`~nemo_platform_plugin.authz.GENERATED_ROUTE_CALLERS` — plus the
+            matching read / write scope. When omitted the routes are left unruled —
+            denied fail-closed at bundle time.
 
     Example with separate input/output types:
         ```python
@@ -872,7 +877,11 @@ def job_route_factory(
     service_name = service_name.lower()
 
     def _stamp(endpoint: Callable[..., Any], *, perm: str, write: bool) -> Callable[..., Any]:
-        """Attach a PRINCIPAL ``@path_rule`` to a generated job route.
+        """Attach a caller/permission ``@path_rule`` to a generated job route.
+
+        Generated routes admit both caller kinds — see
+        :data:`~nemo_platform_plugin.authz.GENERATED_ROUTE_CALLERS` for why that is the
+        blanket policy rather than a per-route choice.
 
         Inert unless the caller passed an ``authz`` scope — so unmigrated callers keep
         emitting unauthz'd routes (handled by the bundle fail-mode). Returns *endpoint*
@@ -883,7 +892,7 @@ def job_route_factory(
                 perm,
                 description=_JOB_PERMISSION_DESCRIPTIONS[perm].format(ns=authz.namespace),
             )
-            path_rule(callers=[CallerKind.PRINCIPAL], permissions=[permission])(endpoint)
+            path_rule(callers=GENERATED_ROUTE_CALLERS, permissions=[permission])(endpoint)
             # Scope is declared separately from the permission rule (see authz.AuthzScope).
             (authz.write if write else authz.read)(endpoint)
         return endpoint
@@ -1226,8 +1235,8 @@ def job_route_factory(
             result_dict["download_url"] = f"{request.url}/download"
             return PlatformJobResultResponse(**result_dict)
 
-        # Stamp authorization rules on the generated routes (PRINCIPAL caller). Reads use
-        # one shared <ns>.read permission; mutating routes get their own permission.
+        # Stamp authorization rules on the generated routes. Reads use one shared
+        # <ns>.read permission; mutating routes get their own permission.
         _stamp(create_job, perm="create", write=True)
         _stamp(list_jobs, perm="list", write=False)
         _stamp(get_job, perm="read", write=False)
