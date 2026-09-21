@@ -22,12 +22,27 @@ __all__ = ["dense_search", "retrieve"]
 logger = logging.getLogger(__name__)
 
 
-def _cap_passage(text: str, truncate_long_documents: Truncation | None) -> str:
-    if truncate_long_documents is None or len(text) <= DOCUMENT_CHARACTER_LIMIT:
+def _cap_passage(
+    text: str,
+    truncate_long_documents: Truncation | None,
+    limit: int = DOCUMENT_CHARACTER_LIMIT,
+) -> str:
+    if limit < 0:
+        raise ValueError("passage_prefix exceeds DOCUMENT_CHARACTER_LIMIT")
+    if len(text) <= limit:
         return text
+    if truncate_long_documents is None:
+        raise ValueError(f"passage exceeds the limit of {limit} characters")
+    if limit == 0:
+        return ""
     if truncate_long_documents == "start":
-        return text[-DOCUMENT_CHARACTER_LIMIT:]
-    return text[:DOCUMENT_CHARACTER_LIMIT]
+        return text[-limit:]
+    return text[:limit]
+
+
+def _prefixed_passage(prefix: str, text: str, truncate_long_documents: Truncation | None) -> str:
+    """Keep ``prefix`` intact and cap ``text`` so the encoded string fits the NIM limit."""
+    return f"{prefix}{_cap_passage(text, truncate_long_documents, DOCUMENT_CHARACTER_LIMIT - len(prefix))}"
 
 
 # Cells in one query-chunk score block, bounding it to ~256 MB of float32.
@@ -107,7 +122,7 @@ async def dense_search(
         document_vectors = await _encode_batches(
             embeddings,
             [
-                _cap_passage(f"{passage_prefix}{passages[document_id]}", truncate_long_documents)
+                _prefixed_passage(passage_prefix, passages[document_id], truncate_long_documents)
                 for document_id in document_ids
             ],
             batch_size=batch_size,

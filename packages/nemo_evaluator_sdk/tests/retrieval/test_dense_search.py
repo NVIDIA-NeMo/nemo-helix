@@ -530,7 +530,51 @@ async def test_retrieve_truncates_long_documents_before_embed(tmp_path: Path) ->
         )
 
     assert len(sent) == 1
+    assert sent[0].startswith("passage: ")
     assert len(sent[0]) == DOCUMENT_CHARACTER_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_retrieve_start_truncation_keeps_passage_prefix(tmp_path: Path) -> None:
+    from nemo_evaluator_sdk.retrieval.passages import DOCUMENT_CHARACTER_LIMIT
+
+    sent: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        texts = payload["input"]
+        if any(text.startswith("passage: ") for text in texts):
+            sent.extend(texts)
+            return _response(request, [[1.0, 0.0]])
+        return _response(request, [[1.0, 0.0]])
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await retrieve(
+            _write_beir(tmp_path, title="Title", text="x" * (DOCUMENT_CHARACTER_LIMIT + 80)),
+            Retrieval(embeddings=_model(), embedding_dimensions=2, truncate_long_documents="start"),
+            client=client,
+        )
+
+    assert len(sent) == 1
+    assert sent[0].startswith("passage: ")
+    assert len(sent[0]) == DOCUMENT_CHARACTER_LIMIT
+    assert sent[0].endswith("x")
+
+
+def test_prefixed_passage_raises_when_untruncated_text_exceeds_budget() -> None:
+    from nemo_evaluator_sdk.retrieval.dense_search import _prefixed_passage
+    from nemo_evaluator_sdk.retrieval.passages import DOCUMENT_CHARACTER_LIMIT
+
+    with pytest.raises(ValueError, match="passage exceeds the limit"):
+        _prefixed_passage("passage: ", "x" * DOCUMENT_CHARACTER_LIMIT, None)
+
+
+def test_prefixed_passage_raises_when_prefix_exceeds_limit() -> None:
+    from nemo_evaluator_sdk.retrieval.dense_search import _prefixed_passage
+    from nemo_evaluator_sdk.retrieval.passages import DOCUMENT_CHARACTER_LIMIT
+
+    with pytest.raises(ValueError, match="passage_prefix exceeds"):
+        _prefixed_passage("p" * (DOCUMENT_CHARACTER_LIMIT + 1), "body", "end")
 
 
 @pytest.mark.asyncio
