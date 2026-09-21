@@ -2,31 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { StartOption as SharedStartOption } from '@studio/components/StartOptions/types';
-import type { CustomizationTemplate } from '@studio/constants/customizationTemplates';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
 
-export type StartOptionId = 'template' | 'scratch';
+export type StartOptionId = 'scratch';
 
 export type StartOption = SharedStartOption<StartOptionId>;
-
-export interface TemplateCardProps {
-  template: CustomizationTemplate;
-  selected: boolean;
-  onSelect: () => void;
-}
-
-export interface TemplateGridProps {
-  /** Id of the picked recipe, or null while none is. */
-  selectedTemplateId: string | null;
-  onSelectTemplate: (id: string | null) => void;
-}
-
-export interface StartOptionDetailProps {
-  option: StartOption;
-  /** The picked recipe, when {@link option} is "template". */
-  selectedTemplateId: string | null;
-  onSelectTemplate: (id: string | null) => void;
-}
 
 /**
  * What the user confirmed via the Continue footer. Every arm but "scratch" resolves to
