@@ -463,12 +463,12 @@ def _add_submit_command(
             elif cli is not None:
                 renderer_resolved = cli.get_job_renderer(job_cls, verb="submit")
 
-        resolved_base_url = _resolve_submit_base_url(typer_ctx, base_url=base_url, cluster=cluster)
+        resolved_base_url = resolve_submit_base_url(typer_ctx, base_url=base_url, cluster=cluster)
         submitted: SubmittedJob | None = None
 
         def _do_submit() -> Any:
             nonlocal submitted
-            resolved_headers = _resolve_submit_auth_headers(typer_ctx)
+            resolved_headers = resolve_submit_auth_headers(typer_ctx)
             submit_kwargs: dict[str, Any] = {
                 "base_url": resolved_base_url,
                 "workspace": workspace,
@@ -1013,7 +1013,7 @@ async def _invoke_function_locally(
     typer.echo(_format_value_for_stdout(awaited))
 
 
-def _resolve_submit_auth_headers(typer_ctx: typer.Context) -> dict[str, str]:
+def resolve_submit_auth_headers(typer_ctx: typer.Context) -> dict[str, str]:
     """Bearer (and other) default headers from the active CLI context."""
     state = typer_ctx.obj
     if state is None or not hasattr(state, "get_sdk_context"):
@@ -1075,7 +1075,7 @@ def _add_function_submit_command(
             cluster=cluster,
             workspace=workspace,
         )
-        headers = _resolve_submit_auth_headers(typer_ctx)
+        headers = resolve_submit_auth_headers(typer_ctx)
         if request_id is not None:
             headers["X-Request-ID"] = request_id
 
@@ -1251,7 +1251,7 @@ def _resolve_cluster_name_to_base_url(cluster_name: str) -> str:
     )
 
 
-def _resolve_submit_base_url(
+def resolve_submit_base_url(
     typer_ctx: typer.Context,
     *,
     base_url: str | None,
@@ -1289,7 +1289,7 @@ def _build_function_submit_url(
     :attr:`NemoFunction.endpoint` substituting the trailing segment
     when set.
     """
-    host = _resolve_submit_base_url(typer_ctx, base_url=base_url, cluster=cluster)
+    host = resolve_submit_base_url(typer_ctx, base_url=base_url, cluster=cluster)
     api_segment = _api_segment_for_function(fn_cls)
     trailing = (fn_cls.endpoint or DEFAULT_FUNCTION_PATH).replace("{name}", fn_cls.name)
     if not trailing.startswith("/"):
