@@ -99,6 +99,17 @@ describe('CreateCustomizationStart', () => {
     expect(continueButton()).toBeEnabled();
   });
 
+  it('names the selection in the footer, and prompts before there is one', async () => {
+    const user = userEvent.setup();
+    renderStart();
+    expect(screen.getByText('Select an option above to continue')).toBeInTheDocument();
+
+    await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
+    expect(
+      screen.getByText(`Continue with ${CUSTOMIZATION_TEMPLATES[0].title} selected`)
+    ).toBeInTheDocument();
+  });
+
   it('hands "from scratch" over without any form values', async () => {
     const user = userEvent.setup();
     const onContinue = vi.fn();
