@@ -25,11 +25,15 @@ Example::
         ...
 """
 
+import logging
 import os
-from typing import cast
+from typing import Any, cast
 
+import click
 import typer
 from nemo_platform_plugin.entities import DEFAULT_WORKSPACE
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_local_cli_sdks(
@@ -51,25 +55,65 @@ def resolve_local_cli_sdks(
     return sdk, async_sdk
 
 
+def _workspace_from_state(state: Any) -> str | None:
+    """Read the active workspace off a CLI state object, if it exposes one."""
+    if state is None or not hasattr(state, "get_workspace"):
+        return None
+    try:
+        resolved = state.get_workspace()
+    except Exception:
+        logger.debug("Failed to resolve workspace from CLI state", exc_info=True)
+        return None
+    return cast(str, resolved) if resolved else None
+
+
 def resolve_cli_workspace(typer_ctx: typer.Context, explicit: str | None = None) -> str:
-    """Resolve the workspace a generated verb should act on.
+    """Resolve the workspace a command should act on, given an explicit context.
 
-    Precedence, mirroring :func:`_resolve_submit_base_url`'s handling of the
-    host: explicit ``--workspace`` flag > the active CLI context's default
-    workspace > ``$NMP_WORKSPACE`` > ``"default"``.
+    An explicit ``--workspace`` wins. Otherwise the active CLI context
+    decides, and it applies ``$NMP_WORKSPACE`` over its own configured
+    workspace. If there is no usable context — no config file yet, or a
+    plugin CLI driven outside ``nemo`` — fall back to ``$NMP_WORKSPACE``,
+    then ``"default"``.
 
-    The state object's ``get_workspace()`` already folds in ``$NMP_WORKSPACE``
-    (the SDK ``Config`` reads it as an override), so the environment lookup
-    here only matters when no state object is set — e.g. plugin tests that
-    exercise a Typer app directly, or a plugin CLI driven outside ``nemo``.
+    Net user-visible order: ``--workspace`` > ``$NMP_WORKSPACE`` > the
+    context's configured workspace > ``"default"``.
+
+    The environment is therefore read in two places. That is deliberate, not
+    redundant: with no config file on disk ``get_workspace()`` returns
+    ``None``, and the lookup below is the only thing that honors
+    ``$NMP_WORKSPACE`` — the documented way to pick a workspace in a fresh
+    container or CI job.
+
+    Use :func:`resolve_workspace` instead when the command does not already
+    take a :class:`typer.Context`.
     """
     if explicit is not None:
         return explicit
+    return _workspace_from_state(typer_ctx.obj) or os.environ.get("NMP_WORKSPACE") or DEFAULT_WORKSPACE
 
-    state = typer_ctx.obj
-    if state is not None and hasattr(state, "get_workspace"):
-        resolved = state.get_workspace()
-        if resolved:
-            return cast(str, resolved)
 
-    return os.environ.get("NMP_WORKSPACE") or DEFAULT_WORKSPACE
+def resolve_workspace(explicit: str | None = None) -> str:
+    """Ambient twin of :func:`resolve_cli_workspace`.
+
+    Reads the *current* Click context rather than one passed in, so
+    plugin-authored commands can honor the active workspace without threading
+    ``typer.Context`` through every signature. ``Context.obj`` is inherited
+    from parent contexts, so this resolves the same state object the top-level
+    ``nemo`` callback installed.
+
+    Same resolution as its twin. Outside a Click invocation (e.g. a direct
+    unit test) there is no state object, so it falls back to
+    ``$NMP_WORKSPACE`` then ``"default"`` — matching the pre-existing
+    behavior of the commands that call it.
+
+    Declare the option as ``typer.Option(None, "--workspace", ...)`` and pass
+    the flag value here. A literal ``"default"`` as the Typer default is the
+    bug this exists to prevent: it makes an omitted flag indistinguishable
+    from an explicit one, so the active context can never win.
+    """
+    if explicit is not None:
+        return explicit
+    ctx = click.get_current_context(silent=True)
+    state = ctx.obj if ctx is not None else None
+    return _workspace_from_state(state) or os.environ.get("NMP_WORKSPACE") or DEFAULT_WORKSPACE
