@@ -70,8 +70,8 @@ export interface StartPageProps {
   onChange: (value: string) => void;
   /** Locks the whole group. Set while a selection is being acted on. */
   disabled?: boolean;
-  /** Shown beside a disabled Continue, in place of the default prompt. */
-  blockedHint?: string;
+  /** Shown while nothing is selected, in place of the default prompt. */
+  emptyHint?: string;
   continueLabel?: ReactNode;
   continueLoading?: boolean;
   canContinue: boolean;

@@ -13,11 +13,13 @@ import {
   Text,
 } from '@nvidia/foundations-react-core';
 import type { StartPageProps } from '@studio/components/StartOptions/types';
-import { ArrowRight } from 'lucide-react';
 import type { FC } from 'react';
 
 /** The column the whole flow sits in, per the design. */
 const CONTENT_WIDTH = 'w-full max-w-[768px]';
+
+/** The design's tile is `radius/md`; Card's own `radius-density-xl` is visibly rounder. */
+const TILE_RADIUS = 'rounded-[var(--radius-md)]';
 
 /**
  * "How do you want to start?" — the entry point shared by the create flows.
@@ -33,7 +35,7 @@ export const StartPage: FC<StartPageProps> = ({
   value,
   onChange,
   disabled = false,
-  blockedHint,
+  emptyHint,
   continueLabel = 'Continue',
   continueLoading = false,
   canContinue,
@@ -41,6 +43,10 @@ export const StartPage: FC<StartPageProps> = ({
   slotBanner,
 }) => {
   const groups = templateGroups.filter((group) => group.templates.length > 0);
+
+  const selectedLabel =
+    options.find((option) => option.id === value)?.title ??
+    groups.flatMap((group) => group.templates).find((template) => template.id === value)?.name;
 
   return (
     <Stack className="h-full">
@@ -66,6 +72,7 @@ export const StartPage: FC<StartPageProps> = ({
                       description={option.description}
                       icon={<option.icon size={16} aria-hidden />}
                       showIndicator={false}
+                      className={TILE_RADIUS}
                       disabled={disabled || !option.enabled}
                     />
                   ))}
@@ -93,6 +100,7 @@ export const StartPage: FC<StartPageProps> = ({
                               description={template.description}
                               icon={<template.icon size={16} aria-hidden />}
                               showIndicator={false}
+                              className={TILE_RADIUS}
                               disabled={disabled}
                             />
                           ))}
@@ -109,13 +117,13 @@ export const StartPage: FC<StartPageProps> = ({
         </Stack>
       </Block>
 
-      <Flex justify="center" className="shrink-0 border-t border-base bg-surface-base px-10 py-4">
-        <Flex align="center" justify="end" gap="density-lg" className={CONTENT_WIDTH}>
-          {!canContinue && !continueLoading && (
-            <Text kind="body/regular/sm" className="text-secondary">
-              {blockedHint ?? 'Select an option above to continue'}
-            </Text>
-          )}
+      <Flex justify="center" className="shrink-0 border-t border-base bg-surface-base px-10 py-3">
+        <Flex align="center" justify="end" gap="density-2xl" className={CONTENT_WIDTH}>
+          <Text kind="label/regular/md" className="text-secondary">
+            {selectedLabel
+              ? `Continue with ${selectedLabel} selected`
+              : (emptyHint ?? 'Select an option above to continue')}
+          </Text>
           <LoadingButton
             color="brand"
             kind="primary"
@@ -123,14 +131,7 @@ export const StartPage: FC<StartPageProps> = ({
             onClick={onContinue}
             disabled={!canContinue}
           >
-            {continueLoading ? (
-              continueLabel
-            ) : (
-              <>
-                {continueLabel}
-                <ArrowRight size={16} aria-hidden />
-              </>
-            )}
+            {continueLabel}
           </LoadingButton>
         </Flex>
       </Flex>
