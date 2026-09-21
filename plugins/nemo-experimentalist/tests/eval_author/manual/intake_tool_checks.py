@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Manual check of the Eval Author Intake tools against a live platform.
+"""Manual check of the Experimentalist Intake tools against a live platform.
 
 Not a test. Pytest does not collect this file. No automation runs it. See README.md in
 this directory.

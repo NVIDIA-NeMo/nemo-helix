@@ -7,7 +7,7 @@ These scripts are not tests. No automation runs them. Pytest does not collect th
 because their names do not start with `test_`.
 
 Run them by hand against a local NeMo Platform that has Intake running and holds real
-spans. The unit tests in `tests/test_traces.py` fake every Intake call, so they prove
+spans. The unit tests in `tests/eval_author/test_traces.py` fake every Intake call, so they prove
 the logic but never prove that Intake answers the way the logic expects. These scripts
 close that gap.
 

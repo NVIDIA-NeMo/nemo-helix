@@ -10,17 +10,6 @@ Inherited from the NeMo Platform monorepo that now hosts this plugin:
 - Concrete type hints, not string-based. Don't hide imports under `TYPE_CHECKING`.
 - Lint/format with `uv run ruff check` and `uv run ruff format`.
 - All files need the SPDX header (`Copyright (c) ... NVIDIA CORPORATION & AFFILIATES`, `Apache-2.0`).
-
-## Eval Author ownership
-
-`nemo_experimentalist_plugin.eval_author` owns Experimentalist's internal Eval Author
-agent, including `eval_author/traces.py`. Insight mode uses this agent to author
-evaluation suites. Its implementation, configuration, and tests remain in this plugin.
-
-- The agent's evaluator, staging, trace, tools, and reporting helpers use intra-package
-  imports.
-- Agent tests live in `tests/eval_author/`, with isolation provided by this plugin's
-  `conftest.py`.
 - Use `nemo_platform_plugin.nooa_model_client` for provider routing, Platform
   authentication, and configured model selection.
 
@@ -40,8 +29,8 @@ command back to the user.
 ### 2026-07-24: Optimizer renamed to Experimentalist
 
 Ahead of the move into the `nemo-platform` monorepo, the plugin was renamed from
-Optimizer to Experimentalist. Like the Eval Author rename below, this is a
-breaking rename with no compatibility aliases:
+Optimizer to Experimentalist. This is a breaking rename with no compatibility
+aliases:
 
 - distribution `nemo-optimizer-plugin` → `nemo-experimentalist-plugin`, source
   path `src/nemo_optimizer_plugin` → `src/nemo_experimentalist_plugin`
@@ -70,25 +59,6 @@ component (`strategy: evolutionary`).
 
 Run `nemo agents experimentalist components` to see everything this install can resolve,
 including components registered by a separately installed package.
-
-### 2026-07-21: Curator renamed to Eval Author
-
-The Curator agent was renamed directly to Eval Author in ASE-643. This is a
-breaking rename with no compatibility aliases or migration layer:
-
-- `nemo_experimentalist_plugin.curator` → `nemo_experimentalist_plugin.eval_author`
-- `Curator`, `CuratorConfig`, and `CuratorResult` → `EvalAuthor`,
-  `EvalAuthorConfig`, and `EvalAuthorResult`
-- `run_curator(...)` and `build_curator_agent(...)` →
-  `run_eval_author(...)` and `build_eval_author_agent(...)`
-- the `curator` optimizer configuration block → `eval_author`
-- Curator-specific artifact paths, cache keys, helpers, tests, and documentation
-  now use `eval_author` / Eval Author terminology
-
-Agents working on in-flight branches that touch these surfaces should rebase
-before resolving conflicts, keep the Eval Author names, and update their code
-instead of restoring Curator imports, configuration, or aliases. The obsolete
-`curator` configuration key is intentionally rejected with a validation error.
 
 ## Development environment
 
