@@ -100,6 +100,10 @@ def add_job_routes(
             compiled ``PlatformJobSpec`` when the plugin's ``compile``
             didn't set one explicitly and the submitter did not provide
             ``profile``.
+        authz: The plugin's :class:`~nemo_platform_plugin.authz.AuthzScope`.
+            When set, every generated route is stamped with a ``@path_rule``
+            (callers :data:`~nemo_platform_plugin.authz.GENERATED_ROUTE_CALLERS`)
+            and the matching read/write scope.
 
     Returns:
         An :class:`APIRouter` with the standard job endpoints mounted.

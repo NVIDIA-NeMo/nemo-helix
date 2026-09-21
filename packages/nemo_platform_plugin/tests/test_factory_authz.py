@@ -97,11 +97,16 @@ def _mounted_customization_jobs(**factory_kwargs) -> APIRouter:
 
 
 def _assert_single_rule(entry: tuple[list, list[str] | None], perm: str, scopes: list[str]) -> None:
-    """Assert *entry* (rules, scope) has exactly one PRINCIPAL rule for *perm* and scope *scopes*."""
+    """Assert *entry* (rules, scope) has exactly one rule for *perm* and scope *scopes*.
+
+    Every generated route carries both caller kinds — see
+    ``nemo_platform_plugin.authz.GENERATED_ROUTE_CALLERS`` for why that is blanket policy
+    rather than a per-route choice.
+    """
     rules, scope = entry
     assert len(rules) == 1
     rule = rules[0]
-    assert rule.callers == [CallerKind.PRINCIPAL]
+    assert rule.callers == [CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL]
     assert [p.id for p in rule.permissions] == [perm]
     assert scope == scopes
 
@@ -200,7 +205,10 @@ def test_job_factory_derivation_end_to_end() -> None:
 
     collection = "/apis/customization/v2/workspaces/{workspace}/jobs"
     assert contrib.endpoints[collection]["post"].permissions == ["customization.jobs.create"]
-    assert contrib.endpoints[collection]["post"].callers == ["principal"]
+    # Both caller kinds reach the wire format, which is what the PDP actually reads: a
+    # ``callers`` list omitting ``service_principal`` is an unconditional deny for one.
+    assert contrib.endpoints[collection]["post"].callers == ["principal", "service_principal"]
+    assert contrib.endpoints[f"{collection}/{{name}}"]["delete"].callers == ["principal", "service_principal"]
     assert contrib.endpoints[f"{collection}/{{name}}"]["delete"].permissions == ["customization.jobs.delete"]
 
 
