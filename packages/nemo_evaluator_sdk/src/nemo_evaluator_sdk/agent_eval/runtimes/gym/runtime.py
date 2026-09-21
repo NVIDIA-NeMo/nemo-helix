@@ -48,9 +48,26 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym.results import (
 from nemo_evaluator_sdk.agent_eval.runtimes.provenance import redact_credentials
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, RunnerInfo
+from nemo_evaluator_sdk.resolver_protocols import SecretResolver
+from nemo_evaluator_sdk.resolvers import LocalSecretResolver
+from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.results import AggregateScore
 
 logger = logging.getLogger(__name__)
+
+
+async def _resolve_env_secrets(env_secrets: Mapping[str, SecretRef], secret_resolver: SecretResolver) -> dict[str, str]:
+    resolved: dict[str, str] = {}
+    for env_var, secret_ref in env_secrets.items():
+        value = await secret_resolver.resolve_secret(secret_ref)
+        if value is None:
+            raise ValueError(
+                f"could not resolve secret {secret_ref.root!r} for env var {env_var!r}. Locally that means "
+                "no matching environment variable was set; in a job it means the platform did not resolve "
+                "the reference."
+            )
+        resolved[env_var] = value
+    return resolved
 
 
 class GymAgentTaskRunner:
@@ -67,6 +84,16 @@ class GymAgentTaskRunner:
     def __init__(self, *, config: GymRuntimeConfig) -> None:
         self._config = config
         self._run_aggregations: dict[str, Any] | None = None
+        self._resolved_env: dict[str, str] = {}
+        self._secrets_resolved = False
+
+    async def resolve_secrets(self, secret_resolver: SecretResolver) -> None:
+        """Resolve ``config.env_secrets``, keyed by the env var Gym reads each one from.
+
+        Call before :meth:`run_tasks`, which otherwise resolves locally.
+        """
+        self._resolved_env = await _resolve_env_secrets(self._config.env_secrets, secret_resolver)
+        self._secrets_resolved = True
 
     @property
     def config(self) -> GymRuntimeConfig:
@@ -125,6 +152,8 @@ class GymAgentTaskRunner:
     ) -> list[AgentEvalTrial]:
         cfg = self._config
         self._run_aggregations = None  # reset per run so a reused runner never leaks a prior run's numbers
+        if not self._secrets_resolved:
+            await self.resolve_secrets(LocalSecretResolver())
         # Provenance for the log line only — the file Gym actually reads is the normalized one we
         # materialize below from the tasks themselves.
         source_dataset = source_datasets(tasks)
@@ -225,7 +254,7 @@ class GymAgentTaskRunner:
         # detects a `uv run` ancestor and tries to replicate that uv project onto its workers,
         # asserting the project pyproject.toml lives in the driver's cwd — which aborts startup. That
         # hook is wrong for Gym (servers manage their own deps), so disable it for the subprocesses.
-        subprocess_env = gym_invocation_env(cfg)
+        subprocess_env = gym_invocation_env(cfg, self._resolved_env)
 
         selection = selection_args(cfg, work_dir)
 
