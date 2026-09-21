@@ -625,6 +625,9 @@ extra-paths = [
   "plugins/nemo-evaluator/src",
   # Source path for the Insights analyst plugin.
   "plugins/nemo-insights/src",
+  # nemo-builder plugin is not a workspace member; add its src so ty can
+  # resolve nemo_builder_plugin imports when checking plugin test files.
+  "plugins/nemo-builder/src",
   # Source path for nemo-sandboxed-gym; its tests import the package under test.
   "packages/sandboxed_gym/src",
   # Agentic-use tests place both tests/agentic-use and tests/agentic-use/shared

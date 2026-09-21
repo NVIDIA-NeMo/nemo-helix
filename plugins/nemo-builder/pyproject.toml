@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "nemo-builder-plugin"
+description = "In-cluster container image builds for NeMo Platform (RFC 001)."
+requires-python = ">=3.11,<3.15"
+dependencies = ["nemo-platform-plugin", "nemo-platform", "pydantic>=2.0.0"]
+version = "0.1.0"
+
+[tool.uv.sources]
+nemo-platform = { path = "../../packages/nemo_platform", editable = true }
+nemo-platform-plugin = { path = "../../packages/nemo_platform_plugin", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nemo_builder_plugin"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["src"]
