@@ -354,6 +354,26 @@ def test_auth_refresh_updates_selected_context_only(oauth_config_file: Path, mon
     assert callable(provider_kwargs["on_tokens_refreshed"])
 
 
+def test_auth_refresh_without_refresh_token_uses_provider_neutral_guidance(
+    oauth_config_file: Path,
+) -> None:
+    with open(oauth_config_file) as f:
+        data = yaml.safe_load(f)
+
+    foo_user = next(user for user in data["users"] if user["name"] == "foo")
+    foo_user["refresh_token"] = None
+
+    with open(oauth_config_file, "w") as f:
+        yaml.safe_dump(data, f)
+
+    result = runner.invoke(app, ["--context", "foo", "auth", "refresh"])
+
+    assert_exit_code(result, 1)
+    assert "Check the OIDC provider and" in result.output
+    assert "client configuration" in result.output
+    assert "with 'offline_access' scope" not in result.output
+
+
 def test_config_backed_force_refresh_reloads_rotated_token_before_request(
     oauth_config_file: Path,
 ) -> None:
@@ -1320,6 +1340,24 @@ def test_auth_login_passes_device_compatibility_settings(
     foo_user = next(user for user in data["users"] if user["name"] == "foo")
     assert foo_user["token"] == "signed-id-token"
     assert foo_user["refresh_token"] == "refresh-token"
+
+
+def test_auth_login_without_refresh_token_uses_provider_neutral_guidance(
+    oauth_config_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def device_flow(**_kwargs) -> SimpleNamespace:
+        return SimpleNamespace(token_for_nmp="signed-id-token", refresh_token=None)
+
+    monkeypatch.setattr("nemo_platform_ext.cli.commands.auth.discover_nmp_config", _discover_oidc_config)
+    monkeypatch.setattr("nemo_platform_ext.auth.device_flow.authenticate_with_device_flow", device_flow)
+    monkeypatch.setattr("nemo_platform_ext.cli.commands.auth.decode_jwt_claims", _decode_jwt_noop)
+
+    result = runner.invoke(app, ["--context", "foo", "auth", "login", "--no-browser"])
+
+    assert_exit_code(result, 0)
+    assert "Refresh token: not issued" in result.output
+    assert "check the OIDC provider and client configuration" in result.output
+    assert "add 'offline_access' scope to enable" not in result.output
 
 
 def test_auth_login_with_base_url_updates_selected_context(oauth_config_file: Path, monkeypatch: pytest.MonkeyPatch):

@@ -452,7 +452,7 @@ def _login_with_oidc(
     if token_response.refresh_token:
         console.print("  Refresh token: [green]saved[/] (enables automatic token renewal)")
     else:
-        console.print("  Refresh token: [yellow]not available[/] (add 'offline_access' scope to enable)")
+        console.print("  Refresh token: [yellow]not issued[/] (check the OIDC provider and client configuration)")
 
     console.print("\n[bold green]Credentials saved to config file.[/]")
     if runtime_token_source := _runtime_token_source_label():
@@ -834,7 +834,10 @@ def refresh(ctx: typer.Context) -> None:
         return
 
     if not context.user.refresh_token:
-        raise AuthError("No refresh token available. Re-run 'nemo auth login' with 'offline_access' scope.")
+        raise AuthError(
+            "No refresh token is available. Check the OIDC provider and client configuration, "
+            "then re-run 'nemo auth login'."
+        )
 
     # Fetch client_id from cluster discovery
     base_url = str(context.cluster.base_url).rstrip("/")
