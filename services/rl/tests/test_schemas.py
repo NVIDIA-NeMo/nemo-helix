@@ -227,6 +227,79 @@ def test_batching_defaults() -> None:
     assert t.sequence_length_round == 64
 
 
+def test_sequence_packing_rejected_under_context_parallel_at_submit() -> None:
+    """DTensorPolicyWorker rejects packing under CP; fail the request, not the GPU job."""
+    with pytest.raises(ValueError, match="not supported with context_parallel_size"):
+        GRPOTraining(
+            type="grpo",
+            batching_strategy=BatchingStrategy.SEQUENCE_PACKING,
+            parallelism=ParallelismParams(num_gpus_per_node=2, context_parallel_size=2),
+        )
+
+
+def test_sequence_packing_accepted_without_context_parallel() -> None:
+    t = GRPOTraining(type="grpo", batching_strategy=BatchingStrategy.SEQUENCE_PACKING)
+    assert t.batching_strategy is BatchingStrategy.SEQUENCE_PACKING
+    assert t.parallelism.context_parallel_size == 1
+
+
+def test_train_mb_tokens_rejected_below_max_seq_length() -> None:
+    """A budget under max_seq_length leaves the longest rollout unable to fit anywhere."""
+    with pytest.raises(ValueError, match="below max_seq_length"):
+        GRPOTraining(type="grpo", max_seq_length=2048, train_mb_tokens=1024)
+
+
+def test_train_mb_tokens_accepted_at_max_seq_length() -> None:
+    t = GRPOTraining(type="grpo", max_seq_length=2048, train_mb_tokens=2048)
+    assert t.train_mb_tokens == 2048
+
+
+def test_batch_multiplier_rejected_below_one() -> None:
+    """NeMo-RL's DAPO contract is float >= 1.0; values below that shrink the prompt pool."""
+    with pytest.raises(ValueError, match="batch_multiplier"):
+        GRPOTraining(type="grpo", use_dynamic_sampling=True, batch_multiplier=0.5)
+
+
+def test_batch_multiplier_requires_dynamic_sampling() -> None:
+    with pytest.raises(ValueError, match="use_dynamic_sampling"):
+        GRPOTraining(type="grpo", batch_multiplier=2.0)
+
+
+def test_batch_multiplier_accepted_with_dynamic_sampling() -> None:
+    t = GRPOTraining(type="grpo", use_dynamic_sampling=True, batch_multiplier=1.5)
+    assert t.batch_multiplier == 1.5
+
+
+def test_context_and_sequence_parallel_rejected_under_tensor_parallel() -> None:
+    with pytest.raises(ValueError, match="incompatible with sequence parallel"):
+        ParallelismParams(num_gpus_per_node=4, tensor_parallel_size=2, context_parallel_size=2, sequence_parallel=True)
+
+
+def test_context_parallel_with_sequence_parallel_ok_at_tp_one() -> None:
+    p = ParallelismParams(num_gpus_per_node=2, context_parallel_size=2, sequence_parallel=True)
+    assert p.tensor_parallel_size == 1
+
+
+def test_leave_one_out_rejected_with_singleton_group() -> None:
+    with pytest.raises(ValueError, match="num_generations_per_prompt >= 2"):
+        GRPOTraining(type="grpo", num_generations_per_prompt=1)
+
+
+def test_singleton_group_ok_without_leave_one_out() -> None:
+    t = GRPOTraining(type="grpo", num_generations_per_prompt=1, use_leave_one_out_baseline=False)
+    assert t.num_generations_per_prompt == 1
+
+
+def test_min_learning_rate_cannot_exceed_peak() -> None:
+    with pytest.raises(ValueError, match="min_learning_rate"):
+        DPOTraining(type="dpo", learning_rate=1e-4, min_learning_rate=1e-3)
+
+
+def test_negative_val_check_interval_rejected() -> None:
+    with pytest.raises(ValueError):
+        DPOTraining(type="dpo", val_check_interval=-1.0)
+
+
 def test_use_triton_defaults_to_unset() -> None:
     """Unset is what lets the compiler resolve it from TP without overriding a caller."""
     from nmp.rl.schemas import LoRAParams
