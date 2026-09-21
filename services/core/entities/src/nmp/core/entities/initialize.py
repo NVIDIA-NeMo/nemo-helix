@@ -108,19 +108,18 @@ async def initialize_database(run_migrations: bool = True) -> None:
     Args:
         run_migrations: If True, run Alembic upgrade head at startup.
     """
-    from nmp.core.entities.app.repository import _async_engine, get_async_session_maker
+    from nmp.core.entities.app.repository import get_async_engine, get_async_session_maker
 
     logger.info("Initializing entity store database...")
 
-    if _async_engine is None:
-        raise RuntimeError("Async engine not initialized. Call initialize_async_engine() before initialize_database().")
+    engine = await get_async_engine()
 
     if run_migrations:
         alembic_ini = _find_alembic_ini()
         if alembic_ini:
             logger.info("Running database migrations (alembic upgrade head)...")
             try:
-                await asyncio.to_thread(_run_alembic_upgrade, alembic_ini, _engine_url_for_alembic(_async_engine))
+                await asyncio.to_thread(_run_alembic_upgrade, alembic_ini, _engine_url_for_alembic(engine))
                 logger.info("✓ Database migrations applied")
             except Exception:
                 logger.exception("Database migrations failed")
