@@ -14,9 +14,7 @@ mutation in ``default`` still requires access to ``default``.
 Phase 0: hardcoded registry. Phase 1: dynamic registration via entity type schemas.
 """
 
-from nmp.common.entities.constants import DEFAULT_WORKSPACE
-
-GLOBAL_WORKSPACE = DEFAULT_WORKSPACE
+from nmp.common.entities.global_workspace import GLOBAL_WORKSPACE as GLOBAL_WORKSPACE
 
 _GLOBALLY_SHAREABLE: frozenset[str] = frozenset(
     {

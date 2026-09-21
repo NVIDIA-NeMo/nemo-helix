@@ -25,6 +25,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from nmp.common.api.common import DeleteResponse, Page, PaginationData
 from nmp.common.auth import ALL_WORKSPACES
 from nmp.common.auth.client import AuthClient
+from nmp.common.entities.global_workspace import workspace_lookup_order
 from nmp.core.entities.api.dependencies import (
     AuthClientDep,
     EntityRepository,
@@ -45,6 +46,7 @@ from nmp.core.entities.app.repository.exceptions import EntityNotFoundError, Ent
 from nmp.core.entities.entities import Entity
 from nmp.core.entities.utils.filter import FilterDep
 from nmp.core.entities.utils.identifiers import generate_entity_name
+from nmp.core.entities.utils.sharing import GLOBAL_WORKSPACE, is_globally_shareable
 from sqlalchemy.exc import IntegrityError
 
 
@@ -365,8 +367,15 @@ async def list_entities(
         # Check if workspace is being deleted (404 for user requests)
         await validate_workspace_not_deleting(workspace_repository, auth_client, workspace)
 
-        query_workspace = workspace
-        effective_filter = filter
+        # A shareable type lists the request workspace unioned with the global one, so a
+        # shared entity shows up in every workspace's listing. Both rows are returned when
+        # a name exists in each; the caller sees the owning workspace on every entity.
+        if is_globally_shareable(entity_type) and workspace != GLOBAL_WORKSPACE:
+            query_workspace = ALL_WORKSPACES
+            effective_filter = add_workspace_filtering({workspace, GLOBAL_WORKSPACE}, filter, field="workspace")
+        else:
+            query_workspace = workspace
+            effective_filter = filter
 
     entities, total = await repository.list_entities(
         workspace=query_workspace,
@@ -438,15 +447,19 @@ async def get_entity_by_name(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
     )
 
-    entity = await repository.get_entity_by_name(
-        workspace=workspace,
-        entity_type=entity_type,
-        name=name,
-        parent=parent,
-    )
-    if entity is None:
-        raise HTTPException(status_code=404, detail="Entity not found")
-    return entity
+    # Shareable types also resolve out of the global workspace. Local wins, so a
+    # same-named entity in the request workspace always shadows the global one.
+    candidates = workspace_lookup_order(workspace) if is_globally_shareable(entity_type) else (workspace,)
+    for candidate in candidates:
+        entity = await repository.get_entity_by_name(
+            workspace=candidate,
+            entity_type=entity_type,
+            name=name,
+            parent=parent,
+        )
+        if entity is not None:
+            return entity
+    raise HTTPException(status_code=404, detail="Entity not found")
 
 
 @router.put(

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 from nemo_platform import APIConnectionError, APIStatusError, AsyncNeMoPlatform
 from nemo_platform.types.inference.virtual_model import VirtualModel
+from nmp.common.entities.global_workspace import workspace_lookup_order
 from nmp.core.inference_gateway.api.middleware_registry import (
     MiddlewareConfigRef,
     PrefetchResult,
@@ -104,8 +105,17 @@ class VirtualModelCache:
     config_ref_versions: dict[MiddlewareConfigRef, datetime | None] = field(default_factory=dict)
 
     def get(self, workspace: str, name: str) -> VirtualModel | None:
-        """Return the VirtualModel for ``workspace/name``, or ``None`` if not cached."""
-        return self.virtual_model_map.get((workspace, name))
+        """Return the VirtualModel for ``workspace/name``, or ``None`` if not cached.
+
+        Falls back to the global workspace so a VirtualModel shared from ``default`` is
+        routable from every workspace. Local wins: a same-named VirtualModel in
+        *workspace* always shadows the global one.
+        """
+        for candidate in workspace_lookup_order(workspace):
+            virtual_model = self.virtual_model_map.get((candidate, name))
+            if virtual_model is not None:
+                return virtual_model
+        return None
 
     def rebuild(self, virtual_models: list[VirtualModel]) -> None:
         """Replace the entire cache with *virtual_models*.
