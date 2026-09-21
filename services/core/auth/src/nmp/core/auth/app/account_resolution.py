@@ -10,6 +10,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping
 
+from nmp.common.auth.principal_identifier import (
+    InvalidPrincipalIdentifier,
+    parse_principal_identifier,
+    parse_service_name,
+)
 from nmp.core.auth.config import AuthServiceConfig
 from nmp.core.entities.app.repository import (
     AccountIdentityConflictError,
@@ -26,7 +31,6 @@ logger = logging.getLogger(__name__)
 CallerKind = Literal["principal", "service_principal"]
 AccountType = Literal["user", "service"]
 
-_SERVICE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 _TRUSTED_IDENTIFIER_RE = re.compile(r"^[a-zA-Z0-9@._\-:+/]+$")
 _BUILT_IN_SERVICE_NAMES = {
     "auth",
@@ -109,7 +113,12 @@ def _list_of_strings(data: Mapping[str, Any], key: str) -> list[str]:
 
 def _caller_kind_from_principal_id(auth_input: Mapping[str, Any]) -> CallerKind:
     principal_id = _string_value(auth_input, "principal_id") or ""
-    return "service_principal" if principal_id.startswith("service:") else "principal"
+    if not principal_id:
+        return "principal"
+    try:
+        return parse_principal_identifier(principal_id, validate=False).caller_kind
+    except InvalidPrincipalIdentifier as exc:
+        raise ServicePrincipalNotAllowedError(str(exc)) from exc
 
 
 def _account_type_from_descriptor(descriptor: Mapping[str, Any]) -> AccountType:
@@ -119,15 +128,6 @@ def _account_type_from_descriptor(descriptor: Mapping[str, Any]) -> AccountType:
     if account_type == "service":
         return "service"
     raise AccountResolutionError("Identity descriptor has invalid account_type")
-
-
-def _service_name_from_principal_id(principal_id: str) -> str | None:
-    if not principal_id.startswith("service:"):
-        return None
-    service_name = principal_id.removeprefix("service:").strip()
-    if not service_name or not _SERVICE_NAME_RE.match(service_name):
-        return None
-    return service_name
 
 
 def _available_service_names(config: AuthServiceConfig) -> set[str]:
@@ -147,8 +147,15 @@ def _descriptor_from_input(auth_input: Mapping[str, Any]) -> dict[str, Any] | No
     if principal_id is None:
         return None
 
-    service_name = _service_name_from_principal_id(principal_id)
-    if service_name is not None:
+    try:
+        parsed_principal = parse_principal_identifier(principal_id, label="principal_id", validate=False)
+    except InvalidPrincipalIdentifier as exc:
+        raise ServicePrincipalNotAllowedError(str(exc)) from exc
+
+    if parsed_principal.is_service_principal():
+        service_name = parsed_principal.service_name
+        if service_name is None:
+            raise ServicePrincipalNotAllowedError("Malformed service principal")
         return {
             "issuer": "nemo:service",
             "subject": service_name,
@@ -176,6 +183,26 @@ def _on_behalf_descriptor_from_input(auth_input: Mapping[str, Any]) -> dict[str,
     on_behalf_of = _string_value(auth_input, "on_behalf_of_principal_id")
     if on_behalf_of is None:
         return None
+    try:
+        parsed_on_behalf_of = parse_principal_identifier(
+            on_behalf_of,
+            label="on_behalf_of_principal_id",
+            validate=False,
+        )
+    except InvalidPrincipalIdentifier as exc:
+        raise ServicePrincipalNotAllowedError(str(exc)) from exc
+    if parsed_on_behalf_of.is_service_principal():
+        service_name = parsed_on_behalf_of.service_name
+        if service_name is None:
+            raise ServicePrincipalNotAllowedError("Malformed service principal")
+        return {
+            "issuer": "nemo:service",
+            "subject": service_name,
+            "subject_claim": "service",
+            "account_type": "service",
+            "display_name": service_name,
+            "authz_aliases": [on_behalf_of],
+        }
     email = _string_value(auth_input, "principal_email")
     return {
         "issuer": "nemo:trusted-header",
@@ -288,8 +315,10 @@ class AccountResolver:
         return record.account_id, aliases, caller_kind
 
     def _require_allowed_service(self, service_name: str) -> None:
-        if not _SERVICE_NAME_RE.match(service_name):
-            raise ServicePrincipalNotAllowedError(f"Malformed service principal: service:{service_name}")
+        try:
+            service_name = parse_service_name(service_name)
+        except InvalidPrincipalIdentifier as exc:
+            raise ServicePrincipalNotAllowedError(f"Malformed service principal: service:{service_name}") from exc
         if service_name not in _available_service_names(self.config):
             raise ServicePrincipalNotAllowedError(f"Unknown service principal: service:{service_name}")
 

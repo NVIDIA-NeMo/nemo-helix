@@ -37,6 +37,7 @@ import uvicorn
 from fastapi import FastAPI
 from nemo_platform_plugin.client.auth_proxy import build_auth_proxy_app
 from nmp.common.auth import Principal
+from nmp.common.auth.principal_identifier import normalize_service_principal_identifier
 from nmp.common.controller import Controller, ControllerManager, Loop, TimedLoopWaiter
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ def build_app(
         raise ValueError("on_behalf_of requires principal authentication")
     identity_headers: dict[str, str] = {}
     if principal:
-        principal_id = principal if principal.startswith("service:") else f"service:{principal}"
+        principal_id = normalize_service_principal_identifier(principal)
         principal_context = Principal(
             id=principal_id,
             authz_aliases=[principal_id],

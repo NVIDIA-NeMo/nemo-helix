@@ -34,6 +34,11 @@ from nmp.common.config import AuthConfig, get_platform_config
 
 from .jwks import DEFAULT_JWKS_CACHE_LIFESPAN, AsyncJWKSClient, signing_jwk_from_jwks
 from .models import Principal
+from .principal_identifier import (
+    SERVICE_ACCOUNT_PRINCIPAL_PREFIX,
+    InvalidPrincipalIdentifier,
+    parse_principal_identifier,
+)
 from .signing_keys import RSASigningKey, RSASigningKeyCache
 from .token_claims import TokenClaims, groups_from_claim, scopes_from_claim
 
@@ -43,7 +48,6 @@ ACCESS_KEY_METADATA_VERSION = 2
 LEGACY_ACCESS_KEY_METADATA_VERSION = 1
 _ACCESS_KEY_JTI_RE = re.compile(ACCESS_KEY_JTI_PATTERN)
 _NEWLY_CREATED_STATUS: AccessKeyStatus = "ACTIVE"
-SERVICE_ACCOUNT_PRINCIPAL_PREFIX = "service-account:"
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +257,7 @@ class AccessKeyIssuerService(AccessKeyIssuer):
         # credential renew its own (or another service's) access indefinitely. Only human
         # PlatformAdmins may create service-bound keys.
         if self._principal.is_service_identity():
-            if self._principal.is_privileged:
+            if self._principal.is_privileged():
                 raise AccessKeyValidationError("Scoped Access Keys cannot be created for service principals")
             raise AccessKeyValidationError("Scoped Access Keys cannot be created by service-account principals")
         if request.service_account_id is None:
@@ -345,7 +349,7 @@ def _build_access_key_token_payload(
 ) -> _AccessKeyTokenPayload:
     if not config.access_keys.enabled:
         raise AccessKeyFeatureDisabledError("Scoped Access Keys are not enabled")
-    if principal.id.startswith("service:"):
+    if principal.is_privileged():
         raise AccessKeyValidationError("Scoped Access Keys cannot be created for service principals")
 
     issued_at = now
@@ -469,12 +473,18 @@ async def validate_access_key_token(
 
         subject = claims.get("sub")
         metadata = claims.get("nmp_access_key")
-        if not isinstance(subject, str) or not subject or subject.startswith("service:"):
+        if not isinstance(subject, str) or not subject:
+            return None
+        try:
+            parsed_subject = parse_principal_identifier(subject)
+        except InvalidPrincipalIdentifier:
+            return None
+        if parsed_subject.is_service_principal():
             return None
         if not isinstance(metadata, dict):
             return None
         entity_type = metadata.get("entity_type", "USER")
-        is_service_account = subject.startswith(SERVICE_ACCOUNT_PRINCIPAL_PREFIX)
+        is_service_account = parsed_subject.is_service_account()
         if is_service_account and subject == SERVICE_ACCOUNT_PRINCIPAL_PREFIX:
             return None
         if (entity_type == "SERVICE_ACCOUNT") != is_service_account:
