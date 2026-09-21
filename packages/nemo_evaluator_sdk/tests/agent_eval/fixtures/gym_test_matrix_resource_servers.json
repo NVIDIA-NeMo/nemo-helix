@@ -1,0 +1,366 @@
+[
+  {
+    "resources_server": "aalcr",
+    "agent": "simple_agent",
+    "agent_server": "aalcr_simple_agent",
+    "resource_server": "aalcr_resources_server",
+    "agent_config": "resources_servers/aalcr/configs/aalcr.yaml",
+    "model_servers": [
+      "Qwen3-235B-A22B-Instruct-2507-FP8"
+    ]
+  },
+  {
+    "resources_server": "abstention",
+    "agent": "simple_agent",
+    "agent_server": "abstention_simple_agent",
+    "resource_server": "abstention",
+    "agent_config": "resources_servers/abstention/configs/abstention.yaml",
+    "model_servers": [
+      "genrm_model"
+    ]
+  },
+  {
+    "resources_server": "arc_agi",
+    "agent": "simple_agent",
+    "agent_server": "arc_agi_simple_agent",
+    "resource_server": "arc_agi_resources_server",
+    "agent_config": "resources_servers/arc_agi/configs/arc_agi.yaml"
+  },
+  {
+    "resources_server": "bird_sql",
+    "agent": "simple_agent",
+    "agent_server": "bird_sql_simple_agent",
+    "resource_server": "bird_sql_resources_server",
+    "agent_config": "resources_servers/bird_sql/configs/bird_sql.yaml"
+  },
+  {
+    "resources_server": "blackjack",
+    "agent": "gymnasium_agent",
+    "agent_server": "blackjack_gymnasium_agent",
+    "resource_server": "blackjack",
+    "agent_config": "resources_servers/blackjack/configs/blackjack.yaml"
+  },
+  {
+    "resources_server": "bunsenbench_chemistry_mcq",
+    "agent": "simple_agent",
+    "agent_server": "bunsenbench_chemistry_mcq_simple_agent",
+    "resource_server": "bunsenbench_chemistry_mcq",
+    "agent_config": "resources_servers/bunsenbench_chemistry_mcq/configs/bunsenbench_chemistry_mcq.yaml"
+  },
+  {
+    "resources_server": "circle_click",
+    "agent": "simple_agent",
+    "agent_server": "circle_click_simple_agent",
+    "resource_server": "circle_click",
+    "agent_config": "resources_servers/circle_click/configs/circle_click.yaml"
+  },
+  {
+    "resources_server": "circle_count",
+    "agent": "simple_agent",
+    "agent_server": "circle_count_simple_agent",
+    "resource_server": "circle_count",
+    "agent_config": "resources_servers/circle_count/configs/circle_count.yaml"
+  },
+  {
+    "resources_server": "code_fim",
+    "agent": "simple_agent",
+    "agent_server": "code_fim_simple_agent",
+    "resource_server": "code_fim",
+    "agent_config": "resources_servers/code_fim/configs/code_fim.yaml"
+  },
+  {
+    "resources_server": "critpt",
+    "agent": "critpt_agent",
+    "agent_server": "critpt_agent",
+    "resource_server": "critpt_resources_server",
+    "agent_config": "resources_servers/critpt/configs/critpt.yaml",
+    "rollout_skip_reason": "critpt verification requires an Artificial Analysis API key and external service"
+  },
+  {
+    "resources_server": "equivalence_rule",
+    "agent": "simple_agent",
+    "agent_server": "lc_equivalence_rule_simple_agent",
+    "resource_server": "lc_equivalence_rule",
+    "agent_config": "resources_servers/equivalence_rule/configs/lc.yaml",
+    "selector": "equivalence_rule/lc"
+  },
+  {
+    "resources_server": "example_multi_step",
+    "agent": "simple_agent",
+    "agent_server": "example_multi_step_simple_agent",
+    "resource_server": "example_multi_step_resources_server",
+    "agent_config": "resources_servers/example_multi_step/configs/example_multi_step.yaml"
+  },
+  {
+    "resources_server": "example_multi_turn_gymnasium",
+    "agent": "gymnasium_agent",
+    "agent_server": "example_multi_turn_gymnasium_agent",
+    "resource_server": "example_multi_turn_gymnasium",
+    "agent_config": "resources_servers/example_multi_turn_gymnasium/configs/example_multi_turn_gymnasium.yaml"
+  },
+  {
+    "resources_server": "example_session_state_mgmt",
+    "agent": "simple_agent",
+    "agent_server": "example_session_state_mgmt_simple_agent",
+    "resource_server": "example_session_state_mgmt_resources_server",
+    "agent_config": "resources_servers/example_session_state_mgmt/configs/example_session_state_mgmt.yaml"
+  },
+  {
+    "resources_server": "example_single_tool_call",
+    "agent": "simple_agent",
+    "agent_server": "example_single_tool_call_simple_agent",
+    "resource_server": "example_single_tool_call",
+    "agent_config": "resources_servers/example_single_tool_call/configs/example_single_tool_call.yaml"
+  },
+  {
+    "resources_server": "example_tool_call_multireward",
+    "agent": "simple_agent",
+    "agent_server": "example_tool_call_multireward_simple_agent",
+    "resource_server": "example_tool_call_multireward",
+    "agent_config": "resources_servers/example_tool_call_multireward/configs/example_tool_call_multireward.yaml"
+  },
+  {
+    "resources_server": "format_verification",
+    "agent": "simple_agent",
+    "agent_server": "citation_format_simple_agent",
+    "resource_server": "citation_format",
+    "agent_config": "resources_servers/format_verification/configs/citation_format.yaml",
+    "selector": "format_verification/citation_format"
+  },
+  {
+    "resources_server": "frontierscience_judge",
+    "agent": "simple_agent",
+    "agent_server": "frontierscience_judge_simple_agent",
+    "resource_server": "frontierscience_judge",
+    "agent_config": "resources_servers/frontierscience_judge/configs/frontierscience_judge.yaml",
+    "model_servers": [
+      "judge_model"
+    ]
+  },
+  {
+    "resources_server": "genrm_compare",
+    "agent": "simple_agent",
+    "agent_server": "genrm_simple_agent",
+    "resource_server": "genrm_compare_resources_server",
+    "agent_config": "resources_servers/genrm_compare/configs/genrm_compare.yaml",
+    "model_servers": [
+      "genrm_model",
+      "policy_model_reasoning_off"
+    ],
+    "needs_gpu": true
+  },
+  {
+    "resources_server": "gpqa_diamond",
+    "agent": "simple_agent",
+    "agent_server": "gpqa_diamond_simple_agent",
+    "resource_server": "gpqa_diamond",
+    "agent_config": "resources_servers/gpqa_diamond/configs/gpqa_diamond.yaml"
+  },
+  {
+    "resources_server": "gymnasium",
+    "agent": "gymnasium_agent",
+    "agent_server": "gymnasium_agent",
+    "resource_server": "gymnasium",
+    "agent_config": "resources_servers/gymnasium/configs/gymnasium.yaml"
+  },
+  {
+    "resources_server": "hotpotqa_qa",
+    "agent": "simple_agent",
+    "agent_server": "hotpotqa_qa_simple_agent",
+    "resource_server": "hotpotqa_qa",
+    "agent_config": "resources_servers/hotpotqa_qa/configs/hotpotqa_qa.yaml"
+  },
+  {
+    "resources_server": "imo_gradingbench",
+    "agent": "simple_agent",
+    "agent_server": "imo_gradingbench_simple_agent",
+    "resource_server": "imo_gradingbench",
+    "agent_config": "resources_servers/imo_gradingbench/configs/imo_gradingbench.yaml"
+  },
+  {
+    "resources_server": "indirect_prompt_injection",
+    "agent": "simple_agent",
+    "agent_server": "indirect_prompt_injection_simple_agent",
+    "resource_server": "indirect_prompt_injection_resources_server",
+    "agent_config": "resources_servers/indirect_prompt_injection/configs/indirect_prompt_injection.yaml"
+  },
+  {
+    "resources_server": "inverse_if",
+    "agent": "simple_agent",
+    "agent_server": "inverse_if_simple_agent",
+    "resource_server": "inverse_if",
+    "agent_config": "resources_servers/inverse_if/configs/inverse_if.yaml",
+    "model_servers": [
+      "judge_model"
+    ]
+  },
+  {
+    "resources_server": "jailbreak_detection",
+    "agent": "simple_agent",
+    "agent_server": "jailbreak_detection_simple_agent",
+    "resource_server": "jailbreak_detection",
+    "agent_config": "resources_servers/jailbreak_detection/configs/jailbreak_detection_nemotron_combined_reward_tp8.yaml",
+    "selector": "jailbreak_detection/jailbreak_detection_nemotron_combined_reward_tp8",
+    "model_servers": [
+      "safety_judge_model"
+    ]
+  },
+  {
+    "resources_server": "lc_niah",
+    "agent": "simple_agent",
+    "agent_server": "lc_niah_simple_agent",
+    "resource_server": "lc_niah",
+    "agent_config": "resources_servers/lc_niah/configs/lc_niah.yaml"
+  },
+  {
+    "resources_server": "math_advanced_calculations",
+    "agent": "simple_agent",
+    "agent_server": "math_advanced_calculations_simple_agent",
+    "resource_server": "math_advanced_calculations",
+    "agent_config": "resources_servers/math_advanced_calculations/configs/math_advanced_calculations.yaml"
+  },
+  {
+    "resources_server": "math_proof_judgement",
+    "agent": "simple_agent",
+    "agent_server": "math_proof_judgement_simple_agent",
+    "resource_server": "math_proof_judgement",
+    "agent_config": "resources_servers/math_proof_judgement/configs/math_proof_judgement.yaml"
+  },
+  {
+    "resources_server": "multichallenge",
+    "agent": "simple_agent",
+    "agent_server": "multichallenge_simple_agent",
+    "resource_server": "multichallenge",
+    "agent_config": "resources_servers/multichallenge/configs/multichallenge.yaml"
+  },
+  {
+    "resources_server": "nvarc",
+    "agent": "simple_agent",
+    "agent_server": "nvarc_inductive_simple_agent",
+    "resource_server": "nvarc_inductive_resources_server",
+    "agent_config": "resources_servers/nvarc/configs/inductive.yaml",
+    "selector": "nvarc/inductive"
+  },
+  {
+    "resources_server": "omniscience",
+    "agent": "simple_agent",
+    "agent_server": "omniscience_simple_agent",
+    "resource_server": "omniscience",
+    "agent_config": "resources_servers/omniscience/configs/omniscience.yaml",
+    "model_servers": [
+      "genrm_model"
+    ]
+  },
+  {
+    "resources_server": "proof_genselect",
+    "agent": "simple_agent",
+    "agent_server": "proof_genselect_simple_agent",
+    "resource_server": "proof_genselect",
+    "agent_config": "resources_servers/proof_genselect/configs/proof_genselect.yaml"
+  },
+  {
+    "resources_server": "proof_judge",
+    "agent": "simple_agent",
+    "agent_server": "proof_simple_agent",
+    "resource_server": "proof_judge",
+    "agent_config": "resources_servers/proof_judge/configs/proof_judge.yaml"
+  },
+  {
+    "resources_server": "proof_verification",
+    "agent": "simple_agent",
+    "agent_server": "proof_verification_simple_agent",
+    "resource_server": "proof_verification",
+    "agent_config": "resources_servers/proof_verification/configs/proof_verification.yaml"
+  },
+  {
+    "resources_server": "ragtruth",
+    "agent": "simple_agent",
+    "agent_server": "ragtruth_simple_agent",
+    "resource_server": "ragtruth",
+    "agent_config": "resources_servers/ragtruth/configs/ragtruth.yaml"
+  },
+  {
+    "resources_server": "ruler",
+    "agent": "simple_agent",
+    "agent_server": "ruler_simple_agent",
+    "resource_server": "ruler_resources_server",
+    "agent_config": "resources_servers/ruler/configs/ruler.yaml"
+  },
+  {
+    "resources_server": "simpleqa",
+    "agent": "simple_agent",
+    "agent_server": "simpleqa_simple_agent",
+    "resource_server": "simpleqa",
+    "agent_config": "resources_servers/simpleqa/configs/simpleqa.yaml",
+    "model_servers": [
+      "genrm_model"
+    ]
+  },
+  {
+    "resources_server": "single_step_tool_use_with_argument_comparison",
+    "agent": "tool_simulation_agent",
+    "agent_server": "single_step_tool_use_with_argument_comparison_agent",
+    "resource_server": "single_step_tool_use_with_argument_comparison_resources_server",
+    "agent_config": "resources_servers/single_step_tool_use_with_argument_comparison/configs/single_step_tool_use_with_argument_comparison.yaml"
+  },
+  {
+    "resources_server": "speed_bench",
+    "agent": "speed_bench_agent",
+    "agent_server": "speed_bench_simple_agent",
+    "resource_server": "speed_bench_resources_server",
+    "agent_config": "resources_servers/speed_bench/configs/speed_bench.yaml",
+    "rollout_skip_reason": "speed_bench requires a real policy model instead of the fixed mock response"
+  },
+  {
+    "resources_server": "spider2_lite",
+    "agent": "simple_agent",
+    "agent_server": "spider2_lite_simple_agent",
+    "resource_server": "spider2_lite_resources_server",
+    "agent_config": "resources_servers/spider2_lite/configs/spider2_lite.yaml"
+  },
+  {
+    "resources_server": "swe_pivot",
+    "agent": "tool_simulation_agent",
+    "agent_server": "swe_pivot_tool_simulation_agent",
+    "resource_server": "swe_pivot",
+    "agent_config": "resources_servers/swe_pivot/configs/swe_pivot.yaml"
+  },
+  {
+    "resources_server": "text_to_sql",
+    "agent": "simple_agent",
+    "agent_server": "text_to_sql_simple_agent",
+    "resource_server": "text_to_sql_resources_server",
+    "agent_config": "resources_servers/text_to_sql/configs/text_to_sql.yaml"
+  },
+  {
+    "resources_server": "vlm_eval_kit",
+    "agent": "simple_agent",
+    "agent_server": "vlm_eval_kit_simple_agent",
+    "resource_server": "vlm_eval_kit_resources_server",
+    "agent_config": "resources_servers/vlm_eval_kit/configs/vlm_eval_kit.yaml"
+  },
+  {
+    "resources_server": "workplace_assistant",
+    "agent": "simple_agent",
+    "agent_server": "workplace_assistant_simple_agent",
+    "resource_server": "workplace_assistant",
+    "agent_config": "resources_servers/workplace_assistant/configs/workplace_assistant.yaml"
+  },
+  {
+    "resources_server": "xlam_fc",
+    "agent": "simple_agent",
+    "agent_server": "xlam_fc_simple_agent",
+    "resource_server": "xlam_fc",
+    "agent_config": "resources_servers/xlam_fc/configs/xlam_fc.yaml"
+  },
+  {
+    "resources_server": "xstest",
+    "agent": "simple_agent",
+    "agent_server": "xstest_simple_agent",
+    "resource_server": "xstest_resources_server",
+    "agent_config": "resources_servers/xstest/configs/xstest.yaml",
+    "model_servers": [
+      "allenai_wildguard_model_server"
+    ]
+  }
+]
