@@ -121,6 +121,44 @@ describe('CreateCustomizationStart', () => {
     expect(onContinue).toHaveBeenCalledWith({ optionId: 'scratch' });
   });
 
+  describe('from a JSON config', () => {
+    /** The only option that asks for something else before the form. */
+    it('goes to the config screen rather than straight to the form', async () => {
+      const user = userEvent.setup();
+      const onContinue = vi.fn();
+      renderStart(onContinue);
+
+      await user.click(screen.getByText('Start from a JSON config'));
+      await user.click(continueButton());
+
+      expect(screen.getByText('Load a job config')).toBeInTheDocument();
+      expect(onContinue).not.toHaveBeenCalled();
+    });
+
+    it('will not continue until the config reads', async () => {
+      const user = userEvent.setup();
+      renderStart();
+
+      await user.click(screen.getByText('Start from a JSON config'));
+      await user.click(continueButton());
+
+      expect(continueButton()).toBeDisabled();
+    });
+
+    it('goes back to the options without having started anything', async () => {
+      const user = userEvent.setup();
+      const onContinue = vi.fn();
+      renderStart(onContinue);
+
+      await user.click(screen.getByText('Start from a JSON config'));
+      await user.click(continueButton());
+      await user.click(screen.getByRole('button', { name: /back/i }));
+
+      expect(screen.getByText('Build from scratch')).toBeInTheDocument();
+      expect(onContinue).not.toHaveBeenCalled();
+    });
+  });
+
   describe('templates', () => {
     it('arms Continue as soon as a recipe is picked', async () => {
       const user = userEvent.setup();

@@ -6,6 +6,7 @@ import {
   START_OPTIONS,
   TEMPLATE_GROUP_TITLE,
 } from '@studio/components/CreateCustomizationStart/constants';
+import { JsonConfigStep } from '@studio/components/CreateCustomizationStart/JsonConfigStep';
 import type { CreateCustomizationStartProps } from '@studio/components/CreateCustomizationStart/types';
 import { useTemplateSetup } from '@studio/components/CreateCustomizationStart/useTemplateSetup';
 import { StartPage } from '@studio/components/StartOptions/StartPage';
@@ -19,6 +20,8 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
   onContinue,
 }) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // The JSON option is the only one that asks for anything else before the form.
+  const [loadingJson, setLoadingJson] = useState(false);
 
   const { run: runTemplateSetup, statusLabel, error: templateError } = useTemplateSetup(workspace);
   const isSettingUp = statusLabel !== '';
@@ -47,6 +50,10 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
       onContinue({ optionId: 'scratch' });
       return;
     }
+    if (selectedId === 'json') {
+      setLoadingJson(true);
+      return;
+    }
     if (!selectedTemplate) return;
 
     // Registering the model and loading the dataset has to finish before the form can
@@ -58,6 +65,15 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
       onContinue({ optionId: 'template', initialValues });
     }
   };
+
+  if (loadingJson) {
+    return (
+      <JsonConfigStep
+        onBack={() => setLoadingJson(false)}
+        onContinue={(initialValues) => onContinue({ optionId: 'json', initialValues })}
+      />
+    );
+  }
 
   return (
     <StartPage

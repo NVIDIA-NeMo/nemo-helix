@@ -4,9 +4,17 @@
 import type { StartOption as SharedStartOption } from '@studio/components/StartOptions/types';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
 
-export type StartOptionId = 'scratch';
+export type StartOptionId = 'scratch' | 'json';
 
 export type StartOption = SharedStartOption<StartOptionId>;
+
+export interface JsonConfigPanelProps {
+  /**
+   * Fired after every edit: the form values when the config is loadable, null when it
+   * isn't — so clearing a good config back to a broken one also disables Continue.
+   */
+  onValidConfig: (fields: CustomizationFormFields | null) => void;
+}
 
 /**
  * What the user confirmed via the Continue footer. Every arm but "scratch" resolves to
@@ -14,7 +22,8 @@ export type StartOption = SharedStartOption<StartOptionId>;
  */
 export type StartSelection =
   | { optionId: 'scratch' }
-  | { optionId: 'template'; initialValues: CustomizationFormFields };
+  | { optionId: 'template'; initialValues: CustomizationFormFields }
+  | { optionId: 'json'; initialValues: CustomizationFormFields };
 
 export interface CreateCustomizationStartProps {
   /** Workspace the template option registers its models and datasets into. */

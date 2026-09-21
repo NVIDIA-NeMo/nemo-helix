@@ -2,13 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { StartOption } from '@studio/components/CreateCustomizationStart/types';
-import { Plus } from 'lucide-react';
+import { FileJson, Plus } from 'lucide-react';
 
 /**
  * The non-template ways in. "Start from a template" is not among them — templates are
  * picked directly from the group below the divider rather than behind an option.
  */
 export const START_OPTIONS: StartOption[] = [
+  {
+    id: 'json',
+    title: 'Start from a JSON config',
+    description:
+      'Paste or upload a job config — the one a job details page downloads, or one you wrote. Opens the form filled in from it.',
+    icon: FileJson,
+    enabled: true,
+  },
   {
     id: 'scratch',
     title: 'Build from scratch',

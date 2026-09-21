@@ -12,12 +12,13 @@ import { useCustomizationCancelUnslothJob } from '@nemo/sdk/generated/customizer
 import { getJobsGetJobQueryKey } from '@nemo/sdk/generated/platform/jobs';
 import { PlatformJobStatus, type PlatformJobResponse } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex } from '@nvidia/foundations-react-core';
+import { customizationJobToConfigJson } from '@studio/components/CreateCustomizationStart/jsonConfig';
 import { getCustomizationJobStatusQueryKey } from '@studio/hooks/useCustomizationJobStatus';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getNewCustomizationJobRoute, getNewEvaluationMetricRoute } from '@studio/routes/utils';
 import { CustomizationBackend, type CustomizationJob } from '@studio/util/customizationBackend';
 import { useQueryClient } from '@tanstack/react-query';
-import { Ban, Copy } from 'lucide-react';
+import { Ban, Copy, Download } from 'lucide-react';
 import { FC } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -84,6 +85,17 @@ export const DetailActions: FC<DetailActionsProps> = ({ model, status, backend, 
     }
   };
 
+  const downloadConfig = () => {
+    if (!job) return;
+    const blob = new Blob([customizationJobToConfigJson(job)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${job.name || 'customization-job'}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   const isCancellable = status !== undefined && CJobCancellableStatuses.includes(status);
   const isCancelling = isPending || status === PlatformJobStatus.cancelling;
   const isLaunchable = status !== undefined && CJobLaunchableStatuses.includes(status);
@@ -100,6 +112,12 @@ export const DetailActions: FC<DetailActionsProps> = ({ model, status, backend, 
       )}
       <QuickActionsMenuRoot
         actions={[
+          {
+            label: 'Download config',
+            icon: <Download />,
+            disabled: !job,
+            onSelect: downloadConfig,
+          },
           {
             label: 'Clone',
             icon: <Copy />,
