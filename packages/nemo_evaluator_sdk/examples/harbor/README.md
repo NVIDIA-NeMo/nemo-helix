@@ -6,14 +6,16 @@
 Run a Harbor **local dataset directory**,
 [`hello_world_dataset/`](hello_world_dataset), natively through the SDK. The
 example scores with Harbor's deterministic **oracle** agent, so it needs no model
-or API key — only the `harbor` extra installed and a working Docker daemon.
+or API key — only Python ≥ 3.12, the `harbor` extra installed, and a working
+Docker daemon.
 
 ## Install
 
-The SDK requires Python ≥ 3.12, matching Harbor's own floor; Harbor itself stays
-an optional extra because it is heavy. The SDK is not published as a standalone
-PyPI package. Use a NeMo Platform source checkout; see [SETUP.md](../../../../SETUP.md)
-for toolchain prerequisites. From the repository root, install the optional extra:
+Harbor stays an optional extra because it is heavy, not because of the
+interpreter — the SDK's floor already matches Harbor's own. The SDK is not
+published as a standalone PyPI package. Use a NeMo Platform source checkout; see
+[SETUP.md](../../../../SETUP.md) for toolchain prerequisites. From the repository
+root, install the optional extra:
 
 ```bash
 uv sync --frozen --package nemo-evaluator-sdk --extra harbor
