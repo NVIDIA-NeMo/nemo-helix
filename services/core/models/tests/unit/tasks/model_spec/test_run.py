@@ -225,3 +225,69 @@ def test_analyze_checkpoint_updates_model_with_plugin_model_spec(tmp_path: Path)
         fileset="qwen3-fileset",
         workspace="default",
     )
+
+
+def _spec_with(**overrides: Any) -> ModelSpec:
+    return _core_model_spec().model_copy(update=overrides)
+
+
+def test_merge_existing_spec_preserves_a_determined_reasoning_toggle() -> None:
+    entity = _model_entity("qwen3")
+    entity.spec = PluginModelSpec.model_validate(_spec_with(chat_template_controls_reasoning=True).model_dump())
+    fresh = _spec_with(chat_template_controls_reasoning=None)
+
+    ModelSpecRunner._merge_existing_spec(entity, fresh)
+
+    assert fresh.chat_template_controls_reasoning is True
+
+
+def test_merge_existing_spec_preserves_a_determined_false() -> None:
+    entity = _model_entity("qwen3")
+    entity.spec = PluginModelSpec.model_validate(_spec_with(chat_template_controls_reasoning=False).model_dump())
+    fresh = _spec_with(chat_template_controls_reasoning=None)
+
+    ModelSpecRunner._merge_existing_spec(entity, fresh)
+
+    assert fresh.chat_template_controls_reasoning is False
+
+
+def test_merge_existing_spec_does_not_override_a_fresh_analysis() -> None:
+    entity = _model_entity("qwen3")
+    entity.spec = PluginModelSpec.model_validate(_spec_with(chat_template_controls_reasoning=False).model_dump())
+    fresh = _spec_with(chat_template_controls_reasoning=True)
+
+    ModelSpecRunner._merge_existing_spec(entity, fresh)
+
+    assert fresh.chat_template_controls_reasoning is True
+
+
+OVERRIDABLE_TEMPLATE = (
+    "{%- set enable_thinking = enable_thinking if enable_thinking is defined else true %}"
+    "{%- if enable_thinking %}<think>{%- endif %}"
+)
+
+
+def test_rederive_uses_a_fileset_supplied_template_over_the_tokenizer_answer() -> None:
+    # Tokenizer said the checkpoint toggles; the fileset then overrode the served
+    # template with one that ignores the kwarg.
+    spec = _spec_with(chat_template_controls_reasoning=True, chat_template="hello {{ messages[0]['content'] }}")
+
+    ModelSpecRunner._rederive_reasoning_control(spec)
+
+    assert spec.chat_template_controls_reasoning is False
+
+
+def test_rederive_promotes_a_toggling_override() -> None:
+    spec = _spec_with(chat_template_controls_reasoning=False, chat_template=OVERRIDABLE_TEMPLATE)
+
+    ModelSpecRunner._rederive_reasoning_control(spec)
+
+    assert spec.chat_template_controls_reasoning is True
+
+
+def test_rederive_leaves_the_tokenizer_answer_when_no_override_arrived() -> None:
+    spec = _spec_with(chat_template_controls_reasoning=True, chat_template=None)
+
+    ModelSpecRunner._rederive_reasoning_control(spec)
+
+    assert spec.chat_template_controls_reasoning is True

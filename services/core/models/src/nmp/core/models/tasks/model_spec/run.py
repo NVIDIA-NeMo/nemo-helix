@@ -46,6 +46,7 @@ from nmp.common.entities.utils import parse_entity_ref
 from nmp.common.model_utils import is_embedding_model
 from nmp.common.sdk_factory import get_platform_sdk
 from nmp.core.models.config import config as models_config
+from nmp.core.models.parallelism.utils import detect_reasoning_control
 from nmp.core.models.schemas import ModelSpec, ToolCallConfig
 from nmp.core.models.tasks.model_spec.schemas import ModelSpecTaskConfig, NMPJobContext
 from nmp.core.models.tasks.model_spec.utils import infer_model_head_type
@@ -150,6 +151,24 @@ class ModelSpecRunner:
             logger.info("Merged tool_call_config from fileset metadata into model spec")
 
     @staticmethod
+    def _rederive_reasoning_control(model_spec: ModelSpec) -> None:
+        """Re-derive reasoning control against the template that will be served.
+
+        The checkpoint's tokenizer supplied the first answer, but the fileset or
+        the entity's previous spec may since have supplied a ``chat_template``
+        override, and that override is what backends render. Runs after both
+        merges so it always sees the final template; leaves the tokenizer-derived
+        answer alone when no override arrived.
+        """
+        if model_spec.chat_template is None:
+            return
+        model_spec.chat_template_controls_reasoning = detect_reasoning_control(model_spec.chat_template)
+        logger.info(
+            f"Re-derived chat_template_controls_reasoning={model_spec.chat_template_controls_reasoning} "
+            "from the served chat template"
+        )
+
+    @staticmethod
     def _merge_existing_spec(me: ModelEntity, model_spec: ModelSpec) -> None:
         """Preserve user-set fields from the model entity's existing spec.
 
@@ -163,6 +182,12 @@ class ModelSpecRunner:
         if model_spec.chat_template is None and me.spec.chat_template:
             model_spec.chat_template = me.spec.chat_template
             logger.info("Preserved chat_template from existing model spec")
+
+        # Tri-state: a determined False must survive a re-analysis that could not
+        # reach the tokenizer, so this checks for None rather than falsiness.
+        if model_spec.chat_template_controls_reasoning is None and me.spec.chat_template_controls_reasoning is not None:
+            model_spec.chat_template_controls_reasoning = me.spec.chat_template_controls_reasoning
+            logger.info("Preserved chat_template_controls_reasoning from existing model spec")
 
         if model_spec.tool_call_config is None and me.spec.tool_call_config:
             model_spec.tool_call_config = ToolCallConfig.model_validate(me.spec.tool_call_config.model_dump())
@@ -307,6 +332,10 @@ class ModelSpecRunner:
         # Preserve user-set fields from the existing spec that the auto-generated
         # spec doesn't cover (e.g. tool_call_config set before the task ran).
         self._merge_existing_spec(me, model_spec)
+
+        # Last, so it sees the final chat_template whether that came from the
+        # fileset or from the entity's previous spec.
+        self._rederive_reasoning_control(model_spec)
 
         try:
             me: ModelEntity = self._models.update_model(

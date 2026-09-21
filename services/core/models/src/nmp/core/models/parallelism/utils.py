@@ -207,3 +207,127 @@ def is_huggingface_model_directory(
         logger.info(f"No model weight files found for {model_path} in file listing: {file_listing} or on disk")
 
     return has_weights
+
+
+# Kwarg name -> the pair of values probed against each other. A template that
+# branches on the kwarg renders these two differently. Booleans cover the
+# Qwen3/Nemotron and DeepSeek spellings; gpt-oss-style templates interpolate a
+# reasoning-effort string into the system prompt instead, so that one is probed
+# with two efforts rather than with on/off.
+REASONING_CONTROL_KWARGS: dict[str, tuple[object, object]] = {
+    "enable_thinking": (True, False),
+    "thinking": (True, False),
+    "reasoning_effort": ("high", "low"),
+}
+
+_PROBE_MESSAGES = [{"role": "user", "content": "hi"}]
+_PROBE_CONTEXT = {
+    "messages": _PROBE_MESSAGES,
+    "add_generation_prompt": True,
+    "bos_token": "",
+    "eos_token": "",
+    "tools": None,
+}
+
+
+def default_chat_template(chat_template: object) -> str | None:
+    """Resolve the template that inference will actually render.
+
+    Transformers exposes ``chat_template`` as a plain string, or as a collection
+    of named templates when a model ships more than one. Only the ``default``
+    entry serves ordinary requests; a model that puts its reasoning behaviour in
+    a separately-named template is switched by template *selection*, not by a
+    kwarg, so the others must not be consulted here.
+    """
+    if isinstance(chat_template, str):
+        return chat_template
+    if isinstance(chat_template, dict):
+        entry = chat_template.get("default")
+        return entry if isinstance(entry, str) else None
+    if isinstance(chat_template, list):
+        for entry in chat_template:
+            if isinstance(entry, dict) and entry.get("name") == "default":
+                template = entry.get("template")
+                return template if isinstance(template, str) else None
+    return None
+
+
+def _render_chat_template(template: str, **kwargs: object) -> str | None:
+    """Render a chat template, or return None if it cannot be rendered here.
+
+    jinja2 arrives with transformers, which is only installed in the task image,
+    so the import is deliberately lazy — an API-server import of this module must
+    not require it.
+    """
+    try:
+        from jinja2 import ChainableUndefined
+        from jinja2.sandbox import ImmutableSandboxedEnvironment
+    except ImportError:
+        logger.info("jinja2 unavailable; cannot determine chat-template reasoning support")
+        return None
+
+    def raise_exception(message: str) -> None:
+        raise RuntimeError(message)
+
+    env = ImmutableSandboxedEnvironment(
+        trim_blocks=True,
+        lstrip_blocks=True,
+        undefined=ChainableUndefined,
+    )
+    env.globals["raise_exception"] = raise_exception
+    env.globals["strftime_now"] = lambda fmt: ""
+    try:
+        return env.from_string(template).render(**_PROBE_CONTEXT, **kwargs)
+    except Exception as exc:
+        logger.info(f"Could not render chat template while probing reasoning support: {exc}")
+        return None
+
+
+def detect_reasoning_control(chat_template: object) -> bool | None:
+    """Whether the served chat template gives a caller control over reasoning.
+
+    Renders the template with each candidate kwarg set two different ways and
+    compares the output. A template that branches on the kwarg renders
+    differently; one that merely mentions it — or hardcodes it, as
+    ``{%- set enable_thinking = true %}`` does — renders the same both ways and
+    is correctly reported as no control.
+
+    Returns None when the answer is undetermined rather than negative: the
+    template could not be resolved or rendered. Absent a template entirely the
+    answer is a definite False, since there is nothing to honour the kwarg.
+
+    Scope is the ``chat_template_kwargs`` family only. Reasoning is also
+    disabled by means that leave nothing in the template to read:
+
+    * ``reasoning_effort`` sent as a *request parameter*, and Anthropic's
+      ``thinking`` config, are properties of the serving API rather than of the
+      weights — switchyard handles each separately in its OpenAI and Anthropic
+      backends. Only the template-interpolated spelling is visible here.
+    * Prompt-level switches such as Qwen3's ``/no_think`` are trained behaviour.
+      The template passes the marker through untouched, so rendering cannot see
+      it; only an inference probe could.
+
+    A False therefore means "this template will ignore the kwarg", not "reasoning
+    cannot be turned off".
+    """
+    if chat_template is None:
+        return False
+
+    template = default_chat_template(chat_template)
+    if template is None:
+        return None
+
+    candidates = {kwarg: values for kwarg, values in REASONING_CONTROL_KWARGS.items() if kwarg in template}
+    if not candidates:
+        return False
+
+    undetermined = False
+    for kwarg, (one, other) in candidates.items():
+        rendered_one = _render_chat_template(template, **{kwarg: one})
+        rendered_other = _render_chat_template(template, **{kwarg: other})
+        if rendered_one is None or rendered_other is None:
+            undetermined = True
+            continue
+        if rendered_one != rendered_other:
+            return True
+    return None if undetermined else False
