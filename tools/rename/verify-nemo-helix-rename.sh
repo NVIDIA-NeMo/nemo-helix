@@ -7,20 +7,34 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-legacy_product_pattern="nemo[ _-]?plat""form"
-legacy_acronym_upper="NM""P"
-legacy_acronym_title="Nm""p"
-legacy_acronym_lower="nm""p"
+legacy_product_pattern="nemo[ _-]?platform"
+legacy_acronym_upper="NMP"
+legacy_acronym_title="Nmp"
+legacy_acronym_lower="nmp"
 expected_image_prefix="nhx-"
 failed=0
 
-if rg -n -I -i --hidden --glob '!.git' --glob '!.git/**' "$legacy_product_pattern" .; then
+mapfile -d '' content_scan_files < <(
+  git ls-files -z --cached --others --exclude-standard \
+    | while IFS= read -r -d '' path; do
+        case "$path" in
+          tools/rename/rename-to-nemo-helix.sh|tools/rename/verify-nemo-helix-rename.sh) continue ;;
+        esac
+        printf '%s\0' "$path"
+      done
+)
+
+if ((${#content_scan_files[@]})) \
+  && printf '%s\0' "${content_scan_files[@]}" \
+    | xargs -0 -r rg -n -I -i --with-filename --hidden --glob '!.git' --glob '!.git/**' "$legacy_product_pattern" --; then
   echo "Legacy product names remain in tracked file contents." >&2
   failed=1
 fi
 
-if rg -n -I -F --hidden --glob '!.git' --glob '!.git/**' \
-  -e "$legacy_acronym_upper" -e "$legacy_acronym_title" -e "$legacy_acronym_lower" .; then
+if ((${#content_scan_files[@]})) \
+  && printf '%s\0' "${content_scan_files[@]}" \
+    | xargs -0 -r rg -n -I -F --with-filename --hidden --glob '!.git' --glob '!.git/**' \
+      -e "$legacy_acronym_upper" -e "$legacy_acronym_title" -e "$legacy_acronym_lower" --; then
   echo "Legacy acronym references remain in tracked file contents." >&2
   failed=1
 fi

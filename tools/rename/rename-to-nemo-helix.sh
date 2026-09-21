@@ -7,27 +7,27 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-old_product="NeMo Plat""form"
-old_product_lower_platform="NeMo plat""form"
-old_product_compact="NeMoPlat""form"
-old_product_kebab="NeMo-Plat""form"
-old_product_kebab_lower_platform="NeMo-plat""form"
-old_title_product="Nemo Plat""form"
-old_title_compact="NemoPlat""form"
-old_title_kebab="Nemo-Plat""form"
-old_title_kebab_lower_platform="Nemo-plat""form"
-old_lower_product="nemo plat""form"
-old_lower_compact="nemoplat""form"
-old_lower_camel="nemoPlat""form"
-old_slug="nemo-plat""form"
-old_module="nemo_plat""form"
-old_upper_product="NEMO PLAT""FORM"
-old_upper_title_product="NEMO Plat""form"
-old_upper_slug="NEMO-PLAT""FORM"
-old_upper_module="NEMO_PLAT""FORM"
-old_acronym_upper="NM""P"
-old_acronym_title="Nm""p"
-old_acronym_lower="nm""p"
+old_product="NeMo Platform"
+old_product_lower_platform="NeMo platform"
+old_product_compact="NeMoPlatform"
+old_product_kebab="NeMo-Platform"
+old_product_kebab_lower_platform="NeMo-platform"
+old_title_product="Nemo Platform"
+old_title_compact="NemoPlatform"
+old_title_kebab="Nemo-Platform"
+old_title_kebab_lower_platform="Nemo-platform"
+old_lower_product="nemo platform"
+old_lower_compact="nemoplatform"
+old_lower_camel="nemoPlatform"
+old_slug="nemo-platform"
+old_module="nemo_platform"
+old_upper_product="NEMO PLATFORM"
+old_upper_title_product="NEMO Platform"
+old_upper_slug="NEMO-PLATFORM"
+old_upper_module="NEMO_PLATFORM"
+old_acronym_upper="NMP"
+old_acronym_title="Nmp"
+old_acronym_lower="nmp"
 
 new_product="NeMo Helix"
 new_product_lower_platform="NeMo Helix"
@@ -192,12 +192,22 @@ for index in "${!old_values[@]}"; do
   export "NEW_$suffix=${new_values[$index]}"
 done
 
+git_search_file_set() {
+  git ls-files -z --cached --others --exclude-standard \
+    | while IFS= read -r -d '' path; do
+        case "$path" in
+          tools/rename/rename-to-nemo-helix.sh|tools/rename/verify-nemo-helix-rename.sh) continue ;;
+        esac
+        printf '%s\0' "$path"
+      done
+}
+
 grep_args=()
 for old_value in "${old_values[@]}"; do
   grep_args+=("-e" "$old_value")
 done
 mapfile -d '' content_files < <(
-  rg -l -0 -I -F --hidden --glob '!.git' --glob '!.git/**' "${grep_args[@]}" . || true
+  git_search_file_set | xargs -0 -r rg -l -0 -I -F --hidden --glob '!.git' --glob '!.git/**' "${grep_args[@]}" -- || true
 )
 
 for path in "${content_files[@]}"; do
@@ -217,8 +227,7 @@ for image in "${unprefixed_images[@]}"; do
   image_grep_args+=("-e" "$image")
 done
 mapfile -d '' image_files < <(
-  rg -l -0 -I -F --hidden --glob '!.git' --glob '!.git/**' \
-    --glob '!scripts/rename-to-nemo-helix.sh' "${image_grep_args[@]}" . || true
+  git_search_file_set | xargs -0 -r rg -l -0 -I -F --hidden --glob '!.git' --glob '!.git/**' "${image_grep_args[@]}" -- || true
 )
 export IMAGE_PREFIX="$new_acronym_lower-"
 export IMAGE_NAMES="$(printf '%s\n' "${unprefixed_images[@]}")"
@@ -246,4 +255,4 @@ while IFS= read -r -d '' path; do
   mv "$path" "$destination"
 done < <(git ls-files -z --cached --others --exclude-standard)
 
-echo "Rename complete. Run scripts/verify-nemo-helix-rename.sh before committing."
+echo "Rename complete. Run tools/rename/verify-nemo-helix-rename.sh before committing."
