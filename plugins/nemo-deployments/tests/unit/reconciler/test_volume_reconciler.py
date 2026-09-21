@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+from typing import Literal
 from unittest.mock import AsyncMock
 
 import pytest
@@ -37,7 +38,7 @@ async def test_volume_create_failure(
     async def fail(**kwargs: object) -> VolumeStatusUpdate:
         raise RuntimeError("docker unavailable")
 
-    mock_backend.create_volume = fail  # type: ignore[method-assign]
+    mock_backend.create_volume = fail  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
 
     await volume_reconciler.reconcile_one(vol)
 
@@ -58,6 +59,32 @@ async def test_deleting_volume_removes_backend_then_entity(
 
     assert mock_backend.volume_delete_calls == [("default", "vol1")]
     mock_entities.delete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_deleting_volume_keeps_entity_when_backend_delete_fails(
+    volume_reconciler: VolumeReconciler,
+    mock_backend: MockDeploymentBackend,
+    mock_entities: AsyncMock,
+) -> None:
+    vol = make_volume()
+    vol.status = "DELETING"
+    mock_backend.delete_volume = AsyncMock(
+        return_value=VolumeStatusUpdate(
+            status="FAILED",
+            status_message="PVC deletion failed",
+            error_details={"reason": "forbidden"},
+        )
+    )
+
+    await volume_reconciler.reconcile_one(vol)
+
+    mock_backend.delete_volume.assert_awaited_once()
+    assert vol.status == "DELETING"
+    assert vol.status_message == "PVC deletion failed"
+    assert vol.error_details == {"reason": "forbidden"}
+    mock_entities.update.assert_awaited_once_with(vol)
+    mock_entities.delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -136,7 +163,7 @@ async def test_deleting_volume_non_released_status_preserves_entity(
     volume_reconciler: VolumeReconciler,
     mock_backend: MockDeploymentBackend,
     mock_entities: AsyncMock,
-    delete_status: str,
+    delete_status: Literal["FAILED", "PENDING", "BOUND", "DELETING"],
 ) -> None:
     """ANY non-RELEASED backend delete status must preserve the entity for retry.
 

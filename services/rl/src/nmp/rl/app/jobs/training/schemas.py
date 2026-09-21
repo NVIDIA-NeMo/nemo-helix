@@ -126,7 +126,7 @@ class GRPOConfig(BaseModel):
     truncated_importance_sampling_ratio_min: float | None = Field(default=None, ge=0.0)
     use_dynamic_sampling: bool = False
     dynamic_sampling_max_gen_batches: int = Field(default=10, gt=0)
-    batch_multiplier: float = Field(default=1.0, gt=0.0)
+    batch_multiplier: float = Field(default=1.0, ge=1.0)
     reward_shaping: dict[str, Any] | None = None
     reward_scaling: dict[str, Any] | None = None
     # Defaults to DYNAMIC: this backend always trains on DTensor, and dynamic batching is the
