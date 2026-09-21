@@ -654,7 +654,8 @@ class _AgentEvalJobBase(NemoJob):
             fail_fast=spec.fail_fast,
         )
         evaluator = self._build_evaluator(platform_client, spec.target)
-        result = evaluator.run_sync(tasks=tasks, trials=spec.trials, target=target, config=run_config)
+        with capture_evaluator_request_logs() as request_logs:
+            result = evaluator.run_sync(tasks=tasks, trials=spec.trials, target=target, config=run_config)
         report_agent_evaluation_usage(
             result,
             request_logs,
