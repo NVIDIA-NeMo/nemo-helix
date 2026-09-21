@@ -214,6 +214,18 @@ class K8sDeploymentConfig(BaseModel):
         ),
     )
 
+    job_ttl_seconds_after_finished: int | None = Field(
+        default=None,
+        ge=0,
+        alias="jobTtlSecondsAfterFinished",
+        description=(
+            "Per-deployment override for ttlSecondsAfterFinished on a finite (Never/OnFailure) Job, "
+            "such as the weight-puller. When set, wins over the executor default; when unset, the "
+            "executor default applies. Controls how quickly a completed Job's pod (and its "
+            "ReadWriteOnce volume attachment) is reaped. k8s-only."
+        ),
+    )
+
     model_config = {"populate_by_name": True}
 
 

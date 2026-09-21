@@ -51,6 +51,17 @@ from nemo_platform_plugin.config import ImagePullSecret, get_platform_config
 CONFIG_FILES_VOLUME = "config-files"
 NATIVE_SIDECAR_RESTART_POLICY: RestartPolicy = "Always"
 
+# Default ttlSecondsAfterFinished for finite (Never/OnFailure) Jobs such as the
+# weight-puller. Completed puller pods hold their ReadWriteOnce weights volume
+# attachment until reaped; without a TTL the cluster default (effectively never)
+# leaves the pod lingering, so the serving Deployment cannot mount the RWO volume
+# and fails with MultiAttachError. The serving Deployment starts only after the
+# puller Job reaches SUCCEEDED (Prerequisite condition="succeeded"), so reaping a
+# completed puller promptly is safe. 60s clears the attachment far faster than the
+# cluster default while leaving the reconciler ample time to observe completion and
+# read the pod exit code before the pod is garbage-collected.
+DEFAULT_JOB_TTL_SECONDS_AFTER_FINISHED = 60
+
 logger = logging.getLogger(__name__)
 
 
@@ -171,6 +182,7 @@ class ExecutorK8sDefaults:
     tolerations: list[dict[str, Any]] = field(default_factory=list)
     affinity: dict[str, Any] = field(default_factory=dict)
     topology_spread_constraints: list[dict[str, Any]] = field(default_factory=list)
+    job_ttl_seconds_after_finished: int | None = DEFAULT_JOB_TTL_SECONDS_AFTER_FINISHED
 
 
 @dataclass(frozen=True)

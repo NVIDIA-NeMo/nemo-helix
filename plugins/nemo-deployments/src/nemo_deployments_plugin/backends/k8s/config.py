@@ -10,7 +10,7 @@ import re
 from copy import deepcopy
 from typing import Any
 
-from nemo_deployments_plugin.backends.k8s.compiler import ExecutorK8sDefaults
+from nemo_deployments_plugin.backends.k8s.compiler import DEFAULT_JOB_TTL_SECONDS_AFTER_FINISHED, ExecutorK8sDefaults
 from nemo_platform_plugin.config import ImagePullSecret
 from pydantic import BaseModel, Field, field_validator
 
@@ -94,6 +94,18 @@ class K8sExecutorConfig(BaseModel):
             "Each entry is a raw Kubernetes topologySpreadConstraint object."
         ),
     )
+    default_job_ttl_seconds_after_finished: int | None = Field(
+        default=DEFAULT_JOB_TTL_SECONDS_AFTER_FINISHED,
+        ge=0,
+        description=(
+            "Executor-level ttlSecondsAfterFinished applied to every finite (Never/OnFailure) Job this "
+            "executor renders, such as the weight-puller. A completed puller pod holds its ReadWriteOnce "
+            "weights volume attachment until reaped; a short TTL releases it promptly so the serving "
+            "Deployment can mount the volume instead of failing with MultiAttachError. Set to null to omit "
+            "the field and defer to the cluster default (effectively never reaped). Overridden per-entity by "
+            "backend_config.k8s.jobTtlSecondsAfterFinished."
+        ),
+    )
 
     @field_validator("default_namespace")
     @classmethod
@@ -131,4 +143,5 @@ class K8sExecutorConfig(BaseModel):
             tolerations=deepcopy(self.default_tolerations),
             affinity=deepcopy(self.default_affinity),
             topology_spread_constraints=deepcopy(self.default_topology_spread_constraints),
+            job_ttl_seconds_after_finished=self.default_job_ttl_seconds_after_finished,
         )
