@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The work volume. `fetch` writes the context here, the sandbox reads it and writes an OCI
+# layout back, and `push` reads that. The data path between the trusted plane and the untrusted
+# one is a volume rather than a network, which is why step 2 never has to read what it runs.
+#
+# ACCESS MODE -- a PoC deviation worth reading before copying this file.
+#
+# The design wants ReadWriteMany: three pods, possibly three nodes, one volume. This cluster has
+# no RWX StorageClass -- `kubectl get csidrivers` shows only pd.csi.storage.gke.io, and the
+# Filestore CSI driver is not installed. All four StorageClasses are RWO.
+#
+# RWO survives here only because the steps are strictly sequential and the `build` step mounts
+# nothing at all, so the volume is attached to one node at a time by construction. To make that
+# reliable rather than lucky, every build pod is pinned to a single labelled node (see the
+# `node_selector` on all three execution profiles, and on the sandbox pod spec).
+#
+# A production deployment needs RWX. Pinning every build in a deployment to one node is a
+# throughput ceiling, not a security property, and it is the first thing to remove.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nmp-build-work
+  namespace: nmp-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard-rwo
+  resources:
+    requests:
+      storage: 100Gi

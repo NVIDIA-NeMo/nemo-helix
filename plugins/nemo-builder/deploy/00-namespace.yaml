@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The build namespace. An ordinary `baseline` namespace -- RFC 001 Requirement 3.
+#
+# `baseline` is the whole point: kaniko is the only builder measured that clears it, and it
+# clears it with zero relaxations. Earlier drafts of the design needed `seccompProfile:
+# Unconfined`, `appArmorProfile: Unconfined` and a `privileged` namespace. None of that is here,
+# and `deploy/negative-control.sh` proves the namespace would still refuse them.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nmp-builds
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
+    app.kubernetes.io/managed-by: nemo-builder

@@ -1,0 +1,103 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The sandbox egress policy. RFC 001 names this the design's only high-severity risk, and the
+# reason is ordering: written the obvious way, this file looks correct and closes nothing.
+#
+# The sandbox MUST have public egress -- 134 of 155 corpus Dockerfiles hit the network inside a
+# `RUN`, so denying it is not on the table. The control is therefore not "no egress", it is
+# "public egress with the private world carved out of it".
+#
+#   Threat-model path A -- dial a cluster Service IP, the API server, 169.254.169.254.
+#   Threat-model path B -- resolve a PUBLIC name to a PRIVATE address and reach it anyway.
+#
+# Path B is the one that matters here. A packet has to be dropped on its *destination address*,
+# not on the name that produced it -- so the private ranges are removed from the allowed set
+# inside the `ipBlock.except` list below, evaluated as part of the same rule.
+#
+# WHY NOT A SEPARATE "DENY" RULE: NetworkPolicy has no deny verb. Its rules are purely additive,
+# and the union of all matching rules is what is permitted. A second rule "denying" RFC1918
+# alongside a rule allowing 0.0.0.0/0 is not a deny -- it is a no-op, and the 0.0.0.0/0 allow
+# wins. That arrangement passes review by eye and leaves path B completely intact.
+#
+# WHY THERE IS NO DNS RULE HERE. The obvious companion to a policy like this is an allow for
+# kube-dns, and the first draft of this file had one. Two measurements removed it:
+#
+#   1. This cluster runs GKE's NodeLocal DNSCache addon, so pods do not resolve against the
+#      kube-dns Service at all -- they resolve against 169.254.20.10, a LINK-LOCAL address.
+#      The `169.254.0.0/16` deny that closes the metadata server closes node-local DNS with it,
+#      and a build dies at `lookup index.docker.io: i/o timeout`. Measured.
+#   2. Adding a kube-dns allow back made the Pod CIDR reachable again -- measured, `nc` to a
+#      kube-dns pod IP on :53 succeeded -- because that rule is precisely an exception to the
+#      `except` list. It bought DNS by reopening part of what this file exists to close.
+#
+# So the sandbox does not use cluster DNS. It is pointed at public resolvers via `dnsPolicy:
+# None` on the pod spec (see the `sandbox_dns_nameservers` setting), which needs no rule here
+# because public egress is already permitted. The sandbox therefore cannot resolve a
+# cluster-internal name at all -- `kubernetes.default.svc.cluster.local` returns NXDOMAIN --
+# which is strictly more closed than the version with a DNS hole in it.
+#
+# The consequence to remember: when the pull-through mirror lands (M2-1) it is in-cluster, and
+# a sandbox with public-only DNS cannot resolve it. Reach it by ClusterIP via `--registry-mirror`
+# plus a `hostAliases` entry, and add that ONE address back as its own narrow egress rule. That
+# is a deliberate, single-address hole -- not a restored DNS rule.
+#
+# Enforcement is a cluster fact, not a manifest fact: this cluster runs Calico
+# (networkPolicy.provider: CALICO, verified). On a cluster with no NetworkPolicy controller this
+# file is decorative and the sandbox is unconstrained.
+---
+# 1. Default-deny, both directions, for anything wearing the sandbox label.
+#    An empty spec with both policyTypes is the deny. Everything below only ever adds back.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nmp-build-sandbox-default-deny
+  namespace: nmp-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+spec:
+  podSelector:
+    matchLabels:
+      nmp.nvidia.com/sandbox: "true"
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# 2. Add back exactly one thing: the public internet, minus the private world.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nmp-build-sandbox-egress
+  namespace: nmp-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+spec:
+  podSelector:
+    matchLabels:
+      nmp.nvidia.com/sandbox: "true"
+  policyTypes:
+    - Egress
+  egress:
+    # The `except` list is the entire security control -- see the header.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              # RFC1918. Covers this cluster's Pod and Service CIDRs, which are both inside
+              # 10/8 -- they are named again below anyway, because the RFC requires the
+              # cluster's own ranges to be stated rather than assumed to fall inside a wider
+              # block. A cluster whose CIDRs sit outside RFC1918 would silently lose the
+              # denial if this list were trimmed to the three RFC1918 blocks.
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              # Link-local. This is the node metadata server, 169.254.169.254 -- measured in
+              # the lab as reachable from a build and good for 1,436 bytes of token response.
+              # It is also node-local DNS, 169.254.20.10; see the header for why that is fine.
+              - 169.254.0.0/16
+              # Carrier-grade NAT. GKE uses this range for some managed endpoints.
+              - 100.64.0.0/10
+              # This cluster's own Pod CIDR and Service CIDR, stated explicitly.
+              # log2-gke-lab: clusterIpv4Cidr 10.1.0.0/19, servicesIpv4Cidr 10.2.0.0/22.
+              - 10.1.0.0/19
+              - 10.2.0.0/22
