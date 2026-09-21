@@ -79,8 +79,8 @@ def gym_global_config(target: GymRunnerTarget) -> dict[str, Any]:
         # Keyed on the *instance*, with or without an environment FileSet: `SessionBackedGymRunner`
         # stamps rows with `agent_ref_name or agent` either way, so keying this on `agent` instead
         # would bind a resources server onto an instance no row routes to, and leave the one they do
-        # route to unbound. A built-in environment can rename an instance too -- `mcqa` registers
-        # `mcqa_simple_agent` -- so this is not FileSet-only.
+        # route to unbound. Renaming is not FileSet-only: 35 of stock Gym's 79 agent configs key an
+        # instance differently from the component (`rewoo_agent` on `langgraph_agent`).
         agent_instance = target.agent_ref_name or target.agent
         config[agent_instance] = {
             "responses_api_agents": {

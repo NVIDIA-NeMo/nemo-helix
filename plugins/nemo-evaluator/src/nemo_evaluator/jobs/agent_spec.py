@@ -206,10 +206,11 @@ class GymRunnerTarget(BaseModel):
     )
     agent_ref_name: str | None = Field(
         default=None,
-        description="Gym agent instance rollouts are routed to when running against a sandboxed host, "
-        "stamped as each row's `agent_ref`. Defaults to `agent`. Set it when the environment's config "
-        "defines the agent under a different name -- `mcqa` registers `mcqa_simple_agent`, and routing to "
-        "`simple_agent` there does not answer.",
+        description="Gym agent *instance*, as distinct from the `agent` component it configures. Defaults "
+        "to `agent`. Set it whenever the two differ, which is common in stock Gym: `rewoo_agent` is an "
+        "instance of the `langgraph_agent` component, as are the whole `anyswe_*` and `anyterminal_*` "
+        "families of theirs. It keys the resources-server binding, decides whether an environment package "
+        "declares the agent, and is stamped as each row's `agent_ref`. Requires sandboxed execution.",
     )
     env_secrets: dict[str, SecretRef] = Field(
         default_factory=dict,
@@ -283,9 +284,9 @@ class GymPlacement(BaseModel):
     agent_ref_name: str | None = Field(
         default=None,
         description="Gym agent *instance* the sandboxed host composes its config around, as distinct from "
-        "the runner's `agent` component. Defaults to `agent`. Set it when the environment defines the agent "
-        "under another name -- `mcqa` registers `mcqa_simple_agent`, and `simple_agent` there does not "
-        "answer. Requires sandboxed execution.",
+        "the runner's `agent` component. Defaults to `agent`. Set it whenever the two differ, which is "
+        "common in stock Gym -- `rewoo_agent` is an instance of the `langgraph_agent` component. Requires "
+        "sandboxed execution.",
     )
 
 
