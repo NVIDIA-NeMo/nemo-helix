@@ -17,6 +17,7 @@ from nemo_evaluator_sdk.values.results import EvaluationResult
 from nemo_platform_plugin.job_usage import JobUsageReporter
 
 _INPUT_TOKEN_KEYS = ("prompt_tokens", "input_tokens", "inputTokens")
+_INPUT_CACHE_TOKEN_KEYS = ("cache_read_input_tokens", "cache_creation_input_tokens")
 _OUTPUT_TOKEN_KEYS = ("completion_tokens", "output_tokens", "outputTokens")
 
 
@@ -31,6 +32,22 @@ def _first_token_count(usage: Mapping[str, object], keys: Sequence[str]) -> int 
     return None
 
 
+def _optional_token_count(usage: Mapping[str, object], key: str) -> int | None:
+    if key not in usage:
+        return 0
+    return _token_count(usage.get(key))
+
+
+def _input_token_count(usage: Mapping[str, object]) -> int | None:
+    base_input_tokens = _first_token_count(usage, _INPUT_TOKEN_KEYS)
+    if base_input_tokens is None:
+        return None
+    cache_token_counts = [_optional_token_count(usage, key) for key in _INPUT_CACHE_TOKEN_KEYS]
+    if any(count is None for count in cache_token_counts):
+        return None
+    return base_input_tokens + sum(count for count in cache_token_counts if count is not None)
+
+
 def _request_usage(request_log: Mapping[str, object]) -> tuple[int | None, int | None]:
     response = request_log.get("response")
     if not isinstance(response, Mapping):
@@ -39,7 +56,7 @@ def _request_usage(request_log: Mapping[str, object]) -> tuple[int | None, int |
     if not isinstance(usage, Mapping):
         return None, None
     typed_usage = cast(Mapping[str, object], usage)
-    return _first_token_count(typed_usage, _INPUT_TOKEN_KEYS), _first_token_count(typed_usage, _OUTPUT_TOKEN_KEYS)
+    return _input_token_count(typed_usage), _first_token_count(typed_usage, _OUTPUT_TOKEN_KEYS)
 
 
 @dataclass
