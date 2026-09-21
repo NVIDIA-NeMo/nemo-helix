@@ -23,6 +23,7 @@ import textwrap
 
 from fastapi import APIRouter, HTTPException, Query, status
 from nmp.common.api.common import DeleteResponse, Page, PaginationData
+from nmp.common.api.filter import ComparisonOperation, FilterOperator
 from nmp.common.auth import ALL_WORKSPACES
 from nmp.common.auth.client import AuthClient
 from nmp.common.entities.global_workspace import workspace_lookup_order
@@ -57,6 +58,9 @@ class EntitiesPage(Page[Entity]):
 router = APIRouter()
 API_TAG = "Entity Store"
 logger = logging.getLogger(__name__)
+
+#: Upper bound on the dependent-children scan; enough to name the affected workspaces.
+MAX_DEPENDENT_CHILDREN_REPORTED = 1000
 
 PROJECT_ENTITY_TYPE = "project"
 
@@ -589,6 +593,29 @@ async def update_entity_by_name(
             ) from e
 
 
+async def _foreign_child_workspaces(
+    repository: EntityRepository,
+    parent_id: str,
+    owning_workspace: str,
+) -> list[str]:
+    """Workspaces other than *owning_workspace* holding children of *parent_id*.
+
+    ``entities.parent`` is ``ON DELETE CASCADE``, so deleting a parent silently removes
+    its children. Once an entity is shared out of the global workspace any workspace can
+    parent onto it — a fine-tuned adapter on a shared base model — and those children are
+    invisible to whoever owns the parent. Deleting would destroy another team's work with
+    no signal, so the caller has to acknowledge the cross-workspace children first.
+    """
+    children, _ = await repository.list_entities(
+        workspace=ALL_WORKSPACES,
+        entity_type=None,
+        page=1,
+        page_size=MAX_DEPENDENT_CHILDREN_REPORTED,
+        filter_op=ComparisonOperation(operator=FilterOperator.EQ, field="parent", value=parent_id),
+    )
+    return sorted({child.workspace for child in children if child.workspace != owning_workspace})
+
+
 @router.delete(
     "/v2/workspaces/{workspace}/entities/{entity_type}/{name}",
     response_model=DeleteResponse,
@@ -615,6 +642,13 @@ async def delete_entity_by_name(
         default=None,
         description="Optional database version for optimistic locking. Delete only succeeds if the entity still has this version.",
     ),
+    force: bool = Query(
+        default=False,
+        description=(
+            "Delete even when child entities in other workspaces would be cascaded away. "
+            "Without this the request is rejected with 409 and those workspaces are named."
+        ),
+    ),
 ) -> DeleteResponse:
     """Delete entity by name."""
     # Check if workspace is being deleted (404 for user requests)
@@ -624,6 +658,25 @@ async def delete_entity_by_name(
         workspace,
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
     )
+
+    if not force:
+        existing = await repository.get_entity_by_name(
+            workspace=workspace,
+            entity_type=entity_type,
+            name=name,
+            parent=parent,
+        )
+        if existing is not None:
+            dependent_workspaces = await _foreign_child_workspaces(repository, existing.id, workspace)
+            if dependent_workspaces:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Entity '{name}' has child entities in other workspaces "
+                        f"({', '.join(dependent_workspaces)}). Deleting it would also delete them. "
+                        f"Remove those entities first, or pass force=true to delete them along with it."
+                    ),
+                )
 
     await _invalidate_role_binding_cache_if_present(repository, workspace, entity_type, name, parent)
 
