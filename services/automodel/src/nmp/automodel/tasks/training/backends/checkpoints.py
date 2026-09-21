@@ -20,6 +20,7 @@ import logging
 import re
 import shutil
 import sys
+from collections.abc import Mapping
 from contextlib import contextmanager
 from enum import StrEnum
 from pathlib import Path
@@ -31,6 +32,7 @@ from nmp.automodel.tasks.training.chat_templates import (
 from nmp.automodel.tasks.training.schemas import (
     CheckpointFormat,
     CheckpointInfo,
+    CheckpointSelection,
     ExportConfig,
     FinetuningType,
     Precision,
@@ -38,6 +40,8 @@ from nmp.automodel.tasks.training.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+CHECKPOINT_STATS_FILENAME = "checkpoint_stats.json"
 
 
 class ModelType(StrEnum):
@@ -124,24 +128,18 @@ def get_model_dir_from_checkpoint(checkpoint_dir: Path, is_peft: bool) -> Path:
     raise FileNotFoundError(f"Model directory not found in checkpoint {checkpoint_dir}")
 
 
-def find_best_checkpoint(
+def _resolve_checkpoint_link(
     workspace_dir: Path,
     config: TrainingStepConfig,
+    link_names: tuple[str, ...],
     model_type: ModelType = ModelType.LLM,
 ) -> Path:
-    """
-    Find the best checkpoint directory.
-    """
+    """Resolve Automodel checkpoint symlinks in order, then fall back to the highest step."""
     base_dir = workspace_dir / "checkpoints"
     is_peft = config.training.finetuning_type in (FinetuningType.LORA, FinetuningType.LORA_MERGED)
     type_label = "" if model_type == ModelType.LLM else model_type.value
 
-    # Order of preference:
-    # 1. LOWEST_VAL symlink
-    # 2. LATEST symlink
-    # 3. Highest step number
-
-    for link_name in ["LOWEST_VAL", "LATEST"]:
+    for link_name in link_names:
         link = base_dir / link_name
         if link.exists() and link.is_symlink():
             try:
@@ -157,9 +155,26 @@ def find_best_checkpoint(
     if not epoch_step_dirs:
         raise FileNotFoundError(f"No {type_label} checkpoint directories found in {base_dir}".replace("  ", " "))
 
-    best_checkpoint = max(epoch_step_dirs, key=extract_step_number)
-    logger.info(f"Using latest {type_label} checkpoint by step number: {best_checkpoint.name}".replace("  ", " "))
-    return get_model_dir_from_checkpoint(best_checkpoint, is_peft)
+    latest_checkpoint = max(epoch_step_dirs, key=extract_step_number)
+    logger.info(f"Using latest {type_label} checkpoint by step number: {latest_checkpoint.name}".replace("  ", " "))
+    return get_model_dir_from_checkpoint(latest_checkpoint, is_peft)
+
+
+def find_selected_checkpoints(
+    workspace_dir: Path,
+    config: TrainingStepConfig,
+    model_type: ModelType = ModelType.LLM,
+) -> dict[str, Path]:
+    """Resolve the configured checkpoint selection in publication order."""
+    selection = config.schedule.checkpoint_selection
+    if selection == CheckpointSelection.BEST:
+        return {"best": _resolve_checkpoint_link(workspace_dir, config, ("LOWEST_VAL", "LATEST"), model_type)}
+    if selection == CheckpointSelection.LAST:
+        return {"last": _resolve_checkpoint_link(workspace_dir, config, ("LATEST",), model_type)}
+    return {
+        "best": _resolve_checkpoint_link(workspace_dir, config, ("LOWEST_VAL", "LATEST"), model_type),
+        "last": _resolve_checkpoint_link(workspace_dir, config, ("LATEST",), model_type),
+    }
 
 
 def fix_fsdp2_architecture(model_path: Path) -> None:
@@ -193,10 +208,80 @@ def fix_fsdp2_architecture(model_path: Path) -> None:
         logger.info(f"Fixed FSDP2 architecture names: {original_archs} -> {fixed_archs}")
 
 
+_ENCODER_KEEP_KEYS = ("is_causal", "pooling", "temperature")
+
+
+def sanitize_encoder_hf(output_path: Path, base_model_path: Path) -> None:
+    """Rewrite a published encoder HF tree to the base architecture.
+
+    Restores ``model_type`` and ``architectures`` from the base checkpoint, drops
+    ``auto_map``, and deletes Python files in *output_path* that the base tree
+    does not ship. Encoder serving fields (``is_causal``, ``pooling``,
+    ``temperature``) already on the trained config are preserved.
+
+    Callers must skip this when the job has ``trust_remote_code=true``. This
+    helper does not read that flag. Custom files remain required to *trace* ONNX
+    from a training checkpoint; sanitize only the published HF directory.
+
+    Args:
+        output_path: HuggingFace checkpoint directory to rewrite (fileset root
+            before restructure, or ``alternates/hf`` for an ONNX-primary fileset).
+        base_model_path: Base HuggingFace directory whose architecture identity
+            is restored.
+    """
+    output_path = Path(output_path)
+    base_model_path = Path(base_model_path)
+    output_config_path = output_path / "config.json"
+    base_config_path = base_model_path / "config.json"
+    if not output_config_path.exists() or not base_config_path.exists():
+        logger.warning(
+            "Skipping encoder HF sanitize: missing config.json (output=%s exists=%s, base=%s exists=%s)",
+            output_config_path,
+            output_config_path.exists(),
+            base_config_path,
+            base_config_path.exists(),
+        )
+        return
+
+    with open(output_config_path) as f:
+        config = json.load(f)
+    with open(base_config_path) as f:
+        base_config = json.load(f)
+
+    kept = {key: config[key] for key in _ENCODER_KEEP_KEYS if key in config}
+    if "model_type" in base_config:
+        config["model_type"] = base_config["model_type"]
+    if "architectures" in base_config:
+        config["architectures"] = base_config["architectures"]
+    config.pop("auto_map", None)
+    config.update(kept)
+
+    with open(output_config_path, "w") as f:
+        json.dump(config, f, indent=2)
+        f.write("\n")
+
+    base_py = {path.relative_to(base_model_path) for path in base_model_path.rglob("*.py") if path.is_file()}
+    for py_file in output_path.rglob("*.py"):
+        if not py_file.is_file():
+            continue
+        relative = py_file.relative_to(output_path)
+        if relative not in base_py:
+            py_file.unlink()
+            logger.info("Removed encoder custom code not present in the base checkpoint: %s", relative)
+
+    logger.info(
+        "Sanitized encoder HF checkpoint at %s to model_type=%s architectures=%s",
+        output_path,
+        config.get("model_type"),
+        config.get("architectures"),
+    )
+
+
 def merge_lora_adapter(
     adapter_path: Path,
     base_model_path: str,
     output_path: Path,
+    trust_remote_code: bool,
 ) -> None:
     """
     Merge LoRA adapter weights into the base model.
@@ -214,6 +299,7 @@ def merge_lora_adapter(
         adapter_path: Path to the LoRA adapter checkpoint
         base_model_path: Path to the base model (for loading weights)
         output_path: Where to save the merged model
+        trust_remote_code: Job flag for loading the *base* fileset.
     """
     try:
         import torch
@@ -238,7 +324,7 @@ def merge_lora_adapter(
             base_model_path,
             torch_dtype=torch.bfloat16,
             device_map="auto",
-            trust_remote_code=True,
+            trust_remote_code=trust_remote_code,
         )
 
         # 2. Attach the LoRA adapter
@@ -254,7 +340,7 @@ def merge_lora_adapter(
         model.save_pretrained(tmp_path, safe_serialization=True)
 
         # 5. Save tokenizer from base model
-        tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=trust_remote_code)
         tokenizer.save_pretrained(tmp_path)
 
         # 6. Copy to output path
@@ -272,6 +358,7 @@ def merge_lora_embedding_adapter(
     adapter_path: Path,
     base_model_path: str,
     output_path: Path,
+    trust_remote_code: bool,
 ) -> None:
     """Merge a LoRA adapter into a base embedding model.
 
@@ -283,6 +370,7 @@ def merge_lora_embedding_adapter(
         adapter_path: Path to the PEFT adapter directory.
         base_model_path: HuggingFace model name or path for the base encoder.
         output_path: Where to write the merged model.
+        trust_remote_code: Job flag for loading the *base* fileset.
     """
     try:
         import gc
@@ -308,7 +396,7 @@ def merge_lora_embedding_adapter(
             base_model_path,
             torch_dtype=torch.float16,
             device_map="auto",
-            trust_remote_code=True,
+            trust_remote_code=trust_remote_code,
         )
 
         logger.info("Loading adapter from %s", adapter_path)
@@ -321,7 +409,7 @@ def merge_lora_embedding_adapter(
         model.save_pretrained(tmp_path, safe_serialization=True)
 
         try:
-            tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=True)
+            tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=trust_remote_code)
             tokenizer.save_pretrained(tmp_path)
             logger.info("Tokenizer saved to %s", tmp_path)
         except Exception as e:
@@ -341,6 +429,7 @@ def merge_lora_cross_encoder_adapter(
     adapter_path: Path,
     base_model_path: str,
     output_path: Path,
+    trust_remote_code: bool,
 ) -> None:
     """Merge a LoRA adapter into a cross-encoder (sequence-classification) base model."""
     try:
@@ -366,7 +455,7 @@ def merge_lora_cross_encoder_adapter(
             base_model_path,
             torch_dtype=torch.float16,
             device_map="auto",
-            trust_remote_code=True,
+            trust_remote_code=trust_remote_code,
         )
 
         logger.info("Loading adapter from %s", adapter_path)
@@ -379,7 +468,7 @@ def merge_lora_cross_encoder_adapter(
         model.save_pretrained(tmp_path, safe_serialization=True)
 
         try:
-            tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=True)
+            tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=trust_remote_code)
             tokenizer.save_pretrained(tmp_path)
             logger.info("Tokenizer saved to %s", tmp_path)
         except Exception as e:
@@ -514,6 +603,8 @@ def export_onnx(
     tokenizer_path: str,
     model_type: ModelType = ModelType.EMBEDDING,
     cfg: ExportConfig | None = None,
+    trust_remote_code: bool = False,
+    load_trust_remote_code: bool = False,
 ) -> Path:
     """Write ``model.onnx`` and ``tokenizer/``. Optionally verify against the traced module."""
     import torch
@@ -527,12 +618,12 @@ def export_onnx(
     torch_dtype = getattr(torch, _TORCH_DTYPES[cfg.precision])
 
     loader = AutoModelForSequenceClassification if is_cross_encoder else AutoModel
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=trust_remote_code)
     inner = loader.from_pretrained(
         str(model_path),
         torch_dtype=torch_dtype,
         attn_implementation=cfg.attn_implementation,
-        trust_remote_code=True,
+        trust_remote_code=load_trust_remote_code,
     ).eval()
 
     export_model = _build_export_module(inner, model_type, cfg)
@@ -702,6 +793,7 @@ def process_checkpoint(
 
     finetuning_type = customizer_config.training.finetuning_type
     base_model_path = customizer_config.model.path
+    job_trust_remote_code = customizer_config.model.trust_remote_code
     is_embedding = model_type == ModelType.EMBEDDING
     is_cross_encoder = model_type == ModelType.CROSS_ENCODER
     is_llm = model_type == ModelType.LLM
@@ -731,18 +823,21 @@ def process_checkpoint(
                 adapter_path=checkpoint_path,
                 base_model_path=base_model_path,
                 output_path=output_path,
+                trust_remote_code=job_trust_remote_code,
             )
         elif is_cross_encoder:
             merge_lora_cross_encoder_adapter(
                 adapter_path=checkpoint_path,
                 base_model_path=base_model_path,
                 output_path=output_path,
+                trust_remote_code=job_trust_remote_code,
             )
         else:
             merge_lora_adapter(
                 adapter_path=checkpoint_path,
                 base_model_path=base_model_path,
                 output_path=output_path,
+                trust_remote_code=job_trust_remote_code,
             )
         checkpoint_format = CheckpointFormat.HF
 
@@ -760,7 +855,8 @@ def process_checkpoint(
         # Note: For hf-peft, chat template is inherited from base model at inference time
 
     else:
-        # Full weights training: copy and process
+        # Full weights: copy Automodel's consolidated dir, then (for untrusted
+        # encoders) strip training-class metadata after ONNX export.
         logger.info(
             f"Copying {type_label} full weights checkpoint from {checkpoint_path} to {output_path}".replace("  ", " ")
         )
@@ -775,13 +871,19 @@ def process_checkpoint(
 
     if (is_embedding or is_cross_encoder) and checkpoint_format != CheckpointFormat.HF_PEFT:
         export_cfg = _resolve_export_config(customizer_config)
+        # Full-SFT copy still has Automodel auto_map until sanitize runs.
+        load_trust_remote_code = True if finetuning_type == FinetuningType.ALL_WEIGHTS else job_trust_remote_code
         export_onnx(
             model_path=output_path,
             output_path=output_path / "alternates" / "onnx",
             tokenizer_path=base_model_path,
             model_type=model_type,
             cfg=export_cfg,
+            trust_remote_code=job_trust_remote_code,
+            load_trust_remote_code=load_trust_remote_code,
         )
+        if not job_trust_remote_code:
+            sanitize_encoder_hf(output_path, Path(base_model_path))
         _restructure_encoder_output(output_path, export_cfg.primary)
 
     # Determine precision: use explicit config value, or extract from base model
@@ -794,3 +896,60 @@ def process_checkpoint(
         format=checkpoint_format,
         precision=precision,
     )
+
+
+def _move_contents(source: Path, destination: Path) -> None:
+    """Move everything in *source* into *destination* and drop the empty *source*."""
+    destination.mkdir(parents=True, exist_ok=True)
+    for entry in list(source.iterdir()):
+        shutil.move(str(entry), str(destination / entry.name))
+    source.rmdir()
+
+
+def copy_checkpoint_stats(workspace_dir: Path, output_path: Path) -> None:
+    """Copy per-checkpoint validation statistics into the output fileset."""
+    source = workspace_dir / "checkpoints" / CHECKPOINT_STATS_FILENAME
+    if not source.is_file():
+        logger.warning("Checkpoint statistics were not found at %s", source)
+        return
+    shutil.copy2(source, output_path / CHECKPOINT_STATS_FILENAME)
+
+
+def process_selected_checkpoints(
+    checkpoints: Mapping[str, Path],
+    output_path: Path,
+    workspace_dir: Path,
+    customizer_config: TrainingStepConfig,
+    model_type: ModelType = ModelType.LLM,
+    resolved_chat_template: str | None = None,
+) -> CheckpointInfo:
+    """Process the selected checkpoint(s) into one fileset.
+
+    Every checkpoint is staged into ``{output_path}/{label}``, so ONNX
+    conversion and sanitizing happen identically for each. The published
+    checkpoint is then moved up to the root, and a ``last`` that was not the
+    published one moves under ``alternates/``.
+    """
+    infos: dict[str, CheckpointInfo] = {}
+    for label, checkpoint_path in checkpoints.items():
+        infos[label] = process_checkpoint(
+            checkpoint_path,
+            output_path / label,
+            customizer_config,
+            model_type=model_type,
+            resolved_chat_template=resolved_chat_template,
+        )
+
+    root_label = "best" if "best" in infos else "last"
+    logger.info("Publishing the %s checkpoint at the fileset root", root_label)
+    _move_contents(output_path / root_label, output_path)
+
+    staged_last = output_path / "last"
+    if staged_last.exists():
+        alternates_path = output_path / "alternates"
+        alternates_path.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(staged_last), str(alternates_path / "last"))
+        logger.info("Published the last checkpoint under alternates/last")
+
+    copy_checkpoint_stats(workspace_dir, output_path)
+    return infos[root_label].model_copy(update={"path": str(output_path)})

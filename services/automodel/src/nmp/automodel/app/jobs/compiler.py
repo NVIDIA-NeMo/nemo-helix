@@ -6,6 +6,7 @@
 import logging
 
 from nemo_platform_plugin.client.errors import NotFoundError
+from nemo_platform_plugin.deployment import LORA_ENABLED_REQUIRED_MESSAGE
 from nemo_platform_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
@@ -52,9 +53,6 @@ from nmp.customization_common.schemas.file_io import (
     FileIOTaskConfig,
     FileSetRef,
     UploadItem,
-)
-from nmp.customization_common.schemas.model_entity import (
-    DeploymentParameters as ModelEntityDeploymentParameters,
 )
 from nmp.customization_common.schemas.model_entity import (
     ModelEntityTaskConfig,
@@ -255,16 +253,6 @@ def _build_model_entity_config(
             rank=training.peft.rank,
         )
 
-    # Only forward the user-supplied deployment_config from the job spec.
-    # tool_call_config from the *source* model entity's spec is propagated
-    # separately via fileset metadata (see build_output_fileset_metadata_from_model_entity),
-    # so we intentionally do not merge it here.
-    deployment_config: str | ModelEntityDeploymentParameters | None = None
-    if isinstance(job_spec.deployment_config, str):
-        deployment_config = job_spec.deployment_config
-    elif job_spec.deployment_config is not None:
-        deployment_config = ModelEntityDeploymentParameters.model_validate(job_spec.deployment_config.model_dump())
-
     return ModelEntityTaskConfig(
         name=job_spec.output.name,
         workspace=workspace,
@@ -277,7 +265,7 @@ def _build_model_entity_config(
         model_entity=job_spec.model,
         peft=peft_config,
         trust_remote_code=trust_remote_code,
-        deployment_config=deployment_config,
+        deployment_config=job_spec.deployment_config,
     )
 
 
@@ -317,6 +305,18 @@ async def _require_tool_call_plugin_permission(workspace: str) -> None:
         )
 
 
+def _config_targets_model(config: ModelDeploymentConfig, workspace: str, name: str) -> bool:
+    """Whether ``config`` deploys the model entity ``workspace/name``.
+
+    ``model_entity_id`` is the canonical link; older configs only carry the
+    name/namespace pair on ``model_spec``, so both are accepted.
+    """
+    model_spec = config.model_spec
+    return (config.model_entity_id == f"{workspace}/{name}") or (
+        model_spec.model_name == name and model_spec.model_namespace == workspace
+    )
+
+
 async def _validate_deployment_config(
     workspace: str,
     transformed_spec: CustomizationJobOutput,
@@ -333,6 +333,10 @@ async def _validate_deployment_config(
 
     # Inline deployment params: check permission-gated fields.
     if isinstance(dc, DeploymentParams):
+        # AutomodelJobInput rejects this at submit, but the compiler is entered with a
+        # CustomizationJobOutput, which carries no such validator -- re-assert it here.
+        if transformed_spec.training.finetuning_type == FinetuningType.LORA and not dc.lora_enabled:
+            raise PlatformJobCompilationError(LORA_ENABLED_REQUIRED_MESSAGE)
         tcc = dc.tool_call_config
         if tcc and tcc.tool_call_plugin:
             await _require_tool_call_plugin_permission(workspace)
@@ -355,6 +359,17 @@ async def _validate_deployment_config(
             "Use a deployment config with lora_enabled=true, or provide inline deployment parameters."
         )
 
+    # The adapter is served from its base model's deployment, so a referenced config
+    # is only usable if it deploys that base model.
+    if is_lora:
+        base = parse_entity_ref(transformed_spec.model, workspace)
+        if not _config_targets_model(resolved_config, base.workspace, base.name):
+            raise PlatformJobCompilationError(
+                f"deployment_config references '{dc}' which targets a different model entity than the base model "
+                f"'{base.workspace}/{base.name}'. A LoRA adapter is served from its base model's deployment, "
+                "so the config must target that base model, or use inline deployment parameters instead."
+            )
+
     # SFT or lora_merged referencing a string config
     if produces_new_model:
         output_name = transformed_spec.output.name
@@ -372,11 +387,7 @@ async def _validate_deployment_config(
 
         # Output model entity already exists (retraining to create a new FileSet).
         # Verify the config actually targets this model entity.
-        model_spec = resolved_config.model_spec
-        config_targets_model = (resolved_config.model_entity_id == f"{existing_me.workspace}/{existing_me.name}") or (
-            model_spec.model_name == existing_me.name and model_spec.model_namespace == existing_me.workspace
-        )
-        if not config_targets_model:
+        if not _config_targets_model(resolved_config, existing_me.workspace, existing_me.name):
             raise PlatformJobCompilationError(
                 f"deployment_config references '{dc}' which targets a different model entity "
                 f"than the output model '{existing_me.workspace}/{existing_me.name}'. "

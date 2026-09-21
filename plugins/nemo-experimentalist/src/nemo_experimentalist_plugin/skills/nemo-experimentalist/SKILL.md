@@ -26,7 +26,9 @@ compatibility: requires the enabled `nemo-experimentalist-plugin`, Docker for Ha
 maturity: beta
 license: Apache-2.0
 user-invocable: true
-allowed-tools: [Bash, Read, Write]
+allowed-tools: Bash, Read, Write
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # NeMo Experimentalist

@@ -13,6 +13,7 @@ from nemo_platform_ext.auth.helpers import NMPOIDCConfig
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_platform_plugin.jobs.client import JobsClient
+from nmp.common.auth import Principal
 from nmp.common.config import Configuration, PlatformConfig
 from nmp.common.http_clients import shared_async_http_client, shared_sync_http_client
 from nmp.common.platform_endpoint import (
@@ -174,6 +175,8 @@ def test_get_platform_sdk_internal_flag():
     assert sdk is not None
     assert "X-NMP-Internal" in sdk.default_headers
     assert sdk.default_headers["X-NMP-Internal"] == "true"
+    assert sdk.default_headers["X-NMP-Principal-Id"] == "service:my-service"
+    assert sdk.default_headers["X-NMP-Actor-Aliases"] == "service:my-service"
 
 
 def test_get_platform_sdk_uses_workload_identity_when_token_file_configured(monkeypatch: pytest.MonkeyPatch, tmp_path):
@@ -268,6 +271,8 @@ def test_get_async_platform_sdk_internal_flag():
     assert sdk is not None
     assert "X-NMP-Internal" in sdk.default_headers
     assert sdk.default_headers["X-NMP-Internal"] == "true"
+    assert sdk.default_headers["X-NMP-Principal-Id"] == "service:async-service"
+    assert sdk.default_headers["X-NMP-Actor-Aliases"] == "service:async-service"
 
 
 def test_on_behalf_of_without_service_principal():
@@ -298,6 +303,7 @@ def test_get_task_sdk_with_principal(monkeypatch: pytest.MonkeyPatch):
 
     assert sdk.default_headers["X-NMP-Principal-Id"] == "service:customizer"
     assert sdk.default_headers["X-NMP-Internal"] == "true"
+    assert sdk.default_headers["X-NMP-Actor-Aliases"] == "service:customizer"
     assert sdk.default_headers["X-NMP-Principal-On-Behalf-Of"] == "real-user@example.com"
 
 
@@ -309,6 +315,7 @@ def test_get_task_sdk_without_principal(monkeypatch: pytest.MonkeyPatch):
 
     assert sdk.default_headers["X-NMP-Principal-Id"] == "service:customizer"
     assert sdk.default_headers["X-NMP-Internal"] == "true"
+    assert sdk.default_headers["X-NMP-Actor-Aliases"] == "service:customizer"
     assert "X-NMP-Principal-On-Behalf-Of" not in sdk.default_headers
 
 
@@ -598,8 +605,9 @@ def test_get_request_scoped_sdk_preserves_base_default_headers_with_scoped_heade
         with patch("nmp.common.sdk_factory.get_principal_auth_headers", return_value=mock_auth_headers):
             scoped_sdk = get_request_scoped_sdk(base_sdk)
 
-    assert scoped_sdk.default_headers["X-NMP-Internal"] == "true"
     assert scoped_sdk.default_headers["X-NMP-Principal-Id"] == "service:jobs"
+    assert scoped_sdk.default_headers["X-NMP-Internal"] == "true"
+    assert scoped_sdk.default_headers["X-NMP-Actor-Aliases"] == "service:jobs"
     assert scoped_sdk.default_headers["X-NMP-Principal-On-Behalf-Of"] == "user@example.com"
     assert scoped_sdk.default_headers["traceparent"] == "00-trace-id-span-id-01"
 
@@ -693,6 +701,33 @@ def test_get_sdk_on_behalf_of_preserves_omitted_default_headers() -> None:
     assert delegated_sdk.default_headers["Content-Type"] is omit
     assert delegated_sdk.default_headers["X-Base"] == "base"
     assert delegated_sdk.default_headers["X-NMP-Principal-On-Behalf-Of"] == "user@example.com"
+
+
+def test_get_sdk_on_behalf_of_clears_stale_delegated_principal_headers() -> None:
+    with NeMoPlatform(
+        base_url="http://nmp.example.test",
+        default_headers={"X-NMP-Principal-Id": "service:jobs"},
+    ) as base_sdk:
+        full_subject_sdk = get_sdk_on_behalf_of(
+            base_sdk,
+            Principal(
+                id="full-user@example.com",
+                email="full-user@example.com",
+                groups=["team-a"],
+                account_id="account-full",
+                authz_aliases=["legacy-full"],
+            ),
+        )
+        id_only_subject_sdk = get_sdk_on_behalf_of(
+            full_subject_sdk,
+            Principal(id="id-only-user@example.com"),
+        )
+
+    assert id_only_subject_sdk.default_headers["X-NMP-Principal-On-Behalf-Of"] == "id-only-user@example.com"
+    assert "X-NMP-Principal-On-Behalf-Of-Email" not in id_only_subject_sdk.default_headers
+    assert "X-NMP-Principal-On-Behalf-Of-Groups" not in id_only_subject_sdk.default_headers
+    assert "X-NMP-Subject-Account-Id" not in id_only_subject_sdk.default_headers
+    assert "X-NMP-Subject-Aliases" not in id_only_subject_sdk.default_headers
 
 
 # --- SDK routing client tests ---

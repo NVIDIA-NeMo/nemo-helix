@@ -338,7 +338,7 @@ class InMemoryRunnerBackend(RunnerBackend):
         base_dir = self._fabric_base_dir_for(workspace, name)
         await asyncio.to_thread(base_dir.mkdir, parents=True, exist_ok=True)
         try:
-            await self._stage_ethos(workspace, agent, config, base_dir)
+            staged_spec = await self._stage_ethos(workspace, agent, config, base_dir)
             # After staging so the support probe plans against a populated
             # base_dir, and before the write so the staged config -- which is
             # what the child process reads -- carries the export.
@@ -366,6 +366,7 @@ class InMemoryRunnerBackend(RunnerBackend):
             pid=proc.pid,
             endpoint=f"http://127.0.0.1:{port}",
             log_path=str(log_path),
+            staged_spec=staged_spec,
             extra={"base_dir": str(base_dir)},
         )
         self._processes[key] = proc

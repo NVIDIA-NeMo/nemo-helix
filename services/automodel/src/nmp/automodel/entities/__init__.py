@@ -15,6 +15,7 @@ They belong in their respective layers:
 
 from .values import (
     CheckpointFormat,
+    CheckpointSelection,
     FinetuningType,
     Precision,
     TrainingType,
@@ -23,6 +24,7 @@ from .values import (
 __all__ = [
     # Enums
     "CheckpointFormat",
+    "CheckpointSelection",
     "FinetuningType",
     "Precision",
     "TrainingType",

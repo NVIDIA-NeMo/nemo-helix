@@ -11,28 +11,24 @@ from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from nemo_platform_plugin.deployment import DeploymentParams, ToolCallParams
 from nemo_platform_plugin.models.types import ModelEntity
 from nmp.automodel.adapter import automodel_spec_to_compiler_output
 from nmp.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
-    DeploymentParams,
     DistillationTraining,
     ExportParams,
     LoRAParams,
     OutputResponse,
     RetrievalParams,
     SFTTraining,
-    ToolCallParams,
 )
 from nmp.automodel.app.jobs.compiler import _build_file_download_config
 from nmp.automodel.compile import platform_job_config_compiler
-from nmp.automodel.entities.values import OutputNameType
+from nmp.automodel.entities.values import CheckpointSelection, OutputNameType
 from nmp.automodel.images import get_tasks_image, get_training_image
 from nmp.common.entities.utils import get_random_id
 from nmp.common.jobs.exceptions import PlatformJobCompilationError
-from nmp.customization_common.schemas.model_entity import (
-    DeploymentParameters as ModelEntityDeploymentParameters,
-)
 from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
 
 
@@ -156,6 +152,7 @@ def test_compile_training_step_carries_retrieval_config() -> None:
         training=SFTTraining(
             recipe="bi_encoder",
             peft=None,
+            checkpoint_selection=CheckpointSelection.BOTH,
             batch_size=4,
             micro_batch_size=1,
             retrieval=RetrievalParams(
@@ -163,6 +160,7 @@ def test_compile_training_step_carries_retrieval_config() -> None:
                 query_prefix="query: ",
                 passage_prefix="passage: ",
                 query_max_length=256,
+                do_distributed_inbatch_negative=True,
                 export=ExportParams(primary="hf", opset=18),
             ),
         ),
@@ -176,8 +174,10 @@ def test_compile_training_step_carries_retrieval_config() -> None:
     assert cfg["retrieval"]["query_prefix"] == "query: "
     assert cfg["retrieval"]["passage_prefix"] == "passage: "
     assert cfg["retrieval"]["query_max_length"] == 256
+    assert cfg["retrieval"]["do_distributed_inbatch_negative"] is True
     assert cfg["retrieval"]["export"]["primary"] == "hf"
     assert cfg["retrieval"]["export"]["opset"] == 18
+    assert cfg["schedule"]["checkpoint_selection"] == "both"
 
 
 def test_sft_training_applies_nemotron_defaults_for_encoder_recipes() -> None:
@@ -489,7 +489,7 @@ def test_build_model_entity_config_forwards_inline_deployment_config() -> None:
     )
     config = _build_model_entity_config("default", job_spec)
 
-    assert isinstance(config.deployment_config, ModelEntityDeploymentParameters)
+    assert isinstance(config.deployment_config, DeploymentParams)
     assert config.deployment_config.gpu == 2
     assert config.deployment_config.image_name == "img"
     assert config.deployment_config.lora_enabled is True
@@ -527,7 +527,7 @@ def test_deployment_config_survives_the_plugin_adapter() -> None:
     )
     config = _build_model_entity_config("default", spec)
 
-    assert isinstance(config.deployment_config, ModelEntityDeploymentParameters)
+    assert isinstance(config.deployment_config, DeploymentParams)
     assert config.deployment_config.gpu == 3
 
 
@@ -628,3 +628,83 @@ async def test_tool_call_plugin_without_the_permission_is_rejected(
 
     with pytest.raises(PlatformJobCompilationError, match="models.tool-call-plugin.set"):
         await platform_job_config_compiler(job, "default", platform_clients)
+
+
+def _lora_job(deployment_config: str | DeploymentParams) -> CustomizationJobOutput:
+    return CustomizationJobOutput(
+        model="default/test-target",
+        dataset="default/my-dataset",
+        training=SFTTraining(peft=LoRAParams(rank=8, alpha=32, merge=False), batch_size=4, micro_batch_size=1),
+        output=_output(),
+        deployment_config=deployment_config,
+    )
+
+
+def _deployment_config(
+    *,
+    lora_enabled: bool = True,
+    model_entity_id: str = "default/test-target",
+    model_name: str = "test-target",
+    model_namespace: str = "default",
+) -> Any:
+    return SimpleNamespace(
+        workspace="default",
+        name="existing-cfg",
+        model_entity_id=model_entity_id,
+        model_spec=SimpleNamespace(lora_enabled=lora_enabled, model_name=model_name, model_namespace=model_namespace),
+    )
+
+
+@pytest.mark.asyncio
+async def test_lora_job_rejects_a_config_for_a_different_base_model(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The adapter is served from its base model's deployment, so the config must target it."""
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(
+            data=lambda: _deployment_config(model_entity_id="default/unrelated", model_name="unrelated")
+        )
+    )
+
+    with pytest.raises(PlatformJobCompilationError, match="different model entity than the base model"):
+        await platform_job_config_compiler(_lora_job("default/other-cfg"), "default", platform_clients)
+
+
+@pytest.mark.asyncio
+async def test_lora_job_accepts_a_config_targeting_its_base_model(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+    platform_clients.models.get_deployment_config = AsyncMock(
+        return_value=SimpleNamespace(data=lambda: _deployment_config())
+    )
+
+    spec = await platform_job_config_compiler(_lora_job("default/existing-cfg"), "default", platform_clients)
+
+    steps = spec.steps if hasattr(spec, "steps") else spec["steps"]
+    me_step = next(s for s in steps if s["name"] == "model-entity-creation")
+    assert me_step["config"]["deployment_config"] == "default/existing-cfg"
+
+
+@pytest.mark.asyncio
+async def test_inline_lora_enabled_false_is_rejected_at_compile(
+    platform_clients: AsyncCustomizationPlatformClients,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AutomodelJobInput rejects this at submit; the compiler takes the output spec."""
+    monkeypatch.setattr(
+        "nmp.automodel.app.jobs.compiler.fetch_model_entity",
+        AsyncMock(return_value=_make_mock_model_entity()),
+    )
+
+    with pytest.raises(PlatformJobCompilationError, match="lora_enabled must be true"):
+        await platform_job_config_compiler(_lora_job(DeploymentParams(lora_enabled=False)), "default", platform_clients)

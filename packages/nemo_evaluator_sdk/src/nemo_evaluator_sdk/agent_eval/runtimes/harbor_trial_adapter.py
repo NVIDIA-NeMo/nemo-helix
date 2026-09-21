@@ -43,14 +43,11 @@ from nemo_evaluator_sdk.values.evidence import (
     EVIDENCE_TRACE,
     CandidateEvidence,
     EvidenceDescriptor,
-    Trajectory,
+    final_agent_message,
     read_atif,
+    read_otlp_spans,
 )
-from nemo_evaluator_sdk.values.otlp import (
-    final_output_text,
-    parse_resource_spans,
-    resource_spans_from_text,
-)
+from nemo_evaluator_sdk.values.otlp import final_output_text
 from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans
 from pydantic import ValidationError
 
@@ -194,33 +191,14 @@ def _trial_output_text(otlp_spans: list[ResourceSpans] | None, atif_trace: Evide
             return answer
     if atif_trace is None or atif_trace.ref is None:
         return None
-    return _final_agent_message(read_atif(Path(atif_trace.ref)))
+    return final_agent_message(read_atif(Path(atif_trace.ref)))
 
 
 def _read_otlp(descriptor: EvidenceDescriptor | None) -> list[ResourceSpans] | None:
     """Parse a trial's OTLP trace, or ``None`` when it is absent or will not read."""
     if descriptor is None or descriptor.ref is None:
         return None
-    path = Path(descriptor.ref)
-    try:
-        return parse_resource_spans(resource_spans_from_text(path.read_text(encoding="utf-8")))
-    except (OSError, ValueError) as error:
-        logger.warning("Ignoring unreadable OTLP trace %s: %s", path, error)
-        return None
-
-
-def _final_agent_message(trajectory: Trajectory | None) -> str | None:
-    """The agent's last message, which is its user-visible answer for the trial.
-
-    Only the *last* agent step can be the answer. An earlier one is intermediate reasoning, so an
-    agent that ends on an empty message has produced no answer rather than the previous one.
-    """
-    if trajectory is None:
-        return None
-    for step in reversed(trajectory.steps):
-        if step.source == "agent":
-            return step.message or None
-    return None
+    return read_otlp_spans(Path(descriptor.ref))
 
 
 def _add_extension_descriptor(

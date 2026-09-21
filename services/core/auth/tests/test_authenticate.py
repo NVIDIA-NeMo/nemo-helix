@@ -5,7 +5,6 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import jwt
@@ -38,9 +37,13 @@ def _private_key_pem() -> bytes:
 def _assert_no_principal_response_headers(response) -> None:
     for header_name in (
         "X-NMP-Principal-Id",
+        "X-NMP-Actor-Account-Id",
         "X-NMP-Principal-Email",
         "X-NMP-Principal-Groups",
+        "X-NMP-Actor-Aliases",
         "X-NMP-Principal-On-Behalf-Of",
+        "X-NMP-Subject-Account-Id",
+        "X-NMP-Subject-Aliases",
         "X-NMP-Principal-On-Behalf-Of-Email",
         "X-NMP-Principal-On-Behalf-Of-Groups",
         "X-NMP-Scopes",
@@ -72,10 +75,12 @@ def _test_client(
     config: AuthConfig,
     *,
     workload_token_exchange_service: WorkloadTokenExchangeService | None = None,
+    access_key_registry: object | None = None,
 ) -> Iterator[TestClient]:
     app = FastAPI()
     app.include_router(router)
-    app.dependency_overrides[get_access_key_registry] = lambda: AlwaysActiveAccessKeyRegistry()
+    registry = access_key_registry or AlwaysActiveAccessKeyRegistry()
+    app.dependency_overrides[get_access_key_registry] = lambda: registry
     if workload_token_exchange_service is not None:
         app.dependency_overrides[get_workload_token_exchange_service] = lambda: workload_token_exchange_service
     with patch("nmp.core.auth.api.v2.authenticate.get_auth_config", return_value=config):
@@ -186,10 +191,9 @@ def test_authenticate_passes_access_key_claims_for_legacy_record_backfill(tmp_pa
     resolved = ResolvedBearerToken(claims=claims, token_kind="access_key")
     registry = ClaimAwareAccessKeyRegistry()
     with (
-        _test_client(config) as client,
+        _test_client(config, access_key_registry=registry) as client,
         patch("nmp.core.auth.api.v2.authenticate.resolve_bearer_token", new=AsyncMock(return_value=resolved)),
     ):
-        client.app.dependency_overrides[get_access_key_registry] = lambda: registry
         response = client.get("/authenticate", headers={"Authorization": "Bearer signed.jwt.token"})
 
     assert response.status_code == 200
@@ -212,10 +216,9 @@ def test_authenticate_rejects_revoked_access_key(tmp_path):
     )
     resolved = ResolvedBearerToken(claims=claims, token_kind="access_key")
     with (
-        _test_client(config) as client,
+        _test_client(config, access_key_registry=RevokedAccessKeyRegistry()) as client,
         patch("nmp.core.auth.api.v2.authenticate.resolve_bearer_token", new=AsyncMock(return_value=resolved)),
     ):
-        client.app.dependency_overrides[get_access_key_registry] = lambda: RevokedAccessKeyRegistry()
         response = client.get("/authenticate", headers={"Authorization": "Bearer signed.jwt.token"})
 
     assert response.status_code == 401
@@ -252,6 +255,7 @@ def test_ext_authz_accepts_original_request_methods_and_returns_principal_header
     assert response.status_code == 200
     assert response.content == b""
     assert response.headers["X-NMP-Principal-Id"] == "writer@example.com"
+    assert response.headers["X-NMP-Actor-Aliases"] == "writer@example.com"
     assert response.headers["X-NMP-Scopes"] == "models:write"
     resolver.assert_awaited_once()
 
@@ -475,9 +479,11 @@ def test_ext_authz_delegated_workload_access_token_returns_obo_principal_headers
     assert response.content == b""
     assert response.headers["X-NMP-Principal-Id"] == "system:serviceaccount:nemo:job"
     assert response.headers["X-NMP-Principal-Groups"] == "system:serviceaccounts,nemo-jobs"
+    assert response.headers["X-NMP-Actor-Aliases"] == "system:serviceaccount:nemo:job"
     assert response.headers["X-NMP-Principal-On-Behalf-Of"] == "submitter@example.com"
     assert response.headers["X-NMP-Principal-On-Behalf-Of-Email"] == "submitter@example.com"
     assert response.headers["X-NMP-Principal-On-Behalf-Of-Groups"] == "workspace-editors"
+    assert response.headers["X-NMP-Subject-Aliases"] == "submitter@example.com"
     assert response.headers["X-NMP-Scopes"] == "openid email groups"
 
 
@@ -692,7 +698,9 @@ def test_authenticate_openapi_hides_ext_authz_and_documents_obo_fields(tmp_path)
     config = AuthConfig(enabled=True, token_signing=TokenSigningConfig(private_key_file=str(tmp_path / "private.pem")))
     (tmp_path / "private.pem").write_bytes(_private_key_pem())
     with _test_client(config) as client:
-        openapi = cast(FastAPI, client.app).openapi()
+        if not isinstance(client.app, FastAPI):
+            raise AssertionError("test client app is not a FastAPI app")
+        openapi = client.app.openapi()
 
     assert "/ext-authz" not in openapi["paths"]
     assert "/ext-authz/{original_path}" not in openapi["paths"]

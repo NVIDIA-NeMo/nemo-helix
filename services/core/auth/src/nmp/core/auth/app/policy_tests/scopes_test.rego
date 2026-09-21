@@ -376,6 +376,32 @@ test_oidc_scopes_ignored if {
     result.allowed == true
 }
 
+# Test that provider namespace scopes are ignored (treated as non-platform scopes)
+test_provider_urn_scopes_ignored if {
+    result := allow with input as {
+        "principal_id": "user1",
+        "method": "GET",
+        "path": "/apis/entities/v2/workspaces/ns1",
+        "scopes": ["openid", "profile", "urn:example:idp:audience:123"]
+    }
+    with data.authz.principals as {"user1": {"workspaces": {"ns1": ["Viewer"]}}}
+    with data.authz.roles as {
+        "Viewer": {
+            "permissions": ["workspaces.read", "workspaces.list"]
+        }
+    }
+    with data.authz.endpoints as {
+        "/apis/entities/v2/workspaces/{name}": {
+            "get": {
+                "permissions": ["workspaces.read"],
+                "scopes": ["entities:read", "platform:read"]
+            }
+        }
+    }
+
+    result.allowed == true
+}
+
 # Test that mixing OIDC scopes with platform scopes works
 test_mixed_oidc_and_platform_scopes if {
     result := allow with input as {

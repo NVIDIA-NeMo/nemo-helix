@@ -66,6 +66,13 @@ def update_fileset(*, workspace: str | None = None, name: str, body: UpdateFiles
 def delete_fileset(*, workspace: str | None = None, name: str) -> FilesetOutput: ...
 
 
+@post("/apis/files/v2/workspaces/{workspace}/filesets/{name}/refresh")
+@abstractmethod
+def refresh_fileset(*, workspace: str | None = None, name: str) -> FilesetOutput:
+    """Re-resolve a fileset's tracked mutable ref and repoint it at the current immutable id."""
+    ...
+
+
 # ---------------------------------------------------------------------------
 # File operations
 # ---------------------------------------------------------------------------

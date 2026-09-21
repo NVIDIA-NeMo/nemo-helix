@@ -25,7 +25,17 @@ from nemo_evaluator_sdk.agent_eval.runtimes.fabric.otlp_writer import otlp_endpo
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.skills import SkillProvenance
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, TrialMeasurements
-from nemo_evaluator_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
+from nemo_evaluator_sdk.values.evidence import (
+    EVIDENCE_FORMAT_ATIF,
+    EVIDENCE_FORMAT_OTLP,
+    EVIDENCE_TRACE,
+    CandidateEvidence,
+    EvidenceDescriptor,
+    final_agent_message,
+    read_atif,
+    read_otlp_spans,
+)
+from nemo_evaluator_sdk.values.otlp import final_output_text
 from pydantic import JsonValue
 
 # The file-exporter output names we choose (Relay accepts these as inputs).
@@ -59,22 +69,69 @@ def task_subdir_name(index: int, task_id: str) -> str:
     return f"{index:06d}-{safe}" if safe else f"task-{index:06d}"
 
 
+#: Mapping keys a Fabric adapter puts its final message under, in precedence order.
+_TEXT_KEYS = ("response", "output_text", "text", "message")
+
+
 def extract_output_text(output: object) -> str | None:
     """Pull the user-visible message out of a Fabric output value (already unwrapped from the result).
 
     Harness outputs vary; adapters commonly nest the final message under ``response`` (the codex-cli
     adapter does). Prefer a string ``response``/``output_text``/``text``/``message``, else stringify.
+
+    An envelope carrying no text at all yields ``None`` rather than its own serialization: an
+    adapter that always emits ``{"response": null}`` has produced no answer, and returning
+    ``'{"response": null}'`` would both read as an answer and mask the trace evidence that holds
+    the real one. A payload with no text key (``{"answer": 42}``) still stringifies, since that is
+    the whole of what the harness returned.
     """
     if output is None:
         return None
     if isinstance(output, str):
         return output
     if isinstance(output, Mapping):
-        for key in ("response", "output_text", "text", "message"):
+        if not output:
+            return None
+        explicitly_absent = False
+        for key in _TEXT_KEYS:
             value = output.get(key)
             if isinstance(value, str):
                 return value
+            if value is None and key in output:
+                explicitly_absent = True
+        if explicitly_absent:
+            return None
     return json.dumps(output, default=str)
+
+
+def trace_answer_text(descriptors: Mapping[str, EvidenceDescriptor]) -> str | None:
+    """The agent's answer read back from a trial's trace evidence, OTLP first and ATIF second.
+
+    The harness ``RunResult`` is the primary source; this is the fallback for adapters that report
+    the answer only through Relay telemetry, so a Fabric trial fills ``output.output_text`` on the
+    same terms as a Harbor one.
+
+    A blank answer is no answer, in either format. The format readers return a trace's last agent
+    text verbatim, whitespace included, because "what did the agent say" and "did the agent answer"
+    are different questions; this asks the second, and holds the trace to the same presence rule the
+    caller applies to the harness output.
+    """
+    otlp = descriptors.get(f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_OTLP}")
+    if otlp is not None and otlp.ref is not None:
+        spans = read_otlp_spans(Path(otlp.ref))
+        if spans is not None:
+            answer = _nonblank(final_output_text(spans))
+            if answer is not None:
+                return answer
+    atif = descriptors.get(f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}")
+    if atif is None or atif.ref is None:
+        return None
+    return _nonblank(final_agent_message(read_atif(Path(atif.ref))))
+
+
+def _nonblank(text: str | None) -> str | None:
+    """``text`` unchanged when it carries visible characters, else ``None``."""
+    return text if text is not None and text.strip() else None
 
 
 def normalize_output(output: Any) -> JsonValue:

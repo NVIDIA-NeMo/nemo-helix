@@ -12,7 +12,7 @@ from typing import Any, TypeVar
 
 import yaml
 from click import UsageError
-from pydantic import BaseModel, RootModel
+from pydantic import BaseModel, RootModel, TypeAdapter
 
 RequestModelT = TypeVar("RequestModelT", bound=BaseModel)
 
@@ -141,6 +141,19 @@ def read_data_input_with_flags(
 
     # Should never reach here due to validation above
     raise ValueError("No input provided")
+
+
+_BOOL = TypeAdapter(bool)
+
+
+def pop_exist_ok(payload: dict[str, Any]) -> bool:
+    """Remove and return the ``exist_ok`` client option, which is never sent on the wire.
+
+    ``--input-data`` may carry it as a JSON/YAML string such as ``"false"``, so it
+    is parsed the way the server would rather than tested for truthiness.
+    """
+    exist_ok = payload.pop("exist_ok", None)
+    return False if exist_ok is None else _BOOL.validate_python(exist_ok)
 
 
 def validate_required_fields(

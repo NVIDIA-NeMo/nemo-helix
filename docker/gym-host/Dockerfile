@@ -34,11 +34,32 @@ ENV PATH="/opt/gym-host-venv/bin:$PATH" \
     NEMO_GYM_VENV_DIR=/opt/gym_venvs \
     UV_CACHE_DIR=/home/ubuntu/.cache/uv
 RUN mkdir -p "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}"
-RUN gym env prefetch "+config_paths=[responses_api_agents/simple_agent/configs/simple_agent.yaml,responses_api_models/inference_provider/configs/inference_provider.yaml,resources_servers/mcqa/configs/mcqa.yaml]" \
+RUN if UV_LINK_MODE=copy gym env prefetch "+config_paths=[responses_api_agents/simple_agent/configs/simple_agent.yaml,responses_api_models/inference_provider/configs/inference_provider.yaml,resources_servers/mcqa/configs/mcqa.yaml]" \
       "++policy_base_url=http://127.0.0.1:9/v1" "++policy_api_key=unused" "++policy_model_name=unused" \
       "++simple_agent.responses_api_agents.simple_agent.resources_server.name=mcqa" \
-      "++uv_venv_dir=${NEMO_GYM_VENV_DIR}" "++uv_cache_dir=${UV_CACHE_DIR}" \
-    || echo "prefetch failed; venvs will be built at run time"
+      "++uv_venv_dir=${NEMO_GYM_VENV_DIR}" "++uv_cache_dir=${UV_CACHE_DIR}"; then \
+      uv cache clean mlflow ray; \
+    else \
+      echo "prefetch failed; venvs will be built at run time"; \
+    fi
+
+# Full MLflow carries gateway server CVEs, while this image only needs Gym's client-side imports.
+# Prefetched Gym venvs live at ${NEMO_GYM_VENV_DIR}/<kind>/<server>/.venv, not one directory deep.
+RUN find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" \
+      \( -type f -o -type l \) -path '*/bin/python' \
+    | while IFS= read -r py; do \
+        uv pip uninstall --python "${py}" mlflow || true; \
+      done \
+    && find "${UV_CACHE_DIR}" -path '*/archive-v0/*/mlflow-*.dist-info' -prune \
+      -exec sh -c 'for path; do rm -rf "$(dirname "${path}")"; done' sh {} + \
+    && test -z "$(find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
+      -path '*/mlflow-*.dist-info/METADATA' -print -quit)"
+
+# Ray's bundled Java jars carry httpcore5 CVEs and are only needed for JVM workers.
+RUN find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
+      -path '*/ray/jars' -prune -exec rm -rf {} + \
+    && test -z "$(find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
+      -path '*/ray/jars/*' -print -quit)"
 
 FROM ${NMP_PYTHON_IMAGE} AS runtime
 
@@ -71,7 +92,11 @@ CMD ["python", "-m", "sandboxed_gym.runtime.gym_host_runtime"]
 
 FROM runtime AS smoke-test
 RUN gym --help >/dev/null \
+    && test -z "$(find /opt/gym-host-venv /opt/gym_venvs /home/ubuntu/.cache/uv \
+        -path '*/mlflow-*.dist-info/METADATA' -print -quit)" \
+    && test -z "$(find /opt/gym-host-venv /opt/gym_venvs /home/ubuntu/.cache/uv \
+        -path '*/ray/jars/*' -print -quit)" \
     && python -c \
-        'import importlib.metadata as m; import nemo_gym, pydantic, yaml; from sandboxed_gym.runtime import gym_host_runtime; print({"nemo-gym": m.version("nemo-gym"), "sandboxed-gym": m.version("sandboxed-gym"), "pydantic": pydantic.__version__, "pyyaml": yaml.__version__, "runtime": gym_host_runtime.__name__})'
+        'import importlib.metadata as m; import nemo_gym, pydantic, yaml; from sandboxed_gym.runtime import gym_host_runtime; print({"nemo-gym": m.version("nemo-gym"), "nemo-sandboxed-gym": m.version("nemo-sandboxed-gym"), "pydantic": pydantic.__version__, "pyyaml": yaml.__version__, "runtime": gym_host_runtime.__name__})'
 
 FROM runtime

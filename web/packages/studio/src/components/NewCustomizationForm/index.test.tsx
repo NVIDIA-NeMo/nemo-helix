@@ -199,7 +199,9 @@ describe('NewCustomizationForm', () => {
 
     await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
 
-    expect(await screen.findByText(/Please fix the following errors/i)).toBeInTheDocument();
+    // The banner names the offending field, not a bare Zod message (ASTD-622).
+    const banner = await screen.findByText(/Please fix the following errors/i);
+    expect(banner.textContent).toMatch(/Model: /);
     expect(mutateAutomodel).not.toHaveBeenCalled();
     expect(mutateUnsloth).not.toHaveBeenCalled();
   });
@@ -264,6 +266,80 @@ describe('NewCustomizationForm', () => {
         'default',
         expect.objectContaining({ filter: expect.objectContaining({ fileset: true }) })
       )
+    );
+  });
+
+  it('surfaces schema violations from a seeded config on load, before any submit', async () => {
+    // Import paths (clone, template, "start from your own config") set field values directly,
+    // bypassing the slider clamps, so an injected 0 against a `.gt(0)` field must be caught on
+    // load rather than only at submit.
+    const seeded = structuredClone(FORM_DEFAULTS);
+    if (seeded.automodel.batch) seeded.automodel.batch.global_batch_size = 0;
+    renderRoute(<NewCustomizationForm workspace="default" initialValues={seeded} />);
+
+    const banner = await screen.findByText(/Please fix the following errors/i);
+    expect(banner.textContent).toMatch(/Global batch size: Number must be greater than 0/);
+  });
+
+  it('clears a seeded validation error once the user corrects the field', async () => {
+    const user = userEvent.setup();
+    // Output name, model, and dataset are filled (as clone/template seeding does) so the
+    // injected batch size is the only schema error, and correcting it clears the whole banner.
+    const seeded = structuredClone(FORM_DEFAULTS);
+    seeded.outputName = 'my-fine-tune-model';
+    seeded.automodel.model = 'meta/llama-3.2-1b-instruct';
+    if (seeded.automodel.dataset) seeded.automodel.dataset.training = 'my-training-dataset';
+    if (seeded.automodel.batch) seeded.automodel.batch.global_batch_size = 0;
+    renderRoute(<NewCustomizationForm workspace="default" initialValues={seeded} />);
+
+    expect(
+      await screen.findByText(/Global batch size: Number must be greater than 0/)
+    ).toBeInTheDocument();
+
+    // Correcting the field revalidates live and clears the banner without a submit. The slider
+    // inputs share an aria-label, so pick this one out by its form field name.
+    const input = screen
+      .getAllByRole('spinbutton')
+      .find((el) => el.getAttribute('name') === 'automodel.batch.global_batch_size');
+    if (!(input instanceof HTMLInputElement)) throw new Error('batch size input not found');
+    await user.clear(input);
+    await user.type(input, '16');
+
+    await waitFor(() =>
+      expect(screen.queryByText(/Please fix the following errors/i)).not.toBeInTheDocument()
+    );
+  });
+
+  it('updates the banner to the remaining error as fields are corrected', async () => {
+    const user = userEvent.setup();
+    // Two injected errors; correcting one must leave the banner showing only the other.
+    const seeded = structuredClone(FORM_DEFAULTS);
+    seeded.outputName = 'my-fine-tune-model';
+    seeded.automodel.model = 'meta/llama-3.2-1b-instruct';
+    if (seeded.automodel.dataset) seeded.automodel.dataset.training = 'my-training-dataset';
+    if (seeded.automodel.batch) seeded.automodel.batch.global_batch_size = 0;
+    if (seeded.automodel.schedule) seeded.automodel.schedule.epochs = 0;
+    renderRoute(<NewCustomizationForm workspace="default" initialValues={seeded} />);
+
+    const banner = await screen.findByText(/Please fix the following errors/i);
+    expect(banner.textContent).toMatch(/Global batch size: Number must be greater than 0/);
+    expect(banner.textContent).toMatch(/Epochs: Number must be greater than 0/);
+
+    const input = screen
+      .getAllByRole('spinbutton')
+      .find((el) => el.getAttribute('name') === 'automodel.batch.global_batch_size');
+    if (!(input instanceof HTMLInputElement)) throw new Error('batch size input not found');
+    await user.clear(input);
+    await user.type(input, '16');
+
+    // The corrected field's error drops; the untouched one remains.
+    await waitFor(() =>
+      expect(screen.getByText(/Please fix the following errors/i).textContent).not.toMatch(
+        /Global batch size/
+      )
+    );
+    expect(screen.getByText(/Please fix the following errors/i).textContent).toMatch(
+      /Epochs: Number must be greater than 0/
     );
   });
 

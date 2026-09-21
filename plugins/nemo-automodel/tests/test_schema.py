@@ -304,3 +304,28 @@ def test_deployment_config_accepts_a_positive_gpu_count() -> None:
 
     assert isinstance(spec.deployment_config, DeploymentParams)
     assert spec.deployment_config.gpu == 1
+
+
+def test_cli_serialization_carries_distributed_inbatch_negative(tmp_path) -> None:
+    job = tmp_path / "job.json"
+    job.write_text(
+        json.dumps(
+            {
+                "model": "embed",
+                "dataset": {"training": "default/train"},
+                "training": {
+                    "training_type": "sft",
+                    "recipe": "bi_encoder",
+                    "finetuning_type": "all_weights",
+                    "retrieval": {"do_distributed_inbatch_negative": True},
+                },
+            }
+        )
+    )
+
+    dumped = json.loads(load_job_json(job))
+    assert dumped["training"]["retrieval"]["do_distributed_inbatch_negative"] is True
+
+    spec = AutomodelJobInput.model_validate(dumped)
+    assert spec.training.retrieval is not None
+    assert spec.training.retrieval.do_distributed_inbatch_negative is True

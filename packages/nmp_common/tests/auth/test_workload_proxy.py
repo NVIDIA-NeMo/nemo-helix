@@ -49,6 +49,7 @@ def test_forward_stamps_service_principal_and_preserves_path() -> None:
     sent = route.calls.last.request
     # The proxy sets the service-principal identity and drops the placeholder auth.
     assert sent.headers["x-nmp-principal-id"] == "service:agents"
+    assert sent.headers["x-nmp-actor-aliases"] == "service:agents"
     assert "authorization" not in {k.lower() for k in sent.headers}
     assert "x-client-hop" not in {k.lower() for k in sent.headers}
     assert "connection" not in resp.headers
@@ -68,7 +69,9 @@ def test_forward_stamps_on_behalf_of_when_configured() -> None:
     sent = route.calls.last.request
     # Service principal clears the route gate; on-behalf-of narrows access to the creator.
     assert sent.headers["x-nmp-principal-id"] == "service:agents"
+    assert sent.headers["x-nmp-actor-aliases"] == "service:agents"
     assert sent.headers["x-nmp-principal-on-behalf-of"] == "user:alice"
+    assert sent.headers["x-nmp-subject-aliases"] == "user:alice"
 
 
 @respx.mock
@@ -97,24 +100,32 @@ def test_forward_strips_inbound_on_behalf_of_to_prevent_spoofing() -> None:
         "/apis/entities/v2/workspaces",
         headers={
             "x-nmp-principal-id": "service:platform",
+            "x-nmp-actor-account-id": "account-attacker",
             "x-nmp-principal-email": "attacker@evil.test",
             "x-nmp-principal-groups": "platform-admins",
+            "x-nmp-actor-aliases": "attacker-alias",
             "x-nmp-principal-on-behalf-of": "user:attacker",
             # Companion metadata must not be smuggled onto our stamped OBO id:
             # the platform derives effective groups/email from these and feeds
             # them to the PDP, so attacker-chosen values would escalate.
             "x-nmp-principal-on-behalf-of-email": "attacker@evil.test",
             "x-nmp-principal-on-behalf-of-groups": "platform-admins",
+            "x-nmp-subject-account-id": "account-attacker",
+            "x-nmp-subject-aliases": "attacker-alias",
         },
     )
 
     sent = route.calls.last.request
     sent_keys = {k.lower() for k in sent.headers}
     assert sent.headers["x-nmp-principal-id"] == "service:agents"
+    assert sent.headers["x-nmp-actor-aliases"] == "service:agents"
     assert sent.headers["x-nmp-principal-on-behalf-of"] == "user:alice"
+    assert sent.headers["x-nmp-subject-aliases"] == "user:alice"
     # Inbound companion metadata cannot be attached to either stamped identity.
+    assert "x-nmp-actor-account-id" not in sent_keys
     assert "x-nmp-principal-email" not in sent_keys
     assert "x-nmp-principal-groups" not in sent_keys
+    assert "x-nmp-subject-account-id" not in sent_keys
     assert "x-nmp-principal-on-behalf-of-email" not in sent_keys
     assert "x-nmp-principal-on-behalf-of-groups" not in sent_keys
 
@@ -132,12 +143,16 @@ def test_forward_strips_inbound_on_behalf_of_when_none_configured() -> None:
             "x-nmp-principal-on-behalf-of": "user:attacker",
             "x-nmp-principal-on-behalf-of-email": "attacker@evil.test",
             "x-nmp-principal-on-behalf-of-groups": "platform-admins",
+            "x-nmp-subject-account-id": "account-attacker",
+            "x-nmp-subject-aliases": "attacker-alias",
         },
     )
 
     sent = route.calls.last.request
     sent_keys = {k.lower() for k in sent.headers}
     assert "x-nmp-principal-on-behalf-of" not in sent_keys
+    assert "x-nmp-subject-account-id" not in sent_keys
+    assert "x-nmp-subject-aliases" not in sent_keys
     assert "x-nmp-principal-on-behalf-of-email" not in sent_keys
     assert "x-nmp-principal-on-behalf-of-groups" not in sent_keys
 

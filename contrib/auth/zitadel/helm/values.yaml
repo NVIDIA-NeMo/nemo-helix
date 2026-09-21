@@ -1,0 +1,386 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+workloadTokenSigningKey:
+  create: true
+  secretName: &workloadTokenSigningKeySecretName nemo-workload-token-signing-key
+  key: private-key.pem
+  mountPath: &workloadTokenSigningKeyMountPath /etc/nmp/workload-token
+  privateKeyPem: ""
+
+workloadTokenTls:
+  create: true
+  secretName: &workloadTokenTlsSecretName nemo-platform-envoy-tls
+  mountPath: &workloadTokenTlsMountPath /etc/nmp/workload-token-tls
+  caBundleMountPath: &workloadTokenTlsCaBundleMountPath /etc/nmp/workload-token-ca
+  caBundleFile: &workloadTokenTlsCaBundleFile /etc/nmp/workload-token-ca/ca.crt
+  durationDays: 3650
+  ipAddresses:
+    - 127.0.0.1
+  dnsNames: []
+
+zitadelSecrets:
+  masterkey:
+    create: true
+    secretName: &zitadelMasterkeySecretName zitadel-masterkey
+    key: masterkey
+  demo:
+    create: true
+    secretName: &zitadelDemoCredentialsSecretName nemo-zitadel-demo-credentials
+    interactiveUserPasswordKey: interactive-user-password
+  postgresql:
+    create: true
+    secretName: &zitadelPostgresqlSecretName zitadel-postgresql
+    adminPasswordKey: &zitadelPostgresqlAdminPasswordKey postgres-password
+    userPasswordKey: &zitadelPostgresqlUserPasswordKey password
+    dsnKey: &zitadelPostgresqlDsnKey dsn
+
+nemoPlatformSecrets:
+  ngc:
+    create: true
+    secretName: &nemoPlatformNgcSecretName nemo-platform-ngc-api
+    key: NGC_API_KEY
+  postgresql:
+    create: true
+    secretName: &nemoPlatformPostgresqlSecretName nemo-platform-postgres
+    passwordKey: password
+
+zitadelDemo:
+  groupsClaim: groups
+  roleKey: nemo-workloads
+  actionName: nemoGroups
+  setupMachine:
+    userId: nemo-setup
+    name: NeMo Platform Setup
+  workloadMachine:
+    userId: svc-nemo
+    name: NeMo Workload Provider
+  loginClientMachine:
+    userId: nemo-login-client
+    name: NeMo Login Client
+  interactiveUser:
+    userName: nemo-user
+    firstName: NeMo
+    lastName: User
+    email: nemo-user@example.com
+
+zitadelSeedJob:
+  enabled: true
+  serviceAccountName: nemo-zitadel-seed
+  stateSecretName: &zitadelSeedStateSecretName nemo-zitadel-seed-state
+  patSecretName: iam-admin-pat
+  patSecretKey: pat
+  nemoConfigMapName: nemo-platform-config
+  nemoDeployments:
+    - nemo-platform-api
+    - nemo-platform-core-controller
+  waitTimeoutSeconds: 600
+  activeDeadlineSeconds: 900
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 300
+  image:
+    repository: docker.io/library/python
+    tag: 3.12-slim
+    pullPolicy: IfNotPresent
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    fsGroupChangePolicy: OnRootMismatch
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+    seccompProfile:
+      type: RuntimeDefault
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+zitadel:
+  fullnameOverride: zitadel
+  initJob:
+    activeDeadlineSeconds: 900
+  setupJob:
+    activeDeadlineSeconds: 900
+  zitadel:
+    masterkey: ""
+    masterkeySecretName: *zitadelMasterkeySecretName
+    configmapConfig:
+      ExternalSecure: true
+      ExternalDomain: 127.0.0.1
+      ExternalPort: 18084
+      TLS:
+        Enabled: false
+      Database:
+        Postgres:
+          Host: zitadel-postgresql
+      FirstInstance:
+        Org:
+          Machine:
+            Machine:
+              Username: iam-admin
+              Name: NeMo ZITADEL Bootstrap Admin
+            MachineKey:
+              ExpirationDate: "2029-01-01T00:00:00Z"
+              Type: 1
+            Pat:
+              ExpirationDate: "2029-01-01T00:00:00Z"
+  login:
+    enabled: false
+    ingress:
+      enabled: false
+  env:
+    - name: ZITADEL_DATABASE_POSTGRES_DSN
+      valueFrom:
+        secretKeyRef:
+          name: *zitadelPostgresqlSecretName
+          key: *zitadelPostgresqlDsnKey
+  ingress:
+    enabled: false
+  postgresql:
+    enabled: true
+    fullnameOverride: zitadel-postgresql
+    commonAnnotations:
+      helm.sh/hook: pre-install
+      helm.sh/hook-weight: "-1"
+    auth:
+      database: zitadel
+      username: zitadel
+      existingSecret: *zitadelPostgresqlSecretName
+      secretKeys:
+        adminPasswordKey: *zitadelPostgresqlAdminPasswordKey
+        userPasswordKey: *zitadelPostgresqlUserPasswordKey
+    primary:
+      persistence:
+        enabled: false
+
+nemo-platform:
+  fullnameOverride: nemo-platform
+  existingSecret: *nemoPlatformNgcSecretName
+  ngcAPIKey: ""
+  zitadelPublicGateway:
+    scheme: https
+    host: 127.0.0.1
+    port: 18084
+  k8s-nim-operator:
+    enabled: false
+  rbac:
+    k8sNimOperatorEnabled: false
+    volcanoEnabled: false
+  postgresql:
+    enabled: true
+    auth:
+      existingSecret: *nemoPlatformPostgresqlSecretName
+  clickhouse:
+    enabled: false
+  externalClickhouse:
+    host: unused-clickhouse
+    existingSecret: nemo-platform-postgres
+    existingSecretPasswordKey: password
+  core:
+    controller:
+      controllerGroup: core
+      startupProbe:
+        failureThreshold: 80
+      controllers:
+        - jobs
+        - models
+        - entities
+        - deployments
+      env:
+        NMP_PLATFORM_URL: "https://nemo-platform-envoy.$(POD_NAMESPACE).svc.cluster.local:8080"
+        NMP_AUTH_URL: "https://nemo-platform-envoy.$(POD_NAMESPACE).svc.cluster.local:8080"
+    storage:
+      accessModes:
+        - ReadWriteOnce
+  api:
+    serviceAccount:
+      create: true
+      name: nemo
+    serviceGroup: core
+    startupProbe:
+      failureThreshold: 80
+    services:
+      - auth
+      - models
+      - files
+      - inference-gateway
+      - jobs
+      - secrets
+      - entities
+      - deployments
+    env:
+      NMP_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE: "/etc/nmp/workload-token/private-key.pem"
+      NMP_AUTH_OIDC_INTROSPECTION_CLIENT_SECRET:
+        valueFrom:
+          secretKeyRef:
+            name: *zitadelSeedStateSecretName
+            key: nemo_client_secret
+            optional: true
+      SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
+      REQUESTS_CA_BUNDLE: *workloadTokenTlsCaBundleFile
+    extraVolumes:
+      - name: workload-token-signing-key
+        secret:
+          secretName: *workloadTokenSigningKeySecretName
+      - name: workload-token-tls-ca
+        secret:
+          secretName: *workloadTokenTlsSecretName
+          items:
+            - key: ca.crt
+              path: ca.crt
+    extraVolumeMounts:
+      - name: workload-token-signing-key
+        mountPath: *workloadTokenSigningKeyMountPath
+        readOnly: true
+      - name: workload-token-tls-ca
+        mountPath: *workloadTokenTlsCaBundleMountPath
+        readOnly: true
+  zitadelEnvoy:
+    serviceName: &zitadelServiceName zitadel
+    servicePort: &zitadelServicePort 8080
+  envoyProxy:
+    enabled: true
+    replicaCount: 1
+    serviceNamespace: ""
+    image:
+      repository: envoyproxy/envoy
+      tag: v1.37.0
+      digest: sha256:f91c972d5c99bc133233a079b5663b903e7d56b3b0b0216398924f7b80d09e47
+    serviceAccount:
+      create: true
+      automount: false
+    podSecurityContext:
+      fsGroup: 65532
+      fsGroupChangePolicy: OnRootMismatch
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65532
+      runAsGroup: 65532
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+          - ALL
+      seccompProfile:
+        type: RuntimeDefault
+    extraVolumeMounts:
+      - name: tmp
+        mountPath: /tmp
+      - name: workload-token-tls
+        mountPath: *workloadTokenTlsMountPath
+        readOnly: true
+    extraVolumes:
+      - name: tmp
+        emptyDir: {}
+      - name: workload-token-tls
+        secret:
+          secretName: *workloadTokenTlsSecretName
+    timeouts:
+      upstreamIdle: "4s"
+    configOverride: '{{ include "nemo-platform-zitadel.envoyConfig" . }}'
+  platformConfig:
+    auth:
+      enabled: true
+      allow_unsigned_jwt: false
+      policy_decision_point_provider: embedded
+      policy_decision_point_base_url: "http://127.0.0.1:8080"
+      policy_data_refresh_interval: 2
+      bundle_cache_seconds: 15
+      admin_email: "admin@example.com"
+      token_signing:
+        issuer: '{{ include "nemo-platform-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-platform-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/apis/auth'
+        key_id: "nemo-platform-signing"
+        private_key_file: "/etc/nmp/workload-token/private-key.pem"
+      access_keys:
+        enabled: false
+      oidc:
+        enabled: true
+        issuer: '{{ include "nemo-platform-zitadel.publicGatewayUrl" . }}'
+        additional_issuers:
+          - '{{ include "nemo-platform-zitadel.serviceUrl" (dict "root" . "serviceName" "zitadel" "scheme" "http" "port" 8080) }}'
+        client_id: "__ZITADEL_NEMO_CLIENT_ID__"
+        token_endpoint: '{{ include "nemo-platform-zitadel.publicGatewayUrl" . }}/oauth/v2/token'
+        device_authorization_endpoint: '{{ include "nemo-platform-zitadel.publicGatewayUrl" . }}/oauth/v2/device_authorization'
+        jwks_uri: '{{ include "nemo-platform-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-platform-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/oauth/v2/keys'
+        introspect_opaque_tokens: true
+        introspection_endpoint: '{{ include "nemo-platform-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-platform-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/oauth/v2/introspect'
+        introspection_client_id: "__ZITADEL_INTROSPECTION_CLIENT_ID__"
+        introspection_client_secret_env_var: "NMP_AUTH_OIDC_INTROSPECTION_CLIENT_SECRET"
+        resolve_opaque_tokens_via_userinfo: false
+        userinfo_endpoint: '{{ include "nemo-platform-zitadel.publicGatewayUrl" . }}/oidc/v1/userinfo'
+        workload_token_exchange_enabled: true
+        workload_client_id: "nemo-platform-workload"
+        workload_audience: "nemo-platform"
+        workload_scope: "openid email groups"
+        workload_token_endpoint: '{{ include "nemo-platform-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-platform-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/apis/auth/token'
+        workload_kubernetes_token_review_enabled: true
+        subject_claim: "sub"
+        email_claim: "email"
+        groups_claim: "groups"
+        default_scopes: "openid email profile offline_access groups urn:zitadel:iam:org:project:id:__ZITADEL_PROJECT_ID__:aud"
+    jobs:
+      executor_defaults:
+        kubernetes_job:
+          env:
+            SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
+            REQUESTS_CA_BUNDLE: *workloadTokenTlsCaBundleFile
+          storage:
+            additional_volumes:
+              - name: workload-token-tls-ca
+                secret:
+                  secret_name: *workloadTokenTlsSecretName
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+            additional_volume_mounts:
+              - name: workload-token-tls-ca
+                mount_path: *workloadTokenTlsCaBundleMountPath
+                read_only: true
+      executors:
+        - provider: cpu
+          profile: workload
+          backend: kubernetes_job
+          config:
+            launcher_image: '{{ include "nmp-core.image" . }}'
+            env:
+              SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
+              REQUESTS_CA_BUNDLE: *workloadTokenTlsCaBundleFile
+            storage:
+              additional_volumes:
+                - name: workload-token-tls-ca
+                  secret:
+                    secret_name: *workloadTokenTlsSecretName
+                    items:
+                      - key: ca.crt
+                        path: ca.crt
+              additional_volume_mounts:
+                - name: workload-token-tls-ca
+                  mount_path: *workloadTokenTlsCaBundleMountPath
+                  read_only: true
+            workload_identity:
+              token_audience: "nemo-platform-workload"
+              token_expiration_seconds: 600
+    models:
+      controller:
+        backends:
+          deployments_plugin:
+            enabled: true
+
+integration:
+  nemoPlatform:
+    apiServiceAccountName: nemo
+    apiServiceName: nemo-platform-api
+    apiServicePort: 8080
+    coreControllerDeploymentName: nemo-platform-core-controller
+    envoyServiceName: nemo-platform-envoy
+    envoyServicePort: 8080
+  zitadel:
+    serviceName: *zitadelServiceName
+    servicePort: *zitadelServicePort
+    groupsClaim: groups

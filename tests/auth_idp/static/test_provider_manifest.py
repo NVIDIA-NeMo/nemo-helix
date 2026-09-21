@@ -62,6 +62,21 @@ def test_provider_manifest_rejects_multiple_grant_credential_sources(grant_name,
         validator.validate(manifest)
 
 
+def test_provider_manifest_allows_generic_grant_with_password_and_client_secret():
+    schema = _load_provider_manifest_schema()
+    validator = validator_for(schema)(schema)
+    manifest = yaml.safe_load(Path("contrib/auth/zitadel/manifest.yaml").read_text())
+    manifest["token_acquisition"]["e2e_setup_grant"].update(
+        {
+            "grant_type": "password",
+            "username": "nemo-setup",
+            "password_env_var": "ZITADEL_E2E_SETUP_PASSWORD",
+        }
+    )
+
+    validator.validate(manifest)
+
+
 def test_authentik_manifest_declares_real_token_acquisition_contract():
     manifest = yaml.safe_load(Path("contrib/auth/authentik/manifest.yaml").read_text())
     token_acquisition = manifest["token_acquisition"]
@@ -103,6 +118,16 @@ def test_authentik_manifest_declares_provider_test_runtimes():
 
     assert "authentik-compose" in runtime_ids
     assert "authentik-kubernetes" in runtime_ids
+
+
+def test_zitadel_manifest_declares_kubernetes_test_runtime():
+    manifest = yaml.safe_load(Path("contrib/auth/zitadel/manifest.yaml").read_text())
+
+    assert manifest["compose_file"] is None
+    assert {runtime["id"] for runtime in manifest["test_runtimes"]} == {"zitadel-kubernetes"}
+    token_acquisition = manifest["token_acquisition"]
+    assert token_acquisition["e2e_setup_grant"]["grant_type"] == "client_credentials"
+    assert token_acquisition["workload_provider_grant"]["grant_type"] == "client_credentials"
 
 
 def test_authentik_manifest_compose_and_kubernetes_runtime_capabilities_stay_in_parity():
@@ -167,6 +192,7 @@ def test_authentik_provider_config_loads_token_acquisition_fields(monkeypatch):
     assert provider.e2e_setup_password_grant["grant_type"] == "password"
     assert provider.e2e_setup_password_grant["password"] == "nemo-setup-token-secret-dev"
     assert provider.interactive_user_password_grant is None
+    assert provider.workload_provider_password_grant is not None
     assert provider.workload_provider_password_grant["grant_type"] == "password"
     assert provider.workload_audience == "nemo-platform"
     assert provider.workload_principal_claim == "sub"
@@ -191,3 +217,30 @@ def test_authentik_provider_config_resolves_workload_provider_password_grant_env
     assert provider.e2e_setup_password_grant is not None
     assert provider.e2e_setup_password_grant["password"] == "nemo-setup-token-secret-dev"
     assert "password_env_var" not in provider.e2e_setup_password_grant
+
+
+def test_zitadel_provider_config_loads_generic_client_credentials_grants(monkeypatch):
+    monkeypatch.setenv("ZITADEL_E2E_SETUP_CLIENT_SECRET", "setup-secret")
+    monkeypatch.setenv("ZITADEL_WORKLOAD_CLIENT_SECRET", "workload-secret")
+
+    provider = load_provider_config(Path("contrib/auth/zitadel/manifest.yaml"))
+
+    assert provider.compose_file is None
+    assert provider.nemo_config == Path("contrib/auth/zitadel/helm/values.yaml")
+    assert provider.token_endpoint == "https://127.0.0.1:18084/oauth/v2/token"
+    assert provider.e2e_setup_password_grant == {
+        "grant_type": "client_credentials",
+        "client_id": "__ZITADEL_SETUP_CLIENT_ID__",
+        "client_secret": "setup-secret",
+        "client_auth_method": "client_secret_basic",
+        "expected_subject": "nemo-setup",
+        "scope": "openid profile email groups urn:zitadel:iam:org:project:id:__ZITADEL_PROJECT_ID__:aud",
+    }
+    assert provider.workload_provider_password_grant == {
+        "grant_type": "client_credentials",
+        "client_id": "__ZITADEL_WORKLOAD_CLIENT_ID__",
+        "client_secret": "workload-secret",
+        "client_auth_method": "client_secret_basic",
+        "expected_subject": "svc-nemo",
+        "scope": "openid profile email groups urn:zitadel:iam:org:project:id:__ZITADEL_PROJECT_ID__:aud",
+    }

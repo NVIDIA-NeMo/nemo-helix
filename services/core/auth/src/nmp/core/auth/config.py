@@ -71,6 +71,14 @@ class AuthServiceConfig(SharedAuthConfig):
         description="Fail-mode for a plugin that contributes invalid HTTP authz.",
     )
 
+    allowed_service_principals: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Additional service principal names allowed for stable account materialization. "
+            "Built-in platform services and installed plugin services are allowed automatically."
+        ),
+    )
+
 
 # Backward compatibility alias
 AuthConfig = AuthServiceConfig

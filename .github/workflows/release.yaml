@@ -27,7 +27,7 @@ on:
         type: string
         default: ""
       version:
-        description: "Stable SemVer core release version, for example 1.0.0."
+        description: "Release version, for example 1.0.0 or 1.0.0-rc0. Becomes the git tag, which an independent wheel prefixes with its own tagPrefix."
         required: false
         type: string
         default: ""
@@ -45,7 +45,7 @@ on:
       wheel-ids:
         description: >-
           Custom only. Comma-separated wheel IDs.
-          Allowed: nemo-platform, nemo-platform-plugin.
+          Allowed: nemo-platform, nemo-platform-plugin, nemo-sandboxed-gym.
         required: false
         type: string
         default: ""
@@ -102,13 +102,19 @@ env:
   # descriptions in the Run workflow form.
   #
   # Wheel fields:
-  #   id      - value users type in wheel-ids and the release artifact id
-  #   package - package passed to uv build --package
-  #   path    - package directory checked before any later release work starts
+  #   id          - value users type in wheel-ids and the release artifact id
+  #   package     - package passed to uv build --package
+  #   path        - package directory checked before any later release work starts
+  #   independent - optional. Releases on its own version line: excluded from every scope
+  #                 except `custom`, where it must be the only artifact selected, and not
+  #                 released as a nightly.
+  #   tagPrefix   - optional. Git tag prefix for an independent wheel. Must match the
+  #                 `pattern-prefix` its dynamic versioning reads.
   RELEASE_WHEELS_JSON: >-
     [
       {"id":"nemo-platform","package":"nemo-platform","path":"packages/nemo_platform"},
-      {"id":"nemo-platform-plugin","package":"nemo-platform-plugin","path":"packages/nemo_platform_plugin"}
+      {"id":"nemo-platform-plugin","package":"nemo-platform-plugin","path":"packages/nemo_platform_plugin"},
+      {"id":"nemo-sandboxed-gym","package":"nemo-sandboxed-gym","path":"packages/sandboxed_gym","independent":true,"tagPrefix":"nemo-sandboxed-gym-v"}
     ]
   # Container fields:
   #   id     - value users type in container-ids and the published image name
@@ -153,6 +159,9 @@ jobs:
       release_scope: ${{ steps.plan.outputs.release_scope }}
       source_sha: ${{ steps.plan.outputs.source_sha }}
       version: ${{ steps.plan.outputs.version }}
+      is_prerelease: ${{ steps.plan.outputs.is_prerelease }}
+      release_tag: ${{ steps.plan.outputs.release_tag }}
+      tag_prefix: ${{ steps.plan.outputs.tag_prefix }}
       release_label: ${{ steps.plan.outputs.release_label }}
       nightly_timestamp: ${{ steps.plan.outputs.nightly_timestamp }}
       wheel_version: ${{ steps.wheel-version.outputs.wheel_version }}
@@ -166,6 +175,7 @@ jobs:
       update_ngc_metadata: ${{ steps.plan.outputs.update_ngc_metadata }}
       send_notifications: ${{ steps.plan.outputs.send_notifications }}
       dry_run: ${{ steps.plan.outputs.dry_run }}
+      act: ${{ steps.plan.outputs.act }}
     steps:
       # This job is intentionally the first gate. It resolves the user's
       # requested artifacts, checks custom ids against the inline catalog, then
@@ -208,6 +218,9 @@ jobs:
               source_sha: plan.sourceSha,
               source_branch: plan.sourceBranch,
               version: plan.version,
+              is_prerelease: String(plan.isPrerelease),
+              release_tag: plan.releaseTag,
+              tag_prefix: plan.tagPrefix,
               release_label: plan.releaseLabel,
               nightly_timestamp: plan.nightlyTimestamp,
               nightly_base_version: nightlyBaseVersion,
@@ -222,6 +235,7 @@ jobs:
               update_ngc_metadata: String(plan.updateNgcMetadata),
               send_notifications: String(plan.sendNotifications),
               dry_run: String(plan.dryRun),
+              act: String(process.env.ACT === "true"),
             };
             Object.entries(outputs).forEach(([name, value]) => core.setOutput(name, value));
             core.info(`Planned ${plan.releaseType} release ${plan.releaseLabel} from ${plan.sourceSha}`);
@@ -276,6 +290,7 @@ jobs:
           WHEEL_IDS: ${{ steps.plan.outputs.wheel_ids }}
           RELEASE_TYPE: ${{ steps.plan.outputs.release_type }}
           RELEASE_VERSION: ${{ steps.plan.outputs.version }}
+          IS_PRERELEASE: ${{ steps.plan.outputs.is_prerelease }}
           NIGHTLY_TIMESTAMP: ${{ steps.plan.outputs.nightly_timestamp }}
           NIGHTLY_BASE_VERSION: ${{ steps.plan.outputs.nightly_base_version }}
         run: |
@@ -288,6 +303,8 @@ jobs:
 
           if [[ "${RELEASE_TYPE}" == "nightly" ]]; then
             cadence="nightly"
+          elif [[ "${IS_PRERELEASE}" == "true" ]]; then
+            cadence="prerelease"
           else
             cadence="release"
           fi
@@ -362,6 +379,7 @@ jobs:
 
   notify-start:
     # Start alerts intentionally run for dry runs so the webhook can be tested.
+    # ACT renders the alert instead of posting it.
     name: Notify release start
     needs: plan-release
     if: needs.plan-release.outputs.send_notifications == 'true'
@@ -416,6 +434,15 @@ jobs:
               process.env.DRY_RUN === "true" && "Mode: dry run (no publishing)",
               `:link: <${process.env.RUN_URL}|Release run #${process.env.RUN_NUMBER}>`,
             );
+            // ACT renders notifications by default. To test Slack deliberately,
+            // set ACT_SEND_NOTIFICATIONS=true and supply a test-channel webhook.
+            if (
+              process.env.ACT === "true"
+              && process.env.ACT_SEND_NOTIFICATIONS !== "true"
+            ) {
+              core.info(`ACT=true; would send Slack notification:\n${lines.filter((line) => line !== false).join("\n")}`);
+              return;
+            }
             const response = await fetch(process.env.SLACK_ALERTS_WEBHOOK, {
               method: "POST",
               headers: {"Content-Type": "application/json"},
@@ -430,7 +457,8 @@ jobs:
     needs: plan-release
     if: >-
       needs.plan-release.outputs.update_ngc_metadata == 'true' &&
-      needs.plan-release.outputs.dry_run != 'true'
+      needs.plan-release.outputs.dry_run != 'true' &&
+      needs.plan-release.outputs.act != 'true'
     uses: ./.github/workflows/ngc-metadata.yaml
     secrets:
       AIRE_NGC_GITHUB_PLATFORM_RW: ${{ secrets.AIRE_NGC_GITHUB_PLATFORM_RW }}
@@ -443,6 +471,12 @@ jobs:
       needs.plan-release.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
+      # Load the dispatch helper from the workflow revision, not the selected release source.
+      - name: Check out workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
       - name: Dispatch registration workflow
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
@@ -452,23 +486,28 @@ jobs:
           SOURCE_RUN_URL: >-
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           WHEEL_IDS: ${{ needs.plan-release.outputs.wheel_ids }}
+          WHEEL_VERSION: ${{ needs.plan-release.outputs.wheel_version }}
           CONTAINER_IDS: ${{ needs.plan-release.outputs.container_ids }}
           INCLUDE_HELM: ${{ needs.plan-release.outputs.include_helm }}
           HELM_VERSION: ${{ needs.plan-release.outputs.helm_version }}
         with:
-          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          # ACT reports the payload without requiring the cross-repository dispatch token.
+          github-token: ${{ needs.plan-release.outputs.act == 'true' && 'act-no-dispatch' || secrets.CI_DISPATCH_TOKEN }}
           script: |
-            const [owner, repo] = process.env.DISPATCH_REPO.split("/");
-
-            await github.rest.repos.createDispatchEvent({
-              owner,
-              repo,
-              event_type: "register-release-artifacts",
-              client_payload: {
+            const { dispatchOrReport } = require("./.github/scripts/release-dispatch.cjs");
+            await dispatchOrReport({
+              core,
+              github,
+              env: process.env,
+              eventType: "register-release-artifacts",
+              clientPayload: {
                 version: process.env.RELEASE_VERSION,
                 source_sha: process.env.SOURCE_SHA,
                 source_run_url: process.env.SOURCE_RUN_URL,
                 wheel_ids: JSON.parse(process.env.WHEEL_IDS),
+                // Differs from `version` for a pre-release: tagged `1.0.0-rc0`, shipped
+                // as `1.0.0rc0`, and Artifactory holds the latter.
+                wheel_version: process.env.WHEEL_VERSION,
                 container_ids: JSON.parse(process.env.CONTAINER_IDS),
                 helm_id: process.env.INCLUDE_HELM === "true"
                   ? process.env.RELEASE_HELM_ID
@@ -487,29 +526,41 @@ jobs:
       needs.plan-release.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
+      # Load the dispatch helper from the workflow revision, not the selected release source.
+      - name: Check out workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
       - name: Dispatch wheel builds
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
           SOURCE_SHA: ${{ needs.plan-release.outputs.source_sha }}
           RELEASE_TYPE: ${{ needs.plan-release.outputs.release_type }}
+          IS_PRERELEASE: ${{ needs.plan-release.outputs.is_prerelease }}
           RELEASE_LABEL: ${{ needs.plan-release.outputs.release_label }}
           NIGHTLY_TIMESTAMP: ${{ needs.plan-release.outputs.nightly_timestamp }}
           WHEEL_VERSION: ${{ needs.plan-release.outputs.wheel_version }}
           WHEEL_IDS: ${{ needs.plan-release.outputs.wheel_ids }}
           PUBLISH_NIGHTLY_WHEELS: ${{ env.RELEASE_PUBLISH_NIGHTLY_WHEELS }}
         with:
-          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          # ACT reports the payload without requiring the cross-repository dispatch token.
+          github-token: ${{ needs.plan-release.outputs.act == 'true' && 'act-no-dispatch' || secrets.CI_DISPATCH_TOKEN }}
           script: |
-            const [owner, repo] = process.env.DISPATCH_REPO.split("/");
-
-            await github.rest.repos.createDispatchEvent({
-              owner,
-              repo,
-              event_type: "stage-wheels",
-              client_payload: {
+            const { dispatchOrReport } = require("./.github/scripts/release-dispatch.cjs");
+            await dispatchOrReport({
+              core,
+              github,
+              env: process.env,
+              eventType: "stage-wheels",
+              clientPayload: {
                 ref: process.env.SOURCE_SHA,
-                cadence: process.env.RELEASE_TYPE === "stable" ? "release" : "nightly",
+                cadence: process.env.RELEASE_TYPE !== "stable"
+                  ? "nightly"
+                  : process.env.IS_PRERELEASE === "true"
+                    ? "prerelease"
+                    : "release",
                 release_label: process.env.RELEASE_LABEL,
                 nightly_timestamp: process.env.NIGHTLY_TIMESTAMP,
                 wheel_version: process.env.WHEEL_VERSION,
@@ -526,6 +577,12 @@ jobs:
       needs.plan-release.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
+      # Load the dispatch helper from the workflow revision, not the selected release source.
+      - name: Check out workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
       - name: Dispatch container builds
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
@@ -535,15 +592,16 @@ jobs:
           RELEASE_LABEL: ${{ needs.plan-release.outputs.release_label }}
           CONTAINER_IDS: ${{ needs.plan-release.outputs.container_ids }}
         with:
-          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          # ACT reports the payload without requiring the cross-repository dispatch token.
+          github-token: ${{ needs.plan-release.outputs.act == 'true' && 'act-no-dispatch' || secrets.CI_DISPATCH_TOKEN }}
           script: |
-            const [owner, repo] = process.env.DISPATCH_REPO.split("/");
-
-            await github.rest.repos.createDispatchEvent({
-              owner,
-              repo,
-              event_type: "release",
-              client_payload: {
+            const { dispatchOrReport } = require("./.github/scripts/release-dispatch.cjs");
+            await dispatchOrReport({
+              core,
+              github,
+              env: process.env,
+              eventType: "release",
+              clientPayload: {
                 ref: process.env.SOURCE_SHA,
                 cadence: process.env.RELEASE_TYPE,
                 version: process.env.RELEASE_LABEL,
@@ -558,7 +616,9 @@ jobs:
   stage-helm:
     name: Stage Helm chart
     needs: plan-release
-    if: needs.plan-release.outputs.include_helm == 'true'
+    if: >-
+      needs.plan-release.outputs.include_helm == 'true' &&
+      needs.plan-release.outputs.act != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -682,29 +742,42 @@ jobs:
       !cancelled() &&
       needs.poll-final-release.result == 'success' &&
       needs.plan-release.outputs.include_helm == 'true' &&
-      needs.plan-release.outputs.dry_run != 'true'
+      needs.plan-release.outputs.dry_run != 'true' &&
+      needs.plan-release.outputs.act != 'true'
     runs-on: ubuntu-latest
     steps:
+      # Load the dispatch helper from the workflow revision, not the selected release source.
+      - name: Check out workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
       - name: Dispatch deployment creation
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
           SOURCE_SHA: ${{ needs.plan-release.outputs.source_sha }}
           RELEASE_TYPE: ${{ needs.plan-release.outputs.release_type }}
+          IS_PRERELEASE: ${{ needs.plan-release.outputs.is_prerelease }}
           RELEASE_LABEL: ${{ needs.plan-release.outputs.release_label }}
           HELM_VERSION: ${{ needs.stage-helm.outputs.chart_version }}
         with:
-          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          # ACT reports the payload without requiring the cross-repository dispatch token.
+          github-token: ${{ needs.plan-release.outputs.act == 'true' && 'act-no-dispatch' || secrets.CI_DISPATCH_TOKEN }}
           script: |
-            const [owner, repo] = process.env.DISPATCH_REPO.split("/");
-
-            await github.rest.repos.createDispatchEvent({
-              owner,
-              repo,
-              event_type: "create-release-deployment",
-              client_payload: {
+            const { dispatchOrReport } = require("./.github/scripts/release-dispatch.cjs");
+            await dispatchOrReport({
+              core,
+              github,
+              env: process.env,
+              eventType: "create-release-deployment",
+              clientPayload: {
                 ref: process.env.SOURCE_SHA,
-                cadence: process.env.RELEASE_TYPE === "stable" ? "release" : "nightly",
+                cadence: process.env.RELEASE_TYPE !== "stable"
+                  ? "nightly"
+                  : process.env.IS_PRERELEASE === "true"
+                    ? "prerelease"
+                    : "release",
                 release_label: process.env.RELEASE_LABEL,
                 helm_version: process.env.HELM_VERSION,
               },
@@ -721,6 +794,7 @@ jobs:
     if: >-
       !cancelled() &&
       needs.plan-release.result == 'success' &&
+      needs.plan-release.outputs.act != 'true' &&
       !contains(needs.*.result, 'failure') &&
       !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
@@ -861,6 +935,7 @@ jobs:
       needs.plan-release.result == 'success' &&
       needs.plan-release.outputs.send_notifications == 'true' &&
       needs.plan-release.outputs.dry_run != 'true' &&
+      needs.plan-release.outputs.act != 'true' &&
       !contains(needs.*.result, 'failure') &&
       !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
@@ -940,6 +1015,7 @@ jobs:
     if: >-
       needs.plan-release.outputs.release_type == 'stable' &&
       needs.plan-release.outputs.dry_run != 'true' &&
+      needs.plan-release.outputs.act != 'true' &&
       needs.poll-final-release.result == 'success'
     runs-on: ubuntu-latest
     permissions:
@@ -957,7 +1033,9 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.plan-release.outputs.version }}
+          RELEASE_TAG: ${{ needs.plan-release.outputs.release_tag }}
+          TAG_PREFIX: ${{ needs.plan-release.outputs.tag_prefix }}
+          IS_PRERELEASE: ${{ needs.plan-release.outputs.is_prerelease }}
           SOURCE_SHA: ${{ needs.plan-release.outputs.source_sha }}
         run: |
           set -euo pipefail
@@ -994,7 +1072,8 @@ jobs:
 
           notes_start_tag="$(
             {
-              git tag -l | grep -E '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' || true
+              git tag -l "${TAG_PREFIX}*" \
+                | grep -E "^${TAG_PREFIX}(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$" || true
               printf '%s\n' "${RELEASE_TAG}"
             } | sort -V -u | awk -v version="${RELEASE_TAG}" '$0 == version {print previous} {previous = $0}'
           )"
@@ -1003,10 +1082,16 @@ jobs:
             notes_range=(--notes-start-tag "${notes_start_tag}")
           fi
 
+          prerelease_flag=()
+          if [[ "${IS_PRERELEASE}" == "true" ]]; then
+            prerelease_flag=(--prerelease)
+          fi
+
           gh release create "${RELEASE_TAG}" \
             --target "${SOURCE_SHA}" \
             --title "${RELEASE_TAG}" \
             --generate-notes \
+            "${prerelease_flag[@]}" \
             "${notes_range[@]}"
 
   notify-end:
@@ -1020,7 +1105,8 @@ jobs:
     if: >-
       !cancelled() &&
       needs.plan-release.outputs.send_notifications == 'true' &&
-      needs.plan-release.outputs.dry_run != 'true'
+      needs.plan-release.outputs.dry_run != 'true' &&
+      needs.plan-release.outputs.act != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out workflow revision

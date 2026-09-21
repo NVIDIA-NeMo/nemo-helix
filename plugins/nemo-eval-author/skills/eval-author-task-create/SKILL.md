@@ -33,7 +33,9 @@ compatibility: >-
 maturity: alpha
 license: Apache-2.0
 user-invocable: true
-allowed-tools: [Bash, Read, Write, Grep, Glob]
+allowed-tools: Bash, Read, Write, Grep, Glob
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Eval Author: create task

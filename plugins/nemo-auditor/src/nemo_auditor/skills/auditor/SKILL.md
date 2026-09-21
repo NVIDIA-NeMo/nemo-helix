@@ -7,6 +7,9 @@ description: >
   NeMo auditor CLI reference for audit configs, targets, and jobs.
   Use when the task involves audit configurations, audit targets, audit jobs,
   vulnerability scanning, probes, or `nemo auditor` CLI commands.
+allowed-tools: Bash
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # NeMo Auditor CLI Reference

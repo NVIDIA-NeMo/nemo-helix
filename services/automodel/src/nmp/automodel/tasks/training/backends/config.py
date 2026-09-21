@@ -147,6 +147,7 @@ def _compile_retrieval_config(
     )
     if is_bi_encoder:
         cfg["model"]["l2_normalize"] = True
+        cfg["model"]["do_distributed_inbatch_negative"] = retrieval_config.do_distributed_inbatch_negative
     else:
         cfg["model"]["num_labels"] = 1
         cfg["model"]["temperature"] = 1.0

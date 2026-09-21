@@ -62,6 +62,60 @@ import { type FieldErrors, FormProvider, type Resolver, useForm, useWatch } from
 import { useNavigate } from 'react-router';
 
 /**
+ * Turn a react-hook-form field path into a human label for the error banner, so a bare
+ * Zod message ("Number must be greater than 0") says which field it belongs to. Generalizes
+ * across every field and every Zod error: the leaf path segment, minus array indices, spaced
+ * and capitalized.
+ *
+ * ponytail: derived from the field path, not the UI slotLabel — `batch_size` reads
+ * "Batch size", not the control's "Global Batch Size". Swap in a path->label map here if
+ * exact UI labels are ever required.
+ */
+const humanizeFieldPath = (path: string): string => {
+  const leaf = path
+    .split('.')
+    .filter((segment) => segment && !/^\d+$/.test(segment))
+    .pop();
+  if (!leaf) return '';
+  const spaced = leaf.replace(/_/g, ' ').trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+};
+
+/**
+ * Flatten a react-hook-form error tree into deduped, field-labeled messages for the banner.
+ * Used by submit validation; the load-time check uses `messagesFromZodIssues`. Both share
+ * `humanizeFieldPath`, so an imported config and a rejected submit read identically.
+ * Returns [] when there are no errors.
+ */
+const collectErrorMessages = (errors: FieldErrors<CustomizationFormFields>): string[] => {
+  const messages: string[] = [];
+  const walk = (node: unknown, path: string) => {
+    if (!node || typeof node !== 'object') return;
+    if ('message' in node && typeof node.message === 'string') {
+      const label = humanizeFieldPath(path);
+      messages.push(label ? `${label}: ${node.message}` : node.message);
+      return;
+    }
+    Object.entries(node).forEach(([key, value]) => walk(value, path ? `${path}.${key}` : key));
+  };
+  walk(errors, '');
+  return Array.from(new Set(messages));
+};
+
+/** Same field-labeled banner messages as `collectErrorMessages`, but from a Zod parse (load). */
+const messagesFromZodIssues = (
+  issues: readonly { path: readonly (string | number)[]; message: string }[]
+): string[] =>
+  Array.from(
+    new Set(
+      issues.map((issue) => {
+        const label = humanizeFieldPath(issue.path.join('.'));
+        return label ? `${label}: ${issue.message}` : issue.message;
+      })
+    )
+  );
+
+/**
  * Readiness states in which creating a base-model deployment is the right move.
  *
  * An allowlist rather than `!== 'serving-lora'`, because the negative form treats every
@@ -316,20 +370,39 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   };
 
   const onInvalid = (formErrors: FieldErrors<CustomizationFormFields>) => {
-    const messages: string[] = [];
-    const collect = (node: unknown) => {
-      if (!node || typeof node !== 'object') return;
-      if ('message' in node && typeof (node as { message?: unknown }).message === 'string') {
-        messages.push((node as { message: string }).message);
-        return;
-      }
-      Object.values(node as Record<string, unknown>).forEach(collect);
-    };
-    collect(formErrors);
-    setValidationErrors(
-      messages.length ? Array.from(new Set(messages)) : ['Please complete the required fields.']
-    );
+    const messages = collectErrorMessages(formErrors);
+    setValidationErrors(messages.length ? messages : ['Please complete the required fields.']);
   };
+
+  // A seeded config (clone, template, or "start from your own config") is validated the
+  // moment it loads, so an imported value that violates the schema — e.g. a numeric of 0
+  // against a `.gt(0)` field — surfaces in the banner immediately, not only on submit.
+  useEffect(() => {
+    if (!initialValues) return;
+    const result = customizationFormSchema.safeParse(initialValues);
+    if (result.success) return;
+    const messages = messagesFromZodIssues(result.error.issues);
+    if (messages.length > 0) setValidationErrors(messages);
+  }, [initialValues]);
+
+  // Once a banner is showing (seeded config or a rejected submit), keep it in sync as the
+  // user corrects fields: revalidate the live values and clear it when they pass. Guarded on
+  // an already-shown banner, so it never surfaces errors on an untouched form.
+  useEffect(() => {
+    const subscription = form.watch(() => {
+      setValidationErrors((current) => {
+        if (current.length === 0) return current;
+        const result = customizationFormSchema.safeParse(form.getValues());
+        const next = result.success ? [] : messagesFromZodIssues(result.error.issues);
+        // Keep the same array reference when nothing changed, so a keystroke that does not
+        // change the error set does not re-render the form.
+        return next.length === current.length && next.every((message, i) => message === current[i])
+          ? current
+          : next;
+      });
+    });
+    return () => subscription.unsubscribe();
+  }, [form]);
 
   useEffect(() => {
     if (validationErrors.length > 0) {

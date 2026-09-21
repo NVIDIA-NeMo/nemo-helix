@@ -83,6 +83,16 @@ def test_delete_fileset() -> None:
     assert prepared.response_type is FilesetOutput
 
 
+def test_refresh_fileset() -> None:
+    prepared = endpoints.refresh_fileset(workspace="default", name="my-fileset")
+
+    assert prepared.method == "POST"
+    assert prepared.path_template == "/apis/files/v2/workspaces/{workspace}/filesets/{name}/refresh"
+    assert prepared.path_params == {"workspace": "default", "name": "my-fileset"}
+    assert prepared.content is None
+    assert prepared.response_type is FilesetOutput
+
+
 def test_list_files() -> None:
     prepared = endpoints.list_files(workspace="default", name="my-fileset")
 

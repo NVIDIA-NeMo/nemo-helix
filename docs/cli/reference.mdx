@@ -1218,7 +1218,7 @@ nemo files [OPTIONS] COMMAND [ARGS]...
 * `list`: List files in a fileset.
 * `delete`: Delete a file from a fileset.
 * `filesets`: Manage filesets
-* `otlp`: Otlp operations
+* `otlp`: OTLP operations
 
 #### nemo files upload
 
@@ -1630,7 +1630,7 @@ Example: metadata = FilesetMetadata( dataset=DatasetMetadataContent( schema=`{"c
 
 #### nemo files otlp
 
-Otlp operations
+OTLP operations
 
 **Usage:**
 
@@ -2569,7 +2569,7 @@ nemo inference gateway [OPTIONS] COMMAND [ARGS]...
 **Commands:**
 
 * `model`: Manage model
-* `openai`: Openai operations
+* `openai`: OpenAI operations
 * `provider`: Manage provider
 
 ##### nemo inference gateway model
@@ -2813,7 +2813,7 @@ nemo inference gateway model put [OPTIONS] TRAILING_URI [NAME]
 
 ##### nemo inference gateway openai
 
-Openai operations
+OpenAI operations
 
 **Usage:**
 
@@ -5917,6 +5917,7 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 * `get`: Get an agent by name.
 * `delete`: Delete an agent from the platform.
 * `deploy`: Deploy an agent on the platform.
+* `redeploy`: Redeploy an agent from a new config, in one command.
 * `logs`: Show logs for an agent deployment.
 * `undeploy`: Stop and remove a deployment (or all deployments for an...
 * `deployments`: Manage agent deployments.
@@ -6082,6 +6083,45 @@ nemo agents deploy [OPTIONS]
 * `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref (e.g. 'default/repo-research-ben'). Its EnvironmentSpec is merged into the agent config and its ComputeSpec/secret refs are snapshotted onto the deployment at create time.
 * `--wait, --no-wait`: Wait for the deployment to reach a terminal status (running or failed) before returning.  Exits 0 only on running; exits 1 with the failure reason if runtime startup fails or readiness times out. Pass --no-wait for fire-and-forget behaviour (the original default — returns the pending deployment immediately as JSON).
 * `--timeout, -t <INTEGER>`: Maximum seconds to wait for a terminal status (only with --wait). [default: 300]
+* `--workspace, -w`: [default: default]
+* `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo agents redeploy
+
+Redeploy an agent from a new config, in one command.
+
+Wraps the four steps you would otherwise run by hand to push a changed
+agent config to a running agent: ``undeploy`` → ``delete`` → ``create``
+→ ``deploy`` (the agent entity is immutable by name, so it must be torn
+down and rebuilt). The new config is validated before any teardown, so a
+bad config is a safe no-op; once teardown starts the operation is not
+atomic but each step is check-first, so it is safe to re-run. Omitted
+runtime flags are auto-detected from the existing deployment. See the
+Deploy Agents docs for the full contract.
+
+**Usage:**
+
+```shell
+nemo agents redeploy [OPTIONS]
+```
+
+**Options:**
+
+* `--agent, -a`: Name of the deployed agent to rebuild.
+* `--agent-config, -c <FILE>`: Path to the new agent YAML config file to redeploy from.
+* `--description`: Agent description (as on create). [default: ]
+* `--name, -n`: Deployment name for the new deployment (auto-generated if omitted).
+* `--mode`: Runtime backend: subprocess, docker, or k8s. Auto-detected from the existing deployment when omitted.
+* `--image, -i`: Container image for docker/k8s modes. Auto-detected from the existing deployment when omitted.
+* `--use-image-entrypoint, --no-use-image-entrypoint`: For docker/k8s modes, preserve the image ENTRYPOINT/CMD instead of injecting the platform-owned agent server command. Auto-detected from the existing deployment when omitted.
+* `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref. Auto-detected from the existing deployment when omitted; pass an empty string to deploy with no environment.
+* `--wait, --no-wait`: Wait for the new deployment to reach a terminal status (running or failed) before returning. Exits 0 only on running; exits 1 on failure or timeout. Pass --no-wait to return the pending deployment immediately as JSON.
+* `--timeout, -t <INTEGER>`: Maximum seconds to wait for a terminal status (only with --wait). [default: 300]
+* `--yes, -y`: Skip confirmation prompt.
 * `--workspace, -w`: [default: default]
 * `--base-url`: Platform base URL. Resolution order: (1) this --base-url flag or NEMO_BASE_URL; (2) shared CLI config (`nemo config set --base-url`) or NMP_BASE_URL; (3) http://localhost:8080 (default). [env: NEMO_BASE_URL=]
 
@@ -9627,7 +9667,7 @@ nemo customization automodel.jobs submit [OPTIONS]
 
 * `--name`: Override `name` in the spec.
 * `--model`: Override `model` in the spec.
-* `--dataset.training`: Training fileset as 'name' or 'workspace/name'.
+* `--dataset.training`: Training fileset as 'name', 'workspace/name', or either form with a '#path/' directory.
 * `--dataset.validation`: Override `dataset.validation` in the spec.
 * `--dataset.prompt-template`: Override `dataset.prompt_template` in the spec.
 * `--training.lora.rank <INTEGER>`: Override `training.lora.rank` in the spec.
@@ -9644,10 +9684,11 @@ nemo customization automodel.jobs submit [OPTIONS]
 * `--training.retrieval.train-n-passages <INTEGER>`: Override `training.retrieval.train_n_passages` in the spec.
 * `--training.retrieval.eval-negative-size <INTEGER>`: Override `training.retrieval.eval_negative_size` in the spec.
 * `--training.retrieval.do-gradient-checkpointing`: Override `training.retrieval.do_gradient_checkpointing` in the spec.
+* `--training.retrieval.do-distributed-inbatch-negative`: Score each query against every passage in the global batch rather than only its own train_n_passages. Ignored for cross_encoder.
 * `--training.retrieval.query-max-length <INTEGER>`: Override `training.retrieval.query_max_length` in the spec.
 * `--training.retrieval.passage-max-length <INTEGER>`: Override `training.retrieval.passage_max_length` in the spec.
-* `--training.retrieval.query-prefix`: Collator-side prefix; BiEncoderCollator adds a space.
-* `--training.retrieval.passage-prefix`: Collator-side prefix; BiEncoderCollator adds a space.
+* `--training.retrieval.query-prefix`: Literal prefix prepended to each query. Empty string disables prefixing.
+* `--training.retrieval.passage-prefix`: Literal prefix prepended to each passage. Empty string disables prefixing.
 * `--training.retrieval.export.opset <INTEGER>`: Override `training.retrieval.export.opset` in the spec.
 * `--training.retrieval.export.normalize`: L2-normalize embeddings. Ignored for cross_encoder.
 * `--training.retrieval.export.dimensions`: Add a Matryoshka 'dimensions' input that truncates and renormalizes embeddings.
@@ -9705,7 +9746,7 @@ nemo customization automodel.jobs submit [OPTIONS]
 
 Job Spec flags are generated from the AutomodelJobInput Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.retrieval.export.pooling`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `deployment_config (other union forms)`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `training.training_type`, `training.recipe`, `training.finetuning_type`, `training.lora.target_modules`, `training.lora.exclude_modules`, `training.precision`, `training.attn_implementation`, `training.teacher_precision`, `training.retrieval.export.primary`, `training.retrieval.export.precision`, `training.retrieval.export.attn_implementation`, `training.retrieval.export.pooling`, `schedule.checkpoint_selection`, `schedule.progress_reporting.time_series_metrics`, `optimizer.optimizer`, `optimizer.lr_decay_style`, `integrations.wandb.tags`, `integrations.mlflow.tags`, `deployment_config (other union forms)`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
 
 ##### nemo customization automodel.jobs explain

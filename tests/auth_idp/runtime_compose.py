@@ -7,10 +7,11 @@ from typing import Callable
 
 import httpx
 from nemo_platform import NeMoPlatform
-from nemo_platform_ext.client.tls import httpx_tls_config_from_env
+from nemo_platform_ext.client.tls import HttpxTLSConfig, httpx_tls_config_from_env
 
 from tests.auth_idp.common import jwt_claims
-from tests.auth_idp.runtime_contract import AuthIdpCase, DeploymentWorkloadRuntimeConfig, TokenSet
+from tests.auth_idp.device_flow import authenticate_authentik_device_flow
+from tests.auth_idp.runtime_contract import AuthIdpCase, DeploymentWorkloadRuntimeConfig, JsonObject, TokenSet
 
 AUTHENTIK_COMPOSE_WORKLOAD_IDENTITY_PASSWORD = "svc-nemo-token-secret-e2e"
 AUTHENTIK_DEFAULT_PASSWORDS_BY_ENVVAR = {
@@ -136,6 +137,28 @@ class ComposeAuthIdpRuntime:
 
     def workload_role_principals(self) -> list[str]:
         return list(self.provider.workload_expected_groups)
+
+    def authenticate_device_flow(
+        self,
+        *,
+        device_authorization_endpoint: str,
+        token_endpoint: str,
+        client_id: str,
+        scope: str,
+        username: str,
+        password: str,
+        tls_config: HttpxTLSConfig,
+    ) -> JsonObject:
+        return authenticate_authentik_device_flow(
+            gateway_base_url=self.gateway_base_url,
+            device_authorization_endpoint=device_authorization_endpoint,
+            token_endpoint=token_endpoint,
+            client_id=client_id,
+            scope=scope,
+            username=username,
+            password=password,
+            tls_config=tls_config,
+        )
 
     def cleanup(self) -> None:
         if self._cleaned_up:

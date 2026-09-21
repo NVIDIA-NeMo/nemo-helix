@@ -21,6 +21,7 @@ from nemo_platform_plugin.client.errors import (
     NemoTransportError,
     NotFoundError,
 )
+from nemo_platform_plugin.deployment import DeploymentParams
 from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.models.client import ModelsClient
 from nemo_platform_plugin.models.types import (
@@ -47,7 +48,6 @@ from nemo_platform_plugin.models.types import (
 )
 from nmp.common.client_factory import get_task_nemo_client
 from nmp.customization_common.schemas.model_entity import (
-    DeploymentParameters,
     ModelEntityCreationError,
     ModelEntityTaskConfig,
 )
@@ -296,7 +296,7 @@ class ModelEntityRunner:
         if is_lora and self._has_active_deployment(me):
             return
 
-        if is_lora and isinstance(dc, DeploymentParameters) and not dc.lora_enabled:
+        if is_lora and isinstance(dc, DeploymentParams) and not dc.lora_enabled:
             logger.warning(f"Deployment requested but lora_enabled is false for a LoRA job: {dc}")
             return
 
@@ -353,7 +353,7 @@ class ModelEntityRunner:
                 f"Failed to resolve deployment config '{config_ref}' in workspace '{workspace}': {e}"
             ) from e
 
-    def _create_deployment_config(self, deploy_params: DeploymentParameters, me: ModelEntity) -> ModelDeploymentConfig:
+    def _create_deployment_config(self, deploy_params: DeploymentParams, me: ModelEntity) -> ModelDeploymentConfig:
         """Create (or update) a ``ModelDeploymentConfig`` from inline parameters."""
         model_spec = ModelDeploymentConfigModelSpec(
             model_name=me.name,

@@ -29,11 +29,15 @@ def _service_principal_headers(service_name: str, *, internal: bool) -> dict[str
 
     headers: dict[str, str] = {
         "X-NMP-Principal-Id": f"service:{service_name}",
+        "X-NMP-Actor-Account-Id": "",
+        "X-NMP-Actor-Aliases": f"service:{service_name}",
         # ``with_options`` merges defaults. Explicitly clear any delegation
         # inherited from a request-scoped client so this is true elevation.
         "X-NMP-Principal-On-Behalf-Of": "",
         "X-NMP-Principal-On-Behalf-Of-Email": "",
         "X-NMP-Principal-On-Behalf-Of-Groups": "",
+        "X-NMP-Subject-Account-Id": "",
+        "X-NMP-Subject-Aliases": "",
     }
     if internal:
         headers.update(MARK_INTERNAL_REQUEST_HEADERS)

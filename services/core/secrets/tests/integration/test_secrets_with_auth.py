@@ -984,7 +984,7 @@ class TestDelegatedSecretAccess:
         workspace_name = short_unique_name("svc-del")
         secret_name = short_unique_name("secret")
         secret_value = "service-to-service-secret"
-        other_service = "service:other-service"
+        other_service = "service:auth"
 
         # Setup: create workspace and secret
         platform_admin_sdk = as_user(sdk, TEST_ADMIN_EMAIL)

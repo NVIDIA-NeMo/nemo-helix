@@ -66,6 +66,7 @@ class TestSyncConstruction:
         client = cf.get_nemo_client(as_service="evaluator", internal=True)
         assert client._default_headers["X-NMP-Principal-Id"] == "service:evaluator"
         assert client._default_headers["X-NMP-Internal"] == "true"
+        assert client._default_headers["X-NMP-Actor-Aliases"] == "service:evaluator"
 
     def test_on_behalf_of(self):
         client = cf.get_nemo_client(as_service="svc", on_behalf_of="user@example.com")
@@ -105,6 +106,7 @@ class TestAsyncConstruction:
         client = cf.get_async_nemo_client(as_service="evaluator", internal=True)
         assert client._default_headers["X-NMP-Principal-Id"] == "service:evaluator"
         assert client._default_headers["X-NMP-Internal"] == "true"
+        assert client._default_headers["X-NMP-Actor-Aliases"] == "service:evaluator"
 
     async def test_uses_endpoint_async_http_client(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         socket_path = tmp_path / "entities.sock"
@@ -135,6 +137,7 @@ class TestUrlRouting:
         assert str(captured[0].url) == "http://entities-svc:9999/apis/entities/v2/foo"
         assert captured[0].headers["X-NMP-Principal-Id"] == "service:entities"
         assert captured[0].headers["X-NMP-Internal"] == "true"
+        assert captured[0].headers["X-NMP-Actor-Aliases"] == "service:entities"
 
     def test_allows_credentialed_uds_service_route(
         self,
@@ -197,12 +200,12 @@ class TestHeadersAuth:
         assert client._default_headers["X-NMP-Principal-Id"] == "user@example.com"
         assert client._default_headers["X-NMP-Principal-Groups"] == "g1,g2"
 
-    def test_merges_otel_propagation_headers_without_adding_internal_auth(self):
-        with scoped_otel_headers({"traceparent": "00-trace-span-01", "X-NMP-Internal": "true"}):
+    def test_merges_otel_propagation_headers_without_adding_auth_context(self):
+        with scoped_otel_headers({"traceparent": "00-trace-span-01", "X-NMP-Actor-Aliases": "attacker"}):
             client = cf.get_nemo_client(as_service="svc")
         assert client._default_headers["traceparent"] == "00-trace-span-01"
         assert client._default_headers["X-NMP-Principal-Id"] == "service:svc"
-        assert "X-NMP-Internal" not in client._default_headers
+        assert client._default_headers["X-NMP-Actor-Aliases"] == "service:svc"
 
     def test_explicit_auth_headers_win_over_conflicting_otel_context(self):
         with scoped_otel_headers(
@@ -210,14 +213,16 @@ class TestHeadersAuth:
                 "traceparent": "00-trace-span-01",
                 "x-nmp-principal-id": "attacker@example.com",
                 "X-NMP-Principal-Groups": "admins",
-                "x-NMP-Internal": "false",
+                "x-NMP-Subject-Aliases": "attacker",
             }
         ):
             client = cf.get_async_nemo_client(as_service="evaluator", internal=True)
         assert client._default_headers["traceparent"] == "00-trace-span-01"
         assert client._default_headers["X-NMP-Principal-Id"] == "service:evaluator"
         assert client._default_headers["X-NMP-Internal"] == "true"
+        assert client._default_headers["X-NMP-Actor-Aliases"] == "service:evaluator"
         assert all(name.lower() != "x-nmp-principal-groups" for name in client._default_headers)
+        assert all(name.lower() != "x-nmp-subject-aliases" for name in client._default_headers)
 
     def test_no_headers_leaves_default_headers_none(self):
         # No service, no principal context, no OTEL, no internal → no default headers.
@@ -283,6 +288,7 @@ class TestTaskClientDelegation:
         headers = client._default_headers
         assert headers["X-NMP-Internal"] == "true"
         assert headers["X-NMP-Principal-Id"] == "service:evaluator"
+        assert headers["X-NMP-Actor-Aliases"] == "service:evaluator"
         assert headers["X-NMP-Principal-On-Behalf-Of"] == "user:alice@acme.com"
         assert headers["X-NMP-Principal-On-Behalf-Of-Email"] == "alice@acme.com"
         assert headers["X-NMP-Principal-On-Behalf-Of-Groups"] == "team-a"

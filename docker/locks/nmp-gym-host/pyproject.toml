@@ -7,12 +7,12 @@ version = "0.0.0"
 requires-python = ">=3.13.14,<3.14"
 dependencies = [
     "nemo-gym==0.5.0",
-    "sandboxed-gym[runtime]",
+    "nemo-sandboxed-gym[runtime]",
     "tiktoken==0.13.0",
 ]
 
 [tool.uv.sources]
-sandboxed-gym = { path = "../../../packages/sandboxed_gym" }
+nemo-sandboxed-gym = { path = "../../../packages/sandboxed_gym" }
 
 [tool.uv]
 constraint-dependencies = [

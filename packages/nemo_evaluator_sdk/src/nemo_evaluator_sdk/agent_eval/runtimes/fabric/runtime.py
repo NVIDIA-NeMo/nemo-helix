@@ -509,7 +509,10 @@ class FabricAgentRuntime:
                 task, evidence_dir, result.failure(), extra_metadata=base_metadata, measurements=measurements
             )
 
+        evidence = self._evidence(run, result, result_path, evidence_dir, atif_path=atif_path)
         output_text = _common.extract_output_text(result.output)
+        if not output_text or not output_text.strip():
+            output_text = _common.trace_answer_text(evidence.descriptors)
         return AgentEvalTrial(
             id=f"{task.id}:{self._runtime_name}",
             task_id=task.id,
@@ -519,7 +522,7 @@ class FabricAgentRuntime:
                 response=result.output,
                 metadata={**base_metadata, "evidence_dir": str(evidence_dir)},
             ),
-            evidence=self._evidence(run, result, result_path, evidence_dir, atif_path=atif_path),
+            evidence=evidence,
             measurements=measurements,
             # AgentPhaseSuccessMetric reads agent_ok to score whether the agent phase finished cleanly
             # (an explicit bool, not just trial status).

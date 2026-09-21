@@ -64,7 +64,7 @@ async def test_training_step_gets_local_validation_path_for_same_fileset() -> No
         job = await platform_job_config_compiler(
             workspace="default",
             job_spec=_spec(validation_path="default/commonsense_qa"),
-            sdk=MagicMock(),
+            platform=MagicMock(),
         )
     finally:
         compiler_mod.fetch_model_entity = original_fetch
@@ -86,7 +86,7 @@ async def test_training_step_gets_separate_validation_path_for_different_fileset
         job = await platform_job_config_compiler(
             workspace="default",
             job_spec=_spec(validation_path="default/commonsense_qa_val"),
-            sdk=MagicMock(),
+            platform=MagicMock(),
         )
     finally:
         compiler_mod.fetch_model_entity = original_fetch
@@ -108,7 +108,7 @@ async def test_upload_step_stamps_output_metadata() -> None:
         job = await platform_job_config_compiler(
             workspace="default",
             job_spec=_spec(validation_path=None),
-            sdk=MagicMock(),
+            platform=MagicMock(),
         )
     finally:
         compiler_mod.fetch_model_entity = original_fetch
@@ -127,7 +127,7 @@ async def test_compiler_applies_profile_to_task_steps() -> None:
         job = await platform_job_config_compiler(
             workspace="default",
             job_spec=_spec(validation_path=None),
-            sdk=MagicMock(),
+            platform=MagicMock(),
             profile="custom-gpu",
         )
     finally:

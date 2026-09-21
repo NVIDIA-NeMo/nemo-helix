@@ -14,7 +14,7 @@ from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_E
 from typer.testing import CliRunner
 
 from tests.auth_idp.common import require_capability, runtime_tls_config
-from tests.auth_idp.device_flow import authenticate_authentik_device_flow, with_url_origin
+from tests.auth_idp.device_flow import with_url_origin
 from tests.auth_idp.runtime_contract import JsonObject
 
 pytestmark = [
@@ -99,8 +99,7 @@ def test_cli_api_command_auto_refreshes_expired_device_flow_token(
         auth_idp_runtime.gateway_base_url,
     )
     runtime_token_endpoint = with_url_origin(oidc.token_endpoint, auth_idp_runtime.gateway_base_url)
-    token_response = authenticate_authentik_device_flow(
-        gateway_base_url=auth_idp_runtime.gateway_base_url,
+    token_response = auth_idp_runtime.authenticate_device_flow(
         device_authorization_endpoint=runtime_device_authorization_endpoint,
         token_endpoint=runtime_token_endpoint,
         client_id=oidc.client_id,
@@ -169,5 +168,8 @@ def test_cli_api_command_auto_refreshes_expired_device_flow_token(
     assert refreshed_access_token != expired_access_token
 
     claims = decode_jwt_claims(refreshed_access_token)
-    assert claims.get("exp", 0) > time.time()
+    if claims:
+        assert claims.get("exp", 0) > time.time()
+    else:
+        assert auth_idp_case.provider.name == "zitadel"
     assert saved_user.get("refresh_token")
