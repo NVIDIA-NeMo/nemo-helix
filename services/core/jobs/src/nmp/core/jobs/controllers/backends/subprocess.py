@@ -12,12 +12,17 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from nemo_platform_plugin.jobs.types import PlatformJobStepWithContext, PlatformJobTaskUpdate
+from nemo_platform_plugin.jobs.types import (
+    PlatformJobStepWithContext,
+    PlatformJobTaskResponse,
+    PlatformJobTaskUpdate,
+)
 from nmp.common.auth import AuthContext
 from nmp.common.config import get_platform_config
 from nmp.common.jobs.constants import (
@@ -58,6 +63,9 @@ SUBPROCESS_PID_STATUS_KEY = "pid"
 SUBPROCESS_PGID_STATUS_KEY = "pgid"
 SUBPROCESS_PERSISTENT_STORAGE_STATUS_KEY = "subprocess_persistent_storage_path"
 _MISSING_METADATA_PENDING_GRACE_SECONDS = 5
+_ORPHAN_TERMINATE_TIMEOUT_SECONDS = 2.0
+_ORPHAN_TERMINATE_POLL_SECONDS = 0.1
+_ORPHANED_MESSAGE = "Job was cancelled: the platform stopped while this job was running"
 SUBPROCESS_INHERITED_ENV_ALLOWLIST = frozenset(
     {
         "PATH",
@@ -78,6 +86,13 @@ class SubprocessJobExecutionProfileConfig(JobExecutionProfileConfig):
     graceful_shutdown_timeout_seconds: int = Field(
         default=10,
         description="How long to wait after SIGTERM before force killing the process group.",
+    )
+    orphan_recovery_grace_seconds: int = Field(
+        default=60,
+        description=(
+            "How long a step may go without updates before a restarted controller treats its subprocess "
+            "as orphaned (platform stopped mid-run) and cancels the step."
+        ),
     )
     cleanup_completed_jobs_immediately: bool = Field(
         default=False,
@@ -156,6 +171,10 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         self._root_dir = Path(self._execution_profile_config.working_directory)
         self._root_dir.mkdir(parents=True, exist_ok=True)
         self._process_registry = SubprocessProcessRegistry()
+        # Subprocess execution state lives in this process's memory, so anything the jobs
+        # database still reports as running from before this timestamp was left behind by a
+        # previous controller (see _orphaned_step_update).
+        self._started_at = datetime.datetime.now(datetime.timezone.utc)
 
     def shutdown(self) -> None:
         for metadata in self._process_registry.values():
@@ -282,7 +301,11 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                     status=PlatformJobStatus.PAUSED,
                     status_details={"message": "Subprocess not found, job paused"},
                 )
-            task_fallback = self._get_task_fallback_update(step)
+            tasks = self._list_tasks_safe(step)
+            orphaned = self._orphaned_step_update(step, tasks)
+            if orphaned is not None:
+                return orphaned
+            task_fallback = self._task_fallback_update(tasks)
             if task_fallback is not None:
                 return task_fallback
             if step.status == PlatformJobStatus.PENDING and not self._pending_step_missing_metadata_is_stale(step):
@@ -357,7 +380,57 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                 shutil.rmtree(metadata.work_dir, ignore_errors=True)
                 self._process_registry.pop(key)
 
-    def _get_task_fallback_update(self, step: PlatformJobStepWithContext) -> JobUpdate | None:
+    @classmethod
+    def _task_fallback_update(cls, tasks: list[PlatformJobTaskResponse] | None) -> JobUpdate | None:
+        latest_task = cls._latest_task(tasks) if tasks else None
+        if latest_task is None:
+            return None
+
+        return JobUpdate(
+            status=latest_task.status,
+            status_details=latest_task.status_details,
+            error_details=latest_task.error_details or {},
+        )
+
+    def _orphaned_step_update(
+        self,
+        step: PlatformJobStepWithContext,
+        tasks: list[PlatformJobTaskResponse] | None,
+    ) -> JobUpdate | None:
+        """Cancel a step whose subprocess was left behind by a previous controller.
+
+        Subprocess execution state is process-local, so a controller restart (platform
+        stopped mid-run) leaves steps running in the database with nothing tracking them.
+        Anything that stopped being updated before this controller started, and has stayed
+        quiet past the grace period, is such a leftover: kill whatever is still running and
+        cancel the step so the job reaches a terminal state.
+        """
+        if tasks is None:
+            return None
+
+        latest_task = self._latest_task(tasks)
+        if latest_task is not None and PlatformJobStatus(latest_task.status).is_terminal():
+            return None
+
+        task_anchor = self._task_timestamp(latest_task) if latest_task is not None else None
+        anchor = task_anchor or step.updated_at or step.created_at
+        if not self._is_orphaned_anchor(anchor):
+            return None
+
+        logger.warning(
+            "Cancelling job step orphaned by a previous jobs controller",
+            extra={"job": step.job, "step": step.name, "workspace": step.workspace, "status": step.status},
+        )
+        if latest_task is not None:
+            self._terminate_orphaned_process(latest_task.status_details or {})
+            self._cancel_orphaned_task(step, latest_task)
+        return JobUpdate(
+            status=PlatformJobStatus.CANCELLED,
+            status_details={"message": _ORPHANED_MESSAGE},
+            error_details={},
+        )
+
+    def _list_tasks_safe(self, step: PlatformJobStepWithContext) -> list[PlatformJobTaskResponse] | None:
         try:
             tasks = self._jobs.list_job_step_tasks(
                 name=step.name,
@@ -370,21 +443,84 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                 extra={"job": step.job, "step": step.name, "workspace": step.workspace},
             )
             return None
+        return list(tasks.data)
 
-        if not tasks.data:
+    @classmethod
+    def _latest_task(cls, tasks: list[PlatformJobTaskResponse]) -> PlatformJobTaskResponse | None:
+        if not tasks:
             return None
+        return max(
+            tasks,
+            key=lambda task: cls._task_timestamp(task) or datetime.datetime.min.replace(tzinfo=datetime.timezone.utc),
+        )
 
-        latest_task = max(
-            tasks.data,
-            key=lambda task: (
-                task.updated_at or task.created_at or datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
-            ),
-        )
-        return JobUpdate(
-            status=latest_task.status,
-            status_details=latest_task.status_details,
-            error_details=latest_task.error_details or {},
-        )
+    @staticmethod
+    def _task_timestamp(task: PlatformJobTaskResponse) -> datetime.datetime | None:
+        return task.updated_at or task.created_at
+
+    def _is_orphaned_anchor(self, anchor: datetime.datetime | None) -> bool:
+        if anchor is None:
+            return False
+        if anchor.tzinfo is None:
+            anchor = anchor.replace(tzinfo=datetime.timezone.utc)
+        if anchor >= self._started_at:
+            return False
+        grace = datetime.timedelta(seconds=self._execution_profile_config.orphan_recovery_grace_seconds)
+        return (anchor + grace) < datetime.datetime.now(datetime.timezone.utc)
+
+    def _cancel_orphaned_task(self, step: PlatformJobStepWithContext, task: PlatformJobTaskResponse) -> None:
+        task_name = task.name
+        if not task_name:
+            return
+        try:
+            self._jobs.update_job_step_task(
+                name=task_name,
+                workspace=step.workspace,
+                job=step.job,
+                step=step.name,
+                body=PlatformJobTaskUpdate(
+                    status=PlatformJobStatus.CANCELLED,
+                    status_details={**(task.status_details or {}), "message": _ORPHANED_MESSAGE},
+                    error_details={},
+                ),
+            )
+        except Exception:
+            logger.warning(
+                "Failed to cancel orphaned subprocess task",
+                extra={"job": step.job, "step": step.name, "workspace": step.workspace, "task": task_name},
+            )
+
+    @staticmethod
+    def _terminate_orphaned_process(status_details: dict) -> None:
+        """Best-effort kill of a process group left behind by a previous controller."""
+        pid = status_details.get(SUBPROCESS_PID_STATUS_KEY)
+        pgid = status_details.get(SUBPROCESS_PGID_STATUS_KEY)
+        if not isinstance(pid, int) or not isinstance(pgid, int):
+            return
+        try:
+            # Guard against PID reuse: a recycled PID is very unlikely to also lead the same group.
+            if os.getpgid(pid) != pgid:
+                return
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            return
+        except Exception:
+            logger.exception("Failed to signal orphaned subprocess group", extra={"pid": pid, "pgid": pgid})
+            return
+
+        deadline = time.monotonic() + _ORPHAN_TERMINATE_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            time.sleep(_ORPHAN_TERMINATE_POLL_SECONDS)
+            try:
+                os.getpgid(pid)
+            except ProcessLookupError:
+                return
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            return
+        except Exception:
+            logger.exception("Failed to kill orphaned subprocess group", extra={"pid": pid, "pgid": pgid})
 
     @staticmethod
     def _pending_step_missing_metadata_is_stale(step: PlatformJobStepWithContext) -> bool:

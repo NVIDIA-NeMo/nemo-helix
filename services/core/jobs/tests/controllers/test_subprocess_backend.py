@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -442,7 +443,7 @@ def test_sync_uses_persisted_task_when_local_metadata_is_missing(
     assert update.error_details == {}
 
 
-def test_get_task_fallback_update_handles_missing_task_timestamps(
+def test_task_fallback_update_handles_missing_task_timestamps(
     mock_nmp_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_active
 ):
     backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
@@ -468,7 +469,7 @@ def test_get_task_fallback_update_handles_missing_task_timestamps(
         )
     )
 
-    update = backend._get_task_fallback_update(step)
+    update = backend._task_fallback_update(backend._list_tasks_safe(step))
 
     assert update is not None
     assert update.status == PlatformJobStatus.ACTIVE
@@ -487,6 +488,161 @@ def test_sync_keeps_recent_pending_step_pending_when_local_metadata_is_missing(
 
     assert update.status == PlatformJobStatus.PENDING
     assert update.error_details == {}
+
+
+def _orphaned_task(status: PlatformJobStatus, age_seconds: int, **overrides):
+    timestamp = datetime.now(timezone.utc) - timedelta(seconds=age_seconds)
+    fields = {
+        "name": "task-orphan",
+        "status": status.value,
+        "status_details": {"message": "Job is running"},
+        "error_details": {},
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
+
+
+def test_sync_cancels_active_step_orphaned_by_previous_controller(
+    mock_nmp_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_active
+):
+    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_active, ["/bin/sh", "-c", "sleep 10"])
+    mock_jobs_client.list_job_step_tasks.return_value = data_response(
+        SimpleNamespace(data=[_orphaned_task(PlatformJobStatus.ACTIVE, age_seconds=3600)])
+    )
+
+    update = backend.sync(step)
+
+    assert update.status == PlatformJobStatus.CANCELLED
+    assert update.status_details == {"message": "Job was cancelled: the platform stopped while this job was running"}
+    last_call = mock_jobs_client.update_job_step_task.call_args
+    assert last_call.kwargs["name"] == "task-orphan"
+    assert last_call.kwargs["body"].status == PlatformJobStatus.CANCELLED
+
+
+def test_sync_cancels_orphaned_step_without_tasks(
+    mock_nmp_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_active
+):
+    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_active, ["/bin/sh", "-c", "sleep 10"])
+    step.updated_at = datetime.now(timezone.utc) - timedelta(seconds=3600)
+    mock_jobs_client.list_job_step_tasks.return_value = data_response(SimpleNamespace(data=[]))
+
+    update = backend.sync(step)
+
+    assert update.status == PlatformJobStatus.CANCELLED
+    mock_jobs_client.update_job_step_task.assert_not_called()
+
+
+def test_sync_does_not_cancel_step_updated_within_grace_period(
+    mock_nmp_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_active
+):
+    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_active, ["/bin/sh", "-c", "sleep 10"])
+    grace = backend._execution_profile_config.orphan_recovery_grace_seconds
+    mock_jobs_client.list_job_step_tasks.return_value = data_response(
+        SimpleNamespace(data=[_orphaned_task(PlatformJobStatus.ACTIVE, age_seconds=grace // 2)])
+    )
+
+    update = backend.sync(step)
+
+    assert update.status == PlatformJobStatus.ACTIVE
+
+
+def test_sync_does_not_cancel_step_owned_by_a_live_controller(
+    mock_nmp_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_active
+):
+    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+    backend._started_at = datetime.now(timezone.utc) - timedelta(days=1)
+    step = _step_with_command(test_step_active, ["/bin/sh", "-c", "sleep 10"])
+    mock_jobs_client.list_job_step_tasks.return_value = data_response(
+        SimpleNamespace(data=[_orphaned_task(PlatformJobStatus.ACTIVE, age_seconds=3600)])
+    )
+
+    update = backend.sync(step)
+
+    assert update.status == PlatformJobStatus.ACTIVE
+
+
+def test_sync_keeps_terminal_task_status_for_missing_metadata(
+    mock_nmp_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_active
+):
+    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_active, ["/bin/sh", "-c", "true"])
+    mock_jobs_client.list_job_step_tasks.return_value = data_response(
+        SimpleNamespace(
+            data=[
+                _orphaned_task(
+                    PlatformJobStatus.COMPLETED,
+                    age_seconds=3600,
+                    status_details={"message": "Job completed successfully with exit code 0"},
+                )
+            ]
+        )
+    )
+
+    update = backend.sync(step)
+
+    assert update.status == PlatformJobStatus.COMPLETED
+
+
+def test_orphan_recovery_kills_leftover_process_group(
+    mock_nmp_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_active
+):
+    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_active, ["/bin/sh", "-c", "sleep 30"])
+    leftover = subprocess.Popen(["/bin/sh", "-c", "sleep 30"], start_new_session=True)
+    mock_jobs_client.list_job_step_tasks.return_value = data_response(
+        SimpleNamespace(
+            data=[
+                _orphaned_task(
+                    PlatformJobStatus.ACTIVE,
+                    age_seconds=3600,
+                    status_details={"pid": leftover.pid, "pgid": os.getpgid(leftover.pid)},
+                )
+            ]
+        )
+    )
+
+    try:
+        update = backend.sync(step)
+
+        assert update.status == PlatformJobStatus.CANCELLED
+        assert leftover.wait(timeout=5) is not None
+    finally:
+        if leftover.poll() is None:
+            leftover.kill()
+            leftover.wait(timeout=5)
+
+
+def test_orphan_recovery_skips_kill_when_recorded_pid_is_not_group_leader(
+    mock_nmp_client, mock_jobs_client, tmp_path, mock_platform_config, test_step_active
+):
+    backend = _subprocess_backend(mock_nmp_client, tmp_path, mock_platform_config)
+    step = _step_with_command(test_step_active, ["/bin/sh", "-c", "sleep 30"])
+    unrelated = subprocess.Popen(["/bin/sh", "-c", "sleep 5"], start_new_session=True)
+    mock_jobs_client.list_job_step_tasks.return_value = data_response(
+        SimpleNamespace(
+            data=[
+                _orphaned_task(
+                    PlatformJobStatus.ACTIVE,
+                    age_seconds=3600,
+                    status_details={"pid": unrelated.pid, "pgid": os.getpgid(unrelated.pid) + 1},
+                )
+            ]
+        )
+    )
+
+    try:
+        update = backend.sync(step)
+
+        assert update.status == PlatformJobStatus.CANCELLED
+        assert unrelated.poll() is None
+    finally:
+        unrelated.kill()
+        unrelated.wait(timeout=5)
 
 
 def test_pending_step_missing_metadata_stale_check_accepts_typed_timestamp(test_step_pending):
