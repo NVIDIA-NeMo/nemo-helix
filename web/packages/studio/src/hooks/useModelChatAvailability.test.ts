@@ -38,7 +38,7 @@ describe('useModelChatAvailability', () => {
       typeof useModelsGetModel
     >);
     mockDeploymentStatus.mockReturnValue({ status: ModelDeploymentStatus.READY, isLoading: false });
-    mockIsServed.mockReturnValue({ isServed: true, isLoading: false });
+    mockIsServed.mockReturnValue({ isServed: true, isLoading: false, isError: false });
   });
 
   // The reported bug. A full-weight run sets `base_model` like any fine-tune, but it
@@ -87,7 +87,7 @@ describe('useModelChatAvailability', () => {
   // changes which entity is asked, not whether the answer is believed.
   it('still reports disabled when the model has no deployment', () => {
     mockDeploymentStatus.mockReturnValue({ status: null, isLoading: false });
-    mockIsServed.mockReturnValue({ isServed: false, isLoading: false });
+    mockIsServed.mockReturnValue({ isServed: false, isLoading: false, isError: false });
 
     const { result } = renderHook(() =>
       useModelChatAvailability(
@@ -118,7 +118,7 @@ describe('useModelChatAvailability', () => {
     });
 
     it('reports an adapter its provider has not loaded as unserved', () => {
-      mockIsServed.mockReturnValue({ isServed: false, isLoading: false });
+      mockIsServed.mockReturnValue({ isServed: false, isLoading: false, isError: false });
 
       const { result } = renderHook(() => useModelChatAvailability(base, { adapter }));
 
@@ -137,7 +137,17 @@ describe('useModelChatAvailability', () => {
     // `isAdapterUnserved` drives a distinct empty state, so it must not fire while the
     // provider lookup is still in flight.
     it('is not unserved while the provider lookup is still loading', () => {
-      mockIsServed.mockReturnValue({ isServed: false, isLoading: true });
+      mockIsServed.mockReturnValue({ isServed: false, isLoading: true, isError: false });
+
+      const { result } = renderHook(() => useModelChatAvailability(base, { adapter }));
+
+      expect(result.current.isAdapterUnserved).toBe(false);
+    });
+
+    // Provider queries do not retry, so a single 5xx lands as isServed:false. Claiming
+    // the base deployment has not loaded the adapter would then be a confident guess.
+    it('does not report unserved when the provider lookup failed', () => {
+      mockIsServed.mockReturnValue({ isServed: false, isLoading: false, isError: true });
 
       const { result } = renderHook(() => useModelChatAvailability(base, { adapter }));
 
@@ -145,7 +155,7 @@ describe('useModelChatAvailability', () => {
     });
 
     it('never reports unserved for a plain model', () => {
-      mockIsServed.mockReturnValue({ isServed: false, isLoading: false });
+      mockIsServed.mockReturnValue({ isServed: false, isLoading: false, isError: false });
 
       const { result } = renderHook(() => useModelChatAvailability(model()));
 

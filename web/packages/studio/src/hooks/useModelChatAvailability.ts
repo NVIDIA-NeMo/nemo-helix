@@ -45,7 +45,11 @@ export function useModelChatAvailability(
   );
   // With an adapter, this asks whether the *adapter* is served, not its base: a READY
   // base deployment that has not loaded the adapter serves the base and nothing else.
-  const { isServed, isLoading: isServedLoading } = useModelIsServed(modelForStatus, adapter);
+  const {
+    isServed,
+    isLoading: isServedLoading,
+    isError: isServedError,
+  } = useModelIsServed(modelForStatus, adapter);
 
   const isLoading = baseModelRef
     ? isLoadingBaseModel || isStatusLoading || isServedLoading
@@ -72,8 +76,14 @@ export function useModelChatAvailability(
    * models. Distinct from a plain unavailable model: the base deployment may be fine
    * and still coming up to the adapter, so callers give it its own empty state rather
    * than the generic "Chat Unavailable".
+   *
+   * Excludes a failed provider lookup. Provider queries do not retry, so a single 5xx
+   * or a stale provider reference yields `isServed: false` without establishing it —
+   * and this drives copy that tells the user the base deployment has not loaded the
+   * adapter yet, which would then be a confident guess. Those fall through to the
+   * generic unavailable state instead.
    */
-  const isAdapterUnserved = Boolean(adapter) && !isLoading && !isServed;
+  const isAdapterUnserved = Boolean(adapter) && !isLoading && !isServedError && !isServed;
 
   return { modelChatStatus, isChatAvailable, isLoading, isAdapterUnserved };
 }

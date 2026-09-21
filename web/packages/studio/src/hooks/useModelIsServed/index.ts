@@ -9,6 +9,12 @@ interface UseModelIsServedResult {
   /** Whether at least one provider lists this model in its served_models. */
   isServed: boolean;
   isLoading: boolean;
+  /**
+   * A provider could not be fetched, so `isServed: false` means "we could not find
+   * out", not "nothing serves this". Callers that state the negative affirmatively
+   * must exclude this case.
+   */
+  isError: boolean;
 }
 
 /**
@@ -27,7 +33,7 @@ export function useModelIsServed(
   adapter?: Adapter | null
 ): UseModelIsServedResult {
   const modelEntityId = model ? toInferenceModelEntityId(model, adapter) : '';
-  const { servedModel, isLoading } = useServedModel(model, modelEntityId);
+  const { servedModel, isLoading, isError } = useServedModel(model, modelEntityId);
 
-  return { isServed: Boolean(servedModel), isLoading };
+  return { isServed: Boolean(servedModel), isLoading, isError: Boolean(isError) };
 }
