@@ -99,3 +99,25 @@ def test_capture_token_usage_restores_outer_correlation() -> None:
         assert runtime_correlation_provider.current() == outer
     finally:
         runtime_correlation_provider.reset(token)
+
+
+def test_capture_token_usage_nested_contexts_are_isolated() -> None:
+    outer_reporter = LocalJobUsageReporter()
+    inner_reporter = LocalJobUsageReporter()
+
+    with capture_token_usage(outer_reporter):
+        outer = runtime_correlation_provider.current()
+        emit_token_usage_event(_event(input_tokens=3, output_tokens=1, correlation=outer))
+        with capture_token_usage(inner_reporter):
+            inner = runtime_correlation_provider.current()
+            assert inner != outer
+            emit_token_usage_event(_event(input_tokens=11, output_tokens=7, correlation=inner))
+        assert runtime_correlation_provider.current() == outer
+        emit_token_usage_event(_event(input_tokens=5, output_tokens=2, correlation=outer))
+
+    assert inner_reporter.latest is not None
+    assert inner_reporter.latest.input_tokens == 11
+    assert inner_reporter.latest.output_tokens == 7
+    assert outer_reporter.latest is not None
+    assert outer_reporter.latest.input_tokens == 8
+    assert outer_reporter.latest.output_tokens == 3

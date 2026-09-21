@@ -16,7 +16,10 @@ from nemo_platform_plugin.job_usage import JobUsageReporter
 
 
 class _TokenUsageAccumulator:
+    """Thread-safe totals for one Data Designer runtime-correlation run."""
+
     def __init__(self, run_id: str) -> None:
+        """Create an accumulator scoped to one generated Data Designer run id."""
         self._run_id = run_id
         self._lock = Lock()
         self._input_tokens = 0
@@ -24,6 +27,7 @@ class _TokenUsageAccumulator:
         self._event_count = 0
 
     def record(self, event: TokenUsageEvent) -> None:
+        """Add matching token-usage events and ignore unrelated runs."""
         if event.correlation is None or event.correlation.run_id != self._run_id:
             return
         with self._lock:
@@ -32,6 +36,7 @@ class _TokenUsageAccumulator:
             self._event_count += 1
 
     def report(self, reporter: JobUsageReporter) -> None:
+        """Publish accumulated totals when at least one event was captured."""
         with self._lock:
             if self._event_count == 0:
                 return
@@ -42,7 +47,13 @@ class _TokenUsageAccumulator:
 
 @contextmanager
 def capture_token_usage(reporter: JobUsageReporter) -> Iterator[None]:
-    """Report totals from Data Designer model calls made in this context."""
+    """Capture Data Designer model-token events and report them on exit.
+
+    The wrapper owns the full setup/teardown sequence shared by Data Designer
+    and Anonymizer tasks: create a fresh runtime correlation, subscribe to the
+    Data Designer token-event bus, restore the previous correlation, unsubscribe,
+    and report cumulative totals even when the wrapped generation raises.
+    """
     run_id = f"nemo-platform-{uuid4().hex}"
     accumulator = _TokenUsageAccumulator(run_id)
     unsubscribe = subscribe_token_usage(accumulator.record)
