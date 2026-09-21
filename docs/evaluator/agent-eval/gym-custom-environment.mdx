@@ -147,6 +147,10 @@ environment variables.
 
 ## 4. Submit the job
 
+<Tabs>
+
+<Tab title="CLI">
+
 ```bash
 nemo evaluator agent-evaluate submit \
   --spec-file gym-custom-environment.yaml \
@@ -154,8 +158,12 @@ nemo evaluator agent-evaluate submit \
   --profile default
 ```
 
-The same submission from Python, with the runner object rather than a spec file. The runner carries
-the evaluation and a `GymPlacement` carries the deployment, so the configuration is written once and
+</Tab>
+
+<Tab title="Python SDK">
+
+Submit the runner object rather than the spec file. The runner carries the evaluation and a
+`GymPlacement` carries the deployment, so the configuration is written once and
 `client.evaluator.submit` returns a job handle that polls itself:
 
 ```python
@@ -188,6 +196,10 @@ job.wait_until_done()
 The same runner runs locally under `AgentEvaluator()` without change — `env_secrets` resolves from
 your own environment there. Only the placement is specific to the platform, which is why it is not
 part of the runner.
+
+</Tab>
+
+</Tabs>
 
 Evaluator compiles two ordered steps:
 
