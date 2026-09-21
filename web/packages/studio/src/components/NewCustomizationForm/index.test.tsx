@@ -390,6 +390,59 @@ describe('NewCustomizationForm', () => {
       expect(mutateAutomodel.mock.calls[0][0].data.spec.deployment_config).toBeUndefined();
     });
 
+    // Topic 3: a failed lookup must not be read as "nothing is deployed".
+    it('creates no config when readiness is indeterminate', async () => {
+      mockReadiness.mockReturnValue({
+        state: 'indeterminate',
+        deploymentName: null,
+        status: null,
+        isLoading: false,
+      });
+      const user = userEvent.setup();
+      renderRoute(
+        <NewCustomizationForm workspace="default" initialValues={validAutomodelValues()} />
+      );
+
+      await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+
+      // The job still runs — only the deployment is withheld.
+      await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
+      expect(mockCreateDeploymentConfig).not.toHaveBeenCalled();
+      expect(mutateAutomodel.mock.calls[0][0].data.spec.deployment_config).toBeUndefined();
+    });
+
+    // Topic 2: while readiness loads, `state` is still its `'none'` default, which is
+    // indistinguishable from a confirmed "nothing is deployed".
+    it('blocks submit while readiness is still loading', async () => {
+      mockReadiness.mockReturnValue({
+        state: 'none',
+        deploymentName: null,
+        status: null,
+        isLoading: true,
+      });
+      renderRoute(
+        <NewCustomizationForm workspace="default" initialValues={validAutomodelValues()} />
+      );
+
+      expect(await screen.findByRole('button', { name: /Start Fine-Tuning/i })).toBeDisabled();
+    });
+
+    // Topic 4: `jobToFormFields` clones a job by copying its whole spec into the form,
+    // so an opted-out run would otherwise resubmit the config the clone came with.
+    it('drops a cloned deployment_config when the user opts out', async () => {
+      const values = validAutomodelValues();
+      (values.automodel as { deployment_config?: string }).deployment_config = 'stale-config';
+      const user = userEvent.setup();
+      renderRoute(<NewCustomizationForm workspace="default" initialValues={values} />);
+
+      await user.click(await screen.findByRole('switch', { name: /Deploy the base model/ }));
+      await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+
+      await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
+      expect(mockCreateDeploymentConfig).not.toHaveBeenCalled();
+      expect(mutateAutomodel.mock.calls[0][0].data.spec.deployment_config).toBeUndefined();
+    });
+
     it('skips the config call when the base already serves LoRA', async () => {
       mockReadiness.mockReturnValue({
         state: 'serving-lora',

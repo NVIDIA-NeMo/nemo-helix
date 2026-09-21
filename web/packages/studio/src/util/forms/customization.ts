@@ -314,13 +314,17 @@ export const customizationFormSchema = z
  * `deployment_config` on a job spec: the name of a `ModelDeploymentConfig` the job's
  * model_entity task resolves and deploys from once training finishes.
  *
- * Omitted rather than sent as `undefined` because every job spec is `extra="forbid"`,
- * and a key present with no value is not the same as an absent key to a caller that
- * spreads the result.
+ * Every builder below sets this **unconditionally**, including to `undefined`, rather
+ * than spreading it in only when present. `jobToFormFields` clones a job by copying its
+ * whole spec into the form (`automodel: stripNulls(job.spec)`, and the same for RL and
+ * unsloth), so a cloned job arrives carrying whatever `deployment_config` it ran with.
+ * A conditional spread leaves that value in place when the user opts out — the job then
+ * deploys a model they declined to deploy.
+ *
+ * Assigning `undefined` is safe against `extra="forbid"`: `JSON.stringify` drops
+ * undefined-valued keys, so the field is absent on the wire exactly as if it had never
+ * been set, while still overriding the spread.
  */
-const deploymentConfigField = (name: string | undefined) =>
-  name ? { deployment_config: name } : {};
-
 export const formToAutomodelCreate = (
   f: CustomizationFormFields,
   deploymentConfig?: string
@@ -342,7 +346,7 @@ export const formToAutomodelCreate = (
       offload_teacher: isDistillation ? training.offload_teacher : undefined,
     },
     output: { name: f.outputName, description: f.description || undefined },
-    ...deploymentConfigField(deploymentConfig),
+    deployment_config: deploymentConfig,
   };
   return {
     name: f.outputName || undefined,
@@ -471,7 +475,7 @@ export const formToRlCreate = (
         automodel_kwargs: f.grpo.automodel_kwargs,
       },
       output: { name: f.outputName || undefined },
-      ...deploymentConfigField(deploymentConfig),
+      deployment_config: deploymentConfig,
     };
     return {
       name: f.outputName || undefined,
@@ -551,10 +555,10 @@ export const formToUnslothCreate = (
         description: f.description || undefined,
         save_method: f.unsloth.output?.save_method,
       },
-      // Native field here — `UnslothJobInput` already declares it, so no intersection is
-      // needed. Set unconditionally rather than via `deploymentConfigField`: the spread of
-      // `f.unsloth` above can carry an inline config from a cloned job, and that would
-      // otherwise survive a run the user asked not to deploy.
+      // Unconditional, overriding the `...f.unsloth` spread above — see the note on
+      // `formToAutomodelCreate`. Unsloth's is the one that can also carry an inline
+      // `DeploymentParams` object rather than a config name, which a clone would
+      // otherwise replay in full.
       deployment_config: deploymentConfig,
     },
   };

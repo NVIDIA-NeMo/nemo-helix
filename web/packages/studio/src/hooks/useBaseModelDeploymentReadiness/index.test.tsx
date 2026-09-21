@@ -110,6 +110,61 @@ describe('useBaseModelDeploymentReadiness', () => {
     );
   });
 
+  describe('failed lookups', () => {
+    const httpError = (status: number) => ({ response: { status } });
+
+    // The distinction the whole error path turns on. A 404 is how "no provider" and
+    // "no deployment" are *reported* — it is the answer in the common case, not a
+    // failure — so treating it as indeterminate would break the main path.
+    it('treats a 404 as a real answer, not a failed lookup', () => {
+      setup({});
+      mocks.useModelsGetProvider.mockReturnValue({ ...idle, error: httpError(404) });
+      expect(
+        renderHook(() => useBaseModelDeploymentReadiness('ws/base')).result.current.state
+      ).toBe('none');
+    });
+
+    it.each([500, 503])('reports indeterminate when a lookup fails with %s', (status) => {
+      setup({});
+      mocks.useModelsGetModel.mockReturnValue({ ...idle, error: httpError(status) });
+      expect(
+        renderHook(() => useBaseModelDeploymentReadiness('ws/base')).result.current.state
+      ).toBe('indeterminate');
+    });
+
+    it('reports indeterminate for a network error with no status', () => {
+      setup({});
+      mocks.useModelsGetModel.mockReturnValue({ ...idle, error: new Error('Network Error') });
+      expect(
+        renderHook(() => useBaseModelDeploymentReadiness('ws/base')).result.current.state
+      ).toBe('indeterminate');
+    });
+
+    // The dangerous one: the deployment resolves and is live, but the config lookup
+    // fails. Without the indeterminate branch the absent `lora_enabled` reads as false,
+    // which claims the base will refuse the adapter and invites a second deployment.
+    it('does not call a live deployment serving-without-lora when the config lookup fails', () => {
+      setup({ ...servingBase });
+      mocks.useModelsGetDeploymentConfigVersion.mockReturnValue({
+        ...idle,
+        error: httpError(500),
+      });
+      expect(
+        renderHook(() => useBaseModelDeploymentReadiness('ws/base')).result.current.state
+      ).toBe('indeterminate');
+    });
+
+    it('still reports the deployment it did resolve', () => {
+      setup({ ...servingBase });
+      mocks.useModelsGetDeploymentConfigVersion.mockReturnValue({
+        ...idle,
+        error: httpError(500),
+      });
+      const { result } = renderHook(() => useBaseModelDeploymentReadiness('ws/base'));
+      expect(result.current.deploymentName).toBe('base-deployment');
+    });
+  });
+
   // Reads the version the deployment pinned, not the latest: configs are
   // immutable and versioned, so the latest may describe something not running.
   it('reads the config version the deployment pinned', () => {

@@ -36,7 +36,10 @@ import { LoraParametersSection } from '@studio/components/NewCustomizationForm/L
 import { ModelSelectionSection } from '@studio/components/NewCustomizationForm/ModelSelectionSection';
 import { RewardEnvironmentSection } from '@studio/components/NewCustomizationForm/RewardEnvironmentSection';
 import { TrainingMethodSection } from '@studio/components/NewCustomizationForm/TrainingMethodSection';
-import { useBaseModelDeploymentReadiness } from '@studio/hooks/useBaseModelDeploymentReadiness';
+import {
+  useBaseModelDeploymentReadiness,
+  type BaseModelDeploymentState,
+} from '@studio/hooks/useBaseModelDeploymentReadiness';
 import {
   configNameFromWizardBaseName,
   createDeploymentWizardSchema,
@@ -57,6 +60,20 @@ import {
 import { FC, useEffect, useMemo, useRef, useState } from 'react';
 import { type FieldErrors, FormProvider, type Resolver, useForm, useWatch } from 'react-hook-form';
 import { useNavigate } from 'react-router';
+
+/**
+ * Readiness states in which creating a base-model deployment is the right move.
+ *
+ * An allowlist rather than `!== 'serving-lora'`, because the negative form treats every
+ * state it does not name as grounds to create a deployment — which is how
+ * `'indeterminate'`, the state that means "we could not find out", would become the state
+ * that acts. Any state added later gets the safe default of doing nothing.
+ */
+const CREATE_DEPLOYMENT_STATES: readonly BaseModelDeploymentState[] = [
+  'none',
+  'serving-without-lora',
+  'unavailable',
+];
 
 interface NewCustomizationFormProps {
   workspace: string;
@@ -145,7 +162,7 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   }) as string | undefined;
 
   const readiness = useBaseModelDeploymentReadiness(baseModelRef, { enabled: isAdapterRun });
-  const needsBaseDeployment = isAdapterRun && readiness.state !== 'serving-lora';
+  const needsBaseDeployment = isAdapterRun && CREATE_DEPLOYMENT_STATES.includes(readiness.state);
 
   // Separate form: these fields drive their own API calls and are not part of any
   // job payload. Typed exactly `WizardFormValues` so the wizard's field components
@@ -201,6 +218,21 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   });
 
   const isPending = isPendingAutomodel || isPendingUnsloth || isPendingRl;
+
+  /**
+   * Anything in flight that the button should report, including the config-creation
+   * step that precedes the job mutations. `form.formState.isSubmitting` is true for
+   * the whole of `onSubmit`, so it is what actually covers that window.
+   */
+  const isSubmitting = isPending || form.formState.isSubmitting;
+
+  /**
+   * Also blocked while readiness resolves, which is not "busy" but "not yet safe to
+   * act on" — the section's `'none'` default is indistinguishable from a real answer
+   * until the queries settle. Only for adapter runs, since that is the only case the
+   * readiness hook is enabled for.
+   */
+  const isSubmitBlocked = isSubmitting || (isAdapterRun && readiness.isLoading);
 
   const onSubmit = async (fields: CustomizationFormFields) => {
     setValidationErrors([]);
@@ -317,8 +349,22 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
                           {deployStage}
                         </Text>
                       ) : null}
-                      <Button type="submit" disabled={isPending} color="brand">
-                        {isPending ? 'Starting…' : 'Start Fine-Tuning'}
+                      {/* `isPending` covers only the job mutations, which are the *last*
+                          step. Config creation happens before them and takes real time, so
+                          on its own `isPending` leaves a window where a second click runs
+                          `onSubmit` again and creates a second config.
+
+                          Readiness matters for the opposite reason: while it loads, `state`
+                          is still its `'none'` default, which the section reads as "no
+                          deployment exists". Submitting then would create a config for a
+                          base that may already be serving LoRA. */}
+                      <Button
+                        type="submit"
+                        disabled={isSubmitBlocked}
+                        color="brand"
+                        aria-busy={isSubmitting}
+                      >
+                        {isSubmitting ? 'Starting…' : 'Start Fine-Tuning'}
                       </Button>
                     </Flex>
                   }

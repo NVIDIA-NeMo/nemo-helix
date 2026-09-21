@@ -104,6 +104,22 @@ describe('DeploymentSection', () => {
     expect(screen.getByText(/once training\s+completes/)).toBeInTheDocument();
   });
 
+  // A failed lookup leaves every hop's data absent, and absent data reads as a
+  // positive claim everywhere else: no status means nothing is serving, no
+  // `lora_enabled` means LoRA is off. Both would have the form offer to deploy.
+  it('refuses to offer a deployment when readiness could not be determined', () => {
+    render(<Harness r={readiness({ state: 'indeterminate' })} />);
+    expect(screen.getByText(/Could not check whether/)).toBeInTheDocument();
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    expect(screen.queryByText('Engine')).not.toBeInTheDocument();
+    expect(screen.queryByText('GPUs')).not.toBeInTheDocument();
+  });
+
+  it('says the job still runs when readiness is indeterminate', () => {
+    render(<Harness r={readiness({ state: 'indeterminate' })} />);
+    expect(screen.getByText(/The job will run/)).toBeInTheDocument();
+  });
+
   describe('opting out', () => {
     it('defaults to deploying', () => {
       expect(DEFAULT_DEPLOY_BASE_MODEL).toBe(true);

@@ -58,6 +58,22 @@ export const DeploymentSection: FC<DeploymentSectionProps> = ({
     );
   }
 
+  // A lookup failed, so the base model's real state is unknown. Offering to deploy
+  // here would be a guess: the fields would be pre-filled from a `'none'` that was
+  // never confirmed, and accepting could add a second deployment to a base that is
+  // already serving. The job still runs — only the deployment is withheld.
+  if (readiness.state === 'indeterminate') {
+    return (
+      <FormSection title="Deployment">
+        <Banner kind="inline" status="warning">
+          Could not check whether {baseModelRef} is already deployed. The job will run, but no
+          deployment will be created for it — deploying blindly risks duplicating one that already
+          exists. Check the Deployments page once the job is under way.
+        </Banner>
+      </FormSection>
+    );
+  }
+
   // Already serving adapters: there is no deployment to create, so there is
   // nothing to decide.
   if (readiness.state === 'serving-lora') {
