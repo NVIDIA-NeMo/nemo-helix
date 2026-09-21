@@ -776,13 +776,21 @@ class TestCompilerDeploymentConfigPlumbing:
 
         from nmp.unsloth.app.jobs import compiler as compiler_mod
 
+        # A LoRA job's config must target the base model; the compiler now resolves it.
+        platform = MagicMock()
+        platform.models.get_deployment_config = AsyncMock(
+            return_value=_response(
+                _resolved_config(model_entity_id="default/base", model_name="base", model_namespace="default")
+            )
+        )
+
         original_fetch = compiler_mod.fetch_model_entity
         compiler_mod.fetch_model_entity = AsyncMock(return_value=_compiler_model_entity())
         try:
             job_spec = await platform_job_config_compiler(
                 workspace="default",
                 job_spec=spec,
-                platform=MagicMock(),
+                platform=platform,
             )
         finally:
             compiler_mod.fetch_model_entity = original_fetch

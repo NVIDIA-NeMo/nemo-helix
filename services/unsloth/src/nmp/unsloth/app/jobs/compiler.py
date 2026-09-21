@@ -16,6 +16,12 @@ from __future__ import annotations
 
 import logging
 
+from nemo_platform_plugin.client.errors import NotFoundError
+from nemo_platform_plugin.deployment import (
+    LORA_ENABLED_REQUIRED_MESSAGE,
+    DeploymentParams,
+    is_unbound_deployment_config,
+)
 from nemo_platform_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
@@ -27,7 +33,9 @@ from nemo_platform_plugin.jobs.api_factory import (
     ResourcesSpec,
 )
 from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
-from nemo_platform_plugin.models.types import ModelEntity
+from nemo_platform_plugin.models.types import ModelDeploymentConfig, ModelEntity
+from nmp.common.auth import auth_client_context
+from nmp.common.entities.utils import parse_entity_ref
 from nmp.common.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nmp.customization_common.schemas.file_io import (
     DownloadItem,
@@ -206,6 +214,146 @@ def _build_model_entity_config(
     )
 
 
+async def _resolve_deployment_config_ref(
+    config_ref: str,
+    workspace: str,
+    platform: AsyncCustomizationPlatformClients,
+) -> ModelDeploymentConfig:
+    """Resolve a ``name`` or ``workspace/name`` string to a ModelDeploymentConfig."""
+    ref = parse_entity_ref(config_ref, default_workspace=workspace)
+    try:
+        response = await platform.models.get_deployment_config(name=ref.name, workspace=ref.workspace)
+        return response.data()
+    except NotFoundError as e:
+        raise PlatformJobCompilationError(
+            f"deployment_config references '{config_ref}' which does not exist in workspace '{ref.workspace}'."
+        ) from e
+    except Exception as e:
+        raise PlatformJobCompilationError(f"Failed to resolve deployment_config '{config_ref}': {e}") from e
+
+
+async def _require_tool_call_plugin_permission(workspace: str) -> None:
+    """Gate ``tool_call_plugin``, the one deployment field that needs a permission check.
+
+    Auth is resolved here rather than up front: every other deployment_config
+    shape validates without it, so demanding an auth context for all of them
+    would fail compilation for jobs that never consult it.
+    """
+    auth_client = auth_client_context.get()
+    if auth_client is None:
+        raise PlatformJobCompilationError(
+            "No auth context available; cannot validate the tool_call_plugin permission.",
+        )
+    if not await auth_client.has_permissions(workspace, ["models.tool-call-plugin.set"]):
+        raise PlatformJobCompilationError(
+            "Insufficient permissions to set tool_call_plugin. Requires the models.tool-call-plugin.set permission."
+        )
+
+
+def _config_targets_model(config: ModelDeploymentConfig, workspace: str, name: str) -> bool:
+    """Whether ``config`` can serve the model entity ``workspace/name``.
+
+    ``model_entity_id`` is the canonical link; older configs only carry the
+    name/namespace pair on ``model_spec``, so both are accepted. A config that
+    names no model at all serves any model: the model_entity task binds it to the
+    trained one at deploy time.
+    """
+    if is_unbound_deployment_config(config):
+        return True
+    model_spec = config.model_spec
+    return (config.model_entity_id == f"{workspace}/{name}") or (
+        model_spec.model_name == name and model_spec.model_namespace == workspace
+    )
+
+
+async def _validate_deployment_config(
+    workspace: str,
+    job_spec: UnslothJobOutput,
+    platform: AsyncCustomizationPlatformClients,
+) -> None:
+    """Validate deployment_config consistency before training starts.
+
+    Without this, a referenced config naming an unrelated model compiles happily and
+    the model_entity task deploys *that* model when the run finishes -- a silently
+    wrong deployment discovered only after the GPU hours are spent.
+
+    The finetuning type is re-derived from the spec rather than read off a property:
+    the compiler is entered with an ``UnslothJobOutput``, and the submit-time
+    predicate (``trains_standalone_lora_adapter``) lives on ``UnslothJobInput``, so
+    any path not going through the plugin's input schema would bypass it.
+    """
+    dc = job_spec.deployment_config
+    if dc is None:
+        return
+
+    # A merged save folds the adapter into the base weights, so only the unmerged
+    # case trains a standalone adapter served from the base model's deployment. The
+    # other two register a model entity of their own, which is the opposite branch.
+    ft_type = _resolve_finetuning_type(job_spec)
+    is_lora_adapter = ft_type == FinetuningType.LORA
+
+    # Inline deployment params: check permission-gated fields.
+    if isinstance(dc, DeploymentParams):
+        # UnslothJobInput rejects this at submit, but the compiler is entered with an
+        # UnslothJobOutput, which carries no such validator -- re-assert it here.
+        if is_lora_adapter and not dc.lora_enabled:
+            raise PlatformJobCompilationError(LORA_ENABLED_REQUIRED_MESSAGE)
+        tcc = dc.tool_call_config
+        if tcc and tcc.tool_call_plugin:
+            await _require_tool_call_plugin_permission(workspace)
+        return
+
+    resolved_config = await _resolve_deployment_config_ref(dc, workspace, platform)
+
+    # A LoRA adapter cannot be served by a base deployment that does not load adapters.
+    if is_lora_adapter and resolved_config.model_spec.lora_enabled is False:
+        raise PlatformJobCompilationError(
+            f"deployment_config references '{dc}' which has lora_enabled=false, "
+            "but this is a LoRA training job. The deployment would not load LoRA adapters. "
+            "Use a deployment config with lora_enabled=true, or provide inline deployment parameters."
+        )
+
+    if is_lora_adapter:
+        # The adapter is served from its base model's deployment, so a referenced
+        # config is only usable if it deploys that base model.
+        base = parse_entity_ref(job_spec.model.name, workspace)
+        if not _config_targets_model(resolved_config, base.workspace, base.name):
+            raise PlatformJobCompilationError(
+                f"deployment_config references '{dc}' which targets a different model entity than the base model "
+                f"'{base.workspace}/{base.name}'. A LoRA adapter is served from its base model's deployment, "
+                "so the config must target that base model, or use inline deployment parameters instead."
+            )
+        return
+
+    # An unbound config names no model, so it is a template that the model_entity
+    # task binds to the trained model. It does not need the output entity to exist,
+    # which it cannot on a first run.
+    if is_unbound_deployment_config(resolved_config):
+        return
+
+    # Full-weight and merged training register their own model entity, so a config
+    # that does name a model is only correct if it names that entity (i.e. a retrain).
+    output_name = job_spec.output.name
+    try:
+        existing_me = (await platform.models.get_model(name=output_name, workspace=workspace)).data()
+    except NotFoundError as e:
+        raise PlatformJobCompilationError(
+            f"deployment_config references '{dc}', which names a different model than the "
+            f"{ft_type.value} training output '{workspace}/{output_name}' (which does not exist yet). "
+            "Use inline deployment parameters (e.g., DeploymentParams(gpu=1, lora_enabled=True)), "
+            "or a deployment config that names no model -- one with neither model_entity_id nor "
+            "model_spec.model_name set -- which is bound to the trained model automatically."
+        ) from e
+
+    if not _config_targets_model(resolved_config, existing_me.workspace, existing_me.name):
+        raise PlatformJobCompilationError(
+            f"deployment_config references '{dc}' which targets a different model entity "
+            f"than the output model '{existing_me.workspace}/{existing_me.name}'. "
+            "The deployment config must target the same model entity being retrained, "
+            "or use inline deployment parameters instead."
+        )
+
+
 async def platform_job_config_compiler(
     workspace: str,
     job_spec: UnslothJobOutput,
@@ -220,6 +368,8 @@ async def platform_job_config_compiler(
     logger.info(f"Compiling Unsloth job to PlatformJobSpec: {job_spec.model_dump_json(indent=2)}")
 
     me = await fetch_model_entity(job_spec.model.name, workspace, platform)
+
+    await _validate_deployment_config(workspace, job_spec, platform)
 
     cpu_resources = _get_cpu_resources()
     base_env = _get_base_environment()
