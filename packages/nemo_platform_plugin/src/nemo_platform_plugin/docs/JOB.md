@@ -203,6 +203,8 @@ The platform calls `get_cli()` once at startup and mounts the result as `nemo <n
 ### Organizing commands
 
 ```python
+from nemo_platform_plugin.cli_state import resolve_cli_workspace
+
 def get_cli(self) -> typer.Typer:
     app = typer.Typer(help=self.description, no_args_is_help=True)
 
