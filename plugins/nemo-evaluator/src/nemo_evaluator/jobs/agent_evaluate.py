@@ -59,12 +59,8 @@ from nemo_evaluator.jobs.gym_sandbox import (
 from nemo_evaluator.jobs.metric_resolution import resolve_metrics_to_inline, to_runtime_bundle
 from nemo_evaluator.jobs.publication import publish_agent_eval_result
 from nemo_evaluator.jobs.result_persistence import persist_agent_eval_result
-<<<<<<< HEAD
-from nemo_evaluator.jobs.utils import async_client_from_sync_client
-=======
 from nemo_evaluator.jobs.token_usage import capture_evaluator_request_logs, report_agent_evaluation_usage
-from nemo_evaluator.jobs.utils import as_async_nemo_client, as_nemo_client
->>>>>>> 3e5ffa8a9 (feat(evaluator): report job token usage)
+from nemo_evaluator.jobs.utils import async_client_from_sync_client
 from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
 from nemo_evaluator.task_refs import resolve_agent_eval_tasks
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
@@ -665,7 +661,8 @@ class _AgentEvalJobBase(NemoJob):
             fail_fast=spec.fail_fast,
         )
         evaluator = self._build_evaluator(platform_client, spec.target)
-        result = evaluator.run_sync(tasks=tasks, trials=spec.trials, target=target, config=run_config)
+        with capture_evaluator_request_logs() as request_logs:
+            result = evaluator.run_sync(tasks=tasks, trials=spec.trials, target=target, config=run_config)
         report_agent_evaluation_usage(
             result,
             request_logs,
