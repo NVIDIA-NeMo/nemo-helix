@@ -1288,6 +1288,19 @@ paths:
           type: integer
         description: Optional database version for optimistic locking. Delete only
           succeeds if the entity still has this version.
+      - name: force
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Delete even when child entities in other workspaces would be
+            cascaded away. Without this the request is rejected with 409 and those
+            workspaces are named.
+          default: false
+          title: Force
+        description: Delete even when child entities in other workspaces would be
+          cascaded away. Without this the request is rejected with 409 and those workspaces
+          are named.
       responses:
         '200':
           description: Successful Response
