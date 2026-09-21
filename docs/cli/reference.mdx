@@ -7742,7 +7742,7 @@ nemo data-designer check-models [OPTIONS] CONFIG_SOURCE
 **Options:**
 
 * `--workspace`: Workspace used to resolve provider references and seed sources. Defaults to the SDK's configured workspace, or 'default'.
-* `--output <CHOICE>`: Output format. 'json' suppresses the human-formatted blocks. [possible values: text, json; default: text]
+* `--output <CHOICE>`: Output format. With 'json' the report is the only thing on stdout; engine progress logs go to stderr so stdout stays parseable. [possible values: text, json; default: text]
 
 **Help:**
 
