@@ -96,12 +96,21 @@ def _mounted_customization_jobs(**factory_kwargs) -> APIRouter:
     return mounted
 
 
-def _assert_single_rule(entry: tuple[list, list[str] | None], perm: str, scopes: list[str]) -> None:
-    """Assert *entry* (rules, scope) has exactly one PRINCIPAL rule for *perm* and scope *scopes*."""
+def _assert_single_rule(
+    entry: tuple[list, list[str] | None],
+    perm: str,
+    scopes: list[str],
+    callers: list[CallerKind] | None = None,
+) -> None:
+    """Assert *entry* (rules, scope) has exactly one rule for *perm* and scope *scopes*.
+
+    *callers* defaults to PRINCIPAL-only — the shape every route keeps unless the
+    factory was told to widen that verb to service principals.
+    """
     rules, scope = entry
     assert len(rules) == 1
     rule = rules[0]
-    assert rule.callers == [CallerKind.PRINCIPAL]
+    assert rule.callers == (callers if callers is not None else [CallerKind.PRINCIPAL])
     assert [p.id for p in rule.permissions] == [perm]
     assert scope == scopes
 
@@ -247,3 +256,133 @@ def test_add_function_routes_description_without_authz_raises() -> None:
 
     with pytest.raises(ValueError, match="permission_description requires authz"):
         add_function_routes(_DescFn, permission_description="Invoke desc")  # authz omitted
+
+
+_PRINCIPAL_AND_SERVICE = [CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL]
+
+
+def test_job_factory_widens_only_the_named_verbs_to_service_principal() -> None:
+    """``service_principal_verbs`` widens exactly the verbs it names, and nothing else."""
+    rules = _rules_by_path_method(_mounted_customization_jobs(service_principal_verbs={"create", "list"}))
+    base = "/apis/customization/v2/workspaces/{workspace}/widget-jobs"
+
+    _assert_single_rule(rules[(base, "post")], "customization.jobs.create", _WRITE, _PRINCIPAL_AND_SERVICE)
+    _assert_single_rule(rules[(base, "get")], "customization.jobs.list", _READ, _PRINCIPAL_AND_SERVICE)
+
+    # Every other CORE route stays principal-only, including the reads that share the
+    # <ns>.read permission with nothing widened.
+    for key in set(rules) - {(base, "post"), (base, "get")}:
+        assert rules[key][0][0].callers == [CallerKind.PRINCIPAL], key
+
+
+def test_job_factory_widens_a_read_verb_across_all_routes_bound_to_it() -> None:
+    """``read`` is one permission behind several routes; widening it covers all of them."""
+    rules = _rules_by_path_method(_mounted_customization_jobs(service_principal_verbs={"read"}))
+    base = "/apis/customization/v2/workspaces/{workspace}/widget-jobs"
+
+    for path in (
+        f"{base}/{{name}}",
+        f"{base}/{{name}}/status",
+        f"{base}/{{name}}/logs",
+        f"{base}/{{name}}/results",
+        f"{base}/{{job}}/results/{{name}}",
+        f"{base}/{{job}}/results/{{name}}/download",
+    ):
+        _assert_single_rule(rules[(path, "get")], "customization.jobs.read", _READ, _PRINCIPAL_AND_SERVICE)
+
+    # Mutating verbs were not named, so they are untouched.
+    assert rules[(base, "post")][0][0].callers == [CallerKind.PRINCIPAL]
+
+
+def test_job_factory_service_principal_verbs_reach_the_wire_contribution() -> None:
+    """The widened caller kinds survive derivation into the PDP wire format.
+
+    This is the assertion that actually matters for the controller: the Rego denies a
+    service principal on any route whose ``callers`` list omits ``service_principal``,
+    so the union has to land in ``AuthzEndpointMethod.callers``, not just on the handler.
+    """
+
+    class _Svc(NemoService):
+        name = "customization"
+
+        def get_routers(self) -> list[RouterSpec]:
+            router = job_route_factory(
+                service_name="customization",
+                job_type="Widened",
+                job_input=_Spec,
+                platform_job_config_compiler=_compiler,
+                authz=AuthzScope("customization").child("jobs"),
+                service_principal_verbs={"create", "list"},
+            )
+            return [RouterSpec(router, prefix="/v2/workspaces/{workspace}")]
+
+    contrib, problems, _warnings = _derive_service_contribution(_Svc())
+    assert problems == []
+
+    collection = "/apis/customization/v2/workspaces/{workspace}/jobs"
+    assert contrib.endpoints[collection]["post"].callers == ["principal", "service_principal"]
+    assert contrib.endpoints[collection]["get"].callers == ["principal", "service_principal"]
+    assert contrib.endpoints[f"{collection}/{{name}}"]["delete"].callers == ["principal"]
+
+
+def test_job_factory_unknown_service_principal_verb_raises() -> None:
+    """A typo'd verb widens nothing, so it fails at wiring rather than at request time."""
+    with pytest.raises(ValueError, match="Unknown service_principal_verbs"):
+        _mounted_customization_jobs(service_principal_verbs={"create", "sumbit"})
+
+
+def test_job_factory_service_principal_verbs_without_authz_raises() -> None:
+    with pytest.raises(ValueError, match="service_principal_verbs requires authz"):
+        job_route_factory(
+            service_name="customization",
+            job_type="Unruled",
+            job_input=_Spec,
+            platform_job_config_compiler=_compiler,
+            service_principal_verbs={"create"},  # authz omitted
+        )
+
+
+def test_job_factory_empty_service_principal_verbs_is_inert() -> None:
+    """An empty set is not an opt-in, so it neither widens nor trips the authz check."""
+    router = job_route_factory(
+        service_name="customization",
+        job_type="Empty",
+        job_input=_Spec,
+        platform_job_config_compiler=_compiler,
+        service_principal_verbs=set(),
+    )
+    for route in router.routes:
+        if isinstance(route, APIRoute):
+            assert get_path_rules(route.endpoint) == []
+
+
+def test_add_function_routes_allow_service_principals() -> None:
+    class _SweepFn(NemoFunction):
+        name = "sweep"
+        spec_schema = _Spec
+
+        async def run(self, spec: _Spec) -> dict[str, bool]:
+            return {"ok": True}
+
+    router = add_function_routes(_SweepFn, authz=AuthzScope("example"), allow_service_principals=True)
+
+    routes = [r for r in router.routes if isinstance(r, APIRoute)]
+    assert len(routes) == 1
+    _assert_single_rule(
+        (get_path_rules(routes[0].endpoint), get_path_scope(routes[0].endpoint)),
+        "example.sweep",
+        ["example:write", "platform:write"],
+        _PRINCIPAL_AND_SERVICE,
+    )
+
+
+def test_add_function_routes_service_principals_without_authz_raises() -> None:
+    class _BareSweepFn(NemoFunction):
+        name = "bare-sweep"
+        spec_schema = _Spec
+
+        async def run(self, spec: _Spec) -> dict[str, bool]:
+            return {"ok": True}
+
+    with pytest.raises(ValueError, match="allow_service_principals requires authz"):
+        add_function_routes(_BareSweepFn, allow_service_principals=True)  # authz omitted

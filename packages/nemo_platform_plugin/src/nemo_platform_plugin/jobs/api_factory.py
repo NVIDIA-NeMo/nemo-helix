@@ -7,7 +7,7 @@ import logging
 import os
 import tarfile
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Mapping
+from collections.abc import Awaitable, Collection, Mapping
 from datetime import datetime
 from enum import StrEnum, auto
 from functools import partial
@@ -789,6 +789,34 @@ def _submit_control_kwargs(
     return kwargs
 
 
+def _resolve_service_principal_verbs(
+    verbs: Collection[str] | None,
+    *,
+    authz: AuthzScope | None,
+) -> frozenset[str]:
+    """Validate the job verbs that may also be called by a service principal.
+
+    Unknown verbs are rejected here rather than ignored: a typo would otherwise widen
+    nothing while reading as if it had, and the resulting route would keep denying the
+    service principal it was meant to admit. Passing verbs without ``authz`` is likewise
+    an error — no rule is stamped at all in that case, so the opt-in would be discarded.
+    """
+    resolved = frozenset(verbs or ())
+    if not resolved:
+        return resolved
+    if authz is None:
+        raise ValueError(
+            "service_principal_verbs requires authz to be set (caller kinds ride on the "
+            "@path_rule stamped from authz); supplying them alone would be silently discarded."
+        )
+    unknown = sorted(resolved - _JOB_PERMISSION_DESCRIPTIONS.keys())
+    if unknown:
+        raise ValueError(
+            f"Unknown service_principal_verbs {unknown}: expected a subset of {sorted(_JOB_PERMISSION_DESCRIPTIONS)}."
+        )
+    return resolved
+
+
 def job_route_factory(
     service_name: str,
     job_type: str,
@@ -800,6 +828,7 @@ def job_route_factory(
     input_to_output: InputToOutputTransformer | InputToOutputTransformerAsync | None = None,
     generate_job_name: JobNameGenerator | None = None,
     authz: AuthzScope | None = None,
+    service_principal_verbs: Collection[str] | None = None,
 ) -> APIRouter:
     """Create a job router with standard CRUD operations.
 
@@ -825,6 +854,20 @@ def job_route_factory(
             use the same name for related fields (e.g., output).
         generate_job_name: Called when user doesn't provide a job name. Returns the
             auto-generated name to use.
+        authz: The plugin's ``AuthzScope``. When set, each generated route is stamped
+            with a ``@path_rule`` (PRINCIPAL caller by default) and the matching read /
+            write scope. When omitted the routes are left unruled — denied fail-closed
+            at bundle time.
+        service_principal_verbs: Job verbs whose routes additionally accept
+            ``SERVICE_PRINCIPAL`` callers, e.g. ``{"create", "list"}`` for a plugin whose
+            own controller submits and polls its jobs. Valid values are the keys of
+            ``_JOB_PERMISSION_DESCRIPTIONS`` (``create``, ``list``, ``read``, ``delete``,
+            ``cancel``, ``pause``, ``resume``); a verb covers every route bound to that
+            permission (``read`` covers get/status/logs/results/downloads). Grant the
+            narrowest set that works: a route listing only PRINCIPAL is an unconditional
+            PDP *deny* for service principals, overriding even the ServiceSystem
+            wildcard, so this is the only way a service-to-service caller can reach a
+            generated job route. Requires ``authz``.
 
     Example with separate input/output types:
         ```python
@@ -871,8 +914,15 @@ def job_route_factory(
     router = APIRouter()
     service_name = service_name.lower()
 
+    service_verbs = _resolve_service_principal_verbs(service_principal_verbs, authz=authz)
+
     def _stamp(endpoint: Callable[..., Any], *, perm: str, write: bool) -> Callable[..., Any]:
-        """Attach a PRINCIPAL ``@path_rule`` to a generated job route.
+        """Attach a caller/permission ``@path_rule`` to a generated job route.
+
+        Callers are PRINCIPAL by default; verbs named in *service_principal_verbs* also
+        admit SERVICE_PRINCIPAL, which is what lets a plugin's own controller call its
+        generated routes (a principal-only route is a hard PDP deny for service
+        principals, not a permission check it could pass via ServiceSystem).
 
         Inert unless the caller passed an ``authz`` scope — so unmigrated callers keep
         emitting unauthz'd routes (handled by the bundle fail-mode). Returns *endpoint*
@@ -883,7 +933,10 @@ def job_route_factory(
                 perm,
                 description=_JOB_PERMISSION_DESCRIPTIONS[perm].format(ns=authz.namespace),
             )
-            path_rule(callers=[CallerKind.PRINCIPAL], permissions=[permission])(endpoint)
+            callers = [CallerKind.PRINCIPAL]
+            if perm in service_verbs:
+                callers.append(CallerKind.SERVICE_PRINCIPAL)
+            path_rule(callers=callers, permissions=[permission])(endpoint)
             # Scope is declared separately from the permission rule (see authz.AuthzScope).
             (authz.write if write else authz.read)(endpoint)
         return endpoint
@@ -1226,8 +1279,9 @@ def job_route_factory(
             result_dict["download_url"] = f"{request.url}/download"
             return PlatformJobResultResponse(**result_dict)
 
-        # Stamp authorization rules on the generated routes (PRINCIPAL caller). Reads use
-        # one shared <ns>.read permission; mutating routes get their own permission.
+        # Stamp authorization rules on the generated routes. Reads use one shared
+        # <ns>.read permission; mutating routes get their own permission. Callers are
+        # PRINCIPAL unless the verb was named in ``service_principal_verbs``.
         _stamp(create_job, perm="create", write=True)
         _stamp(list_jobs, perm="list", write=False)
         _stamp(get_job, perm="read", write=False)

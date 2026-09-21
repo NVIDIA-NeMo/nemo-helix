@@ -41,6 +41,7 @@ profile, or ``default_profile`` when the request did not choose one.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter
@@ -71,6 +72,7 @@ def add_job_routes(
     generate_job_name: "Callable[..., str] | None" = None,
     default_profile: str = "default",
     authz: AuthzScope | None = None,
+    service_principal_verbs: Collection[str] | None = None,
 ) -> APIRouter:
     """Mount submit/list/get/delete routes for *job_cls* on a fresh router.
 
@@ -100,6 +102,18 @@ def add_job_routes(
             compiled ``PlatformJobSpec`` when the plugin's ``compile``
             didn't set one explicitly and the submitter did not provide
             ``profile``.
+        authz: The plugin's :class:`~nemo_platform_plugin.authz.AuthzScope`.
+            When set, every generated route is stamped with a ``@path_rule``
+            (PRINCIPAL caller by default) and the matching read/write scope.
+        service_principal_verbs: Job verbs whose routes additionally accept
+            ``SERVICE_PRINCIPAL`` callers — pass e.g. ``{"create", "list"}``
+            when the plugin's own controller submits and polls these jobs.
+            Without it those calls are denied outright by the PDP, since a
+            principal-only route is a hard deny for service principals rather
+            than a permission check the ServiceSystem wildcard could satisfy.
+            Grant the narrowest set that works. Requires ``authz``. See
+            :func:`~nemo_platform_plugin.jobs.api_factory.job_route_factory`
+            for the full verb list.
 
     Returns:
         An :class:`APIRouter` with the standard job endpoints mounted.
@@ -136,6 +150,7 @@ def add_job_routes(
         job_result_routes=job_result_routes,
         generate_job_name=generate_job_name,
         authz=authz,
+        service_principal_verbs=service_principal_verbs,
     )
     return _rebase_job_collection_routes(router, job_collection_path_for(job_cls))
 
