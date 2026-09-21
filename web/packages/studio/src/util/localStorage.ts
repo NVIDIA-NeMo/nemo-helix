@@ -10,3 +10,4 @@ export const WORKSPACE_DROPDOWN_RECENT_KEY = 'workspace-dropdown-recent';
 export const UI_THEME = 'ui-theme';
 export const SELECTED_WORKSPACE_KEY = 'selected-workspace';
 export const TOUR_SEEN_KEY = 'tour-seen';
+export const NAV_ACCORDION_STATE_KEY = 'nav-accordion-state';
