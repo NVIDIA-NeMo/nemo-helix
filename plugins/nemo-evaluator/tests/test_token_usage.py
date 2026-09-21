@@ -76,6 +76,37 @@ def test_missing_request_dimension_keeps_that_total_unknown() -> None:
     assert reporter.latest.output_tokens == 7
 
 
+def test_request_usage_includes_input_cache_tokens() -> None:
+    reporter = LocalJobUsageReporter()
+    request = {
+        "response": {
+            "usage": {
+                "prompt_tokens": 10,
+                "cache_read_input_tokens": 4,
+                "cache_creation_input_tokens": 6,
+                "completion_tokens": 3,
+            }
+        }
+    }
+
+    report_row_evaluation_usage(_row_result([request]), reporter)
+
+    assert reporter.latest is not None
+    assert reporter.latest.input_tokens == 20
+    assert reporter.latest.output_tokens == 3
+
+
+def test_invalid_request_cache_tokens_keep_input_unknown() -> None:
+    reporter = LocalJobUsageReporter()
+    request = {"response": {"usage": {"prompt_tokens": 10, "cache_read_input_tokens": True, "completion_tokens": 3}}}
+
+    report_row_evaluation_usage(_row_result([request]), reporter)
+
+    assert reporter.latest is not None
+    assert reporter.latest.input_tokens is None
+    assert reporter.latest.output_tokens == 3
+
+
 def test_invalid_counts_are_missing_not_zero() -> None:
     reporter = LocalJobUsageReporter()
 
