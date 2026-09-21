@@ -255,7 +255,7 @@ async def test_retrieval_prepare_compile_adds_gpu_mining_step() -> None:
     assert _executor(steps[1])["provider"] == "cpu"
     assert "nmp-customizer-tasks" in _executor(steps[1])["container"]["image"]
     assert steps[1]["config"]["download"] == [
-        {"src": {"workspace": "default", "name": "retrieval-model"}, "dest": "model"}
+        {"src": {"workspace": "default", "name": "retrieval-model", "path": None}, "dest": "model"}
     ]
     assert _executor(steps[2])["provider"] == "gpu"
     assert "nmp-automodel-training" in _executor(steps[2])["container"]["image"]
