@@ -54,6 +54,17 @@ export interface StartTemplateGroup {
   id: string;
   title: string;
   templates: StartTemplate[];
+  /**
+   * Renders the heading over placeholder tiles instead of the group's own. A group whose
+   * templates are still being fetched would otherwise be indistinguishable from an empty
+   * one, which is dropped — the section would vanish and then push the page down on arrival.
+   */
+  loading?: boolean;
+  /**
+   * Colour for this group's tile icons, as a CSS colour or token reference. What it
+   * signifies is the caller's to decide; the page only applies it.
+   */
+  accent?: string;
 }
 
 export interface StartPageProps {
