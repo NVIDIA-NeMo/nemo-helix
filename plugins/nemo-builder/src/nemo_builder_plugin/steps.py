@@ -129,10 +129,17 @@ class SandboxImage(BaseModel):
 
 
 class SandboxGroup(BaseModel):
-    """One sandbox pod. All images here share one source, so they can share one context mount."""
+    """One sandbox pod. All images here share one source, so they can share one context mount.
 
-    context_sub_path: str = Field(description="Work-volume subPath holding this group's context, mounted read-only.")
-    output_sub_path: str = Field(description="Work-volume subPath for OCI layouts, mounted read-write.")
+    Both paths are **relative to the job's own storage slice**, not to the PVC root. The compiler
+    cannot write an absolute subPath because it does not know the job id -- the job does not
+    exist yet when it runs. ``supervise`` prefixes ``job_storage_subpath(workspace, job_id)``
+    from its own environment, which is the platform's own helper rather than a string this
+    design spells out twice.
+    """
+
+    context_sub_path: str = Field(description="This group's context, mounted read-only. Relative to the job slice.")
+    output_sub_path: str = Field(description="Where OCI layouts go, mounted read-write. Relative to the job slice.")
     images: list[SandboxImage] = Field(min_length=1)
 
 

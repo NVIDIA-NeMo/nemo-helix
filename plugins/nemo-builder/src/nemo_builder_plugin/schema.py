@@ -54,7 +54,15 @@ class FileSetSource(BaseModel):
 class BuildOutput(BaseModel):
     """Where one built image is published."""
 
-    registry: str = Field(description="Registry host to push to.")
+    registry: str | None = Field(
+        default=None,
+        description=(
+            "Registry host to push to. Omit to use the deployment's default registry. A "
+            "deployment with neither fails the COMPILE, not the build -- an unconfigured "
+            "destination is a property of the request being unanswerable, which the caller "
+            "should learn at submit."
+        ),
+    )
     repository: str = Field(description="Repository path within the registry.")
     tag: str = Field(description="The caller's tag. The system tag is pushed alongside it.")
 
