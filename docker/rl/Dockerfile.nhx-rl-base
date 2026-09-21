@@ -219,7 +219,7 @@ ARG UV_SYNC_MODE=--frozen
 
 # The driver installs this from PyPI rather than from RL's lock, which resolves it for the actor
 # venvs only. Keep in lockstep with the pin in NeMo-RL's pyproject.toml.
-ARG NEMO_SANDBOXED_GYM_VERSION=0.1.0
+ARG NEMO_SANDBOXED_GYM_VERSION=0.1.0a1
 
 # Warm the uv CACHE, one extra at a time (they conflict). This is where the heavy compiles happen
 # (mamba-ssm, causal-conv1d, deep_ep, deep_gemm, and Transformer-Engine via automodel); the wheels
@@ -351,15 +351,12 @@ COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} --exclude=**/.git . /opt/n
 # nemo-rl-pinned-source.patch covers: NemotronH trunk layout, Automodel torch 2.11 version
 # compare, transformers dtype alias, v4_compatible checkpoint plumbing, DTensor async
 # checkpoint finalization, Gym setuptools<81 for pkg_resources, and quoting those PEP 508
-# specs in Gym's bash uv-pip command.
-# nemo-rl-gym-host-hf-cache.patch copies a vendored .huggingface snapshot into writable
-# work and points HF_HOME at it before RunHelper.start(); Hub/datasets offline flags
-# follow NHX_ENVIRONMENT_OFFLINE from the compiled job.
+# specs in Gym's bash uv-pip command, and pinning the verifiers agent to a released
+# version rather than a git ref.
 # Drop hunks (or the file) once the corresponding pin contains the fix.
 RUN --mount=type=bind,source=docker/rl/patches,target=/patches \
     cd /opt/nemo-rl && \
-    git apply -p1 --verbose /patches/nemo-rl-pinned-source.patch && \
-    git apply -p1 --verbose /patches/nemo-rl-gym-host-hf-cache.patch
+    git apply -p1 --verbose /patches/nemo-rl-pinned-source.patch
 
 # Install the workspace ROOT (nemo-rl) editable. --no-install-project above installed every
 # DEPENDENCY and workspace MEMBER (incl. nemo-gym) but skipped the root; this adds it with --no-deps
